@@ -145,7 +145,7 @@ type SemanticInput = Readonly<{
   provenance: SourceSemanticPublishedInterpretation["provenance"];
   profile?: SourceSemanticPublishedInterpretation["profile"];
   interpretation?: unknown; draft?: unknown;
-  assertion_locations?: SourceSemanticInterpretation["source"]["assertion_locations"];
+  assertion_locations: NonNullable<SourceSemanticInterpretation["source"]["assertion_locations"]>;
   budget?: RequestBudget; meter?: SourceSemanticResourceLedger;
   producer_version?: string; contract_version?: string;
 }>;
@@ -283,6 +283,22 @@ export function semanticInterpretationEvidenceId(interpretationId: string, sha25
 export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
   value: unknown, workspaceId: string) {
   const bound = SourceSemanticPublishedInterpretationSchema.parse(value);
+  if (bound.interpretation.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION) {
+    throw new CoreError("VALIDATION", "retired source interpretation is ineligible for current execution",
+      { details: { admission: "filtered", reason: "retired_interpretation" } });
+  }
+  return verifyStoredSourceSemanticInterpretation(owner, bound, workspaceId);
+}
+
+/** Exact retained evidence inspection; its result carries no current execution eligibility. */
+export function verifyRetainedPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
+  value: unknown, workspaceId: string) {
+  const bound = SourceSemanticPublishedInterpretationSchema.parse(value);
+  return { eligibility: "retained_only" as const, verification: verifyStoredSourceSemanticInterpretation(owner, bound, workspaceId) };
+}
+
+function verifyStoredSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
+  bound: SourceSemanticPublishedInterpretation, workspaceId: string) {
   if (sourceSemanticInterpretationIdentity(bound.interpretation, owner.sha256) !== bound.interpretation_id) {
     throw new CoreError("VALIDATION", "interpretation identity mismatch");
   }

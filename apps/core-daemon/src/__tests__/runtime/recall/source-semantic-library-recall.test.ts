@@ -5,6 +5,7 @@ import { expect, it, vi } from "vitest";
 import * as Core from "@do-soul/alaya-core";
 import {
   buildSourceReferenceCatalog, canonicalProductIdentityOfEntry, SOURCE_SEMANTIC_K_VERSION,
+  SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, sourceReferenceResolver,
   type SourceEvidenceTarget,
   type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
@@ -13,7 +14,7 @@ import {
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication,
   EvidenceService, encodeSourceSemanticLibraryResponse, fieldContractSha256, preparedDeliveryId, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
-  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, sourceGoldRootIdentity
+  SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, sourceGoldRootIdentity, semanticInterpretationEvidenceId
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -143,7 +144,7 @@ function correspondenceOf(sourceInterpretationId: string, querySemantics: Source
 async function withLibrary(body: (input: {
   allIds: readonly string[]; execute: Execute; filename: string;
   sourceTarget: SourceEvidenceTarget;
-}) => Promise<void>, count: number, obsoleteVersions = 0) {
+}) => Promise<void>, count: number, obsoleteVersions = 0, retiredFirst = false) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -179,10 +180,29 @@ async function withLibrary(body: (input: {
       stores, evidenceService, sha256: fieldContractSha256
     }).publish({
       workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+      assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
       provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
       producer_version: `p${String(index + 1)}`, contract_version: "source-interpretation-v4"
     });
-    allIds.push(published.bound.interpretation_id);
+    if (retiredFirst && index === 0) {
+      const interpretation = { ...published.bound.interpretation,
+        normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION };
+      const interpretation_id = sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256);
+      const retained = { ...published.bound, interpretation, interpretation_id };
+      database.connection.prepare(`INSERT INTO evidence_capsules (
+        object_id, object_kind, schema_version, lifecycle_state, created_at, updated_at, created_by,
+        evidence_kind, semantic_anchor, event_anchor, physical_anchor, evidence_health_state,
+        gist, excerpt, source_hash, run_id, workspace_id, surface_id
+      ) SELECT ?, object_kind, schema_version, lifecycle_state, created_at, updated_at, created_by,
+        evidence_kind, semantic_anchor, event_anchor, physical_anchor, evidence_health_state,
+        ?, excerpt, source_hash, run_id, workspace_id, surface_id
+        FROM evidence_capsules WHERE object_id=?`)
+        .run(semanticInterpretationEvidenceId(interpretation_id, fieldContractSha256),
+          JSON.stringify(retained), published.evidence.object_id);
+      database.connection.prepare("UPDATE evidence_capsules SET lifecycle_state='archived' WHERE object_id=?")
+        .run(published.evidence.object_id);
+      allIds.push(interpretation_id);
+    } else allIds.push(published.bound.interpretation_id);
     sourceTarget = published.bound.source_target;
   }
   if (sourceTarget === undefined) throw new Error("published source target expected");
@@ -211,6 +231,31 @@ function recallRequest(semantic_correspondences: readonly SourceSemanticCorrespo
     semantic_correspondences, budget: BUDGET, output_byte_limit: 1_000_000
   };
 }
+
+it("keeps a retained stored interpretation out of worker discovery and proof while serving its raw source", async () => {
+  await withLibrary(async ({ allIds, execute, filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    try {
+      const id = allIds[0]!;
+      const row = database.connection.prepare("SELECT gist FROM evidence_capsules WHERE object_id=?")
+        .get(semanticInterpretationEvidenceId(id, fieldContractSha256)) as { gist: string };
+      const meter = new SourceSemanticReadBudget(BUDGET);
+      const owner = { stores: sourceSemanticReadStores(database, WS, "artifact-1", meter, ["project"]),
+        sha256: fieldContractSha256, meter };
+      expect(Core.verifyRetainedPublishedSourceSemanticInterpretation(owner, JSON.parse(row.gist), WS).eligibility)
+        .toBe("retained_only");
+      expect(() => Core.verifyPublishedSourceSemanticInterpretation(owner, JSON.parse(row.gist), WS))
+        .toThrow(/ineligible/u);
+    } finally { database.close(); closeCachedDatabase(filename); }
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL,
+      query_semantics: queryOf(), budget: BUDGET });
+    expect(prepared.candidates.some((row) => row.interpretation_id === allIds[0])).toBe(false);
+    const recalled = await call(execute, recallRequest([]));
+    expect(recalled.discovery.examined_source_interpretation_ids).not.toContain(allIds[0]);
+    expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
+    expect(soulSearchFromLibraryRecall(recalled).results.some((row) => row.content_preview?.includes(ASSERTION))).toBe(true);
+  }, 1, 0, true);
+});
 
 it("discovers a relevant interpretation after the first descriptor page and keeps a source without a source interpretation", async () => {
   await withLibrary(async ({ allIds, execute, filename }) => {
@@ -281,6 +326,7 @@ it("verifies observed interpretation bodies and keeps malformed metadata open in
     stores, evidenceService, sha256: fieldContractSha256
   }).publish({
     workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+    assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
     provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
     producer_version: "p1", contract_version: "source-interpretation-v4"
   });
@@ -782,7 +828,8 @@ it("rechecks the indexed current source after publication awaits an existing evi
     const catalog = catalogFor(ASSERTION);
     try {
       await expect(publication.publish({ workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE,
-        catalog, provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
+        catalog, assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
+        provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
         producer_version: "p1", contract_version: "source-interpretation-v4" }))
         .rejects.toThrow(/source binding differs from source record/u);
       expect(meter.nativeWork).toBeGreaterThanOrEqual(20);

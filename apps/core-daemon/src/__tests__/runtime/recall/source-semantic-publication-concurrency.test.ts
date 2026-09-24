@@ -38,6 +38,7 @@ it("returns the stored envelope for concurrent equivalent publications and rejec
       const catalog = buildSourceReferenceCatalog(fieldContractSha256(text), [{ assertion_id: 1, text }], fieldContractSha256);
       const source_ref = sourceReferenceResolver(catalog, fieldContractSha256).referenceForSpan(1, [0, text.length]);
       const input = { workspaceId: WS, runId: RUN, artifactKey: "record", source, catalog,
+        assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(source)] as const }],
         producer_version: "test-author", contract_version: "source-interpretation-v4",
         draft: { contract: "source-interpretation-v4", mentions: [{ id: "mention", assertion_id: 1, source_ref }],
           referents: [], frames: [{ id: "seal", assertion_ids: [1],

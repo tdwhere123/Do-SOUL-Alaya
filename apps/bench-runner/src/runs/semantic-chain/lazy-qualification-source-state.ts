@@ -58,7 +58,7 @@ export function selectedSourceState(source: Awaited<ReturnType<typeof censusComp
     config.source_population.model, config.source_population.requestProfile);
   const history = sourceAttemptHistory(cacheRoot, line.key, config);
   const { raw, ledgers } = history;
-  const cacheIdentity = cache.status === "hit" ? chainIdentity(cache.admitted) : cache.status === "invalid"
+  const cacheIdentity = cache.status === "hit" ? chainIdentity(cache.admitted) : cache.status === "invalid" || cache.status === "retired"
     ? chainIdentity({ invalid: cache.reason }) : null;
   const attemptIdentity = raw.length + ledgers.length === 0 ? null : chainIdentity({
     raw: raw.map(row => ({ ordinal: row.attempt_ordinal, digest: row.decoded_text_digest,
@@ -71,7 +71,7 @@ export function selectedSourceState(source: Awaited<ReturnType<typeof censusComp
     : artifact?.status === "invalid" || artifact?.status === "unbound" ? "cache_invalid"
     : cache.status === "hit" ? cache.admitted.outcome.status === "interpreted" ? "cache_hit_interpreted"
     : cache.admitted.outcome.status === "abstained" ? "cache_hit_abstained" : "cache_hit_empty"
-    : cache.status === "invalid" ? "cache_invalid"
+    : cache.status === "invalid" || cache.status === "retired" ? "cache_invalid"
     : ledgers.some(row => row.pending_keys.includes(line.key) || row.unresolved_attempts.some(attempt => attempt.cache_key === line.key))
       ? "attempt_pending"
     : raw.some(row => row.transport_failure !== undefined) || ledgers.some(row => row.transport_failures.some(attempt => attempt.cache_key === line.key))

@@ -1,15 +1,19 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, retainedSourceSemanticSystemPrompt } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
-import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { inspectCachedSourceSemantic, inspectRetainedCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listProviderRawAttempts, providerRawAttemptPath, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
-import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { cacheFilePath, inspectCachedRawExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { computeRetainedCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
+import { extractionAdmissionGenerationSha256, type ExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { computeExtractionRawJsonSha256 } from "../../../runs/extraction/content-closure.js";
+import { createHash } from "node:crypto";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
@@ -170,6 +174,57 @@ it("fills complete-source open semantics through interactive generateContent wit
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 120000);
+
+it("inspects a retained source shard without reusing it or dispatching its cache root", async () => {
+  const fixture = await setupInteractive();
+  const args = ["extraction-fill", "--variant", "s", "--data-dir", dataDir,
+    "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
+    "--extraction-open-semantics", "--extraction-source-packing", "complete-source",
+    "--extraction-authority", fixture.receiptPath];
+  expect(await runCli(args)).toBe(0);
+  const calls = fixture.fetchMock.mock.calls.length;
+  const currentKey = fixture.keys[0]!;
+  const shardPath = cacheFilePath(cacheRoot, currentKey);
+  const shard = JSON.parse(readFileSync(shardPath, "utf8"));
+  const current = parseSourceSemanticRequest(JSON.parse(shard.source_semantic.result.line.userPrompt));
+  const { source_digest: _digest, ...wrapper } = current;
+  const retainedRequest = parseRetainedSourceSemanticRequest({ ...wrapper, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
+    ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
+  } });
+  const userPrompt = JSON.stringify(retainedRequest);
+  const systemPrompt = retainedSourceSemanticSystemPrompt(retainedRequest);
+  const retiredKey = computeRetainedCacheKey(MODEL, REQUEST_PROFILE, systemPrompt, userPrompt);
+  const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v2", outcome: { status: "abstained" } });
+  const manifestPath = join(cacheRoot, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtractionCacheManifest;
+  const retiredManifest = { ...manifest, source_semantic_generation: {
+    ...manifest.source_semantic_generation!, normalizer_version: "source-semantic-normalizer-v3"
+  } } as unknown as ExtractionCacheManifest;
+  writeFileSync(manifestPath, `${JSON.stringify(retiredManifest, null, 2)}\n`);
+  shard.cache_key = retiredKey;
+  shard.raw_json = rawJson;
+  shard.source_semantic.completion = "abstained";
+  shard.source_semantic.result.line = { ...shard.source_semantic.result.line, key: retiredKey,
+    userPrompt, systemPrompt, requestSha256: createHash("sha256").update(userPrompt).digest("hex") };
+  shard.source_semantic.result.rawJson = rawJson;
+  shard.source_semantic.result.provenance.responseSha256 = computeExtractionRawJsonSha256(rawJson);
+  shard.admission_identity = { ...shard.admission_identity, request_key: retiredKey,
+    raw_json_sha256: computeExtractionRawJsonSha256(rawJson),
+    generation_sha256: extractionAdmissionGenerationSha256(retiredManifest) };
+  const retiredPath = cacheFilePath(cacheRoot, retiredKey);
+  mkdirSync(dirname(retiredPath), { recursive: true });
+  writeFileSync(retiredPath, `${JSON.stringify(shard, null, 2)}\n`);
+  unlinkSync(shardPath);
+
+  expect(inspectRetainedCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "retired", eligibility: "retained_only", verification: { status: "hit", rawJson } });
+  expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "retired", eligibility: "retained_only" });
+  expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "quarantined", rawJson });
+  expect(await runCli(args)).not.toBe(0);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
+}, 60000);
 
 it("quarantines an interactive generateContent line through the same source-semantic receiver as Batch", async () => {
   const fixture = await setupInteractive("unknown_alias");

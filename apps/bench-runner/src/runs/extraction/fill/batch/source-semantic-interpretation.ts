@@ -1,12 +1,12 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../../../compile-seed/compile-seed-types.js";
 import {
-  parseSourceSemanticRequest, receiveSourceSemantics,
+  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, receiveSourceSemantics, verifyRetainedSourceSemantics,
   type SourceSemanticProposalInput
 } from "@do-soul/alaya-soul";
 import type { GeminiBatchInvocation, GeminiBatchLine, GeminiBatchPlan } from "./contract.js";
 import { canonicalBatchPlan } from "./plan.js";
-import { parseSourceSemanticRequestLine } from "../../request-artifact.js";
+import { parseSourceSemanticRequestLine, verifyRetainedSourceSemanticRequestLine } from "../../request-artifact.js";
 
 /** Returned drafts still require Core publication; a parser success is not publication. */
 export function receiveSourceSemanticBatchLine(input: Readonly<{
@@ -17,11 +17,23 @@ export function receiveSourceSemanticBatchLine(input: Readonly<{
 }>) {
   const request = parseSourceSemanticRequest(JSON.parse(input.line.userPrompt));
   parseSourceSemanticRequestLine(input.line, input.config);
+  verifyRetainedBatchBinding(input);
+  return receiveSourceSemantics(input.rawJson, request, input.proposal);
+}
+
+/** Read-only verification of an original line and response under its recorded identity. */
+export function verifyRetainedSourceSemanticBatchLine(input: Parameters<typeof receiveSourceSemanticBatchLine>[0]) {
+  const request = parseRetainedSourceSemanticRequest(JSON.parse(input.line.userPrompt));
+  verifyRetainedSourceSemanticRequestLine(input.line, input.config);
+  verifyRetainedBatchBinding(input);
+  return verifyRetainedSourceSemantics(input.rawJson, request, input.proposal);
+}
+
+function verifyRetainedBatchBinding(input: Parameters<typeof receiveSourceSemanticBatchLine>[0]) {
   const retained = input.retained;
   if (retained !== undefined) canonicalBatchPlan(retained.plan);
   if (retained !== undefined && (retained.provenance.attemptOrdinal === undefined ||
       !retained.plan.lines.some((line) => JSON.stringify(line) === JSON.stringify(input.line)))) {
     throw new AlayaError("CONFLICT", "Batch open semantics is missing its retained plan/attempt binding");
   }
-  return receiveSourceSemantics(input.rawJson, request, input.proposal);
 }

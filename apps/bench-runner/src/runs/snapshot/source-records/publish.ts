@@ -286,6 +286,9 @@ async function publishOneSource(
   if (interpretation === undefined && draft === undefined) {
     return { ...current, ...generation, publication: "failed", publication_error: "interpreted source interpretation has no draft or normalized interpretation" };
   }
+  if (locations === undefined) {
+    return { ...current, ...generation, publication: "failed", publication_error: "current source request has no host-owned assertion locations" };
+  }
   try {
     const published = await publishAdmittedSourceSemanticInterpretation({
       publication, workspaceId, runId, artifactKey: source.source_id, source: source.content_bytes,
@@ -293,7 +296,7 @@ async function publishOneSource(
       producer_version: request.source_request.producer_capability.producer_version,
       contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
       ...(interpretation === undefined ? { draft } : { interpretation }),
-      ...(locations === undefined ? {} : { assertion_locations: locations })
+      assertion_locations: locations
     });
     return {
       ...current, ...generation, publication: "published",

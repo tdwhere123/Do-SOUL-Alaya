@@ -69,7 +69,7 @@ export function prepareSourceRequestWorkset(input: {
   for (const item of requests) {
     const cached = inspectCachedExtractionArtifact(input.cacheRoot, item.line.key,
       prepared.config.model, prepared.config.requestProfile, extractionTypedArtifactMode(prepared.config));
-    if (cached.status === "invalid") {
+    if (cached.status === "invalid" || cached.status === "retired") {
       throw new ExtractionCacheInvariantError(
         `Batch selected cache shard ${item.line.key} is invalid: ${cached.reason}`
       );

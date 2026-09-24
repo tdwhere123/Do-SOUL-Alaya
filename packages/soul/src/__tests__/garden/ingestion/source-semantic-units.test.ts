@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { collectSourceSemanticUnitPacks, indexSourceSemanticUnits, sourceSemanticTransportUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
 import { buildSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
-import { completeEmptySourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { completeEmptySourceSemantics, receiveSourceSemantics, verifyRetainedSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { buildSourceReferenceCatalog } from "@do-soul/alaya-protocol";
-import { semanticSha256, sourceSemanticRequestCatalog, parseSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { semanticSha256, sourceSemanticRequestCatalog, parseRetainedSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 
 const producer = { source_id: "source", source_version: "1", producer_id: "test", producer_version: "1" };
 
@@ -13,13 +13,12 @@ describe("source semantic unit coverage", () => {
     const input = { ...producer, sourceCorpus: "", assertionIds: [] };
     const current = buildSourceSemanticRequest(input);
     const { source_unit_contract: _units, proposal_contract: _proposal, generation_schema_contract: _generation, ...body } = current.source_request;
-    const historical = parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
+    const historical = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, normalizer_version: "source-semantic-normalizer-v3"
     } });
-    const result = completeEmptySourceSemantics(historical, input);
-    expect(result.request).toEqual(historical);
-    expect(result.outcome).toEqual({ status: "no_eligible_source", provider_attempts: 0 });
-    expect(() => completeEmptySourceSemantics(historical, { ...input, sourceCorpus: "different" })).toThrow(/source owner|generation/u);
+    expect(parseRetainedSourceSemanticRequest(JSON.parse(JSON.stringify(historical)))).toEqual(historical);
+    expect(() => completeEmptySourceSemantics(historical, input)).toThrow(/ineligible/u);
+    expect(completeEmptySourceSemantics(current, input).outcome).toEqual({ status: "no_eligible_source", provider_attempts: 0 });
   });
   it("retains conditional, interrogative, anaphoric and Chinese source spans before interpretation", () => {
     const content = "If Talia calls, Niko will leave. Did Niko leave? Talia placed an atlas on the desk. She then opened it. 快来加入我们的活动！";
@@ -73,13 +72,14 @@ describe("source semantic unit coverage", () => {
     const row = indexed[0]!;
     const { source_unit_contract: _contract, generation_schema_contract: _generation, ...body } = current.source_request;
     const source_assertions = [{ assertion_id: row.assertion_id, text: row.text }];
-    const legacy = parseSourceSemanticRequest({ ...current, source_digest: undefined,
+    const legacy = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined,
       source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source_assertions, semanticSha256),
       source_request: { ...body, proposal_contract: "source-semantic-proposal-v1", source_assertions, assertion_locations: [{ assertion_id: 1,
         source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] }] }
     });
-    expect(receiveSourceSemantics("{}", legacy, input).outcome.status).toBe("invalid");
-    expect(() => receiveSourceSemantics("{}", { ...legacy, source_request: {
+    expect(() => receiveSourceSemantics("{}", legacy, input)).toThrow(/ineligible/u);
+    expect(verifyRetainedSourceSemantics("{}", legacy, input).result.outcome.status).toBe("invalid");
+    expect(() => verifyRetainedSourceSemantics("{}", { ...legacy, source_request: {
       ...legacy.source_request, source_unit_contract: "source-semantic-units-v1",
       source_assertions: source_assertions.map((assertion) => ({ ...assertion, source_role: "user" as const }))
     } }, input)).toThrow(/source owner/u);

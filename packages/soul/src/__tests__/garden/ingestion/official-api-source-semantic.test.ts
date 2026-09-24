@@ -8,11 +8,12 @@ import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
-  sourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog, parseSourceSemanticRequest, sourceSemanticSystemPrompt
+  sourceSemanticResponseJsonSchema, retainedSourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog,
+  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, retainedSourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics, proposeQuerySemantics,
-  proposeSourceSemantics as proposeCurrentSourceSemantics, receiveSourceSemantics
+  proposeSourceSemantics as proposeCurrentSourceSemantics, receiveSourceSemantics, verifyRetainedSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
 const PROFILE: SourceInterpretationProfile = {
@@ -26,15 +27,15 @@ const TEXT = "The archivist accessioned folio F into bay B.";
 // Archived graph proposals remain replayable; current content compilation has its own suite.
 function buildSourceSemanticRequest(input: Parameters<typeof buildCurrentSourceSemanticRequest>[0]) {
   const current = buildCurrentSourceSemanticRequest(input);
-  return parseSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
+  return parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
     ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
   } });
 }
 function proposeSourceSemantics(input: Parameters<typeof proposeCurrentSourceSemantics>[0], injected?: { rawJson: string }) {
   return injected === undefined || input.assertionIds.length === 0 ? proposeCurrentSourceSemantics(input, injected)
-    : receiveSourceSemantics(injected.rawJson, buildSourceSemanticRequest(input), input);
+    : verifyRetainedSourceSemantics(injected.rawJson, buildSourceSemanticRequest(input), input).result;
 }
-const SOURCE_SEMANTIC_SYSTEM_PROMPT = sourceSemanticSystemPrompt(buildSourceSemanticRequest(sourceInput()));
+const SOURCE_SEMANTIC_SYSTEM_PROMPT = retainedSourceSemanticSystemPrompt(buildSourceSemanticRequest(sourceInput()));
 
 function sourceInput(text = TEXT) {
   const sourceCorpus = buildOfficialApiSourceCorpus(text, [{ role: "user", content: text }]);
@@ -512,25 +513,25 @@ it("replays explicitly historical requests without upgrading their normalizer or
   const input = sourceInput(), current = buildSourceSemanticRequest(input);
   const { proposal_contract: _proposalContract, source_unit_contract: _unitContract, ...body } = current.source_request;
   const legacyBody = { ...body, source_assertions: body.source_assertions.map(({ assertion_id, text }) => ({ assertion_id, text })) };
-  const legacy = parseSourceSemanticRequest({ ...current, source_request: {
+  const legacy = parseRetainedSourceSemanticRequest({ ...current, source_request: {
     ...legacyBody, normalizer_version: "source-semantic-normalizer-v3"
   } });
   const rawJson = JSON.stringify({ contract: "source-interpretation-response-v5",
     outcome: { status: "interpreted", gaps: [] }, draft: accessionDraft(current) });
-  const historical = receiveSourceSemantics(rawJson, legacy, input);
+  const historical = verifyRetainedSourceSemantics(rawJson, legacy, input).result;
   expect(historical.outcome.status).toBe("interpreted");
   expect(historical.interpretation?.normalizer_version).toBe("source-semantic-normalizer-v3");
   expect(historical.rawJson).toBe(rawJson);
-  expect(receiveSourceSemantics(rawJson, current, input).outcome.status).toBe("invalid");
-  expect(receiveSourceSemantics(interpretedJson(current), legacy, input).outcome.status).toBe("invalid");
+  expect(receiveSourceSemantics(rawJson, buildCurrentSourceSemanticRequest(input), input).outcome.status).toBe("invalid");
+  expect(verifyRetainedSourceSemantics(interpretedJson(current), legacy, input).result.outcome.status).toBe("invalid");
   expect(() => parseSourceSemanticRequest({ ...current, source_request: {
     ...current.source_request, normalizer_version: "source-semantic-normalizer-v3"
   } })).toThrow(/proposal contract and normalizer version/u);
   expect(() => parseSourceSemanticRequest({ ...current, source_request: {
     ...legacyBody, normalizer_version: "source-semantic-normalizer-v5"
   } })).toThrow(/proposal contract and normalizer version/u);
-  expect(JSON.stringify(sourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v5");
-  expect(sourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v5"');
-  expect(sourceSemanticSystemPrompt(legacy)).not.toContain('"contract":"source-semantic-proposal-v1"');
-  expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v1");
+  expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v5");
+  expect(retainedSourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v5"');
+  expect(retainedSourceSemanticSystemPrompt(legacy)).not.toContain('"contract":"source-semantic-proposal-v1"');
+  expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v1");
 });

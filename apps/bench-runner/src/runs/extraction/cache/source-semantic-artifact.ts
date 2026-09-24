@@ -1,21 +1,23 @@
 import {
-  parseSourceSemanticRequest, completeEmptySourceSemantics, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES,
+  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest,
+  completeEmptySourceSemantics, verifyRetainedEmptySourceSemantics, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES,
   type SourceSemanticProposalResult
 } from "@do-soul/alaya-soul";
 import {
   AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT
 } from "@do-soul/alaya-protocol";
 import { readCachedEntry, writeCachedExtraction, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
-import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
+import { computeCacheKey, computeRetainedCacheKey } from "../../compile-seed/cache/cache-key.js";
 import { inspectCachedResponseMetadata, persistedResponseMetadata } from "../../compile-seed/cache/cached-response-metadata.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
-import { receiveSourceSemanticBatchLine } from "../fill/batch/source-semantic-interpretation.js";
+import { receiveSourceSemanticBatchLine, verifyRetainedSourceSemanticBatchLine } from "../fill/batch/source-semantic-interpretation.js";
 import type { GeminiBatchInvocation, GeminiBatchPlan } from "../fill/batch/contract.js";
 import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { assertExtractionCacheIdentity } from "./cache-identity.js";
-import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity } from "./extraction-cache-manifest.js";
+import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity,
+  readRetainedSourceSemanticManifestIdentity } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
 import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
@@ -24,7 +26,7 @@ import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
 import {
   SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
 } from "../request-artifact.js";
-import type { SourceRequestLine } from "../request-artifact.js";
+import { verifyRetainedSourceSemanticRequestLine, type SourceRequestLine } from "../request-artifact.js";
 
 export class SourceSemanticAdmissionError extends Error {}
 
@@ -114,13 +116,15 @@ function assertCompleteProviderFinish(finishReason: string | null, requestProfil
 function inspectInteractiveGenerateContent(
   typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
   entry: CachedExtractionEntry,
-  request: ReturnType<typeof parseSourceSemanticRequest>
+  request: ReturnType<typeof parseSourceSemanticRequest>, retainedOnly: boolean
 ): SourceSemanticProposalResult {
   assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
   if (!isCompleteSemanticFinish(entry.request_profile, typed.result.provenance.finishReason)) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive completion is not a complete provider finish");
   }
-  if (typed.result.rawJson !== entry.raw_json || !isExtractionTransportProvenance(entry.transport_provenance)) {
+  if (typed.result.rawJson !== entry.raw_json ||
+      typed.result.provenance.responseSha256 !== computeExtractionRawJsonSha256(entry.raw_json) ||
+      !isExtractionTransportProvenance(entry.transport_provenance)) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
   }
   const metadata = persistedResponseMetadata({ finishReason: typed.result.provenance.finishReason, completionContractVersion: 1,
@@ -128,11 +132,12 @@ function inspectInteractiveGenerateContent(
   if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
     throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
   }
-  const admitted = receiveSourceSemanticBatchLine({
+  const input = {
     config: { model: entry.model, requestProfile: entry.request_profile },
     line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
     proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id))
-  });
+  };
+  const admitted = retainedOnly ? verifyRetainedSourceSemanticBatchLine(input).result : receiveSourceSemanticBatchLine(input);
   const completion = retainableOutcome(admitted);
   if (completion === undefined || completion !== typed.completion) {
     throw new AlayaError("CONFLICT", "typed open-semantics completion mismatch");
@@ -140,7 +145,7 @@ function inspectInteractiveGenerateContent(
   return admitted;
 }
 
-function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string) {
+function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string, retainedOnly = false) {
   const typed = entry.source_semantic;
   if (typed?.contract !== SOURCE_SEMANTIC_CACHE_CONTRACT || typed.source_binding !== "unbound" ||
       typed.interpretation_contract !== SOURCE_SEMANTIC_PACKET_CONTRACT ||
@@ -151,17 +156,22 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     throw new AlayaError("CONFLICT", "invalid typed source semantic cache artifact");
   }
   const line = artifactLine(typed);
-  if (line.key !== entry.cache_key || computeCacheKey(entry.model, entry.request_profile, line.systemPrompt, line.userPrompt) !== line.key) {
+  const expectedKey = retainedOnly ? computeRetainedCacheKey(entry.model, entry.request_profile, line.systemPrompt, line.userPrompt)
+    : computeCacheKey(entry.model, entry.request_profile, line.systemPrompt, line.userPrompt);
+  if (line.key !== entry.cache_key || expectedKey !== line.key) {
     throw new AlayaError("CONFLICT", "typed open-semantics request key mismatch");
   }
-  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+  const request = retainedOnly ? verifyRetainedSourceSemanticRequestLine(line,
+    { model: entry.model, requestProfile: entry.request_profile }).request
+    : parseSourceSemanticRequest(JSON.parse(line.userPrompt));
   let admitted: SourceSemanticProposalResult;
   if (typed.kind === "deterministic_empty") {
     if (entry.transport_provenance !== undefined || entry.response_metadata !== undefined) {
       throw new AlayaError("CONFLICT", "deterministic open semantics cannot carry a provider receipt");
     }
     if (entry.raw_json !== "") throw new AlayaError("CONFLICT", "deterministic open semantics has nonempty output");
-    admitted = completeEmptySourceSemantics(request, proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id)));
+    const proposal = proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id));
+    admitted = retainedOnly ? verifyRetainedEmptySourceSemantics(request, proposal).result : completeEmptySourceSemantics(request, proposal);
     if (admitted.outcome.status !== "no_eligible_source" || typed.completion !== "no_eligible_source") {
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
     }
@@ -170,7 +180,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
         (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
       throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
     }
-    admitted = inspectInteractiveGenerateContent(typed, entry, request);
+    admitted = inspectInteractiveGenerateContent(typed, entry, request, retainedOnly);
   } else {
     const retained = readRetainedBatchLine(cacheRoot, typed.plan_identity, entry.cache_key);
     const authority = readRetainedBatchAuthority(cacheRoot, typed.plan_identity, typed.authority_receipt_digest);
@@ -186,12 +196,13 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     if (canonicalJson(entry.response_metadata) !== canonicalJson(metadata.response_metadata)) {
       throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
     }
-    admitted = receiveSourceSemanticBatchLine({
+    const input = {
       config: { model: entry.model, requestProfile: entry.request_profile },
       line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
       proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id)),
       retained: { plan: retained.plan, provenance: retained.result.provenance }
-    });
+    };
+    admitted = retainedOnly ? verifyRetainedSourceSemanticBatchLine(input).result : receiveSourceSemanticBatchLine(input);
     const completion = retainableOutcome(admitted);
     if (completion === undefined || completion !== typed.completion) {
       throw new AlayaError("CONFLICT", "typed open-semantics completion mismatch");
@@ -215,16 +226,47 @@ export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string,
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
   try {
-    const inspected = inspectSourceSemanticEntry(cached.entry, cacheRoot);
-    const manifest = readExtractionCacheManifestIdentity(cacheRoot)?.manifest;
-    if (manifest?.source_semantic_generation === undefined ||
-        extractionAdmissionGenerationSha256(manifest) !== cached.entry.admission_identity!.generation_sha256) {
-      throw new AlayaError("CONFLICT", "typed open-semantics generation binding mismatch");
+    const request = parseRetainedSourceSemanticRequest(JSON.parse(artifactLine(cached.entry.source_semantic as CachedSourceSemantic).userPrompt));
+    try { parseSourceSemanticRequest(request); }
+    catch {
+      inspectRecordedSourceSemanticEntry(cached.entry, cacheRoot, true);
+      return { status: "retired" as const, eligibility: "retained_only" as const,
+        reason: "retired source semantic artifact is ineligible for current cache reuse" };
     }
-    return inspected;
+    return inspectRecordedSourceSemanticEntry(cached.entry, cacheRoot, false);
   } catch (cause) {
     return { status: "invalid" as const, reason: cause instanceof Error ? cause.message : String(cause) };
   }
+}
+
+/** Explicit retained inspection; the wrapper cannot be treated as a current cache hit. */
+export function inspectRetainedCachedSourceSemantic(cacheRoot: string, cacheKey: string, model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"]) {
+  const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
+  if (cached.status !== "hit") return cached;
+  try { return inspectRecordedSourceSemanticEntry(cached.entry, cacheRoot, true); }
+  catch (cause) { return { status: "invalid" as const, reason: cause instanceof Error ? cause.message : String(cause) }; }
+}
+
+function inspectRecordedSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string, retainedOnly: true):
+  { status: "retired"; eligibility: "retained_only"; verification: ReturnType<typeof inspectSourceSemanticEntry> };
+function inspectRecordedSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string, retainedOnly: false):
+  ReturnType<typeof inspectSourceSemanticEntry>;
+function inspectRecordedSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string, retainedOnly: boolean) {
+  const inspected = inspectSourceSemanticEntry(entry, cacheRoot, retainedOnly);
+  if (retainedOnly) {
+    const identity = readRetainedSourceSemanticManifestIdentity(cacheRoot);
+    if (identity === undefined || identity.generationSha256 !== entry.admission_identity?.generation_sha256) {
+      throw new AlayaError("CONFLICT", "retained open-semantics generation binding mismatch");
+    }
+    return { status: "retired" as const, eligibility: "retained_only" as const, verification: inspected };
+  }
+  const manifest = readExtractionCacheManifestIdentity(cacheRoot)?.manifest;
+  if (manifest?.source_semantic_generation === undefined ||
+      extractionAdmissionGenerationSha256(manifest) !== entry.admission_identity!.generation_sha256) {
+    throw new AlayaError("CONFLICT", "typed open-semantics generation binding mismatch");
+  }
+  return inspected;
 }
 
 type SourceSemanticImportBase = Readonly<{

@@ -21,7 +21,7 @@ import {
   SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
-  parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
+  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticCorrespondenceProposalInput, type SourceSemanticCorrespondenceRequest,
   type SourceInterpretationDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
@@ -41,6 +41,12 @@ export type SourceSemanticProposalResult = Readonly<{
   interpretation?: SourceSemanticInterpretation;
   raw_response_id?: string;
   rawJson?: string;
+}>;
+
+/** Historical verification is evidence, never an executable current admission. */
+export type RetainedSourceSemanticVerification = Readonly<{
+  eligibility: "retained_only";
+  result: SourceSemanticProposalResult;
 }>;
 
 export type SourceSemanticQueryProposalResult = Readonly<{
@@ -98,18 +104,43 @@ export function completeEmptySourceSemantics(
   return { outcome: { status: "no_eligible_source", provider_attempts: 0 }, provider_attempts: 0, request };
 }
 
+/** Verifies a retained zero-attempt empty disposition without granting cache or publication eligibility. */
+export function verifyRetainedEmptySourceSemantics(
+  requestValue: unknown, input: SourceSemanticProposalInput
+): RetainedSourceSemanticVerification {
+  const request = parseRetainedSourceSemanticRequest(requestValue);
+  if (request.source_request.source_assertions.length !== 0 || input.assertionIds.length !== 0) {
+    throw new AlayaError("CONFLICT", "retained empty source semantics requires no source assertions");
+  }
+  bindSource(request, input);
+  return { eligibility: "retained_only", result: { outcome: { status: "no_eligible_source", provider_attempts: 0 },
+    provider_attempts: 0, request } };
+}
+
 export function receiveSourceSemantics(
   rawJson: string, requestValue: SourceSemanticRequest, input: SourceSemanticProposalInput
 ): SourceSemanticProposalResult {
   const request = parseSourceSemanticRequest(requestValue);
+  return decodeSourceSemantics(rawJson, request, input);
+}
+
+export function verifyRetainedSourceSemantics(
+  rawJson: string, requestValue: unknown, input: SourceSemanticProposalInput
+): RetainedSourceSemanticVerification {
+  const request = parseRetainedSourceSemanticRequest(requestValue);
+  return { eligibility: "retained_only", result: decodeSourceSemantics(rawJson, request, input) };
+}
+
+function decodeSourceSemantics(
+  rawJson: string, request: SourceSemanticRequest, input: SourceSemanticProposalInput
+): SourceSemanticProposalResult {
   const attempt = bindAttempt(rawJson, request);
   const bounded = boundRawJson(rawJson, request.source_request.resource_limits.output_byte_limit, attempt);
   if (bounded !== undefined) return bounded;
   bindSource(request, input);
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  // Marker-absent v3 requests are retained only for historical raw/cache replay.
-  // Remove this branch when those archives use an offline-only legacy reader.
+  // Retained marker-absent v3 requests remain decodable only through the retained verifier.
   let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
   const limits = request.source_request.resource_limits;
   const compact = request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT;

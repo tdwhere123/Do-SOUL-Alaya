@@ -5,7 +5,7 @@ import {
   materializeSourceSemanticCompactProposal, materializeSourceSemanticSelectionProposal,
   SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, sourceSemanticValidationDiagnostics
 } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
+import { parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
 
 const instruction = "Revise the previous proposal against the unchanged original source. Structural diagnostics describe rejected graph construction. Source review is an explicit reviewer interpretation, not an established fact; verify it against the source. Correct all supported content and scope, including omissions, without inventing facts. Return a complete new proposal, not a patch. The host will apply the same strict admission. Previous failures remain retained.";
 const completedInstruction = "Revise the retained complete producer response against the unchanged original source. Diagnostics describe JSON syntax or rejected graph construction; transport completion does not imply valid JSON or faithful meaning. Source review is an explicit reviewer interpretation, not an established fact; verify it against the source. Return one complete JSON proposal matching the response schema, not a patch, while correcting supported content and scope without inventing facts. The host applies unchanged strict admission. Previous failures remain retained.";
@@ -85,7 +85,7 @@ export function validateSourceSemanticRevision(request: SourceSemanticRequest, r
   // Check descending depth before recursive validation; the public cap is three.
   const parentNumber = (parentValue as SourceSemanticRequest)?.source_request?.revision?.revision_number ?? 0;
   if (parentNumber !== revision.revision_number - 1) throw new AlayaError("CONFLICT", "revision does not follow its immediate parent");
-  const parent = parseSourceSemanticRequest(parentValue);
+  const parent = parseRetainedSourceSemanticRequest(parentValue);
   if (JSON.stringify(parent) !== revision.parent_request_json ||
       sourceSemanticBaseRequestDigest(parent) !== revision.base_request_sha256) {
     throw new AlayaError("CONFLICT", "revision parent has a different original request");

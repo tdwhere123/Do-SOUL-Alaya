@@ -41,7 +41,7 @@ describe("source semantic runtime publication adapter", () => {
       publication: { publish }, workspaceId: "ws", runId: "run", artifactKey: "source-1",
       source: SOURCE, catalog: catalogFor("other source text"),
       interpretation: { source: {} } as never, producer_id: "official-api-source-semantic",
-      producer_version: "1", contract_version: "source-interpretation-v4"
+      producer_version: "1", contract_version: "source-interpretation-v4", assertion_locations: locations
     })).rejects.toThrow(/source digest differs from the request catalog/);
     expect(publish).toHaveBeenCalledTimes(1);
   });
@@ -52,7 +52,9 @@ describe("source semantic runtime publication adapter", () => {
       publication: { publish }, workspaceId: "ws", runId: "run", artifactKey: "source-1",
       source: SOURCE, catalog: catalogFor(), interpretation: { source: {} } as never, draft: { contract: "x" },
       producer_id: "official-api-source-semantic", producer_version: "1",
-      contract_version: "source-interpretation-v4"
+      contract_version: "source-interpretation-v4", assertion_locations: [
+        { assertion_id: 1, source_utf8_span: FIRST }, { assertion_id: 2, source_utf8_span: SECOND }
+      ]
     })).rejects.toThrow(/draft or a normalized interpretation, not both/);
     expect(publish).not.toHaveBeenCalled();
   });

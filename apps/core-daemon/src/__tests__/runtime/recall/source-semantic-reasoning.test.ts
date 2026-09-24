@@ -169,6 +169,7 @@ async function withPublished(body: (input: {
     stores, evidenceService, sha256: fieldContractSha256
   }).publish({
     workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+    assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
     provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
     producer_version: "p1", contract_version: "source-interpretation-v4"
   });
@@ -177,6 +178,7 @@ async function withPublished(body: (input: {
     const draft = usesDraft(catalog, ASSERTION);
     const extra = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
       workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+      assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
       provenance: { producer_id: "test-author" }, draft: { ...draft,
         gaps: options.large && index === (options.count ?? 1) - 1 ? Array.from({ length: 40 }, () => ({
           kind: "unsupported_meaning", affected_ids: [], support: [], description: "字".repeat(800)

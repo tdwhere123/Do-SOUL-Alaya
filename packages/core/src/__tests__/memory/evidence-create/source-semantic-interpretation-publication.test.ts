@@ -26,7 +26,7 @@ import { createInMemoryFieldStores } from "../../../memory/evidence-create/field
 import {
   createSourceSemanticInterpretationPublication,
   semanticInterpretationEvidenceId,
-  verifyPublishedSourceSemanticInterpretation
+  verifyPublishedSourceSemanticInterpretation, verifyRetainedPublishedSourceSemanticInterpretation
 } from "../../../memory/evidence-create/source-interpretation-packet-publication.js";
 import { deriveAddressableSpanViews } from "../../../memory/evidence-create/source-span-views.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -154,6 +154,8 @@ function publicationInput(
     draft: usesDraft(catalog, assertion),
     producer_version: "p1",
     contract_version: "source-interpretation-v4",
+    assertion_locations: [{ assertion_id: 1, source_utf8_span: [Buffer.byteLength(source.slice(0, source.indexOf(assertion))),
+      Buffer.byteLength(source.slice(0, source.indexOf(assertion) + assertion.length))] as const }],
     ...extra
   };
 }
@@ -305,6 +307,7 @@ describe("source semantic interpretation publication", () => {
       source,
       catalog,
       provenance: { producer_id: "test-author" },
+      assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(source)] }],
       interpretation: normalized.interpretation
     });
     const start = Buffer.byteLength(source.slice(0, source.indexOf(cafe)), "utf8");
@@ -440,6 +443,7 @@ describe("source semantic interpretation publication", () => {
       source: SOURCE,
       catalog,
       provenance: { producer_id: "test-author" },
+      assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }],
       interpretation: { ...normalized.interpretation, asserted_at_scope: [] }
     })).rejects.toThrow(/host-derived/);
   });
@@ -457,7 +461,8 @@ it("rejects forged selectors on already-normalized interpretations and re-verifi
   const wrong = { ...normalized.interpretation, mentions: normalized.interpretation.mentions.map((row, index) => index === 0
     ? { ...row, source_ref: normalized.interpretation.mentions[1]!.source_ref } : row) };
   const base = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID, runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1",
-    source: SOURCE, catalog, provenance: { producer_id: "test-author" } };
+    source: SOURCE, catalog, provenance: { producer_id: "test-author" },
+    assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] as const }] };
   await expect(fixture.publication.publish({ ...base, interpretation: wrong })).rejects.toThrow(/source reference/);
   const good = await fixture.publication.publish({ ...base, interpretation: normalized.interpretation });
   const damaged = { ...good.bound.interpretation, mentions: good.bound.interpretation.mentions.map((row, index) => index === 0
@@ -482,10 +487,26 @@ it("publishes repeated identical assertions only with distinct exact host locati
     { assertion_id: 2, source_utf8_span: [sentence.length + 1, source.length] as const }];
   const input = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID, runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1",
     source, catalog, provenance: { producer_id: "test-author" }, producer_version: "p1", contract_version: "source-interpretation-v4" };
-  await expect(fixture.publication.publish({ ...input, draft: second })).rejects.toThrow(/host-owned source location/);
+  await expect(fixture.publication.publish({ ...input, draft: second } as Parameters<typeof fixture.publication.publish>[0]))
+    .rejects.toThrow(/host-owned assertion locations/);
   const a = await fixture.publication.publish({ ...input, draft: first, assertion_locations: locations });
   const b = await fixture.publication.publish({ ...input, draft: second, assertion_locations: locations });
   expect(a.bound.interpretation_id).not.toBe(b.bound.interpretation_id);
   expect(b.bound.interpretation.mentions[0]!.utf8_span[0] - a.bound.interpretation.mentions[0]!.utf8_span[0]).toBe(sentence.length + 1);
   expect(verifyPublishedSourceSemanticInterpretation(fixture.owner, b.bound, REAL_SQLITE_TEST_WORKSPACE_ID).bound).toEqual(b.bound);
+});
+
+it("verifies a retained interpretation without admitting it to current execution", async () => {
+  const fixture = await openFixture();
+  await admitSource(fixture);
+  const published = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION)));
+  const interpretation = { ...published.bound.interpretation,
+    normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION };
+  const retained = { ...published.bound, interpretation,
+    interpretation_id: sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256) };
+  expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, retained, REAL_SQLITE_TEST_WORKSPACE_ID))
+    .toThrow(/ineligible/u);
+  const checked = verifyRetainedPublishedSourceSemanticInterpretation(fixture.owner, retained, REAL_SQLITE_TEST_WORKSPACE_ID);
+  expect(checked.eligibility).toBe("retained_only");
+  expect(checked.verification.bound).toEqual(retained);
 });

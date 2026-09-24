@@ -30,7 +30,7 @@ export function bindSourceSemanticLocations(input: Readonly<{
   } else if (h.normalizer_version !== SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION) {
     throw new CoreError("VALIDATION", "unsupported source semantic normalizer version");
   }
-  const locations = locateAssertions(source, catalog, input.locations ?? h.source.assertion_locations);
+  const locations = locateAssertions(source, catalog, input.locations);
   const byId = new Map(locations.map((row) => [row.assertion_id, row.source_utf8_span]));
   if ([...h.frames, ...h.operators].some((row) => row.assertion_ids.some((id) => !byId.has(id)))) {
     throw new CoreError("VALIDATION", "interpretation names an unselected source assertion");
@@ -52,24 +52,18 @@ export function bindSourceSemanticLocations(input: Readonly<{
     ...sourceSemanticStanceLists([...h.frames, ...h.operators]) });
 }
 
-/** Old unique-text catalogs are an explicit compatibility adapter. Repeated text needs host locations. */
+/** Every current location is supplied by the host and checked against the exact source bytes. */
 function locateAssertions(source: string, catalog: SourceReferenceCatalog, supplied: Locations | undefined): Locations {
+  if (supplied === undefined) throw new CoreError("VALIDATION", "source semantic publication requires host-owned assertion locations");
   const sourceBytes = Buffer.byteLength(source);
-  const byId = new Map((supplied ?? []).map((row) => [row.assertion_id, row.source_utf8_span]));
-  if (supplied !== undefined && (byId.size !== supplied.length || supplied.length !== catalog.assertions.length)) {
+  const byId = new Map(supplied.map((row) => [row.assertion_id, row.source_utf8_span]));
+  if (byId.size !== supplied.length || supplied.length !== catalog.assertions.length) {
     throw new CoreError("VALIDATION", "assertion locations do not cover this catalog exactly");
   }
   return [...catalog.assertions].sort((a, b) => a.assertion_id - b.assertion_id).map((row) => {
     const text = row.segments.map((part) => part.text).join("");
-    let span = byId.get(row.assertion_id);
-    if (supplied !== undefined && span === undefined) throw new CoreError("VALIDATION", "assertion location is absent");
-    if (span === undefined) {
-      const start = source.indexOf(text);
-      if (start < 0 || source.indexOf(text, start + 1) >= 0) {
-        throw new CoreError("VALIDATION", "repeated assertion requires a host-owned source location");
-      }
-      span = byteSpan(source, [start, start + text.length]);
-    }
+    const span = byId.get(row.assertion_id);
+    if (span === undefined) throw new CoreError("VALIDATION", "assertion location is absent");
     if (span[1] > sourceBytes || utf8Slice(source, span) !== text) throw new CoreError("VALIDATION", "assertion location differs from source text");
     return { assertion_id: row.assertion_id, source_utf8_span: span };
   });

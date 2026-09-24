@@ -806,13 +806,39 @@ its target. Unowned or conflicting scopes are rejected; the compiler never
 guesses assertion permission, pronoun antecedents or domain facts. Compilation
 and normalization share one resource ledger. Structural admission and located
 gaps cannot certify language completeness. The canonical source interpretation and response-envelope
-shapes remain unchanged. Recorded v1/v2/v3/v4 proposals select their original
-prompt/schema explicitly for replay. Marker-absent normalizer-v3 requests retain
-an explicit historical replay path; new publication requires normalizer-v5.
+shapes remain unchanged. Current SOUL request, receive, prompt, schema and
+revision admission require the v7 selection request, source units, explicit
+host assertion locations and normalizer-v5. Recorded v1/v2/v3/v4 proposals
+and marker-absent normalizer-v3 requests retain their original prompt, schema,
+request and response identities through explicit retained verification only.
+That result is ineligible for new generation, executable cache reuse, import,
+revision preparation, publication and conditional execution. This narrows the
+exported reader APIs; callers inspecting archives must select the retained
+entry and cannot pass its result to a current consumer.
+The current SOUL exports `parseSourceSemanticRequest`,
+`sourceSemanticSystemPrompt`, `sourceSemanticResponseJsonSchema`,
+`receiveSourceSemantics` now reject historical source requests. The current
+official API schema preimage no longer reconstructs their historical schema.
+Bench owns the corresponding current request-line,
+Batch, cache and fill gates. Its retained inspectors use SOUL's explicit
+`parseRetainedSourceSemanticRequest`, `retainedSourceSemanticSystemPrompt`,
+`retainedSourceSemanticResponseJsonSchema`,
+`retainedOfficialApiExtractionResponseSchemaPreimage`,
+`verifyRetainedSourceSemantics` and `verifyRetainedEmptySourceSemantics` only
+to reconstruct recorded identities. Core's
+`verifyRetainedPublishedSourceSemanticInterpretation` is likewise read-only;
+the current published verifier is the worker's eligibility gate. The narrowed
+behavior is a major-level API change for consumers of these exported readers
+under invariant §25; this local change does not publish a package version.
 Request/schema identities distinguish the producer wire. Canonical-envelope
 archives retain native request/response replay with their original prompt. Their
 normalizer-v3 manifests remain ineligible for current cache reuse; replay does
-not upgrade or publish an old interpretation.
+not upgrade or publish an old interpretation. A verified retired cache shard is
+not a miss and cannot trigger fill; its original raw bytes, attempt metadata and
+unknown usage remain available for audit. Current publication requires
+normalizer-v5 and the source's host-provided assertion locations. Stored retired
+interpretations remain inspectable by exact identity but are excluded from
+worker discovery, correspondence and proof, while the underlying source remains.
 
 Current selection requests bind `host-owned-selection-schema-v3`. Every selection
 names an assertion ID and exact text. Occurrences are zero-based among exact

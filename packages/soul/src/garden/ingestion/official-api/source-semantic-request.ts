@@ -240,7 +240,7 @@ function producerCapability(producer_id: string, producer_version: string) {
 
 const requestCatalogs = new WeakMap<SourceSemanticRequest, SourceReferenceCatalog>();
 
-export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
+export function parseRetainedSourceSemanticRequest(value: unknown): SourceSemanticRequest {
   if (Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
   }
@@ -259,6 +259,19 @@ export function parseSourceSemanticRequest(value: unknown): SourceSemanticReques
   if (source_request.revision !== undefined) validateSourceSemanticRevision(request, source_request.revision);
   if (Buffer.byteLength(JSON.stringify(request), "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
+  }
+  return request;
+}
+
+/** Current execution accepts only the current producer wire. Retained bytes use the explicit verifier. */
+export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
+  const request = parseRetainedSourceSemanticRequest(value);
+  if (request.source_request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT ||
+      request.source_request.generation_schema_contract !== SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT ||
+      request.source_request.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION ||
+      request.source_request.source_unit_contract !== SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT ||
+      request.source_request.assertion_locations === undefined) {
+    throw new AlayaError("CONFLICT", "retired source semantic request is ineligible for current execution");
   }
   return request;
 }
@@ -384,6 +397,12 @@ export function buildSourceSemanticCorrespondenceRequest(
 
 /** Producer JSON Schema selected by the recorded request contract, without profile enums. */
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
+  if (request !== undefined) parseSourceSemanticRequest(request);
+  return retainedSourceSemanticResponseJsonSchema(request);
+}
+
+/** Reconstructs an original schema only for retained request identity verification. */
+export function retainedSourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
   const contract = request?.source_request.proposal_contract;
   const generation = request?.source_request.generation_schema_contract;
   const schema = request !== undefined && contract === undefined ? SourceSemanticResponseEnvelopeSchema
@@ -515,6 +534,12 @@ const LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT = [
 
 /** A retained request selects its producer syntax and prompt together. */
 export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
+  parseSourceSemanticRequest(request);
+  return retainedSourceSemanticSystemPrompt(request);
+}
+
+/** Reconstructs original prompt bytes without granting generation eligibility. */
+export function retainedSourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
   if (request.source_request.proposal_contract === undefined) return CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT;
   if (request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) return SOURCE_SEMANTIC_SYSTEM_PROMPT;
   if (request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT) return COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT;

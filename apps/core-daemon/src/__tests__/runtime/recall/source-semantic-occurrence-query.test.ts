@@ -115,6 +115,7 @@ it("consumes proposition role references after source publication and SQLite reo
       evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
     const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
       workspaceId: WS, runId: RUN, artifactKey: "ringing-sequence", source: SOURCE, catalog,
+      assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
       provenance: { producer_id: "occurrence-test-author" }, producer_version: "1", contract_version: "source-interpretation-v4",
       draft: sourceDraft(catalog)
     });

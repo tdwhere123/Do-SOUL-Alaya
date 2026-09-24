@@ -8,7 +8,7 @@ type Publication = Readonly<{
   publish(input: Readonly<{
     workspaceId: string; runId: string; artifactKey: string; source: string; catalog: SourceReferenceCatalog;
     provenance: Readonly<{ producer_id: string; principal?: string; preparation_handle?: string }>;
-    interpretation?: SourceSemanticInterpretation; draft?: unknown; assertion_locations?: Locations;
+    interpretation?: SourceSemanticInterpretation; draft?: unknown; assertion_locations: Locations;
     producer_version: string; contract_version: string;
   }>): Promise<Readonly<{ bound: SourceSemanticPublishedInterpretation; evidence: Readonly<{ object_id: string }> }>>;
 }>;
@@ -20,7 +20,7 @@ type Publication = Readonly<{
 export async function publishAdmittedSourceSemanticInterpretation(input: Readonly<{
   publication: Publication; workspaceId: string; runId: string; artifactKey: string; source: string;
   catalog: SourceReferenceCatalog; producer_id: string; producer_version: string; contract_version: string;
-  interpretation?: SourceSemanticInterpretation; draft?: unknown; assertion_locations?: Locations;
+  interpretation?: SourceSemanticInterpretation; draft?: unknown; assertion_locations: Locations;
 }>) {
   const hasInterpretation = input.interpretation !== undefined;
   const hasDraft = input.draft !== undefined;
@@ -30,16 +30,14 @@ export async function publishAdmittedSourceSemanticInterpretation(input: Readonl
   if (fieldContractSha256(input.source) !== input.catalog.source_digest) {
     throw new AlayaError("VALIDATION", "publication source digest differs from the request catalog");
   }
-  const assertionLocations = input.assertion_locations === undefined
-    ? undefined
-    : verifyRequestOwnedLocations(input.source, input.catalog, input.assertion_locations);
+  const assertionLocations = verifyRequestOwnedLocations(input.source, input.catalog, input.assertion_locations);
   return input.publication.publish({
     workspaceId: input.workspaceId, runId: input.runId, artifactKey: input.artifactKey,
     source: input.source, catalog: input.catalog,
     provenance: { producer_id: input.producer_id },
     producer_version: input.producer_version, contract_version: input.contract_version,
     ...(hasInterpretation ? { interpretation: input.interpretation } : { draft: input.draft }),
-    ...(assertionLocations === undefined ? {} : { assertion_locations: assertionLocations })
+    assertion_locations: assertionLocations
   });
 }
 

@@ -65,6 +65,7 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
     for (let index = 0; index < (fixture.count ?? 1); index += 1) {
       const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
         workspaceId: WS, runId: RUN, artifactKey: fixture.id, source, catalog, provenance: { producer_id: "access-test-author" },
+        assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(source)] }],
         producer_version: `p${index}`, contract_version: "source-interpretation-v4", draft: {
           contract: "source-interpretation-v4", mentions: [{ id: "mStatement", assertion_id: 1, source_ref: sourceRef },
             ...(personRef === undefined ? [] : [{ id: "mPerson", assertion_id: 1, source_ref: personRef }])],

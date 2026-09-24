@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildSourceSemanticRequest as buildCurrentRequest, prepareSourceSemanticRequest,
-  parseSourceSemanticRequest, sourceSemanticRequestCatalog,
-  sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
-import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog,
+  retainedSourceSemanticResponseJsonSchema, retainedSourceSemanticSystemPrompt } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { receiveSourceSemantics, verifyRetainedSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-content-guidance.js";
 import { officialApiExtractionResponseSchema, officialApiExtractionResponseSchemaPreimage } from "../../../garden/ingestion/official-api/response-schema.js";
 import { indexSourceSemanticUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
@@ -12,12 +12,12 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
 const raw = () => SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
 const buildSourceSemanticRequest = (value: Parameters<typeof buildCurrentRequest>[0]) => {
   const request = buildCurrentRequest(value);
-  return parseSourceSemanticRequest({ ...request, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(request), source_request: {
+  return parseRetainedSourceSemanticRequest({ ...request, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(request), source_request: {
     ...request.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
   } });
 };
 const proposeSourceSemantics = (value: Parameters<typeof buildCurrentRequest>[0], response: { rawJson: string }) =>
-  receiveSourceSemantics(response.rawJson, buildSourceSemanticRequest(value), value);
+  verifyRetainedSourceSemantics(response.rawJson, buildSourceSemanticRequest(value), value).result;
 
 describe("retained source-bound semantic content compilation", () => {
   it("keeps legal complete-source requests identical and classifies only valid excess source units", () => {
@@ -66,19 +66,20 @@ describe("retained source-bound semantic content compilation", () => {
   it("pairs producer contract, schema and prompt while retaining recorded graph requests", () => {
     const current = buildSourceSemanticRequest(input);
     expect(current.source_request.proposal_contract).toBe("source-semantic-proposal-v2");
-    expect(JSON.stringify(sourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v2");
-    const historical = parseSourceSemanticRequest({ ...current, source_request: {
+    expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v2");
+    const historical = parseRetainedSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, proposal_contract: "source-semantic-proposal-v1"
     } });
-    expect(sourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
-    expect(sourceSemanticSystemPrompt(historical)).toContain("source-semantic-proposal-v1");
-    expect(sourceSemanticSystemPrompt(historical)).not.toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
-    expect(JSON.stringify(sourceSemanticResponseJsonSchema(historical))).toContain("source-semantic-proposal-v1");
-    for (const request of [current, historical, current]) {
+    expect(retainedSourceSemanticSystemPrompt(current)).toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
+    expect(retainedSourceSemanticSystemPrompt(historical)).toContain("source-semantic-proposal-v1");
+    expect(retainedSourceSemanticSystemPrompt(historical)).not.toBe(SOURCE_SEMANTIC_SYSTEM_PROMPT);
+    expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(historical))).toContain("source-semantic-proposal-v1");
+    for (const request of [buildCurrentRequest(input)]) {
       const prompt = JSON.stringify(request);
       expect(officialApiExtractionResponseSchemaPreimage(prompt)).toBe(JSON.stringify(officialApiExtractionResponseSchema(prompt)));
     }
-    expect(receiveSourceSemantics(raw(), historical, input).outcome.status).toBe("invalid");
+    expect(() => receiveSourceSemantics(raw(), historical, input)).toThrow(/ineligible/u);
+    expect(verifyRetainedSourceSemantics(raw(), historical, input).result.outcome.status).toBe("invalid");
     const { source_unit_contract: _contract, ...body } = current.source_request;
     expect(() => parseSourceSemanticRequest({ ...current, source_request: {
       ...body, source_assertions: body.source_assertions.map(({ assertion_id, text }) => ({ assertion_id, text }))

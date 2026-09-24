@@ -1,5 +1,5 @@
 import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import { parseExtractionOpenSemanticsGeneration } from "../request-artifact.js";
+import { parseExtractionOpenSemanticsGeneration, EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../request-artifact.js";
 import {
   mkdirSync,
   renameSync,
@@ -229,6 +229,26 @@ export function readExtractionCacheManifestIdentity(
     manifest,
     manifestSha256: createHash("sha256").update(raw.bytes).digest("hex")
   };
+}
+
+/** Verifies outer manifest fields and the original generation digest without admitting its retired policy. */
+export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
+  Readonly<{ manifestSha256: string; generationSha256: string }> | undefined {
+  const filePath = extractionCacheManifestPath(cacheRoot);
+  if (!boundedArtifactEntryExists(filePath)) return undefined;
+  const raw = readExtractionCacheManifestBytes(filePath);
+  const value: unknown = JSON.parse(raw.text);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new AlayaError("VALIDATION", "retained source semantic manifest is not an object");
+  }
+  const generation = (value as Record<string, unknown>).source_semantic_generation;
+  if (generation === null || typeof generation !== "object" || Array.isArray(generation)) {
+    throw new AlayaError("VALIDATION", "retained source semantic generation is absent or malformed");
+  }
+  const checked = validateManifest({ ...value, source_semantic_generation: EXTRACTION_OPEN_SEMANTICS_GENERATION }, filePath);
+  const original = { ...checked, source_semantic_generation: generation } as ExtractionCacheManifest;
+  return { manifestSha256: createHash("sha256").update(raw.bytes).digest("hex"),
+    generationSha256: extractionAdmissionGenerationSha256(original) };
 }
 
 export function parseExtractionCacheManifestContents(

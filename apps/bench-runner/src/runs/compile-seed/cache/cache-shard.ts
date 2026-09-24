@@ -67,6 +67,7 @@ export type CachedExtractionInspection =
     readonly usage?: BenchProviderUsage;
   }
   | { readonly status: "missing"; readonly reason?: undefined }
+  | { readonly status: "retired"; readonly eligibility: "retained_only"; readonly reason: string; readonly rawJsonSha256?: undefined }
   | {
     readonly status: "invalid";
     readonly reason: string;
@@ -138,7 +139,13 @@ export function inspectCachedRawExtraction(
 ): CachedRawExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
-  if (cached.entry.source_semantic !== undefined) return inspectCachedSourceSemantic(cacheRoot, cacheKey, model, requestProfile);
+  if (cached.entry.source_semantic !== undefined) {
+    const inspected = inspectCachedSourceSemantic(cacheRoot, cacheKey, model, requestProfile);
+    if (inspected.status === "retired") return { status: "quarantined", reason: inspected.reason,
+      rawJson: cached.entry.raw_json, rawJsonSha256: computeExtractionRawJsonSha256(cached.entry.raw_json),
+      rawSignalCount: 0 };
+    return inspected;
+  }
   if (cached.entry.source_packet !== undefined) return inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile);
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
@@ -227,7 +234,7 @@ export function writeCachedExtraction(
 export function inspectCachedExtractionContent(
   entry: Pick<CachedExtractionEntry, "raw_json" | "response_metadata" |
     "transport_provenance" | "empty_classification" | "request_completion" | "source_packet" | "source_semantic">
-): CachedExtractionInspection {
+): Exclude<CachedExtractionInspection, { status: "retired" }> {
   if (entry.source_packet !== undefined || entry.source_semantic !== undefined) {
     return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
   }
