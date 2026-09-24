@@ -1,4 +1,4 @@
-import { assertSampleKey, assertSampleKeys, assertSampleReceipt, isStepInteractiveSampleReceipt } from "../authority/sample-scope.js";
+import { assertSampleKeys, assertSampleReceipt, isStepInteractiveSampleReceipt } from "../authority/sample-scope.js";
 import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import { readRootBatchRuns } from "./batch/store.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
@@ -18,11 +18,8 @@ import { receiptExtractionCacheIdentity } from "../authority/receipt-cache-ident
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import type { ExecutionExtractionAuthority } from "./fill-execution.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
-import { repairScopeKeys } from "../authority/repair/repair-scope.js";
-import {
-  assertCatalogRefillRootBinding,
-  catalogRefillScopeKeys
-} from "../authority/catalog-refill/scope.js";
+import { assertExtractionAuthorityKeyInScope } from "../authority/receipt/scope.js";
+import { assertCatalogRefillRootBinding } from "../authority/catalog-refill/scope.js";
 
 export function createExtractionExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
@@ -74,17 +71,18 @@ function createLedgerExecutionAuthority(
     receipt, cacheRoot, targetSelection, writeLease
   );
   assertTarget();
-  const repairKeys = receipt.repair_scope === undefined
-    ? undefined
-    : repairScopeKeys(receipt.repair_scope);
-  const catalogRefillKeys = receipt.catalog_refill === undefined
-    ? undefined
-    : catalogRefillScopeKeys(receipt.catalog_refill);
   const ledger = openReceiptAttemptLedger(receipt, cacheRoot);
-  assertCatalogRefillLedgerIsCurrent(receipt, ledger.snapshot());
+  const snapshot = ledger.snapshot();
+  for (const key of new Set([
+    ...snapshot.unresolvedAttempts.map(attempt => attempt.cacheKey),
+    ...snapshot.settledAttempts.map(attempt => attempt.cacheKey),
+    ...snapshot.successfulEntries.map(entry => entry.cacheKey),
+    ...snapshot.transportFailures.map(failure => failure.cacheKey),
+    ...snapshot.pendingKeys
+  ])) assertExtractionAuthorityKeyInScope(receipt, key);
+  assertCatalogRefillLedgerIsCurrent(receipt, snapshot);
   const reserveAttemptOrdinal = async (cacheKey: string, signal?: AbortSignal): Promise<number> => {
-    assertSampleKey(receipt.sample_scope, cacheKey);
-    assertScopeKeyAllowed(repairKeys, catalogRefillKeys, cacheKey);
+    assertExtractionAuthorityKeyInScope(receipt, cacheKey);
     assertTarget();
     assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
     signal?.throwIfAborted();
@@ -118,22 +116,25 @@ function createLedgerExecutionAuthority(
       return Object.freeze(ordinals);
     },
     abandonPendingShard: (key, ordinal) => {
-      assertSampleKey(receipt.sample_scope, key);
+      assertExtractionAuthorityKeyInScope(receipt, key);
       ledger.abandonPendingShard(key, ordinal);
     },
     commitSuccessfulShard: (key) => {
-      assertSampleKey(receipt.sample_scope, key);
+      assertExtractionAuthorityKeyInScope(receipt, key);
       ledger.commitSuccessfulShard(key);
     },
     commitDeterministicShard: receipt.catalog_refill === undefined && receipt.sample_scope === undefined
-      ? ledger.commitDeterministicShard
+      ? (key) => {
+          assertExtractionAuthorityKeyInScope(receipt, key);
+          ledger.commitDeterministicShard(key);
+        }
       : () => {
           throw new ExtractionCacheInvariantError(
             "catalog refill cannot commit a deterministic shard"
           );
         },
     recordTransportOutcome: (key, outcome, ordinal) => {
-      assertSampleKey(receipt.sample_scope, key);
+      assertExtractionAuthorityKeyInScope(receipt, key);
       return ledger.recordTransportOutcome(key, outcome, ordinal);
     },
     snapshot: ledger.snapshot
@@ -165,22 +166,6 @@ function openReceiptAttemptLedger(receipt: ExtractionAuthorityReceipt, cacheRoot
       ? { maximumAttemptsPerKey: 1 } : {}),
     successfulShardCeiling: receipt.limits.successful_shard_ceiling
   });
-}
-
-function assertScopeKeyAllowed(
-  repairKeys: ReadonlySet<string> | undefined,
-  catalogRefillKeys: ReadonlySet<string> | undefined,
-  cacheKey: string
-): void {
-  if (repairKeys !== undefined && !repairKeys.has(cacheKey)) {
-    throw new ExtractionCacheInvariantError(
-      "extraction repair authority refused an out-of-scope shard"
-    );
-  }
-  if (catalogRefillKeys === undefined || catalogRefillKeys.has(cacheKey)) return;
-  throw new ExtractionCacheInvariantError(
-    "catalog refill authority refused an out-of-scope shard"
-  );
 }
 
 function createTargetAssertion(

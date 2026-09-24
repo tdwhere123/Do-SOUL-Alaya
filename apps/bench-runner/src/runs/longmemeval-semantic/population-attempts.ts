@@ -57,7 +57,8 @@ export function inspectPopulationAttemptScopes(scopes: readonly PopulationAttemp
                 scope.layer === "query" ? "query" : "semantic_correspondence")) {
             throw new AlayaError("CONFLICT", "population raw attempt differs from selected producer scope");
           }
-          verifyProviderRawReservation(raw, snapshot);
+          // This projection counts retained attempts; it does not admit their output.
+          verifyProviderRawReservation(raw, snapshot, "accounting");
         }
         const rawIdentity = raw === undefined ? null : chainIdentity(raw);
         const usage = raw?.usage_known && raw.usage !== null ?

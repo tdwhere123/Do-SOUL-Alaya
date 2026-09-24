@@ -15,6 +15,7 @@ import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRa
   writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
+import { inspectPopulationAttemptScopes } from "../../../runs/longmemeval-semantic/population-attempts.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
@@ -267,7 +268,7 @@ export function proposalRecoveryCases(input: {
       expect(readFileSync(f.ledgerPath, "utf8")).toBe(ledger);
     });
 
-    it.each(["body only", "body and normalized usage"] as const)(
+    it.each(["body only", "body and normalized usage", "body and normalized usage without settlement witness"] as const)(
       "refuses admitted proposal after %s contradicts the retained attempt", async change => {
         const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);
         f.raw(1, input.body(f.line), { inputTokens: 2, outputTokens: 3, totalTokens: 5 });
@@ -280,7 +281,7 @@ export function proposalRecoveryCases(input: {
         const text = JSON.stringify(body);
         raw.response_body = { ...raw.response_body, text, original_byte_length: Buffer.byteLength(text),
           digest: createHash("sha256").update(text).digest("hex") };
-        if (change === "body and normalized usage") {
+        if (change !== "body only") {
           raw.usage = { inputTokens: 8, outputTokens: 3, totalTokens: 11 };
           const shardPath = semanticProposalShardPath(f.cacheRoot, f.line.key);
           const shard = JSON.parse(readFileSync(shardPath, "utf8"));
@@ -288,17 +289,68 @@ export function proposalRecoveryCases(input: {
           writeFileSync(shardPath, JSON.stringify(shard));
         }
         writeFileSync(rawPath, JSON.stringify(raw));
+        if (change === "body and normalized usage without settlement witness") {
+          const record = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
+          delete record.settled_attempts[0].usage_sha256;
+          writeFileSync(f.ledgerPath, JSON.stringify(record));
+        }
         const ledger = readFileSync(f.ledgerPath, "utf8");
         if (change === "body only") expect(() => readProviderRawAttempt(f.cacheRoot, f.line.key, 1))
           .toThrow(/physical response differs/u);
         else expect(readProviderRawAttempt(f.cacheRoot, f.line.key, 1)?.usage).toEqual(raw.usage);
-        expect(() => f.read()).toThrow(change === "body only" ? /physical response differs/u : /exact settled attempt/u);
+        expect(() => f.read()).toThrow(change === "body only" ? /physical response differs/u :
+          change === "body and normalized usage" ? /exact settled attempt/u : /exact settled usage witness/u);
         expect(f.chain()).toMatchObject({ status: "cache_invalid", received: undefined });
         expect(() => prepareSemanticProposal(f.workset, f.cacheRoot, 128)).toThrow();
         await expect(f.fill()).rejects.toThrow();
         expect(readFileSync(f.ledgerPath, "utf8")).toBe(ledger);
       }
     );
+
+    it("keeps a settled response without its usage witness non-executable and never retries it", async () => {
+      const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);
+      f.raw(1, input.body(f.line), { inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+      f.ledger.recordTransportOutcome(f.line.key, { retryCount: 0, rateLimitRetries: 0,
+        successfulRequestCount: 1, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } }, 1);
+      const record = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
+      delete record.settled_attempts[0].usage_sha256;
+      writeFileSync(f.ledgerPath, JSON.stringify(record));
+      const retained = readFileSync(f.ledgerPath, "utf8");
+      expect(readProviderRawAttempt(f.cacheRoot, f.line.key, 1)?.usage?.totalTokens).toBe(5);
+      expect(inspectExtractionAttemptLedger({ cacheRoot: f.cacheRoot,
+        lineageDigest: f.authority.attempt_lineage_digest,
+        cacheIdentity: { model: f.workset.model, requestProfile: input.config().requestProfile }
+      })?.attempts).toBe(1);
+      expect(inspectPopulationAttemptScopes([{ layer: f.workset.kind === "query" ? "query" : "correspondence",
+        cacheRoot: f.cacheRoot, model: f.workset.model, requestProfile: f.workset.request_profile,
+        keys: [f.line.key] }])).toMatchObject({ scoped_authorized_attempts: 1,
+        observed_raw_receipts: 1, observed_known_usage_attempts: 1, scoped_reported_input_tokens: 2 });
+      expect(() => f.read()).toThrow(/exact settled usage witness/u);
+      expect(f.chain()).toMatchObject({ status: "cache_invalid", received: undefined });
+      let calls = 0;
+      await expect(executeSemanticProposalFill({ workset: f.workset, cacheRoot: f.cacheRoot,
+        authority: f.authority, config: input.config(), extractor: { extract: async () => {
+          calls += 1; throw new Error("must not retry");
+        } } })).rejects.toThrow(/exact settled usage witness/u);
+      expect(calls).toBe(0);
+      expect(readFileSync(f.ledgerPath, "utf8")).toBe(retained);
+    });
+
+    it("refuses an admitted shard after its settled usage witness is removed", async () => {
+      const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);
+      f.raw(1, input.body(f.line), { inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+      await f.fill();
+      const record = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
+      delete record.settled_attempts[0].usage_sha256;
+      writeFileSync(f.ledgerPath, JSON.stringify(record));
+      const retained = readFileSync(f.ledgerPath, "utf8");
+      expect(() => f.read()).toThrow(/exact settled usage witness/u);
+      expect(f.chain()).toMatchObject({ status: "cache_invalid", received: undefined });
+      expect(() => openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+        authority: f.authority, kind: f.workset.kind })).toThrow(/exact settled usage witness/u);
+      await expect(f.fill()).rejects.toThrow(/exact settled usage witness/u);
+      expect(readFileSync(f.ledgerPath, "utf8")).toBe(retained);
+    });
 
     it("does not publish successful raw against a durably failed transport attempt", async () => {
       const f = fixture(); f.ledger.reserveAttemptOrdinal(f.line.key);

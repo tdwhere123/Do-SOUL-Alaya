@@ -1,13 +1,16 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, expect, it, vi } from "vitest";
+import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import { buildSourceSemanticRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
-import { openExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
+import { openExtractionAttemptLedger, readSettledExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { importSourceSemanticArtifact, inspectCachedSourceSemantic,
   writeDeterministicSourceSemanticArtifact } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { readValidDeterministicLedgerShard, readValidLedgerShard } from "../../../runs/extraction/authority/attempt-ledger-shards.js";
@@ -46,11 +49,12 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
   return JSON.stringify(envelope);
 }
 
-async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic", questions = 1) {
+async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic", questions = 1,
+  providerUrl = "https://fixture-provider.invalid") {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
-  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
   await writeDataset(Array.from({ length: questions }, (_, index) => ({ ...buildExtractionFillQuestion(`q${index}`,
     "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
     `The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready. Record ${index}.`,
@@ -150,6 +154,134 @@ it("fills complete-source open semantics through interactive generateContent wit
   await assertNativeSemanticChain(cacheRoot, sourceOnly);
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
+}, 120000);
+
+it("withholds a source after its settled usage witness is removed", async () => {
+  const fixture = await setupInteractive();
+  const args = ["extraction-fill", "--variant", "s", "--data-dir", dataDir,
+    "--pinned-meta-root", pinnedMetaRoot, "--extraction-cache-root", cacheRoot,
+    "--extraction-open-semantics", "--extraction-source-packing", "complete-source",
+    "--extraction-authority", fixture.receiptPath];
+  expect(await runCli(args)).toBe(0);
+  const census = await censusCompleteSourceRecords({ population: "fixture", dataDir, pinnedMetaRoot });
+  const publicationAssociations = census.records.map(source => {
+    const key = fixture.keys.find(candidate => {
+      const inspected = inspectCachedSourceSemantic(cacheRoot, candidate, MODEL, REQUEST_PROFILE);
+      return inspected.status === "hit" &&
+        sourceSemanticRequestCatalog(inspected.admitted.request).source_digest === source.corpus_digest;
+    })!;
+    const inspected = inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE);
+    if (inspected.status !== "hit") throw new Error("fixture source interpretation missing");
+    return { source_id: source.source_id, source_version: source.source_version,
+      generation_key: key, request_digest: inspected.requestDigest };
+  });
+  expect(census.records).toHaveLength(2);
+  const raw = listProviderRawAttempts(cacheRoot, fixture.keys[0]!)[0]!;
+  const ledgerPath = join(cacheRoot, readdirSync(cacheRoot).find(name => name.startsWith("extraction-attempt-ledger"))!);
+  const record = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  const settled = record.settled_attempts.find((item: { attempt_ordinal: number }) =>
+    item.attempt_ordinal === raw.attempt_ordinal);
+  expect(settled.usage_sha256).toMatch(/^[0-9a-f]{64}$/u);
+  delete settled.usage_sha256;
+  writeFileSync(ledgerPath, JSON.stringify(record));
+  const ledgerBefore = readFileSync(ledgerPath, "utf8");
+  fixture.fetchMock.mockClear();
+  expect(inspectCachedRawExtraction(cacheRoot, raw.cache_key, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "invalid" });
+  expect(inspectCachedSourceSemantic(cacheRoot, raw.cache_key, MODEL, REQUEST_PROFILE))
+    .toMatchObject({ status: "invalid" });
+  expect(() => readSettledExtractionAttemptLedger({ cacheRoot,
+    lineageDigest: raw.kind === "source_semantic" ? raw.authority_lineage_digest! : "",
+    cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE } }))
+    .toThrow(/successful shard closure drifted/u);
+  const report = await publishSourceSemanticSnapshot({
+    snapshotPath: join(cacheRoot, "missing-settlement.sqlite"),
+    dataDirRoot: join(cacheRoot, "missing-settlement-publication"),
+    recordedAt: "2026-09-25T00:00:00.000Z", producerCommit: "a".repeat(40),
+    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoots: [cacheRoot],
+      model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
+  });
+  expect(report.published_count).toBe(1);
+  expect(report.sources.filter(source => source.publication === "published")).toHaveLength(1);
+  expect(fixture.fetchMock).not.toHaveBeenCalled();
+  expect(readFileSync(ledgerPath, "utf8")).toBe(ledgerBefore);
+}, 60000);
+
+it("persists exact JSON and SSE bodies from loopback HTTP through baseline source publication", async () => {
+  const bodies = new Map<string, Buffer>();
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const userPrompt = JSON.parse(Buffer.concat(chunks).toString("utf8")).contents[0].parts[0].text as string;
+      const rawJson = authoredResponse(userPrompt);
+      const usageMetadata = { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 };
+      const sse = bodies.size % 2 === 1;
+      const physical = sse ? [
+        `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: rawJson.slice(0, 20) }] } }],
+          fixtureNote: "café" })}\n\n`,
+        `data: ${JSON.stringify({ candidates: [{ finishReason: "STOP",
+          content: { parts: [{ text: rawJson.slice(20) }] } }], usageMetadata })}\n\n`
+      ].join("") : JSON.stringify({ candidates: [{ finishReason: "STOP",
+        content: { parts: [{ text: rawJson }] } }], usageMetadata, fixtureNote: "café" });
+      const bytes = Buffer.from(physical, "utf8");
+      bodies.set(userPrompt, bytes);
+      response.writeHead(200, { "content-type": sse ? "text/event-stream" : "application/json" });
+      response.end(bytes);
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject); server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const fixture = await setupInteractive("semantic", 1, origin);
+    vi.unstubAllGlobals();
+    const filled = await runExtractionFill({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+      sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+      authorityReceiptPath: fixture.receiptPath });
+    expect(filled.coverage).toBe(1);
+    expect(bodies.size).toBe(fixture.keys.length);
+    for (const key of fixture.keys) {
+      const shard = JSON.parse(readFileSync(cacheFilePath(cacheRoot, key), "utf8"));
+      const physical = bodies.get(shard.source_semantic.result.line.userPrompt);
+      const raw = listProviderRawAttempts(cacheRoot, key)[0];
+      expect(physical).toBeDefined();
+      expect(Buffer.from(raw!.response_body!.text, "utf8").equals(physical!)).toBe(true);
+      expect(raw!.response_body).toMatchObject({ truncated: false, original_byte_length: physical!.byteLength });
+      expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("hit");
+    }
+    const receipt = JSON.parse(readFileSync(fixture.receiptPath, "utf8"));
+    const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest: receipt.lineage_digest,
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: receipt.limits.starting_missing, maximumAttempts: receipt.limits.maximum_attempts,
+      successfulShardCeiling: receipt.limits.successful_shard_ceiling }).snapshot();
+    expect(ledger.successfulShards).toBe(fixture.keys.length);
+    expect(ledger.unresolvedAttempts).toEqual([]);
+    const census = await censusCompleteSourceRecords({ population: "fixture", dataDir, pinnedMetaRoot });
+    const publicationAssociations = census.records.map(source => {
+      const match = fixture.keys.map(key => ({ key, inspected: inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE) }))
+        .find(item => item.inspected.status === "hit" &&
+          sourceSemanticRequestCatalog(item.inspected.admitted.request).source_digest === source.corpus_digest);
+      if (match?.inspected.status !== "hit") throw new Error("source interpretation association missing");
+      return { source_id: source.source_id, source_version: source.source_version,
+        generation_key: match.key, request_digest: match.inspected.requestDigest };
+    });
+    const snapshotPath = join(cacheRoot, "physical-http-publication.sqlite");
+    const published = await publishSourceSemanticSnapshot({ snapshotPath,
+      dataDirRoot: join(cacheRoot, "physical-http-publication"), recordedAt: "2026-09-25T00:00:00.000Z",
+      producerCommit: "a".repeat(40), populations: [{ name: "fixture", dataDir, pinnedMetaRoot,
+        cacheRoots: [cacheRoot], model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }] });
+    expect(published.published_count).toBe(census.records.length);
+    const database = openReadOnlyDatabase(snapshotPath);
+    try {
+      const rows = database.connection.prepare("SELECT gist FROM evidence_capsules").all() as { gist: string }[];
+      expect(rows.some(row => row.gist.includes("complete"))).toBe(true);
+    } finally { database.close(); }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 }, 120000);
 
 it("withholds a staged baseline source until its original attempts recover without new calls", async () => {

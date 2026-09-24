@@ -233,7 +233,11 @@ export function readExtractionCacheManifestIdentity(
 
 /** Verifies outer manifest fields and the original generation digest without admitting its retired policy. */
 export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
-  Readonly<{ manifestSha256: string; generationSha256: string; providerUrl: string; systemPromptSha256: string }> | undefined {
+  Readonly<{ manifestSha256: string; generationSha256: string; systemPromptSha256: string; providerUrl: string;
+    extractionModel: string; modelFamily: string; requestProfile: ExtractionRequestProfile;
+    sourcePacking: ExtractionSourcePacking; cacheKeyAlgorithm: string;
+    dataset: string; datasetRevision: string; windowOffset: number; windowLimit: number;
+    expectedTurns: number; expectedKeySetSha256: string }> | undefined {
   const filePath = extractionCacheManifestPath(cacheRoot);
   if (!boundedArtifactEntryExists(filePath)) return undefined;
   const raw = readExtractionCacheManifestBytes(filePath);
@@ -246,10 +250,20 @@ export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
     throw new AlayaError("VALIDATION", "retained source semantic generation is absent or malformed");
   }
   const checked = validateManifest({ ...value, source_semantic_generation: EXTRACTION_OPEN_SEMANTICS_GENERATION }, filePath);
+  if (checked.schema_version !== 4 || checked.window_offset === undefined || checked.window_limit === undefined ||
+      checked.expected_turns === undefined || checked.expected_key_set_sha256 === undefined) {
+    throw new AlayaError("CONFLICT", "retained source semantic manifest lacks recorded generation identity");
+  }
   const original = { ...checked, source_semantic_generation: generation } as ExtractionCacheManifest;
   return { manifestSha256: createHash("sha256").update(raw.bytes).digest("hex"),
-    generationSha256: extractionAdmissionGenerationSha256(original), providerUrl: checked.provider_url,
-    systemPromptSha256: checked.system_prompt_sha256 };
+    generationSha256: extractionAdmissionGenerationSha256(original),
+    systemPromptSha256: checked.system_prompt_sha256, providerUrl: checked.provider_url,
+    extractionModel: checked.extraction_model, modelFamily: checked.model_family,
+    requestProfile: checked.request_profile, sourcePacking: checked.source_packing,
+    cacheKeyAlgorithm: checked.cache_key_algo, dataset: checked.dataset,
+    datasetRevision: checked.dataset_revision, windowOffset: checked.window_offset,
+    windowLimit: checked.window_limit, expectedTurns: checked.expected_turns,
+    expectedKeySetSha256: checked.expected_key_set_sha256 };
 }
 
 export function parseExtractionCacheManifestContents(

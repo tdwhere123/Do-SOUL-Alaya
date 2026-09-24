@@ -16,7 +16,8 @@ import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } fro
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
 import { assertStepSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
 import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
-import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { inspectCachedSourceSemantic, inspectRetainedCachedSourceSemantic } from
+  "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listProviderRawAttempts, providerRawAttemptPath, readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
@@ -360,6 +361,8 @@ it("reopens a successful Step source interpretation without a second HTTP reques
   expect(filled.newlyExtracted).toBe(1);
   expect(http.calls).toHaveLength(1);
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
+  expect(inspectRetainedCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE))
+    .toMatchObject({ status: "retired", eligibility: "retained_only" });
   vi.stubEnv("E0_TEST_GARDEN_KEY", "");
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
   expect(listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]?.http_response?.bodyComplete).toBe(true);

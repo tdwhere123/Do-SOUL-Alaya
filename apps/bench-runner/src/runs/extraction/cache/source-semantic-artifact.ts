@@ -114,7 +114,7 @@ function inspectInteractiveGenerateContent(
   cacheRoot: string,
   request: ReturnType<typeof parseSourceSemanticRequest>
 ): { admitted: SourceSemanticProposalResult; binding: ReturnType<typeof inspectInteractiveTransportEvidence> } {
-  const binding = inspectInteractiveTransportEvidence(typed, entry, cacheRoot);
+  const binding = inspectInteractiveTransportEvidence(typed, entry, cacheRoot, retainedOnly);
   const input = {
     config: { model: entry.model, requestProfile: entry.request_profile },
     line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,

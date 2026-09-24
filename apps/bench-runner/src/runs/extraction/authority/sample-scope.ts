@@ -107,12 +107,6 @@ export function assertSampleKeys(scope: ExtractionSampleScope, keys: readonly st
   }
 }
 
-export function assertSampleKey(scope: ExtractionSampleScope | undefined, key: string): void {
-  if (scope !== undefined && !scope.keys.includes(key)) {
-    throw new Error("sample authority refused an out-of-scope request");
-  }
-}
-
 export function assertSampleExecutionOptions(
   receipt: ExtractionAuthorityReceipt, options: ExtractionFillOptions
 ): void {

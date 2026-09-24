@@ -101,7 +101,7 @@ it("stops Step proposal dispatch after first length response while retaining raw
   await expect(executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: stepConfig,
     extractor: { extract: async () => {
       calls += 1;
-      return { rawJson, responseMetadata: { finishReason: "length" },
+      return { rawJson: "partial", responseMetadata: { finishReason: "length" },
         httpResponse: { contentType: "text/event-stream", bodyBase64: bytes.toString("base64"),
           bodyByteLength: bytes.length, bodySha256: createHash("sha256").update(bytes).digest("hex"),
           bodyTruncated: false, bodyComplete: true } };

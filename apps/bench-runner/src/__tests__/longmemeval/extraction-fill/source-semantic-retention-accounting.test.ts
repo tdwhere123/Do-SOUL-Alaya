@@ -4,6 +4,8 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it, vi } from "vitest";
+import { canonicalJson } from "@do-soul/alaya-protocol";
+import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { runCli } from "../../../cli/cli.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
@@ -77,9 +79,14 @@ function expectSettledQuarantine(keys: readonly string[], usageKnown: boolean, f
   expect(record.settled_attempts).toHaveLength(keys.length);
   expect(record.successful_shards).toEqual([]);
   expect(record.transport_failures).toHaveLength(keys.length);
+  const expectedUsage = usageKnown ? { inputTokens: 10, outputTokens: 20, totalTokens: 30 } : null;
+  const expectedUsageSha256 = createHash("sha256").update(canonicalJson(expectedUsage)).digest("hex");
   for (const key of keys) {
     const raw = rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]!;
-    expect(record.settled_attempts).toContainEqual({ cache_key: key, attempt_ordinal: raw.attempt_ordinal });
+    expect(raw.usage).toEqual(expectedUsage);
+    expect(record.settled_attempts).toContainEqual({
+      cache_key: key, attempt_ordinal: raw.attempt_ordinal, usage_sha256: expectedUsageSha256
+    });
     expect(record.transport_failures).toContainEqual({
       cache_key: key, attempt_ordinal: raw.attempt_ordinal,
       kind: "response_schema_error", phase: "response_schema", http_status: null, fingerprint
@@ -141,8 +148,27 @@ it.each([
   }
 }, 60000);
 
-it.each([true, false])("recovers a complete escaped source response with usageKnown=%s exactly once", async usageKnown => {
+it.each([true, false])("quarantines an escaped response whose physical body exceeds retention with usageKnown=%s", async usageKnown => {
   const response = ABSTAINED + "\n".repeat(1024 * 1024 - Buffer.byteLength(ABSTAINED));
+  const fixture = await setup(usageKnown, response);
+  expect(await runCli(fixture.args)).toBe(0);
+  const digest = createHash("sha256").update(response).digest("hex");
+  for (const key of fixture.keys) {
+    const raw = rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]!;
+    expect(raw).toMatchObject({ decoded_text: response, decoded_text_truncated: false,
+      full_replay_possible: true, original_byte_length: 1024 * 1024,
+      decoded_text_digest: digest, usage_known: usageKnown,
+      response_body: { truncated: true, original_byte_length: expect.any(Number) } });
+    expect(raw.response_body!.original_byte_length).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+  }
+  const settled = expectSettledQuarantine(fixture.keys, usageKnown, digest);
+  await restartCli(fixture.args);
+  expect(ledger()).toEqual(settled);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
+}, 60000);
+
+it.each([true, false])("recovers a complete escaped source response below both retention limits with usageKnown=%s", async usageKnown => {
+  const response = ABSTAINED + "\n".repeat(8 * 1024);
   const fixture = await setup(usageKnown, response);
   const writeRaw = rawAttempts.writeProviderRawAttempt;
   const interrupt = vi.spyOn(rawAttempts, "writeProviderRawAttempt").mockImplementation(input => {
@@ -154,8 +180,11 @@ it.each([true, false])("recovers a complete escaped source response with usageKn
   expect(ledger().unresolved_attempts).toHaveLength(fixture.keys.length);
   for (const key of fixture.keys) {
     expect(rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]).toMatchObject({ decoded_text: response,
-      decoded_text_truncated: false, full_replay_possible: true, original_byte_length: 1024 * 1024,
+      decoded_text_truncated: false, full_replay_possible: true, original_byte_length: Buffer.byteLength(response),
+      response_body: { truncated: false, original_byte_length: expect.any(Number) },
       decoded_text_digest: createHash("sha256").update(response).digest("hex"), usage_known: usageKnown });
+    expect(rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]!.response_body!.original_byte_length)
+      .toBeLessThanOrEqual(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
   }
   await restartCli(fixture.args);
   const settled = ledger();

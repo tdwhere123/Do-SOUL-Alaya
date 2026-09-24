@@ -11,6 +11,16 @@ export function assertExtractionAuthorityReceiptScope(
   assertRepairScope(receipt);
 }
 
+/** A finite receipt authorizes these keys, regardless of ledger reservations. */
+export function assertExtractionAuthorityKeyInScope(receipt: ExtractionAuthorityReceipt, key: string): void {
+  if (receipt.probe_key !== undefined && receipt.probe_key !== key ||
+      receipt.sample_scope !== undefined && !receipt.sample_scope.keys.includes(key) ||
+      receipt.repair_scope !== undefined && !receipt.repair_scope.shards.some(shard => shard.cache_key === key) ||
+      receipt.catalog_refill !== undefined && !receipt.catalog_refill.keys.includes(key)) {
+    throw new Error("extraction authority refused an out-of-scope request key");
+  }
+}
+
 function assertContinuationScope(receipt: ExtractionAuthorityReceipt): void {
   if (receipt.continuation !== undefined &&
       (receipt.action !== "fill" || receipt.target_selection_digest === undefined ||

@@ -170,7 +170,8 @@ export function bindProviderRawAttempt(
 
 /** A settled source rejection remains final even if admission is attempted again. */
 export function verifyProviderRawReservation(
-  raw: ProviderRawAttempt, ledger: ExtractionAttemptLedgerSnapshot | undefined
+  raw: ProviderRawAttempt, ledger: ExtractionAttemptLedgerSnapshot | undefined,
+  purpose: "executable" | "accounting" = "executable"
 ): "rejected" | undefined {
   assertExtractionAttemptReservation(ledger, raw.cache_key, raw.attempt_ordinal);
   const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
@@ -190,6 +191,13 @@ export function verifyProviderRawReservation(
   if (settlement?.usageSha256 !== undefined &&
       settlement.usageSha256 !== settledAttemptUsageDigest(raw.usage)) {
     throw new ProviderRawAttemptIdentityError("provider raw usage differs from its exact settled attempt");
+  }
+  // Old ledgers remain readable for attempt accounting. A completed response cannot
+  // regain execution authority when its independent settlement witness is absent.
+  if (purpose === "executable" && settled && settlement.usageSha256 === undefined &&
+      raw.transport_failure === undefined && raw.full_replay_possible &&
+      providerRawSuccessEvidenceState(raw) === "bound") {
+    throw new ProviderRawAttemptIdentityError("provider raw lacks its exact settled usage witness");
   }
   return sourceRejection ? "rejected" : undefined;
 }

@@ -1,4 +1,4 @@
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
 import type { CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { inspectCachedResponseMetadata, persistedResponseMetadata } from "../../compile-seed/cache/cached-response-metadata.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
@@ -10,6 +10,7 @@ import { providerRawSuccessEvidenceState, readProviderRawAttempt,
   verifyProviderRawReservation } from "../fill/provider-raw-attempt.js";
 import { readRetainedInteractiveAuthority } from "../fill/retained-interactive-authority.js";
 import { sourceSemanticRequestWireDigest } from "../fill/source-semantic-interactive-request.js";
+import { assertExtractionAuthorityKeyInScope } from "../authority/receipt/scope.js";
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { computeSystemPromptSha256, readRetainedSourceSemanticManifestIdentity } from "./extraction-cache-manifest.js";
 import type { CachedSourceSemantic, InteractiveSemanticProvenance } from "./source-semantic-artifact.js";
@@ -32,7 +33,8 @@ export function interactiveResponseMetadata(provenance: InteractiveSemanticProve
 export function inspectInteractiveTransportEvidence(
   typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
   entry: CachedExtractionEntry,
-  cacheRoot: string
+  cacheRoot: string,
+  retainedOnly = false
 ): { readonly attemptOrdinal: number; readonly authorityLineageDigest: string;
   readonly admissionState: "pending" | "admitted" } {
   if ((typed.kind === "step_chat_completion") !==
@@ -59,22 +61,37 @@ export function inspectInteractiveTransportEvidence(
   }
   const receipt = readRetainedInteractiveAuthority(cacheRoot, raw.authority_receipt_digest,
     raw.authority_lineage_digest);
+  assertExtractionAuthorityKeyInScope(receipt, entry.cache_key);
   const transport = receipt.observation.transport!;
   const logical = receipt.observation.extraction;
+  const dataset = receipt.observation.dataset;
   const manifest = readRetainedSourceSemanticManifestIdentity(cacheRoot);
   const requestConfig: CompileSeedExtractionConfig = {
     model: entry.model, requestProfile: entry.request_profile,
     providerUrl: logical.providerUrl, transportProviderUrl: transport.providerUrl,
     transportModel: transport.model, apiKey: null
   };
+  // Retained Step schema bytes are absent. Its recorded digest remains evidence,
+  // but rederiving today's wire would demand current producer eligibility.
+  const requestDigestMatches = retainedOnly && typed.kind === "step_chat_completion" ||
+    raw.request_digest === sourceSemanticRequestWireDigest(requestConfig, line, receipt.limits.max_output_tokens);
   if (manifest?.providerUrl !== logical.providerUrl ||
+      manifest.extractionModel !== logical.model || manifest.modelFamily !== logical.modelFamily ||
+      manifest.requestProfile !== logical.requestProfile ||
+      manifest.sourcePacking !== (logical.sourcePacking ?? DEFAULT_EXTRACTION_SOURCE_PACKING) ||
+      manifest.cacheKeyAlgorithm !== logical.cacheKeyAlgorithm ||
+      manifest.dataset !== dataset.variant.replace(/_/u, "-") ||
+      manifest.datasetRevision !== dataset.revisionSha256 ||
+      manifest.windowOffset !== dataset.windowOffset || manifest.windowLimit !== dataset.windowLimit ||
+      manifest.expectedTurns !== receipt.observation.inventory.expectedTurns ||
+      manifest.expectedKeySetSha256 !== dataset.expectedKeySetSha256 ||
       manifest.systemPromptSha256 !== logical.systemPromptSha256 ||
-      logical.systemPromptSha256 !== computeSystemPromptSha256(line.systemPrompt) ||
+      computeSystemPromptSha256(line.systemPrompt) !== logical.systemPromptSha256 ||
       logical.model !== entry.model || logical.requestProfile !== entry.request_profile ||
       raw.model !== entry.model || raw.request_profile !== entry.request_profile ||
       raw.source_request_sha256 !== computeExtractionRawJsonSha256(line.userPrompt) ||
       line.requestSha256 !== raw.source_request_sha256 ||
-      raw.request_digest !== sourceSemanticRequestWireDigest(requestConfig, line, receipt.limits.max_output_tokens) ||
+      !requestDigestMatches ||
       canonicalJson(entry.transport_provenance) !== canonicalJson(buildExtractionTransportProvenance(transport)) ||
       !raw.full_replay_possible || raw.transport_failure !== undefined ||
       providerRawSuccessEvidenceState(raw) !== "bound" ||
