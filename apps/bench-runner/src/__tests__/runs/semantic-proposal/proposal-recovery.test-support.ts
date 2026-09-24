@@ -8,14 +8,19 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
+import { inspectProviderChatCompletionResponse, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
+import { readProviderResponseWithEvidence } from "../../../../../../packages/engine-gateway/src/provider/chat-completion/response-evidence.js";
 import { inspectExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
-import { providerRawAttemptPath, readProviderRawAttempt, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRawAttempt,
+  writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
-import { materializeSemanticProposalLines, type SemanticProposalLine, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset,
+  type SemanticProposalLine, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
 const execFileAsync = promisify(execFile);
@@ -65,6 +70,63 @@ export function proposalRecoveryCases(input: {
       };
       return { cacheRoot, workset, line, authority, ledger, ledgerPath, raw, read, chain, fill, restart };
     }
+
+    it.each([true, false].flatMap(truncated => [true, false].map(usageKnown => ({ truncated, usageKnown }))))(
+      "retains native Step evidence with truncated=$truncated usageKnown=$usageKnown without a second attempt",
+      async ({ truncated, usageKnown }) => {
+        const cacheRoot = mkdtempSync(join(tmpdir(), "proposal-step-retention-")); roots.push(cacheRoot);
+        const workset = parseSemanticProposalWorkset({ ...input.workset(),
+          contract: "source-semantic-proposal-workset-v4",
+          provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
+          model: STEP_PLAN_QUOTE_BASIS.selected_model,
+          request_profile: "step-3.5-2603-low-json-schema-v1" });
+        const authority = pinSemanticProposalAuthority({
+          preflight: prepareSemanticProposal(workset, cacheRoot, 4096, 1),
+          inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
+          outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+        });
+        const line = materializeSemanticProposalLines(workset, 4096)[0]!;
+        const usage = usageKnown ? { prompt_tokens: 11, completion_tokens: 17, total_tokens: 28 } : undefined;
+        const physical = JSON.stringify({ choices: [{ finish_reason: "stop",
+          message: { content: input.body(line) } }], ...(usage === undefined ? {} : { usage }) }) +
+          (truncated ? " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) : "");
+        const retained = await readProviderResponseWithEvidence(new Response(physical, {
+          headers: { "content-type": "application/json" }
+        }));
+        const decoded = inspectProviderChatCompletionResponse(retained.bodyText,
+          retained.evidence.contentType, 200, { sseCompletionPolicy: "require_witness" });
+        const config: CompileSeedExtractionConfig = { model: workset.model,
+          requestProfile: "step-3.5-2603-low-json-schema-v1",
+          providerUrl: workset.provider_url, apiKey: "synthetic-only" };
+        let calls = 0;
+        const extractor = { extract: async () => { calls += 1; return {
+          rawJson: decoded.text, responseMetadata: { finishReason: decoded.finishReason },
+          ...(decoded.usage === undefined ? {} : { usage: decoded.usage }), httpResponse: retained.evidence
+        }; } };
+        const fill = () => executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor });
+        if (truncated) await expect(fill()).rejects.toThrow(/stopped after incomplete/u);
+        else await expect(fill()).resolves.toMatchObject({ newly_admitted: 1, attempts: 1 });
+        expect(calls).toBe(1);
+        const raw = readProviderRawAttempt(cacheRoot, line.key, 1)!;
+        expect(raw.http_response).toMatchObject({ bodyTruncated: truncated, bodyComplete: true });
+        expect(providerRawSuccessEvidenceState(raw)).toBe(truncated ? "truncated" : "bound");
+        const rawBytes = readFileSync(providerRawAttemptPath(cacheRoot, line.key, 1));
+        const result = readSemanticProposalResults(workset, cacheRoot, 4096)[0]!;
+        expect(result.status).toBe(truncated ? "incomplete" : "interpreted");
+        const chain = readSemanticChainProposalResults(workset, cacheRoot, 4096)[0];
+        if (truncated) expect(chain?.received).toBeUndefined();
+        else expect(chain?.received).toBeDefined();
+        const before = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind }).snapshot();
+        expect(before).toMatchObject({ attempts: 1, successfulShards: truncated ? 0 : 1 });
+        expect(before.telemetry.totalTokens).toBe(usageKnown ? 28 : 0);
+        if (truncated) await expect(fill()).rejects.toThrow(/retained incomplete/u);
+        else await expect(fill()).resolves.toMatchObject({ attempts: 0, cache_hits: 1 });
+        expect(calls).toBe(1);
+        expect(readFileSync(providerRawAttemptPath(cacheRoot, line.key, 1)).equals(rawBytes)).toBe(true);
+        const after = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: workset.kind }).snapshot();
+        expect(after).toEqual(before);
+      }
+    );
 
     it.each([true, false].flatMap(truncated => [true, false].flatMap(usageKnown =>
       ["live", "retained recovery"].map(path => ({ truncated, usageKnown, path })))))

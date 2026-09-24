@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
-import { providerRawAttemptPath, readProviderRawAttempt, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRawAttempt,
+  writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -95,6 +96,19 @@ it("retains missing and truncated Gemini body witnesses without inventing decode
   expect(readProviderRawAttempt(truncated.root, truncated.cacheKey, 1)).toMatchObject({
     response_body: { truncated: true }, finish_reason: "MAX_TOKENS", usage: null
   });
+});
+
+it("requires a Step HTTP witness for completed output but keeps a witness-free failure readable", () => {
+  const input = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1" };
+  expect(() => writeProviderRawAttempt({ ...input, decodedText: "{}" })).toThrow(/integrity mismatch/u);
+  expect(existsSync(providerRawAttemptPath(input.root, input.cacheKey, 1))).toBe(false);
+  const failure = { kind: "network_error" as const, phase: "request" as const,
+    httpStatus: null, fingerprint: "d".repeat(64), attempt: 1 };
+  writeProviderRawAttempt({ ...input, decodedText: "", finishReason: null, transportFailure: failure });
+  const raw = readProviderRawAttempt(input.root, input.cacheKey, 1)!;
+  expect(raw.http_response).toBeUndefined();
+  expect(raw.transport_failure).toEqual(failure);
+  expect(providerRawSuccessEvidenceState(raw)).toBe("failed");
 });
 
 it("rejects a digest-consistent complete response body above its retention limit", () => {

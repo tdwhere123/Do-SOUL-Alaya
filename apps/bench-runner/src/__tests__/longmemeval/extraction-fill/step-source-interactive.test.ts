@@ -4,7 +4,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
+import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
@@ -19,6 +21,8 @@ import { listProviderRawAttempts, providerRawAttemptPath, readProviderRawAttempt
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
+import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
+import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
@@ -133,7 +137,7 @@ it("rejects complete Step HTTP bytes that contradict normalized finish and usage
 
 async function listen(
   onRequest: (body: Record<string, unknown>, index: number) =>
-    { text: string; finish: string; usage?: Record<string, unknown> }
+    { text: string; finish: string; usage?: Record<string, unknown>; padding?: string }
 ) {
   const calls: { path: string | undefined; body: Record<string, unknown>; wire: string }[] = [];
   server = createServer(async (request, response) => {
@@ -145,7 +149,7 @@ async function listen(
       delta: { content: answer.text }, finish_reason: answer.finish
     }], usage: answer.usage ?? { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18,
       prompt_tokens_details: { cached_tokens: 3 },
-      completion_tokens_details: { reasoning_tokens: 4 } } })}\n\ndata: [DONE]\n\n`;
+      completion_tokens_details: { reasoning_tokens: 4 } } })}\n\ndata: [DONE]\n\n${answer.padding ?? ""}`;
     calls.push({ path: request.url, body, wire });
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.end(wire);
@@ -161,6 +165,55 @@ async function listen(
   vi.stubGlobal("fetch", intercepted);
   return { calls, intercepted };
 }
+
+it("withholds a truncated Step source response from reuse and SQLite publication after one attempt", async () => {
+  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "1");
+  const fixture = await scenario(2);
+  const http = await listen((body, index) => ({
+    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
+    ...(index === 1 ? { padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) } : {})
+  }));
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+  expect(http.calls).toHaveLength(2);
+  const [completeKey, truncatedKey] = fixture.selected;
+  const complete = listProviderRawAttempts(roots.cacheRoot, completeKey!)[0]!;
+  const truncated = listProviderRawAttempts(roots.cacheRoot, truncatedKey!)[0]!;
+  expect(complete.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: false });
+  expect(truncated.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: true });
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, completeKey!, MODEL, PROFILE).status).toBe("hit");
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, truncatedKey!, MODEL, PROFILE).status).not.toBe("hit");
+  const rawPath = providerRawAttemptPath(roots.cacheRoot, truncatedKey!, truncated.attempt_ordinal);
+  const rawBytes = readFileSync(rawPath);
+  const reopened = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot).snapshot()!;
+  expect(reopened).toMatchObject({ attempts: 2, successfulShards: 1 });
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+  expect(http.calls).toHaveLength(2);
+  expect(readFileSync(rawPath).equals(rawBytes)).toBe(true);
+  expect(createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot).snapshot()).toEqual(reopened);
+
+  const census = await censusCompleteSourceRecords({ population: "fixture", dataDir: roots.dataDir,
+    pinnedMetaRoot: roots.pinnedMetaRoot });
+  const associations = fixture.preflight.planned_requests.flatMap(line => {
+    const sourceDigest = sourceSemanticRequestCatalog(parseSourceSemanticRequest(JSON.parse(line.userPrompt))).source_digest;
+    return census.records.filter(source => source.corpus_digest === sourceDigest).map(source => ({
+      source_id: source.source_id, source_version: source.source_version,
+      generation_key: line.key, request_digest: line.requestSha256
+    }));
+  });
+  expect(associations).toHaveLength(2);
+  const snapshotPath = join(roots.cacheRoot, "step-truncated-publication.sqlite");
+  const published = await publishSourceSemanticSnapshot({ snapshotPath,
+    dataDirRoot: join(roots.cacheRoot, "step-truncated-publication"),
+    recordedAt: "2026-09-25T00:00:00.000Z", producerCommit: "a".repeat(40),
+    populations: [{ name: "fixture", dataDir: roots.dataDir, pinnedMetaRoot: roots.pinnedMetaRoot,
+      cacheRoots: [roots.cacheRoot], model: MODEL, requestProfile: PROFILE,
+      publicationAssociations: associations }] });
+  expect(published.published_count).toBe(1);
+  const database = openReadOnlyDatabase(snapshotPath);
+  try {
+    expect(database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules").get()).toEqual({ n: 1 });
+  } finally { database.close(); }
+});
 
 it("binds a four-key Step sample to exact HTTP bytes and stops after its first incomplete response", async () => {
   const fixture = await scenario(4);

@@ -199,7 +199,10 @@ export function providerRawSuccessEvidenceState(
   raw: ProviderRawAttempt
 ): "bound" | "missing" | "truncated" | "failed" | "unsupported" {
   if (raw.transport_failure !== undefined) return "failed";
-  if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") return "bound";
+  if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") {
+    if (raw.http_response === undefined) return "missing";
+    return raw.http_response.bodyTruncated || !raw.http_response.bodyComplete ? "truncated" : "bound";
+  }
   if (!isGeminiGenerateContentProfile(raw.request_profile)) return "unsupported";
   if (raw.response_body === undefined) return "missing";
   return raw.response_body.truncated ? "truncated" : "bound";
