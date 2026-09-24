@@ -740,20 +740,27 @@ The canonical query also binds the complete host-approved fixed context
 identity changes when those consumed fields change, even if the query text and
 meaning body do not. Source records hold the same attribution schema; the current
 source request and published interpretation carry the exact source value, and
-the current correspondence selection request is v6. Its versioned endpoint-evidence
+the current correspondence assessment request is v7. Its versioned endpoint-evidence
 projection copies declared named-reference uses, source mentions, attribution,
 assertion locations, frame context, support and bindings onto the existing catalog
 handles. It selects no equivalence and gives no new proof authority. Mention span
 units remain tagged separately from source UTF-8 assertion and attribution spans;
-the source interpretation identity does not bind mention spans. Recorded v5 request
-bytes and cache identities remain historical and cannot enter current generation;
-there is no retained v5 C semantic replay entry. Protocol counts projected JSON
-bytes incrementally before expanding each endpoint and repeated use. SOUL uses
-the same meter to bound descriptor aggregation and reserve the other request
-fields before projection; the projection spends only the remaining 1 MB request
-allowance. SOUL retains the final full-request serialization cap as a backstop.
+the source interpretation identity does not bind mention spans. Recorded v5 and v6 C
+request bytes and cache identities remain historical and cannot enter current
+generation; there is no retained historical C semantic replay entry. The current C
+response v4 carries `source-semantic-correspondence-assessment-v1`: each advertised
+query endpoint has exactly one supported or unresolved assessment. Supported
+assessments propose explicit source equivalents; unresolved assessments propose
+none, while supported endpoints may still form a partial canonical C. Only
+supported pairs lower to the existing canonical C; grounding and unresolved
+explanations remain inspectable metadata, not executable proof. Protocol counts
+projected JSON bytes incrementally before expanding each endpoint and repeated
+use. SOUL uses the same meter to bound descriptor aggregation and reserve
+the other request fields before projection; the projection spends only the
+remaining 1 MB request allowance. SOUL retains the final full-request
+serialization cap as a backstop.
 The Protocol endpoint-evidence projection exports are additive minor API under
-invariant §25; the v6 C request is a new wire identity.
+invariant §25; the v7 C request and v4 response have current wire identities.
 Role-only inputs explicitly
 carry `unknown`; they do not manufacture a speaker or conversation identity.
 Captured attribution is scoped to its issuer and conversation, and exact UTF-8
