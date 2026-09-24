@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SourceSemanticResourceLedger,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   materializeSourceSemanticQueryMeaning, sourceSemanticQueryBranchViews,
   type QueryProgram, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
@@ -18,7 +19,8 @@ const reportQuestion = "Which witness reported that Nia opened the blue crate?";
 function admitMeaning(original: string, body: unknown): SourceSemanticQuery {
   const query = materializeSourceSemanticQueryMeaning(body, {
     original_query: original, original_query_digest: digestOriginalQuery(original),
-    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1"
+    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1",
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION
   });
   const admission = admitSourceSemanticQuery(query, original);
   if (admission.kind !== "admitted") throw new Error(`authored query was ${admission.kind}`);
