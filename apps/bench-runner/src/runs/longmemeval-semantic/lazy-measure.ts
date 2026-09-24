@@ -1,12 +1,12 @@
 import { join, resolve } from "node:path";
 import { AlayaError } from "@do-soul/alaya-protocol";
-import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
-import { readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
+import { measureSemanticChain, semanticChainReplayTargetInputPaths } from "../semantic-chain/replay.js";
+import { readLazyQualifiedExposureState, lazyQualificationInputPaths } from "../semantic-chain/lazy-qualification.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { QuestionPublicationSchema } from "./execute.js";
-import { loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze } from "./contract.js";
+import { QuestionPublicationSchema, longMemEvalQuestionInputPaths } from "./execute.js";
+import { loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "./contract.js";
 import { admitLongMemEvalLazyConfig, type LongMemEvalLazyConfigInput } from "./lazy-config.js";
 import { joinLongMemEvalGold } from "./measure.js";
 import { longMemEvalMetricOutcome } from "./measure.js";
@@ -26,14 +26,16 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   const frozen = readLongMemEvalSemanticFreeze(input.root);
   if (frozen.contract !== "longmemeval-native-semantic-v3") throw new AlayaError("CONFLICT", "native question arm changed");
   const selected = frozen.selected[0]!;
-  const questionDirectory = resolve(input.root, "questions", String(selected.index).padStart(5, "0"));
+  const questionPaths = longMemEvalQuestionInputPaths(input.root, selected.index);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
     dataDir: frozen.config.data_dir, pinnedMetaRoot: frozen.config.pinned_meta_root });
-  const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, input.lazyRoot,
+  const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, longMemEvalFreezePath(input.root),
+    input.lazyRoot, ...lazyQualificationInputPaths(input.lazyRoot),
     input.preparedPath, input.sourcePreflightPath, input.sourceCacheRoot,
-    ...(first.status === "durable" ? semanticChainReplayInputPaths(first.final.final_chain_root, first.path) : []),
+    ...(first.status === "durable" ? [first.path] : []),
+    ...semanticChainReplayTargetInputPaths(first.final.final_chain_root),
     first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
-    questionDirectory, join(questionDirectory, "library.sqlite"), join(questionDirectory, "publication.json"),
+    ...questionPaths.admittedInputPaths,
     frozen.config.data_dir, frozen.config.pinned_meta_root,
     datasetPaths.sourcePath, datasetPaths.checksumSource, frozen.config.query_cache_root,
     frozen.config.correspondence_cache_root, ...frozen.config.source_cache_roots,

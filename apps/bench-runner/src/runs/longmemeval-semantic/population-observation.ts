@@ -8,7 +8,6 @@ import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
-import { inspectSemanticChainReplayTarget } from "../semantic-chain/replay.js";
 import { materializeSemanticProposalLines } from "../semantic-proposal/workset.js";
 import { admitLongMemEvalLazyConfig } from "./lazy-config.js";
 import { admitLongMemEvalLazyMeasurement, measureLongMemEvalLazyFirstExposure } from "./lazy-measure.js";
@@ -202,17 +201,8 @@ async function admitObservation(result: z.infer<typeof ObservationSchema>, popul
 /** Samples frozen native references first; absent or rejected stages remain in the fixed denominator. */
 export async function observeLongMemEvalLazyPopulation(root: string, value: unknown, evaluatorRoot: string) {
   const input = ObservationInputSchema.parse(value);
-  const { population, admittedInputPaths } = readLongMemEvalLazyPopulationForObservation(root);
-  const memberReplayPaths: string[] = [];
-  for (const member of population.members) {
-    try {
-      const { final } = await admitLazyFinal(member.lazy_root);
-      const target = inspectSemanticChainReplayTarget(final.final_chain_root, "retained");
-      memberReplayPaths.push(join(final.final_chain_root, "prepare.json"), target.output);
-      for (const path of target.rowPaths.values()) memberReplayPaths.push(path, `${path}.reserved`);
-    } catch { /* Invalid member state remains unknown during aggregate observation. */ }
-  }
-  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths, ...memberReplayPaths,
+  const { population, admittedInputPaths } = await readLongMemEvalLazyPopulationForObservation(root);
+  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths,
     ...population.members.map(member => member.evaluator_root)]);
   const path = join(outputRoot, `population-observation-${input.cutoff_id}.json`);
   const populationIdentity = chainIdentity(population);

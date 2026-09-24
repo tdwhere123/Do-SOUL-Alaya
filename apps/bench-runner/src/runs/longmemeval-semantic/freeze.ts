@@ -7,7 +7,8 @@ import { censusCompleteSourceRecords } from "../snapshot/source-records/census.j
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
-import { LongMemEvalExperimentConfigSchema, LongMemEvalExperimentFreezeSchema, loadFrozenLongMemEvalDataset } from "./contract.js";
+import { LongMemEvalExperimentConfigSchema, LongMemEvalExperimentFreezeSchema, loadFrozenLongMemEvalDataset,
+  longMemEvalFreezePath } from "./contract.js";
 import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from "./native-arm.js";
 
 /** Freezes original dataset identities and context before any query-semantics outputs; never dispatches a provider. */
@@ -18,9 +19,9 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
   if (config.stage === "formal" && config.previously_exposed_question_ids === undefined) {
     throw new AlayaError("VALIDATION", "formal freeze requires explicit prior development exposure");
   }
-  return withSnapshotPublishLock(join(root, "freeze.json"), async () => {
+  return withSnapshotPublishLock(longMemEvalFreezePath(root), async () => {
     const loaded = await loadFrozenLongMemEvalDataset(config);
-    const existing = readChainArtifact(join(root, "freeze.json"));
+    const existing = readChainArtifact(longMemEvalFreezePath(root));
     if (existing !== undefined) {
       const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
       if (chainIdentity(frozen.config) !== chainIdentity(config)
@@ -72,7 +73,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
       implementation_revision: readCurrentExtractionAuthorityRevision(),
       exposure: config.stage === "formal" ? "formal_with_recorded_development_exposure" : "development_exposed",
       inventory, selected: selected.map((row, index) => ({ ...row, query_key: lines[index]!.key })), query_workset });
-    writeChainArtifact(join(root, "freeze.json"), frozen);
+    writeChainArtifact(longMemEvalFreezePath(root), frozen);
     writeChainJson(join(root, "query-workset.json"), query_workset);
     return frozen;
   });

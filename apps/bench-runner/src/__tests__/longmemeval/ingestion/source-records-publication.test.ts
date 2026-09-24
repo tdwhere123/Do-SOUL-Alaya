@@ -194,6 +194,23 @@ describe("complete-source census and publication", () => {
     expect(readdirSync(first.chain_root).some(name => name.startsWith("measurement-"))).toBe(false);
     expect(readdirSync(physicalQuestion).some(name => name.startsWith("measurement-"))).toBe(false);
     const measured = await measureLongMemEvalSemanticRun(root, replay.path, evaluatorRoot);
+    expect(measured.result.primary).toMatchObject({ eligible: 2, hits: 2, misses: 0, unknown: 0 });
+    const unavailableMember = replay.result.rows[1]!;
+    if (unavailableMember.status !== "replayed") throw new Error("second question replay required");
+    const retainedReplayBytes = readFileSync(unavailableMember.replay_path, "utf8");
+    unlinkSync(unavailableMember.replay_path);
+    const missing = await measureLongMemEvalSemanticRun(root, replay.path, join(f.root, "missing-member-evaluator"));
+    expect(missing.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+    expect(missing.result.rows.find(row => row.question_id === "aliased")).toMatchObject({
+      outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
+    expect(missing.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
+    writeFileSync(unavailableMember.replay_path, "{");
+    const corrupt = await measureLongMemEvalSemanticRun(root, replay.path, join(f.root, "corrupt-member-evaluator"));
+    expect(corrupt.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+    expect(corrupt.result.rows.find(row => row.question_id === "aliased")).toMatchObject({
+      outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
+    expect(corrupt.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
+    writeFileSync(unavailableMember.replay_path, retainedReplayBytes);
     const detailPath = measured.result.rows.find(row => row.question_id === "first")?.measurement_path;
     if (!detailPath) throw new Error("first source detail required");
     expect(detailPath.startsWith(`${evaluatorRoot}/`)).toBe(true);

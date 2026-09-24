@@ -47,6 +47,15 @@ export const ExperimentPreparedSchema = z.discriminatedUnion("contract", [LongMe
 const NativeReplaySchema = LongMemEvalReplaySchema.extend({ contract: z.literal("longmemeval-native-semantic-replay-v1") }).strict();
 export const LongMemEvalExperimentReplaySchema = z.discriminatedUnion("contract", [LongMemEvalReplaySchema, NativeReplaySchema]);
 
+/** The question publisher owns these paths, including leaves reached through directory aliases. */
+export function longMemEvalQuestionInputPaths(root: string, index: number) {
+  const directory = resolve(root, "questions", String(index).padStart(5, "0"));
+  const snapshotPath = join(directory, "library.sqlite");
+  const publicationPath = join(directory, "publication.json");
+  return { directory, snapshotPath, publicationPath, admittedInputPaths: [directory, snapshotPath,
+    `${snapshotPath}.publication.json`, publicationPath, join(directory, "publication-input.json")] };
+}
+
 export async function prepareLongMemEvalSemanticRun(root: string) {
   const frozen = readLongMemEvalSemanticFreeze(root);
   await loadFrozenLongMemEvalDataset(frozen.config);
@@ -55,8 +64,7 @@ export async function prepareLongMemEvalSemanticRun(root: string) {
   const rows: z.infer<typeof LongMemEvalPreparedSchema>["rows"] = [];
   for (const [index, selected] of frozen.selected.entries()) {
     try {
-      const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
-      const publicationPath = join(directory, "publication.json");
+      const { directory, publicationPath } = longMemEvalQuestionInputPaths(root, selected.index);
       const publication = await publishQuestion(frozen, selected, directory, publicationPath);
       const current = results[index]!;
       if (current.line.key !== selected.query_key) throw new AlayaError("CONFLICT", "frozen query request identity changed");
@@ -171,8 +179,8 @@ export async function replayLongMemEvalSemanticRun(root: string, preparedPath: s
     if (row.status === "unavailable") { rows.push(row); continue; }
     try {
       const selected = frozen.selected.find((selected) => selected.question_id === row.question_id)!;
-      const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
-      if (row.publication_path !== join(directory, "publication.json")) throw new AlayaError("CONFLICT", "question publication path changed");
+      const { directory, publicationPath } = longMemEvalQuestionInputPaths(root, selected.index);
+      if (row.publication_path !== publicationPath) throw new AlayaError("CONFLICT", "question publication path changed");
       const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(row.publication_path));
       if (chainIdentity(publication) !== row.publication_identity) throw new AlayaError("CONFLICT", "prepared question publication changed");
       verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, row.chain_root);

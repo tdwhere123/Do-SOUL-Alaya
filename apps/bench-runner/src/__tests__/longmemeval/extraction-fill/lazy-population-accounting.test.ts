@@ -306,6 +306,29 @@ it("runs one explicit member through native SQLite first exposure and preserves 
     cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalRows))
     .rejects.toThrow(/separate from producer and input roots/u);
   expect(existsSync(join(root, "population-cutoff-unsafe-output.json"))).toBe(false);
+  const prepareStage = readChainArtifact(join(root, "stages", String(member.index).padStart(5, "0"),
+    "prepare.completed.json")) as { result_path: string };
+  const prepared = readChainArtifact(prepareStage.result_path) as { rows: { status: string; chain_root?: string }[] };
+  const initialChain = prepared.rows.find(row => row.status === "prepared")?.chain_root;
+  if (initialChain === undefined) throw new Error("prepared member chain required");
+  const physicalInitialChain = join(dirname(root), "physical-initial-chain");
+  renameSync(initialChain, physicalInitialChain);
+  symlinkSync(physicalInitialChain, initialChain, "dir");
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "initial-chain-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalInitialChain))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-initial-chain-output.json"))).toBe(false);
+  const originalQuestion = join(member.native_root, "questions", String(member.index).padStart(5, "0"));
+  const physicalQuestion = join(dirname(root), "physical-original-question");
+  renameSync(originalQuestion, physicalQuestion);
+  symlinkSync(physicalQuestion, originalQuestion, "dir");
+  const finalPath = join(member.lazy_root, "final.json"), finalBytes = readFileSync(finalPath, "utf8");
+  writeFileSync(finalPath, "{");
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-member-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalQuestion))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unavailable-member-output.json"))).toBe(false);
+  writeFileSync(finalPath, finalBytes);
   const requestedPath = join(root, "stages", String(second.index).padStart(5, "0"), "freeze.requested.json");
   const foreignStage = { ...readChainArtifact(requestedPath) as object, question_id: member.question_id };
   writeFileSync(requestedPath, JSON.stringify({ identity: chainIdentity(foreignStage), payload: foreignStage }));

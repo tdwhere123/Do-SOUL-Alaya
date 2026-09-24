@@ -24,6 +24,14 @@ import { Digest, SourceTuple, PublicationReport, LazyQualificationConfigSchema,
 import { selectedProducerAttempts, selectedSourceState } from "./lazy-qualification-source-state.js";
 
 type Config = LazyQualificationConfig;
+
+/** Known lazy-stage inputs remain protected even when later member evidence is unavailable. */
+export function lazyQualificationInputPaths(root: string): readonly string[] {
+  const snapshot = join(root, "final-library.sqlite");
+  return [join(root, "window.json"), join(root, "final.json"), join(root, "first-exposure.json"),
+    join(root, "first-exposure.reserved.json"), snapshot, `${snapshot}.publication.json`];
+}
+
 const WindowRow = SourceTuple.extend({
   rank: z.number().int().min(1).max(10), key: Digest.nullable(), cache_root: z.string().nullable(),
   question_id: z.string(), session_id: z.string(), session_index: z.number().int().nonnegative(),

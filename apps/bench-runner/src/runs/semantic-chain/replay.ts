@@ -184,9 +184,11 @@ export const ReplaySchema = z.object({ contract: z.literal("source-semantic-chai
   }).passthrough()) }).passthrough();
 type ReplayRow = z.infer<typeof ReplaySchema>["rows"][number];
 
-/** The replay owner supplies every row/reservation leaf that archive admission may read. */
-export function semanticChainReplayInputPaths(root: string, replayPath: string): readonly string[] {
-  return replayInputPaths(root, replayPath, ReplaySchema.parse(readChainArtifact(replayPath)));
+/** Resolve planned replay inputs without admitting a possibly missing or corrupt replay artifact. */
+export function semanticChainReplayTargetInputPaths(root: string, arm: "retained" | "without_semantic_correspondences" = "retained"):
+  readonly string[] {
+  const target = inspectSemanticChainReplayTarget(root, arm);
+  return [join(root, "prepare.json"), target.output, ...[...target.rowPaths.values()].flatMap(path => [path, `${path}.reserved`])];
 }
 
 function replayInputPaths(root: string, replayPath: string, replay: z.infer<typeof ReplaySchema>): readonly string[] {

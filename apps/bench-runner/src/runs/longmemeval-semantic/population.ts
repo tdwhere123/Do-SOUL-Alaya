@@ -6,10 +6,11 @@ import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingesti
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
-  readLazyQualifiedExposureState, sealLazyQualificationFinal } from "../semantic-chain/lazy-qualification.js";
+  readLazyQualifiedExposureState, sealLazyQualificationFinal, lazyQualificationInputPaths } from "../semantic-chain/lazy-qualification.js";
+import { semanticChainReplayTargetInputPaths } from "../semantic-chain/replay.js";
 import { createLongMemEvalSelectionContractFromAssignments } from "../selection/contract.js";
-import { LongMemEvalNativeSemanticConfigSchema, readLongMemEvalSemanticFreeze } from "./contract.js";
-import { prepareLongMemEvalSemanticRun } from "./execute.js";
+import { LongMemEvalNativeSemanticConfigSchema, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "./contract.js";
+import { ExperimentPreparedSchema, longMemEvalQuestionInputPaths, prepareLongMemEvalSemanticRun } from "./execute.js";
 import { freezeLongMemEvalSemanticRun } from "./freeze.js";
 import { admitLongMemEvalLazyConfig, writeLongMemEvalLazyConfig } from "./lazy-config.js";
 
@@ -70,7 +71,9 @@ function assertRootIsolation(population: Population, root: string,
   const exclusiveProducers = population.members.flatMap(member => [member.native_root, member.lazy_root]);
   const producerPaths = population.members.flatMap(member => [member.native_root, member.lazy_root,
     member.source_cache_root, member.native_config_path, member.source_preflight_path,
-    member.lazy_config_path]);
+    member.lazy_config_path, longMemEvalFreezePath(member.native_root),
+    ...longMemEvalQuestionInputPaths(member.native_root, member.index).admittedInputPaths,
+    ...lazyQualificationInputPaths(member.lazy_root)]);
   producerPaths.push(...configs.flatMap(config => {
     const dataset = longMemEvalDatasetInputPaths("longmemeval_s", {
       dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root });
@@ -97,7 +100,8 @@ function assertRootIsolation(population: Population, root: string,
       throw new AlayaError("CONFLICT", "population evaluator root overlaps a producer, output, or another evaluator");
     }
   }
-  return producerPaths;
+  return [join(root, "population.json"), ...producerPaths, ...population.members.flatMap(member => STAGES.flatMap(stage =>
+    (["requested", "completed", "failed"] as const).map(state => stagePath(root, member, stage, state))))];
 }
 
 function readNativeConfig(member: Member, datasetSha256: string, datasetQuestionCount: number) {
@@ -174,12 +178,34 @@ export function freezeLongMemEvalLazyPopulation(value: unknown, root: string) {
 }
 
 export function readLongMemEvalLazyPopulation(root: string) {
-  return readLongMemEvalLazyPopulationForObservation(root).population;
+  return admitPopulation(readChainArtifact(join(root, "population.json")), root).population;
 }
 
 /** Native population admission exposes the exact member inputs used before aggregate measurement. */
-export function readLongMemEvalLazyPopulationForObservation(root: string) {
-  return admitPopulation(readChainArtifact(join(root, "population.json")), root);
+export async function readLongMemEvalLazyPopulationForObservation(root: string) {
+  const admitted = admitPopulation(readChainArtifact(join(root, "population.json")), root);
+  const memberInputs: string[] = [];
+  const populationIdentity = chainIdentity(admitted.population);
+  for (const member of admitted.population.members) {
+    for (const stage of STAGES) {
+      try {
+        const completed = stageRecord(root, member, stage, "completed", populationIdentity);
+        if (completed?.result_path === null || completed?.result_path === undefined) continue;
+        memberInputs.push(completed.result_path);
+        if (stage !== "prepare") continue;
+        const prepared = ExperimentPreparedSchema.parse(readChainArtifact(completed.result_path));
+        for (const row of prepared.rows) if (row.status === "prepared") {
+          memberInputs.push(row.chain_root, join(row.chain_root, "prepare.json"), row.publication_path);
+        }
+      } catch { /* The stage record path itself remains protected when its contents are unavailable. */ }
+    }
+    try {
+      const { final } = await admitLazyFinal(member.lazy_root);
+      memberInputs.push(final.final_snapshot_path, final.publication_report_path, final.final_chain_root,
+        ...semanticChainReplayTargetInputPaths(final.final_chain_root));
+    } catch { /* Static frozen member inputs remain protected when later state is unavailable. */ }
+  }
+  return { ...admitted, admittedInputPaths: [...admitted.admittedInputPaths, ...memberInputs] };
 }
 
 function stagePath(root: string, member: Member, stage: Stage, state: "requested" | "completed" | "failed") {

@@ -52,8 +52,10 @@ export const LongMemEvalNativeSemanticFreezeSchema = LongMemEvalSemanticFreezeSc
 export const LongMemEvalExperimentFreezeSchema = z.discriminatedUnion("contract", [LongMemEvalSemanticFreezeSchema, LongMemEvalNativeSemanticFreezeSchema]);
 export type LongMemEvalSemanticFreeze = z.infer<typeof LongMemEvalExperimentFreezeSchema>;
 
+export function longMemEvalFreezePath(root: string): string { return join(root, "freeze.json"); }
+
 export function readLongMemEvalSemanticFreeze(root: string): LongMemEvalSemanticFreeze {
-  const frozen = LongMemEvalExperimentFreezeSchema.parse(readChainArtifact(join(root, "freeze.json")));
+  const frozen = LongMemEvalExperimentFreezeSchema.parse(readChainArtifact(longMemEvalFreezePath(root)));
   if (readCurrentExtractionAuthorityRevision() !== frozen.implementation_revision) throw new AlayaError("CONFLICT", "frozen implementation changed");
   return frozen;
 }

@@ -1,16 +1,18 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
-import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
+import { measureSemanticChain, semanticChainReplayTargetInputPaths } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
 import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
-import { LongMemEvalExperimentReplaySchema, LongMemEvalSourceOnlyReplaySchema, verifyLongMemEvalQuestionPublication, verifyLongMemEvalQuestionChain,
+import { LongMemEvalExperimentReplaySchema, LongMemEvalSourceOnlyReplaySchema, longMemEvalQuestionInputPaths,
+  verifyLongMemEvalQuestionPublication, verifyLongMemEvalQuestionChain,
   type QuestionPublicationSchema } from "./execute.js";
 import type { z } from "zod";
-import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze } from "./contract.js";
+import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze,
+  longMemEvalFreezePath } from "./contract.js";
 
 type LongMemEvalOutcome = Readonly<{
   index: number; question_id: string; cohort: "answerable" | "abstention"; selected: boolean;
@@ -68,16 +70,14 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   }
   if (replay.freeze_identity !== chainIdentity(frozen)) throw new AlayaError("CONFLICT", "development replay binds another freeze");
   assertLongMemEvalSemanticRows(frozen, replay.rows);
-  const questionPaths = frozen.selected.flatMap((selected) => {
-    const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
-    return [directory, join(directory, "library.sqlite"), join(directory, "publication.json")];
-  });
+  const questionPaths = frozen.selected.flatMap(selected => longMemEvalQuestionInputPaths(root, selected.index).admittedInputPaths);
   const replayPaths = replay.rows.flatMap((row) => row.status === "replayed"
-    ? [row.chain_root, row.publication_path,
-      ...semanticChainReplayInputPaths(row.chain_root, row.replay_path)] : []);
+    ? [row.chain_root, row.publication_path, row.replay_path,
+      ...semanticChainReplayTargetInputPaths(row.chain_root)] : []);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
     dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root });
-  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, replayPath, ...questionPaths, ...replayPaths,
+  const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, longMemEvalFreezePath(root), replayPath,
+    ...questionPaths, ...replayPaths,
     config.data_dir, config.pinned_meta_root, datasetPaths.sourcePath, datasetPaths.checksumSource,
     config.query_cache_root,
     ...("arm" in config ? [config.correspondence_cache_root, ...config.source_cache_roots] : [])]);
@@ -96,8 +96,8 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
     let attribution: LongMemEvalOutcome["attribution"] = { layer: "preparation_unavailable", native: null };
     if (replayed.status === "replayed") {
       try {
-        const directory = resolve(root, "questions", String(selected.index).padStart(5, "0"));
-        if (replayed.publication_path !== join(directory, "publication.json")) throw new AlayaError("CONFLICT", "question publication path changed");
+        const { directory, publicationPath } = longMemEvalQuestionInputPaths(root, selected.index);
+        if (replayed.publication_path !== publicationPath) throw new AlayaError("CONFLICT", "question publication path changed");
         const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(replayed.publication_path));
         if (chainIdentity(publication) !== replayed.publication_identity) throw new AlayaError("CONFLICT", "replayed question publication changed");
         verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, replayed.chain_root);
