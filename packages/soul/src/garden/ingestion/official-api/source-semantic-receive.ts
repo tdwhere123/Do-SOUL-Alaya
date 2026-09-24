@@ -221,7 +221,14 @@ function receiveQuerySemantics(
     return { ...attempt, outcome: { status: "invalid", reason: "interpreted_query_required" } };
   }
   try {
-    const query = parseQuery({ original_query: request.original_query, request, query: materializeQuery(envelope.data.query, request) });
+    const meter = new SourceSemanticResourceLedger({
+      work_units: request.resource_limits.work_units ?? 200000,
+      memory_bytes: request.resource_limits.memory_bytes ?? 20000000
+    });
+    meter.retain(envelope.data.outcome, "query response outcome");
+    const query = parseQuery({ original_query: request.original_query, request,
+      query: materializeQuery(envelope.data.query, request, meter) });
+    meter.retain(query, "query receive result");
     if (canonicalJson(query.approved_fixed_context) !== canonicalJson(request.approved_fixed_context ?? null) ||
         canonicalJson(query.attribution_context) !== canonicalJson(request.attribution_context)) {
       return { ...attempt, outcome: { status: "invalid", reason: "query_context_mismatch" } };
@@ -237,6 +244,7 @@ function receiveQuerySemantics(
     }
     return { ...attempt, outcome: { status: "interpreted", gaps: query.gaps }, query };
   } catch (error) {
+    if (error instanceof SourceSemanticResourceExhausted) return { ...attempt, outcome: { status: "resource_exhausted" } };
     return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
 }
@@ -392,7 +400,9 @@ function parseResponseJson<T>(rawJson: string, attempt: Attempt<T>):
   }
 }
 
-function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): SourceSemanticQuery {
+function materializeQuery(
+  body: unknown, request: SourceSemanticQueryRequest, meter: SourceSemanticResourceLedger
+): SourceSemanticQuery {
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
   const envelope = {
@@ -403,7 +413,9 @@ function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): S
     approved_fixed_context: request.approved_fixed_context ?? null,
     attribution_context: request.attribution_context
   };
-  return materializeSourceSemanticQueryMeaning(expandSourceSemanticQueryCarrier(record, request.resource_limits), envelope);
+  return materializeSourceSemanticQueryMeaning(
+    expandSourceSemanticQueryCarrier(record, request.resource_limits, meter), envelope, meter
+  );
 }
 
 function selectionGroupCompleteness(

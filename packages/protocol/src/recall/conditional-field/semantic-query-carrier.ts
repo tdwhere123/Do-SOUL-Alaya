@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SOURCE_SEMANTIC_MAX_BYTES } from "../../garden/source-semantic-draft.js";
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import {
   SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,
   SourceSemanticQueryCarrierBodySchema,
@@ -31,17 +32,22 @@ function references(node: CarrierNode): readonly string[] {
 /** Decode only supplied structure. The existing meaning parser and compiler own all semantics. */
 export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readonly<{
   work_units?: number; memory_bytes?: number
-}>): SourceSemanticQueryMeaningBody {
-  const maxWork = Math.min(SOURCE_SEMANTIC_MAX_BYTES, limits?.work_units ?? SOURCE_SEMANTIC_MAX_BYTES);
-  const maxBytes = Math.min(SOURCE_SEMANTIC_MAX_BYTES, limits?.memory_bytes ?? SOURCE_SEMANTIC_MAX_BYTES);
+}>, sharedMeter?: SourceSemanticResourceLedger): SourceSemanticQueryMeaningBody {
+  const meter = sharedMeter ?? new SourceSemanticResourceLedger({
+    work_units: limits?.work_units ?? 200000, memory_bytes: limits?.memory_bytes ?? 20000000
+  });
   const raw = JSON.stringify(value);
-  if (raw === undefined || Buffer.byteLength(raw, "utf8") > SOURCE_SEMANTIC_MAX_BYTES * 4 ||
-      limits?.memory_bytes !== undefined && Buffer.byteLength(raw, "utf8") > limits.memory_bytes) {
-    fail("query carrier exceeds its byte bound");
+  if (raw === undefined) fail("query carrier requires JSON structure");
+  if (Buffer.byteLength(raw, "utf8") > SOURCE_SEMANTIC_MAX_BYTES * 4) {
+    throw new SourceSemanticResourceExhausted("query carrier input");
   }
+  meter.retain(value, "query carrier input");
+  meter.charge(0, Buffer.byteLength(raw, "utf8"), "query carrier serialization");
   const body = SourceSemanticQueryCarrierBodySchema.parse(value) as CarrierBody;
+  meter.retain(body, "query carrier parsed body");
   const table = new Map<string, CarrierNode>();
   for (const node of body.nodes) {
+    meter.charge(1, 0, "query carrier validation");
     if (table.has(node.node)) fail(`duplicate serialization reference: ${node.node}`);
     table.set(node.node, node);
   }
@@ -55,6 +61,7 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
     if (state.get(root) === "done") continue;
     const stack = [{ token: root, next: 0 }];
     while (stack.length > 0) {
+      meter.charge(1, 0, "query carrier traversal");
       const current = stack[stack.length - 1]!;
       const node = table.get(current.token);
       if (node === undefined) fail(`missing serialization reference: ${current.token}`);
@@ -76,6 +83,7 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
   const statistics = new Map<string, { count: number; bytes: number; depth: number }>();
   for (const token of order) {
     const node = table.get(token)!;
+    meter.charge(1 + references(node).length, 0, "query carrier measurement");
     const { node: _token, ...expression } = node;
     let count = 1;
     let bytes = Buffer.byteLength(JSON.stringify(expression), "utf8");
@@ -85,8 +93,8 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
       count += measured.count;
       bytes += measured.bytes - Buffer.byteLength(JSON.stringify(child), "utf8");
       depth = Math.max(depth, (node.kind === "occurrence" ? 0 : 1) + measured.depth);
-      if (count > maxWork || bytes > maxBytes) {
-        fail("query carrier expanded work exceeds its bound");
+      if (count > SOURCE_SEMANTIC_MAX_BYTES || bytes > SOURCE_SEMANTIC_MAX_BYTES) {
+        throw new SourceSemanticResourceExhausted("query carrier expansion");
       }
     }
     if (depth > SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1) fail("query carrier nesting exceeds its bound");
@@ -95,14 +103,17 @@ export function expandSourceSemanticQueryCarrier(value: unknown, limits?: Readon
   let expandedCount = 0;
   let expandedBytes = Buffer.byteLength(JSON.stringify({ ...body, nodes: undefined }), "utf8");
   for (const token of roots) {
+    meter.charge(1, 0, "query carrier measurement");
     const measured = statistics.get(token)!;
     expandedCount += measured.count;
     expandedBytes += measured.bytes - Buffer.byteLength(JSON.stringify(token), "utf8");
-    if (expandedCount > maxWork || expandedBytes > maxBytes) {
-      fail("query carrier expanded work exceeds its bound");
+    if (expandedCount > SOURCE_SEMANTIC_MAX_BYTES || expandedBytes > SOURCE_SEMANTIC_MAX_BYTES) {
+      throw new SourceSemanticResourceExhausted("query carrier expansion");
     }
   }
-  if (expandedBytes > maxBytes) fail("query carrier expanded work exceeds its bound");
+  if (expandedBytes > SOURCE_SEMANTIC_MAX_BYTES) throw new SourceSemanticResourceExhausted("query carrier expansion");
+  // Charge the expanded copy before allocating it, including non-expression fields.
+  meter.charge(expandedCount, expandedBytes, "query carrier expansion");
 
   const expand = (token: string): QueryMeaning => {
     const { node: _token, ...expression } = table.get(token)!;

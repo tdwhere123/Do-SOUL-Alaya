@@ -170,7 +170,8 @@ function summarize(
   const count = (...statuses: readonly string[]) => rows.filter(row => statuses.includes(row.status)).length;
   return {
     requested: rows.length, cache_hits: cacheHits, newly_admitted: newlyAdmitted,
-    terminal_failures: count("transport_failure"), attempts, interpreted: count("interpreted"),
+    terminal_failures: count("transport_failure"), resource_exhausted: count("resource_exhausted"),
+    attempts, interpreted: count("interpreted"),
     abstained: count("abstained"), cached_invalid: rows.filter(row => row.shard !== undefined &&
       ["invalid", "core_rejected", "incomplete", "transport_failure"].includes(row.status)).length,
     unattempted: count("unattempted"), unknown: count("unknown"), pending: count("pending"),
@@ -445,8 +446,13 @@ function replayCachedProposalShard(
     }
     return "empty";
   }
-  const classified = classifyProposalOutcome(receiveLine(line, shard.raw_json).outcome, shard.finish_reason,
-    shard.request_profile);
+  const receivedOutcome = receiveLine(line, shard.raw_json).outcome;
+  const recordedStatus = proposalOutcomeStatus(shard);
+  if ((recordedStatus === "resource_exhausted" || receivedOutcome.status === "resource_exhausted") &&
+      recordedStatus !== receivedOutcome.status) {
+    throw new SemanticProposalIdentityError(`semantic proposal resource outcome mismatch: ${shard.cache_key}`);
+  }
+  const classified = classifyProposalOutcome(receivedOutcome, shard.finish_reason, shard.request_profile);
   if (classified === "incomplete") {
     // Parser/semantic outcome stays distinct from completion: interpreted plus
     // non-STOP with admitted=false is the retained incomplete cache state.

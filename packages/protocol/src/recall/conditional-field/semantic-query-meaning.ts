@@ -4,6 +4,7 @@ import {
   SOURCE_SEMANTIC_MAX_BYTES, SOURCE_SEMANTIC_MAX_DEPTH,
   SourceSemanticHandleSchema, SourceSemanticReadingSchema
 } from "../../garden/source-semantic-draft.js";
+import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticQueryEvaluationSchema, SourceSemanticQuerySchema, SourceSemanticQueryGapSchema,
   SourceSemanticRequestedOperationSchema,
@@ -217,15 +218,16 @@ export type SourceSemanticQueryMeaningEnvelope = Readonly<{
 
 /** Host graph construction. Does not repair a legacy producer graph. */
 export function materializeSourceSemanticQueryMeaning(
-  body: unknown, envelope: SourceSemanticQueryMeaningEnvelope
+  body: unknown, envelope: SourceSemanticQueryMeaningEnvelope, meter?: SourceSemanticResourceLedger
 ): SourceSemanticQuery {
+  meter?.retain(body, "query meaning materialization");
   preflight(body);
   if (typeof envelope.original_query !== "string" || envelope.original_query.length === 0) {
     fail(["original_query"], "query meaning requires original query text");
   }
   const parsed = SourceSemanticQueryMeaningBodySchema.parse(body);
   const compiled = new QueryMeaningCompiler(envelope.original_query).compile(parsed);
-  return SourceSemanticQuerySchema.parse({
+  const query = SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
     original_query_digest: envelope.original_query_digest,
     approved_fixed_context: ApprovedSemanticContextSchema.nullable().parse(envelope.approved_fixed_context),
@@ -245,6 +247,8 @@ export function materializeSourceSemanticQueryMeaning(
     ...(parsed.evaluation === undefined ? {} : { evaluation: parsed.evaluation }),
     ...(parsed.requested_operation === undefined ? {} : { requested_operation: parsed.requested_operation })
   });
+  meter?.retain(query, "query canonical meaning");
+  return query;
 }
 
 function preflight(value: unknown): void {

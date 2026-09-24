@@ -7,6 +7,7 @@ import {
 } from "../../../recall/conditional-field/index.js";
 import { sourceSemanticQueryIdentity } from "../../../garden/source-semantic-identity.js";
 import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../../conversation/utterance-attribution.js";
+import { SourceSemanticResourceExhausted } from "../../../garden/source-semantic-resources.js";
 
 const original = "Who sent the sample to Mira?";
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -90,6 +91,7 @@ it("keeps inner and outer negation distinct and permits finite evaluation withou
 });
 
 it("rejects missing, duplicate, cyclic, unreachable and wrong-kind serialization references", () => {
+  expect(() => expandSourceSemanticQueryCarrier(undefined)).toThrow(/requires JSON structure/u);
   const valid = encodeSourceSemanticQueryCarrier(SourceSemanticQueryMeaningBodySchema.parse(body([sent])));
   const query = valid as unknown as { nodes: readonly { node: string; content?: unknown }[];
     alternatives: readonly { conditions: readonly string[] }[] };
@@ -118,8 +120,8 @@ it("rejects graph amplification before constructing its expanded meaning", () =>
   }
   const carrier = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
     alternatives: [{ conditions: [previous] }], nodes };
-  expect(() => expandSourceSemanticQueryCarrier(carrier)).toThrow(/expanded work exceeds its bound/u);
-  expect(() => expandSourceSemanticQueryCarrier(carrier, { work_units: 0 })).toThrow(/expanded work exceeds its bound/u);
+  expect(() => expandSourceSemanticQueryCarrier(carrier)).toThrow(SourceSemanticResourceExhausted);
+  expect(() => expandSourceSemanticQueryCarrier(carrier, { work_units: 0 })).toThrow(SourceSemanticResourceExhausted);
 });
 
 it("reports a long serialization cycle explicitly before recursive expansion", () => {

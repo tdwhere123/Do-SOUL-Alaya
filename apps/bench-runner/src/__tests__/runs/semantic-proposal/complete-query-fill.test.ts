@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -10,7 +10,7 @@ import { admitSourceSemanticQuery, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from
 import { proposeQuerySemantics } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
-  inspectSemanticProposalShard, hasAdmittedProposalOutcome
+  inspectSemanticProposalShard, hasAdmittedProposalOutcome, semanticProposalShardPath
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
   executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
@@ -257,6 +257,39 @@ it("does not treat a Core-invalid receive as an executable cache hit", async () 
   expect(replayed.cached_invalid).toBe(1);
   expect(replayed.newly_admitted).toBe(0);
   expect(replayed.interpreted).toBe(0);
+});
+
+it("persists native query resource exhaustion and refuses a conflicting cached outcome", async () => {
+  const nodes: object[] = [{ node: "leaf", kind: "statement", predicate: "send", arguments: [] }];
+  let root = "leaf";
+  for (let depth = 1; depth <= 8; depth += 1) {
+    const node = `level${depth}`;
+    nodes.push({ node, kind: "opaque", operands: Array(8).fill(root) });
+    root = node;
+  }
+  const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v8",
+    outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v5",
+      alternatives: [{ conditions: [root] }], gaps: [], nodes } });
+  const cacheRoot = join(tempRoot(), "cache"), workset = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const first = extractor([rawJson]);
+  const fill = await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: first });
+  const key = authority.keys[0]!;
+  const shard = inspectSemanticProposalShard(cacheRoot, key, { kind: "query", model: MODEL, request_profile: PROFILE });
+  expect(first.calls).toHaveLength(1);
+  expect(fill).toMatchObject({ resource_exhausted: 1, terminal_failures: 0,
+    rejected: 0, newly_admitted: 0 });
+  expect(shard?.outcome).toEqual({ status: "resource_exhausted" });
+  expect(shard?.admitted).toBe(false);
+  expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toBe(rawJson);
+  expect(readSemanticProposalResults(workset, cacheRoot, 128)[0]?.status).toBe("resource_exhausted");
+  const second = extractor(["must not run"]);
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: second });
+  expect(second.calls).toEqual([]);
+  writeFileSync(semanticProposalShardPath(cacheRoot, key), JSON.stringify({ ...shard,
+    outcome: { status: "invalid", reason: "malformed_response" } }));
+  expect(() => readSemanticProposalResults(workset, cacheRoot, 128)).toThrow(/resource outcome mismatch/u);
 });
 
 async function fillInterpretedQuery(finish: string | null) {
