@@ -18,6 +18,7 @@ import { SemanticChainPlanSchema, chainIdentity, readChainArtifact,
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { admitNativeLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
 import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../runs/semantic-chain/replay.js";
+import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
@@ -600,7 +601,7 @@ async function fillAuthoredCompletionCorrespondence(
   const support = interpretation.frames[0]!.predicate_support;
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(selected,
     correspondenceCacheRoot, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
-  await executeSemanticProposalFill({ workset: selected, cacheRoot: correspondenceCacheRoot,
+  return executeSemanticProposalFill({ workset: selected, cacheRoot: correspondenceCacheRoot,
     authority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
       rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
@@ -744,5 +745,154 @@ it("records whether three cold authored composition windows share the same eligi
   if (returnRoot !== undefined) {
     writeFileSync(join(returnRoot, "qualified-exposures.json"), JSON.stringify(qualifiedExposure, null, 2));
     cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
+  }
+}, 120000);
+
+it("delivers the fixed completed item through the normal native qualification lifecycle", async () => {
+  const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
+    ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
+  const expectedWindow = [5, 11, 3, 8, 1, 10, 9, 2, 6, 7];
+  const expectedRecords = ["06a672c9f0466751e19d3c33f56bbee649e49b7b7da3e306d58e5f7a98a43da5",
+    "3c1de53a4a3dc4c90a2464191796b78ffe21a1f614f6042d8cc535d3cbbeeca1",
+    "48545d4cf4d1afb623e34beb815545a7b416c393dc6d31c4d18ca617e65ae90c",
+    "4e0f9b0e4269c04741a7847fb5a2361778b98a519f59227a5f1597ed5cb9635f",
+    "7769a015fccf0024ec25838cb3a8157943fbbc54bbca4df6832eae19978d5fe3",
+    "831e98ffc460a07e8e511956b6a7adf9dde4e0e60527406b839665b675e5898c",
+    "9d5d61d11627d84c62cd2d11cb952bea79352b55a2d7d263983105023604c4bb",
+    "a89904be290bb1da70bd7b72953126fc7bce40821fc0f5b9c47c73d1cb9e2f83",
+    "c37d8fcb63aa303cf593a6d64538edd77baa129eb97bb76c8876525e9aecc036",
+    "e4c84c830b3eab4dd8a1b6c4df779e8f689334d744021f193bcabc82d9a9eca7"]
+    .map(digest => `sha256:${digest}`);
+  const returnRoot = process.env.NATIVE_DELIVERY_CONTROL_RETURN_ROOT;
+  if (returnRoot !== undefined) mkdirSync(returnRoot, { recursive: true });
+  try {
+    const fixture = await preparedSourceFixture(contents);
+    await fillAuthoredCompletionQuery(fixture.config.chain.query_workset,
+      fixture.config.chain.query_cache_root);
+    const config = await fixture.bind(fixture.config.chain, "normal-lifecycle");
+    const root = join(cacheRoot, "normal-lifecycle-stage");
+    const window = await prepareLazyQualificationWindow(config, root);
+    if (returnRoot !== undefined) writeFileSync(join(returnRoot, "window.json"), JSON.stringify(window, null, 2));
+    expect(window.config.chain.query_workset.items).toEqual([{ original_query: "What was completed?" }]);
+    expect(window.query_key).toBe("557fc3568c912fcc313f621622704b67ce669d12c2e8f9e65697d2003a812e8a");
+    expect(window.window.map(row => row.source_id)).toEqual(expectedWindow.map(index => `fixture:bounded-s${index}-r0`));
+    expect(window.window.map(row => row.record_id)).toEqual(expectedRecords);
+    expect(window.window.map(row => row.source_version)).toEqual(Array(10)
+      .fill("55e8c8cc90876bdfbe5295ba2bd9be3c4fb89f8fe4cfa181e5394c9c970d7814"));
+    expect(window.window.map(row => row.state)).toEqual(Array(10).fill("cache_miss"));
+    expect(window.selected_missing_keys).toHaveLength(10);
+    expect(window.starting_access.source_candidates.map(row => row.source_id))
+      .toEqual([5, 11, 3, 8, 1, 10, 9, 2, 6, 7, 4, 0].map(index => `fixture:bounded-s${index}-r0`));
+    const { plan: batchPlan, imported, fetchMock, createCount } = await fillFrozenShortSources(window.selected_missing_keys);
+    const final = await sealLazyQualificationFinal(root);
+    const report = JSON.parse(readFileSync(final.publication_report_path, "utf8"));
+    if (returnRoot !== undefined) writeFileSync(join(returnRoot, "qualified-final.json"),
+      JSON.stringify({ final, report, batchPlan, authorityTelemetry: imported.authorityTelemetry }, null, 2));
+    expect(final.final_snapshot_sha256).not.toBe(window.starting_snapshot_sha256);
+    expect(report).toMatchObject({ census_count: 12, admitted_count: 12, published_count: 10, rejected_count: 0 });
+    expect(report.sources.map((row: { source_id: string; source_version: string; record_id: string }) =>
+      [row.source_id, row.source_version, row.record_id])).toEqual(fixture.published.sources.map(row =>
+      [row.source_id, row.source_version, row.record_id]));
+    expect(report.sources.filter((row: { publication: string }) => row.publication === "published")
+      .map((row: { source_id: string }) => row.source_id).sort())
+      .toEqual(expectedWindow.map(index => `fixture:bounded-s${index}-r0`).sort());
+    expect(report.sources.filter((row: { publication: string }) => row.publication !== "published")
+      .map((row: { source_id: string }) => row.source_id).sort())
+      .toEqual(["fixture:bounded-s0-r0", "fixture:bounded-s4-r0"]);
+    expect(report.sources[0]).toMatchObject({ host_preparation: { status: "unsupported_source",
+      reason: { dimension: "assertions", actual: 5000, limit: 64 } }, source_interpretation: "absent" });
+    expect(report.sources[4]).toMatchObject({ host_preparation: { status: "ready" },
+      source_interpretation: "absent", publication: "not_attempted" });
+    expect(final).toMatchObject({ selected_new_associations: 10, warm_outside_associations: 0,
+      provider_calls: 0, source_producer: { new_authorized_attempts: 10, new_raw_receipts: 0,
+        unknown_usage_attempts: 10, unresolved_new_attempts: 10 } });
+    const chainPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(final.final_chain_root, "prepare.json")));
+    const query = chainPlan.queries[0]!;
+    const workset = chainPlan.correspondence_workset!;
+    const lines = materializeSemanticProposalLines(workset, 4096);
+    if (returnRoot !== undefined) writeFileSync(join(returnRoot, "opportunity.json"),
+      JSON.stringify({ query, lines: lines.map(line => ({ key: line.key, request: line.request })) }, null, 2));
+    expect(query.status).toBe("ready");
+    if (query.status !== "ready") throw new Error("fixed source requires a ready native opportunity");
+    expect(query.descriptors.map(row => row.source_id)).toEqual(["fixture:bounded-s7-r0"]);
+    expect(query.correspondence_opportunities).toEqual([{
+      source_interpretation_id: query.descriptors[0]!.interpretation_id, decision: "selected" }]);
+    expect(query).toMatchObject({ discovery_open: true, discovery_truncated: true,
+      unvisited_source_interpretation_count: null });
+    expect(lines).toHaveLength(1);
+    const request = lines[0]!.request as SourceSemanticCorrespondenceRequest;
+    expect(request.source_interpretation_descriptors[0]?.interpretation.source.source_id)
+      .toBe("fixture:bounded-s7-r0");
+    const correspondence = await fillAuthoredCompletionCorrespondence(workset, 0,
+      fixture.config.chain.correspondence_cache_root);
+    if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence.json"),
+      JSON.stringify(correspondence, null, 2));
+    expect(correspondence).toMatchObject({ requested: 1, newly_admitted: 1,
+      interpreted: 1, rejected: 0, incomplete: 0, unknown: 0 });
+    const exposure = await replayLazyQualifiedFirstExposure(root);
+    if (returnRoot !== undefined) writeFileSync(join(returnRoot, "exposure.json"), JSON.stringify(exposure, null, 2));
+    expect(exposure.result.rows[0]?.status).toBe("replayed");
+    const row = exposure.result.rows[0]!;
+    const native = SoulInterpretationResponseSchema.parse(row.response);
+    if (native.operation !== "recall" || native.index === undefined) throw new Error("native indexed recall required");
+    const roots = native.index.entries.map(entry => entry.target.kind === "source_evidence" ? entry.target.root_id : null);
+    expect(roots).toEqual([7, 5, 11, 3, 8].map(index =>
+      report.sources.find((source: { source_id: string }) => source.source_id === `fixture:bounded-s${index}-r0`)?.record_id));
+    expect(roots).not.toContain(report.sources[1]?.record_id);
+    const target = report.sources[7]!.record_id;
+    const slot = native.slot_qualifiers?.[0];
+    const proof = native.proofs?.find(value => value.source_interpretation_id === query.descriptors[0]!.interpretation_id);
+    expect(slot).toMatchObject({ index: 0, evidence_kind: "semantic_proof", selection_basis: "direct_answer",
+      source_interpretation_id: query.descriptors[0]!.interpretation_id, payload_support: "available" });
+    expect(proof).toMatchObject({ source_target: { root_id: target }, semantic_status: "unreviewed",
+      conclusion_scope: "conditional_on_interpretation", world_claim: "unknown" });
+    expect(proof?.binding_results?.some(binding => binding.query_complete && Object.keys(binding.returned).length > 0))
+      .toBe(true);
+    const answer = proof?.binding_results?.find(binding => binding.kind === "answer" && binding.query_complete);
+    const themeMention = proof?.interpretation.mentions.find(mention => mention.text === "item 7");
+    const themeReferent = proof?.interpretation.referents.find(referent =>
+      themeMention !== undefined && referent.mentions.includes(themeMention.id));
+    expect(answer).toBeDefined();
+    expect(themeMention).toBeDefined();
+    expect(themeReferent).toBeDefined();
+    expect(answer?.returned.theme?.node_id).toBe(themeReferent?.id);
+    expect(answer?.returned.theme?.packet_id).toBe(proof?.source_interpretation_id);
+    expect(slot?.witnesses?.[0]?.binding_id).toBe(answer?.binding_id);
+    expect(slot?.conditional_computation_id).toBe(proof?.conditional_computation_id);
+    expect(slot?.semantic_correspondence_id).toBe(proof?.semantic_correspondence_id);
+    expect(proof?.consumed_leaves.some(leaf => leaf.leaf_kind.startsWith("source_interpretation_"))).toBe(true);
+    expect(proof?.consumed_leaves.some(leaf => leaf.leaf_kind.startsWith("semantic_correspondence_"))).toBe(true);
+    const result = native.results?.[0];
+    expect(result).toMatchObject({ object_kind: "semantic_proof", target: { root_id: target } });
+    expect(result?.content_preview).toBe("User: I completed item 7.");
+    expect(result?.target).toEqual(native.index.entries[0]!.target);
+    expect(result?.output_binding).toBe(answer?.binding_id);
+    expect(native.index.entries[0]?.interpretation_node?.packet_id).toBe(proof?.source_interpretation_id);
+    expect(native.request_identity).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    const span = native.index.entries[0]!.target.kind === "source_evidence" ? native.index.entries[0]!.target.span : null;
+    expect(span).toMatchObject({ content_start: 0, content_end: 25, content_complete: true });
+    expect(Buffer.byteLength(result!.content_preview!.slice(span!.content_start, span!.content_end))).toBe(25);
+    const validated = measureSourceSemanticLibraryResponse({ recallResult: native,
+      firstExposurePage: row.first_exposure!, requestBudget: fixture.config.chain.budget,
+      sourceRecords: report.sources.map((source: { source_record: unknown }) => source.source_record), goldSourceUnits: [] });
+    expect(validated.measurement?.status).toBe("validated");
+    expect(validated.validatedProofRanks).toContain(1);
+    expect(row.first_exposure).toMatchObject({ delivery_id: native.delivery_id, page_purpose: "membership",
+      initial: { delivery_id: native.delivery_id } });
+    expect(row.first_exposure?.initial?.slots[0]).toMatchObject({ rank: 1, object_kind: "semantic_proof",
+      target: { root_id: target } });
+    expect(row.first_exposure?.initial?.identity).toMatchObject({ query_id: native.index.query_id,
+      snapshot_id: native.index.snapshot_id, interpretation_id: native.index.interpretation_id,
+      as_of: native.index.as_of });
+    expect(exposure.delivery).toMatchObject({ selected_delivered: 5, selected_undelivered: 5, outside_delivered: 0 });
+    expect(native.discovery?.access?.unvisited_sources).toBe(true);
+    expect(native.discovery?.access?.unvisited_interpretations).toBe(true);
+    expect(native.index.completeness?.observed_coverage).toBe("open");
+    expect(exposure.result.provider_calls).toBe(0);
+    expect(createCount()).toBe(1);
+    expect(fetchMock.mock.calls.length).toBe(5);
+  } finally {
+    if (returnRoot !== undefined && cacheRoot !== undefined) cpSync(cacheRoot, join(returnRoot, "native-cache"),
+      { recursive: true, force: true });
   }
 }, 120000);
