@@ -37,7 +37,7 @@ const EntityTarget = z.discriminatedUnion("kind", [FreeTarget, NamedTarget, Loca
 const RoleArgument = z.object({
   role: Reading, target: EntityTarget, excerpt: z.string().min(1).max(1024).optional()
 }).strict().readonly();
-const Occurrence = z.object({ kind: z.literal("occurrence"), key: Key }).strict().readonly();
+const OccurrenceShape = { kind: z.literal("occurrence"), key: Key };
 
 type Path = readonly (string | number)[];
 type EntityTargetValue = z.infer<typeof EntityTarget>;
@@ -108,8 +108,9 @@ export type QueryOpaqueMeaning = Readonly<{
 }>;
 export type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
 
-function meaningShape(operand: z.ZodTypeAny, serializedId?: typeof Key): z.ZodTypeAny {
-  const token = serializedId === undefined ? {} : { node: serializedId };
+function meaningShape<Operand extends z.ZodTypeAny, const Serialized extends Record<string, z.ZodTypeAny>>(
+  operand: Operand, token: Serialized
+) {
   return z.discriminatedUnion("kind", [
     z.object({
       ...token,
@@ -142,13 +143,13 @@ function meaningShape(operand: z.ZodTypeAny, serializedId?: typeof Key): z.ZodTy
       kind: z.literal("opaque"), key: Key.optional(), return: z.boolean().optional(), operands: z.array(operand).min(1).max(8).readonly(),
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
-    serializedId === undefined ? Occurrence : Occurrence.unwrap().safeExtend({ node: serializedId }).readonly()
+    z.object({ ...OccurrenceShape, ...token }).strict().readonly()
   ]);
 }
 
-const Meaning: z.ZodType<QueryMeaning> = z.lazy(() => meaningShape(Meaning)) as z.ZodType<QueryMeaning>;
+const Meaning: z.ZodType<QueryMeaning> = z.lazy(() => meaningShape(Meaning, {})) as z.ZodType<QueryMeaning>;
 /** One structural authority projected with either nested operands or serialization references. */
-const SourceSemanticQueryCarrierNodeSchema = meaningShape(Key, Key);
+const SourceSemanticQueryCarrierNodeSchema = meaningShape(Key, { node: Key });
 function alternativeShape<Condition extends z.ZodTypeAny>(condition: Condition) {
   const conditions = z.array(condition).max(16).readonly();
   return z.object({
@@ -164,7 +165,7 @@ const Domain = z.object({
   key: Key, excerpt: z.string().min(1).max(1024)
 }).strict().readonly();
 
-function meaningBodyShape<AlternativeSchema extends z.ZodTypeAny>(alternative: AlternativeSchema, nodes?: z.ZodTypeAny) {
+function meaningBodyShape<AlternativeSchema extends z.ZodTypeAny>(alternative: AlternativeSchema) {
   return {
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT),
     alternatives: z.array(alternative).min(1).max(16).readonly(),
@@ -172,8 +173,7 @@ function meaningBodyShape<AlternativeSchema extends z.ZodTypeAny>(alternative: A
     domains: z.array(Domain).max(64).readonly().optional(),
     entities: z.array(z.discriminatedUnion("kind", [FreeTarget, NamedTarget])).max(64).readonly().optional(),
     evaluation: SourceSemanticQueryEvaluationSchema.optional(),
-    requested_operation: SourceSemanticRequestedOperationSchema.optional(),
-    ...(nodes === undefined ? {} : { nodes })
+    requested_operation: SourceSemanticRequestedOperationSchema.optional()
   };
 }
 
@@ -201,8 +201,10 @@ function validateMeaningBody(body: { evaluation?: { kind: string }; requested_op
 
 export const SourceSemanticQueryMeaningBodySchema = z.object(meaningBodyShape(Alternative))
   .strict().readonly().superRefine(validateMeaningBody);
-export const SourceSemanticQueryCarrierBodySchema = z.object(meaningBodyShape(alternativeShape(Key),
-  z.array(SourceSemanticQueryCarrierNodeSchema).max(SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES).readonly()))
+export const SourceSemanticQueryCarrierBodySchema = z.object({
+  ...meaningBodyShape(alternativeShape(Key)),
+  nodes: z.array(SourceSemanticQueryCarrierNodeSchema).max(SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES).readonly()
+})
   .strict().readonly().superRefine(validateMeaningBody);
 
 export type SourceSemanticQueryMeaningBody = z.infer<typeof SourceSemanticQueryMeaningBodySchema>;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, expectTypeOf, it } from "vitest";
 import {
-  SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SourceSemanticQueryMeaningBodySchema,
+  SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SourceSemanticQueryCarrierBodySchema, SourceSemanticQueryMeaningBodySchema,
   encodeSourceSemanticQueryCarrier, expandSourceSemanticQueryCarrier,
   materializeSourceSemanticQueryMeaning
 } from "../../../recall/conditional-field/index.js";
@@ -23,6 +23,37 @@ const sent = { kind: "statement", key: "sent", predicate: "send", arguments: [
 const body = (conditions: readonly unknown[], extra: object = {}) => ({
   contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   alternatives: [{ conditions }], gaps: [], ...extra
+});
+
+type CarrierBody = typeof SourceSemanticQueryCarrierBodySchema._output;
+type MeaningBody = typeof SourceSemanticQueryMeaningBodySchema._output;
+
+it("requires typed carrier nodes and excludes nodes from nested meaning", () => {
+  const carrier: CarrierBody = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    alternatives: [{ conditions: ["n"] }], gaps: [],
+    nodes: [{ node: "n", kind: "statement", predicate: "send", arguments: [] }] };
+  const nested: MeaningBody = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    alternatives: [{ conditions: [{ kind: "statement", predicate: "send", arguments: [] }] }], gaps: [] };
+  expect(carrier.nodes[0]?.node).toBe("n");
+  expect(SourceSemanticQueryCarrierBodySchema.safeParse(carrier).success).toBe(true);
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse(nested).success).toBe(true);
+  expectTypeOf<CarrierBody["nodes"][number]["node"]>().toEqualTypeOf<string>();
+  expectTypeOf<"nodes" extends keyof MeaningBody ? true : false>().toEqualTypeOf<false>();
+
+  // @ts-expect-error carrier nodes are required
+  const missing: CarrierBody = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    alternatives: [{ conditions: ["n"] }], gaps: [] };
+  const wrong: CarrierBody = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    alternatives: [{ conditions: ["n"] }], gaps: [],
+    // @ts-expect-error carrier nodes must be rows
+    nodes: "wrong" };
+  const nestedWithNodes: MeaningBody = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    alternatives: [{ conditions: [{ kind: "statement", predicate: "send", arguments: [] }] }], gaps: [],
+    // @ts-expect-error nested meaning has no nodes field
+    nodes: [] };
+  expect(SourceSemanticQueryCarrierBodySchema.safeParse(missing).success).toBe(false);
+  expect(SourceSemanticQueryCarrierBodySchema.safeParse(wrong).success).toBe(false);
+  expect(SourceSemanticQueryMeaningBodySchema.safeParse(nestedWithNodes).success).toBe(false);
 });
 
 function roundTrip(value: unknown) {
@@ -93,8 +124,7 @@ it("keeps inner and outer negation distinct and permits finite evaluation withou
 it("rejects missing, duplicate, cyclic, unreachable and wrong-kind serialization references", () => {
   expect(() => expandSourceSemanticQueryCarrier(undefined)).toThrow(/requires JSON structure/u);
   const valid = encodeSourceSemanticQueryCarrier(SourceSemanticQueryMeaningBodySchema.parse(body([sent])));
-  const query = valid as unknown as { nodes: readonly { node: string; content?: unknown }[];
-    alternatives: readonly { conditions: readonly string[] }[] };
+  const query = valid;
   expect(() => expandSourceSemanticQueryCarrier({ ...valid, alternatives: [{ conditions: ["missing"] }] }))
     .toThrow(/missing serialization reference/u);
   expect(() => expandSourceSemanticQueryCarrier({ ...valid, nodes: [...query.nodes, query.nodes[0]] }))

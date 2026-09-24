@@ -33,12 +33,10 @@ const CASES = [
 ] as const;
 
 function withExplicitObligation(response: (typeof CASES)[number]["example"]["response"], obligation: "asserted_at_source" | "entailed_at_source") {
-  const changed = structuredClone(response);
-  const token = changed.query.alternatives[0]!.conditions[0]!;
-  const node = (changed.query.nodes as { node: string; obligation?: string }[]).find(row => row.node === token);
-  if (node === undefined) throw new Error("evidence act fixture node missing");
-  node.obligation = obligation;
-  return changed;
+  const token = response.query.alternatives[0]!.conditions[0]!;
+  if (!response.query.nodes.some(row => row.node === token)) throw new Error("evidence act fixture node missing");
+  return { ...response, query: { ...response.query,
+    nodes: response.query.nodes.map(row => row.node === token ? { ...row, obligation } : row) } };
 }
 
 function proposed(original: string, response: unknown) {
