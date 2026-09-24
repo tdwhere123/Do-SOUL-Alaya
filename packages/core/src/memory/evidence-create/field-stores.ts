@@ -1,5 +1,6 @@
 import {
   sameFactorDescriptorFields,
+  canonicalJson,
   type AddressableSourceSpan,
   type DerivationJobReceipt,
   type FactorDescriptor,
@@ -254,7 +255,8 @@ function sameRecord(existing: SourceRecordIdentity, incoming: SourceRecordIdenti
     existing.operator_id === incoming.operator_id &&
     existing.event_time === incoming.event_time &&
     existing.valid_from === incoming.valid_from &&
-    existing.valid_to === incoming.valid_to;
+    existing.valid_to === incoming.valid_to &&
+    canonicalJson(existing.attribution_context ?? null) === canonicalJson(incoming.attribution_context ?? null);
 }
 
 function sameSpan(existing: AddressableSourceSpan, incoming: AddressableSourceSpan): boolean {

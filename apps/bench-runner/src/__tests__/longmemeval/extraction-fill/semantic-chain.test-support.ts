@@ -155,7 +155,7 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     blocked.queries.map((row) => ({ query_key: row.query_key, source_units: [] })))).toThrow(/query-semantics state changed/u);
   const limitedRoot = join(cacheRoot, "limited-observation-chain");
   const limited = await prepareSemanticChain({ ...config,
-    budget: { ...config.budget, work_units: 200000, memory_bytes: 20000000 }
+    budget: { ...config.budget, work_units: 210000, memory_bytes: 20000000 }
   }, limitedRoot);
   expect(limited.queries[0]).toMatchObject({ status: "ready", discovery_open: true,
     discovery_truncated: true, unvisited_source_interpretation_count: null,

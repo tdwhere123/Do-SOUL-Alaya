@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
 import { SourceSemanticInterpretationSchema } from "../../garden/source-semantic-interpretation.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION, UTTERANCE_ATTRIBUTION_CONTRACT } from "../../conversation/utterance-attribution.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import { SourceSemanticCorrespondenceSchema } from "../../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../../recall/conditional-field/interpretation-context.js";
@@ -18,7 +19,8 @@ const other = `sha256:${"b".repeat(64)}`;
 const interpretation = SourceSemanticInterpretationSchema.parse({
   contract: "source-interpretation-v4",
   k_version: "k1", normalizer_version: "n1",
-  source: { source_id: "src", source_version: "1", content_digest: digest },
+  source: { source_id: "src", source_version: "1", content_digest: digest,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
   producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
   mentions: [{ id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" }, text: "sent", utf8_span: [0, 4] }],
   referents: [{ id: "rBob", referent_kind: "grouped", mentions: ["mSent"] }],
@@ -32,8 +34,9 @@ const interpretation = SourceSemanticInterpretationSchema.parse({
 });
 
 const query = SourceSemanticQuerySchema.parse({
-  contract: "source-semantic-query-v3", original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
+  contract: "source-semantic-query-v4", original_query_digest: digest,
+  approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v4",
   variables: [{ id: "parcel", sort: "entity" }, { id: "fSend", sort: "proposition" }],
   alternatives: [{
     frames: [{
@@ -74,6 +77,33 @@ it("keeps query-semantics identity independent of source interpretation", () => 
   expect(querySemanticsId).toBe(sourceSemanticQueryIdentity(query, sha));
   expect(querySemanticsId).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
   expect(SourceSemanticQuerySchema.safeParse({ ...query, source_interpretation_id: digest }).success).toBe(false);
+});
+
+it("binds exact approved query context and scoped utterance attribution into Q and H identities", () => {
+  const captured = {
+    contract: UTTERANCE_ATTRIBUTION_CONTRACT, status: "captured" as const,
+    issuer_scope: "capture-a",
+    utterances: [{ occurrence_id: "turn-1", utf8_span: [0, 4] as const,
+      conversation_ref: "conversation-a", author_ref: "author-a" }]
+  };
+  const qBase = SourceSemanticQuerySchema.parse({ ...query, attribution_context: captured,
+    approved_fixed_context: { context_id: "approved-1", notes: "Keep every approved instruction." } });
+  const hBase = SourceSemanticInterpretationSchema.parse({ ...interpretation,
+    source: { ...interpretation.source, attribution_context: captured } });
+  for (const changed of [
+    { ...captured, issuer_scope: "capture-b" },
+    { ...captured, utterances: [{ ...captured.utterances[0]!, conversation_ref: "conversation-b" }] },
+    { ...captured, utterances: [{ ...captured.utterances[0]!, author_ref: "author-b" }] }
+  ]) {
+    const q = SourceSemanticQuerySchema.parse({ ...qBase, attribution_context: changed });
+    const h = SourceSemanticInterpretationSchema.parse({ ...hBase,
+      source: { ...hBase.source, attribution_context: changed } });
+    expect(sourceSemanticQueryIdentity(q, sha)).not.toBe(sourceSemanticQueryIdentity(qBase, sha));
+    expect(sourceSemanticInterpretationIdentity(h, sha)).not.toBe(sourceSemanticInterpretationIdentity(hBase, sha));
+  }
+  const amended = SourceSemanticQuerySchema.parse({ ...qBase,
+    approved_fixed_context: { context_id: "approved-1", notes: "Keep every approved instruction and example." } });
+  expect(sourceSemanticQueryIdentity(amended, sha)).not.toBe(sourceSemanticQueryIdentity(qBase, sha));
 });
 
 it("keeps semantic correspondence and conditional computation acyclic: correspondence hashes source interpretation and query semantics, computation hashes correspondence, and correspondence never contains computation", () => {

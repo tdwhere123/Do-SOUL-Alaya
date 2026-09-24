@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   buildSourceReferenceCatalog,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SoulInterpretationResponse,
   type SourceSemanticWorkerRequest,
   type SourceSemanticWorkerResult
@@ -70,6 +71,7 @@ const DRAFT = {
 function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorkerResult {
   if (request.kind === "validate_source") return { kind: "validate_source", source_id: "artifact-1", source_version: "1",
     content_digest: `sha256:${fieldContractSha256(SOURCE)}`, source: SOURCE, catalog: CATALOG,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(SOURCE)] }], coverage: IDLE, work: WORK };
   if (request.kind === "prepare_source") {
     return {
@@ -78,6 +80,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
       source_id: request.source_id,
       source_version: "1",
       content_digest: `sha256:${fieldContractSha256(SOURCE)}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       catalog: CATALOG,
       coverage: { ...IDLE, discovery: "complete" },
       work: WORK

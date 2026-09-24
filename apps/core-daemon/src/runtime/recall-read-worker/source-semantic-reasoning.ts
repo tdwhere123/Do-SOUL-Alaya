@@ -63,7 +63,12 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
   const stores = sourceSemanticReadStores(runtime.database, payload.workspace_id, sourceId, meter, authorized);
   const stored = currentSemanticSource(stores, payload.workspace_id, sourceId);
   authorizeSemanticScope(stored.record.scope_class, authorized);
-  if (lease !== undefined && (lease.source_version !== stored.record.source_version || lease.content_digest !== stored.record.content_digest)) {
+  const attribution = stored.record.attribution_context;
+  if (attribution === undefined || attribution === null) throw new CoreError("CONFLICT", "source attribution is unavailable", {
+    details: { admission: "unavailable", unavailable: "attribution_context" }
+  });
+  if (lease !== undefined && (lease.source_version !== stored.record.source_version || lease.content_digest !== stored.record.content_digest
+    || canonicalJson(lease.attribution_context) !== canonicalJson(attribution))) {
     throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
   }
   const units = stored.content_bytes.length === 0 ? [] : indexSourceSemanticUnits(stored.content_bytes);
@@ -71,7 +76,8 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
   const cost = sourceReferencePreparationCost(assertions);
   meter.charge(cost.work_units, cost.memory_bytes, "source references");
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(stored.content_bytes), assertions, fieldContractSha256);
-  const fields = { source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest, catalog };
+  const fields = { source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest,
+    attribution_context: attribution, catalog };
   if (request.kind === "validate_source") return SourceSemanticWorkerResultSchema.parse({
     kind: request.kind, ...fields, source: stored.content_bytes,
     assertion_locations: units.map((unit) => ({ assertion_id: unit.assertion_id,
@@ -79,7 +85,8 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
     coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter)
   });
   const source_handle = issueSemanticLease(runtime, { ...leaseBase(runtime, payload, authorized), kind: "source",
-    source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest }, meter);
+    source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest,
+    attribution_context: attribution }, meter);
   return SourceSemanticWorkerResultSchema.parse({ kind: request.kind, ...fields, source_handle,
     coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter) });
 }

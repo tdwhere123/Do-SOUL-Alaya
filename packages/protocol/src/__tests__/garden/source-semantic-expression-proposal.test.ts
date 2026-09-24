@@ -6,6 +6,7 @@ import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from ".
 import { SourceSemanticResponseEnvelopeSchema } from "../../garden/source-semantic-interpretation.js";
 import { sourceSemanticValidationDiagnostics } from "../../garden/source-semantic-diagnostics.js";
 import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { buildSourceReferenceCatalog } from "../../evidence/source-reference.js";
 import { SourceSemanticExpressionGenerationSchema } from "../../garden/source-semantic-expression-proposal.js";
 import { SOURCE_SEMANTIC_MAX_DEPTH } from "../../garden/source-semantic-draft.js";
@@ -156,7 +157,8 @@ describe("nested source semantic expression proposals", () => {
     const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
     const draft = materializeSourceSemanticExpressionProposal(value, meter).draft!;
     const normalized = normalizeSourceSemantics({ draft, catalog, sha256: sha, meter,
-      source: { source_id: "nested", source_version: "1", content_digest: `sha256:${sha(source)}` },
+      source: { source_id: "nested", source_version: "1", content_digest: `sha256:${sha(source)}`,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
       producer_id: "expression-test", producer_version: "1", contract_version: "source-interpretation-v4" });
     expect(normalized.status).toBe("normalized");
     if (normalized.status !== "normalized") throw new Error("Expected normalized actual anchors");

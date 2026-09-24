@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApprovedSemanticContextSchema, UtteranceAttributionSchema } from "../../conversation/utterance-attribution.js";
 import {
   SOURCE_SEMANTIC_MAX_BYTES, SOURCE_SEMANTIC_MAX_DEPTH,
   SourceSemanticHandleSchema, SourceSemanticReadingSchema
@@ -186,6 +187,8 @@ export type SourceSemanticQueryMeaningEnvelope = Readonly<{
   readonly original_query_digest: string;
   readonly producer_id: string;
   readonly producer_version: string;
+  readonly approved_fixed_context: z.infer<typeof ApprovedSemanticContextSchema> | null;
+  readonly attribution_context: z.infer<typeof UtteranceAttributionSchema>;
 }>;
 
 /** Host graph construction. Does not repair a legacy producer graph. */
@@ -201,6 +204,8 @@ export function materializeSourceSemanticQueryMeaning(
   return SourceSemanticQuerySchema.parse({
     contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
     original_query_digest: envelope.original_query_digest,
+    approved_fixed_context: ApprovedSemanticContextSchema.nullable().parse(envelope.approved_fixed_context),
+    attribution_context: UtteranceAttributionSchema.parse(envelope.attribution_context),
     producer_id: envelope.producer_id,
     producer_version: envelope.producer_version,
     contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT,

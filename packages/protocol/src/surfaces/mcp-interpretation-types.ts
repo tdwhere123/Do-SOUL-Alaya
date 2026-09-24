@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
 import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "../garden/source-semantic-access.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
@@ -114,6 +115,7 @@ export const SoulInterpretationPrepareSourceResponseSchema = z.object({
   source_id: BoundedIdSchema.optional(),
   source_version: BoundedIdSchema.optional(),
   content_digest: Sha256DigestSchema.optional(),
+  attribution_context: UtteranceAttributionSchema.optional(),
   catalog: SourceReferenceCatalogSchema.optional(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   ...CoverageWork

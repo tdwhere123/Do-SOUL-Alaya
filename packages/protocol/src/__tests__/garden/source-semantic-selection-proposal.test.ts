@@ -10,6 +10,7 @@ import { SOURCE_SEMANTIC_MAX_DEPTH } from "../../garden/source-semantic-draft.js
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { buildSourceReferenceCatalog, sourceReferenceResolver } from "../../evidence/source-reference.js";
 import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const quote = (text: string, assertion_id = 1, occurrence?: number) => ({ assertion_id, text,
@@ -192,7 +193,8 @@ describe("exact-text source semantic selections", () => {
       new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 1 }))).toThrow(SourceSemanticResourceExhausted);
     const draft = compile(proposal([root(fact())]));
     expect(normalizeSourceSemantics({ draft, ...binding(["Mira shelved atlas."]),
-      source: { source_id: "selection", source_version: "1", content_digest: `sha256:${sha256("Mira shelved atlas.")}` },
+      source: { source_id: "selection", source_version: "1", content_digest: `sha256:${sha256("Mira shelved atlas.")}`,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
       producer_id: "neutral", producer_version: "1", contract_version: "source-interpretation-v4" }).status).toBe("normalized");
   });
 });

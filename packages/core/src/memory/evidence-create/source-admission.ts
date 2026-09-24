@@ -7,6 +7,7 @@ import {
   hashSourceRecordId,
   verifyAddressableSourceSpan,
   verifySourceRecordIdentity,
+  bindUtteranceAttribution, UNKNOWN_UTTERANCE_ATTRIBUTION, canonicalJson, compareUtcInstants,
   type AddressableSourceSpan,
   type FieldContractSha256,
   type SourceAdmissionPort,
@@ -60,6 +61,17 @@ function persistRecord(
     request.speaker === undefined || request.speaker === null ? [] : [request.speaker]
   );
   const scopeClass = retainedSourceScopeClass(request.scope_class);
+  const attribution = request.attribution_context === null ? null : bindUtteranceAttribution(
+    request.attribution_context === undefined ? UNKNOWN_UTTERANCE_ATTRIBUTION : request.attribution_context,
+    request.content_bytes);
+  const current = stores.getCurrentRecord(request.workspace_id, request.source_id);
+  const retained = stores.getStoredRecord(request.workspace_id, identity);
+  if (retained === null && current !== null &&
+      canonicalJson(current.attribution_context ?? null) !== canonicalJson(attribution) &&
+      (current.source_version === request.source_version ||
+        compareUtcInstants(request.recorded_at, current.recorded_at) !== 1)) {
+    throw new Error("source attribution correction requires a later recorded time and new source revision");
+  }
   const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse({
     ...receiptFields(identity),
     schema_version: 1,
@@ -74,8 +86,16 @@ function persistRecord(
     valid_to: request.valid_to,
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     ...(speaker === undefined ? {} : { speaker }),
-    ...(scopeClass === undefined ? {} : { scope_class: scopeClass })
+    ...(scopeClass === undefined ? {} : { scope_class: scopeClass }),
+    attribution_context: attribution
   }), sha256);
+  if (attribution === null) {
+    if (retained === null || (retained.record.attribution_context !== null &&
+        retained.record.attribution_context !== undefined) ||
+        retained.content_bytes !== request.content_bytes) {
+      throw new Error("null attribution is reserved for an exact retained source record");
+    }
+  }
   return stores.putRecord(record, request.content_bytes);
 }
 

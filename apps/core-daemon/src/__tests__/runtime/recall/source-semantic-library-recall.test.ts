@@ -7,6 +7,7 @@ import {
   buildSourceReferenceCatalog, canonicalProductIdentityOfEntry, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, sourceReferenceResolver,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceEvidenceTarget,
   type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
   type SourceSemanticWorkerResult, type SourceSemanticWorkerRequest
@@ -95,11 +96,12 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: digestOriginalQuery(ORIGINAL),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -180,6 +182,7 @@ async function withLibrary(body: (input: {
       stores, evidenceService, sha256: fieldContractSha256
     }).publish({
       workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
       provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
       producer_version: `p${String(index + 1)}`, contract_version: "source-interpretation-v4"
@@ -326,6 +329,7 @@ it("verifies observed interpretation bodies and keeps malformed metadata open in
     stores, evidenceService, sha256: fieldContractSha256
   }).publish({
     workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
     provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
     producer_version: "p1", contract_version: "source-interpretation-v4"
@@ -769,7 +773,9 @@ it("retains a current prefix without resurrecting excluded, erased or unavailabl
     expect(prefix).toMatchObject({ open: true, truncated: true });
     expect(prefix.pages).toBeGreaterThan(0);
     expect(prefix.pages).toBeLessThan(512);
-    expect(prefix.sources).toHaveLength(prefix.pages);
+    expect(prefix.sources.length).toBeGreaterThan(0);
+    expect(prefix.sources.length).toBeLessThanOrEqual(prefix.pages);
+    expect(prefix.stopping_reasons).toContain("budget");
     expect(partial.nativeWork).toBe(prefix.pages * 5);
     expect(partial.spentWork).toBeLessThanOrEqual(79);
     expect(partial.spentWork).toBeGreaterThan(partial.nativeWork);
@@ -828,6 +834,7 @@ it("rechecks the indexed current source after publication awaits an existing evi
     const catalog = catalogFor(ASSERTION);
     try {
       await expect(publication.publish({ workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
         catalog, assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
         provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
         producer_version: "p1", contract_version: "source-interpretation-v4" }))

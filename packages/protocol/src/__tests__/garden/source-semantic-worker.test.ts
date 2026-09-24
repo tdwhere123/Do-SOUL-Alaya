@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
 import { SourceSemanticAccessReceiptSchema } from "../../garden/source-semantic-access.js";
@@ -23,8 +24,9 @@ const coverage = {
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
 const validQuery = SourceSemanticQuerySchema.parse({
-  contract: "source-semantic-query-v3", original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
+  contract: "source-semantic-query-v4", original_query_digest: digest,
+  approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v4",
   variables: [{ id: "actor", sort: "entity" }, { id: "fUse", sort: "proposition" }],
   alternatives: [{ frames: [{ id: "qUse", variable: "fUse", predicate_reading: "use",
     role_requirements: [{ id: "agent", role_reading: "agent", target_variable: "actor",

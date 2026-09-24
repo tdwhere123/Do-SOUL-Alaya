@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   materializeSourceSemanticQueryMeaning, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticRequest, receiveSourceSemantics } from "@do-soul/alaya-soul";
@@ -79,6 +80,7 @@ function meaningQuery(original: string, conditions: object[]): SourceSemanticQue
   const semantics = materializeSourceSemanticQueryMeaning({
     contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions }], gaps: []
   }, { original_query: original, original_query_digest: digestOriginalQuery(original),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" });
   expect(admitSourceSemanticQuery(semantics, original).kind).toBe("admitted");
   return semantics;

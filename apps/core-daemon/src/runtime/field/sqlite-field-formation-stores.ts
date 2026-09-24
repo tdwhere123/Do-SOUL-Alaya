@@ -106,6 +106,7 @@ function recordToRow(
     operator_id: record.operator_id,
     speaker: record.speaker ?? null,
     scope_class: record.scope_class ?? null,
+    attribution_context: record.attribution_context ?? null,
     source_body: contentBytes
   };
 }

@@ -1,5 +1,6 @@
 import { StorageError } from "../../shared/errors.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
+import { canonicalJson } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
 import {
@@ -34,13 +35,13 @@ const SOURCE_RECORD_PAGE_MAX = 512;
 const SOURCE_BODY_BYTE_MAX = 65_536;
 const SOURCE_METADATA_BYTE_MAX = 7864;
 const SOURCE_METADATA_COLUMNS = ["record_id", "workspace_id", "source_id", "source_version", "content_digest",
-  "evidence_object_id", "recorded_at", "event_time", "valid_from", "valid_to", "operator_id", "speaker", "scope_class"] as const;
+  "evidence_object_id", "recorded_at", "event_time", "valid_from", "valid_to", "operator_id", "speaker", "scope_class", "attribution_context_json"] as const;
 const METADATA_BYTES = SOURCE_METADATA_COLUMNS.map((column) => `COALESCE(octet_length(${column}), 0)`).join(" + ");
 
 const RECORD_SELECT = `
   SELECT record_id, workspace_id, source_id, source_version, content_digest,
          evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-         operator_id, speaker, scope_class, source_body
+         operator_id, speaker, scope_class, attribution_context_json, source_body
   FROM source_records
 `;
 
@@ -101,8 +102,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
         evidence_object_id, recorded_at, event_time, valid_from, valid_to,
-        operator_id, speaker, scope_class, source_body, retained_content_bytes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        operator_id, speaker, scope_class, attribution_context_json, source_body, retained_content_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, record_id) DO NOTHING
     `);
     this.selectStatement = database.connection.prepare(
@@ -160,6 +161,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
           row.record_id, row.workspace_id, row.source_id, row.source_version,
           row.content_digest, row.evidence_object_id, row.recorded_at, row.event_time,
           row.valid_from, row.valid_to, row.operator_id, row.speaker, row.scope_class,
+          row.attribution_context === null ? null : canonicalJson(row.attribution_context),
           row.source_body, row.source_body === null ? null : Buffer.byteLength(row.source_body, "utf8")
         ),
         () => this.findById(row.workspace_id, row.record_id),
@@ -430,7 +432,8 @@ function sameRecord(existing: FieldSourceRecordRow, incoming: FieldSourceRecordR
     existing.valid_from === incoming.valid_from &&
     existing.valid_to === incoming.valid_to &&
     (existing.speaker ?? null) === (incoming.speaker ?? null) &&
-    (existing.scope_class ?? null) === (incoming.scope_class ?? null);
+    (existing.scope_class ?? null) === (incoming.scope_class ?? null) &&
+    canonicalJson(existing.attribution_context ?? null) === canonicalJson(incoming.attribution_context ?? null);
 }
 
 function sameSpan(existing: FieldSourceSpanRow, incoming: FieldSourceSpanRow): boolean {

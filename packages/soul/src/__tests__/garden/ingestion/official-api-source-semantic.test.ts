@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  sourceReferenceResolver, sourceSemanticInterpretationIdentity, type SourceInterpretationProfile
+  sourceReferenceResolver, sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION,
+  normalizeSourceSemantics, UTTERANCE_ATTRIBUTION_CONTRACT,
+  type SourceInterpretationProfile, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
-  buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, semanticSha256,
+  buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, buildSourceSemanticQueryRequest, semanticSha256,
   sourceSemanticResponseJsonSchema, retainedSourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog,
   parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, retainedSourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
@@ -24,11 +26,37 @@ const PROFILE: SourceInterpretationProfile = {
 
 const TEXT = "The archivist accessioned folio F into bay B.";
 
+it("keeps source bytes and query text identity stable while changing current H and Q request context", () => {
+  const source = sourceInput();
+  const capturedSource: UtteranceAttribution = { contract: UTTERANCE_ATTRIBUTION_CONTRACT,
+    status: "captured", issuer_scope: "authored-harness", utterances: [{ occurrence_id: "source-turn",
+      utf8_span: [0, Buffer.byteLength(source.sourceCorpus)], conversation_ref: "conversation-1", author_ref: "author-1" }] };
+  const unknownH = buildCurrentSourceSemanticRequest(source);
+  const capturedH = buildCurrentSourceSemanticRequest({ ...source, attribution_context: capturedSource });
+  expect(unknownH.source_digest).toBe(capturedH.source_digest);
+  expect(sourceSemanticRequestCatalog(unknownH)).toEqual(sourceSemanticRequestCatalog(capturedH));
+  expect(unknownH.source_request.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+  expect(JSON.stringify(unknownH)).not.toBe(JSON.stringify(capturedH));
+
+  const original_query = "which folio was accessioned into bay B?";
+  const capturedQuery: UtteranceAttribution = { ...capturedSource, utterances: [{
+    occurrence_id: "query-turn", utf8_span: [0, Buffer.byteLength(original_query)],
+    conversation_ref: "conversation-1", author_ref: "author-1" }] };
+  const input = { original_query, producer_id: "query-producer", producer_version: "1" };
+  const unknownQ = buildSourceSemanticQueryRequest(input);
+  const capturedQ = buildSourceSemanticQueryRequest({ ...input, attribution_context: capturedQuery });
+  expect(unknownQ.original_query_digest).toBe(capturedQ.original_query_digest);
+  expect(unknownQ.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+  expect(JSON.stringify(unknownQ)).not.toBe(JSON.stringify(capturedQ));
+});
+
 // Archived graph proposals remain replayable; current content compilation has its own suite.
 function buildSourceSemanticRequest(input: Parameters<typeof buildCurrentSourceSemanticRequest>[0]) {
   const current = buildCurrentSourceSemanticRequest(input);
-  return parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
-    ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
+  const { attribution_context: _currentAttribution, ...historicalRequest } = current.source_request;
+  return parseRetainedSourceSemanticRequest({ ...current, schema_version: 5,
+    source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
+    ...historicalRequest, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
   } });
 }
 function proposeSourceSemantics(input: Parameters<typeof proposeCurrentSourceSemantics>[0], injected?: { rawJson: string }) {
@@ -99,13 +127,29 @@ function interpretedJson(request: ReturnType<typeof buildSourceSemanticRequest>,
   });
 }
 
+function currentInterpretation() {
+  const input = sourceInput();
+  const request = buildCurrentSourceSemanticRequest(input);
+  const normalized = normalizeSourceSemantics({
+    draft: accessionDraft(request), catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256,
+    source: { source_id: input.source_id, source_version: input.source_version,
+      content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
+    producer_id: input.producer_id, producer_version: input.producer_version,
+    contract_version: "source-interpretation-v4"
+  });
+  if (normalized.status !== "normalized") throw new Error("current source fixture did not normalize");
+  return normalized.interpretation;
+}
+
 const digest = `sha256:${"a".repeat(64)}`;
 
 function admittedQuery() {
   return {
-    contract: "source-semantic-query-v3" as const,
+    contract: "source-semantic-query-v4" as const,
     original_query_digest: `sha256:${semanticSha256("which folio was accessioned into bay B?")}`,
-    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v3",
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v4",
     variables: [
       { id: "folio", sort: "entity" as const }, { id: "bay", sort: "entity" as const },
       { id: "fAccession", sort: "proposition" as const }
@@ -337,8 +381,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
   it("prepares native query-semantics and semantic-correspondence prompts without provider calls and retains them on injected success or failure", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("provider calls are forbidden"));
     try {
-      const source = sourceInput(), sourceRequest = buildSourceSemanticRequest(source);
-      const sourceInterpretation = proposeSourceSemantics(source, { rawJson: interpretedJson(sourceRequest) }).interpretation!;
+      const sourceInterpretation = currentInterpretation();
       const query = admittedQuery();
       const queryInput = { original_query: "which folio was accessioned into bay B?", producer_id: "query-producer", producer_version: "1" };
       const correspondenceInput = { original_query: "which folio was accessioned into bay B?", admitted_query_semantics: query,
@@ -406,8 +449,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
   });
 
   it("rejects semantic_correspondence outcome gaps rather than returning successful empty gaps", () => {
-    const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const sourceInterpretation = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
+    const sourceInterpretation = currentInterpretation();
     const received = proposeCorrespondenceSemantics({ original_query: "which folio was accessioned into bay B?", admitted_query_semantics: admittedQuery(),
       source_interpretation_descriptors: [{ source_interpretation_id: sourceSemanticInterpretationIdentity(sourceInterpretation, semanticSha256), interpretation: sourceInterpretation }],
       producer_id: "correspondence-producer", producer_version: "1" }, { rawJson: JSON.stringify({
@@ -452,8 +494,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
   });
 
   it("accepts admitted query semantics plus source-interpretation descriptors and rejects ranking or seeds", () => {
-    const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const sourceInterpretation = proposeSourceSemantics(input, { rawJson: interpretedJson(request) }).interpretation!;
+    const sourceInterpretation = currentInterpretation();
     const correspondenceInput = { original_query: "which folio was accessioned into bay B?",
       admitted_query_semantics: admittedQuery(),
       source_interpretation_descriptors: [{

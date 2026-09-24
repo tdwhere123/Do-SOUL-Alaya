@@ -1,4 +1,5 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
+  UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -26,10 +27,8 @@ export function semanticProposalWorksetContract(requestProfile: string) {
 
 const QueryItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
-  approved_fixed_context: z.object({
-    context_id: z.string().min(1).max(256),
-    notes: z.string().min(1).max(1024).optional()
-  }).strict().optional()
+  approved_fixed_context: ApprovedSemanticContextSchema.optional(),
+  attribution_context: UtteranceAttributionSchema.optional()
 }).strict();
 
 const CorrespondenceItemSchema = z.object({
@@ -92,7 +91,8 @@ export function materializeSemanticProposalLines(
       const parsed = QueryItemSchema.parse(item);
       const request = buildSourceSemanticQueryRequest({
         original_query: parsed.original_query, producer_id, producer_version,
-        ...(parsed.approved_fixed_context === undefined ? {} : { approved_fixed_context: parsed.approved_fixed_context })
+        ...(parsed.approved_fixed_context === undefined ? {} : { approved_fixed_context: parsed.approved_fixed_context }),
+        attribution_context: parsed.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION
       });
       return bindLine(workset, "query", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema,
         parsed.original_query, maxOutputTokens);

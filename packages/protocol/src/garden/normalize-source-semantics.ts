@@ -17,8 +17,9 @@ import {
 } from "./source-semantic-draft.js";
 import {
   SourceSemanticInterpretationSchema, SourceSemanticSourceBindingSchema,
+  RetainedSourceSemanticInterpretationSchema, RetainedSourceSemanticSourceBindingSchema,
   type SourceSemanticInterpretation, type SourceSemanticNormalizedMention,
-  type SourceSemanticSourceBinding
+  type SourceSemanticSourceBinding, type RetainedSourceSemanticInterpretation
 } from "./source-semantic-interpretation.js";
 
 export const SOURCE_SEMANTIC_K_VERSION = "source-semantic-k-v3" as const;
@@ -43,6 +44,9 @@ export type SourceSemanticNormalizationInput = Readonly<{
   readonly meter?: SourceSemanticResourceLedger;
   readonly normalizer_version?: typeof SOURCE_SEMANTIC_NORMALIZER_VERSION | typeof SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION;
 }>;
+export type RetainedSourceSemanticNormalizationInput = Omit<SourceSemanticNormalizationInput, "source"> & Readonly<{
+  source: z.infer<typeof RetainedSourceSemanticSourceBindingSchema>;
+}>;
 
 export type SourceSemanticHandleMap = Readonly<Record<string, string>>;
 
@@ -54,12 +58,29 @@ export type SourceSemanticNormalizationResult =
     }
   | { readonly status: "invalid"; readonly reason: string }
   | { readonly status: "resource_exhausted" };
+export type RetainedSourceSemanticNormalizationResult =
+  | { readonly status: "normalized"; readonly interpretation: RetainedSourceSemanticInterpretation;
+      readonly alpha_map: SourceSemanticHandleMap }
+  | { readonly status: "invalid"; readonly reason: string }
+  | { readonly status: "resource_exhausted" };
 
 type Ok<T> = { readonly status: "ok"; readonly value: T };
 
 export function normalizeSourceSemantics(
   input: SourceSemanticNormalizationInput
 ): SourceSemanticNormalizationResult {
+  return normalize(input, false) as SourceSemanticNormalizationResult;
+}
+
+/** Original source shape and identity remain isolated from current execution. */
+export function normalizeRetainedSourceSemantics(
+  input: RetainedSourceSemanticNormalizationInput
+): RetainedSourceSemanticNormalizationResult {
+  return normalize(input, true) as RetainedSourceSemanticNormalizationResult;
+}
+
+function normalize(input: SourceSemanticNormalizationInput | RetainedSourceSemanticNormalizationInput,
+  retained: boolean): SourceSemanticNormalizationResult | RetainedSourceSemanticNormalizationResult {
   const meter = input.meter ?? new SourceSemanticResourceLedger(input.budget ?? { work_units: 200000, memory_bytes: 20000000 });
   const gated = gateResources(input, meter);
   if (gated !== undefined) return gated;
@@ -72,11 +93,11 @@ export function normalizeSourceSemantics(
   } catch (error) { return fromCaught(error); }
   const mentions = resolveMentions(accounted.mentions, input.catalog, input.sha256);
   if (mentions.status !== "ok") return mentions;
-  return assemble(accounted, mentions.value, input, meter);
+  return assemble(accounted, mentions.value, input, meter, retained);
 }
 
 function gateResources(
-  input: SourceSemanticNormalizationInput, meter: SourceSemanticResourceLedger
+  input: SourceSemanticNormalizationInput | RetainedSourceSemanticNormalizationInput, meter: SourceSemanticResourceLedger
 ): SourceSemanticNormalizationResult | undefined {
   try {
     meter.retain(input.draft, "normalization input");
@@ -130,15 +151,15 @@ function resolveMentions(
 function assemble(
   draft: SourceSemanticDraft,
   mentions: readonly SourceSemanticNormalizedMention[],
-  input: SourceSemanticNormalizationInput,
-  meter: SourceSemanticResourceLedger
-): SourceSemanticNormalizationResult {
-  const source = SourceSemanticSourceBindingSchema.safeParse(input.source);
+  input: SourceSemanticNormalizationInput | RetainedSourceSemanticNormalizationInput,
+  meter: SourceSemanticResourceLedger, retained: boolean
+): SourceSemanticNormalizationResult | RetainedSourceSemanticNormalizationResult {
+  const source = (retained ? RetainedSourceSemanticSourceBindingSchema : SourceSemanticSourceBindingSchema).safeParse(input.source);
   if (!source.success) return fromIssues(source.error.issues);
   try { chargeSourceSemanticValidation(draft, meter); }
   catch (error) { return fromCaught(error); }
   const occurrences = [...draft.frames, ...draft.operators];
-  const parsed = SourceSemanticInterpretationSchema.safeParse({
+  const parsed = (retained ? RetainedSourceSemanticInterpretationSchema : SourceSemanticInterpretationSchema).safeParse({
     contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: input.normalizer_version ?? SOURCE_SEMANTIC_NORMALIZER_VERSION,

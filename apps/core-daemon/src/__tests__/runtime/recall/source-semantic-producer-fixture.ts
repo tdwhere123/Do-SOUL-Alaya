@@ -2,6 +2,7 @@ import {
   SourceSemanticQuerySchema, SourceSemanticCorrespondenceSchema, sourceSemanticQueryIdentity,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
@@ -13,6 +14,8 @@ export function authoredQuerySemantics(input: SourceSemanticQueryProposalInput, 
   const query = SourceSemanticQuerySchema.parse({ contract: SOURCE_SEMANTIC_QUERY_CONTRACT,
     original_query_digest: `sha256:${fieldContractSha256(input.original_query)}`,
     producer_id: input.producer_id, producer_version: input.producer_version,
+    approved_fixed_context: input.approved_fixed_context ?? null,
+    attribution_context: input.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION,
     contract_version: SOURCE_SEMANTIC_QUERY_CONTRACT, ...(body as object) });
   return { query, outcome: { status: "interpreted" as const } };
 }

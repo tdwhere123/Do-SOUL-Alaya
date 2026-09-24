@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApprovedSemanticContextSchema, UtteranceAttributionSchema } from "../../conversation/utterance-attribution.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "./common.js";
 import { canonicalJson } from "../selection/capture/canonical-json.js";
@@ -8,7 +9,7 @@ import {
   SourceSemanticReadingSchema
 } from "../../garden/source-semantic-draft.js";
 
-export const SOURCE_SEMANTIC_QUERY_CONTRACT = "source-semantic-query-v3" as const;
+export const SOURCE_SEMANTIC_QUERY_CONTRACT = "source-semantic-query-v4" as const;
 export const SOURCE_SEMANTIC_CONTEXT_OBLIGATION_KINDS = [
   "asserted_at_source", "entailed_at_source", "explicit_embedded_structure", "unresolved"
 ] as const;
@@ -93,6 +94,8 @@ export const SourceSemanticQueryEvaluationSchema = z.discriminatedUnion("kind", 
 const SourceSemanticQueryObjectSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_QUERY_CONTRACT),
   original_query_digest: Sha256DigestSchema,
+  approved_fixed_context: ApprovedSemanticContextSchema.nullable(),
+  attribution_context: UtteranceAttributionSchema,
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,

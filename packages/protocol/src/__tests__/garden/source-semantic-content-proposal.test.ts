@@ -5,6 +5,7 @@ import { SourceSemanticResponseEnvelopeSchema } from "../../garden/source-semant
 import { createHash } from "node:crypto";
 import { buildSourceReferenceCatalog } from "../../evidence/source-reference.js";
 import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { sourceSemanticValidationDiagnostics } from "../../garden/source-semantic-diagnostics.js";
 import { z } from "zod";
 
@@ -265,7 +266,8 @@ describe("source-bound content proposal compiler", () => {
     const run = (meter: SourceSemanticResourceLedger) => {
       const draft = materializeSourceSemanticContentProposal(value, meter).draft!;
       return normalizeSourceSemantics({ draft, catalog, sha256: sha, meter,
-        source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha(source)}` },
+        source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha(source)}`,
+          attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
         producer_id: "proposal-test", producer_version: "1", contract_version: "source-interpretation-v4" });
     };
     const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });

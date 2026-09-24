@@ -1,4 +1,4 @@
-import { AlayaError, type SourceReferenceCatalog, type SourceSemanticInterpretation,
+import { AlayaError, type SourceReferenceCatalog, type SourceSemanticInterpretation, type UtteranceAttribution,
   type SourceSemanticPublishedInterpretation } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 
@@ -7,6 +7,7 @@ type Locations = NonNullable<SourceSemanticInterpretation["source"]["assertion_l
 type Publication = Readonly<{
   publish(input: Readonly<{
     workspaceId: string; runId: string; artifactKey: string; source: string; catalog: SourceReferenceCatalog;
+    attribution_context: UtteranceAttribution;
     provenance: Readonly<{ producer_id: string; principal?: string; preparation_handle?: string }>;
     interpretation?: SourceSemanticInterpretation; draft?: unknown; assertion_locations: Locations;
     producer_version: string; contract_version: string;
@@ -20,6 +21,7 @@ type Publication = Readonly<{
 export async function publishAdmittedSourceSemanticInterpretation(input: Readonly<{
   publication: Publication; workspaceId: string; runId: string; artifactKey: string; source: string;
   catalog: SourceReferenceCatalog; producer_id: string; producer_version: string; contract_version: string;
+  attribution_context: UtteranceAttribution;
   interpretation?: SourceSemanticInterpretation; draft?: unknown; assertion_locations: Locations;
 }>) {
   const hasInterpretation = input.interpretation !== undefined;
@@ -34,6 +36,7 @@ export async function publishAdmittedSourceSemanticInterpretation(input: Readonl
   return input.publication.publish({
     workspaceId: input.workspaceId, runId: input.runId, artifactKey: input.artifactKey,
     source: input.source, catalog: input.catalog,
+    attribution_context: input.attribution_context,
     provenance: { producer_id: input.producer_id },
     producer_version: input.producer_version, contract_version: input.contract_version,
     ...(hasInterpretation ? { interpretation: input.interpretation } : { draft: input.draft }),

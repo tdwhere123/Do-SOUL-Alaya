@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
-  sourceSemanticQueryBranchViews
+  sourceSemanticQueryBranchViews, UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
@@ -70,9 +70,10 @@ function existentialBody() {
 
 function canonicalQuery(original: string, body: object) {
   return SourceSemanticQuerySchema.parse({
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: `sha256:${semanticSha256(original)}`,
-    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v3",
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v4",
     ...body
   });
 }
@@ -119,7 +120,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
               { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
             ] } }] }] } })
     });
-    expect(received.request.contract).toBe("source-semantic-query-request-v7");
+    expect(received.request.contract).toBe("source-semantic-query-request-v8");
     expect(received.outcome.status).toBe("interpreted");
     expect(received.query?.alternatives[0]?.frames[0]?.role_requirements).toEqual([
       { id: "reporter", role_reading: "reporter", target_variable: key, support: { kind: "query_text", excerpt: "Who" } }
@@ -398,7 +399,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         query: existentialBody()
       })
     });
-    expect(query.request.contract).toBe("source-semantic-query-request-v7");
+    expect(query.request.contract).toBe("source-semantic-query-request-v8");
     expect(query.outcome.status).toBe("invalid");
     expect(query.query).toBeUndefined();
 
@@ -413,7 +414,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         semantic_correspondence: { correspondences: [] }
       })
     });
-    expect(semantic_correspondence.request.contract).toBe("source-semantic-correspondence-request-v4");
+    expect(semantic_correspondence.request.contract).toBe("source-semantic-correspondence-request-v5");
     expect(semantic_correspondence.outcome.status).toBe("invalid");
     expect(semantic_correspondence.semantic_correspondence).toBeUndefined();
   });

@@ -15,6 +15,7 @@ import type {
 } from "./projection-generation.js";
 import type { QueryCondition, QueryConditionReceipt } from "./query-condition.js";
 import type { CausalUsageReceipt } from "./causal-usage.js";
+import type { UtteranceAttribution } from "../../conversation/utterance-attribution.js";
 import type { EffectDecisionReceipt, EffectRequest } from "./proof-effect.js";
 
 export type SourceAdmissionRequest = Readonly<{
@@ -29,6 +30,8 @@ export type SourceAdmissionRequest = Readonly<{
   readonly valid_to: string | null;
   readonly speaker?: SourceSpeakerRole | null;
   readonly scope_class?: SourceScopeClass | null;
+  /** Null only re-admits an exact existing historical record to attach spans. */
+  readonly attribution_context?: UtteranceAttribution | null;
   readonly spans: readonly Readonly<{
     readonly start_offset: number;
     readonly end_offset: number;

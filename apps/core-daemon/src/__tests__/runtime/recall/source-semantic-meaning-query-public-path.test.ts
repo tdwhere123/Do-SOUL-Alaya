@@ -6,7 +6,9 @@ import { expect, it } from "vitest";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
-  SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
+  type SourceSemanticDraft,
+  SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
+  UTTERANCE_ATTRIBUTION_CONTRACT, type UtteranceAttribution, sourceSemanticQueryIdentity
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
@@ -33,6 +35,12 @@ const BUDGET = {
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10
 };
 const SCOPES = { mode: "named" as const, scopes: ["project"] };
+const SOURCE_ATTRIBUTION: UtteranceAttribution = { contract: UTTERANCE_ATTRIBUTION_CONTRACT,
+  status: "captured", issuer_scope: "authored-harness", utterances: [{ occurrence_id: "source-utterance",
+    utf8_span: [0, Buffer.byteLength(SOURCE)], conversation_ref: "conversation-1", author_ref: "person-1" }] };
+const QUERY_ATTRIBUTION: UtteranceAttribution = { contract: UTTERANCE_ATTRIBUTION_CONTRACT,
+  status: "captured", issuer_scope: "authored-harness", utterances: [{ occurrence_id: "query-utterance",
+    utf8_span: [0, Buffer.byteLength(ORIGINAL)], conversation_ref: "conversation-1", author_ref: "person-1" }] };
 
 /** Contract-migrated meaning fixture for the model response receiver. */
 const FROZEN_MEANING_RAW = JSON.stringify({
@@ -84,7 +92,8 @@ function referentOf(sourceInterpretation: SourceSemanticInterpretation, text: st
   return row;
 }
 
-async function admitSource(filename: string, content = SOURCE, sourceId = "artifact-lathe"): Promise<void> {
+async function admitSource(filename: string, content = SOURCE, sourceId = "artifact-lathe",
+  attribution?: UtteranceAttribution): Promise<void> {
   const { database } = await createRecallRealStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
@@ -94,7 +103,8 @@ async function admitSource(filename: string, content = SOURCE, sourceId = "artif
   await admission.admit({
     workspace_id: WS, source_id: sourceId, source_version: "1", content_bytes: content,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
-    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(content)
+    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(content),
+    ...(attribution === undefined ? {} : { attribution_context: attribution })
   }, { workspaceId: WS });
   database.close();
   closeCachedDatabase(filename);
@@ -132,11 +142,12 @@ async function interpret(handler: Handler, args: unknown, context: Context) {
   return SoulInterpretationResponseSchema.parse(result.output);
 }
 
-function receiveFrozenQuerySemantics() {
+function receiveFrozenQuerySemantics(attribution?: UtteranceAttribution) {
   const received = proposeQuerySemantics({
     original_query: ORIGINAL,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
-    producer_version: "1"
+    producer_version: "1",
+    ...(attribution === undefined ? {} : { attribution_context: attribution })
   }, { rawJson: FROZEN_MEANING_RAW });
   if (received.outcome.status !== "interpreted" || received.query === undefined) {
     throw new Error(`query semantics receive failed: ${JSON.stringify(received.outcome)}`);
@@ -188,17 +199,18 @@ function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceI
  * opt-in typed source interpretation, query semantics, and semantic correspondence library path. Ordinary `soul.recall` is not that surface.
  */
 it("recalls admitted query meaning through SQLite reopen, worker, and public interpretation", async () => {
-  const receivedQuerySemantics = receiveFrozenQuerySemantics();
-  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v7");
+  const receivedQuerySemantics = receiveFrozenQuerySemantics(QUERY_ATTRIBUTION);
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v8");
   expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
   const filename = join(directory, "alaya.db");
   try {
-    await admitSource(filename);
+    await admitSource(filename, SOURCE, "artifact-lathe", SOURCE_ATTRIBUTION);
     const session = await openSession(filename);
     let sourceInterpretationId: string;
     let sourceInterpretation: SourceSemanticInterpretation;
+    let sourceDraft: SourceSemanticDraft;
     try {
       const prepared = await interpret(session.handler, {
         operation: "prepare_source", source_id: "artifact-lathe", budget: BUDGET, authorized_scopes: SCOPES
@@ -209,7 +221,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
       const catalog = prepared.catalog;
       const receivedInterpretation = proposeSourceSemantics({
         sourceCorpus: SOURCE, assertionIds: [1], source_id: "artifact-lathe", source_version: "1",
-        producer_id: "test-author", producer_version: "p1"
+        producer_id: "test-author", producer_version: "p1", attribution_context: SOURCE_ATTRIBUTION
       }, {
         rawJson: JSON.stringify({
           contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
@@ -229,6 +241,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
       if (receivedInterpretation.draft === undefined || receivedInterpretation.interpretation === undefined) {
         throw new Error(`source-interpretation receive failed: ${JSON.stringify(receivedInterpretation.outcome)}`);
       }
+      sourceDraft = receivedInterpretation.draft;
       const published = await interpret(session.handler, {
         operation: "propose", source_handle: prepared.source_handle, draft: receivedInterpretation.draft,
         producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4",
@@ -245,8 +258,8 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
 
     const reopened = await openSession(filename);
     try {
-      const admitted = receiveFrozenQuerySemantics();
-      expect(admitted.request.contract).toBe("source-semantic-query-request-v7");
+      const admitted = receiveFrozenQuerySemantics(QUERY_ATTRIBUTION);
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v8");
       const querySemanticsAfter = admitted.query;
       const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {
@@ -259,6 +272,9 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
       expect(proofSlot).toBeDefined();
       expect(recalled.proofs?.some((row) => row.source_interpretation_id === sourceInterpretationId && (row.binding_results?.length ?? 0) > 0)).toBe(true);
       const proof = recalled.proofs!.find(row => row.source_interpretation_id === sourceInterpretationId)!;
+      expect(proof.source_record.attribution_context).toEqual(SOURCE_ATTRIBUTION);
+      expect(proof.interpretation.source.attribution_context).toEqual(SOURCE_ATTRIBUTION);
+      expect(proof.query.attribution_context).toEqual(QUERY_ATTRIBUTION);
       expect(proof.binding_results?.map(row => row.kind).sort()).toEqual(["answer", "evidence"]);
       expect(proof.binding_results?.find(row => row.kind === "evidence")?.query_complete).toBe(false);
       expect(proofSlot!.witnesses).toHaveLength(2);
@@ -266,6 +282,50 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
         operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
       expect(recalled.results?.[proofSlot!.index]?.object_kind).toBe("semantic_proof");
       expect(recalled.delivery_id).toEqual(expect.any(String));
+      const otherQueryAttribution: UtteranceAttribution = { ...QUERY_ATTRIBUTION, status: "captured",
+        utterances: [{ ...QUERY_ATTRIBUTION.utterances[0]!, author_ref: "person-2" }] };
+      const shifted = receiveFrozenQuerySemantics(otherQueryAttribution);
+      expect(sourceSemanticQueryIdentity(shifted.query, fieldContractSha256)).not.toBe(
+        sourceSemanticQueryIdentity(querySemanticsAfter, fieldContractSha256));
+      const staleCorrespondence = await interpret(reopened.handler, {
+        operation: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
+        query_semantics: shifted.query, semantic_correspondences: [semantic_correspondence],
+        budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
+      }, reopened.context);
+      expect(staleCorrespondence.operation).toBe("recall");
+      if (staleCorrespondence.operation === "recall") expect(staleCorrespondence.proofs ?? []).toEqual([]);
+      const staleSource = await interpret(reopened.handler, { operation: "prepare_source",
+        source_id: "artifact-lathe", budget: BUDGET, authorized_scopes: SCOPES }, reopened.context);
+      if (staleSource.operation !== "prepare_source" || staleSource.source_handle === undefined) {
+        throw new Error("source handle required for correction control");
+      }
+      const correctedAttribution: UtteranceAttribution = { ...SOURCE_ATTRIBUTION, status: "captured",
+        utterances: [{ ...SOURCE_ATTRIBUTION.utterances[0]!, author_ref: "person-2" }] };
+      const stores = createSqliteFieldFormationStores({ database: reopened.database,
+        repos: createDaemonFieldRepos({ database: reopened.database }) });
+      await createAuditedSourceAdmission({ stores, eventLogRepo: new SqliteEventLogRepo(reopened.database),
+        runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256 }).admit({
+          workspace_id: WS, source_id: "artifact-lathe", source_version: "2", content_bytes: SOURCE,
+          evidence_object_id: null, recorded_at: "2026-09-21T10:00:01.000Z", event_time: null,
+          valid_from: null, valid_to: null, speaker: "user", scope_class: "project",
+          attribution_context: correctedAttribution, spans: deriveAddressableSpanViews(SOURCE)
+        }, { workspaceId: WS });
+      const stalePublication = await interpret(reopened.handler, { operation: "propose",
+        source_handle: staleSource.source_handle, draft: sourceDraft!, producer_id: "test-author",
+        producer_version: "p1", contract_version: "source-interpretation-v4",
+        budget: BUDGET, authorized_scopes: SCOPES }, reopened.context);
+      expect(stalePublication.operation).toBe("propose");
+      if (stalePublication.operation === "propose") expect(stalePublication.outcome).toMatchObject({
+        status: "invalid", reason: "source_not_current" });
+      const currentSource = await interpret(reopened.handler, { operation: "prepare_source",
+        source_id: "artifact-lathe", budget: BUDGET, authorized_scopes: SCOPES }, reopened.context);
+      expect(currentSource).toMatchObject({ operation: "prepare_source", source_version: "2",
+        attribution_context: correctedAttribution });
+      const oldProof = await interpret(reopened.handler, { operation: "recall",
+        accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
+        query_semantics: querySemanticsAfter, semantic_correspondences: [semantic_correspondence],
+        budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES }, reopened.context);
+      if (oldProof.operation === "recall") expect(oldProof.proofs ?? []).toEqual([]);
     } finally {
       await closeSession(reopened, filename);
     }

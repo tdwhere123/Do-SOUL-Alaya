@@ -44,7 +44,8 @@ export function sourceRecordFromRow(row: FieldSourceRecordRow): SourceRecordIden
     valid_to: row.valid_to,
     operator_id: row.operator_id,
     ...(row.speaker === null ? {} : { speaker: row.speaker }),
-    ...(row.scope_class === null ? {} : { scope_class: row.scope_class })
+    ...(row.scope_class === null ? {} : { scope_class: row.scope_class }),
+    attribution_context: row.attribution_context
   });
 }
 

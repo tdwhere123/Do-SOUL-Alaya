@@ -1,7 +1,8 @@
 import {
   AlayaError, SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SOURCE_SEMANTIC_RESPONSE_CONTRACT, canonicalJson, type SourceInterpretationProfile
+  SOURCE_SEMANTIC_RESPONSE_CONTRACT, canonicalJson, type SourceInterpretationProfile,
+  type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
@@ -181,16 +182,17 @@ export function extractionArtifactRequests(turn: Pick<LongMemEvalExtractionTurn,
 
 /** Shared request construction for extraction turns and canonical source census records. */
 export function sourceSemanticArtifactRequests(sourceCorpus: string, packing: ExtractionSourcePacking | undefined,
-  openSemantics: ExtractionOpenSemanticsGeneration): readonly Readonly<{
+  openSemantics: ExtractionOpenSemanticsGeneration, attribution?: UtteranceAttribution): readonly Readonly<{
     source: ReturnType<typeof collectSourceSemanticUnitPacks>[number]; semantic: SourceSemanticRequest; userPrompt: string;
   }>[] {
-  return sourceSemanticArtifactPreparations(sourceCorpus, packing, openSemantics).flatMap((item) =>
+  return sourceSemanticArtifactPreparations(sourceCorpus, packing, openSemantics, attribution).flatMap((item) =>
     item.status === "ready" ? [{ source: item.source, semantic: item.semantic, userPrompt: item.userPrompt }] : []);
 }
 
 /** The source inventory stays whole even when its interpretation has no legal request. */
 export function sourceSemanticArtifactPreparations(sourceCorpus: string, packing: ExtractionSourcePacking | undefined,
-  openSemantics: ExtractionOpenSemanticsGeneration): readonly SourceSemanticArtifactPreparation[] {
+  openSemantics: ExtractionOpenSemanticsGeneration,
+  attribution?: UtteranceAttribution): readonly SourceSemanticArtifactPreparation[] {
   const generation = parseExtractionOpenSemanticsGeneration(openSemantics);
   return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source): SourceSemanticArtifactPreparation => {
     const proposal = {
@@ -199,7 +201,8 @@ export function sourceSemanticArtifactPreparations(sourceCorpus: string, packing
       assertionIds: source.source_assertions.map((row) => row.assertion_id),
       source_id: "unbound", source_version: "unbound",
       producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-      producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
+      producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION,
+      ...(attribution === undefined ? {} : { attribution_context: attribution })
     };
     const base = prepareSourceSemanticRequest(proposal);
     if (base.status === "unsupported_source") return { status: "unsupported_source", source, disposition: base };

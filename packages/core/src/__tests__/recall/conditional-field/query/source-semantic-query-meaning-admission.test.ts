@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SourceSemanticResourceLedger, materializeSourceSemanticQueryMeaning
+  SourceSemanticResourceLedger, materializeSourceSemanticQueryMeaning, UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import { digestOriginalQuery } from "../../../../recall/conditional-field/query/compile-query-identity.js";
 import { admitSourceSemanticQuery } from "../../../../recall/conditional-field/query/source-semantic-query-admission.js";
@@ -70,6 +70,7 @@ describe("source semantic query meaning admission", () => {
       gaps: []
     }, {
       original_query: ORIGINAL, original_query_digest: digestOriginalQuery(ORIGINAL),
+      approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
       producer_version: "1"
     });
@@ -113,5 +114,6 @@ function reportedQuery(original: string, reporter: object, extra: object = {}) {
       content: { kind: "statement", key: "leave", predicate: "left", arguments: [
         { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
       ] } }] }], ...extra }, { original_query: original, original_query_digest: digestOriginalQuery(original),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" });
 }

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
   buildSourceReferenceCatalog, materializeSourceSemanticQueryMeaning, sourceReferenceResolver,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceSemanticDraft, type SourceSemanticInterpretation, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
@@ -41,6 +42,7 @@ function occurrenceQuery(): SourceSemanticQuery {
       ] }
     ] }]
   }, { original_query: ORIGINAL, original_query_digest: `sha256:${fieldContractSha256(ORIGINAL)}`,
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1" });
 }
 
@@ -114,7 +116,8 @@ it("consumes proposition role references after source publication and SQLite reo
     const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
       evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
     const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
-      workspaceId: WS, runId: RUN, artifactKey: "ringing-sequence", source: SOURCE, catalog,
+      workspaceId: WS, runId: RUN, artifactKey: "ringing-sequence", source: SOURCE,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, catalog,
       assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
       provenance: { producer_id: "occurrence-test-author" }, producer_version: "1", contract_version: "source-interpretation-v4",
       draft: sourceDraft(catalog)

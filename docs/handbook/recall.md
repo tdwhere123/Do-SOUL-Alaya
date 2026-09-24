@@ -714,8 +714,9 @@ implementation guidance or target KPI certification.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 11.0.0 uses `source-interpretation-v4`, `source-semantic-query-v3`,
-`source-semantic-correspondence-v3`, response envelope v5, reasoning v5, cache v3,
+Garden v1. Protocol 12.0.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
+`source-semantic-correspondence-v3`, source response envelope v6, published source interpretation v5,
+reasoning v5, cache v3,
 library v5, public/worker recall protocol 6, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
@@ -725,9 +726,21 @@ separate regression contracts.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Query request/response v7 use the same recursive meaning schema as
+operation. Current query request/response v8 use the same recursive meaning schema as
 local receive admission; depth and byte limits remain local requirements. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
+The canonical query also binds the complete host-approved fixed context
+(`null` when none was supplied) and one `utterance-attribution-v1` value. Its
+identity changes when those consumed fields change, even if the query text and
+meaning body do not. Source records hold the same attribution schema; the current
+source request and published interpretation carry the exact source value, and
+the current correspondence selection request is v5. Role-only inputs explicitly
+carry `unknown`; they do not manufacture a speaker or conversation identity.
+Captured attribution is scoped to its issuer and conversation, and exact UTF-8
+occurrence ranges bind it to the admitted bytes. It supplies bounded outer-author
+context, not a source fact or an answer. A metadata correction keeps source bytes
+and digest unchanged but requires a new source revision recorded at a later time;
+same-version attribution changes conflict.
 The producer marks each requested entity, statement or operator on its declaration with
 `return:true`; Protocol derives the canonical return list. A separate producer
 return list is rejected. Evidence inputs cannot declare returned targets. Boolean
@@ -819,6 +832,13 @@ The current SOUL exports `parseSourceSemanticRequest`,
 `sourceSemanticSystemPrompt`, `sourceSemanticResponseJsonSchema`,
 `receiveSourceSemantics` now reject historical source requests. The current
 official API schema preimage no longer reconstructs their historical schema.
+Historical source records with absent or null attribution remain distinguishable
+from a new explicit `unknown` value. The named retained H reader preserves the
+old source-binding shape and published v4 identity preimage for envelopes v1–v5;
+it is read-only and cannot feed current publication, worker discovery or proof.
+Current H publication requires envelope v6 and published v5 identity. Old Q, H,
+correspondence and cache identities do not gain current authority merely by
+decoding or by replaying their recorded bytes.
 Bench owns the corresponding current request-line,
 Batch, cache and fill gates. Its retained inspectors use SOUL's explicit
 `parseRetainedSourceSemanticRequest`, `retainedSourceSemanticSystemPrompt`,

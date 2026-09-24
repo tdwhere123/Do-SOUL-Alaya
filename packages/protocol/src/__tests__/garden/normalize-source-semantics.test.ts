@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { buildSourceReferenceCatalog, sourceReferenceResolver } from "../../evidence/source-reference.js";
 import { sourceSemanticInterpretationIdentity } from "../../garden/source-semantic-identity.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, normalizeSourceSemantics
 } from "../../garden/normalize-source-semantics.js";
@@ -21,7 +22,8 @@ function run(
 ) {
   return normalizeSourceSemantics({
     draft, catalog, sha256: sha,
-    source: { source_id: "src", source_version: "1", content_digest: digest },
+    source: { source_id: "src", source_version: "1", content_digest: digest,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
     ...over
   });

@@ -4,6 +4,7 @@ import {
   hashAddressableSourceSpanId,
   hashContentDigest,
   hashSourceRecordId,
+  UTTERANCE_ATTRIBUTION_CONTRACT,
   type SourceAdmissionRequest
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as fieldSha256 } from "../../shared/field-hash.js";
@@ -74,6 +75,17 @@ describe("source admission", () => {
 
     expect(first.record.content_digest).toBe(second.record.content_digest);
     expect(first.record.identity).not.toBe(second.record.identity);
+  });
+
+  it("rejects changed attribution on an existing in-memory source identity", () => {
+    const stores = createInMemoryFieldStores();
+    const admission = createSourceAdmissionPort({ sha256: fieldSha256, stores });
+    const first = admission.admit(request());
+    const attribution = { contract: UTTERANCE_ATTRIBUTION_CONTRACT, status: "captured" as const,
+      issuer_scope: "authored-harness", utterances: [{ occurrence_id: "turn-1",
+        utf8_span: [0, BODY.length] as const, conversation_ref: "conversation-1", author_ref: "person-1" }] };
+    expect(() => admission.admit(request({ attribution_context: attribution }))).toThrow(/replay mismatch/);
+    expect(stores.getStoredRecord("workspace-1", first.record.identity)?.record).toEqual(first.record);
   });
 
   it("admits a record-only root with null evidence_object_id and no minted capsule", () => {

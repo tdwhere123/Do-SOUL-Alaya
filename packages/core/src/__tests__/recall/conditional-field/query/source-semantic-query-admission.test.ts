@@ -3,6 +3,7 @@ import {
   SourceSemanticQuerySchema,
   queryAlternativeConnected,
   sourceSemanticQueryIdentity,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceSemanticContextObligation,
   type SourceSemanticQuery,
   type SourceSemanticQueryAlternative,
@@ -46,11 +47,12 @@ function draft(
   } = {}
 ) {
   return {
-    contract: "source-semantic-query-v3" as const,
+    contract: "source-semantic-query-v4" as const,
     original_query_digest: digestOriginalQuery(originalQuery),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: extra.producer_id ?? SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: extra.producer_version ?? "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables,
     alternatives: extra.alternatives ?? [{ frames, context_obligations: obligations }],
     return_variables: extra.return_variables ?? ["parcel"],

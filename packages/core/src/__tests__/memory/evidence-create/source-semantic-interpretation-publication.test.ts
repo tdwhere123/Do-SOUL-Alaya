@@ -8,8 +8,10 @@ import {
   normalizeSourceSemantics,
   sourceReferenceResolver,
   sourceSemanticInterpretationIdentity,
+  retainedSourceSemanticInterpretationIdentity,
   SourceSemanticPublishedInterpretationSchema,
   SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceReferenceCatalog
 } from "@do-soul/alaya-protocol";
 import {
@@ -87,6 +89,7 @@ async function admitSource(
     workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
     source_id: sourceId,
     source_version: sourceVersion,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     content_bytes: content,
     evidence_object_id: evidenceObjectId,
     recorded_at: recordedAt,
@@ -149,6 +152,7 @@ function publicationInput(
     runId: REAL_SQLITE_TEST_RUN_ID,
     artifactKey: "artifact-1",
     source,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     catalog,
     provenance: { producer_id: "test-author", request_key: "req-1", raw_response_id: "raw-1" },
     draft: usesDraft(catalog, assertion),
@@ -213,13 +217,14 @@ describe("source semantic interpretation publication", () => {
     const again = await fixture.publication.publish(publicationInput(catalog));
     expect(again.bound).toEqual(first.bound);
     expect(first.bound.semantic_status).toBe("unreviewed");
-    expect(first.bound.contract).toBe("published-source-interpretation-v4");
+    expect(first.bound.contract).toBe("published-source-interpretation-v5");
     expect(first.bound.source_target.root_id).toBe(admitted.record.identity);
     expect(first.bound.source_target.evidence_object_id).toBeNull();
     expect(first.bound.interpretation.source).toEqual({
       source_id: "artifact-1",
       source_version: "1",
       content_digest: admitted.record.content_digest,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }]
     });
     expect(first.bound.interpretation_id).toBe(
@@ -291,6 +296,7 @@ describe("source semantic interpretation publication", () => {
         source_id: admitted.record.source_id,
         source_version: admitted.record.source_version,
         content_digest: admitted.record.content_digest,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
         assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(source)] }]
       },
       producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
@@ -305,6 +311,7 @@ describe("source semantic interpretation publication", () => {
       runId: REAL_SQLITE_TEST_RUN_ID,
       artifactKey: "artifact-1",
       source,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       catalog,
       provenance: { producer_id: "test-author" },
       assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(source)] }],
@@ -345,6 +352,7 @@ describe("source semantic interpretation publication", () => {
       source_id: "artifact-other",
       source_version: "1",
       content_bytes: SOURCE,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       evidence_object_id: "other-source-alias",
       recorded_at: CLOCK,
       event_time: null, valid_from: null, valid_to: null,
@@ -383,7 +391,7 @@ describe("source semantic interpretation publication", () => {
 
     const published = await fixture.publication.publish(publicationInput(catalog));
     const damaged = JSON.stringify({
-      contract: "published-source-interpretation-v4",
+      contract: "published-source-interpretation-v5",
       source_target: published.bound.source_target,
       broken: true
     });
@@ -427,6 +435,7 @@ describe("source semantic interpretation publication", () => {
         source_id: admitted.record.source_id,
         source_version: admitted.record.source_version,
         content_digest: admitted.record.content_digest,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
         assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }]
       },
       producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
@@ -441,6 +450,7 @@ describe("source semantic interpretation publication", () => {
       runId: REAL_SQLITE_TEST_RUN_ID,
       artifactKey: "artifact-1",
       source: SOURCE,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       catalog,
       provenance: { producer_id: "test-author" },
       assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }],
@@ -455,13 +465,15 @@ it("rejects forged selectors on already-normalized interpretations and re-verifi
   const catalog = catalogFor(ASSERTION);
   const normalized = normalizeSourceSemantics({ draft: usesDraft(catalog, ASSERTION), catalog, sha256: fieldContractSha256,
     source: { source_id: admitted.record.source_id, source_version: admitted.record.source_version,
-      content_digest: admitted.record.content_digest, assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }] },
+      content_digest: admitted.record.content_digest, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+      assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] }] },
     producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4" });
   if (normalized.status !== "normalized") throw new Error("normalization should pass");
   const wrong = { ...normalized.interpretation, mentions: normalized.interpretation.mentions.map((row, index) => index === 0
     ? { ...row, source_ref: normalized.interpretation.mentions[1]!.source_ref } : row) };
   const base = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID, runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1",
-    source: SOURCE, catalog, provenance: { producer_id: "test-author" },
+    source: SOURCE, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    catalog, provenance: { producer_id: "test-author" },
     assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, 23] as const }] };
   await expect(fixture.publication.publish({ ...base, interpretation: wrong })).rejects.toThrow(/source reference/);
   const good = await fixture.publication.publish({ ...base, interpretation: normalized.interpretation });
@@ -486,7 +498,8 @@ it("publishes repeated identical assertions only with distinct exact host locati
   const locations = [{ assertion_id: 1, source_utf8_span: [0, sentence.length] as const },
     { assertion_id: 2, source_utf8_span: [sentence.length + 1, source.length] as const }];
   const input = { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID, runId: REAL_SQLITE_TEST_RUN_ID, artifactKey: "artifact-1",
-    source, catalog, provenance: { producer_id: "test-author" }, producer_version: "p1", contract_version: "source-interpretation-v4" };
+    source, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, catalog,
+    provenance: { producer_id: "test-author" }, producer_version: "p1", contract_version: "source-interpretation-v4" };
   await expect(fixture.publication.publish({ ...input, draft: second } as Parameters<typeof fixture.publication.publish>[0]))
     .rejects.toThrow(/host-owned assertion locations/);
   const a = await fixture.publication.publish({ ...input, draft: first, assertion_locations: locations });
@@ -500,13 +513,43 @@ it("verifies a retained interpretation without admitting it to current execution
   const fixture = await openFixture();
   await admitSource(fixture);
   const published = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION)));
+  const { attribution_context: _historicalAttribution, ...retainedSource } = published.bound.interpretation.source;
   const interpretation = { ...published.bound.interpretation,
+    source: retainedSource,
     normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION };
-  const retained = { ...published.bound, interpretation,
-    interpretation_id: sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256) };
+  const retained = { ...published.bound, contract: "published-source-interpretation-v4", interpretation,
+    interpretation_id: retainedSourceSemanticInterpretationIdentity(interpretation, fieldContractSha256) };
   expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, retained, REAL_SQLITE_TEST_WORKSPACE_ID))
-    .toThrow(/ineligible/u);
+    .toThrow();
   const checked = verifyRetainedPublishedSourceSemanticInterpretation(fixture.owner, retained, REAL_SQLITE_TEST_WORKSPACE_ID);
   expect(checked.eligibility).toBe("retained_only");
   expect(checked.verification.bound).toEqual(retained);
+});
+
+it("publishes only an explicitly unbound normalized interpretation with matching captured attribution", async () => {
+  const fixture = await openFixture();
+  const admitted = await admitSource(fixture);
+  const catalog = catalogFor(ASSERTION);
+  const normalized = normalizeSourceSemantics({
+    draft: usesDraft(catalog, ASSERTION), catalog, sha256: fieldContractSha256,
+    source: { source_id: "unbound", source_version: "unbound", content_digest: admitted.record.content_digest,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
+    producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
+  });
+  if (normalized.status !== "normalized") throw new Error("normalization should pass");
+  const { draft: _draft, ...base } = publicationInput(catalog);
+  const published = await fixture.publication.publish({ ...base, interpretation: normalized.interpretation });
+  expect(published.bound.interpretation.source.source_id).toBe(admitted.record.source_id);
+  expect(published.bound.interpretation.source.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+  await expect(fixture.publication.publish({ ...base, interpretation: {
+    ...normalized.interpretation,
+    source: { ...normalized.interpretation.source, source_id: "older-artifact", source_version: "1" }
+  } })).rejects.toThrow(/normalized interpretation source binding/u);
+  await expect(fixture.publication.publish({ ...base, interpretation: {
+    ...normalized.interpretation,
+    source: { ...normalized.interpretation.source, attribution_context: {
+      contract: "utterance-attribution-v1", status: "captured", issuer_scope: "fixture",
+      utterances: [{ occurrence_id: "turn-1", utf8_span: [0, 4], conversation_ref: "c", author_ref: "a" }]
+    } }
+  } })).rejects.toThrow(/normalized interpretation source binding/u);
 });

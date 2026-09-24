@@ -9,6 +9,7 @@ export const SOURCE_INTERPRETATION_DEPENDENCY_CONTRACTS = [
   SOURCE_INTERPRETATION_CONTRACT,
   PublishedSourceInterpretationPacketSchema.unwrap().shape.contract.value,
   SOURCE_SEMANTIC_PACKET_CONTRACT,
+  "published-source-interpretation-v4",
   SOURCE_SEMANTIC_PUBLISHED_CONTRACT
 ] as const;
 

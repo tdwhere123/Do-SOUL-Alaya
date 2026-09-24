@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
   SoulInterpretationRequestSchema, sourceReferenceResolver,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
@@ -167,11 +168,12 @@ function usesDraft(catalog: SourceReferenceCatalog, text: string, extra: { theme
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: digestOriginalQuery(ORIGINAL),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -192,11 +194,12 @@ const WHO = "who uses the tools?";
 
 function agentQuery(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: digestOriginalQuery(WHO),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables: [{ id: "who", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{

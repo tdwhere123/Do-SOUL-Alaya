@@ -12,7 +12,8 @@ import {
   SourceSemanticPublishedInterpretationSchema, sourceSemanticInterpretationIdentity,
   type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
   type SourceSemanticWorkerRequest,
-  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
+  SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
+  UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import { proposeCorrespondenceSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
 import {
@@ -93,11 +94,12 @@ function usesDraft(catalog: SourceReferenceCatalog, assertion: string) {
 
 function queryOf(): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: digestOriginalQuery(ORIGINAL),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables: [{ id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } }, { id: "tools", sort: "entity" }, { id: "fUse", sort: "proposition" }],
     alternatives: [{
       frames: [{
@@ -169,6 +171,7 @@ async function withPublished(body: (input: {
     stores, evidenceService, sha256: fieldContractSha256
   }).publish({
     workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
     provenance: { producer_id: "test-author" }, draft: usesDraft(catalog, ASSERTION),
     producer_version: "p1", contract_version: "source-interpretation-v4"
@@ -178,6 +181,7 @@ async function withPublished(body: (input: {
     const draft = usesDraft(catalog, ASSERTION);
     const extra = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
       workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(SOURCE)] }],
       provenance: { producer_id: "test-author" }, draft: { ...draft,
         gaps: options.large && index === (options.count ?? 1) - 1 ? Array.from({ length: 40 }, () => ({

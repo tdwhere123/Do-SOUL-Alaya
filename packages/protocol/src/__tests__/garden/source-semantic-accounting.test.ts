@@ -5,6 +5,7 @@ import { accountSourceSemanticDraft, assertSourceSemanticAccounting } from "../.
 import { SourceSemanticDraftSchema } from "../../garden/source-semantic-draft.js";
 import { normalizeSourceSemantics, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION } from "../../garden/normalize-source-semantics.js";
 import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 const catalog = buildSourceReferenceCatalog(sha("Alice runs. It rains."), [
@@ -53,7 +54,8 @@ it("keeps embedded content nonasserted when its parent has no content binding", 
     context_owner: { kind: "embedding", parent_frame: "fRun", content_argument: "fWalk" }
   }] });
   const result = normalizeSourceSemantics({ draft: embedded, catalog, sha256: sha,
-    source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}` },
+    source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "producer", producer_version: "1", contract_version: "source-interpretation-v4" });
   expect(result.status).toBe("normalized");
   if (result.status !== "normalized") throw new Error("expected normalized graph");
@@ -75,7 +77,8 @@ it("does not claim that an evidence-connected assertion has complete language fi
 
 it("retains historical replay semantics explicitly while new normalization accounts for omissions", () => {
   const input = { draft: draft(), catalog, sha256: sha,
-    source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}` },
+    source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "producer", producer_version: "1", contract_version: "source-interpretation-v4" };
   const old = normalizeSourceSemantics({ ...input, normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION });
   const current = normalizeSourceSemantics(input);
@@ -88,7 +91,8 @@ it("retains historical replay semantics explicitly while new normalization accou
 
 const normalize = (value: unknown, sourceCatalog = catalog) => normalizeSourceSemantics({
   draft: value, catalog: sourceCatalog, sha256: sha,
-  source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}` },
+  source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}`,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
   producer_id: "producer", producer_version: "1", contract_version: "source-interpretation-v4"
 });
 

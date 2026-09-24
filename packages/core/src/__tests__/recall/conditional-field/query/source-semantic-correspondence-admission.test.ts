@@ -3,6 +3,7 @@ import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
   SourceSemanticCorrespondenceSchema, sourceSemanticCorrespondenceIdentity, sourceSemanticContextIdentity,
   sourceSemanticInterpretationIdentity,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceSemanticEndpointCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticQueryFrame, type SourceSemanticQueryVariable
 } from "@do-soul/alaya-protocol";
@@ -31,11 +32,12 @@ function queryDraft(
   extra: { readonly producer_id?: string; readonly producer_version?: string } = {}
 ): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: digestOriginalQuery(ORIGINAL),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: extra.producer_id ?? SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: extra.producer_version ?? "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables,
     alternatives: [{
       frames,
@@ -93,7 +95,8 @@ function mixedInterpretation(sourceId = "src", sourceVersion = "1"): SourceSeman
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: sourceId, source_version: sourceVersion, content_digest: digestOriginalQuery(ORIGINAL) },
+    source: { source_id: sourceId, source_version: sourceVersion, content_digest: digestOriginalQuery(ORIGINAL),
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mSent", "sent", 1, [0, 4]),

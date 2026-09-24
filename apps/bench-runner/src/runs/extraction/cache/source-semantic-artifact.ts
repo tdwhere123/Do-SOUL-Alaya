@@ -4,7 +4,8 @@ import {
   type SourceSemanticProposalResult
 } from "@do-soul/alaya-soul";
 import {
-  AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT
+  AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_PACKET_CONTRACT,
+  type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { readCachedEntry, writeCachedExtraction, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { computeCacheKey, computeRetainedCacheKey } from "../../compile-seed/cache/cache-key.js";
@@ -76,8 +77,9 @@ function unboundProposal(sourceCorpus: string): {
   };
 }
 
-function proposalForRequest(sourceCorpus: string, assertionIds: readonly number[]) {
-  return { ...unboundProposal(sourceCorpus), assertionIds };
+function proposalForRequest(sourceCorpus: string, assertionIds: readonly number[], attribution?: UtteranceAttribution) {
+  return { ...unboundProposal(sourceCorpus), assertionIds,
+    ...(attribution === undefined ? {} : { attribution_context: attribution }) };
 }
 
 /** Two retained copies of raw JSON may each expand sixfold; host IR/refs add another escaped copy. */
@@ -135,7 +137,8 @@ function inspectInteractiveGenerateContent(
   const input = {
     config: { model: entry.model, requestProfile: entry.request_profile },
     line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
-    proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id))
+    proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id),
+      request.source_request.attribution_context)
   };
   const admitted = retainedOnly ? verifyRetainedSourceSemanticBatchLine(input).result : receiveSourceSemanticBatchLine(input);
   const completion = retainableOutcome(admitted);
@@ -170,7 +173,8 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       throw new AlayaError("CONFLICT", "deterministic open semantics cannot carry a provider receipt");
     }
     if (entry.raw_json !== "") throw new AlayaError("CONFLICT", "deterministic open semantics has nonempty output");
-    const proposal = proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id));
+    const proposal = proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id),
+      request.source_request.attribution_context);
     admitted = retainedOnly ? verifyRetainedEmptySourceSemantics(request, proposal).result : completeEmptySourceSemantics(request, proposal);
     if (admitted.outcome.status !== "no_eligible_source" || typed.completion !== "no_eligible_source") {
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
@@ -199,7 +203,8 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     const input = {
       config: { model: entry.model, requestProfile: entry.request_profile },
       line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
-      proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id)),
+      proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id),
+        request.source_request.attribution_context),
       retained: { plan: retained.plan, provenance: retained.result.provenance }
     };
     admitted = retainedOnly ? verifyRetainedSourceSemanticBatchLine(input).result : receiveSourceSemanticBatchLine(input);
@@ -293,7 +298,8 @@ function admitSourceSemanticLine(input: SourceSemanticImportBase & {
   try {
     admitted = receiveSourceSemanticBatchLine({
       config: input.config, line: input.line, rawJson: input.rawJson, sourceCorpus: input.sourceCorpus,
-      proposal: proposalForRequest(input.sourceCorpus, request.source_request.source_assertions.map((row) => row.assertion_id)),
+      proposal: proposalForRequest(input.sourceCorpus, request.source_request.source_assertions.map((row) => row.assertion_id),
+        request.source_request.attribution_context),
       ...(input.retained === undefined ? {} : { retained: input.retained })
     });
   } catch (cause) {

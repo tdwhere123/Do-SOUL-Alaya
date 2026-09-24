@@ -9,7 +9,8 @@ import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
   type SourceSemanticEndpointCorrespondence, type SourceSemanticConsumedLeaf,
   type SourceSemanticCorrespondence, type SourceSemanticInterpretation,
-  type SourceSemanticQuery, type SourceSemanticQueryFrame, type SourceSemanticQueryVariable
+  type SourceSemanticQuery, type SourceSemanticQueryFrame, type SourceSemanticQueryVariable,
+  UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import { digestOriginalQuery } from "../../../recall/conditional-field/query/compile-query-identity.js";
 import { SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
@@ -40,11 +41,12 @@ function queryOf(
   obligations: SourceSemanticQuery["alternatives"][number]["context_obligations"]
 ): SourceSemanticQuery {
   return {
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: digestOriginalQuery(original),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables, alternatives: [{ frames, context_obligations: obligations }],
     return_variables: ["parcel"], gaps: []
   };
@@ -147,7 +149,8 @@ function mixedInterpretation(): SourceSemanticInterpretation {
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "src", source_version: "1", content_digest: digestOriginalQuery(AND_QUERY) },
+    source: { source_id: "src", source_version: "1", content_digest: digestOriginalQuery(AND_QUERY),
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mSent", "sent", 1, [0, 4]), mention("mParcelSend", "parcel", 1, [5, 11]),
@@ -193,7 +196,8 @@ function orionInterpretation(extra: {
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "orion", source_version: "1", content_digest: digestOriginalQuery(JOIN_QUERY) },
+    source: { source_id: "orion", source_version: "1", content_digest: digestOriginalQuery(JOIN_QUERY),
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mOrion", "Orion", 1, [0, 5]), mention("mSent", "sent", 1, [6, 10]),
@@ -234,7 +238,8 @@ function stanceInterpretation(act: "assertion" | "question" | "directive"): Sour
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "stance", source_version: act, content_digest: digestOriginalQuery(SEND_QUERY) },
+    source: { source_id: "stance", source_version: act, content_digest: digestOriginalQuery(SEND_QUERY),
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [mention("mSent", "sent", 1, [0, 4]), mention("mParcel", "parcel", 1, [5, 11])],
     referents: [{ id: "rParcel", referent_kind: "grouped", mentions: ["mParcel"] }],

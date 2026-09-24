@@ -475,7 +475,8 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
       producer_id: request.producer_capability.producer_id,
       producer_version: request.producer_capability.producer_version,
       resource_limits: request.resource_limits,
-      ...(request.approved_fixed_context === undefined ? {} : { approved_fixed_context: request.approved_fixed_context })
+      ...(request.approved_fixed_context === undefined ? {} : { approved_fixed_context: request.approved_fixed_context }),
+      attribution_context: request.attribution_context
     }, { rawJson });
     if (canonicalJson(received.request) !== canonicalJson(request)) {
       throw new AlayaError("INTERNAL", "semantic proposal receive lost the retained request envelope");

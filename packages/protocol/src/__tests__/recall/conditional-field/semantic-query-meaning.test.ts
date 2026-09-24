@@ -7,9 +7,11 @@ import {
   materializeSourceSemanticQueryMeaning, sourceSemanticQueryBranchViews
 } from "../../../recall/conditional-field/index.js";
 import { sourceSemanticQueryIdentity } from "../../../garden/source-semantic-identity.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../../conversation/utterance-attribution.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
-const identity = { original_query_digest: digest, producer_id: "qp", producer_version: "1" };
+const identity = { original_query_digest: digest, approved_fixed_context: null,
+  attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, producer_id: "qp", producer_version: "1" };
 const envelope = { ...identity, original_query: "Who sent the sample to Mira?" };
 const operation = { reading: "identify the requested participants", support: { kind: "query_text", excerpt: "Who" } };
 

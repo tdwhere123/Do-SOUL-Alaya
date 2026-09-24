@@ -23,6 +23,7 @@ export type SourceSemanticPublicationPort = Readonly<{
   publish(input: Readonly<{
     workspaceId: string; runId: string; artifactKey: string; source: string; catalog: SourceReferenceCatalog;
     assertion_locations: NonNullable<SourceSemanticInterpretation["source"]["assertion_locations"]>;
+    attribution_context: SourceSemanticInterpretation["source"]["attribution_context"];
     provenance: Readonly<{ producer_id: string; principal?: string; preparation_handle?: string }>;
     draft: unknown; producer_version: string; contract_version: string; budget?: RequestBudget;
   }>): Promise<Readonly<{ bound: SourceSemanticPublishedInterpretation; evidence: Readonly<{ object_id: string }>;
@@ -88,7 +89,8 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       meter.charge(cost.work_units, cost.memory_bytes, "disposition validation");
       const outcome = verifySourceSemanticDisposition(request.disposition, prepared.catalog, fieldContractSha256);
       return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome, semantic_status: "unreviewed",
-        source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest },
+        source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest,
+          attribution_context: prepared.attribution_context },
         coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes }, provider_attempts: 0 });
     }
     const usedWork = prepared.work.logical_work ?? prepared.work.native_work;
@@ -98,6 +100,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
     const published = await publication.publish({ workspaceId: context.workspaceId, runId: context.runId,
       artifactKey: prepared.source_id, source: prepared.source, catalog: prepared.catalog,
       assertion_locations: prepared.assertion_locations, budget: remaining,
+      attribution_context: prepared.attribution_context,
       provenance: { producer_id: request.producer_id, principal: context.agentTarget, preparation_handle: request.source_handle },
       draft: request.draft, producer_version: request.producer_version, contract_version: request.contract_version });
     return SoulInterpretationResponseSchema.parse({ operation: "propose",

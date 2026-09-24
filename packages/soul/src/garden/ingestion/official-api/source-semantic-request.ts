@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
+  RetainedSourceSemanticRequestEnvelopeSchema,
   SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
   SourceSemanticExpressionProposalSchema, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
@@ -21,7 +22,9 @@ import {
   sourceReferenceCapacityReason, SourceReferenceCapacityExceeded, SourceReferenceCapacityReasonSchema,
   SOURCE_REFERENCE_MAX_ASSERTIONS,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
-  type SourceSemanticCorrespondenceEndpointCatalog
+  type SourceSemanticCorrespondenceEndpointCatalog,
+  ApprovedSemanticContextSchema, UtteranceAttributionSchema, UNKNOWN_UTTERANCE_ATTRIBUTION,
+  bindUtteranceAttribution, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { sourceSemanticQueryExamples } from "./source-semantic-query-examples.js";
@@ -33,9 +36,9 @@ import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canon
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v7" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v8" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v7" as const;
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v4" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v5" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
 const FORBIDDEN_PROPOSAL_KEYS = [
@@ -68,6 +71,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
+  attribution_context: UtteranceAttributionSchema.optional(),
   assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly().optional(),
   source_assertions: z.array(z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"]).optional()
@@ -121,9 +125,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   }
 }).readonly();
 
-const ApprovedContextSchema = z.object({
-  context_id: BoundedIdSchema, notes: z.string().min(1).max(1024).optional()
-}).strict().readonly();
+const ApprovedContextSchema = ApprovedSemanticContextSchema;
 
 const SourceInterpretationDescriptorSchema = z.object({
   source_interpretation_id: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
@@ -140,7 +142,7 @@ type SourceSemanticApprovedContext = z.infer<typeof ApprovedContextSchema>;
 export type SourceInterpretationDescriptor = z.infer<typeof SourceInterpretationDescriptorSchema>;
 
 export type SourceSemanticRequest = Readonly<{
-  schema_version: typeof SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION;
+  schema_version: number;
   interpretation_contract: typeof SOURCE_SEMANTIC_PACKET_CONTRACT;
   source_request: SourceSemanticOpenRequestBody;
   profile?: SourceInterpretationProfile;
@@ -158,6 +160,7 @@ export type SourceSemanticProposalInput = Readonly<{
   resource_limits?: Partial<SourceSemanticResourceLimits>;
   profile?: SourceInterpretationProfile;
   revision?: SourceSemanticRevision;
+  attribution_context?: UtteranceAttribution;
 }>;
 
 export const SourceSemanticUnsupportedSourceSchema = z.object({
@@ -179,6 +182,7 @@ export type SourceSemanticHostPreparation = Readonly<{ status: "ready"; request:
 export type SourceSemanticQueryProposalInput = Readonly<{
   original_query: string;
   approved_fixed_context?: SourceSemanticApprovedContext;
+  attribution_context?: UtteranceAttribution;
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
@@ -199,6 +203,7 @@ export type SourceSemanticQueryRequest = Readonly<{
   original_query: string;
   original_query_digest: string;
   approved_fixed_context?: SourceSemanticApprovedContext;
+  attribution_context: UtteranceAttribution;
   producer_capability: z.infer<typeof ProducerCapability>;
   resource_limits: SourceSemanticResourceLimits;
 }>;
@@ -244,8 +249,11 @@ export function parseRetainedSourceSemanticRequest(value: unknown): SourceSemant
   if (Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
   }
-  const parsed = SourceSemanticRequestEnvelopeSchema.parse(value);
+  const parsed = RetainedSourceSemanticRequestEnvelopeSchema.parse(value);
   const source_request = SourceSemanticOpenRequestBodySchema.parse(parsed.source_request);
+  if (parsed.schema_version < SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION && source_request.attribution_context !== undefined) {
+    throw new AlayaError("CONFLICT", "retained source request cannot gain attribution after recording");
+  }
   if (new Set(source_request.source_assertions.map((row) => row.assertion_id)).size !== source_request.source_assertions.length) {
     throw new AlayaError("VALIDATION", "source semantic request has duplicate assertion identities");
   }
@@ -266,7 +274,9 @@ export function parseRetainedSourceSemanticRequest(value: unknown): SourceSemant
 /** Current execution accepts only the current producer wire. Retained bytes use the explicit verifier. */
 export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
   const request = parseRetainedSourceSemanticRequest(value);
-  if (request.source_request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT ||
+  if (request.schema_version !== SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION ||
+      request.source_request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT ||
+      request.source_request.attribution_context === undefined ||
       request.source_request.generation_schema_contract !== SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT ||
       request.source_request.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION ||
       request.source_request.source_unit_contract !== SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT ||
@@ -325,6 +335,7 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     generation_schema_contract: SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT,
     producer_capability: producer,
     resource_limits: limits,
+    attribution_context: bindUtteranceAttribution(input.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION, input.sourceCorpus),
     assertion_locations: units.map((row) => ({
       assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(input.sourceCorpus.slice(0, row.start)), Buffer.byteLength(input.sourceCorpus.slice(0, row.end))]
     })),
@@ -366,6 +377,7 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
     original_query_digest,
     ...(input.approved_fixed_context !== undefined
       ? { approved_fixed_context: ApprovedContextSchema.parse(input.approved_fixed_context) } : {}),
+    attribution_context: bindUtteranceAttribution(input.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION, original_query),
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits)
   };

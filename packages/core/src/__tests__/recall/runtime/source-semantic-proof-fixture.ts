@@ -3,7 +3,8 @@ import { oracleSourceSemanticJoin, decodeEngineBindings, oracleBindingsMatchEngi
 import { SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
   sourceSemanticQueryIdentity, type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticCorrespondence,
   fieldReceiptContractFields, hashSourceRecordId, SourceRecordIdentitySchema, SOURCE_SPAN_IDENTITY_OPERATOR_ID,
-  SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, sourceRecallTarget, type SourceSemanticLibraryProof, type RequestBudget } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, sourceRecallTarget, UNKNOWN_UTTERANCE_ATTRIBUTION,
+  type SourceSemanticLibraryProof, type RequestBudget } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 as sha } from "../../../shared/field-hash.js";
 import { SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID as QUERY_PRODUCER } from "../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID as CORRESPONDENCE_PRODUCER } from "../../../recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
@@ -18,7 +19,8 @@ export const BUDGET = { schema_version: 1 as const, work_units: 1000000, memory_
 export function source(): SourceSemanticInterpretation {
   const names = ["Alice", "Bob", "X", "Y", "uses"];
   return { contract: "source-interpretation-v4", k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "two-users", source_version: "1", content_digest: `sha256:${sha("Alice uses X. Bob uses Y.")}` },
+    source: { source_id: "two-users", source_version: "1", content_digest: `sha256:${sha("Alice uses X. Bob uses Y.")}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "fixture", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: names.map((name, index) => ({ id: `m${name}`, assertion_id: 1, text: name, utf8_span: [0, name.length], source_ref: { first: `a1s${index}`, last: `a1s${index}` } })),
     referents: names.slice(0,4).map((name) => ({ id: `r${name}`, referent_kind: "grouped", mentions: [`m${name}`] })),
@@ -31,7 +33,8 @@ export function catalog(count: number): SourceSemanticInterpretation {
   const names = [...brands.slice(0, count), ...items.slice(0, count), "uses"];
   const frames = Array.from({ length: count }, (_, index) => event(`f${index}`, `r${brands[index]}`, `r${items[index]}`));
   return { contract: "source-interpretation-v4", k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "offer-catalog", source_version: "1", content_digest: `sha256:${sha(names.join(" "))}` },
+    source: { source_id: "offer-catalog", source_version: "1", content_digest: `sha256:${sha(names.join(" "))}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "fixture", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: names.map((name, index) => ({ id: `m${name}`, assertion_id: 1, text: name, utf8_span: [0, name.length], source_ref: { first: `a1s${index}`, last: `a1s${index}` } })),
     referents: names.slice(0, count * 2).map((name) => ({ id: `r${name}`, referent_kind: "grouped", mentions: [`m${name}`] })),
@@ -44,8 +47,9 @@ export function event(id: string, actor: string, object: string): SourceSemantic
     bindings: [{ slot_id: "agent", target: { kind: "node", id: actor }, support: [] }, { slot_id: "theme", target: { kind: "node", id: object }, support: [] }] };
 }
 export function query(original = ORIGINAL, fixed = true): SourceSemanticQuery {
-  return { contract: "source-semantic-query-v3", original_query_digest: `sha256:${sha(original)}`,
-    producer_id: QUERY_PRODUCER, producer_version: "1", contract_version: "source-semantic-query-v3",
+  return { contract: "source-semantic-query-v4", original_query_digest: `sha256:${sha(original)}`,
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    producer_id: QUERY_PRODUCER, producer_version: "1", contract_version: "source-semantic-query-v4",
     variables: [{ id: "actor", sort: "entity", ...(fixed ? { reference: { kind: "query_text" as const, excerpt: "Alice" } } : {}) },
       { id: "tools", sort: "entity" }, { id: "use", sort: "proposition" }],
     alternatives: [{ frames: [{ id: "qUse", variable: "use", predicate_reading: "use",
@@ -93,7 +97,9 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
   const identity = hashSourceRecordId(interpretation.source, sha);
   const record = SourceRecordIdentitySchema.parse({ ...fieldReceiptContractFields({ identity,
     producer: SOURCE_SPAN_IDENTITY_OPERATOR_ID, consumer: "projection_generation" }), schema_version: 1,
-    workspace_id: input.workspaceId ?? "ws", source_id, source_version, content_digest, evidence_object_id: null, recorded_at: CLOCK,
+    workspace_id: input.workspaceId ?? "ws", source_id, source_version, content_digest,
+    attribution_context: interpretation.source.attribution_context,
+    evidence_object_id: null, recorded_at: CLOCK,
     event_time: null, valid_from: null, valid_to: null, scope_class: "project", operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID });
   const target = sourceRecallTarget({ workspace_id: record.workspace_id, root_kind: "source_record", root_id: record.identity,
     source_version: record.source_version, content_digest: record.content_digest, evidence_object_id: record.evidence_object_id });

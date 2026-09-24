@@ -11,7 +11,8 @@ import {
 } from "@do-soul/alaya-core";
 import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
-  SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity
+  SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
+  UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import {
   proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest
@@ -78,11 +79,12 @@ function sha256(text: string): string {
 
 function admittedQuery() {
   return {
-    contract: "source-semantic-query-v3" as const,
+    contract: "source-semantic-query-v4" as const,
     original_query_digest: `sha256:${sha256(ORIGINAL)}`,
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID,
     producer_version: "1",
-    contract_version: "source-semantic-query-v3",
+    contract_version: "source-semantic-query-v4",
     variables: [
       { id: "parcel", sort: "entity" as const },
       { id: "fSend", sort: "proposition" as const }
@@ -107,7 +109,8 @@ function interpretation() {
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "src", source_version: "1", content_digest: `sha256:${sha256(ORIGINAL)}` },
+    source: { source_id: "src", source_version: "1", content_digest: `sha256:${sha256(ORIGINAL)}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "source-interpretation-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       {

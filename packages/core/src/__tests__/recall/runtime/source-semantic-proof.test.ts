@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SourceSemanticDraftSchema, SourceSemanticQuerySchema, sourceSemanticCorrespondenceIdentity,
+  sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
   type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -71,18 +70,23 @@ describe("source semantic proof obligations", () => {
     expect(result.binding_results ?? []).toEqual([]);
   });
   it("compiles five complete groups to five answers without exhausting the existing budget", () => {
-    const packet = JSON.parse(readFileSync(fileURLToPath(new URL("./source-semantic-set-valued-catalog-fixture.json", import.meta.url)), "utf8"));
-    expect(SourceSemanticQuerySchema.parse(packet.query_semantics)).toEqual(packet.query_semantics);
-    expect(packet.semantic_correspondence.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "predicate")).toHaveLength(5);
-    expect(packet.semantic_correspondence.correspondences.filter((row: { query_endpoint: { kind: string } }) => row.query_endpoint.kind === "slot")).toHaveLength(10);
+    const original_query = "who uses which tools?";
+    const source_interpretation = catalog(5);
+    const query_semantics = { ...query(original_query, false), return_variables: ["actor", "tools"] };
+    const semantic_correspondence = correspondenceFor(source_interpretation, query_semantics, false);
+    expect(SourceSemanticQuerySchema.parse(query_semantics)).toEqual(query_semantics);
+    expect(semantic_correspondence.correspondences.filter((row) => row.query_endpoint.kind === "predicate")).toHaveLength(5);
+    expect(semantic_correspondence.correspondences.filter((row) => row.query_endpoint.kind === "slot")).toHaveLength(10);
     const executed = executeSourceSemanticInterpretation({
-      source_interpretation: packet.source_interpretation, query_semantics: packet.query_semantics, semantic_correspondence: packet.semantic_correspondence, original_query: packet.original_query,
+      source_interpretation, query_semantics, semantic_correspondence, original_query,
       workspaceId: "source-semantic-library", scope: "project", authorizedScopes: ["project"],
       asOf: "2026-09-21T10:00:00.000Z",
       request: {
         contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
-        source_interpretation_id: packet.semantic_correspondence.source_interpretation_id, query_semantics_id: packet.semantic_correspondence.query_semantics_id, semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(packet.semantic_correspondence, fieldContractSha256),
-        original_query: packet.original_query, budget: BUDGET, output_byte_limit: 1_000_000
+        source_interpretation_id: sourceSemanticInterpretationIdentity(source_interpretation, fieldContractSha256),
+        query_semantics_id: sourceSemanticQueryIdentity(query_semantics, fieldContractSha256),
+        semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(semantic_correspondence, fieldContractSha256),
+        original_query, budget: BUDGET, output_byte_limit: 1_000_000
       }
     });
     const result = executed.result;

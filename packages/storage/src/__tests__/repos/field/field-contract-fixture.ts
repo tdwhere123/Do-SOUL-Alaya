@@ -18,6 +18,7 @@ import {
   hashGenerationId,
   hashIncidenceId,
   hashSourceRecordId,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type FieldContractSha256
 } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
@@ -82,6 +83,7 @@ export function hashedRecord(
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     speaker: null as "user" | "assistant" | "system" | null,
     scope_class: null as "project" | "global_domain" | "global_core" | null,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     source_body: body as string | null
   };
 }
@@ -224,13 +226,13 @@ export function hashedUsage(
   };
 }
 
-export function hashedEffect(workspaceId: string, record: ReturnType<typeof hashedRecord>) {
+export function hashedEffect(workspaceId: string, record: Readonly<{ record_id: string; content_digest: string }>) {
   return hashedEffectFromRecords(workspaceId, [record]);
 }
 
 export function hashedEffectFromRecords(
   workspaceId: string,
-  records: readonly ReturnType<typeof hashedRecord>[]
+  records: readonly Readonly<{ record_id: string; content_digest: string }>[]
 ) {
   const supporting_proof_witnesses = [
     { receipt_id: "actor-proof-1", kind: "actor_authority",

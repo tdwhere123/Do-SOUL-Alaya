@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildSourceReferenceCatalog, sourceReferenceResolver, type SourceSemanticQuery, type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
+import { buildSourceReferenceCatalog, sourceReferenceResolver, UNKNOWN_UTTERANCE_ATTRIBUTION,
+  type SourceSemanticQuery, type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
@@ -26,8 +27,9 @@ export type AccessFixtureSource = Readonly<{ id: string; text: string; reading?:
 type Execute = NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>["execute"];
 
 export function accessQuery(original: string, reading = original): SourceSemanticQuery {
-  return { contract: "source-semantic-query-v3", original_query_digest: digestOriginalQuery(original),
-    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1", contract_version: "source-semantic-query-v3",
+  return { contract: "source-semantic-query-v4", original_query_digest: digestOriginalQuery(original),
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1", contract_version: "source-semantic-query-v4",
     variables: [{ id: "statement", sort: "proposition" }], alternatives: [{ frames: [{ id: "qStatement", variable: "statement",
       predicate_reading: reading, role_requirements: [] }], context_obligations: [{ frame: "qStatement", kind: "asserted_at_source" }] }],
     return_variables: ["statement"], gaps: [] };
@@ -76,7 +78,9 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
       const authored = fixture.authoredDraft?.(catalog);
       if (fixture.authoredDraft !== undefined && authored === undefined) throw new Error("authored source fixture returned no draft");
       const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
-        workspaceId: WS, runId: RUN, artifactKey: fixture.id, source, catalog, provenance: { producer_id: "access-test-author" },
+        workspaceId: WS, runId: RUN, artifactKey: fixture.id, source, catalog,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+        provenance: { producer_id: "access-test-author" },
         assertion_locations: fixture.authoredDraft === undefined
           ? [{ assertion_id: 1, source_utf8_span: [fixture.verbatim === true ? 0 : 6, Buffer.byteLength(source)] }]
           : units.map(unit => ({

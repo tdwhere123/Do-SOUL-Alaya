@@ -93,7 +93,8 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
     const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
       evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
     const published = await createSourceSemanticInterpretationPublication({ stores, evidenceService, sha256: fieldContractSha256 }).publish({
-      workspaceId: WS, runId: RUN, artifactKey: sourceId, source: text, catalog: sourceSemanticRequestCatalog(request),
+      workspaceId: WS, runId: RUN, artifactKey: sourceId, source: text,
+      attribution_context: request.source_request.attribution_context!, catalog: sourceSemanticRequestCatalog(request),
       assertion_locations: request.source_request.assertion_locations!,
       provenance: { producer_id: input.producer_id }, producer_version: "1", contract_version: "source-interpretation-v4",
       draft: received.draft

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { canonicalJson, type SourceSemanticQuery, type SourceSemanticQueryStatus, type Continuation } from "@do-soul/alaya-protocol";
+import { canonicalJson, type SourceSemanticQuery, type SourceSemanticQueryStatus, type Continuation, type UtteranceAttribution } from "@do-soul/alaya-protocol";
 import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
@@ -12,6 +12,7 @@ export type SourceSemanticLease = Readonly<{
   lifetime_now?: string;
   expires_at: string; revision: string;
   source_id?: string; source_version?: string; content_digest?: string;
+  attribution_context?: UtteranceAttribution;
   original_query?: string; query_semantics?: SourceSemanticQuery; query_semantics_id?: string;
   query_semantics_input_id?: string;
   query_semantics_status?: SourceSemanticQueryStatus;

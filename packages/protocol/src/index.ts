@@ -236,6 +236,7 @@ export {
 } from "./shared/standard-response.js";
 export { ManifestationBudgetConfigRouteDataSchema } from "./recall/manifestation-budget.js";
 export * from "./garden/semantic-artifact.js";
+export * from "./conversation/utterance-attribution.js";
 export * from "./garden/identity-observation.js";
 export * from "./garden/source-interpretation.js";
 export * from "./garden/source-interpretation-packet.js";

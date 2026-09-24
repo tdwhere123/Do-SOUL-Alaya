@@ -15,6 +15,7 @@ import {
   type FieldContractSha256
 } from "./canonical-identity.js";
 import { SOURCE_SPAN_IDENTITY_OPERATOR_ID } from "./operator-manifest.js";
+import { UtteranceAttributionSchema } from "../../conversation/utterance-attribution.js";
 
 export const AddressableSourceSpanPurposeSchema = z.enum([
   "native_structure",
@@ -40,7 +41,8 @@ export const SourceRecordIdentitySchema = FieldReceiptContractFieldsSchema.exten
   valid_to: IsoDatetimeStringSchema.nullable(),
   operator_id: NonEmptyStringSchema.max(128),
   speaker: SourceSpeakerRoleSchema.nullable().optional(),
-  scope_class: SourceScopeClassSchema.nullable().optional()
+  scope_class: SourceScopeClassSchema.nullable().optional(),
+  attribution_context: UtteranceAttributionSchema.nullable().optional()
 }).strict().superRefine((record, context) => {
   if (record.valid_from === null && record.valid_to !== null) {
     context.addIssue({ code: "custom", message: "valid_to requires valid_from" });

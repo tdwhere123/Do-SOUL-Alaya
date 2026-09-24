@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { SourceSemanticDraftSchema } from "../../garden/source-semantic-draft.js";
 import { sourceSemanticValidationDiagnostics, SourceSemanticDiagnosticsSchema } from "../../garden/source-semantic-diagnostics.js";
 import {
@@ -22,7 +23,8 @@ const mention = { id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", las
 const irBody = {
   contract: "source-interpretation-v4" as const,
   k_version: "k1", normalizer_version: "n1",
-  source: { source_id: "src", source_version: "1", content_digest: digest },
+  source: { source_id: "src", source_version: "1", content_digest: digest,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
   producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
   mentions: [mention],
   referents: [{ id: "rBob", referent_kind: "grouped" as const, mentions: ["mSent"] }],
@@ -53,7 +55,7 @@ it("accepts normalized IR and rejects asserted_at_scope without source_act asser
 it("keeps published provenance out of parse identity of the IR body", () => {
   const interpretation = SourceSemanticInterpretationSchema.parse(irBody);
   const published = SourceSemanticPublishedInterpretationSchema.parse({
-    contract: "published-source-interpretation-v4",
+    contract: "published-source-interpretation-v5",
     interpretation_id: sourceSemanticInterpretationIdentity(interpretation, sha),
     semantic_status: "unreviewed",
     source_target: { kind: "source_evidence", workspace_id: "ws", root_kind: "source_record",
@@ -139,9 +141,10 @@ it("bounds structural diagnostics without changing the invalid state", () => {
 
 it("versions the open envelope, reasoning, and cache without reusing occupied literals", () => {
   expect(SourceSemanticRequestEnvelopeSchema.parse({
-    schema_version: 5, interpretation_contract: "source-interpretation-v4", source_request: {},
+    schema_version: 6, interpretation_contract: "source-interpretation-v4",
+    source_request: { attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     source_catalog: { contract: "ascii-run-unicode-scalar-v1", source_digest: hex, catalog_id: digest, assertions: [] }
-  }).schema_version).toBe(5);
+  }).schema_version).toBe(6);
   expect(SourceSemanticRequestEnvelopeSchema.safeParse({
     schema_version: 3, interpretation_contract: "source-interpretation-v4", source_request: {},
     source_catalog: { contract: "ascii-run-unicode-scalar-v1", source_digest: hex, catalog_id: digest, assertions: [] }

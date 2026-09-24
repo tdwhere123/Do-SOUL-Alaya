@@ -7,7 +7,8 @@ import {
 } from "@do-soul/alaya-core";
 import { prepareSourceSemanticRequest, sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
   type SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
-import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson,
+  SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase, initDatabase, sourceRecordFromRow, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
   SqliteFieldSourceRecordRepo
@@ -289,14 +290,19 @@ async function publishOneSource(
   if (locations === undefined) {
     return { ...current, ...generation, publication: "failed", publication_error: "current source request has no host-owned assertion locations" };
   }
+  if (request.source_request.attribution_context === undefined) {
+    return { ...current, ...generation, publication: "failed",
+      publication_error: "retained source request has no captured attribution binding" };
+  }
   try {
     const published = await publishAdmittedSourceSemanticInterpretation({
       publication, workspaceId, runId, artifactKey: source.source_id, source: source.content_bytes,
       catalog: sourceSemanticRequestCatalog(request), producer_id: request.source_request.producer_capability.producer_id,
       producer_version: request.source_request.producer_capability.producer_version,
       contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
-      ...(interpretation === undefined ? { draft } : { interpretation }),
-      assertion_locations: locations
+      ...(interpretation === undefined ? { draft } : { interpretation: SourceSemanticInterpretationSchema.parse(interpretation) }),
+      assertion_locations: locations,
+      attribution_context: request.source_request.attribution_context
     });
     return {
       ...current, ...generation, publication: "published",

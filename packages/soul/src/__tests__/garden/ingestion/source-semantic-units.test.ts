@@ -12,8 +12,10 @@ describe("source semantic unit coverage", () => {
   it("preserves historical empty-request identity and source binding without current-generation relabeling", () => {
     const input = { ...producer, sourceCorpus: "", assertionIds: [] };
     const current = buildSourceSemanticRequest(input);
-    const { source_unit_contract: _units, proposal_contract: _proposal, generation_schema_contract: _generation, ...body } = current.source_request;
-    const historical = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
+    const { source_unit_contract: _units, proposal_contract: _proposal,
+      generation_schema_contract: _generation, attribution_context: _attribution, ...body } = current.source_request;
+    const historical = parseRetainedSourceSemanticRequest({ ...current, schema_version: 5,
+      source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
       ...body, normalizer_version: "source-semantic-normalizer-v3"
     } });
     expect(parseRetainedSourceSemanticRequest(JSON.parse(JSON.stringify(historical)))).toEqual(historical);
@@ -70,9 +72,10 @@ describe("source semantic unit coverage", () => {
     const indexed = indexOfficialApiSourceAssertions(sourceCorpus);
     expect(indexed).toHaveLength(1);
     const row = indexed[0]!;
-    const { source_unit_contract: _contract, generation_schema_contract: _generation, ...body } = current.source_request;
+    const { source_unit_contract: _contract, generation_schema_contract: _generation,
+      attribution_context: _attribution, ...body } = current.source_request;
     const source_assertions = [{ assertion_id: row.assertion_id, text: row.text }];
-    const legacy = parseRetainedSourceSemanticRequest({ ...current, source_digest: undefined,
+    const legacy = parseRetainedSourceSemanticRequest({ ...current, schema_version: 5, source_digest: undefined,
       source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source_assertions, semanticSha256),
       source_request: { ...body, proposal_contract: "source-semantic-proposal-v1", source_assertions, assertion_locations: [{ assertion_id: 1,
         source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] }] }

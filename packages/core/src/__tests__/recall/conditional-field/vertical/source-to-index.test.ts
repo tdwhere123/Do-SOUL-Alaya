@@ -9,6 +9,7 @@ import {
   hashSourceRecordId,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type Transition
 } from "@do-soul/alaya-protocol";
 import {
@@ -248,6 +249,7 @@ function plantRecord(database: StorageDatabase, workspaceId: string, body: strin
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     speaker: null,
     scope_class: null,
+    attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     source_body: body
   };
   return new SqliteFieldSourceRecordRepo(database, fieldContractSha256).insert(record);

@@ -345,7 +345,8 @@ function insertIncidence(
   new SqliteFieldSourceRecordRepo(database, fieldSha256).insert({
     workspace_id: workspaceId, record_id, source_id: `${workspaceId}-src`, source_version: "v1", content_digest,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
-    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID, source_body: token, speaker: "user", scope_class: "project"
+    operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID, source_body: token, speaker: "user", scope_class: "project",
+    attribution_context: null
   });
   const span_id = hashAddressableSourceSpanId({
     record_id,

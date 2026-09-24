@@ -4,7 +4,8 @@ import {
   EffectDecisionSchema,
   FactorFamilySchema,
   ProjectionEraseSubjectKindSchema,
-  ProjectionGenerationStatusSchema
+  ProjectionGenerationStatusSchema,
+  UtteranceAttributionSchema
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
 import type { StorageDatabase } from "../../../sqlite/db.js";
@@ -46,6 +47,8 @@ export const fieldSourceRecordParser: RowParser<FieldSourceRecordRow> = {
       operator_id: readNonEmptyStringField(row, "operator_id"),
       speaker: readSpeakerField(row),
       scope_class: readScopeClassField(row),
+      attribution_context: row.attribution_context_json === null
+        ? null : UtteranceAttributionSchema.parse(JSON.parse(readNonEmptyStringField(row, "attribution_context_json"))),
       source_body: readNullableStringField(row, "source_body")
     });
   }

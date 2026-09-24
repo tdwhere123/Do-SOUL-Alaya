@@ -7,6 +7,7 @@ import type {
   ProjectionGenerationPort,
   ProjectionGenerationStatus
 } from "@do-soul/alaya-protocol";
+import type { UtteranceAttribution } from "@do-soul/alaya-protocol";
 
 export type FieldSourceRecordRow = Readonly<{
   readonly record_id: string;
@@ -22,6 +23,7 @@ export type FieldSourceRecordRow = Readonly<{
   readonly operator_id: string;
   readonly speaker: "user" | "assistant" | "system" | null;
   readonly scope_class: "project" | "global_domain" | "global_core" | null;
+  readonly attribution_context: UtteranceAttribution | null;
   readonly source_body: string | null;
 }>;
 

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { buildSourceReferenceCatalog, sourceReferenceResolver } from "@do-soul/alaya-protocol";
+import { buildSourceReferenceCatalog, sourceReferenceResolver, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
@@ -38,6 +38,7 @@ it("returns the stored envelope for concurrent equivalent publications and rejec
       const catalog = buildSourceReferenceCatalog(fieldContractSha256(text), [{ assertion_id: 1, text }], fieldContractSha256);
       const source_ref = sourceReferenceResolver(catalog, fieldContractSha256).referenceForSpan(1, [0, text.length]);
       const input = { workspaceId: WS, runId: RUN, artifactKey: "record", source, catalog,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
         assertion_locations: [{ assertion_id: 1, source_utf8_span: [6, Buffer.byteLength(source)] as const }],
         producer_version: "test-author", contract_version: "source-interpretation-v4",
         draft: { contract: "source-interpretation-v4", mentions: [{ id: "mention", assertion_id: 1, source_ref }],

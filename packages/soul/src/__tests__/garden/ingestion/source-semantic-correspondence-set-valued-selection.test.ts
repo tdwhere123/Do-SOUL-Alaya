@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
   SourceSemanticInterpretationSchema, SourceSemanticQuerySchema,
-  sourceSemanticInterpretationIdentity
+  sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, semanticSha256
@@ -17,9 +17,10 @@ const role = (id: string, variable: string, excerpt: string) => ({
 
 function setValuedQuery() {
   return SourceSemanticQuerySchema.parse({
-    contract: "source-semantic-query-v3",
+    contract: "source-semantic-query-v4",
     original_query_digest: `sha256:${semanticSha256(SET_VALUED)}`,
-    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v3",
+    approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+    producer_id: "query-producer", producer_version: "1", contract_version: "source-semantic-query-v4",
     variables: [
       { id: "offer_action", sort: "proposition" },
       { id: "brand", sort: "entity" },
@@ -63,7 +64,8 @@ function twoOfferInterpretation() {
     contract: "source-interpretation-v4",
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    source: { source_id: "src", source_version: "1", content_digest: `sha256:${semanticSha256(SET_VALUED)}` },
+    source: { source_id: "src", source_version: "1", content_digest: `sha256:${semanticSha256(SET_VALUED)}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "h-producer", producer_version: "1", contract_version: "source-interpretation-v4",
     mentions: [
       mention("mPhilips", "Philips", 0), mention("mStylish", "stylish", 1), mention("mOffer1", "offers", 2),

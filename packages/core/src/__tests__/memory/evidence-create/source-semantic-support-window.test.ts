@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSourceReferenceCatalog, normalizeSourceSemantics, SourceSemanticResourceLedger,
+  UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceSemanticGraph, type SourceSemanticInterpretation
 } from "@do-soul/alaya-protocol";
 import { bindSourceSemanticLocations, verifySourceSemanticLocations } from "../../../memory/evidence-create/source-semantic-location.js";
@@ -23,7 +24,8 @@ function fixture(units: readonly string[], transform = (graph: SourceSemanticGra
       slots: [], bindings: [] }))
   };
   const normalized = normalizeSourceSemantics({ draft: { contract: "source-interpretation-v4", ...transform(graph) },
-    catalog, sha256: sha, source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha(source)}` },
+    catalog, sha256: sha, source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha(source)}`,
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "authored-window-fixture", producer_version: "1", contract_version: "source-interpretation-v4" });
   expect(normalized.status, JSON.stringify(normalized)).toBe("normalized");
   if (normalized.status !== "normalized") throw new Error(JSON.stringify(normalized));

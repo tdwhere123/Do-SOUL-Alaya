@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../../conversation/utterance-attribution.js";
 import {
   SourceSemanticQuerySchema, queryAlternativeConnected,
   type SourceSemanticQueryAlternative, type SourceSemanticQueryFrame,
@@ -17,8 +18,9 @@ const query = (
     { id: "fPack", sort: "proposition" }, { id: "fInspect", sort: "proposition" }
   ]
 ) => ({
-  contract: "source-semantic-query-v3" as const, original_query_digest: digest,
-  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v3",
+  contract: "source-semantic-query-v4" as const, original_query_digest: digest,
+  approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+  producer_id: "qp", producer_version: "1", contract_version: "source-semantic-query-v4",
   variables, alternatives: [{ frames, context_obligations: obligations }] satisfies SourceSemanticQueryAlternative[],
   return_variables: ["parcel"], gaps: []
 });

@@ -53,6 +53,7 @@ export function plantSourceRecord(database: StorageDatabase, body: string, sourc
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     speaker: null,
     scope_class: null,
+    attribution_context: null,
     source_body: body
   });
 }

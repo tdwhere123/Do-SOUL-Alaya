@@ -12,6 +12,7 @@ import { SOURCE_SEMANTIC_MAX_DEPTH } from "../../garden/source-semantic-draft.js
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { accountSourceSemanticDraft, assertSourceSemanticAccounting } from "../../garden/source-semantic-accounting.js";
 import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
+import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { buildSourceReferenceCatalog } from "../../evidence/source-reference.js";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -215,7 +216,8 @@ describe("host-owned compact source semantic expressions", () => {
     expect(() => assertSourceSemanticAccounting({ ...accounted, gaps: [] }, catalog)).toThrow(/host-derived source accounting/u);
     const normalized = normalizeSourceSemantics({
       draft: accounted, catalog, sha256: sha,
-      source: { source_id: "compact", source_version: "1", content_digest: `sha256:${sha(source)}` },
+      source: { source_id: "compact", source_version: "1", content_digest: `sha256:${sha(source)}`,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
       producer_id: "compact-test", producer_version: "1", contract_version: "source-interpretation-v4"
     });
     expect(normalized.status).toBe("normalized");

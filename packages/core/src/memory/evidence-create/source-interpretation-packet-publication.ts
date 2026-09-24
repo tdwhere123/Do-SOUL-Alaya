@@ -2,6 +2,7 @@ import {
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type RequestBudget, canonicalJson, buildSourceReferenceCatalog, sourceReferenceResolver, assertSourceInterpretationPacketProfile, SourceInterpretationPacketSchema,
   PublishedSourceInterpretationPacketSchema, sourceRecallTarget, sourceEvidenceRootTarget,
   normalizeSourceSemantics, sourceSemanticInterpretationIdentity, sourceSemanticStanceLists,
+  retainedSourceSemanticInterpretationIdentity, RetainedSourceSemanticPublishedInterpretationSchema,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SourceRecordIdentitySchema, verifySourceRecordIdentity,
   type SourceRecordIdentity, type SourceEvidenceTarget,
   SourceReferenceCatalogSchema, SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema,
@@ -9,7 +10,8 @@ import {
   type SourceReferenceCatalog, type SourceSemanticInterpretation,
   type SourceSemanticPublishedInterpretation
 } from "@do-soul/alaya-protocol";
-import { bindSourceSemanticLocations, verifySourceSemanticLocations } from "./source-semantic-location.js";
+import { bindSourceSemanticLocations, verifySourceSemanticLocations,
+  verifyRetainedSourceSemanticLocations } from "./source-semantic-location.js";
 import { CoreError } from "../../shared/errors.js";
 import type { FieldFormationStores } from "./field-stores.js";
 import type { EvidenceService } from "../evidence-service.js";
@@ -141,6 +143,7 @@ export function verifyPublishedSourceInterpretation(owner: Pick<Owner, "stores" 
 
 type SemanticInput = Readonly<{
   workspaceId: string; runId: string; artifactKey: string; source: string;
+  attribution_context: SourceSemanticInterpretation["source"]["attribution_context"];
   catalog: SourceReferenceCatalog;
   provenance: SourceSemanticPublishedInterpretation["provenance"];
   profile?: SourceSemanticPublishedInterpretation["profile"];
@@ -203,6 +206,10 @@ function bindSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "me
   }
   const stored = resolveCurrentSource(owner.stores, input.workspaceId,
     { artifact_key: input.artifactKey, source_corpus_digest: owner.sha256(input.source) }, owner.sha256);
+  if (stored.record.attribution_context === undefined || stored.record.attribution_context === null ||
+      canonicalJson(stored.record.attribution_context) !== canonicalJson(input.attribution_context)) {
+    throw new CoreError("VALIDATION", "publication attribution differs from admitted source revision");
+  }
   const catalog = SourceReferenceCatalogSchema.parse(input.catalog);
   const interpretation = bindSourceSemanticLocations({ source: stored.content_bytes,
     interpretation: incomingInterpretation(owner, stored, input, catalog), catalog,
@@ -215,10 +222,18 @@ function incomingInterpretation(owner: Pick<Owner, "sha256" | "meter">, stored: 
   const source = {
     source_id: stored.record.source_id,
     source_version: stored.record.source_version,
-    content_digest: stored.record.content_digest
+    content_digest: stored.record.content_digest,
+    attribution_context: input.attribution_context
   };
   if (input.interpretation !== undefined) {
     const interpretation = SourceSemanticInterpretationSchema.parse(input.interpretation);
+    const unbound = interpretation.source.source_id === "unbound" && interpretation.source.source_version === "unbound";
+    if (interpretation.source.content_digest !== source.content_digest ||
+        canonicalJson(interpretation.source.attribution_context) !== canonicalJson(source.attribution_context) ||
+        !unbound && (interpretation.source.source_id !== source.source_id ||
+          interpretation.source.source_version !== source.source_version)) {
+      throw new CoreError("VALIDATION", "normalized interpretation source binding differs from captured request");
+    }
     if (interpretation.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION) {
       throw new CoreError("VALIDATION", "new source semantic publication requires the current normalizer");
     }
@@ -269,7 +284,7 @@ function assemblePublishedInterpretation(sha256: FieldContractSha256, stored: Re
     content_digest: stored.record.content_digest, evidence_object_id: stored.record.evidence_object_id
   });
   return SourceSemanticPublishedInterpretationSchema.parse({
-    contract: "published-source-interpretation-v4" as const,
+    contract: "published-source-interpretation-v5" as const,
     interpretation_id: sourceSemanticInterpretationIdentity(interpretation, sha256),
     semantic_status: "unreviewed" as const, source_target, interpretation, provenance,
     ...(profile === undefined ? {} : { profile })
@@ -293,8 +308,30 @@ export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "
 /** Exact retained evidence inspection; its result carries no current execution eligibility. */
 export function verifyRetainedPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
   value: unknown, workspaceId: string) {
-  const bound = SourceSemanticPublishedInterpretationSchema.parse(value);
-  return { eligibility: "retained_only" as const, verification: verifyStoredSourceSemanticInterpretation(owner, bound, workspaceId) };
+  const current = SourceSemanticPublishedInterpretationSchema.safeParse(value);
+  if (current.success) return { eligibility: "retained_only" as const,
+    verification: verifyStoredSourceSemanticInterpretation(owner, current.data, workspaceId) };
+  const bound = RetainedSourceSemanticPublishedInterpretationSchema.parse(value);
+  if (retainedSourceSemanticInterpretationIdentity(bound.interpretation, owner.sha256) !== bound.interpretation_id) {
+    throw new CoreError("VALIDATION", "retained interpretation identity mismatch");
+  }
+  const stored = owner.stores.getStoredRecord(workspaceId, bound.source_target.root_id);
+  if (stored === null) throw new CoreError("VALIDATION", "retained interpretation source is unavailable");
+  const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse(stored.record), owner.sha256);
+  const target = sourceRecallTarget({ workspace_id: workspaceId, root_kind: "source_record",
+    root_id: record.identity, source_version: record.source_version, content_digest: record.content_digest,
+    evidence_object_id: record.evidence_object_id });
+  if (canonicalJson(target) !== canonicalJson(sourceEvidenceRootTarget(bound.source_target)) ||
+      bound.interpretation.source.source_id !== record.source_id ||
+      bound.interpretation.source.source_version !== record.source_version ||
+      bound.interpretation.source.content_digest !== record.content_digest) {
+    throw new CoreError("VALIDATION", "retained interpretation source binding mismatch");
+  }
+  const located = verifyRetainedSourceSemanticLocations(stored.content_bytes, bound.interpretation, owner.sha256, owner.meter);
+  if (canonicalJson(located) !== canonicalJson(bound.interpretation)) {
+    throw new CoreError("VALIDATION", "retained interpretation source locations differ");
+  }
+  return { eligibility: "retained_only" as const, verification: { bound, stored } };
 }
 
 function verifyStoredSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
@@ -326,6 +363,8 @@ export function verifySourceSemanticSourceBinding(interpretation: SourceSemantic
   if (interpretation.source.source_id !== record.source_id
     || interpretation.source.source_version !== record.source_version
     || interpretation.source.content_digest !== record.content_digest
+    || record.attribution_context === undefined || record.attribution_context === null
+    || canonicalJson(interpretation.source.attribution_context) !== canonicalJson(record.attribution_context)
     || canonicalJson(expected) !== canonicalJson(sourceEvidenceRootTarget(target))) {
     throw new CoreError("VALIDATION", "interpretation source binding differs from source record", { details: { admission: "filtered" } });
   }

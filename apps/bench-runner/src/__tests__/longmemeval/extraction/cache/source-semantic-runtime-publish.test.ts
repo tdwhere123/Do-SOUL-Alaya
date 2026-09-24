@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildSourceReferenceCatalog } from "@do-soul/alaya-protocol";
+import { buildSourceReferenceCatalog, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   publishAdmittedSourceSemanticInterpretation, verifyRequestOwnedLocations
@@ -30,7 +30,8 @@ describe("source semantic runtime publication adapter", () => {
     ];
     await publishAdmittedSourceSemanticInterpretation({
       publication: { publish }, workspaceId: "ws", runId: "run", artifactKey: "source-1",
-      source: SOURCE, catalog, interpretation: { source: { assertion_locations: locations } } as never,
+      source: SOURCE, catalog, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+      interpretation: { source: { assertion_locations: locations } } as never,
       producer_id: "official-api-source-semantic", producer_version: "1",
       contract_version: "source-interpretation-v4", assertion_locations: locations
     });
@@ -40,6 +41,7 @@ describe("source semantic runtime publication adapter", () => {
     await expect(publishAdmittedSourceSemanticInterpretation({
       publication: { publish }, workspaceId: "ws", runId: "run", artifactKey: "source-1",
       source: SOURCE, catalog: catalogFor("other source text"),
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       interpretation: { source: {} } as never, producer_id: "official-api-source-semantic",
       producer_version: "1", contract_version: "source-interpretation-v4", assertion_locations: locations
     })).rejects.toThrow(/source digest differs from the request catalog/);
@@ -50,7 +52,8 @@ describe("source semantic runtime publication adapter", () => {
     const publish = vi.fn();
     await expect(publishAdmittedSourceSemanticInterpretation({
       publication: { publish }, workspaceId: "ws", runId: "run", artifactKey: "source-1",
-      source: SOURCE, catalog: catalogFor(), interpretation: { source: {} } as never, draft: { contract: "x" },
+      source: SOURCE, catalog: catalogFor(), attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
+      interpretation: { source: {} } as never, draft: { contract: "x" },
       producer_id: "official-api-source-semantic", producer_version: "1",
       contract_version: "source-interpretation-v4", assertion_locations: [
         { assertion_id: 1, source_utf8_span: FIRST }, { assertion_id: 2, source_utf8_span: SECOND }
