@@ -36,7 +36,8 @@ export function inspectInteractiveTransportEvidence(
   cacheRoot: string,
   retainedOnly = false
 ): { readonly attemptOrdinal: number; readonly authorityLineageDigest: string;
-  readonly admissionState: "pending" | "admitted" } {
+  readonly admissionState: "pending" | "admitted"; readonly requestBinding: "verified" | "unbound";
+  readonly historyComplete: boolean } {
   if ((typed.kind === "step_chat_completion") !==
       (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
     throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
@@ -71,9 +72,10 @@ export function inspectInteractiveTransportEvidence(
     providerUrl: logical.providerUrl, transportProviderUrl: transport.providerUrl,
     transportModel: transport.model, apiKey: null
   };
-  // Retained Step schema bytes are absent. Its recorded digest remains evidence,
-  // but rederiving today's wire would demand current producer eligibility.
-  const requestDigestMatches = retainedOnly && typed.kind === "step_chat_completion" ||
+  // Retired Step schema bytes have no independent wire witness here. Preserve
+  // their accounting, but never classify an unchecked digest as verified.
+  const requestBinding = retainedOnly && typed.kind === "step_chat_completion" ? "unbound" : "verified";
+  const requestDigestMatches = requestBinding === "unbound" ||
     raw.request_digest === sourceSemanticRequestWireDigest(requestConfig, line, receipt.limits.max_output_tokens);
   if (manifest?.providerUrl !== logical.providerUrl ||
       manifest.extractionModel !== logical.model || manifest.modelFamily !== logical.modelFamily ||
@@ -106,7 +108,7 @@ export function inspectInteractiveTransportEvidence(
   if (ledger === undefined || ledger.startingMissing !== receipt.limits.starting_missing ||
       ledger.maximumAttempts !== receipt.limits.maximum_attempts ||
       ledger.successfulShardCeiling !== receipt.limits.successful_shard_ceiling ||
-      verifyProviderRawReservation(raw, ledger) === "rejected") {
+      verifyProviderRawReservation(raw, ledger, requestBinding === "unbound" ? "accounting" : "executable") === "rejected") {
     throw new AlayaError("CONFLICT", "typed source semantic raw attempt has no admissible reservation");
   }
   const successful = ledger.successfulEntries.find((shard) => shard.cacheKey === entry.cache_key);
@@ -119,7 +121,7 @@ export function inspectInteractiveTransportEvidence(
       throw new AlayaError("CONFLICT", "typed source semantic cache has no pending exact attempt");
     }
     return { attemptOrdinal: provenance.attemptOrdinal, authorityLineageDigest: raw.authority_lineage_digest,
-      admissionState: "pending" };
+      admissionState: "pending", requestBinding, historyComplete: ledger.historyComplete };
   }
   if (!settled || successful.successKind !== "provider" || successful.attemptOrdinal !== provenance.attemptOrdinal ||
       successful.authorityLineageDigest !== raw.authority_lineage_digest ||
@@ -128,5 +130,5 @@ export function inspectInteractiveTransportEvidence(
     throw new AlayaError("CONFLICT", "typed source semantic cache differs from its ledger shard");
   }
   return { attemptOrdinal: provenance.attemptOrdinal, authorityLineageDigest: raw.authority_lineage_digest,
-    admissionState: "admitted" };
+    admissionState: "admitted", requestBinding, historyComplete: ledger.historyComplete };
 }

@@ -183,6 +183,14 @@ export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerR
   }
 }
 
+/** Named reservations must account for every spent ordinal before execution can continue. */
+export function hasCompleteAttemptHistory(record: ExtractionAttemptLedgerRecord): boolean {
+  const named = new Set([
+    ...record.unresolved_attempts, ...(record.settled_attempts ?? []), ...record.transport_failures
+  ].map(attempt => attempt.attempt_ordinal));
+  return named.size === record.attempts;
+}
+
 export function emptyAttemptTelemetry(): ExtractionAttemptTelemetryRecord {
   return {
     retry_successes: 0,

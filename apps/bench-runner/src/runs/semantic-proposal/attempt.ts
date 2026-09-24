@@ -64,7 +64,8 @@ export function readSemanticProposalAttemptState(
   const settled = [...(ledger?.settledAttempts ?? []), ...(ledger?.transportFailures ?? [])]
     .filter(attempt => attempt.cacheKey === cacheKey).sort((left, right) => right.attemptOrdinal - left.attemptOrdinal)[0];
   let status: "unknown" | "pending" | "transport_failure" | "incomplete" | "settled" = "settled";
-  if (unresolved.some(attempt => !raws.some(raw => raw.attempt_ordinal === attempt.attemptOrdinal))) status = "unknown";
+  if (ledger !== undefined && !ledger.historyComplete) status = "incomplete";
+  else if (unresolved.some(attempt => !raws.some(raw => raw.attempt_ordinal === attempt.attemptOrdinal))) status = "unknown";
   else if (unresolved.length > 0 || shard === undefined && raws.length > 0) status = "pending";
   else if (shard === undefined && settled !== undefined) {
     status = ledger?.transportFailures.some(attempt => attempt.attemptOrdinal === settled.attemptOrdinal)

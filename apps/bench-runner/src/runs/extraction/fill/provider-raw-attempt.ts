@@ -174,6 +174,9 @@ export function verifyProviderRawReservation(
   purpose: "executable" | "accounting" = "executable"
 ): "rejected" | undefined {
   assertExtractionAttemptReservation(ledger, raw.cache_key, raw.attempt_ordinal);
+  if (purpose === "executable" && !ledger?.historyComplete) {
+    throw new ProviderRawAttemptIdentityError("provider raw attempt history is incomplete");
+  }
   const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
   const settlement = ledger?.settledAttempts.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
   const settled = settlement !== undefined;

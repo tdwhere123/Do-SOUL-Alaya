@@ -14,6 +14,7 @@ import type {
   ExtractionAttemptReservationRecord,
   ExtractionTransportFailureRecord
 } from "./contract.js";
+import { hasCompleteAttemptHistory } from "./contract.js";
 
 export interface ExtractionTransportOutcome {
   readonly retryCount: number;
@@ -40,6 +41,9 @@ export function reserveTransportAttempt(
   maximumAttemptsPerKey?: number
 ): ExtractionAttemptLedgerRecord {
   assertCacheKey(cacheKey);
+  if (!hasCompleteAttemptHistory(current)) {
+    throw new ExtractionAttemptLimitError("extraction attempt history is incomplete; reservation is unavailable");
+  }
   if (maximumAttemptsPerKey !== undefined) {
     if (!Number.isSafeInteger(maximumAttemptsPerKey) || maximumAttemptsPerKey < 1) {
       throw new ExtractionAttemptLimitError("invalid extraction per-key attempt ceiling");

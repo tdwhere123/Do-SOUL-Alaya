@@ -17,6 +17,7 @@ import {
   EXTRACTION_ATTEMPT_LEDGER_VERSION,
   assertStoredAttemptLedgerRecord,
   emptyAttemptTelemetry,
+  hasCompleteAttemptHistory,
   persistAttemptLedgerRecordExclusive,
   persistAttemptLedgerRecord,
   projectAttemptLedgerV5Terminal,
@@ -54,6 +55,7 @@ export interface ExtractionAttemptLedgerSnapshot {
   readonly maximumAttempts: number;
   readonly successfulShardCeiling: number;
   readonly attempts: number;
+  readonly historyComplete: boolean;
   readonly successfulShards: number;
   readonly successfulEntries: readonly Readonly<ExtractionSuccessfulShard>[];
   readonly successfulKeys: readonly string[];
@@ -143,6 +145,9 @@ export function readSettledExtractionAttemptLedger(input: {
   if (current.pending_keys.length > 0 || current.unresolved_attempts.length > 0) {
     throw new Error("predecessor extraction attempt ledger is not durably settled");
   }
+  if (!hasCompleteAttemptHistory(current)) {
+    throw new Error("predecessor extraction attempt history is incomplete");
+  }
   assertSuccessfulShards(input.cacheRoot, current);
   return toSnapshot(current, path, envelope.rawSha256);
 }
@@ -163,6 +168,7 @@ export function forkSettledExtractionAttemptLedger(input: {
   const predecessor = readAttemptLedgerRecordEnvelope(predecessorPath).record;
   assertLedgerIdentity(predecessor, input.predecessorLineageDigest, input.cacheIdentity);
   if (predecessor.pending_keys.length > 0 || predecessor.unresolved_attempts.length > 0 ||
+      !hasCompleteAttemptHistory(predecessor) ||
       ledgerDigest(predecessor) !== input.predecessorLedgerSha256) {
     throw new Error("predecessor extraction attempt ledger changed before continuation fork");
   }
@@ -194,6 +200,7 @@ export function ensureForkedExtractionAttemptLedger(input: {
   const predecessor = predecessorEnvelope.record;
   assertLedgerIdentity(predecessor, input.predecessorLineageDigest, input.cacheIdentity);
   if (predecessor.pending_keys.length > 0 || predecessor.unresolved_attempts.length > 0 ||
+      !hasCompleteAttemptHistory(predecessor) ||
       ledgerDigest(predecessor) !== input.predecessorLedgerSha256 ||
       predecessorEnvelope.rawSha256 !== input.predecessorRawLedgerSha256) {
     throw new Error("predecessor extraction attempt ledger changed before continuation fork");
@@ -370,6 +377,7 @@ function reconcilePending(
   publicationTemporaryDirectory?: string,
   inspectShard: ExtractionAttemptShardInspector = readValidLedgerShard
 ): ExtractionAttemptLedgerRecord {
+  if (!hasCompleteAttemptHistory(current)) return current;
   const recovered = current.pending_keys.flatMap((cacheKey) => {
     const shard = inspectShard(cacheRoot, cacheKey, current.cache_identity);
     return shard === undefined || !shardAttemptBelongsToLedger(shard, current) ? [] : [shard];
@@ -472,6 +480,7 @@ function toSnapshot(
     maximumAttempts: record.maximum_attempts,
     successfulShardCeiling: record.successful_shard_ceiling,
     attempts: record.attempts,
+    historyComplete: hasCompleteAttemptHistory(record),
     successfulShards: record.successful_shards.length,
     successfulEntries: Object.freeze(record.successful_shards.map((shard) =>
       Object.freeze({ ...shard })

@@ -330,10 +330,11 @@ function replayExistingProposalRaws(
   const raws = listProviderRawAttempts(input.cacheRoot, line.key);
   const rawOrdinals = new Set(raws.map((item) => item.attempt_ordinal));
   const unresolved = snapshot.unresolvedAttempts.filter((item) => item.cacheKey === line.key);
-  const missingCompleted = snapshot.settledAttempts.filter(attempt => attempt.cacheKey === line.key &&
-    !rawOrdinals.has(attempt.attemptOrdinal) && !snapshot.transportFailures.some(failure =>
-      failure.attemptOrdinal === attempt.attemptOrdinal));
-  if (missingCompleted.length > 0) {
+  // A failure record still spends its ordinal. Its lost raw cannot prove the
+  // retry disposition, including when an older ledger has no settled witness.
+  const missingSettled = [...snapshot.settledAttempts, ...snapshot.transportFailures]
+    .some(attempt => attempt.cacheKey === line.key && !rawOrdinals.has(attempt.attemptOrdinal));
+  if (missingSettled) {
     return { done: true, classified: "incomplete", admitted: false, attempts: used };
   }
   if (snapshot.pendingKeys.includes(line.key) && raws.length === 0 && unresolved.length === 0 &&

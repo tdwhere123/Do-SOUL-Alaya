@@ -18,6 +18,8 @@ import { assertStepSourcePreflightReceipt } from "../../../runs/extraction/autho
 import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
 import { inspectCachedSourceSemantic, inspectRetainedCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { inspectInteractiveTransportEvidence } from "../../../runs/extraction/cache/source-interactive-binding.js";
+import { readCachedEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { listProviderRawAttempts, providerRawAttemptPath, readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from
   "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
@@ -105,6 +107,30 @@ it("reopens a configured logical model alias through its recorded Step transport
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, logicalModel, PROFILE))
     .toMatchObject({ status: "hit", transportProvenance: { model: MODEL } });
   await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(1);
+});
+
+it("rejects a changed current Step wire digest through both inspection APIs", async () => {
+  const fixture = await scenario(1);
+  const http = await listen(body => ({
+    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
+  }));
+  await runExtractionFill(fixture.options);
+  const key = fixture.selected[0]!;
+  const cached = readCachedEntry(roots.cacheRoot, key, MODEL, PROFILE);
+  if (cached.status !== "hit" || cached.entry.source_semantic?.kind !== "step_chat_completion") {
+    throw new Error("expected an admitted Step source artifact");
+  }
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("hit");
+  expect(inspectRetainedCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE))
+    .toMatchObject({ status: "retired", verification: { status: "hit", requestBinding: "verified" } });
+  expect(inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, true))
+    .toMatchObject({ requestBinding: "unbound", admissionState: "admitted" });
+  const path = providerRawAttemptPath(roots.cacheRoot, key, 1);
+  const raw = JSON.parse(readFileSync(path, "utf8"));
+  writeFileSync(path, JSON.stringify({ ...raw, request_digest: "e".repeat(64) }));
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("invalid");
+  expect(inspectRetainedCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("invalid");
   expect(http.calls).toHaveLength(1);
 });
 

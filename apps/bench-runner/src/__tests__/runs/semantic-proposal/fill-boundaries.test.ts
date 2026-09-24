@@ -724,7 +724,7 @@ it("restarts a later key from its own reserved raws instead of the global attemp
   expect(readProviderRawAttempt(cacheRoot, line1.key, 2)?.decoded_text).toContain("abstained");
 });
 
-it("restarts from a settled transport-without-raw using remaining per-key attempts", async () => {
+it("withholds a settled transport without raw while other keys keep their attempts", async () => {
   const root = tempRoot();
   const cacheRoot = join(root, "cache");
   const prepared = workset(true, ["Who chairs SHADOW?", "Who sent the sample to Mira?"]);
@@ -738,24 +738,26 @@ it("restarts from a settled transport-without-raw using remaining per-key attemp
   const planted = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
   const ordinal = planted.reserveAttemptOrdinal(line1.key);
   planted.recordTransportOutcome(line1.key, settledNetworkError(), ordinal);
+  const before = planted.snapshot();
   expect(readProviderRawAttempt(cacheRoot, line1.key, ordinal)).toBeUndefined();
-  const spy = extractor(["not-json", "not-json", "not-json"]);
+  const spy = extractor(["not-json", "not-json"]);
   const result = await executeSemanticProposalFill({
     workset: prepared, cacheRoot, authority, config: config(), extractor: spy
   });
-  expect(spy.calls).toHaveLength(3);
-  expect(spy.calls.filter((prompt) => prompt.includes("Who chairs SHADOW?"))).toHaveLength(1);
+  expect(spy.calls).toHaveLength(2);
+  expect(spy.calls.filter((prompt) => prompt.includes("Who chairs SHADOW?"))).toHaveLength(0);
   expect(spy.calls.filter((prompt) => prompt.includes("Who sent the sample to Mira?"))).toHaveLength(2);
-  expect(result.attempts).toBe(4);
+  expect(result.attempts).toBe(3);
   expect(readProviderRawAttempt(cacheRoot, line1.key, 1)).toBeUndefined();
-  expect(readProviderRawAttempt(cacheRoot, line1.key, 2)?.decoded_text).toBe("not-json");
+  expect(readProviderRawAttempt(cacheRoot, line2.key, 2)?.decoded_text).toBe("not-json");
   expect(readProviderRawAttempt(cacheRoot, line2.key, 3)?.decoded_text).toBe("not-json");
-  expect(readProviderRawAttempt(cacheRoot, line2.key, 4)?.decoded_text).toBe("not-json");
   expect(inspectSemanticProposalShard(cacheRoot, line2.key, {
     kind: "query", model: MODEL, request_profile: PROFILE
   })).toBeDefined();
   const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
-  expect(ledger.snapshot().attempts).toBe(4);
+  expect(ledger.snapshot().attempts).toBe(3);
+  expect(ledger.snapshot().transportFailures.filter((failure) => failure.cacheKey === line1.key))
+    .toEqual(before.transportFailures);
 });
 
 it("publishes a last-attempt shard when the global ceiling leaves fewer slots than remaining per-key attempts", async () => {

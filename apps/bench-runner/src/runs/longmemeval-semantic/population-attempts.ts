@@ -44,7 +44,7 @@ export function inspectPopulationAttemptScopes(scopes: readonly PopulationAttemp
         lineageDigest: record.lineage_digest, cacheIdentity: record.cache_identity });
       if (snapshot === undefined) throw new AlayaError("CONFLICT", "population attempt ledger disappeared during inspection");
       const history = [...snapshot.unresolvedAttempts, ...snapshot.settledAttempts, ...snapshot.transportFailures];
-      if (new Set(history.map(row => row.attemptOrdinal)).size !== snapshot.attempts) complete = false;
+      if (!snapshot.historyComplete) complete = false;
       for (const reservation of history) {
         if (!keys.has(reservation.cacheKey)) continue;
         const id = JSON.stringify([scope.layer, root, scope.model, scope.requestProfile,

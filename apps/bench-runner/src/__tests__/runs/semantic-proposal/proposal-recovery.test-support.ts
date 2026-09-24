@@ -195,6 +195,69 @@ export function proposalRecoveryCases(input: {
       expect(await f.fill()).toMatchObject({ unknown: 0, incomplete: 1, terminal_failures: 0, unattempted: 0, attempts: 1 });
     });
 
+    it("does not spend again when a prior settled attempt has lost its named history", async () => {
+      const f = fixture();
+      f.ledger.reserveAttemptOrdinal(f.line.key);
+      f.ledger.recordTransportOutcome(f.line.key, { retryCount: 0, rateLimitRetries: 0,
+        successfulRequestCount: 1, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } }, 1);
+      const record = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
+      delete record.settled_attempts;
+      writeFileSync(f.ledgerPath, JSON.stringify(record));
+      const before = readFileSync(f.ledgerPath, "utf8");
+      expect(f.read().status).toBe("incomplete");
+      expect(inspectPopulationAttemptScopes([{ layer: f.workset.kind === "query" ? "query" : "correspondence",
+        cacheRoot: f.cacheRoot, model: f.workset.model, requestProfile: f.workset.request_profile,
+        keys: [f.line.key] }])).toMatchObject({ inspected_scope_history_complete: false,
+        scoped_authorized_attempts: null });
+      let calls = 0;
+      await expect(executeSemanticProposalFill({ workset: f.workset, cacheRoot: f.cacheRoot,
+        authority: f.authority, config: input.config(), extractor: { extract: async () => {
+          calls += 1; throw new Error("must not dispatch");
+        } } })).resolves.toMatchObject({ attempts: 0, incomplete: 1, newly_admitted: 0 });
+      expect(calls).toBe(0);
+      expect(readFileSync(f.ledgerPath, "utf8")).toBe(before);
+    });
+
+    it.each([true, false].flatMap(usageKnown =>
+      (["settled", "failure-only"] as const).map(history => ({ usageKnown, history }))))(
+      "keeps lost $history terminal failure spent with known usage=$usageKnown", async ({ usageKnown, history }) => {
+        const f = fixture();
+        const ordinal = f.ledger.reserveAttemptOrdinal(f.line.key);
+        const failure = { attempt: 1, kind: "response_parse_error" as const, phase: "response_parse" as const,
+          httpStatus: 200, fingerprint: "e".repeat(64) };
+        writeProviderRawAttempt({ root: f.cacheRoot, cacheKey: f.line.key, attemptOrdinal: ordinal,
+          kind: f.workset.kind, model: f.workset.model, requestProfile: f.workset.request_profile,
+          requestDigest: f.line.requestDigest, attemptLineageDigest: f.authority.attempt_lineage_digest,
+          decodedText: "", finishReason: null, transportFailure: failure, failureRetryable: false,
+          failureClassification: "failure_non_retryable_response",
+          ...(usageKnown ? { usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } } : {}) });
+        expect(f.read().status).toBe("pending");
+        expect(await f.fill()).toMatchObject({ attempts: 1, terminal_failures: 1, newly_admitted: 0 });
+        expect(f.read().status).toBe("transport_failure");
+        unlinkSync(semanticProposalShardPath(f.cacheRoot, f.line.key));
+        unlinkSync(providerRawAttemptPath(f.cacheRoot, f.line.key, ordinal));
+        if (history === "failure-only") {
+          const record = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
+          delete record.settled_attempts;
+          writeFileSync(f.ledgerPath, JSON.stringify(record));
+        }
+        const bytes = readFileSync(f.ledgerPath);
+        const before = openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+          authority: f.authority, kind: f.workset.kind }).snapshot();
+        expect(before).toMatchObject({ attempts: 1, successfulShards: 0,
+          unresolvedAttempts: [], transportFailures: [{ attemptOrdinal: 1, cacheKey: f.line.key }],
+          telemetry: { totalTokens: usageKnown ? 5 : 0, usageUnknownAttempts: usageKnown ? 0 : 1,
+            terminalRetryClassifications: { failure_non_retryable_response: 1 } } });
+        expect(before.settledAttempts).toHaveLength(history === "settled" ? 1 : 0);
+        expect(f.read().status).toBe("transport_failure");
+        expect(await f.fill()).toMatchObject({ attempts: 1, terminal_failures: 1, newly_admitted: 0 });
+        expect(readFileSync(f.ledgerPath).equals(bytes)).toBe(true);
+        expect(await f.restart()).toMatchObject({ summary: { terminal_failures: 1, newly_admitted: 0 },
+          statuses: ["transport_failure"] });
+        expect(readFileSync(f.ledgerPath).equals(bytes)).toBe(true);
+      }
+    );
+
     it("retains native Gemini success bytes through proposal admission, reopen and no-call reuse", async () => {
       const cacheRoot = mkdtempSync(join(tmpdir(), "proposal-native-response-")); roots.push(cacheRoot);
       let calls = 0;
@@ -368,8 +431,8 @@ export function proposalRecoveryCases(input: {
       f.ledger.recordTransportOutcome(f.line.key, { retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1 }, 1);
       const old = JSON.parse(readFileSync(f.ledgerPath, "utf8")); delete old.settled_attempts;
       const bytes = JSON.stringify(old); writeFileSync(f.ledgerPath, bytes);
-      expect(f.read().status).toBe("pending");
-      expect(await f.fill()).toMatchObject({ unknown: 0, pending: 1, unattempted: 0, newly_admitted: 0 });
+      expect(f.read().status).toBe("incomplete");
+      expect(await f.fill()).toMatchObject({ unknown: 0, incomplete: 1, unattempted: 0, newly_admitted: 0 });
       expect(readFileSync(f.ledgerPath, "utf8")).toBe(bytes);
     });
 

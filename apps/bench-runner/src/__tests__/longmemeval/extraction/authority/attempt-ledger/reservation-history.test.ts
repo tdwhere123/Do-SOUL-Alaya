@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { assertExtractionAttemptReservation, inspectExtractionAttemptLedger, openExtractionAttemptLedger }
+import { assertExtractionAttemptReservation, inspectExtractionAttemptLedger, openExtractionAttemptLedger,
+  readSettledExtractionAttemptLedger, forkSettledExtractionAttemptLedger }
   from "../../../../../runs/extraction/authority/attempt-ledger.js";
 
 const roots: string[] = [];
@@ -29,6 +30,27 @@ it("retains exact settled ownership across reopen while leaving the other reserv
   expect(() => assertExtractionAttemptReservation(read, first, 3)).toThrow(/exact reserved attempt/u);
   expect(readFileSync(f.path, "utf8")).toBe(before);
   expect(openExtractionAttemptLedger({ ...f.identity, startingMissing: 2 }).snapshot().settledAttempts).toEqual(read.settledAttempts);
+});
+
+it("keeps anonymous spent usage readable but refuses reservation and continuation after reopen", () => {
+  const f = fixture(), key = "1".repeat(64);
+  f.ledger.reserveAttemptOrdinal(key);
+  f.ledger.recordTransportOutcome(key, { retryCount: 0, rateLimitRetries: 0,
+    successfulRequestCount: 1, usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } }, 1);
+  const record = JSON.parse(readFileSync(f.path, "utf8"));
+  delete record.settled_attempts;
+  record.pending_keys = [];
+  writeFileSync(f.path, JSON.stringify(record));
+  const before = readFileSync(f.path, "utf8");
+  const reopened = openExtractionAttemptLedger({ ...f.identity, startingMissing: 2 });
+  expect(reopened.snapshot()).toMatchObject({ attempts: 1, historyComplete: false,
+    telemetry: { inputTokens: 2, outputTokens: 3, totalTokens: 5 } });
+  expect(() => reopened.reserveAttemptOrdinal(key)).toThrow(/history is incomplete/u);
+  expect(() => readSettledExtractionAttemptLedger(f.identity)).toThrow(/history is incomplete/u);
+  expect(() => forkSettledExtractionAttemptLedger({ ...f.identity,
+    predecessorLineageDigest: f.identity.lineageDigest, predecessorLedgerSha256: reopened.snapshot().ledgerSha256,
+    successorLineageDigest: "b".repeat(64) })).toThrow(/history is incomplete|changed before continuation/u);
+  expect(readFileSync(f.path, "utf8")).toBe(before);
 });
 
 it.each(["overlap", "duplicate", "beyond-ceiling", "foreign-failure", "null-entry"] as const)(

@@ -930,3 +930,30 @@ it("still refuses mixing lazy_field, expansion, or an injected extractor with op
     expansionCapability: {} as LongMemEvalExpansionCapability
   })).rejects.toThrow(/cannot mix lazy_field, expansion, or an injected extractor/u);
 });
+
+it("does not redispatch after raw loss exposes an anonymous spent attempt", async () => {
+  const fixture = await setupInteractive();
+  await runExtractionFill({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    concurrency: 1, authorityReceiptPath: fixture.receiptPath, log: () => undefined });
+  const originalCalls = fixture.fetchMock.mock.calls.length;
+  expect(originalCalls).toBeGreaterThan(0);
+  const ledgerPath = join(cacheRoot, readdirSync(cacheRoot).find(name => name.startsWith("extraction-attempt-ledger."))!);
+  const record = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  record.successful_shards = [];
+  record.pending_keys = fixture.keys;
+  delete record.settled_attempts;
+  writeFileSync(ledgerPath, JSON.stringify(record));
+  for (const key of fixture.keys) {
+    const raw = listProviderRawAttempts(cacheRoot, key)[0]!;
+    unlinkSync(cacheFilePath(cacheRoot, key));
+    unlinkSync(providerRawAttemptPath(cacheRoot, key, raw.attempt_ordinal));
+  }
+  const before = readFileSync(ledgerPath, "utf8");
+  await expect(runExtractionFill({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    concurrency: 1, authorityReceiptPath: fixture.receiptPath, log: () => undefined }))
+    .rejects.toThrow(/history is incomplete/u);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(originalCalls);
+  expect(readFileSync(ledgerPath, "utf8")).toBe(before);
+});
