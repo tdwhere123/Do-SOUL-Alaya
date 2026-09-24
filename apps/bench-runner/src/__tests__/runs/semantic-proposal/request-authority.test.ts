@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,9 @@ import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticPropo
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, proposalCacheKey } from "../../../runs/semantic-proposal/workset.js";
+import { prepareSemanticProviderRequest } from "../../../runs/compile-seed/http/semantic-provider-http.js";
+import { geminiGenerationSchemaCacheMaterial, projectGeminiGenerationSchema } from "../../../runs/extraction/fill/batch/generation-schema.js";
+import { buildExtractionTransportProvenance } from "../../../runs/extraction/transport-route.js";
 import { listExtractionAttemptLedgerRecords, openExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { readProviderRawAttempt, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { inspectSemanticProposalShard, semanticProposalShardPath, writeSemanticProposalShard,
@@ -60,6 +63,56 @@ it("keeps recorded recursive-wire cache evidence inspectable without current wor
   expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.shard).toBeUndefined();
   expect(inspectSemanticProposalShard(cacheRoot, historicalKey,
     { kind: "query", model, request_profile: requestProfile })).toEqual(historical);
+});
+
+it("verifies a retained recursive query shard against its recorded request and cache identity", () => {
+  const recorded = JSON.parse(readFileSync(new URL("./retained-recursive-query-request.json", import.meta.url), "utf8")) as {
+    schema: object; systemPrompt: string; userPrompt: string;
+    config: { model: string; requestProfile: "gemini-3.1-minimal-v1"; providerUrl: string; apiKey: null };
+    key: string; wireUrl: string; wireBodySha256: string; requestDigest: string; cacheMaterialSha256: string;
+  };
+  const { schema, systemPrompt, userPrompt, config } = recorded;
+  const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+  const projected = projectGeminiGenerationSchema(schema);
+  expect(projected.recursive).toBe(true);
+  expect(projected.instruction).toContain("complete response envelope including its contract, outcome and body");
+  expect(hash(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema)))).toBe(recorded.cacheMaterialSha256);
+  const wire = prepareSemanticProviderRequest(config, {
+    systemPrompt, userPrompt, responseJsonSchema: schema, maxOutputTokens: 4096,
+    retryMode: "disabled", outputTokenField: "maxOutputTokens", validateRawJson: () => undefined
+  }, "source_semantic_proposal");
+  expect(wire.url.href).toBe(recorded.wireUrl);
+  expect(hash(wire.body)).toBe(recorded.wireBodySha256);
+  expect(hash(JSON.stringify([wire.url.href, wire.body]))).toBe(recorded.requestDigest);
+  expect(proposalCacheKey(config.model, config.requestProfile, systemPrompt, userPrompt,
+    schema, 4096, config.providerUrl)).toBe(recorded.key);
+
+  const raw_json = JSON.stringify({ contract: "source-semantic-query-response-v7", outcome: { status: "abstained" } });
+  const transport_provenance = buildExtractionTransportProvenance(config);
+  const historical = {
+    contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "query" as const, cache_key: recorded.key,
+    model: config.model, request_profile: config.requestProfile,
+    original_query: (JSON.parse(userPrompt) as { original_query: string }).original_query,
+    system_prompt: systemPrompt, user_prompt: userPrompt, raw_json,
+    outcome: { status: "abstained" }, admitted: false, attempt_ordinal: 1,
+    attempt_lineage_digest: "a".repeat(64), request_digest: recorded.requestDigest,
+    extracted_at: "recorded", raw_digest: hash(raw_json), max_output_tokens: 4096,
+    transport_provenance
+  };
+  const cacheRoot = root();
+  writeSemanticProposalShard(cacheRoot, historical);
+  const lookup = {
+    kind: "query" as const, model: config.model, request_profile: config.requestProfile,
+    system_prompt: systemPrompt, user_prompt: userPrompt, schema, max_output_tokens: 4096,
+    provider_url: config.providerUrl, request_digest: recorded.requestDigest, transport_provenance,
+    attempt_lineage_digest: historical.attempt_lineage_digest
+  };
+  expect(inspectSemanticProposalShard(cacheRoot, recorded.key, lookup)).toEqual(historical);
+  expect(() => inspectSemanticProposalShard(cacheRoot, recorded.key, {
+    ...lookup, schema: { ...schema, description: "changed" }
+  })).toThrow(/identity mismatch/u);
+  const current = materializeSemanticProposalLines(workset(config.providerUrl, [historical.original_query]), 4096)[0]!;
+  expect(current.key).not.toBe(recorded.key);
 });
 
 it("requires Step workset version and selected Plan route before authority", () => {

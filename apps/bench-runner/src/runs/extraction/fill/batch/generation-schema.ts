@@ -13,6 +13,8 @@ const singlePositions = ["items", "additionalProperties", "contains", "not", "if
  * always retains the full schema, including when decoding uses JSON mode. */
 const GEMINI_STRUCTURED_SCHEMA_MAX_BYTES = 16 * 1024;
 const GEMINI_ENVELOPE_EXPANSION_MAX_NODES = 1024;
+// Retained recursive Q requests keep their recorded decoding guidance after the current contract advances.
+const RETAINED_QUERY_RESPONSE_CONTRACT = "source-semantic-query-response-v7";
 
 const ENVELOPE_SCHEMA_INSTRUCTION =
   "Return JSON satisfying this complete local response schema. All required fields, kinds and operands remain mandatory; omitted or invalid expressions will be rejected. Return the complete response envelope including its contract, outcome and body, not the schema itself.\n";
@@ -25,7 +27,8 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
   const root = schema as Schema, recursiveReferences = new Map<string, boolean>();
   const contract = record(record(root.properties)?.contract);
   const values = Array.isArray(contract?.enum) ? contract.enum : [contract?.const];
-  const envelope = values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
+  const envelope = values.some(value => value === RETAINED_QUERY_RESPONSE_CONTRACT
+    || value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
     || value === SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT);
   const instruction = envelope ? ENVELOPE_SCHEMA_INSTRUCTION : SOURCE_SCHEMA_INSTRUCTION;
   const cycle = (value: unknown, visiting = new Set<string>()): boolean => {
