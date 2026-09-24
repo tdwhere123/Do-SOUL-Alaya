@@ -546,28 +546,45 @@ function shortSourceBatchResponse(line: { key: string; request: { contents: { pa
 function installStrictShortSourceBatchMock() {
   let upload = "", displayName = "", creates = 0;
   const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
-    const path = new URL(String(url)).pathname;
-    if (path === "/upload/v1beta/files") return new Response(null,
+    const requestUrl = new URL(String(url));
+    const path = requestUrl.pathname;
+    const method = init?.method ?? "GET";
+    if (requestUrl.origin !== "https://fixture-provider.invalid") {
+      throw new Error(`unexpected offline request ${method} ${requestUrl.origin}${path}`);
+    }
+    if (method === "POST" && path === "/upload/v1beta/files") return new Response(null,
       { headers: { "x-goog-upload-url": "https://fixture-provider.invalid/upload-session" } });
-    if (path === "/upload-session") {
+    if (method === "POST" && path === "/upload-session") {
       upload = String(init?.body);
       return Response.json({ file: { name: "files/input" } });
     }
-    if (path.endsWith(":batchGenerateContent")) {
+    if (method === "POST" && path === `/v1beta/models/${MODEL}:batchGenerateContent`) {
       creates++;
       displayName = JSON.parse(String(init?.body)).batch.displayName;
       return Response.json({ name: "batches/job" });
     }
-    if (path === "/v1beta/batches/job") return Response.json({ name: "batches/job", metadata: {
+    if (method === "GET" && path === "/v1beta/batches/job") return Response.json({ name: "batches/job", metadata: {
       displayName, model: `models/${MODEL}`, state: "BATCH_STATE_SUCCEEDED",
       inputConfig: { fileName: "files/input" }, output: { responsesFile: "files/output" } } });
-    if (path === "/download/v1beta/files/output:download") return new Response(upload.trim().split("\n")
+    if (method === "GET" && path === "/download/v1beta/files/output:download") return new Response(upload.trim().split("\n")
       .map(line => shortSourceBatchResponse(JSON.parse(line))).join("\n"));
-    throw new Error(`unexpected offline request ${path}`);
+    throw new Error(`unexpected offline request ${method} ${requestUrl.origin}${path}`);
   });
   vi.stubGlobal("fetch", fetchMock);
   return { fetchMock, createCount: () => creates };
 }
+
+it("rejects Batch requests with a foreign origin, wrong method or wrong model route", async () => {
+  const { fetchMock, createCount } = installStrictShortSourceBatchMock();
+  const createPath = `/v1beta/models/${MODEL}:batchGenerateContent`;
+  await expect(fetchMock(new URL(`https://unexpected-provider.invalid${createPath}`),
+    { method: "POST" })).rejects.toThrow(/unexpected offline request/u);
+  await expect(fetchMock(new URL(`https://fixture-provider.invalid${createPath}`),
+    { method: "GET" })).rejects.toThrow(/unexpected offline request/u);
+  await expect(fetchMock(new URL("https://fixture-provider.invalid/v1beta/models/gemini-wrong:batchGenerateContent"),
+    { method: "POST" })).rejects.toThrow(/unexpected offline request/u);
+  expect(createCount()).toBe(0);
+});
 
 async function fillAuthoredCompletionCorrespondence(
   workset: Parameters<typeof materializeSemanticProposalLines>[0], opportunity: number,
