@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AlayaError } from "../../shared/alaya-error.js";
 import {
   SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticHandleSchema, SourceSemanticSupportSchema
 } from "../../garden/source-semantic-draft.js";
@@ -157,7 +158,7 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
   const query_endpoints = catalog.query_endpoints.map((endpoint) => {
     if (endpoint.kind === "referent") {
       const variable = variables.get(endpoint.variable!);
-      if (variable?.reference === undefined) throw new Error("catalog referent has no declared query reference");
+      if (variable?.reference === undefined) throw new AlayaError("VALIDATION", "catalog referent has no declared query reference");
       const uses = query.alternatives.flatMap((alternative, index) => alternative.frames.flatMap((frame) =>
         frame.role_requirements.filter((role) => role.target_variable === variable.id).map((role) => ({
           alternative: index, frame: frame.id, predicate_reading: frame.predicate_reading,
@@ -174,7 +175,7 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
     }
     const alternative = query.alternatives[endpoint.alternative!];
     const frame = alternative?.frames.find((row) => row.id === endpoint.frame);
-    if (alternative === undefined || frame === undefined) throw new Error("catalog frame has no declared query frame");
+    if (alternative === undefined || frame === undefined) throw new AlayaError("VALIDATION", "catalog frame has no declared query frame");
     const frame_context = { frame: frame.id, predicate_reading: frame.predicate_reading,
       operator: frame.operator ?? null, source_act: frame.source_act ?? null,
       context_obligations: alternative.context_obligations.filter((row) => row.frame === frame.id),
@@ -187,20 +188,20 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
         roles: frame.role_requirements };
     }
     const role = frame.role_requirements.find((row) => row.id === endpoint.slot);
-    if (role === undefined) throw new Error("catalog slot has no declared query role");
+    if (role === undefined) throw new AlayaError("VALIDATION", "catalog slot has no declared query role");
     return { handle: endpoint.handle, kind: endpoint.kind, frame_context, role };
   });
   const source_endpoints = catalog.source_endpoints.map((endpoint) => {
     const interpretation = sources.get(endpoint.source_interpretation_handle);
-    if (interpretation === undefined) throw new Error("catalog source endpoint has no declared interpretation");
+    if (interpretation === undefined) throw new AlayaError("VALIDATION", "catalog source endpoint has no declared interpretation");
     const source_context = { attribution_context: interpretation.source.attribution_context,
       assertion_locations: interpretation.source.assertion_locations ?? null };
     if (endpoint.kind === "referent") {
       const referent = interpretation.referents.find((row) => row.id === endpoint.referent);
-      if (referent === undefined) throw new Error("catalog referent has no declared source referent");
+      if (referent === undefined) throw new AlayaError("VALIDATION", "catalog referent has no declared source referent");
       const mentions = referent.mentions.map((id) => {
         const mention = interpretation.mentions.find((row) => row.id === id);
-        if (mention === undefined) throw new Error("source referent has no declared mention");
+        if (mention === undefined) throw new AlayaError("VALIDATION", "source referent has no declared mention");
         return { id: mention.id, text: mention.text, assertion_id: mention.assertion_id,
           source_ref: mention.source_ref, utf8_span: mention.utf8_span,
           span_space: mention.span_space ?? null };
@@ -208,7 +209,7 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
       const uses = interpretation.frames.flatMap((frame) => frame.bindings.filter((binding) =>
         binding.target.kind === "node" && binding.target.id === referent.id).map((binding) => {
           const slot = frame.slots.find((row) => row.id === binding.slot_id);
-          if (slot === undefined) throw new Error("source binding has no declared slot");
+          if (slot === undefined) throw new AlayaError("VALIDATION", "source binding has no declared slot");
           return { frame: frame.id, assertion_ids: frame.assertion_ids, context_owner: frame.context_owner,
             slot: slot.id, role_reading: slot.role_reading, slot_support: slot.support,
             target: binding.target, binding_support: binding.support };
@@ -216,7 +217,7 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
       return { handle: endpoint.handle, kind: endpoint.kind, source_context, mentions, uses };
     }
     const frame = interpretation.frames.find((row) => row.id === endpoint.frame);
-    if (frame === undefined) throw new Error("catalog frame has no declared source frame");
+    if (frame === undefined) throw new AlayaError("VALIDATION", "catalog frame has no declared source frame");
     const frame_context = { frame: frame.id, assertion_ids: frame.assertion_ids,
       context_owner: frame.context_owner, predicate_support: frame.predicate_support,
       additional_support: frame.additional_support };
@@ -226,7 +227,7 @@ export function buildSourceSemanticCorrespondenceEndpointEvidence(
           bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) })) };
     }
     const slot = frame.slots.find((row) => row.id === endpoint.slot);
-    if (slot === undefined) throw new Error("catalog slot has no declared source slot");
+    if (slot === undefined) throw new AlayaError("VALIDATION", "catalog slot has no declared source slot");
     return { handle: endpoint.handle, kind: endpoint.kind, source_context, frame_context,
       slot, bindings: frame.bindings.filter((binding) => binding.slot_id === slot.id) };
   });

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION, encodeSourceSemanticQueryCarrier,
+import { AlayaError, buildSourceSemanticCorrespondenceEndpointEvidence,
+  sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION, encodeSourceSemanticQueryCarrier,
   type SourceSemanticQueryMeaningBody } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticCorrespondenceRequest, semanticSha256 }
   from "../../../garden/ingestion/official-api/source-semantic-request.js";
@@ -154,4 +155,34 @@ it("presents declared reference uses and source frame context on the same endpoi
     kind: "slot", frame_context: { context_owner: { kind: "source_act", source_act: "assertion" } },
     bindings: [{ target: { kind: "node", id: sourceSpeaker.id } }]
   });
+});
+
+it("classifies mismatched public projection references as validation errors", () => {
+  const interpretation = chargerSource();
+  const query = chargerQuery(RECIPIENT, "recipient");
+  const descriptor = { source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation, semanticSha256),
+    interpretation };
+  const catalog = buildSourceSemanticCorrespondenceRequest({ original_query: RECIPIENT,
+    admitted_query_semantics: query, source_interpretation_descriptors: [descriptor],
+    producer_id: "authored-control", producer_version: "1" }).catalog;
+  const sourceSlot = catalog.source_endpoints.find(row => row.kind === "slot")!;
+  const cases = [
+    { catalog: { ...catalog, query_endpoints: catalog.query_endpoints.map(row =>
+      row.kind === "referent" && row.variable === "speaker" ? { ...row, variable: "missing" } : row) },
+      message: "catalog referent has no declared query reference" },
+    { catalog: { ...catalog, source_endpoints: catalog.source_endpoints.map(row =>
+      row.handle === sourceSlot.handle ? { ...row, slot: "missing" } : row) },
+      message: "catalog slot has no declared source slot" }
+  ];
+  for (const entry of cases) {
+    let failure: unknown;
+    try {
+      buildSourceSemanticCorrespondenceEndpointEvidence(query,
+        [{ source_interpretation_handle: "source1", interpretation }], entry.catalog);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(AlayaError);
+    expect(failure).toMatchObject({ code: "VALIDATION", message: entry.message });
+  }
 });
