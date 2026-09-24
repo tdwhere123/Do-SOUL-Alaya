@@ -10,6 +10,7 @@ import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
+import * as sourceArtifacts from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { openExtractionAttemptLedger, readSettledExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { importSourceSemanticArtifact, inspectCachedSourceSemantic,
   writeDeterministicSourceSemanticArtifact } from "../../../runs/extraction/cache/source-semantic-artifact.js";
@@ -347,6 +348,93 @@ it("withholds a staged baseline source until its original attempts recover witho
   const admitted = await publish("admitted-publication");
   expect(admitted.published_count).toBe(census.records.length);
   expect(admitted.source_interpretation_binding_complete).toBe(true);
+}, 60000);
+
+it.each([true, false])("keeps a settled source rejection spent after raw loss with known usage=%s", async usageKnown => {
+  const fixture = await setupInteractive();
+  const options = { variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    authorityReceiptPath: fixture.receiptPath };
+  const fetchMock = vi.fn(async () => Response.json({
+    candidates: [{ finishReason: "STOP", content: { parts: [{ text: "{" }] } }],
+    ...(usageKnown ? { usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3, totalTokenCount: 5 } } : {})
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+  await runExtractionFill(options);
+  expect(fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
+  const receipt = JSON.parse(readFileSync(fixture.receiptPath, "utf8"));
+  const ledgerInput = { cacheRoot, lineageDigest: receipt.lineage_digest,
+    cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+    startingMissing: receipt.limits.starting_missing, maximumAttempts: receipt.limits.maximum_attempts,
+    successfulShardCeiling: receipt.limits.successful_shard_ceiling };
+  const before = openExtractionAttemptLedger(ledgerInput).snapshot();
+  expect(before).toMatchObject({ attempts: fixture.keys.length, successfulShards: 0,
+    telemetry: { totalTokens: usageKnown ? fixture.keys.length * 5 : 0,
+      usageUnknownAttempts: usageKnown ? 0 : fixture.keys.length } });
+  expect(before.transportFailures).toHaveLength(fixture.keys.length);
+  expect(before.transportFailures.every(failure => failure.kind === "response_schema_error")).toBe(true);
+  const missingKey = fixture.keys[0]!;
+  const raw = listProviderRawAttempts(cacheRoot, missingKey)[0]!;
+  const requestDigests = new Map(fixture.keys.map(key => {
+    const attempt = listProviderRawAttempts(cacheRoot, key)[0]!;
+    if (attempt.kind !== "source_semantic") throw new Error("fixture raw is not a source attempt");
+    return [key, attempt.source_request_sha256!] as const;
+  }));
+  unlinkSync(providerRawAttemptPath(cacheRoot, missingKey, raw.attempt_ordinal));
+
+  await runExtractionFill(options);
+  expect(fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
+  expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toEqual(before);
+  expect(inspectCachedSourceSemantic(cacheRoot, missingKey, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
+  const census = await censusCompleteSourceRecords({ population: "fixture", dataDir, pinnedMetaRoot });
+  const report = await publishSourceSemanticSnapshot({
+    snapshotPath: join(cacheRoot, "lost-rejection.sqlite"),
+    dataDirRoot: join(cacheRoot, "lost-rejection"), recordedAt: "2026-09-25T00:00:00.000Z",
+    producerCommit: "a".repeat(40), populations: [{ name: "fixture", dataDir, pinnedMetaRoot,
+      cacheRoots: [cacheRoot], model: MODEL, requestProfile: REQUEST_PROFILE,
+      publicationAssociations: census.records.map((source, index) => ({ source_id: source.source_id,
+        source_version: source.source_version, generation_key: fixture.keys[index]!,
+        request_digest: requestDigests.get(fixture.keys[index]!)! })) }] });
+  expect(report.published_count).toBe(0);
+  expect(report.source_interpretation_binding_complete).toBe(false);
+}, 60000);
+
+it("does not redispatch a settled success after its pre-shard write and raw are lost", async () => {
+  const fixture = await setupInteractive();
+  const options = { variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
+    sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    authorityReceiptPath: fixture.receiptPath };
+  const originalImport = sourceArtifacts.importSourceSemanticArtifact;
+  let interruptedKey: string | undefined;
+  const interrupt = vi.spyOn(sourceArtifacts, "importSourceSemanticArtifact").mockImplementation(input => {
+    const result = originalImport(input);
+    if (interruptedKey === undefined) {
+      interruptedKey = input.result.line.key;
+      unlinkSync(cacheFilePath(input.cacheRoot, interruptedKey));
+    }
+    return result;
+  });
+  await runExtractionFill(options);
+  interrupt.mockRestore();
+  expect(interruptedKey).toBeDefined();
+  const initialCalls = fixture.fetchMock.mock.calls.length;
+  expect(initialCalls).toBe(fixture.keys.length);
+  const receipt = JSON.parse(readFileSync(fixture.receiptPath, "utf8"));
+  const ledgerInput = { cacheRoot, lineageDigest: receipt.lineage_digest,
+    cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+    startingMissing: receipt.limits.starting_missing, maximumAttempts: receipt.limits.maximum_attempts,
+    successfulShardCeiling: receipt.limits.successful_shard_ceiling };
+  const before = openExtractionAttemptLedger(ledgerInput).snapshot();
+  expect(before).toMatchObject({ attempts: initialCalls, successfulShards: initialCalls - 1,
+    telemetry: { totalTokens: initialCalls * 30 } });
+  expect(before.settledAttempts).toHaveLength(initialCalls);
+  const raw = listProviderRawAttempts(cacheRoot, interruptedKey!)[0]!;
+  unlinkSync(providerRawAttemptPath(cacheRoot, interruptedKey!, raw.attempt_ordinal));
+
+  await runExtractionFill(options);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(initialCalls);
+  expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toEqual(before);
+  expect(inspectCachedSourceSemantic(cacheRoot, interruptedKey!, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
 }, 60000);
 
 it("rejects invalid interactive evidence before current reuse and retained quarantine", async () => {

@@ -30,7 +30,7 @@ import { batchDigest } from "./batch/plan.js";
 import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { assertStepReportedUsage, baseReportedUsage } from "../authority/step-quote.js";
 import {
-  bindProviderRawAttempt, listProviderRawAttempts, readProviderRawAttempt, requestEnvelopeDigest,
+  bindProviderRawAttempt, listProviderRawAttempts, requestEnvelopeDigest,
   writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation,
   providerRawSuccessEvidenceState, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
@@ -150,14 +150,20 @@ function replayInteractiveRaws(
   workset: SourceRequestWorkset,
   line: SourceRequestLine
 ): "admitted" | "quarantined" | "transport_exhausted" | undefined {
-  const unresolved = input.authority!.snapshot()?.unresolvedAttempts
-    .filter((item) => item.cacheKey === line.key) ?? [];
+  const history = input.authority!.snapshot();
+  const raws = listProviderRawAttempts(input.cacheRoot, line.key);
+  const retainedOrdinals = new Set(raws.map(raw => raw.attempt_ordinal));
+  const unresolved = history?.unresolvedAttempts.filter(item => item.cacheKey === line.key) ?? [];
   for (const pending of unresolved) {
-    if (readProviderRawAttempt(input.cacheRoot, line.key, pending.attemptOrdinal) === undefined) {
+    if (!retainedOrdinals.has(pending.attemptOrdinal)) {
       return "transport_exhausted";
     }
   }
-  const raws = listProviderRawAttempts(input.cacheRoot, line.key);
+  // A settled attempt remains spent when its raw witness is lost. Without that
+  // witness, neither its terminal disposition nor a retry decision can be replayed.
+  const settled = [...(history?.settledAttempts ?? []), ...(history?.transportFailures ?? [])]
+    .filter(item => item.cacheKey === line.key);
+  if (settled.some(item => !retainedOrdinals.has(item.attemptOrdinal))) return "quarantined";
   if (raws.length === 0) return undefined;
   const sourceCorpus = boundSourceCorpus(workset, line);
   for (const raw of raws) {
