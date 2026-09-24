@@ -271,6 +271,16 @@ it("binds one original question through full-source preflight, native window, fi
   await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: physicalRows }))
     .rejects.toThrow(/separate from producer and input roots/u);
   expect(readdirSync(physicalRows).some(name => name.startsWith("measurement-"))).toBe(false);
+  const initial = alpha.prepared.result.rows[0];
+  if (initial?.status !== "prepared") throw new Error("initial chain required");
+  const physicalInitial = join(dirname(cacheRoot), "physical-initial-chain");
+  renameSync(initial.chain_root, physicalInitial);
+  symlinkSync(physicalInitial, initial.chain_root, "dir");
+  await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: physicalInitial }))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(readdirSync(physicalInitial).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
+  unlinkSync(initial.chain_root);
+  renameSync(physicalInitial, initial.chain_root);
   expect(readdirSync(dataDir).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
   expect(readdirSync(pinnedMetaRoot).some(name => name.startsWith("measurement-") || name.startsWith("lazy-measurement-"))).toBe(false);
   expect(existsSync(join(pinnedMetaRoot, "nested-output"))).toBe(false);

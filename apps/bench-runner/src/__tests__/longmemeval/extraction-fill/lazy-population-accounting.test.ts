@@ -323,6 +323,13 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   renameSync(originalQuestion, physicalQuestion);
   symlinkSync(physicalQuestion, originalQuestion, "dir");
   const finalPath = join(member.lazy_root, "final.json"), finalBytes = readFileSync(finalPath, "utf8");
+  const untrustedFinal = JSON.parse(finalBytes) as { identity: string; payload: unknown };
+  writeFileSync(finalPath, JSON.stringify({ ...untrustedFinal, identity: "0".repeat(64) }));
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-final-row-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalRows))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unavailable-final-row-output.json"))).toBe(false);
+  writeFileSync(finalPath, finalBytes);
   writeFileSync(finalPath, "{");
   await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-member-output",
     cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalQuestion))

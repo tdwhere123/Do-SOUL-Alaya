@@ -1,7 +1,7 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
-import { measureSemanticChain, semanticChainReplayTargetInputPaths } from "../semantic-chain/replay.js";
+import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
@@ -72,8 +72,9 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   assertLongMemEvalSemanticRows(frozen, replay.rows);
   const questionPaths = frozen.selected.flatMap(selected => longMemEvalQuestionInputPaths(root, selected.index).admittedInputPaths);
   const replayPaths = replay.rows.flatMap((row) => row.status === "replayed"
-    ? [row.chain_root, row.publication_path, row.replay_path,
-      ...semanticChainReplayTargetInputPaths(row.chain_root)] : []);
+    ? [row.chain_root, row.publication_path,
+      ...semanticChainReplayInputPaths(row.chain_root, row.replay_path,
+        frozen.selected.filter(selected => selected.question_id === row.question_id).map(selected => selected.query_key))] : []);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
     dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root });
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, longMemEvalFreezePath(root), replayPath,

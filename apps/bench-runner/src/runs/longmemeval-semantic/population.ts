@@ -4,13 +4,13 @@ import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, readChainArtifactPayloadForInventory, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
-  readLazyQualifiedExposureState, sealLazyQualificationFinal, lazyQualificationInputPaths } from "../semantic-chain/lazy-qualification.js";
-import { semanticChainReplayTargetInputPaths } from "../semantic-chain/replay.js";
+  readLazyQualifiedExposureState, sealLazyQualificationFinal, lazyQualificationInputPaths,
+  lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification.js";
 import { createLongMemEvalSelectionContractFromAssignments } from "../selection/contract.js";
 import { LongMemEvalNativeSemanticConfigSchema, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "./contract.js";
-import { ExperimentPreparedSchema, longMemEvalQuestionInputPaths, prepareLongMemEvalSemanticRun } from "./execute.js";
+import { longMemEvalQuestionInputPaths, prepareLongMemEvalSemanticRun } from "./execute.js";
 import { freezeLongMemEvalSemanticRun } from "./freeze.js";
 import { admitLongMemEvalLazyConfig, writeLongMemEvalLazyConfig } from "./lazy-config.js";
 
@@ -185,25 +185,24 @@ export function readLongMemEvalLazyPopulation(root: string) {
 export async function readLongMemEvalLazyPopulationForObservation(root: string) {
   const admitted = admitPopulation(readChainArtifact(join(root, "population.json")), root);
   const memberInputs: string[] = [];
-  const populationIdentity = chainIdentity(admitted.population);
   for (const member of admitted.population.members) {
     for (const stage of STAGES) {
-      try {
-        const completed = stageRecord(root, member, stage, "completed", populationIdentity);
-        if (completed?.result_path === null || completed?.result_path === undefined) continue;
-        memberInputs.push(completed.result_path);
-        if (stage !== "prepare") continue;
-        const prepared = ExperimentPreparedSchema.parse(readChainArtifact(completed.result_path));
-        for (const row of prepared.rows) if (row.status === "prepared") {
-          memberInputs.push(row.chain_root, join(row.chain_root, "prepare.json"), row.publication_path);
-        }
-      } catch { /* The stage record path itself remains protected when its contents are unavailable. */ }
+      const completed = z.object({ result_path: z.string().min(1).nullable() }).passthrough().safeParse(
+        readChainArtifactPayloadForInventory(stagePath(root, member, stage, "completed")));
+      if (!completed.success || completed.data.result_path === null) continue;
+      memberInputs.push(completed.data.result_path);
+      if (stage !== "prepare") continue;
+      const prepared = z.object({ rows: z.array(z.unknown()) }).passthrough().safeParse(
+        readChainArtifactPayloadForInventory(completed.data.result_path));
+      if (!prepared.success) continue;
+      for (const value of prepared.data.rows) {
+        const row = z.object({ status: z.literal("prepared"), chain_root: z.string().min(1),
+          publication_path: z.string().min(1) }).passthrough().safeParse(value);
+        if (row.success) memberInputs.push(row.data.chain_root,
+          join(row.data.chain_root, "prepare.json"), row.data.publication_path);
+      }
     }
-    try {
-      const { final } = await admitLazyFinal(member.lazy_root);
-      memberInputs.push(final.final_snapshot_path, final.publication_report_path, final.final_chain_root,
-        ...semanticChainReplayTargetInputPaths(final.final_chain_root));
-    } catch { /* Static frozen member inputs remain protected when later state is unavailable. */ }
+    memberInputs.push(...lazyQualificationRetainedInputPaths(member.lazy_root));
   }
   return { ...admitted, admittedInputPaths: [...admitted.admittedInputPaths, ...memberInputs] };
 }

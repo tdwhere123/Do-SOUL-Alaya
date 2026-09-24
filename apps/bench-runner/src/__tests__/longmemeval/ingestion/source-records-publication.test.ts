@@ -211,6 +211,24 @@ describe("complete-source census and publication", () => {
       outcome: "unknown", measurement_path: null, attribution: { layer: "measurement_unavailable", native: null } });
     expect(corrupt.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
     writeFileSync(unavailableMember.replay_path, retainedReplayBytes);
+    const planPath = join(unavailableMember.chain_root, "prepare.json");
+    const planBytes = readFileSync(planPath);
+    for (const state of ["missing", "corrupt"] as const) {
+      if (state === "missing") unlinkSync(planPath);
+      else writeFileSync(planPath, "{");
+      const unavailable = await measureLongMemEvalSemanticRun(root, replay.path,
+        join(f.root, `${state}-plan-evaluator`));
+      expect(unavailable.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+      expect(unavailable.result.rows.find(row => row.question_id === "first")?.outcome).toBe("hit");
+      writeFileSync(planPath, planBytes);
+    }
+    const peerPublication = readChainArtifact(unavailableMember.publication_path) as { snapshot_path: string };
+    const snapshotBackup = `${peerPublication.snapshot_path}.temporarily-unavailable`;
+    await rename(peerPublication.snapshot_path, snapshotBackup);
+    const staleSnapshot = await measureLongMemEvalSemanticRun(root, replay.path,
+      join(f.root, "unavailable-snapshot-evaluator"));
+    expect(staleSnapshot.result.primary).toMatchObject({ eligible: 2, hits: 1, misses: 0, unknown: 1 });
+    await rename(snapshotBackup, peerPublication.snapshot_path);
     const detailPath = measured.result.rows.find(row => row.question_id === "first")?.measurement_path;
     if (!detailPath) throw new Error("first source detail required");
     expect(detailPath.startsWith(`${evaluatorRoot}/`)).toBe(true);

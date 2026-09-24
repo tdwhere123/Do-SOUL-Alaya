@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { AlayaError } from "@do-soul/alaya-protocol";
-import { measureSemanticChain, semanticChainReplayTargetInputPaths } from "../semantic-chain/replay.js";
-import { readLazyQualifiedExposureState, lazyQualificationInputPaths } from "../semantic-chain/lazy-qualification.js";
+import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
+import { readLazyQualifiedExposureState, lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -30,10 +30,10 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
     dataDir: frozen.config.data_dir, pinnedMetaRoot: frozen.config.pinned_meta_root });
   const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, longMemEvalFreezePath(input.root),
-    input.lazyRoot, ...lazyQualificationInputPaths(input.lazyRoot),
+    input.lazyRoot, ...lazyQualificationRetainedInputPaths(input.lazyRoot),
     input.preparedPath, input.sourcePreflightPath, input.sourceCacheRoot,
-    ...(first.status === "durable" ? [first.path] : []),
-    ...semanticChainReplayTargetInputPaths(first.final.final_chain_root),
+    bound.config.initial_chain_root, join(bound.config.initial_chain_root, "prepare.json"),
+    ...semanticChainReplayInputPaths(first.final.final_chain_root, first.path, [selected.query_key]),
     first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
     ...questionPaths.admittedInputPaths,
     frozen.config.data_dir, frozen.config.pinned_meta_root,

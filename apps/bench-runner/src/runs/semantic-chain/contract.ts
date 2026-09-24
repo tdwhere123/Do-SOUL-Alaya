@@ -72,6 +72,17 @@ export function readChainArtifact(path: string): unknown | undefined {
   return envelope.payload;
 }
 
+/** Path inventories can retain readable references from an unavailable artifact; this never admits its payload. */
+export function readChainArtifactPayloadForInventory(path: string): unknown | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const envelope = z.object({ payload: z.unknown() }).passthrough().safeParse(JSON.parse(
+      readBoundedCanonicalUtf8Artifact({ path, maxBytes: 32 * 1024 * 1024, label: "semantic chain path inventory" })
+    ));
+    return envelope.success ? envelope.data.payload : undefined;
+  } catch { return undefined; }
+}
+
 export function writeChainArtifact(path: string, payload: unknown): void {
   const identity = chainIdentity(payload);
   const existing = readChainArtifact(path);

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { admitSourceSemanticQuery, authorizedScopesFromAdmission, authorizeSemanticScope, fieldContractSha256, hydrateUtf8Chunk, preparedDeliveryId,
@@ -184,17 +184,13 @@ export const ReplaySchema = z.object({ contract: z.literal("source-semantic-chai
   }).passthrough()) }).passthrough();
 type ReplayRow = z.infer<typeof ReplaySchema>["rows"][number];
 
-/** Resolve planned replay inputs without admitting a possibly missing or corrupt replay artifact. */
-export function semanticChainReplayTargetInputPaths(root: string, arm: "retained" | "without_semantic_correspondences" = "retained"):
-  readonly string[] {
-  const target = inspectSemanticChainReplayTarget(root, arm);
-  return [join(root, "prepare.json"), target.output, ...[...target.rowPaths.values()].flatMap(path => [path, `${path}.reserved`])];
-}
-
-function replayInputPaths(root: string, replayPath: string, replay: z.infer<typeof ReplaySchema>): readonly string[] {
-  return [join(root, "prepare.json"), replayPath, ...replay.rows.flatMap(row => {
-    if (row.status === "blocked") return [];
-    const path = semanticChainReplayRowPath(root, replay.identity, row.query_key);
+/** Physical replay inputs are known from the frozen path and query keys, even if the plan or replay is unavailable. */
+export function semanticChainReplayInputPaths(root: string, replayPath: string, queryKeys: readonly string[]): readonly string[] {
+  const paths = [join(root, "prepare.json"), replayPath];
+  const match = /^replay-([a-f0-9]{64})\.json$/u.exec(basename(replayPath));
+  if (resolve(replayPath) !== resolve(root, basename(replayPath)) || match === null) return paths;
+  return [...paths, ...queryKeys.flatMap(key => {
+    const path = semanticChainReplayRowPath(root, match[1]!, key);
     return [path, `${path}.reserved`];
   })];
 }
@@ -203,6 +199,9 @@ function replayInputPaths(root: string, replayPath: string, replay: z.infer<type
 export function admitSemanticChainReplay(root: string, replayPath: string) {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
   const replay = ReplaySchema.parse(readChainArtifact(replayPath));
+  if (resolve(replayPath) !== resolve(semanticChainReplayPath(root, replay.identity))) {
+    throw new AlayaError("CONFLICT", "measurement replay path does not bind its retained identity");
+  }
   if (replay.plan_identity !== chainIdentity(plan)) {
     throw new AlayaError("CONFLICT", "measurement replay does not bind this plan");
   }
@@ -229,7 +228,8 @@ export function admitSemanticChainReplay(root: string, replayPath: string) {
           reason: `archive_admission: ${error instanceof Error ? error.message : String(error)}` };
       }
     });
-    return { plan, replay: { ...replay, rows }, admittedInputPaths: replayInputPaths(root, replayPath, replay) };
+    return { plan, replay: { ...replay, rows }, admittedInputPaths: semanticChainReplayInputPaths(root, replayPath,
+      replay.rows.map(row => row.query_key)) };
   } finally { connection.close(); }
 }
 
