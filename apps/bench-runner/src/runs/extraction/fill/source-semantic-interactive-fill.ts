@@ -34,6 +34,7 @@ import {
   writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
 import { assertExtractionFillComplete } from "./fill-completion.js";
+import { retainInteractiveAuthority } from "./retained-interactive-authority.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
   attemptInputByteUpperBound,
@@ -79,6 +80,7 @@ export async function executeOpenSemanticsInteractiveFill(
       authority.receipt.price.maximum_input_tokens_per_attempt
     );
   }
+  if (workset.lines.length > 0) retainInteractiveAuthority(input.writeLease, authority.receipt);
   const extractor = createSemanticProviderHttpExtractor(input.prepared.config, "source_semantic");
   let newlyExtracted = 0;
   await runBoundedWorkers(workset.lines, input.concurrency, async (line) => {
@@ -175,7 +177,10 @@ function importInteractiveFromRaw(
   bindProviderRawAttempt(raw, {
     cacheKey: line.key, kind: "source_semantic", model: input.prepared.config.model,
     requestProfile: input.prepared.config.requestProfile,
-    requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, input.authority!.receipt.limits.max_output_tokens)
+    requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, input.authority!.receipt.limits.max_output_tokens),
+    authorityReceiptDigest: input.authority!.receipt.receipt_digest,
+    authorityLineageDigest: input.authority!.receipt.lineage_digest,
+    sourceRequestSha256: line.requestSha256
   });
   if (verifyProviderRawReservation(raw, input.authority!.snapshot()) === "rejected") return "quarantined";
   assertStepReportedUsage(input.prepared.config.requestProfile, raw.usage,
@@ -248,6 +253,9 @@ async function dispatchInteractiveLine(
     const raw = writeProviderRawAttempt({
       root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
       model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
+      authorityReceiptDigest: authority.receipt.receipt_digest,
+      authorityLineageDigest: authority.receipt.lineage_digest,
+      sourceRequestSha256: line.requestSha256,
       requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, maxOutputTokens), decodedText: "",
       finishReason: response?.finishReason ?? null,
       failureRetryable: input.options.signal?.aborted === true ? false : !isCompletedNonRetryableResponse(outcome),
@@ -266,6 +274,9 @@ async function dispatchInteractiveLine(
   const raw = writeProviderRawAttempt({
     root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
     model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
+    authorityReceiptDigest: authority.receipt.receipt_digest,
+    authorityLineageDigest: authority.receipt.lineage_digest,
+    sourceRequestSha256: line.requestSha256,
     requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, maxOutputTokens), decodedText: extracted.rawJson,
     finishReason: extracted.responseMetadata?.finishReason ?? null,
     ...(extracted.usage === undefined ? {} : { usage: extracted.usage }),

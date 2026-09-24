@@ -70,10 +70,15 @@ const RawAttemptFields = {
   http_response: HttpResponseSchema.optional(),
   extracted_at: z.string().min(1)
 };
+const SourceAuthorityFields = {
+  authority_receipt_digest: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  authority_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  source_request_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional()
+};
 // Source extraction retains its unchanged raw contract; proposal attempts require reservation ownership.
 const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
-  z.object({ ...RawAttemptFields, contract: z.literal(PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
-  z.object({ ...RawAttemptFields, contract: z.literal(STEP_PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
+  z.object({ ...RawAttemptFields, ...SourceAuthorityFields, contract: z.literal(PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
+  z.object({ ...RawAttemptFields, ...SourceAuthorityFields, contract: z.literal(STEP_PROVIDER_RAW_ATTEMPT_CONTRACT), kind: z.literal("source_semantic") }).strict(),
   z.object({ ...RawAttemptFields, contract: z.literal(PROPOSAL_RAW_ATTEMPT_CONTRACT),
     kind: z.enum(["query", "semantic_correspondence"]),
     attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
@@ -125,7 +130,8 @@ export class ProviderRawAttemptIdentityError extends Error {
 }
 
 type RawAttemptOwner =
-  | { kind: "source_semantic"; attemptLineageDigest?: never }
+  | { kind: "source_semantic"; attemptLineageDigest?: never;
+    authorityReceiptDigest?: string; authorityLineageDigest?: string; sourceRequestSha256?: string }
   | { kind: "query" | "semantic_correspondence"; attemptLineageDigest: string };
 
 export function bindProviderRawAttempt(
@@ -146,6 +152,10 @@ export function bindProviderRawAttempt(
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
       raw.model !== expected.model || raw.request_profile !== expected.requestProfile ||
       raw.request_digest !== expected.requestDigest ||
+      raw.kind === "source_semantic" && expected.kind === "source_semantic" &&
+        (expected.authorityReceiptDigest !== undefined && raw.authority_receipt_digest !== expected.authorityReceiptDigest ||
+         expected.authorityLineageDigest !== undefined && raw.authority_lineage_digest !== expected.authorityLineageDigest ||
+         expected.sourceRequestSha256 !== undefined && raw.source_request_sha256 !== expected.sourceRequestSha256) ||
       raw.kind !== "source_semantic" && raw.attempt_lineage_digest !== expected.attemptLineageDigest) {
     throw new ProviderRawAttemptIdentityError(
       `provider raw attempt identity mismatch: ${expected.cacheKey}`
@@ -248,6 +258,15 @@ export function writeProviderRawAttempt(input: Readonly<{
       ? input.kind === "source_semantic" ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT
       : input.kind === "source_semantic" ? PROVIDER_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT,
     ...(input.kind === "source_semantic" ? {} : { attempt_lineage_digest: input.attemptLineageDigest }),
+    ...(input.kind !== "source_semantic" || input.authorityReceiptDigest === undefined ? {} : {
+      authority_receipt_digest: input.authorityReceiptDigest
+    }),
+    ...(input.kind !== "source_semantic" || input.authorityLineageDigest === undefined ? {} : {
+      authority_lineage_digest: input.authorityLineageDigest
+    }),
+    ...(input.kind !== "source_semantic" || input.sourceRequestSha256 === undefined ? {} : {
+      source_request_sha256: input.sourceRequestSha256
+    }),
     cache_key: input.cacheKey,
     attempt_ordinal: input.attemptOrdinal,
     kind: input.kind,

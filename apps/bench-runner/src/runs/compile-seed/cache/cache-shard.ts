@@ -88,6 +88,8 @@ export type CachedRawExtractionInspection =
       readonly rawJsonSha256: string;
       readonly rawSignalCount: number;
       readonly transportProvenance?: ExtractionTransportProvenance;
+      readonly attemptOrdinal?: number;
+      readonly authorityLineageDigest?: string;
     }
   | { readonly status: "missing"; readonly reason?: undefined }
   | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string }

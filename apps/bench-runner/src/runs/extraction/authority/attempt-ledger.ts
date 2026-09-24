@@ -299,6 +299,9 @@ export function openExtractionAttemptLedger(input: {
     abandonPendingShard: (cacheKey, attemptOrdinal) => update(abandonPendingShard(current, cacheKey, attemptOrdinal)),
     commitSuccessfulShard: (cacheKey) => {
       const shard = requireValidShard(input.cacheRoot, cacheKey, current.cache_identity, inspectShard);
+      if (!shardAttemptBelongsToLedger(shard, current)) {
+        throw new ExtractionAttemptLimitError("extraction success differs from its settled provider attempt");
+      }
       update(commitProviderBackedShard(current, shard));
     },
     commitDeterministicShard: (cacheKey) => {
@@ -365,7 +368,7 @@ function reconcilePending(
 ): ExtractionAttemptLedgerRecord {
   const recovered = current.pending_keys.flatMap((cacheKey) => {
     const shard = inspectShard(cacheRoot, cacheKey, current.cache_identity);
-    return shard === undefined ? [] : [shard];
+    return shard === undefined || !shardAttemptBelongsToLedger(shard, current) ? [] : [shard];
   });
   if (recovered.length === 0) return current;
   const recoveredKeys = new Set(recovered.map((shard) => shard.cacheKey));
@@ -391,6 +394,15 @@ function requireValidShard(
   return shard;
 }
 
+function shardAttemptBelongsToLedger(
+  shard: ExtractionSuccessfulShard, record: ExtractionAttemptLedgerRecord
+): boolean {
+  if (shard.successKind !== "provider" || shard.attemptOrdinal === undefined) return true;
+  return shard.authorityLineageDigest === record.lineage_digest &&
+    (record.settled_attempts ?? []).some((attempt) =>
+      attempt.cache_key === shard.cacheKey && attempt.attempt_ordinal === shard.attemptOrdinal);
+}
+
 function assertSuccessfulShards(
   cacheRoot: string,
   record: ExtractionAttemptLedgerRecord,
@@ -398,6 +410,9 @@ function assertSuccessfulShards(
   customInspector = false
 ): void {
   for (const shard of record.successful_shards) {
+    if (!shardAttemptBelongsToLedger(shard, record)) {
+      throw new AlayaError("CONFLICT", `extraction authority successful shard attempt drifted: ${shard.cacheKey}`);
+    }
     if (!customInspector) {
       assertLedgerSuccessfulShard(cacheRoot, shard, record.cache_identity);
       continue;

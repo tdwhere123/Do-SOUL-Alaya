@@ -233,7 +233,7 @@ export function readExtractionCacheManifestIdentity(
 
 /** Verifies outer manifest fields and the original generation digest without admitting its retired policy. */
 export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
-  Readonly<{ manifestSha256: string; generationSha256: string; systemPromptSha256: string }> | undefined {
+  Readonly<{ manifestSha256: string; generationSha256: string; providerUrl: string; systemPromptSha256: string }> | undefined {
   const filePath = extractionCacheManifestPath(cacheRoot);
   if (!boundedArtifactEntryExists(filePath)) return undefined;
   const raw = readExtractionCacheManifestBytes(filePath);
@@ -248,7 +248,7 @@ export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
   const checked = validateManifest({ ...value, source_semantic_generation: EXTRACTION_OPEN_SEMANTICS_GENERATION }, filePath);
   const original = { ...checked, source_semantic_generation: generation } as ExtractionCacheManifest;
   return { manifestSha256: createHash("sha256").update(raw.bytes).digest("hex"),
-    generationSha256: extractionAdmissionGenerationSha256(original),
+    generationSha256: extractionAdmissionGenerationSha256(original), providerUrl: checked.provider_url,
     systemPromptSha256: checked.system_prompt_sha256 };
 }
 

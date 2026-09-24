@@ -375,9 +375,13 @@ function isShards(value: unknown): value is readonly ExtractionSuccessfulShard[]
   return Array.isArray(value) && value.every((shard) => {
     if (!hasShardIdentity(shard) || typeof shard.successKind !== "string") return false;
     if (shard.successKind === "provider") {
+      const bound = "attemptOrdinal" in shard || "authorityLineageDigest" in shard;
       return hasExactKeys(shard, [
-        "cacheKey", "rawJsonSha256", "successKind", "transportProvenance"
-      ]) && isTransportProvenance(shard.transportProvenance);
+        "cacheKey", "rawJsonSha256", "successKind", "transportProvenance",
+        ...(bound ? ["attemptOrdinal", "authorityLineageDigest"] : [])
+      ]) && isTransportProvenance(shard.transportProvenance) && (!bound ||
+        typeof shard.attemptOrdinal === "number" && Number.isSafeInteger(shard.attemptOrdinal) && shard.attemptOrdinal > 0 &&
+        isDigest(shard.authorityLineageDigest));
     }
     return (shard.successKind === "deterministic" ||
       shard.successKind === "legacy-unclassified") && hasExactKeys(

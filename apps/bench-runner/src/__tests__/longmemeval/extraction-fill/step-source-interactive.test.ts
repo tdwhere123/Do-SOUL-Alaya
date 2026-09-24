@@ -43,9 +43,10 @@ function responseFor(userPrompt: string): string {
   return JSON.stringify(tableCompletedResponse(assertion.assertion_id, theme));
 }
 
-async function scenario(selectedCount: number, outputTokenCap?: number) {
+async function scenario(selectedCount: number, outputTokenCap?: number, logicalModel = MODEL) {
   setExtractionCredentialFixture();
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", logicalModel);
+  if (logicalModel !== MODEL) vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
   await writeDataset(Array.from({ length: 3 }, (_, i) => buildExtractionFillQuestion(
@@ -85,6 +86,21 @@ async function scenario(selectedCount: number, outputTokenCap?: number) {
   return { options: { ...options, authorityReceiptPath: receiptPath }, selected, preflight, receipt,
     receiptInput };
 }
+
+it("reopens a configured logical model alias through its recorded Step transport", async () => {
+  const logicalModel = "fixture-step-alias";
+  const fixture = await scenario(1, undefined, logicalModel);
+  const http = await listen(body => ({
+    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
+  }));
+  await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(1);
+  expect(http.calls[0]!.body.model).toBe(MODEL);
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, logicalModel, PROFILE))
+    .toMatchObject({ status: "hit", transportProvenance: { model: MODEL } });
+  await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(1);
+});
 
 async function listen(
   onRequest: (body: Record<string, unknown>, index: number) =>

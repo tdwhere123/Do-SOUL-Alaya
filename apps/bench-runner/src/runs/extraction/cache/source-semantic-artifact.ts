@@ -15,11 +15,12 @@ import { computeExtractionRawJsonSha256 } from "../content-closure.js";
 import { receiveSourceSemanticBatchLine } from "../fill/batch/source-semantic-interpretation.js";
 import type { GeminiBatchInvocation, GeminiBatchPlan } from "../fill/batch/contract.js";
 import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
-import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
+import { buildExtractionTransportProvenance } from "../transport-route.js";
 import { assertExtractionCacheIdentity } from "./cache-identity.js";
 import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentity,
   readRetainedSourceSemanticManifestIdentity, computeSystemPromptSha256 } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
+import { assertInteractiveProvenance, inspectInteractiveTransportEvidence, interactiveResponseMetadata } from "./source-interactive-binding.js";
 import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
@@ -101,42 +102,6 @@ function retainableOutcome(result: SourceSemanticProposalResult): "interpreted" 
   return undefined;
 }
 
-function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
-  const transport = requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
-    ? "step-chat-completion" : "gemini-generate-content";
-  if (provenance.transport !== transport || "job" in provenance || "inputFile" in provenance ||
-      !Number.isSafeInteger(provenance.attemptOrdinal) || provenance.attemptOrdinal <= 0) {
-    throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
-  }
-}
-
-function interactiveResponseMetadata(provenance: InteractiveSemanticProvenance) {
-  return persistedResponseMetadata({ finishReason: provenance.finishReason, completionContractVersion: 1,
-    completionWitness: "finish_reason" }, provenance.usage, true);
-}
-
-function inspectInteractiveTransportEvidence(
-  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
-  entry: CachedExtractionEntry
-): void {
-  if ((typed.kind === "step_chat_completion") !==
-      (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
-    throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
-  }
-  assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
-  if (!isCompleteSemanticFinish(entry.request_profile, typed.result.provenance.finishReason) ||
-      typed.result.rawJson !== entry.raw_json ||
-      typed.result.provenance.responseSha256 !== computeExtractionRawJsonSha256(entry.raw_json) ||
-      !isExtractionTransportProvenance(entry.transport_provenance)) {
-    throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
-  }
-  inspectCachedResponseMetadata(entry.response_metadata, true);
-  if (canonicalJson(entry.response_metadata) !==
-      canonicalJson(interactiveResponseMetadata(typed.result.provenance).response_metadata)) {
-    throw new AlayaError("CONFLICT", "typed open-semantics retained response metadata mismatch");
-  }
-}
-
 function assertCompleteProviderFinish(finishReason: string | null, requestProfile: string): void {
   if (!isCompleteSemanticFinish(requestProfile, finishReason)) {
     throw new SourceSemanticAdmissionError("source semantics completion is not a complete provider finish");
@@ -146,9 +111,10 @@ function assertCompleteProviderFinish(finishReason: string | null, requestProfil
 function inspectInteractiveGenerateContent(
   typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
   entry: CachedExtractionEntry,
+  cacheRoot: string,
   request: ReturnType<typeof parseSourceSemanticRequest>
-): SourceSemanticProposalResult {
-  inspectInteractiveTransportEvidence(typed, entry);
+): { admitted: SourceSemanticProposalResult; binding: ReturnType<typeof inspectInteractiveTransportEvidence> } {
+  const binding = inspectInteractiveTransportEvidence(typed, entry, cacheRoot);
   const input = {
     config: { model: entry.model, requestProfile: entry.request_profile },
     line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
@@ -160,7 +126,7 @@ function inspectInteractiveGenerateContent(
   if (completion === undefined || completion !== typed.completion) {
     throw new AlayaError("CONFLICT", "typed open-semantics completion mismatch");
   }
-  return admitted;
+  return { admitted, binding };
 }
 
 function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: string) {
@@ -180,6 +146,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
   }
   const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
   let admitted: SourceSemanticProposalResult;
+  let interactiveBinding: ReturnType<typeof inspectInteractiveTransportEvidence> | undefined;
   if (typed.kind === "deterministic_empty") {
     if (entry.transport_provenance !== undefined || entry.response_metadata !== undefined) {
       throw new AlayaError("CONFLICT", "deterministic open semantics cannot carry a provider receipt");
@@ -192,7 +159,9 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
     }
   } else if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
-    admitted = inspectInteractiveGenerateContent(typed, entry, request);
+    const inspected = inspectInteractiveGenerateContent(typed, entry, cacheRoot, request);
+    admitted = inspected.admitted;
+    interactiveBinding = inspected.binding;
   } else {
     const retained = readRetainedBatchLine(cacheRoot, typed.plan_identity, entry.cache_key);
     const authority = readRetainedBatchAuthority(cacheRoot, typed.plan_identity, typed.authority_receipt_digest);
@@ -231,7 +200,8 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     requestDigest: computeExtractionRawJsonSha256(line.userPrompt),
     cacheAdmission: entry.admission_identity, deterministicEmpty: typed.kind === "deterministic_empty",
     rawJson: entry.raw_json, rawJsonSha256, rawSignalCount: 0, parsedDraftCount: admitted.draft === undefined ? 0 : 1,
-    transportProvenance: entry.transport_provenance, ...response };
+    transportProvenance: entry.transport_provenance, ...response,
+    ...(interactiveBinding === undefined ? {} : interactiveBinding) };
 }
 
 export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string, model: string,
@@ -336,7 +306,7 @@ function inspectRetiredSourceSemanticEntry(entry: CachedExtractionEntry, cacheRo
     return;
   }
   if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
-    inspectInteractiveTransportEvidence(typed, entry);
+    inspectInteractiveTransportEvidence(typed, entry, cacheRoot);
     return;
   }
   if (typed.kind !== "gemini_batch") throw new AlayaError("CONFLICT", "retained source transport kind is unknown");
@@ -456,7 +426,7 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
   const { admitted, completion } = admitSourceSemanticLine({
     ...input, line: result.line, rawJson: result.rawJson
   });
-  persistSemanticEntry(input, {
+  const entry: CachedExtractionEntry = {
     model: config.model, request_profile: config.requestProfile,
     cache_key: result.line.key, raw_json: result.rawJson, extracted_at: new Date().toISOString(),
     transport_provenance: buildExtractionTransportProvenance(config),
@@ -467,7 +437,10 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
       interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
       kind: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "step_chat_completion" : "gemini_generate_content", completion,
       source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, result }
-  }, identity.manifestSha256);
+  };
+  inspectInteractiveTransportEvidence(entry.source_semantic as Extract<CachedSourceSemantic,
+    { kind: "gemini_generate_content" | "step_chat_completion" }>, entry, input.cacheRoot);
+  persistSemanticEntry(input, entry, identity.manifestSha256);
   return admitted;
 }
 

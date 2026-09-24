@@ -21,6 +21,8 @@ export type ExtractionSuccessfulShard = SuccessfulShardIdentity & (
   | {
     readonly successKind: "provider";
     readonly transportProvenance: ExtractionTransportProvenance;
+    readonly attemptOrdinal?: number;
+    readonly authorityLineageDigest?: string;
   }
   | { readonly successKind: "deterministic" }
   | { readonly successKind: "legacy-unclassified" }
@@ -50,7 +52,10 @@ export function readValidLedgerShard(
   if (shard.status !== "hit" || shard.transportProvenance === undefined) return undefined;
   return {
     cacheKey, rawJsonSha256: shard.rawJsonSha256,
-    successKind: "provider", transportProvenance: shard.transportProvenance
+    successKind: "provider", transportProvenance: shard.transportProvenance,
+    ...(typeof shard.attemptOrdinal === "number" && typeof shard.authorityLineageDigest === "string" ? {
+      attemptOrdinal: shard.attemptOrdinal, authorityLineageDigest: shard.authorityLineageDigest
+    } : {})
   };
 }
 
