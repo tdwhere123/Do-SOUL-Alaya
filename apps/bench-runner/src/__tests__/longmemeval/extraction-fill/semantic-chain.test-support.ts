@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { expect } from "vitest";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
@@ -200,6 +200,17 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(await prepareSemanticChain(config, root)).toEqual(plan);
   expect(existsSync(join(root, "semantic_correspondence-workset.json"))).toBe(true);
   const replay = await replaySemanticChain(root);
+  const correspondenceKey = materializeSemanticProposalLines(plan.correspondence_workset!, 4096)[0]!.key;
+  const physicalBucket = join(cacheRoot, "physical-correspondence-bucket");
+  const linkedBucket = join(correspondenceCache, correspondenceKey.slice(0, 2));
+  mkdirSync(physicalBucket);
+  mkdirSync(correspondenceCache, { recursive: true });
+  symlinkSync(physicalBucket, linkedBucket, "dir");
+  expect(() => measureSemanticChain(root, replay.path,
+    plan.queries.map(row => ({ query_key: row.query_key, source_units: [] })), physicalBucket))
+    .toThrow(/separate from producer and input roots/u);
+  expect(readdirSync(physicalBucket)).toEqual([]);
+  unlinkSync(linkedBucket);
   const payload = readChainArtifact(replay.path) as { rows: { response?: { index?: { as_of: string } }; correspondence_outcomes?: { status: string }[] }[] };
   expect(payload.rows[0]?.correspondence_outcomes?.every((row) => row.status === "unattempted")).toBe(true);
   expect(payload.rows[0]?.response?.index?.as_of).toBe(config.interpretation_clock);
@@ -263,9 +274,11 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     arm.leaf_kind.startsWith(family) && (arm.removed_answers?.length ?? 0) > 0)).toBe(true);
   expect(interveneSemanticChain(root, proofReplay.path, 32)).toEqual(intervention);
   for (const [name, rows] of [["missing", []], ["duplicate", [...proofPayload.rows, proofPayload.rows[0]]]] as const) {
-    const invalidPath = join(root, `invalid-${name}-replay.json`);
+    const invalidRoot = join(cacheRoot, `invalid-${name}-chain`);
+    writeChainArtifact(join(invalidRoot, "prepare.json"), plan);
+    const invalidPath = join(invalidRoot, basename(proofReplay.path));
     writeChainArtifact(invalidPath, { ...proofPayload, rows });
-    expect(() => interveneSemanticChain(root, invalidPath)).toThrow(/exact query denominator/u);
+    expect(() => interveneSemanticChain(invalidRoot, invalidPath)).toThrow(/exact query denominator/u);
   }
   const control = await replaySemanticChain(root, "without_semantic_correspondences");
   const controlPayload = readChainArtifact(control.path) as { rows: { response?: unknown }[] };

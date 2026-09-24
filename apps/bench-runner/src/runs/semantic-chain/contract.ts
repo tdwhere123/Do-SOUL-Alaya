@@ -84,12 +84,17 @@ export function readChainArtifactPayloadForInventory(path: string): unknown | un
 }
 
 /** A readable path reference protects output even when unrelated retained fields fail admission. */
-export function retainedArtifactPathField(value: unknown, ...keys: readonly string[]): string | undefined {
+export function retainedArtifactField(value: unknown, ...keys: readonly string[]): unknown {
   let current = value;
   for (const key of keys) {
     if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined;
     current = Reflect.get(current, key);
   }
+  return current;
+}
+
+export function retainedArtifactPathField(value: unknown, ...keys: readonly string[]): string | undefined {
+  const current = retainedArtifactField(value, ...keys);
   return typeof current === "string" && current.length > 0 ? current : undefined;
 }
 

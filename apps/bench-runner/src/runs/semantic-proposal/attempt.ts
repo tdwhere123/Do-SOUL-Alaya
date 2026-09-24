@@ -1,16 +1,49 @@
-import { inspectExtractionAttemptLedger,
+import { inspectExtractionAttemptLedger, ledgerPath,
   listExtractionAttemptLedgerRecords, openExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
-import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, SemanticProposalIdentityError,
+import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, semanticProposalShardPath, SemanticProposalIdentityError,
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
-import { assertSemanticProposalExecutionScope, verifySemanticProposalAuthority, type SemanticProposalAuthority } from "./authority.js";
+import { assertSemanticProposalExecutionScope, proposalAttemptLineage, verifySemanticProposalAuthority, type SemanticProposalAuthority } from "./authority.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
-import type { SemanticProposalKind } from "./workset.js";
+import { materializeSemanticProposalLines, type SemanticProposalKind, type SemanticProposalLine,
+  type SemanticProposalWorkset } from "./workset.js";
 import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
+  providerRawAttemptInputPaths,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
+import { dirname } from "node:path";
+
+export function semanticProposalLookup(
+  workset: SemanticProposalWorkset, line: SemanticProposalLine, maxOutputTokens: number
+): SemanticProposalLookup {
+  return {
+    kind: workset.kind, model: workset.model, request_profile: workset.request_profile,
+    system_prompt: line.systemPrompt, user_prompt: line.userPrompt,
+    schema: line.responseJsonSchema, max_output_tokens: maxOutputTokens,
+    provider_url: workset.provider_url, request_digest: line.requestDigest, transport_provenance: line.transportProvenance,
+    attempt_lineage_digest: proposalAttemptLineage({ ...workset, transport_provenance: line.transportProvenance })
+  };
+}
+
+/** Physical inputs of the proposal reader, retained independently of their semantic admission. */
+export function semanticProposalCacheInputPaths(
+  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number
+): readonly string[] {
+  const paths = [cacheRoot];
+  for (const item of workset.items) {
+    // A malformed sibling request must not erase independently readable cache paths.
+    let line: SemanticProposalLine;
+    try { line = materializeSemanticProposalLines({ ...workset, items: [item] }, maxOutputTokens)[0]!; }
+    catch { continue; }
+    const shard = semanticProposalShardPath(cacheRoot, line.key);
+    paths.push(dirname(shard), shard, ledgerPath(cacheRoot,
+      semanticProposalLookup(workset, line, maxOutputTokens).attempt_lineage_digest!),
+      ...providerRawAttemptInputPaths(cacheRoot, line.key));
+  }
+  return paths;
+}
 
 export function readSemanticProposalAttemptState(
   cacheRoot: string, cacheKey: string, expected: SemanticProposalLookup

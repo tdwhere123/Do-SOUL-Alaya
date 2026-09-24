@@ -434,7 +434,7 @@ function assertBoundRecord(
   }
 }
 
-function ledgerPath(cacheRoot: string, lineageDigest: string): string {
+export function ledgerPath(cacheRoot: string, lineageDigest: string): string {
   assertDigest(lineageDigest);
   return join(cacheRoot, `extraction-attempt-ledger.${lineageDigest}.json`);
 }

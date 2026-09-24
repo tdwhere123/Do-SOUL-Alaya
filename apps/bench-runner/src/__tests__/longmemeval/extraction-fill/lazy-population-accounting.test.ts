@@ -296,6 +296,23 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   expect(after.result.primary.hits + after.result.primary.misses + after.result.primary.unknown).toBe(20);
   expect(readChainArtifact(after.path)).toEqual(after.result);
   expect(forbiddenFetch).not.toHaveBeenCalled();
+  const memberFreeze = readChainArtifact(join(member.native_root, "freeze.json")) as {
+    selected: { query_key: string }[]; config: { query_cache_root: string } };
+  const physicalQueryBucket = join(dirname(root), "physical-member-query-bucket");
+  const queryBucket = join(memberFreeze.config.query_cache_root, memberFreeze.selected[0]!.query_key.slice(0, 2));
+  mkdirSync(dirname(queryBucket), { recursive: true });
+  const hadQueryBucket = existsSync(queryBucket);
+  if (hadQueryBucket) renameSync(queryBucket, physicalQueryBucket);
+  else mkdirSync(physicalQueryBucket);
+  symlinkSync(physicalQueryBucket, queryBucket, "dir");
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "query-cache-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalQueryBucket))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(readdirSync(physicalQueryBucket).some(name => name.startsWith("measurement-") || name.startsWith("population-cutoff-")))
+    .toBe(false);
+  unlinkSync(queryBucket);
+  if (hadQueryBucket) renameSync(physicalQueryBucket, queryBucket);
+  else rmSync(physicalQueryBucket, { recursive: true });
   const final = readChainArtifact(join(member.lazy_root, "final.json")) as { final_chain_root: string };
   const exposure = readChainArtifact(join(member.lazy_root, "first-exposure.json")) as { replay_identity: string };
   const replayRows = join(final.final_chain_root, `replay-${exposure.replay_identity}`);

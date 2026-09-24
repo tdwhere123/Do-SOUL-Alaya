@@ -22,6 +22,7 @@ import { FirstExposurePageSchema } from "../measurement/first-exposure-session.j
 import { SemanticChainPlanSchema, SemanticChainQuerySchema, chainIdentity, readChainArtifact, writeChainArtifact,
   assertChainSnapshot, withSemanticChainDaemon, type SemanticChainPlan } from "./contract.js";
 import { readSemanticChainCorrespondences, semanticChainQueryCorrespondences, verifySemanticChainQueries } from "./inputs.js";
+import { semanticChainCacheInputPaths } from "./inputs.js";
 import { discoverSemanticChainQuery } from "./prepare.js";
 
 export function inspectSemanticChainReplayTarget(root: string, arm: "retained" | "without_semantic_correspondences") {
@@ -132,7 +133,7 @@ function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof disco
 export function measureSemanticChain(root: string, replayPath: string, goldValue: unknown, evaluatorRoot: string) {
   const { plan, replay, admittedInputPaths } = admitSemanticChainReplay(root, replayPath);
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, ...admittedInputPaths,
-    plan.config.snapshot_path, plan.config.query_cache_root, plan.config.correspondence_cache_root]);
+    plan.config.snapshot_path, ...semanticChainCacheInputPaths(plan)]);
   const gold = z.array(z.object({ query_key: z.string(), source_units: SourceGoldUnitSchema.array() }).strict()).parse(goldValue);
   const expected = plan.queries.map((row) => row.query_key).sort();
   if (canonicalJson(expected) !== canonicalJson(gold.map((row) => row.query_key).sort())) {

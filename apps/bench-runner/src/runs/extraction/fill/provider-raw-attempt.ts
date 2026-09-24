@@ -90,11 +90,24 @@ export function providerRawAttemptPath(root: string, key: string, ordinal: numbe
   return join(root, "provider-raw", key.slice(0, 2), `${key}.${ordinal}.json`);
 }
 
+export function providerRawAttemptInputPaths(root: string, key: string): readonly string[] {
+  const directory = join(root, "provider-raw", key.slice(0, 2));
+  try {
+    return [directory, ...matchingRawAttemptNames(directory, key).map(name => join(directory, name))];
+  } catch {
+    // The directory is still a known input when its entries cannot be listed.
+    return [directory];
+  }
+}
+
+function matchingRawAttemptNames(directory: string, key: string): readonly string[] {
+  if (!boundedArtifactEntryExists(directory)) return [];
+  return readdirSync(directory).filter(name => name.startsWith(`${key}.`) && name.endsWith(".json"));
+}
+
 export function listProviderRawAttempts(root: string, key: string): readonly ProviderRawAttempt[] {
   const directory = join(root, "provider-raw", key.slice(0, 2));
-  if (!boundedArtifactEntryExists(directory)) return [];
-  return readdirSync(directory)
-    .filter((name) => name.startsWith(`${key}.`) && name.endsWith(".json"))
+  return matchingRawAttemptNames(directory, key)
     .map((name) => {
       const ordinal = Number(name.slice(key.length + 1, -5));
       const record = readProviderRawAttempt(root, key, ordinal);

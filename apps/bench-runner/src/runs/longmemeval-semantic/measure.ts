@@ -2,6 +2,8 @@ import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
+import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
+import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
@@ -73,6 +75,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   const questionPaths = frozen.selected.flatMap(selected => longMemEvalQuestionInputPaths(root, selected.index).admittedInputPaths);
   const replayPaths = replay.rows.flatMap((row) => row.status === "replayed"
     ? [row.chain_root, row.publication_path,
+      ...retainedSemanticChainCacheInputPaths(row.chain_root),
       ...semanticChainReplayInputPaths(row.chain_root, row.replay_path,
         frozen.selected.filter(selected => selected.question_id === row.question_id).map(selected => selected.query_key))] : []);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
@@ -80,7 +83,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, longMemEvalFreezePath(root), replayPath,
     ...questionPaths, ...replayPaths,
     config.data_dir, config.pinned_meta_root, datasetPaths.sourcePath, datasetPaths.checksumSource,
-    config.query_cache_root,
+    ...semanticProposalCacheInputPaths(frozen.query_workset, config.query_cache_root, config.max_output_tokens),
     ...("arm" in config ? [config.correspondence_cache_root, ...config.source_cache_roots] : [])]);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
   const selectedRows: LongMemEvalOutcome[] = [];

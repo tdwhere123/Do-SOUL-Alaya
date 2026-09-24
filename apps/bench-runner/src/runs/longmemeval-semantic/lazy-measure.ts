@@ -3,6 +3,7 @@ import { AlayaError } from "@do-soul/alaya-protocol";
 import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
 import { readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
 import { lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification-inputs.js";
+import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -38,7 +39,8 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
     first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
     ...questionPaths.admittedInputPaths,
     frozen.config.data_dir, frozen.config.pinned_meta_root,
-    datasetPaths.sourcePath, datasetPaths.checksumSource, frozen.config.query_cache_root,
+    datasetPaths.sourcePath, datasetPaths.checksumSource,
+    ...semanticProposalCacheInputPaths(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens),
     frozen.config.correspondence_cache_root, ...frozen.config.source_cache_roots,
     bound.config.chain.snapshot_path, bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root]);
   if (chainIdentity(first.window.config) !== chainIdentity(bound.config) ||

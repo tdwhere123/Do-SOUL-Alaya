@@ -239,6 +239,15 @@ it("binds one original question through full-source preflight, native window, fi
   expect(measured.path.startsWith(evaluatorRoot)).toBe(true);
   expect(readChainArtifact(measured.path)).toEqual(measured.result);
   expect(await measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot })).toEqual(measured);
+  const physicalQueryBucket = join(dirname(cacheRoot), "physical-lazy-query-bucket");
+  const queryBucket = join(alpha.frozen.config.query_cache_root, alpha.frozen.selected[0]!.query_key.slice(0, 2));
+  mkdirSync(physicalQueryBucket);
+  mkdirSync(alpha.frozen.config.query_cache_root, { recursive: true });
+  symlinkSync(physicalQueryBucket, queryBucket, "dir");
+  await expect(measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot: physicalQueryBucket }))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(readdirSync(physicalQueryBucket)).toEqual([]);
+  unlinkSync(queryBucket);
   expect(await runLongMemEvalSemanticLauncher(["measure-lazy", "--root", alpha.input.root,
     "--prepared", alpha.input.preparedPath, "--source-preflight", alpha.input.sourcePreflightPath,
     "--source-cache-root", alpha.input.sourceCacheRoot, "--lazy-root", lazyRoot,

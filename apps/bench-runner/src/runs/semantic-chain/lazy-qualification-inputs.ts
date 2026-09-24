@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Digest } from "./bind-lazy.js";
 import { readChainArtifactPayloadForInventory, retainedArtifactPathField } from "./contract.js";
 import { semanticChainReplayInputPaths } from "./replay.js";
+import { retainedSemanticChainCacheInputPaths } from "./inputs.js";
 
 /** Known lazy-stage inputs remain protected even when later member evidence is unavailable. */
 export function lazyQualificationInputPaths(root: string): readonly string[] {
@@ -16,7 +17,8 @@ export function lazyQualificationRetainedInputPaths(root: string): readonly stri
   const paths = [...lazyQualificationInputPaths(root)];
   const window = readChainArtifactPayloadForInventory(join(root, "window.json"));
   const initialRoot = retainedArtifactPathField(window, "config", "initial_chain_root");
-  if (initialRoot !== undefined) paths.push(initialRoot, join(initialRoot, "prepare.json"));
+  if (initialRoot !== undefined) paths.push(initialRoot, join(initialRoot, "prepare.json"),
+    ...retainedSemanticChainCacheInputPaths(initialRoot));
   const windowQueryKey = retainedArtifactPathField(window, "query_key");
   const final = readChainArtifactPayloadForInventory(join(root, "final.json"));
   for (const key of ["final_snapshot_path", "publication_report_path"] as const) {
@@ -24,7 +26,8 @@ export function lazyQualificationRetainedInputPaths(root: string): readonly stri
     if (path !== undefined) paths.push(path);
   }
   const finalRoot = retainedArtifactPathField(final, "final_chain_root");
-  if (finalRoot !== undefined) paths.push(finalRoot, join(finalRoot, "prepare.json"));
+  if (finalRoot !== undefined) paths.push(finalRoot, join(finalRoot, "prepare.json"),
+    ...retainedSemanticChainCacheInputPaths(finalRoot));
   for (const name of ["first-exposure.json", "first-exposure.reserved.json"]) {
     const exposure = readChainArtifactPayloadForInventory(join(root, name));
     const replayPath = retainedArtifactPathField(exposure, "replay_path");
@@ -32,6 +35,7 @@ export function lazyQualificationRetainedInputPaths(root: string): readonly stri
     const queryKeys = new Set<string>();
     if (Digest.safeParse(windowQueryKey).success) queryKeys.add(windowQueryKey!);
     const replayRoot = dirname(replayPath);
+    paths.push(...retainedSemanticChainCacheInputPaths(replayRoot));
     const plan = z.object({ queries: z.array(z.unknown()) }).passthrough().safeParse(
       readChainArtifactPayloadForInventory(join(replayRoot, "prepare.json")));
     const replay = z.object({ rows: z.array(z.unknown()) }).passthrough().safeParse(

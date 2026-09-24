@@ -5,7 +5,10 @@ import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/boun
 import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
 import { chainIdentity, readChainArtifact, readChainArtifactPayloadForInventory,
-  retainedArtifactPathField, writeChainArtifact } from "../semantic-chain/contract.js";
+  retainedArtifactField, retainedArtifactPathField, writeChainArtifact } from "../semantic-chain/contract.js";
+import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
+import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
+import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
 import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
   readLazyQualifiedExposureState, sealLazyQualificationFinal } from "../semantic-chain/lazy-qualification.js";
 import { lazyQualificationInputPaths, lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification-inputs.js";
@@ -158,7 +161,7 @@ function admitPopulation(value: unknown, root: string) {
       throw new AlayaError("CONFLICT", "frozen native resource or profile config changed");
     }
   }
-  return { population: { ...population, selection }, admittedInputPaths };
+  return { population: { ...population, selection }, admittedInputPaths, configs };
 }
 
 /** This operation reads membership metadata only: no corpus, source, gold, or provider access. */
@@ -186,7 +189,11 @@ export function readLongMemEvalLazyPopulation(root: string) {
 export async function readLongMemEvalLazyPopulationForObservation(root: string) {
   const admitted = admitPopulation(readChainArtifact(join(root, "population.json")), root);
   const memberInputs: string[] = [];
-  for (const member of admitted.population.members) {
+  for (const [index, member] of admitted.population.members.entries()) {
+    const freeze = readChainArtifactPayloadForInventory(longMemEvalFreezePath(member.native_root));
+    const queryWorkset = SemanticProposalWorksetSchema.safeParse(retainedArtifactField(freeze, "query_workset"));
+    if (queryWorkset.success) memberInputs.push(...semanticProposalCacheInputPaths(queryWorkset.data,
+      admitted.configs[index]!.query_cache_root, admitted.configs[index]!.max_output_tokens));
     for (const stage of STAGES) {
       const completed = readChainArtifactPayloadForInventory(stagePath(root, member, stage, "completed"));
       const resultPath = retainedArtifactPathField(completed, "result_path");
@@ -199,7 +206,8 @@ export async function readLongMemEvalLazyPopulationForObservation(root: string) 
       for (const value of prepared.data.rows) {
         const chainRoot = retainedArtifactPathField(value, "chain_root");
         const publicationPath = retainedArtifactPathField(value, "publication_path");
-        if (chainRoot !== undefined) memberInputs.push(chainRoot, join(chainRoot, "prepare.json"));
+        if (chainRoot !== undefined) memberInputs.push(chainRoot, join(chainRoot, "prepare.json"),
+          ...retainedSemanticChainCacheInputPaths(chainRoot));
         if (publicationPath !== undefined) memberInputs.push(publicationPath);
       }
     }

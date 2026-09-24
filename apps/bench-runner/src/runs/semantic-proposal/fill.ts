@@ -28,14 +28,15 @@ import {
   materializeSemanticProposalLines, semanticProposalRequestBinding
 } from "./workset.js";
 import {
-  type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority, proposalAttemptLineage,
+  type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority,
   assertSemanticProposalExecutionScope, inspectSemanticProposalExecutionScope
 } from "./authority.js";
-import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, assertProposalRawReservation } from "./attempt.js";
+import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, assertProposalRawReservation,
+  semanticProposalLookup } from "./attempt.js";
 import {
   hasAdmittedProposalOutcome, hasVerifiedProposalCompletion, proposalOutcomeStatus,
   writeSemanticProposalShard, SEMANTIC_PROPOSAL_CACHE_CONTRACT, SemanticProposalIdentityError,
-  type SemanticProposalLookup, type SemanticProposalShard
+  type SemanticProposalShard
 } from "./artifact.js";
 
 export type ProposalAttemptClass = "interpreted" | "abstained" | "retryable" | "terminal" | "incomplete" | "unknown" | "pending";
@@ -59,7 +60,7 @@ export function prepareSemanticProposal(
   const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
   const cachedKeys = new Set<string>();
   for (const line of lines) {
-    const state = readSemanticProposalAttemptState(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
     const existing = state.shard;
     if (existing !== undefined) {
       if (state.status !== "settled") {
@@ -99,7 +100,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
   let cacheHits = 0;
   for (const line of lines) {
     const existing = readSemanticProposalAttemptState(
-      input.cacheRoot, line.key, lookupOf(input.workset, line, maxOutputTokens)
+      input.cacheRoot, line.key, semanticProposalLookup(input.workset, line, maxOutputTokens)
     ).shard;
     if (existing !== undefined) {
       const prior = replayCachedProposalShard(line, existing);
@@ -196,22 +197,10 @@ function assertAuthorizedProposalRequest(
   }
 }
 
-function lookupOf(
-  workset: SemanticProposalWorkset, line: SemanticProposalLine, maxOutputTokens: number
-): SemanticProposalLookup {
-  return {
-    kind: workset.kind, model: workset.model, request_profile: workset.request_profile,
-    system_prompt: line.systemPrompt, user_prompt: line.userPrompt,
-    schema: line.responseJsonSchema, max_output_tokens: maxOutputTokens,
-    provider_url: workset.provider_url, request_digest: line.requestDigest, transport_provenance: line.transportProvenance,
-    attempt_lineage_digest: proposalAttemptLineage({ ...workset, transport_provenance: line.transportProvenance })
-  };
-}
-
 /** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
 export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
   return materializeSemanticProposalLines(workset, maxOutputTokens).map((line) => {
-    const state = readSemanticProposalAttemptState(cacheRoot, line.key, lookupOf(workset, line, maxOutputTokens));
+    const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
     const shard = state.shard;
     if (state.status !== "settled") return { line, shard, status: state.status };
     if (shard === undefined) return { line, status: "unattempted" as const };
@@ -383,7 +372,7 @@ function replayPersistedProposalRaw(
   raw: ProviderRawAttempt,
   lastAttempt: boolean
 ): { classified: ProposalAttemptClass; admitted: boolean } {
-  assertProposalRawReservation(raw, ledger.snapshot(), lookupOf(input.workset, line, input.authority.limits.max_output_tokens), line.key);
+  assertProposalRawReservation(raw, ledger.snapshot(), semanticProposalLookup(input.workset, line, input.authority.limits.max_output_tokens), line.key);
   assertStepReportedUsage(input.workset.request_profile, raw.usage, input.authority.limits.max_output_tokens);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {

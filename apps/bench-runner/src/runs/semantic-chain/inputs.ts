@@ -2,12 +2,39 @@ import { AlayaError, canonicalJson, type SourceSemanticCorrespondence,
   type SourceSemanticQueryUnavailableReason } from "@do-soul/alaya-protocol";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
-import { chainIdentity, type SemanticChainPlan } from "./contract.js";
+import { chainIdentity, readChainArtifactPayloadForInventory, retainedArtifactField,
+  retainedArtifactPathField, type SemanticChainPlan } from "./contract.js";
 import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
+import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
+import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
 import { SemanticProposalIdentityError, semanticProposalShardPath } from "../semantic-proposal/artifact.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { ProviderRawAttemptIdentityError } from "../extraction/fill/provider-raw-attempt.js";
 import { ExtractionAttemptLimitError } from "../extraction/authority/attempt-ledger.js";
+import { join } from "node:path";
+
+/** Retained plans expose readable cache inputs without admitting the plan or its execution state. */
+export function semanticChainCacheInputPaths(value: unknown): readonly string[] {
+  const paths: string[] = [];
+  const tokens = retainedArtifactField(value, "config", "max_output_tokens");
+  for (const [rootKeys, worksetKeys] of [
+    [["config", "query_cache_root"], ["config", "query_workset"]],
+    [["config", "correspondence_cache_root"], ["correspondence_workset"]]
+  ] as const) {
+    const root = retainedArtifactPathField(value, ...rootKeys);
+    if (root === undefined) continue;
+    paths.push(root);
+    const workset = SemanticProposalWorksetSchema.safeParse(retainedArtifactField(value, ...worksetKeys));
+    if (workset.success && typeof tokens === "number" && Number.isInteger(tokens) && tokens >= 1 && tokens <= 65536) {
+      paths.push(...semanticProposalCacheInputPaths(workset.data, root, tokens));
+    }
+  }
+  return paths;
+}
+
+export function retainedSemanticChainCacheInputPaths(root: string): readonly string[] {
+  return semanticChainCacheInputPaths(readChainArtifactPayloadForInventory(join(root, "prepare.json")));
+}
 
 /** Retain failed cache admission in its exact request slot, without repairing or borrowing output. */
 export function readSemanticChainProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
