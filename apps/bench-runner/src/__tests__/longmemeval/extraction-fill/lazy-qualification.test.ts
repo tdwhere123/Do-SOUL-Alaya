@@ -664,7 +664,7 @@ it("records whether three cold authored composition windows share the same eligi
   if (returnRoot !== undefined) {
     mkdirSync(returnRoot);
     writeFileSync(join(returnRoot, "window-trace.json"), JSON.stringify({
-      candidate: "1d257e784e9741dfbdf0333651353fd1d1a9db72", matched, tuples, eligible,
+      candidate: windows[0]!.config.chain.implementation_revision, matched, tuples, eligible,
       windows: windows.map(window => ({ query_state_identity: window.query_state_identity,
         starting_snapshot_sha256: window.starting_snapshot_sha256,
         starting_publication_identity: window.starting_publication_identity,
