@@ -817,16 +817,18 @@ or equal names. Incomplete execution phases remain resource-exhausted/partial.
 Archive-only source-evidence protocol 1/library v1 retains its recorded identities,
 page and order through the offline admission owner.
 
-New source-interpretation extraction uses the producer-only `source-semantic-proposal-v7` contract
-with `host-owned-selection-schema-v3` at canonical domination depth 16. Optional
-quantified and measurement fields remain in that recorded projection; omit empty
-tables when the source does not support them. The producer owns predicate/role
-readings, co-reference, semantic scope, speech acts, domain membership/closure
-and measurement context. Exact text selections and inline mentions are enough
-for an unreused local referent. A compact source-proposal alias is required only for
-co-reference, an occurrence reference, same-parent reuse, or a quantifier
-binding. Source-label equality is not identity. Nested expressions remain the
-scope owner; the host does not reconstruct lost scope from English labels or map
+Current source-interpretation extraction uses the producer-only
+`source-semantic-proposal-v8` contract with `host-owned-table-schema-v1` at
+canonical domination depth 16. The finite table declares typed entity and
+occurrence keys, roots, nodes, domains, measurements and gaps. Omit optional
+domain and measurement tables when the source does not support them. The producer
+owns predicate/role readings, co-reference, semantic scope, speech acts, domain
+membership/closure and measurement context. Every materialized entity is declared
+once and referenced by its table key; a distinct semantic alias records supported
+co-reference. `content_ref` owns nested content, `content_reference` reuses content
+under the same parent, and `occurrence_ref` names an occurrence without governing
+it. Source-label equality is not identity. The table's ownership edges preserve
+nested scope; the host does not reconstruct lost scope from English labels or map
 a missing act to assertion. Role evidence alone does not define an argument
 target, and a local key cannot supply missing identifier or date text. A reporting
 event with its own time or other roles uses the ordinary statement with nested
@@ -838,12 +840,12 @@ binders and canonical outcome gaps. A plain occurrence reference does not embed
 its target. Unowned or conflicting scopes are rejected; the compiler never
 guesses assertion permission, pronoun antecedents or domain facts. Compilation
 and normalization share one resource ledger. Structural admission and located
-gaps cannot certify language completeness. The selection-producer change preserved
+gaps cannot certify language completeness. The table-producer change preserved
 the canonical interpretation and source response envelope. The attribution cutover
 adds required source-binding attribution and published envelope v5; the source
 response envelope remains v5. Current SOUL request, receive, prompt, schema and
-revision admission require the v7 selection request, source units, explicit
-host assertion locations and normalizer-v5. Recorded v1/v2/v3/v4 proposals
+revision admission require the v8 table request, source units, explicit
+host assertion locations and normalizer-v5. Recorded earlier producer proposals
 and marker-absent normalizer-v3 requests retain their original prompt, schema,
 request and response identities through explicit retained verification only.
 That result is ineligible for new generation, executable cache reuse, import,
@@ -882,7 +884,7 @@ normalizer-v5 and the source's host-provided assertion locations. Stored retired
 interpretations remain inspectable by exact identity but are excluded from
 worker discovery, correspondence and proof, while the underlying source remains.
 
-Current selection requests bind `host-owned-selection-schema-v3`. Every selection
+Current table requests bind `host-owned-table-schema-v1`. Every source selection
 names an assertion ID and exact text. Occurrences are zero-based among exact
 catalog-eligible matches ordered by start, including overlapping matches; only
 multiple eligible matches require an explicit occurrence. The catalog boundary
@@ -890,9 +892,10 @@ resolver rejects absent, ambiguous, out-of-range and word-internal selections.
 The historical raw-substring locator does not define this producer's ordinal.
 Discontinuous lists retain their existing bounds. The request carries the original source digest and units;
 the catalog remains host-owned and is reconstructed by the existing owner. The
-selection compiler lowers into the unchanged compact/expression compiler. There
-is no v6 compatibility or fallback selection syntax. Retained v6 raw responses
-remain historical execution evidence, not current v7 admissions.
+table adapter checks key ownership before expansion and lowers through the
+existing selection, compact and expression compiler. There is no fallback producer
+syntax. Retained v7 and earlier raw responses remain historical execution evidence,
+not current v8 admissions.
 Recorded compact expression v4 requests bind `host-owned-expression-schema-v1`. Protocol
 derives each generation schema from its corresponding shapes, with shared acyclic
 definitions spanning the canonical domination-depth limit. Recorded v3 requests

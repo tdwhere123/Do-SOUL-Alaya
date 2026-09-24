@@ -43,7 +43,8 @@ describe("source-bound explicit proposal revisions", () => {
   it("retains rejected raw and precise diagnostics while applying unchanged admission to the replacement", () => {
     const parent = buildSourceSemanticRequest(input);
     const broken = JSON.parse(raw);
-    broken.content.roots[1].expression.content.arguments[1].target.arguments[1].target = { kind: "occurrence", key: "absent" };
+    broken.content.nodes.find((node: { key: string }) => node.key === "knowledge").arguments[1].target =
+      { kind: "content_ref", key: "absent" };
     const previous = JSON.stringify(broken);
     const original = receiveSourceSemantics(previous, parent, input);
     expect(original.outcome.status).toBe("invalid");

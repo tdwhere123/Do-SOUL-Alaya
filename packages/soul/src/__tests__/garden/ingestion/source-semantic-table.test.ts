@@ -5,12 +5,15 @@ import { describe, expect, it } from "vitest";
 import { materializeSourceSemanticSelectionProposal, normalizeSourceSemantics,
   materializeSourceSemanticTableProposal, sourceSemanticEvidenceClosure,
   SourceSemanticResourceLedger, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SourceSemanticResourceExhausted,
+  SourceSemanticTableValidationError } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticRequest, semanticSha256, sourceSemanticRequestCatalog,
   sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from
   "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { receiveSourceSemantics } from
   "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { prepareSourceSemanticRevision } from
+  "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { indexSourceSemanticUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as SELECTION_PROMPT } from
   "../../../garden/ingestion/official-api/source-semantic-selection-guidance.js";
@@ -334,5 +337,35 @@ describe("finite source table production receive", () => {
     expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThan(2000000);
     expect(receiveTable(repeated, large, { work_units: 200000, memory_bytes: 2000000 }).outcome.status)
       .toBe("resource_exhausted");
+  });
+
+  it("keeps table repair diagnostics separate from resource exhaustion in exported revision preparation", () => {
+    const text = `met ${Array.from({ length: 64 }, () => "Mira").join(" ")}`;
+    const { input, request } = setup(text);
+    const valid = table([statement("event", "met", [{ role: "agent", target: entityRef("person") }])],
+      [{ form: "entity", key: "person", semantic_key: "person", mentions: [atom("Mira", 1, 0)] }]);
+    const invalid = structuredClone(valid);
+    invalid.content.nodes[0]!.arguments[0] = { role: "agent", target: entityRef("absent") };
+    expect(receiveSourceSemantics(JSON.stringify(valid), request, input).outcome.status).toBe("interpreted");
+    expect(receiveSourceSemantics(JSON.stringify(invalid), request, input).outcome.status).toBe("invalid");
+    expect(() => materializeSourceSemanticTableProposal(invalid,
+      { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }))
+      .toThrow(SourceSemanticTableValidationError);
+    const revision = prepareSourceSemanticRevision(request, JSON.stringify(invalid), [],
+      { responseCompletion: "complete" });
+    expect(revision.structural_diagnostics).toEqual([{
+      code: "invalid_table_proposal", path: [], message: "missing_entity: absent"
+    }]);
+    const revisedRequest = buildSourceSemanticRequest({ ...input, revision });
+    expect(receiveSourceSemantics(JSON.stringify(valid), revisedRequest, input).outcome.status).toBe("interpreted");
+
+    const nodes = Array.from({ length: 16 }, (_, i) => statement(`event${i}`, "met",
+      Array.from({ length: 8 }, (_, j) => ({ role: `participant${j}`, target: entityRef("person") }))));
+    const expensive = table(nodes, [{ form: "entity", key: "person", semantic_key: "person",
+      mentions: Array.from({ length: 64 }, (_, i) => atom("Mira", 1, i)) }], nodes.map(node => node.key));
+    const raw = JSON.stringify(expensive);
+    expect(receiveSourceSemantics(raw, request, input).outcome.status).toBe("resource_exhausted");
+    expect(() => prepareSourceSemanticRevision(request, raw, [], { responseCompletion: "complete" }))
+      .toThrow(SourceSemanticResourceExhausted);
   });
 });

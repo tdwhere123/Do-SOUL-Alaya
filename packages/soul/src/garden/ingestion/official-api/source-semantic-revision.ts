@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema,
+  AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema, SourceSemanticTableValidationError,
   materializeSourceSemanticContentProposal, materializeSourceSemanticExpressionProposal,
   materializeSourceSemanticCompactProposal, materializeSourceSemanticSelectionProposal,
   materializeSourceSemanticTableProposal,
@@ -118,7 +118,8 @@ function structuralDiagnostics(raw: string, request: SourceSemanticRequest, comp
   }
   catch (error) {
     if (!(error instanceof z.ZodError)) {
-      if (request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) throw error;
+      if (!(error instanceof SourceSemanticTableValidationError) ||
+          request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) throw error;
       return SourceSemanticDiagnosticsSchema.parse([{ code: "invalid_table_proposal", path: [],
         message: String(error instanceof Error ? error.message : error).slice(0, 256) }]);
     }

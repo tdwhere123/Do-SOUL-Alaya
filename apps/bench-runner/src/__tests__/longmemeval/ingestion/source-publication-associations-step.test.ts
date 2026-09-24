@@ -45,11 +45,13 @@ function response(userPrompt: string) {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions[0]!;
   const theme = assertion.text.includes("alpha") ? "alpha" : "beta";
-  return JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
-    roots: [{ act: "assertion", expression: { kind: "statement",
+  return JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+    roots: [{ act: "assertion", expression: { kind: "content_ref", key: "completion" } }],
+    entities: [{ form: "entity", key: "r0", semantic_key: "r0",
+      mentions: [{ assertion_id: assertion.assertion_id, text: theme }] }],
+    nodes: [{ kind: "statement", key: "completion",
       predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
-      arguments: [{ role: "theme", target: { kind: "entity", key: "r0",
-        mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }] } }]
+      arguments: [{ role: "theme", target: { kind: "entity_ref", key: "r0" } }], qualifications: [] }], gaps: []
   } });
 }
 

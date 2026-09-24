@@ -13,7 +13,7 @@ export { SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_SELECTION_
   SourceSemanticSelectionProposalSchema, SourceSemanticSelectionGenerationSchema,
   materializeSourceSemanticSelectionProposal } from "./source-semantic-selection-proposal.js";
 export { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
-  sourceSemanticTableJsonSchema,
+  SourceSemanticTableValidationError, sourceSemanticTableJsonSchema,
   materializeSourceSemanticTableProposal } from "./source-semantic-table-proposal.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticContextOwnerSchema,

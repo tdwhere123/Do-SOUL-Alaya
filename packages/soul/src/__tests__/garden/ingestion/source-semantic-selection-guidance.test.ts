@@ -5,21 +5,30 @@ import { buildSourceSemanticRequest } from "../../../garden/ingestion/official-a
 import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
 const select = (text: string, assertion_id = 1) => ({ assertion_id, text });
-const statement = (reading: string, text: string, assertion_id: number, arguments_: object[], key?: string) => ({
-  kind: "statement", ...(key === undefined ? {} : { key }),
-  predicate: { kind: "explicit", reading, support: select(text, assertion_id) }, arguments: arguments_
+const entity = (key: string) => ({ kind: "entity_ref", key });
+const content = (key: string) => ({ kind: "content_ref", key });
+const occurrence = (key: string) => ({ kind: "occurrence_ref", key });
+const mention = (key: string, text: string, assertion_id = 1, semantic_key?: string) => ({
+  form: "entity", key, ...(semantic_key === undefined ? {} : { semantic_key }), mentions: [select(text, assertion_id)]
 });
-const root = (expression: object) => ({ act: "assertion", expression });
+const selected = (key: string, text: string, assertion_id = 1) => ({
+  form: "selection", key, selection: select(text, assertion_id)
+});
+const statement = (key: string, reading: string, text: string, assertion_id: number, arguments_: object[],
+  qualifications: object[] = []) => ({ kind: "statement", key,
+  predicate: { kind: "explicit", reading, support: select(text, assertion_id) }, arguments: arguments_, qualifications
+});
+const root = (key: string) => ({ act: "assertion", expression: content(key) });
 
-function interpret(texts: string[], roots: object[], gaps: object[] = []): SourceSemanticInterpretation {
+function interpret(texts: string[], roots: object[], nodes: object[], entities: object[], gaps: object[] = []): SourceSemanticInterpretation {
   const input = { sourceCorpus: `User: ${texts.join(" ")}`, assertionIds: texts.map((_, index) => index + 1),
     sourceScope: "complete-source" as const, source_id: "authored-source", source_version: "1",
     producer_id: "authored-control", producer_version: "1" };
   const request = buildSourceSemanticRequest(input);
   expect(request.source_request.source_assertions.map((row) => row.text)).toEqual(texts.map((text, index) =>
     index === 0 ? `User: ${text}` : text));
-  const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v7",
-    outcome: { status: "interpreted" }, content: { roots, ...(gaps.length === 0 ? {} : { gaps }) } }), request, input);
+  const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v8",
+    outcome: { status: "interpreted" }, content: { roots, nodes, entities, gaps } }), request, input);
   expect(received.outcome, JSON.stringify(received.outcome)).toMatchObject({ status: "interpreted" });
   return received.interpretation!;
 }
@@ -32,23 +41,25 @@ function closureTexts(interpretation: SourceSemanticInterpretation, occurrence: 
 
 describe("source meaning controls through receive and evidence closure", () => {
   it("keeps denial inside a quoted report distinct from denial of the report", () => {
-    const speaker = { kind: "entity", key: "lena", mentions: [select("Lena")] };
-    const quotedSelf = { kind: "entity", key: "lena", mentions: [select("I")] };
-    const release = (verb: string) => statement("release", verb, 1, [
-      { role: "actor", target: quotedSelf }, { role: "item", target: select("the amber crate") }
+    const entities = [mention("speaker", "Lena", 1, "lena"), mention("self", "I", 1, "lena"),
+      selected("crate", "the amber crate")];
+    const release = (verb: string) => statement("release", "release", verb, 1, [
+      { role: "actor", target: entity("self") }, { role: "item", target: entity("crate") }
     ]);
-    const said = interpret(["Lena said, 'I did not release the amber crate'."], [root(statement("say", "said", 1, [
-      { role: "speaker", target: speaker },
-      { role: "quoted content", support: select("did not release"), target: {
-        kind: "not", support: select("not"), content: release("release")
-      } }
-    ]))]);
-    const didNotSay = interpret(["Lena did not say, 'I released the amber crate'."], [root({
-      kind: "not", support: select("did not"), content: statement("say", "say", 1, [
-        { role: "speaker", target: speaker },
-        { role: "quoted content", support: select("released"), target: release("released") }
-      ])
-    })]);
+    const said = interpret(["Lena said, 'I did not release the amber crate'."], [root("saying")], [
+      statement("saying", "say", "said", 1, [
+        { role: "speaker", target: entity("speaker") },
+        { role: "quoted content", support: select("did not release"), target: content("denial") }
+      ]),
+      { kind: "not", key: "denial", support: select("not"), content: content("release") }, release("release")
+    ], entities);
+    const didNotSay = interpret(["Lena did not say, 'I released the amber crate'."], [root("denial")], [
+      { kind: "not", key: "denial", support: select("did not"), content: content("saying") },
+      statement("saying", "say", "say", 1, [
+        { role: "speaker", target: entity("speaker") },
+        { role: "quoted content", support: select("released"), target: content("release") }
+      ]), release("released")
+    ], entities);
     const sayFrame = said.frames.find((row) => row.predicate_support.reading === "say")!;
     const deniedRelease = said.frames.find((row) => row.predicate_support.reading === "release")!;
     const innerNot = said.operators.find((row) => row.operator === "not")!;
@@ -78,16 +89,21 @@ describe("source meaning controls through receive and evidence closure", () => {
 
   it("keeps a supplied proposition under unknown truth distinct from unresolved content", () => {
     const text = "The inspector does not know whether gate R-6 is open.";
-    const proposition = statement("open", "open", 1, [{ role: "subject", target: select("gate R-6") }]);
-    const knowledge = (target: object) => root({ kind: "not", support: select("does not"),
-      content: statement("know whether", "know whether", 1, [
-        { role: "knower", target: select("The inspector") },
+    const nodes = (target: object) => [
+      { kind: "not", key: "uncertainty", support: select("does not"), content: content("knowledge") },
+      statement("knowledge", "know whether", "know whether", 1, [
+        { role: "knower", target: entity("inspector") },
         { role: "content", support: select("whether"), target }
-      ], "knowledge") });
-    const knownContent = interpret([text], [knowledge(proposition)]);
-    const missingContent = interpret([text], [knowledge({ kind: "unresolved" })], [
-      { kind: "missing_binding", support: select("gate R-6 is open"), affected: ["knowledge"] }
-    ]);
+      ])
+    ];
+    const knownContent = interpret([text], [root("uncertainty")],
+      [...nodes(content("opening")), statement("opening", "open", "open", 1,
+        [{ role: "subject", target: entity("gate") }])],
+      [selected("inspector", "The inspector"), selected("gate", "gate R-6")]);
+    const missingContent = interpret([text], [root("uncertainty")], nodes({ kind: "unresolved" }),
+      [selected("inspector", "The inspector")], [
+        { kind: "missing_binding", support: select("gate R-6 is open"), affected: [occurrence("knowledge")] }
+      ]);
     const open = knownContent.frames.find((row) => row.predicate_support.reading === "open")!;
     const know = knownContent.frames.find((row) => row.predicate_support.reading === "know whether")!;
     expect(open.context_owner).toEqual({ kind: "embedding", parent_frame: know.id, content_argument: open.id });
@@ -102,27 +118,31 @@ describe("source meaning controls through receive and evidence closure", () => {
   it("locates qualification on its event or a gap on that event, not on another frame", () => {
     const texts = ["The badge admits guests on Friday only.",
       "The supervisor does not know whether it admits guests on Sunday."];
-    const first = (qualified: boolean) => root(statement("admit", "admits", 1, [
-      { role: "subject", target: { kind: "entity", key: "badge", mentions: [select("badge")] } },
-      { role: "visitor", target: select("guests") },
-      { role: qualified ? "exclusive applicability day" : "day", target: select("Friday"),
-        support: select(qualified ? "Friday only" : "Friday") }
-    ], "fridayAdmission"));
-    const second = root({ kind: "not", support: select("does not", 2), content:
-      statement("know whether", "know whether", 2, [
-        { role: "knower", target: select("The supervisor", 2) },
-        { role: "content", support: select("whether", 2), target: statement("admit", "admits", 2, [
-          { role: "subject", target: { kind: "entity", key: "badge", mentions: [select("it", 2)] } },
-          { role: "visitor", target: select("guests", 2) },
-          { role: "day", target: select("Sunday", 2) }
-        ]) }
-      ], "knowledge") });
-    const qualified = interpret(texts, [first(true), second]);
-    const localGap = interpret(texts, [first(false), second], [
-      { kind: "unsupported_meaning", support: select("only"), affected: ["fridayAdmission"] }
+    const entities = [mention("firstBadge", "badge", 1, "badge"), mention("laterBadge", "it", 2, "badge"),
+      selected("fridayGuests", "guests"), selected("friday", "Friday"), selected("supervisor", "The supervisor", 2),
+      selected("sundayGuests", "guests", 2), selected("sunday", "Sunday", 2)];
+    const nodes = (qualified: boolean) => [
+      statement("fridayAdmission", "admit", "admits", 1, [
+        { role: "subject", target: entity("firstBadge") }, { role: "visitor", target: entity("fridayGuests") },
+        ...(qualified ? [] : [{ role: "day", target: entity("friday"), support: select("Friday") }])
+      ], qualified ? [{ role: "exclusive applicability day", target: entity("friday"), support: select("Friday only") }] : []),
+      { kind: "not", key: "uncertainty", support: select("does not", 2), content: content("knowledge") },
+      statement("knowledge", "know whether", "know whether", 2, [
+        { role: "knower", target: entity("supervisor") },
+        { role: "content", support: select("whether", 2), target: content("sundayAdmission") }
+      ]),
+      statement("sundayAdmission", "admit", "admits", 2, [
+        { role: "subject", target: entity("laterBadge") }, { role: "visitor", target: entity("sundayGuests") },
+        { role: "day", target: entity("sunday") }
+      ])
+    ];
+    const roots = [root("fridayAdmission"), root("uncertainty")];
+    const qualified = interpret(texts, roots, nodes(true), entities);
+    const localGap = interpret(texts, roots, nodes(false), entities, [
+      { kind: "unsupported_meaning", support: select("only"), affected: [occurrence("fridayAdmission")] }
     ]);
-    const otherGap = interpret(texts, [first(false), second], [
-      { kind: "unsupported_meaning", support: select("only"), affected: ["knowledge"] }
+    const otherGap = interpret(texts, roots, nodes(false), entities, [
+      { kind: "unsupported_meaning", support: select("only"), affected: [occurrence("knowledge")] }
     ]);
     const firstFrame = (h: SourceSemanticInterpretation) => h.frames.find((row) =>
       row.predicate_support.reading === "admit" && row.context_owner.kind === "source_act")!;

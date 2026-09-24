@@ -114,7 +114,15 @@ export function sourceSemanticTableJsonSchema(): object {
     } });
 }
 
-function fail(code: string, key: string): never { throw new AlayaError("VALIDATION", `${code}: ${key}`); }
+/** A producer-authored table violates the table ownership contract. */
+export class SourceSemanticTableValidationError extends AlayaError {
+  constructor(code: string, key: string) {
+    super("VALIDATION", `${code}: ${key}`);
+    this.name = "SourceSemanticTableValidationError";
+  }
+}
+
+function fail(code: string, key: string): never { throw new SourceSemanticTableValidationError(code, key); }
 function references(node: Node): readonly OperandValue[] {
   if (node.kind === "statement") return [...node.arguments, ...node.qualifications]
     .flatMap(row => row.target.kind === "content_ref" || row.target.kind === "content_reference" ? [row.target] : []);
