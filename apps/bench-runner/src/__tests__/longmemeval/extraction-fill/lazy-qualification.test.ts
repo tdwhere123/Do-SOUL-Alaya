@@ -752,6 +752,18 @@ it("delivers the fixed completed item through the normal native qualification li
   const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
     ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
   const expectedWindow = [5, 11, 3, 8, 1, 10, 9, 2, 6, 7];
+  const expectedSourceKeys = [
+    ["fixture:bounded-s5-r0", "a2410ac50624929934178a977ab6a53438b311b88fafc1bd2ed78c7ba1df22ef"],
+    ["fixture:bounded-s11-r0", "a7a157ddde8b0775ae5259b74d27280bf2fd9705d4aa3a4533cd37f505d694d0"],
+    ["fixture:bounded-s3-r0", "b7da46265fa5bc12fb35becba7bcee8f4557e4e68b632ac831af5fb27c8427ee"],
+    ["fixture:bounded-s8-r0", "ad845372ab76e3b9d4e0cbe2bdce3fcc9b036f361b28bcb8063b8ebd2f679967"],
+    ["fixture:bounded-s1-r0", "8c38f90bffd90400c4d682ab6dc8fe5e5781f871659713f04ccf325496cf2a93"],
+    ["fixture:bounded-s10-r0", "ab38cb74d6192ab35727cdaeec53bbde0cb17a13c30bd09e947de77da5e88f88"],
+    ["fixture:bounded-s9-r0", "4098987b723808ead23eec33ebf7014fe4ef25fc9520b0ba87293b79f3e36596"],
+    ["fixture:bounded-s2-r0", "bfdf3e8ed7aa5932298b715d4d421dd85eec374b9ef4a5ab0857652a83ab1796"],
+    ["fixture:bounded-s6-r0", "4dd9133fdb7d3db7c1dcbede497a766228fccd440e150a979921fe717fa2dac3"],
+    ["fixture:bounded-s7-r0", "a19699d47647a19acfb54715173da48141351955d96e56e0306b0807a7ecc58b"]
+  ] as const;
   const expectedRecords = ["06a672c9f0466751e19d3c33f56bbee649e49b7b7da3e306d58e5f7a98a43da5",
     "3c1de53a4a3dc4c90a2464191796b78ffe21a1f614f6042d8cc535d3cbbeeca1",
     "48545d4cf4d1afb623e34beb815545a7b416c393dc6d31c4d18ca617e65ae90c",
@@ -781,6 +793,8 @@ it("delivers the fixed completed item through the normal native qualification li
       .fill("55e8c8cc90876bdfbe5295ba2bd9be3c4fb89f8fe4cfa181e5394c9c970d7814"));
     expect(window.window.map(row => row.state)).toEqual(Array(10).fill("cache_miss"));
     expect(window.selected_missing_keys).toHaveLength(10);
+    expect(window.window.map(row => [row.source_id, row.key])).toEqual(expectedSourceKeys);
+    expect(new Set(window.selected_missing_keys)).toEqual(new Set(expectedSourceKeys.map(([, key]) => key)));
     expect(window.starting_access.source_candidates.map(row => row.source_id))
       .toEqual([5, 11, 3, 8, 1, 10, 9, 2, 6, 7, 4, 0].map(index => `fixture:bounded-s${index}-r0`));
     const { plan: batchPlan, imported, fetchMock, createCount } = await fillFrozenShortSources(window.selected_missing_keys);
