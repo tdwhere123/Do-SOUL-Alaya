@@ -306,8 +306,31 @@ it("runs one explicit member through native SQLite first exposure and preserves 
     cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalRows))
     .rejects.toThrow(/separate from producer and input roots/u);
   expect(existsSync(join(root, "population-cutoff-unsafe-output.json"))).toBe(false);
+  const exposurePath = join(member.lazy_root, "first-exposure.json"), exposureBytes = readFileSync(exposurePath, "utf8");
+  const unrelatedExposureError = { ...exposure, final_identity: "invalid" };
+  writeFileSync(exposurePath, JSON.stringify({ identity: chainIdentity(unrelatedExposureError), payload: unrelatedExposureError }));
+  const reservationPath = join(member.lazy_root, "first-exposure.reserved.json");
+  const reservationBytes = readFileSync(reservationPath, "utf8");
+  const reservation = readChainArtifact(reservationPath) as Record<string, unknown>;
+  const unrelatedReservationError = { ...reservation, final_identity: "invalid" };
+  writeFileSync(reservationPath, JSON.stringify({ identity: chainIdentity(unrelatedReservationError), payload: unrelatedReservationError }));
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-exposure-row-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: null }, physicalRows))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unavailable-exposure-row-output.json"))).toBe(false);
+  writeFileSync(exposurePath, exposureBytes);
+  writeFileSync(reservationPath, reservationBytes);
+  const finalPath = join(member.lazy_root, "final.json"), finalBytes = readFileSync(finalPath, "utf8");
+  const unrelatedFinalError = { ...final, final_snapshot_path: null };
+  writeFileSync(finalPath, JSON.stringify({ identity: chainIdentity(unrelatedFinalError), payload: unrelatedFinalError }));
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-final-field-row-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: null }, physicalRows))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unavailable-final-field-row-output.json"))).toBe(false);
+  writeFileSync(finalPath, finalBytes);
   const prepareStage = readChainArtifact(join(root, "stages", String(member.index).padStart(5, "0"),
     "prepare.completed.json")) as { result_path: string };
+  const preparedBytes = readFileSync(prepareStage.result_path, "utf8");
   const prepared = readChainArtifact(prepareStage.result_path) as { rows: { status: string; chain_root?: string }[] };
   const initialChain = prepared.rows.find(row => row.status === "prepared")?.chain_root;
   if (initialChain === undefined) throw new Error("prepared member chain required");
@@ -318,11 +341,33 @@ it("runs one explicit member through native SQLite first exposure and preserves 
     cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalInitialChain))
     .rejects.toThrow(/separate from producer and input roots/u);
   expect(existsSync(join(root, "population-cutoff-initial-chain-output.json"))).toBe(false);
+  const windowPath = join(member.lazy_root, "window.json"), windowBytes = readFileSync(windowPath, "utf8");
+  const window = readChainArtifact(windowPath) as Record<string, unknown>;
+  const unrelatedWindowError = { ...window, query_key: null };
+  writeFileSync(windowPath, JSON.stringify({ identity: chainIdentity(unrelatedWindowError), payload: unrelatedWindowError }));
+  const unrelatedPreparedError = { ...prepared, rows: prepared.rows.map(row => row.status === "prepared"
+    ? { ...row, publication_path: null } : row) };
+  writeFileSync(prepareStage.result_path, JSON.stringify({ identity: chainIdentity(unrelatedPreparedError), payload: unrelatedPreparedError }));
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-initial-field-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: null }, physicalInitialChain))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unavailable-initial-field-output.json"))).toBe(false);
+  const retainedReplayPath = (readChainArtifact(exposurePath) as { replay_path: string }).replay_path;
+  const replayBytes = readFileSync(retainedReplayPath, "utf8");
+  const replay = readChainArtifact(retainedReplayPath) as { rows: Array<Record<string, unknown>> };
+  const unrelatedReplayError = { ...replay, rows: replay.rows.map(row => ({ ...row, query_key: null })) };
+  writeFileSync(retainedReplayPath, JSON.stringify({ identity: chainIdentity(unrelatedReplayError), payload: unrelatedReplayError }));
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-query-key-row-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: null }, physicalRows))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-unavailable-query-key-row-output.json"))).toBe(false);
+  writeFileSync(retainedReplayPath, replayBytes);
+  writeFileSync(windowPath, windowBytes);
+  writeFileSync(prepareStage.result_path, preparedBytes);
   const originalQuestion = join(member.native_root, "questions", String(member.index).padStart(5, "0"));
   const physicalQuestion = join(dirname(root), "physical-original-question");
   renameSync(originalQuestion, physicalQuestion);
   symlinkSync(physicalQuestion, originalQuestion, "dir");
-  const finalPath = join(member.lazy_root, "final.json"), finalBytes = readFileSync(finalPath, "utf8");
   const untrustedFinal = JSON.parse(finalBytes) as { identity: string; payload: unknown };
   writeFileSync(finalPath, JSON.stringify({ ...untrustedFinal, identity: "0".repeat(64) }));
   await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "unavailable-final-row-output",

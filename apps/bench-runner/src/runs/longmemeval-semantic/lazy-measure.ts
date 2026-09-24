@@ -1,7 +1,8 @@
 import { join, resolve } from "node:path";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
-import { readLazyQualifiedExposureState, lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification.js";
+import { readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
+import { lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification-inputs.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";

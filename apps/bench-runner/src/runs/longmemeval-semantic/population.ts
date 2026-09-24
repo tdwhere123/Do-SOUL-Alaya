@@ -4,10 +4,11 @@ import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
-import { chainIdentity, readChainArtifact, readChainArtifactPayloadForInventory, writeChainArtifact } from "../semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, readChainArtifactPayloadForInventory,
+  retainedArtifactPathField, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
-  readLazyQualifiedExposureState, sealLazyQualificationFinal, lazyQualificationInputPaths,
-  lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification.js";
+  readLazyQualifiedExposureState, sealLazyQualificationFinal } from "../semantic-chain/lazy-qualification.js";
+import { lazyQualificationInputPaths, lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification-inputs.js";
 import { createLongMemEvalSelectionContractFromAssignments } from "../selection/contract.js";
 import { LongMemEvalNativeSemanticConfigSchema, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "./contract.js";
 import { longMemEvalQuestionInputPaths, prepareLongMemEvalSemanticRun } from "./execute.js";
@@ -187,19 +188,19 @@ export async function readLongMemEvalLazyPopulationForObservation(root: string) 
   const memberInputs: string[] = [];
   for (const member of admitted.population.members) {
     for (const stage of STAGES) {
-      const completed = z.object({ result_path: z.string().min(1).nullable() }).passthrough().safeParse(
-        readChainArtifactPayloadForInventory(stagePath(root, member, stage, "completed")));
-      if (!completed.success || completed.data.result_path === null) continue;
-      memberInputs.push(completed.data.result_path);
+      const completed = readChainArtifactPayloadForInventory(stagePath(root, member, stage, "completed"));
+      const resultPath = retainedArtifactPathField(completed, "result_path");
+      if (resultPath === undefined) continue;
+      memberInputs.push(resultPath);
       if (stage !== "prepare") continue;
       const prepared = z.object({ rows: z.array(z.unknown()) }).passthrough().safeParse(
-        readChainArtifactPayloadForInventory(completed.data.result_path));
+        readChainArtifactPayloadForInventory(resultPath));
       if (!prepared.success) continue;
       for (const value of prepared.data.rows) {
-        const row = z.object({ status: z.literal("prepared"), chain_root: z.string().min(1),
-          publication_path: z.string().min(1) }).passthrough().safeParse(value);
-        if (row.success) memberInputs.push(row.data.chain_root,
-          join(row.data.chain_root, "prepare.json"), row.data.publication_path);
+        const chainRoot = retainedArtifactPathField(value, "chain_root");
+        const publicationPath = retainedArtifactPathField(value, "publication_path");
+        if (chainRoot !== undefined) memberInputs.push(chainRoot, join(chainRoot, "prepare.json"));
+        if (publicationPath !== undefined) memberInputs.push(publicationPath);
       }
     }
     memberInputs.push(...lazyQualificationRetainedInputPaths(member.lazy_root));

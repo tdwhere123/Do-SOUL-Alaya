@@ -16,21 +16,14 @@ import { readSemanticChainProposalResults, semanticChainProposalStates, semantic
 import { discoverSemanticChainQuery } from "./prepare.js";
 import { prepareSemanticChain } from "./prepare.js";
 import { admitSemanticChainReplay, inspectSemanticChainReplayTarget, ReplaySchema,
-  replaySemanticChain, semanticChainReplayInputPaths, semanticChainReplayPath } from "./replay.js";
-import { SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact, readChainArtifactPayloadForInventory,
+  replaySemanticChain, semanticChainReplayPath } from "./replay.js";
+import { SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
   withSemanticChainDaemon, writeChainArtifact, writeChainJson } from "./contract.js";
 import { Digest, SourceTuple, PublicationReport, LazyQualificationConfigSchema,
   admitNativeLazyConfig, type LazyQualificationConfig } from "./bind-lazy.js";
 import { selectedProducerAttempts, selectedSourceState } from "./lazy-qualification-source-state.js";
 
 type Config = LazyQualificationConfig;
-
-/** Known lazy-stage inputs remain protected even when later member evidence is unavailable. */
-export function lazyQualificationInputPaths(root: string): readonly string[] {
-  const snapshot = join(root, "final-library.sqlite");
-  return [join(root, "window.json"), join(root, "final.json"), join(root, "first-exposure.json"),
-    join(root, "first-exposure.reserved.json"), snapshot, `${snapshot}.publication.json`];
-}
 
 const WindowRow = SourceTuple.extend({
   rank: z.number().int().min(1).max(10), key: Digest.nullable(), cache_root: z.string().nullable(),
@@ -77,27 +70,6 @@ const ExposureReservationSchema = z.object({ final_identity: Digest, replay_iden
 const ExposureSchema = ExposureReservationSchema.extend({ contract: z.literal("source-semantic-lazy-first-exposure-v2"),
   replay_digest: Digest, selected_delivered: z.number().int().nonnegative(),
   selected_undelivered: z.number().int().nonnegative(), outside_delivered: z.number().int().nonnegative() }).strict();
-
-/** Inventory retained path references without admitting an executable member or losing known static inputs. */
-export function lazyQualificationRetainedInputPaths(root: string): readonly string[] {
-  const paths = [...lazyQualificationInputPaths(root)];
-  const window = z.object({ config: z.object({ initial_chain_root: z.string() }).passthrough(),
-    query_key: z.string() }).passthrough().safeParse(readChainArtifactPayloadForInventory(join(root, "window.json")));
-  if (window.success) paths.push(window.data.config.initial_chain_root,
-    join(window.data.config.initial_chain_root, "prepare.json"));
-  const final = z.object({ final_snapshot_path: z.string(), publication_report_path: z.string(),
-    final_chain_root: z.string() }).passthrough().safeParse(readChainArtifactPayloadForInventory(join(root, "final.json")));
-  if (final.success) paths.push(final.data.final_snapshot_path, final.data.publication_report_path,
-    final.data.final_chain_root, join(final.data.final_chain_root, "prepare.json"));
-  for (const name of ["first-exposure.json", "first-exposure.reserved.json"]) {
-    const exposure = ExposureReservationSchema.passthrough().safeParse(
-      readChainArtifactPayloadForInventory(join(root, name)));
-    if (exposure.success) paths.push(...(final.success && window.success
-      ? semanticChainReplayInputPaths(final.data.final_chain_root, exposure.data.replay_path,
-        [window.data.query_key]) : [exposure.data.replay_path]));
-  }
-  return paths;
-}
 
 function sourceInventory(rows: readonly z.infer<typeof SourceTuple>[]): string {
   return chainIdentity(rows.map(({ source_id, source_version, content_digest, corpus_digest, record_id }) =>
