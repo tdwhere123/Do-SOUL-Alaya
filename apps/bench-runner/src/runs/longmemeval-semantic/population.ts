@@ -8,6 +8,7 @@ import { chainIdentity, readChainArtifact, readChainArtifactPayloadForInventory,
   retainedArtifactField, retainedArtifactPathField, writeChainArtifact } from "../semantic-chain/contract.js";
 import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
 import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
+import { retainedSourceRequestInputKeys, sourceCacheInputPaths } from "../extraction/cache/source-cache-inputs.js";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
 import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
   readLazyQualifiedExposureState, sealLazyQualificationFinal } from "../semantic-chain/lazy-qualification.js";
@@ -190,6 +191,14 @@ export async function readLongMemEvalLazyPopulationForObservation(root: string) 
   const admitted = admitPopulation(readChainArtifact(join(root, "population.json")), root);
   const memberInputs: string[] = [];
   for (const [index, member] of admitted.population.members.entries()) {
+    const config = admitted.configs[index]!;
+    const sourceKeys = [
+      ...retainedSourceRequestInputKeys(member.source_preflight_path),
+      ...config.source_publication_associations.flatMap(row => "generation_key" in row ? [row.generation_key] : [])
+    ];
+    for (const cacheRoot of new Set([member.source_cache_root, ...config.source_cache_roots])) {
+      memberInputs.push(...sourceCacheInputPaths(cacheRoot, sourceKeys));
+    }
     const freeze = readChainArtifactPayloadForInventory(longMemEvalFreezePath(member.native_root));
     const queryWorkset = SemanticProposalWorksetSchema.safeParse(retainedArtifactField(freeze, "query_workset"));
     if (queryWorkset.success) memberInputs.push(...semanticProposalCacheInputPaths(queryWorkset.data,

@@ -4,6 +4,7 @@ import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
 import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
 import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
+import { sourceCacheInputPaths } from "../extraction/cache/source-cache-inputs.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
@@ -80,11 +81,16 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
         frozen.selected.filter(selected => selected.question_id === row.question_id).map(selected => selected.query_key))] : []);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
     dataDir: config.data_dir, pinnedMetaRoot: config.pinned_meta_root });
+  const sourceKeys = frozen.contract === "longmemeval-native-semantic-v3" ? [
+    ...frozen.source_caches.flatMap(cache => cache.shards.map(shard => shard.key)),
+    ...frozen.config.source_publication_associations.flatMap(row => "generation_key" in row ? [row.generation_key] : [])
+  ] : [];
   const outputRoot = admitEvaluatorOutputRoot(evaluatorRoot, [root, longMemEvalFreezePath(root), replayPath,
     ...questionPaths, ...replayPaths,
     config.data_dir, config.pinned_meta_root, datasetPaths.sourcePath, datasetPaths.checksumSource,
     ...semanticProposalCacheInputPaths(frozen.query_workset, config.query_cache_root, config.max_output_tokens),
-    ...("arm" in config ? [config.correspondence_cache_root, ...config.source_cache_roots] : [])]);
+    ...("arm" in config ? [config.correspondence_cache_root,
+      ...config.source_cache_roots.flatMap(cacheRoot => sourceCacheInputPaths(cacheRoot, sourceKeys))] : [])]);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
   const selectedRows: LongMemEvalOutcome[] = [];
   for (const selected of frozen.selected) {

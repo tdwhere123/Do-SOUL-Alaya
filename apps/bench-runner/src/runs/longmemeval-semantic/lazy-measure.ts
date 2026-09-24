@@ -4,6 +4,7 @@ import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic
 import { readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
 import { lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification-inputs.js";
 import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
+import { retainedSourceRequestInputKeys, sourceCacheInputPaths } from "../extraction/cache/source-cache-inputs.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -31,9 +32,18 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
   const questionPaths = longMemEvalQuestionInputPaths(input.root, selected.index);
   const datasetPaths = longMemEvalDatasetInputPaths("longmemeval_s", {
     dataDir: frozen.config.data_dir, pinnedMetaRoot: frozen.config.pinned_meta_root });
+  const sourceKeys = [
+    ...first.window.window.flatMap(row => row.key === null ? [] : [row.key]),
+    ...frozen.source_caches.flatMap(cache => cache.shards.map(shard => shard.key)),
+    ...frozen.config.source_publication_associations.flatMap(row => "generation_key" in row ? [row.generation_key] : []),
+    ...bound.config.cache_owners.flatMap(owner => retainedSourceRequestInputKeys(owner.retainedPreparationPath)),
+    ...retainedSourceRequestInputKeys(input.sourcePreflightPath)
+  ];
+  const sourceRoots = new Set([input.sourceCacheRoot, ...frozen.config.source_cache_roots,
+    ...bound.config.cache_owners.map(owner => owner.cacheRoot)]);
   const outputRoot = admitEvaluatorOutputRoot(input.evaluatorRoot, [input.root, longMemEvalFreezePath(input.root),
     input.lazyRoot, ...lazyQualificationRetainedInputPaths(input.lazyRoot),
-    input.preparedPath, input.sourcePreflightPath, input.sourceCacheRoot,
+    input.preparedPath, input.sourcePreflightPath,
     bound.config.initial_chain_root, join(bound.config.initial_chain_root, "prepare.json"),
     ...semanticChainReplayInputPaths(first.final.final_chain_root, first.path, [selected.query_key]),
     first.final.final_chain_root, first.final.final_snapshot_path, first.final.publication_report_path,
@@ -41,7 +51,8 @@ export async function measureLongMemEvalLazyFirstExposure(input: LongMemEvalLazy
     frozen.config.data_dir, frozen.config.pinned_meta_root,
     datasetPaths.sourcePath, datasetPaths.checksumSource,
     ...semanticProposalCacheInputPaths(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens),
-    frozen.config.correspondence_cache_root, ...frozen.config.source_cache_roots,
+    frozen.config.correspondence_cache_root,
+    ...[...sourceRoots].flatMap(cacheRoot => sourceCacheInputPaths(cacheRoot, sourceKeys)),
     bound.config.chain.snapshot_path, bound.config.chain.query_cache_root, bound.config.chain.correspondence_cache_root]);
   if (chainIdentity(first.window.config) !== chainIdentity(bound.config) ||
       first.window.starting_publication_identity !== bound.publication_identity) {

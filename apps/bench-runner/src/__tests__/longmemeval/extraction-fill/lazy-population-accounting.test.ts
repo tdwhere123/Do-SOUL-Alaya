@@ -296,6 +296,23 @@ it("runs one explicit member through native SQLite first exposure and preserves 
   expect(after.result.primary.hits + after.result.primary.misses + after.result.primary.unknown).toBe(20);
   expect(readChainArtifact(after.path)).toEqual(after.result);
   expect(forbiddenFetch).not.toHaveBeenCalled();
+  const sourceKey = preflight.selected_keys[0]!;
+  const sourceRawBucket = join(cacheRoot, "provider-raw", sourceKey.slice(0, 2));
+  const physicalSourceRaw = join(dirname(root), "physical-member-source-raw");
+  mkdirSync(dirname(sourceRawBucket), { recursive: true });
+  const hadSourceRawBucket = existsSync(sourceRawBucket);
+  if (hadSourceRawBucket) renameSync(sourceRawBucket, physicalSourceRaw);
+  else mkdirSync(physicalSourceRaw);
+  symlinkSync(physicalSourceRaw, sourceRawBucket, "dir");
+  await expect(observeLongMemEvalLazyPopulation(root, { cutoff_id: "source-raw-output",
+    cutoff_at: "2026-09-23T00:02:30.000Z", predecessor_identity: chainIdentity(after.result) }, physicalSourceRaw))
+    .rejects.toThrow(/separate from producer and input roots/u);
+  expect(existsSync(join(root, "population-cutoff-source-raw-output.json"))).toBe(false);
+  expect(readdirSync(physicalSourceRaw).some(name => name.startsWith("measurement-") || name.startsWith("population-cutoff-")))
+    .toBe(false);
+  unlinkSync(sourceRawBucket);
+  if (hadSourceRawBucket) renameSync(physicalSourceRaw, sourceRawBucket);
+  else rmSync(physicalSourceRaw, { recursive: true });
   const memberFreeze = readChainArtifact(join(member.native_root, "freeze.json")) as {
     selected: { query_key: string }[]; config: { query_cache_root: string } };
   const physicalQueryBucket = join(dirname(root), "physical-member-query-bucket");

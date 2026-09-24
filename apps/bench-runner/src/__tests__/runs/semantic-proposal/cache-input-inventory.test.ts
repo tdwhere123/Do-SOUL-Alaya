@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { admitEvaluatorOutputRoot } from "../../../runs/measurement/evaluator-output.js";
+import { retainedSourceRequestInputKeys, sourceCacheInputPaths } from "../../../runs/extraction/cache/source-cache-inputs.js";
+import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { semanticProposalCacheInputPaths, semanticProposalLookup } from "../../../runs/semantic-proposal/attempt.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
@@ -60,4 +62,51 @@ it("keeps valid request paths when another retained item cannot materialize", ()
   const line = materializeSemanticProposalLines({ ...workset, items: [workset.items[0]] }, 128)[0]!;
   const paths = semanticProposalCacheInputPaths(workset, join(root, "cache"), 128);
   expect(paths).toContain(semanticProposalShardPath(join(root, "cache"), line.key));
+});
+
+it("protects source raw, shard, and ledger aliases despite unavailable sibling evidence", () => {
+  const root = mkdtempSync(join(tmpdir(), "source-cache-inputs-")); roots.push(root);
+  const cacheRoot = join(root, "cache"), key = "a".repeat(64), shardKey = "b".repeat(64);
+  const preflight = join(root, "source-preflight.json");
+  writeFileSync(preflight, JSON.stringify({ selected_keys: [key, null],
+    ready_requests: [{ key }, { key: "malformed" }], planned_requests: [{ key: shardKey }] }));
+  expect(retainedSourceRequestInputKeys(preflight)).toEqual([key, shardKey]);
+  const rawRoot = join(cacheRoot, "provider-raw");
+  mkdirSync(rawRoot, { recursive: true });
+  const rawTarget = join(root, "physical-raw");
+  mkdirSync(rawTarget);
+  const rawBucket = join(rawRoot, key.slice(0, 2));
+  symlinkSync(rawTarget, rawBucket, "dir");
+  const paths = sourceCacheInputPaths(cacheRoot, retainedSourceRequestInputKeys(preflight));
+  expect(paths).toContain(rawBucket);
+  expect(paths).toContain(cacheFilePath(cacheRoot, shardKey));
+  expect(() => admitEvaluatorOutputRoot(rawTarget, paths)).toThrow(/separate from producer and input roots/u);
+  const safeRoot = join(root, "separate-evaluator");
+  expect(admitEvaluatorOutputRoot(safeRoot, paths)).toBe(safeRoot);
+
+  const shardTarget = join(root, "physical-shard");
+  mkdirSync(shardTarget);
+  symlinkSync(shardTarget, dirname(cacheFilePath(cacheRoot, shardKey)), "dir");
+  expect(() => admitEvaluatorOutputRoot(shardTarget, sourceCacheInputPaths(cacheRoot, [shardKey])))
+    .toThrow(/separate from producer and input roots/u);
+  const ledgerTarget = join(root, "physical-ledger");
+  mkdirSync(ledgerTarget);
+  writeFileSync(join(ledgerTarget, "ledger.json"), "{invalid");
+  const ledger = ledgerPath(cacheRoot, "c".repeat(64));
+  symlinkSync(join(ledgerTarget, "ledger.json"), ledger);
+  const ledgerPaths = sourceCacheInputPaths(cacheRoot);
+  expect(ledgerPaths).toContain(ledger);
+  expect(() => admitEvaluatorOutputRoot(ledgerTarget, ledgerPaths)).toThrow(/separate from producer and input roots/u);
+
+  const fileCache = join(root, "file-cache"), fileBucket = join(fileCache, "provider-raw", "aa");
+  const fileTarget = join(root, "physical-raw-file");
+  mkdirSync(fileBucket, { recursive: true });
+  mkdirSync(fileTarget);
+  const rawFile = join(fileBucket, `${key}.malformed.json`);
+  writeFileSync(join(fileTarget, "attempt.json"), "{invalid");
+  symlinkSync(join(fileTarget, "attempt.json"), rawFile);
+  const filePaths = sourceCacheInputPaths(fileCache);
+  expect(filePaths).toContain(rawFile);
+  expect(() => admitEvaluatorOutputRoot(fileTarget, filePaths))
+    .toThrow(/separate from producer and input roots/u);
 });
