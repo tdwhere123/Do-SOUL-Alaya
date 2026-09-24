@@ -1,11 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import {
-  SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
-  SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND, SourceSemanticSelectionGenerationSchema,
-  materializeSourceSemanticCompactProposal, materializeSourceSemanticSelectionProposal
-} from "../../garden/source-semantic-proposal.js";
+import { SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND, compileSourceSemanticSelection } from "../../garden/source-semantic-selection-lowering.js";
+import { compileSourceSemanticCompact } from "../../garden/source-semantic-compact-lowering.js";
 import { SOURCE_SEMANTIC_MAX_DEPTH } from "../../garden/source-semantic-draft.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { buildSourceReferenceCatalog, sourceReferenceResolver } from "../../evidence/source-reference.js";
@@ -15,7 +11,7 @@ import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attr
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const quote = (text: string, assertion_id = 1, occurrence?: number) => ({ assertion_id, text,
   ...(occurrence === undefined ? {} : { occurrence }) });
-const proposal = (roots: object[], extra: object = {}) => ({ contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
+const proposal = (roots: object[], extra: object = {}) => ({
   outcome: { status: "interpreted" }, content: { roots, ...extra } });
 const statement = (reading: string, support: unknown, args: object[] = [], key?: string) => ({ kind: "statement",
   ...(key === undefined ? {} : { key }), predicate: { kind: "explicit", reading, support }, arguments: args });
@@ -24,21 +20,27 @@ function binding(texts: string[]) {
   const catalog = buildSourceReferenceCatalog(sha256(texts.join("\n")), texts.map((text, index) => ({ assertion_id: index + 1, text })), sha256);
   return { catalog, sha256 };
 }
-const compile = (value: unknown, texts = ["Mira shelved atlas."]) => materializeSourceSemanticSelectionProposal(value, binding(texts)).draft!;
+const lower = (value: unknown, texts = ["Mira shelved atlas."],
+  meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })) => {
+  const input = value as { content?: unknown; outcome?: unknown };
+  return compileSourceSemanticSelection(input.content, input.outcome, binding(texts), meter);
+};
+const compile = (value: unknown, texts = ["Mira shelved atlas."]) => lower(value, texts).draft!;
 const fact = () => statement("shelve", quote("shelved"), [{ role: "agent", target: quote("Mira") }, { role: "theme", target: quote("atlas") }]);
 
-describe("exact-text source semantic selections", () => {
+describe("source semantic exact-text lowering", () => {
   it("compiles a fact without model catalog anchors and preserves its compact canonical meaning", () => {
     const value = proposal([root(fact())]);
     const before = JSON.stringify(value), draft = compile(value);
     expect(draft.frames).toHaveLength(1); expect(draft.referents).toHaveLength(2);
     expect(draft.frames[0]!.context_owner).toEqual({ kind: "source_act", source_act: "assertion" });
-    const old = materializeSourceSemanticCompactProposal({ contract: SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
-      outcome: { status: "interpreted" }, content: { roots: [root({ kind: "statement",
-        predicate: { kind: "explicit", reading: "shelve", at: "a1s2" }, arguments: [
-          { role: "agent", target: "a1s0" }, { role: "theme", target: "a1s4" }
-        ] })] } });
-    expect(draft).toEqual(old.draft);
+    const compact = { roots: [root({ kind: "statement",
+      predicate: { kind: "explicit", reading: "shelve", at: "a1s2" }, arguments: [
+        { role: "agent", target: "a1s0" }, { role: "theme", target: "a1s4" }
+      ] })] };
+    const direct = compileSourceSemanticCompact(compact, { status: "interpreted" },
+      new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 }));
+    expect(draft).toEqual(direct.draft);
     expect(JSON.stringify(value)).toBe(before);
   });
 
@@ -171,25 +173,21 @@ describe("exact-text source semantic selections", () => {
     for (const target of ["a1s0", { first: "a1s0", last: "a1s2" }, { assertion_id: 1, text: "Mira", first: "a1s0" }]) {
       expect(() => compile(proposal([root(statement("shelve", quote("shelved"), [{ role: "agent", target }]))]))).toThrow();
     }
-    expect(() => compile({ ...proposal([root(fact())]), contract: "source-semantic-proposal-v5" })).toThrow();
   });
 
   it("binds non-proposition disposition support with the same exact-text rule", () => {
-    const value = { contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, outcome: { status: "no_executable_proposition",
+    const value = { outcome: { status: "no_executable_proposition",
       description: "A heading without an executable relation.", context_support: [quote("Notes")] } };
-    const result = materializeSourceSemanticSelectionProposal(value, binding(["Notes"]));
+    const result = lower(value, ["Notes"]);
     expect(result.outcome).toMatchObject({ context_support: [{ kind: "source_reference", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } }] });
-    expect(() => materializeSourceSemanticSelectionProposal(value, binding(["Notes Notes"]))).toThrow();
+    expect(() => lower(value, ["Notes Notes"])).toThrow();
   });
 
-  it("retains full recursive guidance, canonical admission and resource bounds", () => {
-    const json = JSON.stringify(z.toJSONSchema(SourceSemanticSelectionGenerationSchema, { io: "output", reused: "ref" }));
-    expect(json).toContain(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
-    expect(json).toContain('"occurrence"'); expect(json).not.toContain('a[1-9]');
+  it("retains canonical admission and resource bounds", () => {
     let deep: object = fact();
     for (let index = 0; index < SOURCE_SEMANTIC_MAX_DEPTH + 1; index++) deep = { kind: "possible", support: quote("Mira"), content: deep };
     expect(() => compile(proposal([root(deep)]))).toThrow(/canonical domination depth/u);
-    expect(() => materializeSourceSemanticSelectionProposal(proposal([root(fact())]), binding(["Mira shelved atlas."]),
+    expect(() => lower(proposal([root(fact())]), ["Mira shelved atlas."],
       new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 1 }))).toThrow(SourceSemanticResourceExhausted);
     const draft = compile(proposal([root(fact())]));
     expect(normalizeSourceSemantics({ draft, ...binding(["Mira shelved atlas."]),

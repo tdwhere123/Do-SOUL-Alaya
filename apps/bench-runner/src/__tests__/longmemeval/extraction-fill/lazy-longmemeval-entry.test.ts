@@ -324,11 +324,12 @@ it("binds a fresh question to one previously received compatible source without 
     const wire = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
     const request = parseSourceSemanticRequest(JSON.parse(wire.messages[1]!.content));
     const assertion = request.source_request.source_assertions[0]!;
-    const raw = JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-      content: { roots: [{ act: "assertion", expression: { kind: "statement",
-        predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0",
-          mentions: [{ assertion_id: assertion.assertion_id, text: "alpha" }] } }] } }] } });
+    const raw = JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+      content: { roots: [{ act: "assertion", expression: { kind: "content_ref", key: "complete" } }],
+        entities: [{ form: "selection", key: "theme", selection: { assertion_id: assertion.assertion_id, text: "alpha" } }],
+        nodes: [{ kind: "statement", key: "complete",
+          predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
+          arguments: [{ role: "theme", target: { kind: "entity_ref", key: "theme" } }], qualifications: [] }], gaps: [] } });
     return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: raw }, finish_reason: "stop" }],
       usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } })}\n\ndata: [DONE]\n\n`,
     { headers: { "content-type": "text/event-stream" } });

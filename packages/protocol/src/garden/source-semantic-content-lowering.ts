@@ -16,7 +16,6 @@ import {
 } from "./source-semantic-resources.js";
 import { chargeSourceSemanticValidation } from "./source-semantic-validation-cost.js";
 
-export const SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT = "source-semantic-proposal-v2" as const;
 const Handle = SourceSemanticHandleSchema;
 const Anchor = z.object({ assertion_id: SourceAssertionIdSchema, source_ref: SourceReferenceSchema }).strict().readonly();
 const Anchors = (min = 0, max = 8) => z.array(Anchor).min(min).max(max).readonly();
@@ -42,7 +41,7 @@ const Operator = z.discriminatedUnion("operator", [
   z.object({ ...OperatorBase, operator: z.literal("conditional"), antecedent: Handle, consequent: Handle }).strict().readonly(),
   z.object({ ...OperatorBase, operator: z.literal("forall"), domain: Handle, restriction: Handle.nullable(), content: Handle }).strict().readonly()
 ]);
-const Content = z.object({
+export const SourceSemanticContentShape = z.object({
   entities: z.array(z.object({ id: Handle, referent_kind: SourceSemanticReferentSchema.unwrap().shape.referent_kind,
     mentions: Anchors(0, 64) }).strict().readonly()).max(256).readonly(),
   statements: z.array(Statement).max(256).readonly(),
@@ -58,32 +57,22 @@ const Outcome = z.discriminatedUnion("status", [
   z.object({ status: z.literal("interpreted") }).strict().readonly(),
   ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
 ]);
-const Proposal = z.object({ contract: z.literal(SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT),
-  outcome: Outcome, content: Content.optional() }).strict().readonly();
-type ContentValue = z.infer<typeof Content>;
+type ContentValue = z.infer<typeof SourceSemanticContentShape>;
 type AnchorValue = z.infer<typeof Anchor>;
 type OperatorValue = z.infer<typeof Operator>;
 
-/** Schema consumers and the receiver share the same compiler and canonical authority. */
-export const SourceSemanticContentProposalSchema = Proposal.superRefine((proposal, context) => {
-  try { materializeSourceSemanticContentProposal(proposal); }
-  catch (error) {
-    if (!(error instanceof z.ZodError)) throw error;
-    for (const issue of error.issues) context.addIssue({ ...issue });
-  }
-});
-
-export function materializeSourceSemanticContentProposal(
-  value: unknown, meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })
+/** Current table compiler phase: content handles become one canonical envelope. */
+export function compileSourceSemanticContent(
+  contentValue: unknown, outcomeValue: unknown, meter: SourceSemanticResourceLedger
 ): SourceSemanticResponseEnvelope {
-  meter.retain(value, "content proposal input");
-  const proposal = Proposal.parse(value);
-  if ((proposal.outcome.status === "interpreted") !== (proposal.content !== undefined)) {
+  meter.retain({ outcome: outcomeValue, content: contentValue }, "content compiler input");
+  const outcome = Outcome.parse(outcomeValue);
+  if ((outcome.status === "interpreted") !== (contentValue !== undefined)) {
     invalid("interpreted outcome requires content; other outcomes must not carry content");
   }
-  const draft = proposal.content === undefined ? undefined : lowerContent(proposal.content, meter);
+  const draft = contentValue === undefined ? undefined : lowerContent(SourceSemanticContentShape.parse(contentValue), meter);
   const envelope = { contract: SOURCE_SEMANTIC_RESPONSE_CONTRACT,
-    outcome: proposal.outcome.status === "interpreted" ? { status: "interpreted", gaps: draft!.gaps } : proposal.outcome,
+    outcome: outcome.status === "interpreted" ? { status: "interpreted", gaps: draft!.gaps } : outcome,
     ...(draft === undefined ? {} : { draft }) };
   meter.retain(envelope, "content proposal canonical validation");
   if (draft !== undefined) chargeSourceSemanticValidation(draft, meter);

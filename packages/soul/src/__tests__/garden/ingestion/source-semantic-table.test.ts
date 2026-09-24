@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { materializeSourceSemanticSelectionProposal, normalizeSourceSemantics,
-  materializeSourceSemanticTableProposal, sourceSemanticEvidenceClosure,
-  SourceSemanticResourceLedger, SOURCE_SEMANTIC_PACKET_CONTRACT,
+import { materializeSourceSemanticTableProposal, sourceSemanticEvidenceClosure,
+  SourceSemanticResourceLedger, type SourceSemanticInterpretation,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SourceSemanticResourceExhausted,
   SourceSemanticTableValidationError } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticRequest, semanticSha256, sourceSemanticRequestCatalog,
@@ -15,8 +14,6 @@ import { receiveSourceSemantics } from
 import { prepareSourceSemanticRevision } from
   "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { indexSourceSemanticUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT as SELECTION_PROMPT } from
-  "../../../garden/ingestion/official-api/source-semantic-selection-guidance.js";
 import { SOURCE_SEMANTIC_TABLE_EXAMPLE } from
   "../../../garden/ingestion/official-api/source-semantic-table-guidance.js";
 import { SOURCE_SEMANTIC_PRESERVATION_GUIDANCE, SOURCE_SEMANTIC_OPERATOR_GUIDANCE,
@@ -61,25 +58,7 @@ function receiveTable(text: string, value: unknown, resource_limits?: { output_b
     resource_limits === undefined ? prepared.request : buildSourceSemanticRequest(input), input);
 }
 
-function directNative(response: unknown, text: string) {
-  const { input, request } = setup(text);
-  const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
-  const envelope = materializeSourceSemanticSelectionProposal(response,
-    { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter);
-  expect(envelope.outcome.status).toBe("interpreted");
-  const normalized = normalizeSourceSemantics({ draft: envelope.draft!, catalog: sourceSemanticRequestCatalog(request),
-    sha256: semanticSha256, source: { source_id: input.source_id, source_version: input.source_version,
-      content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`,
-      attribution_context: request.source_request.attribution_context!,
-      assertion_locations: request.source_request.assertion_locations },
-    producer_id: input.producer_id, producer_version: input.producer_version,
-    contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
-    normalizer_version: request.source_request.normalizer_version, meter });
-  expect(normalized.status).toBe("normalized");
-  return normalized.status === "normalized" ? normalized.interpretation : undefined;
-}
-
-function closure(h: NonNullable<ReturnType<typeof directNative>>, id: string) {
+function closure(h: SourceSemanticInterpretation, id: string) {
   const ids = sourceSemanticEvidenceClosure(h, [id],
     new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 }));
   return h.mentions.filter(m => ids.has(m.id)).map(m => m.text);
@@ -89,13 +68,10 @@ describe("finite source table production receive", () => {
   for (const [id, text] of Object.entries(originals)) it(`preserves the complete ${id} graph and evidence closure`, () => {
     const { input, request } = setup(text);
     const table = fixture(`${id}-conformed.json`);
-    const authored = fixture(`baseline-${id}-authored.json`);
     const result = receiveSourceSemantics(JSON.stringify({ ...table.wire,
       contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT }), request, input);
     expect(result.outcome.status, JSON.stringify(result.outcome)).toBe("interpreted");
     const h = result.interpretation!;
-    const expected = directNative(authored.response, text)!;
-    expect(h).toEqual(expected);
     expect(h).toEqual(table.interpretation);
     expect(h.source.attribution_context?.status).toBe("unknown");
     expect(h.mentions.some(m => m.text === "Avery")).toBe(false);
@@ -127,19 +103,21 @@ describe("finite source table production receive", () => {
     }
   });
 
-  it("uses the same semantic guidance while the neutral table example keeps the old meaning", () => {
+  it("uses shared semantic guidance and admits the neutral table example", () => {
     const text = "The permit is valid on Tuesday only. The clerk does not know whether the permit is valid on Thursday.";
     const { input, request } = setup(text);
     const prompt = sourceSemanticSystemPrompt(request);
     for (const guidance of [SOURCE_SEMANTIC_PRESERVATION_GUIDANCE, SOURCE_SEMANTIC_OPERATOR_GUIDANCE,
       SOURCE_SEMANTIC_SCOPE_GUIDANCE, SOURCE_SEMANTIC_DOMAIN_GUIDANCE, SOURCE_SEMANTIC_ATTRIBUTION_GUIDANCE]) {
       expect(prompt).toContain(guidance);
-      expect(SELECTION_PROMPT).toContain(guidance);
     }
     expect(JSON.parse(prompt.split("Example response:\n")[1]!)).toEqual(SOURCE_SEMANTIC_TABLE_EXAMPLE);
     const current = receiveSourceSemantics(JSON.stringify(SOURCE_SEMANTIC_TABLE_EXAMPLE), request, input);
     expect(current.outcome.status).toBe("interpreted");
-    expect(current.interpretation).toEqual(directNative(JSON.parse(SELECTION_PROMPT.split("Example response:\n")[1]!), text));
+    expect(current.interpretation!.frames.map(row => row.predicate_support.reading))
+      .toEqual(["valid", "know whether", "valid"]);
+    expect(current.interpretation!.asserted_at_scope).toHaveLength(2);
+    expect(current.interpretation!.gaps).toEqual([]);
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(request))).toContain("source-semantic-proposal-v8");
   });
 

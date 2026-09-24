@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -33,57 +33,16 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias" | "duplicate_gap_channel" | "partial" = "semantic") {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
-  const catalog = sourceSemanticRequestCatalog(request).assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
-  const segment = (text: string) => catalog.segments.find((row) => row.text === text)!;
-  const anchor = (text: string) => ({
-    assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
-  });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
-  const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v8" ? tableCompletedResponse(assertion.assertion_id, theme)
-    : contract === "source-semantic-proposal-v7" ? {
-    contract, outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }]
-      } }]
-    }
-  } : contract === "source-semantic-proposal-v4" ? {
-    contract, outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "complete", at: segment("completed").id },
-        arguments: [{ role: "theme", target: { key: "r0", at: segment(theme).id } }]
-      } }]
-    }
-  } : {
-    contract: "source-semantic-proposal-v3",
-    outcome: { status: "interpreted" },
-    content: {
-      roots: [{ act: "assertion", expression: {
-        kind: "statement", key: "f0", predicate: { kind: "explicit", reading: "complete", evidence: [anchor("completed")] },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", referent_kind: "grouped", mentions: [anchor(theme)] }, evidence: [anchor(theme)] }]
-      } }],
-      gaps: []
-    }
-  };
-  const editable = JSON.parse(JSON.stringify(envelope));
-  if (mode === "unknown_alias") {
-    if (contract === "source-semantic-proposal-v8") editable.content.nodes[0].arguments[0].target = { kind: "entity_ref", key: "missing" };
-    else editable.content.roots[0].expression.arguments[0].target = contract === "source-semantic-proposal-v7"
-      ? { kind: "occurrence", key: segment(theme).id }
-      : { kind: "reference", key: segment(theme).id };
-  }
+  const envelope = tableCompletedResponse(assertion.assertion_id, theme);
+  if (mode === "unknown_alias") envelope.content.nodes[0]!.arguments[0]!.target = { kind: "entity_ref", key: "missing" };
   if (mode === "duplicate_gap_channel" || mode === "partial") {
-    const gaps = contract === "source-semantic-proposal-v8"
-      ? [{ kind: "unresolved_referent", affected: [{ kind: "entity_ref", key: "theme" }],
-          support: { assertion_id: assertion.assertion_id, text: theme } }]
-      : contract === "source-semantic-proposal-v7"
-      ? [{ kind: "unresolved_referent", affected: ["r0"], support: { assertion_id: assertion.assertion_id, text: theme } }]
-      : [{ kind: "unresolved_referent", affected: ["r0"], evidence: [anchor(theme)] }];
-    if (mode === "partial") editable.content.gaps = gaps;
-    else editable.outcome.gaps = gaps;
+    const gaps = [{ kind: "unresolved_referent", affected: [{ kind: "entity_ref", key: "theme" }],
+      support: { assertion_id: assertion.assertion_id, text: theme } }];
+    if (mode === "partial") envelope.content.gaps = gaps;
+    else (envelope.outcome as { gaps?: typeof gaps }).gaps = gaps;
   }
-  return JSON.stringify(editable);
+  return JSON.stringify(envelope);
 }
 
 async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise: boolean | "complete_invalid_json" = false,

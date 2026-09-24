@@ -6,9 +6,9 @@ import {
   SourceSemanticReferentSchema
 } from "./source-semantic-draft.js";
 import {
-  SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND,
-  SourceSemanticSelectionGenerationSchema, materializeSourceSemanticSelectionProposal
-} from "./source-semantic-selection-proposal.js";
+  SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND, SourceSemanticSelectionContentShape,
+  SourceSemanticSelectionOutcomeShape, compileSourceSemanticSelection
+} from "./source-semantic-selection-lowering.js";
 import { SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
 import { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 import { SourceSemanticInterpretationSchema } from "./source-semantic-interpretation.js";
@@ -18,7 +18,7 @@ import type { FieldContractSha256 } from "../recall/field-contract/canonical-ide
 /** Finite producer syntax; native selection and graph owners retain canonical meaning. */
 export const SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT = "source-semantic-proposal-v8" as const;
 export const SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT = "host-owned-table-schema-v1" as const;
-const SelectionContent = SourceSemanticSelectionGenerationSchema.unwrap().shape.content.unwrap().unwrap().shape;
+const SelectionContent = SourceSemanticSelectionContentShape.unwrap().shape;
 const NativeDomain = SelectionContent.domains.unwrap().unwrap().element.unwrap();
 const NativeMeasurement = SelectionContent.measurements.unwrap().unwrap().element.unwrap();
 const NativeDomainMember = NativeDomain.shape.members.unwrap().element.unwrap();
@@ -89,7 +89,7 @@ const Domain = NativeDomain.extend({
 const Measurement = NativeMeasurement.extend({ subject: EntityRef }).readonly();
 const GapTarget = z.discriminatedUnion("kind", [EntityRef, OccurrenceRef]);
 const SourceSemanticTableProposalSchema = z.object({ contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
-  outcome: SourceSemanticSelectionGenerationSchema.unwrap().shape.outcome,
+  outcome: SourceSemanticSelectionOutcomeShape,
   content: z.object({ roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS),
     expression: ContentRef }).strict().readonly()).max(LIMIT.roots).readonly(),
     entities: z.array(Entity).max(LIMIT.entities).readonly(),
@@ -262,7 +262,7 @@ function index(content: Content, meter: SourceSemanticResourceLedger) {
   return { nodes, entities };
 }
 
-/** Only a syntax/ownership adapter: the existing selection materializer decides canonical meaning. */
+/** Table syntax and ownership adapt into the shared internal lowering ledger. */
 export function materializeSourceSemanticTableProposal(value: unknown,
   binding: Readonly<{ catalog: SourceReferenceCatalog; sha256: FieldContractSha256 }>,
   meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })) {
@@ -275,9 +275,7 @@ export function materializeSourceSemanticTableProposal(value: unknown,
     fail("outcome_content_mismatch", proposal.outcome.status);
   }
   const content = proposal.content;
-  if (content === undefined) return materializeSourceSemanticSelectionProposal({
-    contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, outcome: proposal.outcome
-  }, binding, meter);
+  if (content === undefined) return compileSourceSemanticSelection(undefined, proposal.outcome, binding, meter);
   const { nodes, entities } = index(content, meter);
   const entity = (key: string): object => {
     const row = entities.get(key)!;
@@ -314,7 +312,7 @@ export function materializeSourceSemanticTableProposal(value: unknown,
       restriction: row.restriction === null ? null : operand(row.restriction) };
     return base;
   };
-  const selection = { contract: SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, outcome: proposal.outcome,
+  const selection = { outcome: proposal.outcome,
     content: { roots: content.roots.map(row => ({ act: row.act, expression: expression(row.expression.key) })),
       ...(content.domains === undefined ? {} : { domains: content.domains.map(row => ({ ...row,
         members: row.members.map(member => ({ ...member, referent: entity(member.referent.key) })),
@@ -326,5 +324,5 @@ export function materializeSourceSemanticTableProposal(value: unknown,
           : entities.get(affected.key)!.semantic_key!),
         ...(row.description === undefined ? {} : { description: row.description }) })) } };
   meter.retain(selection, "table selection lowering");
-  return materializeSourceSemanticSelectionProposal(selection, binding, meter);
+  return compileSourceSemanticSelection(selection.content, selection.outcome, binding, meter);
 }

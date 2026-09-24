@@ -1,9 +1,8 @@
 import {
   AlayaError, buildSourceReferenceCatalog, canonicalJson, sourceReferenceResolver, sourceSemanticStanceLists,
   SourceSemanticInterpretationSchema, SourceSemanticResourceLedger, sourceReferencePreparationCost,
-  RetainedSourceSemanticInterpretationSchema,
-  assertSourceSemanticAccounting, SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
-  type SourceSemanticInterpretation, type RetainedSourceSemanticInterpretation,
+  assertSourceSemanticAccounting, SOURCE_SEMANTIC_NORMALIZER_VERSION,
+  type SourceSemanticInterpretation,
   type SourceReferenceCatalog, type FieldContractSha256
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
@@ -16,29 +15,28 @@ export function bindSourceSemanticLocations(input: Readonly<{
   source: string; interpretation: SourceSemanticInterpretation; catalog: SourceReferenceCatalog;
   locations?: Locations; sha256: FieldContractSha256; meter?: SourceSemanticResourceLedger;
 }>): SourceSemanticInterpretation {
-  return bindLocations(input, false) as SourceSemanticInterpretation;
+  return bindLocations(input);
 }
 
 function bindLocations(input: Readonly<{
-  source: string; interpretation: SourceSemanticInterpretation | RetainedSourceSemanticInterpretation;
+  source: string; interpretation: SourceSemanticInterpretation;
   catalog: SourceReferenceCatalog; locations?: Locations; sha256: FieldContractSha256;
   meter?: SourceSemanticResourceLedger;
-}>, retained: boolean): SourceSemanticInterpretation | RetainedSourceSemanticInterpretation {
+}>): SourceSemanticInterpretation {
   const { source, interpretation: h, catalog, sha256 } = input;
   input.meter?.retain(h, "source location verification");
   const cost = sourceReferencePreparationCost(catalog.assertions.map((row) => ({ assertion_id: row.assertion_id, text: row.segments.map((segment) => segment.text).join("") })));
   input.meter?.charge(cost.work_units, cost.memory_bytes, "source reference verification");
   const resolver = sourceReferenceResolver(catalog, sha256);
-  if (h.normalizer_version === SOURCE_SEMANTIC_NORMALIZER_VERSION) {
-    try { assertSourceSemanticAccounting(h, catalog, input.meter); }
-    catch (error) {
-      if (error instanceof AlayaError && error.code === "VALIDATION") {
-        throw new CoreError("VALIDATION", error.message, { cause: error });
-      }
-      throw error;
-    }
-  } else if (h.normalizer_version !== SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION) {
+  if (h.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION) {
     throw new CoreError("VALIDATION", "unsupported source semantic normalizer version");
+  }
+  try { assertSourceSemanticAccounting(h, catalog, input.meter); }
+  catch (error) {
+    if (error instanceof AlayaError && error.code === "VALIDATION") {
+      throw new CoreError("VALIDATION", error.message, { cause: error });
+    }
+    throw error;
   }
   const locations = locateAssertions(source, catalog, input.locations);
   const byId = new Map(locations.map((row) => [row.assertion_id, row.source_utf8_span]));
@@ -57,7 +55,7 @@ function bindLocations(input: Readonly<{
     }
     return { ...mention, text: located.text, utf8_span: absolute, span_space: "source_utf8" as const };
   });
-  return (retained ? RetainedSourceSemanticInterpretationSchema : SourceSemanticInterpretationSchema).parse({ ...h, mentions,
+  return SourceSemanticInterpretationSchema.parse({ ...h, mentions,
     source: { ...h.source, assertion_locations: locations },
     ...sourceSemanticStanceLists([...h.frames, ...h.operators]) });
 }
@@ -80,23 +78,18 @@ function locateAssertions(source: string, catalog: SourceReferenceCatalog, suppl
 }
 
 export function verifySourceSemanticLocations(source: string, h: SourceSemanticInterpretation, sha256: FieldContractSha256, meter?: SourceSemanticResourceLedger): SourceSemanticInterpretation {
-  return verifyLocations(source, h, sha256, meter, false) as SourceSemanticInterpretation;
+  return verifyLocations(source, h, sha256, meter);
 }
 
-export function verifyRetainedSourceSemanticLocations(source: string, h: RetainedSourceSemanticInterpretation,
-  sha256: FieldContractSha256, meter?: SourceSemanticResourceLedger): RetainedSourceSemanticInterpretation {
-  return verifyLocations(source, h, sha256, meter, true) as RetainedSourceSemanticInterpretation;
-}
-
-function verifyLocations(source: string, h: SourceSemanticInterpretation | RetainedSourceSemanticInterpretation,
-  sha256: FieldContractSha256, meter: SourceSemanticResourceLedger | undefined, retained: boolean) {
+function verifyLocations(source: string, h: SourceSemanticInterpretation,
+  sha256: FieldContractSha256, meter: SourceSemanticResourceLedger | undefined) {
   const locations = h.source.assertion_locations;
   if (locations === undefined) throw new CoreError("VALIDATION", "interpretation has no host-owned assertion locations");
   if (h.mentions.some((row) => row.span_space !== "source_utf8")) throw new CoreError("VALIDATION", "durable interpretation requires source UTF-8 coordinates");
   const catalog = buildSourceReferenceCatalog(sha256(source), locations.map((row) => ({
     assertion_id: row.assertion_id, text: utf8Slice(source, row.source_utf8_span)
   })), sha256);
-  return bindLocations({ source, interpretation: h, catalog, locations, sha256, meter }, retained);
+  return bindLocations({ source, interpretation: h, catalog, locations, sha256, meter });
 }
 
 function utf8Slice(source: string, span: readonly [number, number]): string {

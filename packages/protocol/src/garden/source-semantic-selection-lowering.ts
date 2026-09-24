@@ -3,19 +3,13 @@ import {
   SOURCE_SEMANTIC_GAP_KINDS, SOURCE_SEMANTIC_MAX_DEPTH, SOURCE_SEMANTIC_SOURCE_ACTS,
   SourceSemanticDecimalSchema, SourceSemanticReadingSchema
 } from "./source-semantic-draft.js";
-import {
-  SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, materializeSourceSemanticCompactProposal
-} from "./source-semantic-compact-proposal.js";
+import { compileSourceSemanticCompact } from "./source-semantic-compact-lowering.js";
 import { SourceSemanticOutcomeSchema, SourceSemanticNoPropositionOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
 import { SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
 import { sourceReferenceResolver, sourceReferencePreparationCost, type SourceReferenceCatalog } from "../evidence/source-reference.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 
-export const SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT = "source-semantic-proposal-v7" as const;
-export const SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT = "host-owned-selection-schema-v3" as const;
-export const SOURCE_SEMANTIC_SELECTION_GENERATION_DEPTH = SOURCE_SEMANTIC_MAX_DEPTH;
-export const SOURCE_SEMANTIC_SELECTION_FEATURES = ["nested_expression", "quantified", "measurement"] as const;
 /** Canonical coalesced spans retained after meaning-preserving merge; not a silent clip. */
 export const SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND = 8 as const;
 /** Producer list bound before coalescing adjacent support into spans. */
@@ -91,51 +85,30 @@ function contentShape(expression: z.ZodType<ExpressionValue>) {
     }).strict().readonly()).max(256).readonly().optional()
   }).strict().readonly();
 }
-const Content = contentShape(Expression);
-const Outcome = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
+export const SourceSemanticSelectionContentShape = contentShape(Expression);
+export const SourceSemanticSelectionOutcomeShape = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
   SourceSemanticNoPropositionOutcomeSchema.unwrap().extend({
     context_support: z.array(SupportAtom).min(1).max(8).readonly() }).strict().readonly(),
   ...SourceSemanticOutcomeSchema.options.filter(option => !["interpreted", "no_executable_proposition"].includes(option.unwrap().shape.status.value))]);
-const SelectionProposal = z.object({
-  contract: z.literal(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT),
-  outcome: Outcome, content: Content.optional()
-}).strict().readonly();
-type ContentValue = z.infer<typeof Content>;
+type ContentValue = z.infer<typeof SourceSemanticSelectionContentShape>;
 
-/** Recursive decoder guidance. Unfolded compact-v4 remains too large for structured decode; this schema is the complete local contract. */
-export const SourceSemanticSelectionGenerationSchema = SelectionProposal;
-
-/** Syntax validation does not bind selections; materialization requires the trusted request catalog. */
-export const SourceSemanticSelectionProposalSchema = z.preprocess((value, context) => {
-  try {
-    preflight(value, new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 }));
-    return value;
-  } catch (error) {
-    if (!(error instanceof z.ZodError)) throw error;
-    for (const issue of error.issues) context.addIssue({ ...issue });
-    return z.NEVER;
-  }
-}, SelectionProposal);
-
-export function materializeSourceSemanticSelectionProposal(value: unknown,
+/** Current table compiler phase: exact source text resolves to compact anchors. */
+export function compileSourceSemanticSelection(contentValue: unknown, outcomeValue: unknown,
   binding: Readonly<{ catalog: SourceReferenceCatalog; sha256: FieldContractSha256 }>,
-  meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })): SourceSemanticResponseEnvelope {
-  preflight(value, meter);
-  const proposal = SelectionProposal.parse(value);
-  if ((proposal.outcome.status === "interpreted") !== (proposal.content !== undefined)) {
+  meter: SourceSemanticResourceLedger): SourceSemanticResponseEnvelope {
+  preflight({ outcome: outcomeValue, content: contentValue }, meter);
+  const outcome = SourceSemanticSelectionOutcomeShape.parse(outcomeValue);
+  if ((outcome.status === "interpreted") !== (contentValue !== undefined)) {
     invalid(["content"], "outcome_content_mismatch", "", "Interpreted outcome requires content; other outcomes must not carry content.");
   }
-  const lowerer = proposal.content !== undefined || proposal.outcome.status === "no_executable_proposition"
+  const lowerer = contentValue !== undefined || outcome.status === "no_executable_proposition"
     ? new SelectionLowerer(binding, meter) : undefined;
-  const outcome = proposal.outcome.status === "no_executable_proposition"
-    ? { ...proposal.outcome, context_support: proposal.outcome.context_support.map((row, index) =>
-      lowerer!.dispositionSupport(row, ["outcome", "context_support", index])) } : proposal.outcome;
-  const compact = {
-    contract: SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT, outcome,
-    ...(proposal.content === undefined ? {} : { content: lowerer!.lower(proposal.content) })
-  };
-  meter.retain(compact, "selection compact lowering");
-  return materializeSourceSemanticCompactProposal(compact, meter);
+  const loweredOutcome = outcome.status === "no_executable_proposition"
+    ? { ...outcome, context_support: outcome.context_support.map((row, index) =>
+      lowerer!.dispositionSupport(row, ["outcome", "context_support", index])) } : outcome;
+  const compact = contentValue === undefined ? undefined : lowerer!.lower(SourceSemanticSelectionContentShape.parse(contentValue));
+  meter.retain({ outcome: loweredOutcome, content: compact }, "selection compact lowering");
+  return compileSourceSemanticCompact(compact, loweredOutcome, meter);
 }
 
 function preflight(value: unknown, meter: SourceSemanticResourceLedger): void {

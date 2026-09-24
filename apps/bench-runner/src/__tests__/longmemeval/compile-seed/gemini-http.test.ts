@@ -130,16 +130,10 @@ describe("native Gemini interactive extraction", () => {
     expect(soul.officialApiExtractionResponseSchema(userPrompt)).toEqual(originalSnapshot);
   });
 
-  it.each(["historical", "bounded"])("transmits %s expression generation over HTTP and admits complete source expressions locally", async (generation) => {
-    const source = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
+  it("transmits current table generation over HTTP and admits its source-bound example", async () => {
+    const source = { sourceCorpus: "The permit is valid on Tuesday only. The clerk does not know whether the permit is valid on Thursday.", assertionIds: [1, 2],
       source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
-    const current = soul.buildSourceSemanticRequest(source);
-    const { generation_schema_contract: _generation, ...source_request } = current.source_request;
-    const request = soul.parseSourceSemanticRequest(generation === "bounded" ? current : {
-      schema_version: current.schema_version, interpretation_contract: current.interpretation_contract,
-      source_catalog: soul.sourceSemanticRequestCatalog(current),
-      source_request: { ...source_request, proposal_contract: "source-semantic-proposal-v3" }
-    });
+    const request = soul.buildSourceSemanticRequest(source);
     const systemPrompt = soul.sourceSemanticSystemPrompt(request);
     const raw = systemPrompt.split("Example response:\n")[1]!;
     let observed: string | undefined;
@@ -161,9 +155,8 @@ describe("native Gemini interactive extraction", () => {
     expect(observed).toBeDefined();
     const wire = JSON.parse(observed!);
     expect(wire.generationConfig.responseMimeType).toBe("application/json");
-    expect(wire.generationConfig).not.toHaveProperty("responseJsonSchema");
-    expect(wire.systemInstruction.parts[1].text).toContain(
-      JSON.stringify(soul.officialApiExtractionResponseSchema(JSON.stringify(request))));
+    expect(wire.generationConfig.responseJsonSchema).toBeDefined();
+    expect(wire.systemInstruction.parts).toEqual([{ text: systemPrompt }]);
   });
 
   it("adapts generation array bounds and empty additional-property schemas without changing other constraints or property names", () => {

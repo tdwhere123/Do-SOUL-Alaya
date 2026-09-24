@@ -1,16 +1,15 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, retainedSourceSemanticSystemPrompt } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
-import { inspectCachedSourceSemantic, inspectRetainedCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listProviderRawAttempts, providerRawAttemptPath, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { cacheFilePath, inspectCachedRawExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
-import { computeRetainedCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 import { extractionAdmissionGenerationSha256, type ExtractionCacheManifest } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { computeExtractionRawJsonSha256 } from "../../../runs/extraction/content-closure.js";
 import { createHash } from "node:crypto";
@@ -33,45 +32,12 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias" = "semantic") {
   const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
-  const catalog = sourceSemanticRequestCatalog(request).assertions.find((row) => row.assertion_id === assertion.assertion_id)!;
-  const segment = (text: string) => catalog.segments.find((row) => row.text === text)!;
-  const anchor = (text: string) => ({
-    assertion_id: assertion.assertion_id, source_ref: { first: segment(text).id, last: segment(text).id }
-  });
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
-  const contract = request.source_request.proposal_contract ?? "source-semantic-proposal-v3";
-  const envelope = contract === "source-semantic-proposal-v8" ? tableCompletedResponse(assertion.assertion_id, theme)
-    : contract === "source-semantic-proposal-v7" ? {
-    contract, outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "complete", support: { assertion_id: assertion.assertion_id, text: "completed" } },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", mentions: [{ assertion_id: assertion.assertion_id, text: theme }] } }]
-      } }]
-    }
-  } : contract === "source-semantic-proposal-v4" ? {
-    contract, outcome: { status: "interpreted" }, content: {
-      roots: [{ act: "assertion", expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "complete", at: segment("completed").id },
-        arguments: [{ role: "theme", target: { key: "r0", at: segment(theme).id } }]
-      } }]
-    }
-  } : {
-    contract: "source-semantic-proposal-v3",
-    outcome: { status: "interpreted" },
-    content: {
-      roots: [{ act: "assertion", expression: {
-        kind: "statement", key: "f0", predicate: { kind: "explicit", reading: "complete", evidence: [anchor("completed")] },
-        arguments: [{ role: "theme", target: { kind: "entity", key: "r0", referent_kind: "grouped", mentions: [anchor(theme)] }, evidence: [anchor(theme)] }]
-      } }],
-      gaps: []
-    }
+  const envelope = tableCompletedResponse(assertion.assertion_id, theme);
+  if (mode === "unknown_alias") envelope.content.nodes[0]!.arguments[0]!.target = {
+    kind: "entity_ref", key: "missing"
   };
-  const editable = JSON.parse(JSON.stringify(envelope));
-  if (mode === "unknown_alias") {
-    if (contract === "source-semantic-proposal-v8") editable.content.nodes[0].arguments[0].target = { kind: "entity_ref", key: "missing" };
-    else editable.content.roots[0].expression.arguments[0].target = { kind: "reference", key: segment(theme).id };
-  }
-  return JSON.stringify(editable);
+  return JSON.stringify(envelope);
 }
 
 async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic", questions = 1) {
@@ -192,13 +158,12 @@ it("inspects a retained source shard without reusing it or dispatching its cache
   const shardPath = cacheFilePath(cacheRoot, currentKey);
   const shard = JSON.parse(readFileSync(shardPath, "utf8"));
   const current = parseSourceSemanticRequest(JSON.parse(shard.source_semantic.result.line.userPrompt));
-  const { source_digest: _digest, ...wrapper } = current;
-  const retainedRequest = parseRetainedSourceSemanticRequest({ ...wrapper, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
-    ...current.source_request, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v2"
-  } });
+  const retainedRequest = { ...current, source_request: {
+    ...current.source_request, proposal_contract: "source-semantic-proposal-v2"
+  } };
   const userPrompt = JSON.stringify(retainedRequest);
-  const systemPrompt = retainedSourceSemanticSystemPrompt(retainedRequest);
-  const retiredKey = computeRetainedCacheKey(MODEL, REQUEST_PROFILE, systemPrompt, userPrompt);
+  const systemPrompt = "Recorded retired source-semantic prompt bytes";
+  const retiredKey = createHash("sha256").update("recorded retired source shard").digest("hex");
   const rawJson = JSON.stringify({ contract: "source-semantic-proposal-v2", outcome: { status: "abstained" } });
   const manifestPath = join(cacheRoot, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as ExtractionCacheManifest;
@@ -221,8 +186,6 @@ it("inspects a retained source shard without reusing it or dispatching its cache
   writeFileSync(retiredPath, `${JSON.stringify(shard, null, 2)}\n`);
   unlinkSync(shardPath);
 
-  expect(inspectRetainedCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
-    .toMatchObject({ status: "retired", eligibility: "retained_only", verification: { status: "hit", rawJson } });
   expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
     .toMatchObject({ status: "retired", eligibility: "retained_only" });
   expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))

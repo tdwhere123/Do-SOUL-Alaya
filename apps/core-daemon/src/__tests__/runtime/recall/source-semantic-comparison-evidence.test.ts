@@ -22,23 +22,36 @@ function quote(assertion_id: number, text: string, occurrence?: number) {
   return { assertion_id, text, ...(occurrence === undefined ? {} : { occurrence }) };
 }
 
+type TableFact = Readonly<{ reading: string; support: ReturnType<typeof quote>;
+  arguments: readonly Readonly<{ role: string; selection: ReturnType<typeof quote> }>[] }>;
+
+function tableFacts(facts: readonly TableFact[]) {
+  return { contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+    roots: facts.map((_, index) => ({ act: "assertion", expression: { kind: "content_ref", key: `event${index}` } })),
+    entities: facts.flatMap((fact, index) => fact.arguments.map((row, role) => ({
+      form: "selection", key: `entity${index}_${role}`, selection: row.selection
+    }))),
+    nodes: facts.map((fact, index) => ({ kind: "statement", key: `event${index}`,
+      predicate: { kind: "explicit", reading: fact.reading, support: fact.support },
+      arguments: fact.arguments.map((row, role) => ({ role: row.role,
+        target: { kind: "entity_ref", key: `entity${index}_${role}` } })), qualifications: [] })), gaps: []
+  } };
+}
+
 function measuredDraft(_catalog: SourceReferenceCatalog) {
-  const fact = (assertion_id: number, batch: string, activity: string, duration: string, ordinal: number) => ({
-    act: "assertion", expression: { kind: "statement",
-      predicate: { kind: "explicit", reading: "take-duration", support: quote(assertion_id, "took", ordinal) },
-      arguments: [
-        { role: "batch", target: quote(assertion_id, `batch ${batch}`) },
-        { role: "activity", target: quote(assertion_id, activity) },
-        { role: "duration", target: quote(assertion_id, duration) }
-      ] }
+  const fact = (assertion_id: number, batch: string, activity: string, duration: string, ordinal: number): TableFact => ({
+    reading: "take-duration", support: quote(assertion_id, "took", ordinal), arguments: [
+      { role: "batch", selection: quote(assertion_id, `batch ${batch}`) },
+      { role: "activity", selection: quote(assertion_id, activity) },
+      { role: "duration", selection: quote(assertion_id, duration) }
+    ]
   });
   const received = proposeSourceSemantics({ sourceCorpus: MEASURED, assertionIds: [1, 2], sourceScope: "complete-source",
     source_id: "measured-comparison-source", source_version: "1", producer_id: "authored-control", producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-    content: { roots: [fact(1, "Kestrel", "setup", "8 minutes", 0),
-      fact(1, "Kestrel", "the supervised run", "13 minutes", 1),
-      fact(2, "Lark", "setup", "11 minutes", 0),
-      fact(2, "Lark", "the supervised run", "9 minutes", 1)] } }) });
+  { rawJson: JSON.stringify(tableFacts([fact(1, "Kestrel", "setup", "8 minutes", 0),
+    fact(1, "Kestrel", "the supervised run", "13 minutes", 1),
+    fact(2, "Lark", "setup", "11 minutes", 0),
+    fact(2, "Lark", "the supervised run", "9 minutes", 1)])) });
   if (received.draft === undefined || received.interpretation === undefined) {
     throw new Error(`measured H failed: ${JSON.stringify(received.outcome)}`);
   }
@@ -48,25 +61,20 @@ function measuredDraft(_catalog: SourceReferenceCatalog) {
 function statedDraft(_catalog: SourceReferenceCatalog) {
   const received = proposeSourceSemantics({ sourceCorpus: STATED, assertionIds: [1, 2], sourceScope: "complete-source",
     source_id: "stated-comparison-source", source_version: "1", producer_id: "authored-control", producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-    content: { roots: [
-      { act: "assertion", expression: { kind: "statement",
-        predicate: { kind: "explicit", reading: "take-longer-than", support: quote(1, "took longer than") },
-        arguments: [
-          { role: "left_batch", target: quote(1, "batch Kestrel") },
-          { role: "left_activity", target: quote(1, "The supervised run") },
-          { role: "right_batch", target: quote(1, "batch Lark") },
-          { role: "right_activity", target: quote(1, "the supervised run") }
-        ] } },
-      { act: "assertion", expression: { kind: "statement",
-        predicate: { kind: "explicit", reading: "take-less-than", support: quote(2, "took less time than") },
-        arguments: [
-          { role: "left_batch", target: quote(2, "batch Kestrel") },
-          { role: "left_activity", target: quote(2, "Setup") },
-          { role: "right_batch", target: quote(2, "batch Lark") },
-          { role: "right_activity", target: quote(2, "setup") }
-        ] } }
-    ] } }) });
+  { rawJson: JSON.stringify(tableFacts([
+    { reading: "take-longer-than", support: quote(1, "took longer than"), arguments: [
+      { role: "left_batch", selection: quote(1, "batch Kestrel") },
+      { role: "left_activity", selection: quote(1, "The supervised run") },
+      { role: "right_batch", selection: quote(1, "batch Lark") },
+      { role: "right_activity", selection: quote(1, "the supervised run") }
+    ] },
+    { reading: "take-less-than", support: quote(2, "took less time than"), arguments: [
+      { role: "left_batch", selection: quote(2, "batch Kestrel") },
+      { role: "left_activity", selection: quote(2, "Setup") },
+      { role: "right_batch", selection: quote(2, "batch Lark") },
+      { role: "right_activity", selection: quote(2, "setup") }
+    ] }
+  ])) });
   if (received.draft === undefined || received.interpretation === undefined) {
     throw new Error(`stated H failed: ${JSON.stringify(received.outcome)}`);
   }

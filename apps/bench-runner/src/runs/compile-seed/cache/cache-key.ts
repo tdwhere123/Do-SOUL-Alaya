@@ -3,9 +3,7 @@ import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-s
 import type { ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 import { createHash } from "node:crypto";
 import { geminiGenerationSchemaCacheMaterial } from "../../extraction/fill/batch/generation-schema.js";
-import {
-  officialApiExtractionResponseSchemaPreimage, retainedOfficialApiExtractionResponseSchemaPreimage
-} from "@do-soul/alaya-soul";
+import { officialApiExtractionResponseSchemaPreimage } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
   "../../extraction/cache/cache-invariant-error.js";
 import type { LongMemEvalExtractionTurn } from
@@ -34,17 +32,6 @@ export function computeCacheKey(
   );
 }
 
-/** Original cache-key material is reconstructed for retained evidence, never for a fresh request. */
-export function computeRetainedCacheKey(
-  model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"],
-  systemPrompt: string,
-  extractionRequest: string
-): string {
-  return hashCacheIdentity(model, requestProfile, systemPrompt, extractionRequest,
-    generationSchemaCacheMaterial(extractionRequest, model, true));
-}
-
 export function computeOfficialApiRequestCacheKey(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
@@ -54,9 +41,8 @@ export function computeOfficialApiRequestCacheKey(
   return computeCacheKey(model, requestProfile, systemPrompt, extractionRequest);
 }
 
-function generationSchemaCacheMaterial(extractionRequest: string, model: string, retained = false): string {
-  const preimage = retained ? retainedOfficialApiExtractionResponseSchemaPreimage(extractionRequest)
-    : officialApiExtractionResponseSchemaPreimage(extractionRequest);
+function generationSchemaCacheMaterial(extractionRequest: string, model: string): string {
+  const preimage = officialApiExtractionResponseSchemaPreimage(extractionRequest);
   return model.startsWith("gemini-") ? geminiGenerationSchemaCacheMaterial(preimage) : preimage;
 }
 

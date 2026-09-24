@@ -2,16 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
-  SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema, SourceSemanticResponseEnvelopeSchema,
-  RetainedSourceSemanticRequestEnvelopeSchema,
-  SourceSemanticProposalSchema, SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
-  SourceSemanticContentProposalSchema, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
-  SourceSemanticExpressionProposalSchema, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
-  SourceSemanticExpressionGenerationSchema,
-  SourceSemanticCompactProposalSchema, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
-  SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT, SourceSemanticCompactGenerationSchema,
-  SourceSemanticSelectionProposalSchema, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
-  SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT, SourceSemanticSelectionGenerationSchema,
+  SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
   sourceSemanticTableJsonSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
@@ -33,12 +24,7 @@ import {
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { sourceSemanticQueryExamples, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
 export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT as COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-compact-guidance.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT as SELECTION_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
-import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canonical-prompt.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 
@@ -65,73 +51,22 @@ const ProducerCapability = z.object({
 
 const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
-  normalizer_version: z.enum([SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION]),
-  proposal_contract: z.enum([SOURCE_SEMANTIC_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT,
-    SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
-    SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT]).optional(),
-  source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT).optional(),
+  normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
+  proposal_contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
+  source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT),
   source_scope: z.literal("complete-source").optional(),
-  generation_schema_contract: z.enum(["bounded-expression-schema-v1", SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT,
-    SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT]).optional(),
+  generation_schema_contract: z.literal(SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
-  attribution_context: UtteranceAttributionSchema.optional(),
-  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly().optional(),
+  attribution_context: UtteranceAttributionSchema,
+  assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly(),
   source_assertions: z.array(z.object({
-    assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"]).optional()
+    assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"])
   }).strict().readonly()).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly()
 }).strict().superRefine((request, context) => {
-  if (request.source_scope === undefined && (request.source_assertions.length > 8 || (request.assertion_locations?.length ?? 0) > 8)) {
+  if (request.source_scope === undefined && (request.source_assertions.length > 8 || request.assertion_locations.length > 8)) {
     context.addIssue({ code: "custom", message: "partial source requests permit at most eight source units" });
-  }
-  if (request.source_scope !== undefined && request.source_unit_contract === undefined) {
-    context.addIssue({ code: "custom", message: "complete source scope requires the source unit contract" });
-  }
-  const current = request.proposal_contract !== undefined;
-  if (current !== (request.normalizer_version === SOURCE_SEMANTIC_NORMALIZER_VERSION)) {
-    context.addIssue({ code: "custom", message: "proposal contract and normalizer version must agree" });
-  }
-  if (request.source_unit_contract === undefined && request.source_assertions.some((row) => row.source_role !== undefined)) {
-    context.addIssue({ code: "custom", message: "source roles require the source unit contract" });
-  }
-  if (request.source_unit_contract !== undefined && (!current || request.source_assertions.some((row) => row.source_role === undefined))) {
-    context.addIssue({ code: "custom", message: "source units require the current proposal contract and explicit source roles" });
-  }
-  const semanticContent = request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ||
-    request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT ||
-    request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT ||
-    request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT ||
-    request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT;
-  if (semanticContent && request.source_unit_contract === undefined) {
-    context.addIssue({ code: "custom", message: "content proposals require complete source units" });
-  }
-  if (request.revision !== undefined && !semanticContent) {
-    context.addIssue({ code: "custom", message: "revision requires the semantic content proposal contract" });
-  }
-  if (request.generation_schema_contract === "bounded-expression-schema-v1" &&
-    request.proposal_contract !== SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT) {
-    context.addIssue({ code: "custom", message: "bounded generation schema requires the expression proposal contract" });
-  }
-  if (request.generation_schema_contract === SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT &&
-    request.proposal_contract !== SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT) {
-    context.addIssue({ code: "custom", message: "host-owned generation schema requires the compact expression proposal contract" });
-  }
-  if (request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT &&
-    request.generation_schema_contract !== SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT) {
-    context.addIssue({ code: "custom", message: "compact expression proposals require the host-owned generation schema" });
-  }
-  if (request.generation_schema_contract === SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT &&
-    request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) {
-    context.addIssue({ code: "custom", message: "host-owned selection schema requires the selection proposal contract" });
-  }
-  if (request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT &&
-    request.generation_schema_contract !== SOURCE_SEMANTIC_SELECTION_GENERATION_CONTRACT) {
-    context.addIssue({ code: "custom", message: "selection proposals require the host-owned selection schema" });
-  }
-  if ((request.generation_schema_contract === SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT) !==
-      (request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT)) {
-    context.addIssue({ code: "custom", message: "table proposals require the host-owned table schema" });
   }
 }).readonly();
 
@@ -156,8 +91,8 @@ export type SourceSemanticRequest = Readonly<{
   interpretation_contract: typeof SOURCE_SEMANTIC_PACKET_CONTRACT;
   source_request: SourceSemanticOpenRequestBody;
   profile?: SourceInterpretationProfile;
-}> & (Readonly<{ source_digest: string; source_catalog?: never }>
-  | Readonly<{ source_catalog: SourceReferenceCatalog; source_digest?: never }>);
+  source_digest: string;
+}>;
 
 export type SourceSemanticProposalInput = Readonly<{
   sourceCorpus: string;
@@ -256,23 +191,14 @@ function producerCapability(producer_id: string, producer_version: string) {
 
 const requestCatalogs = new WeakMap<SourceSemanticRequest, SourceReferenceCatalog>();
 
-export function parseRetainedSourceSemanticRequest(value: unknown): SourceSemanticRequest {
+export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
   if (Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") > 1_000_000) {
     throw new AlayaError("VALIDATION", "source semantic request exceeds its byte bound");
   }
-  const parsed = RetainedSourceSemanticRequestEnvelopeSchema.parse(value);
+  const parsed = SourceSemanticRequestEnvelopeSchema.parse(value);
   const source_request = SourceSemanticOpenRequestBodySchema.parse(parsed.source_request);
-  if (parsed.schema_version < SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION && source_request.attribution_context !== undefined) {
-    throw new AlayaError("CONFLICT", "retained source request cannot gain attribution after recording");
-  }
   if (new Set(source_request.source_assertions.map((row) => row.assertion_id)).size !== source_request.source_assertions.length) {
     throw new AlayaError("VALIDATION", "source semantic request has duplicate assertion identities");
-  }
-  const catalogBound = source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT ||
-    source_request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT;
-  if (catalogBound ? parsed.source_digest === undefined || parsed.source_catalog !== undefined
-    : parsed.source_catalog === undefined || parsed.source_digest !== undefined) {
-    throw new AlayaError("VALIDATION", "source semantic request source binding differs from its proposal contract");
   }
   const request = Object.freeze({ ...parsed, source_request }) as SourceSemanticRequest;
   requestCatalogs.set(request, sourceSemanticRequestCatalog(request));
@@ -283,32 +209,11 @@ export function parseRetainedSourceSemanticRequest(value: unknown): SourceSemant
   return request;
 }
 
-/** Current execution accepts only the current producer wire. Retained bytes use the explicit verifier. */
-export function parseSourceSemanticRequest(value: unknown): SourceSemanticRequest {
-  const request = parseRetainedSourceSemanticRequest(value);
-  if (request.schema_version !== SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION ||
-      request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT ||
-      request.source_request.attribution_context === undefined ||
-      request.source_request.generation_schema_contract !== SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT ||
-      request.source_request.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION ||
-      request.source_request.source_unit_contract !== SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT ||
-      request.source_request.assertion_locations === undefined) {
-    throw new AlayaError("CONFLICT", "retired source semantic request is ineligible for current execution");
-  }
-  return request;
-}
-
 /** Catalog identity and segmentation remain owned by the shared source-reference builder. */
 export function sourceSemanticRequestCatalog(request: SourceSemanticRequest): SourceReferenceCatalog {
   const retained = requestCatalogs.get(request);
   if (retained !== undefined) return retained;
-  const digest = request.source_digest ?? request.source_catalog?.source_digest;
-  if (digest === undefined) throw new AlayaError("VALIDATION", "source semantic request requires a source digest");
-  const catalog = buildSourceReferenceCatalog(digest, request.source_request.source_assertions, semanticSha256);
-  if (request.source_catalog !== undefined && canonicalJson(catalog) !== canonicalJson(request.source_catalog)) {
-    throw new AlayaError("CONFLICT", "source semantic request catalog mismatch");
-  }
-  return catalog;
+  return buildSourceReferenceCatalog(request.source_digest, request.source_request.source_assertions, semanticSha256);
 }
 
 export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticHostPreparation {
@@ -432,39 +337,10 @@ export function buildSourceSemanticCorrespondenceRequest(
   return request;
 }
 
-/** Producer JSON Schema selected by the recorded request contract, without profile enums. */
+/** Current table generation schema, without profile enums. */
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
-  if (request === undefined) return sourceSemanticTableJsonSchema();
-  parseSourceSemanticRequest(request);
-  return retainedSourceSemanticResponseJsonSchema(request);
-}
-
-/** Reconstructs an original schema only for retained request identity verification. */
-export function retainedSourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
-  const contract = request?.source_request.proposal_contract;
-  if (contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) return sourceSemanticTableJsonSchema();
-  const generation = request?.source_request.generation_schema_contract;
-  const schema = request !== undefined && contract === undefined ? SourceSemanticResponseEnvelopeSchema
-    : contract === SOURCE_SEMANTIC_PROPOSAL_CONTRACT ? SourceSemanticProposalSchema
-    : contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT ? SourceSemanticContentProposalSchema
-    : contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT
-      ? generation !== undefined ? SourceSemanticExpressionGenerationSchema : SourceSemanticExpressionProposalSchema
-    : contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT
-      ? generation !== undefined ? SourceSemanticCompactGenerationSchema : SourceSemanticCompactProposalSchema
-    : generation !== undefined || request === undefined
-      ? SourceSemanticSelectionGenerationSchema : SourceSemanticSelectionProposalSchema;
-  const output = schema === SourceSemanticExpressionProposalSchema || schema === SourceSemanticExpressionGenerationSchema
-    || schema === SourceSemanticCompactProposalSchema || schema === SourceSemanticCompactGenerationSchema
-    || schema === SourceSemanticSelectionProposalSchema || schema === SourceSemanticSelectionGenerationSchema;
-  const reused = schema === SourceSemanticExpressionGenerationSchema || schema === SourceSemanticCompactGenerationSchema
-    || schema === SourceSemanticSelectionGenerationSchema;
-  return z.toJSONSchema(schema, {
-    io: output ? "output" : "input",
-    ...(reused ? { reused: "ref" as const } : {}),
-    override: ({ jsonSchema }) => {
-      if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
-    }
-  });
+  if (request !== undefined) parseSourceSemanticRequest(request);
+  return sourceSemanticTableJsonSchema();
 }
 
 const QueryCorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
@@ -508,86 +384,10 @@ export function sourceSemanticCorrespondenceResponseJsonSchema(): object {
   }).strict().readonly());
 }
 
-const exampleGaps = [{ kind: "unresolved_referent", affected_ids: ["rItem"],
-  support: [{ kind: "lexical", mentions: ["mItem"] }], description: "The thing shelved is not identified." },
-  { kind: "uninterpreted_clause", affected_ids: ["mClause"],
-    support: [{ kind: "lexical", mentions: ["mClause"] }], description: "This clause is left uninterpreted without inventing a frame." }];
-const sourceSemanticResponseExample = {
-  contract: SOURCE_SEMANTIC_PROPOSAL_CONTRACT,
-  outcome: { status: "interpreted" },
-  draft: {
-    contract: "source-interpretation-v4",
-    mentions: [
-      { id: "mActor", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } },
-      { id: "mShelved", assertion_id: 1, source_ref: { first: "a1s2", last: "a1s2" } },
-      { id: "mItem", assertion_id: 1, source_ref: { first: "a1s4", last: "a1s4" } },
-      { id: "mClause", assertion_id: 2, source_ref: { first: "a2s0", last: "a2s11" } }
-    ],
-    referents: [
-      { id: "rActor", referent_kind: "grouped", mentions: ["mActor"] },
-      { id: "rItem", referent_kind: "unresolved", mentions: ["mItem"] }
-    ],
-    frames: [{
-      id: "fShelve", assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" },
-      additional_support: [], predicate_support: { kind: "explicit", reading: "shelve", mentions: ["mShelved"] },
-      slots: [
-        { id: "agent", role_reading: "person doing the shelving", support: [{ kind: "lexical", mentions: ["mActor"] }] },
-        { id: "theme", role_reading: "thing placed on a shelf", support: [{ kind: "lexical", mentions: ["mItem"] }] }
-      ],
-      bindings: [
-        { slot_id: "agent", target: { kind: "node", id: "rActor" }, support: [] },
-        { slot_id: "theme", target: { kind: "node", id: "rItem" }, support: [] }
-      ]
-    }],
-    operators: [], gaps: exampleGaps
-  }
-};
-
-// Retained graph proposals select these exact prompt bytes for cache replay.
-const LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT = [
-  "Propose one source-local semantic draft using source-interpretation-v4.",
-  'Return strict JSON {"contract":"source-semantic-proposal-v1","outcome":OUTCOME,"draft":DRAFT_IF_INTERPRETED}. Interpreted OUTCOME is exactly {"status":"interpreted"}; draft.gaps is the sole gap list.',
-  "Ask only for draft semantics: mention handles with catalog first/last selections, referents, frames with predicate and role readings, slot definitions versus bindings, operators, context owners, lexical/additional/dominating support, and explicit gaps.",
-  "Do not emit host hashes, character or UTF-8 offsets, entry_roots, asserted_at_scope, persistent IDs, QueryProgram, seeds, scores, ranking, answers, or verdicts.",
-  "A supplied profile is an optional adapter, not an admission prerequisite. Novel predicate and role readings are allowed.",
-  "Select inclusive first/last segment IDs shown in source_catalog. Never copy quotation text, invent offsets, or cross assertion boundaries.",
-  "Keep catalog segment IDs separate from graph handles: source_catalog segment IDs (for example a1s2) occur ONLY inside source_ref.first/last. Graph mention IDs (for example mShelved) are declared in draft.mentions[].id. Every predicate mentions/supporting_context, referent mentions, lexical/additional support.mentions (including role, binding and gap support) MUST refer to those declared graph mention IDs, never catalog segment IDs.",
-  "Declare a mention for every source span used by predicates, roles, bindings and gaps. Mentions locate evidence; they are not argument nodes.",
-  'For a binding target {"kind":"node","id":ID}, ID must name a declared draft.referents[].id, draft.frames[].id, or draft.operators[].id. A mention ID, catalog segment ID, frame-local slot ID, or undeclared handle is not a node target.',
-  'For a source-supported entity or value, declare a referent (one mention is sufficient for referent_kind="grouped") and bind to that referent, not its mention. For an unresolved role target use {"kind":"unresolved"} without id, or omit its binding and retain a located gap; never fabricate a participant to complete a slot.',
-  "A gap affected_ids entry may name a declared mention, referent, frame, or operator. For an uninterpreted clause with no frame, declare a mention for its source span and use that mention in affected_ids and lexical support. Never cite a hypothetical or omitted frame as if it were declared.",
-  "Each binding slot_id must name a slot defined by that same frame. Dominating support via_id must name a declared referent, frame, or operator, not a mention. Check each reference against its required kind before returning the draft; prefixes alone do not declare a handle.",
-  'An embedded occurrence uses context_owner={"kind":"embedding","parent_frame":PARENT_FRAME_ID}. Do not emit content_argument: the host derives the current occurrence ID. The parent binding identifies its content target; do not assert the embedded action independently.',
-  "Cover every selected source assertion with interpreted meaning or an explicit located draft.gaps entry. Locate gap support through declared mentions for that assertion. Do not silently omit clauses that are difficult to interpret.",
-  "Explicit predicate support needs valid mention handles; implicit support needs supporting context and a reading. Empty or omitted support is a gap, not implicit.",
-  "Unresolved referents are local. Do not mint a global unknown. Record unsupported meaning as gaps.",
-  'For source universals use operator="forall" with binder, domain, restriction (a governed occurrence or null), and content. Bind its body with {kind:"bound_variable",quantifier:OPERATOR_ID,binder:BINDER}. Nested universal binders are unsupported: retain a located gap instead of flattening them.',
-  'Optional domains contain {id,context:OWNER_ID_OR_NULL,support,members:[{referent,evidence,restrictions:[{restriction,evidence}]}],exclusions:[{referent,evidence}],closure:{kind:"open"}|{kind:"closed",evidence}}. Membership/restriction/closure evidence must be occurrences in the declared context; null requires source assertions. Lists are bounded to64 members. A universal claim does not establish a complete census. Preserve promise/report/negative ownership.',
-  'Optional measurements contain {id,subject,owner,population,metric,unit,context,value,support}. value is an exact decimal string (128 digits,64 fractional digits maximum), with source support. Distinct values for the same subject/population/metric/unit/context require an explicit context distinction. Do not turn subjective easiest/best wording into objective values or rankings.',
-  "Outcome interpreted requires a draft; abstained, invalid, quarantine, truncated, and transport failures must not carry a draft.",
-  "For interpreted output, emit gaps only in draft.gaps. Do not repeat gaps in outcome; the host derives the canonical envelope from the draft.",
-  "Do not infer world truth or confidence. Admission of a draft does not certify language fidelity.",
-  "Neutral partial example, not the current input: assertion 1 is Mira shelved something. Its catalog segments are a1s0=Mira, a1s1=space, a1s2=shelved, a1s3=space, a1s4=something, a1s5=period. Assertion 2 is The label is hard to interpret. Its segments are a2s0=The, a2s1=space, a2s2=label, a2s3=space, a2s4=is, a2s5=space, a2s6=hard, a2s7=space, a2s8=to, a2s9=space, a2s10=interpret, a2s11=period. This example deliberately leaves assertion 2 as a mention-located gap without a frame. Use the current request's catalog for your response.",
-  `Example response:\n${JSON.stringify(sourceSemanticResponseExample)}`
-].join("\n");
-
-/** A retained request selects its producer syntax and prompt together. */
+/** Current source-table prompt bytes are owned by the table guidance. */
 export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
   parseSourceSemanticRequest(request);
-  return retainedSourceSemanticSystemPrompt(request);
-}
-
-/** Reconstructs original prompt bytes without granting generation eligibility. */
-export function retainedSourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
-  if (request.source_request.proposal_contract === undefined) return CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT;
-  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) return SOURCE_SEMANTIC_SYSTEM_PROMPT;
-  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) return SELECTION_SOURCE_SEMANTIC_SYSTEM_PROMPT;
-  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT) return COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT;
-  if (request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT) {
-    return EXPRESSION_SOURCE_SEMANTIC_SYSTEM_PROMPT;
-  }
-  return request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
-    ? CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT : LEGACY_SOURCE_SEMANTIC_SYSTEM_PROMPT;
+  return SOURCE_SEMANTIC_SYSTEM_PROMPT;
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [

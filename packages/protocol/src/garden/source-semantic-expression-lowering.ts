@@ -1,13 +1,12 @@
 import { z } from "zod";
-import { SourceSemanticContentProposalSchema, materializeSourceSemanticContentProposal } from "./source-semantic-content-proposal.js";
+import { SourceSemanticContentShape, compileSourceSemanticContent } from "./source-semantic-content-lowering.js";
 import { SOURCE_SEMANTIC_MAX_DEPTH, SOURCE_SEMANTIC_SOURCE_ACTS, SourceSemanticDomainSchema,
   SourceSemanticMeasurementSchema } from "./source-semantic-draft.js";
 import { SourceSemanticOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 
-export const SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT = "source-semantic-proposal-v3" as const;
 const Key = z.string().min(1).max(64);
-const Fields = SourceSemanticContentProposalSchema.unwrap().shape.content.unwrap().unwrap().shape;
+const Fields = SourceSemanticContentShape.unwrap().shape;
 const EntityFields = Fields.entities.unwrap().element.unwrap().shape;
 const StatementFields = Fields.statements.unwrap().element.unwrap().shape;
 const ArgumentFields = StatementFields.arguments.unwrap().element.unwrap().shape;
@@ -76,49 +75,21 @@ function contentShape(expression: z.ZodType<ExpressionValue>) {
 const Content = contentShape(Expression);
 const Outcome = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
   ...SourceSemanticOutcomeSchema.options.filter(option => option.unwrap().shape.status.value !== "interpreted")]);
-const Proposal = z.object({ contract: z.literal(SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT), outcome: Outcome,
-  content: Content.optional() }).strict().readonly();
-
-/** Decoder syntax only; the unchanged compiler remains the semantic admission authority.
- * Emit with reused: "ref" so shared layers become an acyclic definitions DAG. */
-export const SourceSemanticExpressionGenerationSchema = (() => {
-  let expression: z.ZodType<ExpressionValue> | undefined;
-  // Canonical depth counts domination edges: a root plus MAX_DEPTH descendants.
-  for (let depth = SOURCE_SEMANTIC_MAX_DEPTH; depth >= 0; depth--) {
-    const operand: z.ZodType<OperandValue> = expression === undefined ? ContentReference : z.union([ContentReference, expression]);
-    expression = expressionShape(targetShape(expression), operand);
-  }
-  return Proposal.unwrap().extend({ content: contentShape(expression!).optional() }).readonly();
-})();
 type ContentValue = z.infer<typeof Content>;
 type Path = (string | number)[];
 type SymbolKind = "entity" | "statement" | "operator" | "domain" | "measurement";
 type SymbolValue = { id: string; kind: SymbolKind; path: Path; parent?: string };
 
-/** Identity preprocessing guards recursive parsing. JSON Schema uses the unchanged output syntax. */
-export const SourceSemanticExpressionProposalSchema = z.preprocess((value, context) => {
-  const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
-  try {
-    materializeSourceSemanticExpressionProposal(value, meter);
-    meter.retain(value, "expression schema output validation");
-    return value;
-  } catch (error) {
-    if (!(error instanceof z.ZodError)) throw error;
-    for (const issue of error.issues) context.addIssue({ ...issue });
-    return z.NEVER;
-  }
-}, Proposal);
-
-export function materializeSourceSemanticExpressionProposal(value: unknown,
-  meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })): SourceSemanticResponseEnvelope {
-  preflight(value, meter);
-  const proposal = Proposal.parse(value);
-  if ((proposal.outcome.status === "interpreted") !== (proposal.content !== undefined)) {
+/** Current table compiler phase: expression ownership becomes content handles. */
+export function compileSourceSemanticExpression(contentValue: unknown, outcomeValue: unknown,
+  meter: SourceSemanticResourceLedger): SourceSemanticResponseEnvelope {
+  preflight({ outcome: outcomeValue, content: contentValue }, meter);
+  const outcome = Outcome.parse(outcomeValue);
+  if ((outcome.status === "interpreted") !== (contentValue !== undefined)) {
     invalid(["content"], "outcome_content_mismatch", "", "Interpreted outcome requires content; other outcomes must not carry content.");
   }
-  const content = proposal.content === undefined ? undefined : new ExpressionLowerer(meter).lower(proposal.content);
-  return materializeSourceSemanticContentProposal({ contract: "source-semantic-proposal-v2", outcome: proposal.outcome,
-    ...(content === undefined ? {} : { content }) }, meter);
+  const content = contentValue === undefined ? undefined : new ExpressionLowerer(meter).lower(Content.parse(contentValue));
+  return compileSourceSemanticContent(content, outcome, meter);
 }
 
 /** Iterative traversal bounds unknown nesting before Zod can recurse, including malformed fields. */

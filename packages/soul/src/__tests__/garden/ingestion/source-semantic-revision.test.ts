@@ -89,6 +89,6 @@ describe("source-bound explicit proposal revisions", () => {
     }
     expect(() => prepareSourceSemanticRevision(request, raw)).toThrow();
     expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...request.source_request,
-      proposal_contract: "source-semantic-proposal-v1" } })).toThrow(/revision requires/u);
+      proposal_contract: "source-semantic-proposal-v1" } })).toThrow(/proposal_contract/u);
   });
 });

@@ -139,15 +139,15 @@ it("bounds structural diagnostics without changing the invalid state", () => {
   expect(SourceSemanticDiagnosticsSchema.safeParse(diagnostics).success).toBe(true);
 });
 
-it("versions the open envelope, reasoning, and cache without reusing occupied literals", () => {
+it("accepts the current source envelope and keeps reasoning and cache literals distinct", () => {
   expect(SourceSemanticRequestEnvelopeSchema.parse({
     schema_version: 6, interpretation_contract: "source-interpretation-v4",
     source_request: { attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
-    source_catalog: { contract: "ascii-run-unicode-scalar-v1", source_digest: hex, catalog_id: digest, assertions: [] }
+    source_digest: hex
   }).schema_version).toBe(6);
   expect(SourceSemanticRequestEnvelopeSchema.safeParse({
     schema_version: 3, interpretation_contract: "source-interpretation-v4", source_request: {},
-    source_catalog: { contract: "ascii-run-unicode-scalar-v1", source_digest: hex, catalog_id: digest, assertions: [] }
+    source_digest: hex
   }).success).toBe(false);
   const budget = { schema_version: 1, work_units: 1, memory_bytes: 1, page_budget: 1, finalization_reserve: 0, min_envelope: 0 };
   expect(SourceSemanticReasoningRequestSchema.parse({

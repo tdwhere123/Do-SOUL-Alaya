@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { buildSourceReferenceCatalog } from "../../evidence/source-reference.js";
 import { accountSourceSemanticDraft, assertSourceSemanticAccounting } from "../../garden/source-semantic-accounting.js";
 import { SourceSemanticDraftSchema } from "../../garden/source-semantic-draft.js";
-import { normalizeSourceSemantics, SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION } from "../../garden/normalize-source-semantics.js";
+import { normalizeSourceSemantics } from "../../garden/normalize-source-semantics.js";
 import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 
@@ -73,20 +73,6 @@ it("does not claim that an evidence-connected assertion has complete language fi
   expect(result.gaps).toEqual([]);
   expect(result).not.toHaveProperty("semantic_complete");
   expect(result.frames).toEqual(bound.frames); // No adverb relation can be inferred mechanically.
-});
-
-it("retains historical replay semantics explicitly while new normalization accounts for omissions", () => {
-  const input = { draft: draft(), catalog, sha256: sha,
-    source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha("source")}`,
-      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
-    producer_id: "producer", producer_version: "1", contract_version: "source-interpretation-v4" };
-  const old = normalizeSourceSemantics({ ...input, normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION });
-  const current = normalizeSourceSemantics(input);
-  expect(old.status).toBe("normalized"); expect(current.status).toBe("normalized");
-  if (old.status !== "normalized" || current.status !== "normalized") throw new Error("expected normalized graphs");
-  expect(old.interpretation.gaps).toEqual([]);
-  expect(current.interpretation.gaps.length).toBeGreaterThan(0);
-  expect(old.interpretation.normalizer_version).not.toBe(current.interpretation.normalizer_version);
 });
 
 const normalize = (value: unknown, sourceCatalog = catalog) => normalizeSourceSemantics({

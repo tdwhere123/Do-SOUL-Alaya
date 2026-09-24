@@ -70,51 +70,53 @@ function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
   return { assertion_id: assertionId, text };
 }
 
-function compactUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = {}) {
+function tableUse(catalog: SourceReferenceCatalog, extra: { gap?: boolean } = {}) {
   return {
-    contract: "source-semantic-proposal-v7" as const,
+    contract: "source-semantic-proposal-v8" as const,
     outcome: { status: "interpreted" as const },
     content: {
-      roots: [{
-        act: "assertion" as const,
-        expression: {
-          kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", support: quote(catalog, "uses") },
-          arguments: [
-            { role: "agent", target: quote(catalog, "Alice") },
-            { role: "theme", target: quote(catalog, "tools") }
-          ]
-        }
-      }],
-      ...(extra.gap === true ? { gaps: [{ kind: "universal_quantification" as const, support: quote(catalog, "Alice"),
-        description: "Nested universal binders remain unsupported." }] } : {})
+      roots: [{ act: "assertion" as const, expression: { kind: "content_ref" as const, key: "use" } }],
+      entities: [
+        { form: "selection" as const, key: "actor", selection: quote(catalog, "Alice") },
+        { form: "selection" as const, key: "theme", selection: quote(catalog, "tools") }
+      ],
+      nodes: [{ kind: "statement" as const, key: "use",
+        predicate: { kind: "explicit" as const, reading: "use", support: quote(catalog, "uses") },
+        arguments: [
+          { role: "agent", target: { kind: "entity_ref" as const, key: "actor" } },
+          { role: "theme", target: { kind: "entity_ref" as const, key: "theme" } }
+        ], qualifications: [] }],
+      gaps: extra.gap === true ? [{ kind: "universal_quantification" as const, support: quote(catalog, "Alice"),
+        affected: [{ kind: "occurrence_ref" as const, key: "use" }],
+        description: "Nested universal binders remain unsupported." }] : []
     }
   };
 }
 
-function compactPromise(catalog: SourceReferenceCatalog) {
+function tablePromise(catalog: SourceReferenceCatalog) {
   return {
-    contract: "source-semantic-proposal-v7" as const,
+    contract: "source-semantic-proposal-v8" as const,
     outcome: { status: "interpreted" as const },
     content: {
-      roots: [{
-        act: "assertion" as const,
-        expression: {
-          kind: "statement" as const,
+      roots: [{ act: "assertion" as const, expression: { kind: "content_ref" as const, key: "promise" } }],
+      entities: [
+        { form: "selection" as const, key: "actor", selection: quote(catalog, "Alice") },
+        { form: "selection" as const, key: "theme", selection: quote(catalog, "tools") }
+      ],
+      nodes: [
+        { kind: "statement" as const, key: "promise",
           predicate: { kind: "explicit" as const, reading: "promise", support: quote(catalog, "promised") },
           arguments: [
-            { role: "promisor", target: quote(catalog, "Alice") },
-            { role: "content", support: quote(catalog, "send"), target: {
-              kind: "statement" as const,
-              predicate: { kind: "explicit" as const, reading: "send", support: quote(catalog, "send") },
-              arguments: [
-                { role: "agent", target: quote(catalog, "Alice") },
-                { role: "theme", target: quote(catalog, "tools") }
-              ]
-            } }
-          ]
-        }
-      }]
+            { role: "promisor", target: { kind: "entity_ref" as const, key: "actor" } },
+            { role: "content", support: quote(catalog, "send"), target: { kind: "content_ref" as const, key: "send" } }
+          ], qualifications: [] },
+        { kind: "statement" as const, key: "send",
+          predicate: { kind: "explicit" as const, reading: "send", support: quote(catalog, "send") },
+          arguments: [
+            { role: "agent", target: { kind: "entity_ref" as const, key: "actor" } },
+            { role: "theme", target: { kind: "entity_ref" as const, key: "theme" } }
+          ], qualifications: [] }
+      ], gaps: []
     }
   };
 }
@@ -125,7 +127,7 @@ function receiveInterpretation(source: string, sourceId: string, raw: object, pr
     producer_id: "test-author", producer_version: producerVersion
   }, { rawJson: JSON.stringify(raw) });
   if (received.outcome.status !== "interpreted" || received.draft === undefined || received.interpretation === undefined) {
-    throw new Error(`compact receive failed: ${JSON.stringify(received.outcome)}`);
+    throw new Error(`table receive failed: ${JSON.stringify(received.outcome)}`);
   }
   return { ...received, draft: received.draft, interpretation: received.interpretation };
 }
@@ -381,7 +383,7 @@ it("preserves compact source interpretation and receiver query semantics and sem
     const session = await openSession(filename);
     try {
       const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
-      const rawInterpretation = compactUse(prepared.catalog);
+      const rawInterpretation = tableUse(prepared.catalog);
       const rawBytes = Buffer.byteLength(JSON.stringify(rawInterpretation));
       const receivedInterpretation = receiveInterpretation(ALICE, "artifact-alice", rawInterpretation);
       expect(sourceSemanticRequestCatalog(receivedInterpretation.request).catalog_id).toBe(prepared.catalog.catalog_id);
@@ -526,7 +528,7 @@ it("discovers a compact-published interpretation after the first descriptor page
     const session = await openSession(filename);
     try {
       const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
-      const receivedInterpretation = receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog));
+      const receivedInterpretation = receiveInterpretation(ALICE, "artifact-alice", tableUse(prepared.catalog));
       const ids: string[] = [];
       for (let index = 0; index < 17; index += 1) {
         ids.push((await proposeDraft(session.handler, session.context, prepared.source_handle, receivedInterpretation.draft, `p${String(index + 1)}`)).interpretation_id);
@@ -583,7 +585,7 @@ it("retrieves promised source evidence without minting a completed-event proof",
     const session = await openSession(filename);
     try {
       const prepared = await prepareSource(session.handler, session.context, "artifact-promise");
-      const receivedInterpretation = receiveInterpretation(PROMISE, "artifact-promise", compactPromise(prepared.catalog));
+      const receivedInterpretation = receiveInterpretation(PROMISE, "artifact-promise", tablePromise(prepared.catalog));
       expect(frameOf(receivedInterpretation.interpretation, "send").context_owner.kind).toBe("embedding");
       const published = await proposeDraft(session.handler, session.context, prepared.source_handle, receivedInterpretation.draft, "p1");
       await closeSession(session, filename);
@@ -647,19 +649,15 @@ it("drops only dependent proof when a necessary source interpretation binding is
     try {
       const alice = await prepareSource(session.handler, session.context, "artifact-alice");
       const other = await prepareSource(session.handler, session.context, "artifact-other");
-      const full = receiveInterpretation(ALICE, "artifact-alice", compactUse(alice.catalog));
+      const full = receiveInterpretation(ALICE, "artifact-alice", tableUse(alice.catalog));
       const otherInterpretation = receiveInterpretation(OTHER, "artifact-other", {
-        contract: "source-semantic-proposal-v7",
-        outcome: { status: "interpreted" },
+        contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
         content: {
-          roots: [{
-            act: "assertion",
-            expression: {
-              kind: "statement",
-              predicate: { kind: "explicit", reading: "stay", support: quote(other.catalog, "stays") },
-              arguments: [{ role: "agent", target: quote(other.catalog, "Alice") }]
-            }
-          }]
+          roots: [{ act: "assertion", expression: { kind: "content_ref", key: "stay" } }],
+          entities: [{ form: "selection", key: "actor", selection: quote(other.catalog, "Alice") }],
+          nodes: [{ kind: "statement", key: "stay",
+            predicate: { kind: "explicit", reading: "stay", support: quote(other.catalog, "stays") },
+            arguments: [{ role: "agent", target: { kind: "entity_ref", key: "actor" } }], qualifications: [] }], gaps: []
         }
       });
       const published = await proposeDraft(session.handler, session.context, alice.source_handle, full.draft, "p1");
@@ -706,7 +704,7 @@ it("keeps failed sources available and reserves or paginates complete packages u
     const session = await openSession(filename);
     try {
       const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
-      const gapped = receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog, { gap: true }));
+      const gapped = receiveInterpretation(ALICE, "artifact-alice", tableUse(prepared.catalog, { gap: true }));
       expect(gapped.interpretation.gaps.some((row) => row.kind === "universal_quantification")).toBe(true);
       const published = await proposeDraft(session.handler, session.context, prepared.source_handle, gapped.draft, "p1");
       await closeSession(session, filename);
@@ -769,7 +767,7 @@ it("invalidates stale results after source update and recovers a pre-failure cop
     let semantic_correspondence: object | undefined;
     try {
       const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
-      const receivedInterpretation = receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog));
+      const receivedInterpretation = receiveInterpretation(ALICE, "artifact-alice", tableUse(prepared.catalog));
       const published = await proposeDraft(session.handler, session.context, prepared.source_handle, receivedInterpretation.draft, "p1");
       interpretationId = published.interpretation_id;
       semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
@@ -848,7 +846,7 @@ it("publishes repeated source assertions through the public handle and delivers 
       const received = proposeSourceSemantics({ sourceCorpus: source, sourceScope: "complete-source",
         assertionIds: prepared.catalog.assertions.map((row) => row.assertion_id), source_id: sourceId,
         source_version: "1", producer_id: "test-author", producer_version: "p1" },
-      { rawJson: JSON.stringify(compactUse(prepared.catalog)) });
+      { rawJson: JSON.stringify(tableUse(prepared.catalog)) });
       expect(received.outcome.status).toBe("interpreted");
       expect(received.draft).toBeDefined();
       published = await proposeDraft(session.handler, session.context, prepared.source_handle, received.draft, "p1");

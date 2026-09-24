@@ -1,9 +1,9 @@
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import {
-  SourceSemanticInterpretationSchema, RetainedSourceSemanticInterpretationSchema,
+  SourceSemanticInterpretationSchema,
   SOURCE_SEMANTIC_PUBLISHED_CONTRACT,
-  type SourceSemanticInterpretation, type RetainedSourceSemanticInterpretation
+  type SourceSemanticInterpretation
 } from "./source-semantic-interpretation.js";
 import {
   SourceSemanticQuerySchema, SOURCE_SEMANTIC_QUERY_CONTRACT, type SourceSemanticQuery
@@ -18,18 +18,12 @@ import {
 
 export function sourceSemanticInterpretationPreimage(interpretation: SourceSemanticInterpretation) {
   const value = SourceSemanticInterpretationSchema.parse(interpretation);
-  return interpretationPreimage(value, SOURCE_SEMANTIC_PUBLISHED_CONTRACT);
+  return interpretationPreimage(value);
 }
 
-export function retainedSourceSemanticInterpretationPreimage(interpretation: RetainedSourceSemanticInterpretation) {
-  return interpretationPreimage(RetainedSourceSemanticInterpretationSchema.parse(interpretation),
-    "published-source-interpretation-v4");
-}
-
-function interpretationPreimage(value: SourceSemanticInterpretation | RetainedSourceSemanticInterpretation,
-  contract: string) {
+function interpretationPreimage(value: SourceSemanticInterpretation) {
   return {
-    contract,
+    contract: SOURCE_SEMANTIC_PUBLISHED_CONTRACT,
     k_version: value.k_version,
     normalizer_version: value.normalizer_version,
     source: value.source,
@@ -107,12 +101,6 @@ export function sourceSemanticInterpretationIdentity(
   interpretation: SourceSemanticInterpretation, sha256: FieldContractSha256
 ): string {
   return digest(sourceSemanticInterpretationPreimage(interpretation), sha256);
-}
-
-export function retainedSourceSemanticInterpretationIdentity(
-  interpretation: RetainedSourceSemanticInterpretation, sha256: FieldContractSha256
-): string {
-  return digest(retainedSourceSemanticInterpretationPreimage(interpretation), sha256);
 }
 
 export function sourceSemanticQueryIdentity(query: SourceSemanticQuery, sha256: FieldContractSha256): string {

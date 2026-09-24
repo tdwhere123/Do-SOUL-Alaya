@@ -83,11 +83,14 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
       source_id: sourceId, source_version: "1", producer_id: "authored-act", producer_version: "1" };
     const request = buildSourceSemanticRequest(input);
     const select = (text: string) => ({ assertion_id: 1, text });
-    const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v7",
-      outcome: { status: "interpreted" }, content: { roots: [{ act, expression: {
-        kind: "statement", predicate: { kind: "explicit", reading: "polish", support: select(predicate) },
-        arguments: [{ role: "theme", target: select("the lens") }]
-      } }] }
+    const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v8",
+      outcome: { status: "interpreted" }, content: {
+        roots: [{ act, expression: { kind: "content_ref", key: "polish" } }],
+        entities: [{ form: "selection", key: "lens", selection: select("the lens") }],
+        nodes: [{ kind: "statement", key: "polish",
+          predicate: { kind: "explicit", reading: "polish", support: select(predicate) },
+          arguments: [{ role: "theme", target: { kind: "entity_ref", key: "lens" } }], qualifications: [] }], gaps: []
+      }
     }), request, input);
     expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });
     if (received.draft === undefined) throw new Error("source draft required");

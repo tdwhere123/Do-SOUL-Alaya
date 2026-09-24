@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import * as Core from "@do-soul/alaya-core";
 import {
   buildSourceReferenceCatalog, canonicalProductIdentityOfEntry, SOURCE_SEMANTIC_K_VERSION,
-  SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION, sourceSemanticInterpretationIdentity,
+  sourceSemanticInterpretationIdentity,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, sourceReferenceResolver,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceEvidenceTarget,
@@ -189,7 +189,7 @@ async function withLibrary(body: (input: {
     });
     if (retiredFirst && index === 0) {
       const interpretation = { ...published.bound.interpretation,
-        normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION };
+        normalizer_version: "source-semantic-normalizer-v3" };
       const interpretation_id = sourceSemanticInterpretationIdentity(interpretation, fieldContractSha256);
       const retained = { ...published.bound, interpretation, interpretation_id };
       database.connection.prepare(`INSERT INTO evidence_capsules (
@@ -245,8 +245,8 @@ it("keeps a retained stored interpretation out of worker discovery and proof whi
       const meter = new SourceSemanticReadBudget(BUDGET);
       const owner = { stores: sourceSemanticReadStores(database, WS, "artifact-1", meter, ["project"]),
         sha256: fieldContractSha256, meter };
-      expect(Core.verifyRetainedPublishedSourceSemanticInterpretation(owner, JSON.parse(row.gist), WS).eligibility)
-        .toBe("retained_only");
+      expect(JSON.parse(row.gist)).toMatchObject({ interpretation: {
+        normalizer_version: "source-semantic-normalizer-v3" } });
       expect(() => Core.verifyPublishedSourceSemanticInterpretation(owner, JSON.parse(row.gist), WS))
         .toThrow(/ineligible/u);
     } finally { database.close(); closeCachedDatabase(filename); }

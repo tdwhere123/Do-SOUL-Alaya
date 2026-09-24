@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { materializeSourceSemanticContentProposal, SourceSemanticContentProposalSchema } from "../../garden/source-semantic-proposal.js";
+import { compileSourceSemanticContent } from "../../garden/source-semantic-content-lowering.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { SourceSemanticResponseEnvelopeSchema } from "../../garden/source-semantic-interpretation.js";
 import { createHash } from "node:crypto";
@@ -26,21 +26,25 @@ type FixtureContent = {
   acts: ReturnType<typeof act>[]; gaps: { kind: string; evidence: ReturnType<typeof anchor>[]; affected?: string[]; description?: string }[];
   domains?: ReturnType<typeof domain>[]; measurements?: object[];
 };
-function proposal(content: Partial<FixtureContent> = {}): { contract: string; outcome: { status: string }; content: FixtureContent } {
-  return { contract: "source-semantic-proposal-v2", outcome: { status: "interpreted" }, content: {
+function proposal(content: Partial<FixtureContent> = {}): { outcome: { status: string }; content: FixtureContent } {
+  return { outcome: { status: "interpreted" }, content: {
     entities: [entity()], statements: [statement("send", [argument("entity", "alice")])],
     operators: [], acts: [act("send")], gaps: [], ...content
   } };
 }
-const compile = (value: unknown) => materializeSourceSemanticContentProposal(value).draft!;
+const lower = (value: unknown, meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })) => {
+  const input = value as { content?: unknown; outcome?: unknown };
+  return compileSourceSemanticContent(input.content, input.outcome, meter);
+};
+const compile = (value: unknown) => lower(value).draft!;
 
-describe("source-bound content proposal compiler", () => {
+describe("source semantic content lowering", () => {
   it("interns anchors, generates slots and preserves explicitly shared entities without mutating input", () => {
     const value = proposal({ entities: [entity("hostMention0")], statements: [
       statement("send", [argument("entity", "hostMention0", "agent")]),
       statement("arrive", [argument("entity", "hostMention0", "agent")])
     ], acts: [act("send"), act("arrive")] });
-    const before = JSON.stringify(value), result = materializeSourceSemanticContentProposal(value), h = result.draft!;
+    const before = JSON.stringify(value), result = lower(value), h = result.draft!;
     expect(JSON.stringify(value)).toBe(before);
     expect(h.mentions).toHaveLength(2);
     expect(h.mentions.some((row) => row.id === "hostMention0")).toBe(false);
@@ -51,7 +55,7 @@ describe("source-bound content proposal compiler", () => {
     expect(h.frames[0]!.slots[0]).toMatchObject({ id: "argument0", role_reading: "agent" });
     expect(h.frames[0]!.bindings[0]!.slot_id).toBe("argument0");
     expect(SourceSemanticResponseEnvelopeSchema.safeParse(result).success).toBe(true);
-    expect(materializeSourceSemanticContentProposal(value)).toEqual(result);
+    expect(lower(value)).toEqual(result);
   });
 
   it("preserves shared proposition references without making them governing content", () => {
@@ -141,7 +145,7 @@ describe("source-bound content proposal compiler", () => {
     const value = proposal({ statements: [{ ...statement("send", [argument("entity", "alice")]),
       predicate: { kind: "implicit", reading: "send", evidence: [anchor(0, 2)] } }],
     gaps: [{ kind: "unresolved_referent", evidence: [anchor(5, 3)], affected: ["alice"], description: "Uncertain identity." }] });
-    const result = materializeSourceSemanticContentProposal(value), h = result.draft!;
+    const result = lower(value), h = result.draft!;
     expect(h.frames[0]!.assertion_ids).toEqual([1, 2]);
     expect(h.frames[0]!.predicate_support.kind).toBe("implicit");
     const mention = h.mentions.find((row) => row.assertion_id === 3)!;
@@ -160,7 +164,6 @@ describe("source-bound content proposal compiler", () => {
     if (failure === "forged_gap_alias") c.gaps = [{ kind: "uninterpreted_clause", evidence: [anchor()], affected: ["hostMention0"] }];
     if (failure === "cycle") { c.acts = []; c.statements[0]!.arguments[0]!.target = { kind: "content", id: "send" }; }
     const before = JSON.stringify(value);
-    expect(SourceSemanticContentProposalSchema.safeParse(value).success).toBe(false);
     expect(() => compile(value)).toThrow();
     expect(JSON.stringify(value)).toBe(before);
   });
@@ -218,24 +221,23 @@ describe("source-bound content proposal compiler", () => {
     expect(diagnostics[31]).toMatchObject({ reference: "orphan31" });
     expect(JSON.stringify(diagnostics).length).toBeLessThanOrEqual(8192);
     const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
-    expect(() => materializeSourceSemanticContentProposal(value, meter)).toThrow(z.ZodError);
+    expect(() => lower(value, meter)).toThrow(z.ZodError);
     const bounded = new SourceSemanticResourceLedger({ work_units: meter.spentWork - 1, memory_bytes: 20000000 });
-    expect(() => materializeSourceSemanticContentProposal(value, bounded)).toThrow(SourceSemanticResourceExhausted);
+    expect(() => lower(value, bounded)).toThrow(SourceSemanticResourceExhausted);
   });
 
-  it("retains non-interpretation outcomes and rejects legacy or canonical fields", () => {
-    expect(materializeSourceSemanticContentProposal({ contract: "source-semantic-proposal-v2", outcome: { status: "abstained" } }).outcome).toEqual({ status: "abstained" });
+  it("retains non-interpretation outcomes and rejects canonical fields", () => {
+    expect(lower({ outcome: { status: "abstained" } }).outcome).toEqual({ status: "abstained" });
     expect(() => compile({ ...proposal(), outcome: { status: "abstained" } })).toThrow();
-    expect(() => compile({ ...proposal(), contract: "source-semantic-proposal-v1" })).toThrow();
     const canonicalFrame = { ...statement("send"), context_owner: { kind: "source_act", source_act: "assertion" } };
     expect(() => compile(proposal({ statements: [canonicalFrame] }))).toThrow();
   });
 
   it("shares the caller's ledger and bounds expansion before allocating excess canonical mentions", () => {
-    expect(() => materializeSourceSemanticContentProposal(proposal(), new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 1 })))
+    expect(() => lower(proposal(), new SourceSemanticResourceLedger({ work_units: 1, memory_bytes: 1 })))
       .toThrow(SourceSemanticResourceExhausted);
     const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
-    materializeSourceSemanticContentProposal(proposal(), meter);
+    lower(proposal(), meter);
     expect(meter.spentWork).toBeGreaterThan(0); expect(meter.spentBytes).toBeGreaterThan(0);
     const entities = Array.from({ length: 8 }, (_, n) => ({ id: `entity${n}`, referent_kind: "grouped",
       mentions: Array.from({ length: 64 }, (_, i) => anchor(n * 64 + i)) }));
@@ -249,7 +251,7 @@ describe("source-bound content proposal compiler", () => {
     const statements = Array.from({ length: 256 }, (_, i) => statement(`event${i}`));
     const value = proposal({ entities: [], statements, acts: statements.map((row) => act(row.id)) });
     try {
-      materializeSourceSemanticContentProposal(value, new SourceSemanticResourceLedger({ work_units: 40000, memory_bytes: 20000000 }));
+      lower(value, new SourceSemanticResourceLedger({ work_units: 40000, memory_bytes: 20000000 }));
       throw new Error("expected bounded canonical validation");
     } catch (error) {
       expect(error).toBeInstanceOf(SourceSemanticResourceExhausted);
@@ -264,7 +266,7 @@ describe("source-bound content proposal compiler", () => {
       predicate: { kind: "explicit", reading: "send", evidence: [anchor(2)] },
       arguments: [{ role: "agent", target: { kind: "entity", id: "alice" }, evidence: [anchor(0)] }] }] });
     const run = (meter: SourceSemanticResourceLedger) => {
-      const draft = materializeSourceSemanticContentProposal(value, meter).draft!;
+      const draft = lower(value, meter).draft!;
       return normalizeSourceSemantics({ draft, catalog, sha256: sha, meter,
         source: { source_id: "source", source_version: "1", content_digest: `sha256:${sha(source)}`,
           attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
@@ -289,7 +291,7 @@ function quantified() {
 }
 
 function diagnosticsOf(value: unknown) {
-  try { materializeSourceSemanticContentProposal(value); }
+  try { lower(value); }
   catch (error) {
     if (!(error instanceof z.ZodError)) throw error;
     return sourceSemanticValidationDiagnostics(error);

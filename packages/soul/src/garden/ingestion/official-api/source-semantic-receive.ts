@@ -7,52 +7,38 @@ import {
   SourceSemanticQuerySchema, SourceSemanticCorrespondenceSelectionSchema, materializeSourceSemanticQueryMeaning,
   expandSourceSemanticQueryCarrier,
   materializeSourceSemanticCorrespondenceSelection,
-  SourceSemanticResponseEnvelopeSchema, SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
+  SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   SourceSemanticInterpretationSchema,
-  materializeSourceSemanticProposal, materializeSourceSemanticContentProposal, buildSourceReferenceCatalog,
-  materializeSourceSemanticExpressionProposal, SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT,
-  materializeSourceSemanticCompactProposal, SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT,
-  materializeSourceSemanticSelectionProposal, SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT,
-  materializeSourceSemanticTableProposal, SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
-  SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
-  normalizeSourceSemantics, normalizeRetainedSourceSemantics, sourceSemanticQueryIdentity,
+  materializeSourceSemanticTableProposal,
+  SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
+  normalizeSourceSemantics, sourceSemanticQueryIdentity,
   verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticCorrespondence, type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticDraft,
-  type SourceSemanticInterpretation, type RetainedSourceSemanticInterpretation,
+  type SourceSemanticInterpretation,
   type SourceSemanticOutcome, type SourceSemanticQuery,
-  type SourceSemanticQueryOutcome,
-  SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION
+  type SourceSemanticQueryOutcome
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
-  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
+  parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticCorrespondenceProposalInput, type SourceSemanticCorrespondenceRequest,
   type SourceInterpretationDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
 } from "./source-semantic-request.js";
 
-import { buildOfficialApiSourceRequest } from "./extraction-request.js";
-import { indexOfficialApiSourceAssertions } from "../../triage/grounding/source-locator.js";
-
 export const MAX_SOURCE_SEMANTIC_RESPONSE_BYTES = 1024 * 1024;
 const HOST_ONLY_OUTCOMES = new Set(["no_eligible_source", "unavailable", "unexercised", "preparation_required"]);
 
-export type SourceSemanticProposalResult<TInterpretation = SourceSemanticInterpretation | RetainedSourceSemanticInterpretation> = Readonly<{
+export type SourceSemanticProposalResult = Readonly<{
   outcome: SourceSemanticOutcome;
   provider_attempts: 0 | 1;
   request: SourceSemanticRequest;
   draft?: SourceSemanticDraft;
-  interpretation?: TInterpretation;
+  interpretation?: SourceSemanticInterpretation;
   raw_response_id?: string;
   rawJson?: string;
-}>;
-
-/** Historical verification is evidence, never an executable current admission. */
-export type RetainedSourceSemanticVerification = Readonly<{
-  eligibility: "retained_only";
-  result: SourceSemanticProposalResult<SourceSemanticInterpretation | RetainedSourceSemanticInterpretation>;
 }>;
 
 export type SourceSemanticQueryProposalResult = Readonly<{
@@ -86,7 +72,7 @@ type Attempt<T> = Readonly<{ provider_attempts: 1; request: T; raw_response_id: 
 export function proposeSourceSemantics(
   input: SourceSemanticProposalInput,
   injected?: Readonly<{ rawJson: string }>
-): SourceSemanticProposalResult<SourceSemanticInterpretation> {
+): SourceSemanticProposalResult {
   const request = buildSourceSemanticRequest(input);
   if (request.source_request.source_assertions.length === 0) {
     return { outcome: { status: "no_eligible_source", provider_attempts: 0 }, provider_attempts: 0, request };
@@ -101,7 +87,7 @@ export function proposeSourceSemantics(
 export function completeEmptySourceSemantics(
   requestValue: SourceSemanticRequest,
   input: SourceSemanticProposalInput
-): SourceSemanticProposalResult<SourceSemanticInterpretation> {
+): SourceSemanticProposalResult {
   const request = parseSourceSemanticRequest(requestValue);
   if (request.source_request.source_assertions.length !== 0 || input.assertionIds.length !== 0) {
     throw new AlayaError("CONFLICT", "deterministic empty source semantics requires no eligible assertions");
@@ -110,22 +96,9 @@ export function completeEmptySourceSemantics(
   return { outcome: { status: "no_eligible_source", provider_attempts: 0 }, provider_attempts: 0, request };
 }
 
-/** Verifies a retained zero-attempt empty disposition without granting cache or publication eligibility. */
-export function verifyRetainedEmptySourceSemantics(
-  requestValue: unknown, input: SourceSemanticProposalInput
-): RetainedSourceSemanticVerification {
-  const request = parseRetainedSourceSemanticRequest(requestValue);
-  if (request.source_request.source_assertions.length !== 0 || input.assertionIds.length !== 0) {
-    throw new AlayaError("CONFLICT", "retained empty source semantics requires no source assertions");
-  }
-  bindSource(request, input);
-  return { eligibility: "retained_only", result: { outcome: { status: "no_eligible_source", provider_attempts: 0 },
-    provider_attempts: 0, request } };
-}
-
 export function receiveSourceSemantics(
   rawJson: string, requestValue: SourceSemanticRequest, input: SourceSemanticProposalInput
-): SourceSemanticProposalResult<SourceSemanticInterpretation> {
+): SourceSemanticProposalResult {
   const request = parseSourceSemanticRequest(requestValue);
   const result = decodeSourceSemantics(rawJson, request, input);
   if (result.interpretation === undefined) {
@@ -135,48 +108,28 @@ export function receiveSourceSemantics(
   return { ...result, interpretation: SourceSemanticInterpretationSchema.parse(result.interpretation) };
 }
 
-export function verifyRetainedSourceSemantics(
-  rawJson: string, requestValue: unknown, input: SourceSemanticProposalInput
-): RetainedSourceSemanticVerification {
-  const request = parseRetainedSourceSemanticRequest(requestValue);
-  return { eligibility: "retained_only", result: decodeSourceSemantics(rawJson, request, input) };
-}
-
 function decodeSourceSemantics(
   rawJson: string, request: SourceSemanticRequest, input: SourceSemanticProposalInput
-): SourceSemanticProposalResult<SourceSemanticInterpretation | RetainedSourceSemanticInterpretation> {
+): SourceSemanticProposalResult {
   const attempt = bindAttempt(rawJson, request);
   const bounded = boundRawJson(rawJson, request.source_request.resource_limits.output_byte_limit, attempt);
   if (bounded !== undefined) return bounded;
   bindSource(request, input);
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  // Retained marker-absent v3 requests remain decodable only through the retained verifier.
-  let envelope: ReturnType<typeof SourceSemanticResponseEnvelopeSchema.safeParse>;
   const limits = request.source_request.resource_limits;
-  const compact = request.source_request.proposal_contract === SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT;
-  const selection = request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT;
-  const table = request.source_request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT;
-  const expression = request.source_request.proposal_contract === SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT;
-  const meter = compact || selection || table || expression || request.source_request.proposal_contract === SOURCE_SEMANTIC_CONTENT_PROPOSAL_CONTRACT
-    ? new SourceSemanticResourceLedger({ work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000 }) : undefined;
+  const meter = new SourceSemanticResourceLedger({
+    work_units: limits.work_units ?? 200000, memory_bytes: limits.memory_bytes ?? 20000000
+  });
+  let envelope: ReturnType<typeof materializeSourceSemanticTableProposal>;
   try {
-    envelope = request.source_request.proposal_contract === undefined
-      ? SourceSemanticResponseEnvelopeSchema.safeParse(parsed.value)
-      : table ? { success: true, data: materializeSourceSemanticTableProposal(parsed.value, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter) }
-      : selection ? { success: true, data: materializeSourceSemanticSelectionProposal(parsed.value, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter) }
-      : compact ? { success: true, data: materializeSourceSemanticCompactProposal(parsed.value, meter) }
-      : expression ? { success: true, data: materializeSourceSemanticExpressionProposal(parsed.value, meter) }
-      : meter !== undefined ? { success: true, data: materializeSourceSemanticContentProposal(parsed.value, meter) }
-      : { success: true, data: materializeSourceSemanticProposal(parsed.value) };
+    envelope = materializeSourceSemanticTableProposal(parsed.value,
+      { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter);
   } catch (error) {
     if (error instanceof SourceSemanticResourceExhausted) return { ...attempt, outcome: { status: "resource_exhausted" } };
     return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
-  if (!envelope.success) {
-    return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
-  }
-  const { outcome, draft } = envelope.data;
+  const { outcome, draft } = envelope;
   if (HOST_ONLY_OUTCOMES.has(outcome.status)) {
     return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
   }
@@ -315,29 +268,26 @@ function parseSourceSemanticQueryProposal(input: Readonly<{
 
 function admitInterpretedDraft(
   draft: SourceSemanticDraft, request: SourceSemanticRequest, input: SourceSemanticProposalInput,
-  attempt: Attempt<SourceSemanticRequest>, meter?: SourceSemanticResourceLedger
-): SourceSemanticProposalResult<SourceSemanticInterpretation | RetainedSourceSemanticInterpretation> {
+  attempt: Attempt<SourceSemanticRequest>, meter: SourceSemanticResourceLedger
+): SourceSemanticProposalResult {
   const limits = request.source_request.resource_limits;
   const normalization = {
     draft, catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256,
     source: {
       source_id: input.source_id, source_version: input.source_version,
       content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`,
-      ...(request.schema_version === SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION
-        ? { attribution_context: request.source_request.attribution_context } : {}),
-      ...(request.source_request.assertion_locations === undefined ? {} : { assertion_locations: request.source_request.assertion_locations })
+      attribution_context: request.source_request.attribution_context,
+      assertion_locations: request.source_request.assertion_locations
     },
     producer_id: request.source_request.producer_capability.producer_id,
     producer_version: request.source_request.producer_capability.producer_version,
     contract_version: SOURCE_SEMANTIC_PACKET_CONTRACT,
     normalizer_version: request.source_request.normalizer_version,
-    ...(meter === undefined ? {} : { meter }),
+    meter,
     ...(limits.work_units !== undefined && limits.memory_bytes !== undefined
       ? { budget: { work_units: limits.work_units, memory_bytes: limits.memory_bytes } } : {})
   };
-  const normalized = request.schema_version === SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION
-    ? normalizeSourceSemantics(normalization as Parameters<typeof normalizeSourceSemantics>[0])
-    : normalizeRetainedSourceSemantics(normalization as Parameters<typeof normalizeRetainedSourceSemantics>[0]);
+  const normalized = normalizeSourceSemantics(normalization);
   if (normalized.status === "resource_exhausted") return { ...attempt, outcome: { status: "resource_exhausted" }, draft };
   if (normalized.status !== "normalized") {
     return { ...attempt, outcome: { status: "invalid", reason: normalized.reason }, draft };
@@ -350,33 +300,16 @@ function admitInterpretedDraft(
 
 function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposalInput): void {
   const ids = request.source_request.source_assertions.map((row) => row.assertion_id);
-  const expected = request.source_request.source_unit_contract === undefined
-    ? historicalSourceBinding(input.sourceCorpus, ids)
-    : buildSourceSemanticRequest({ ...input, assertionIds: ids, sourceScope: request.source_request.source_scope });
-  if (canonicalJson("schema_version" in expected ? sourceSemanticRequestCatalog(expected) : expected.source_catalog) !== canonicalJson(sourceSemanticRequestCatalog(request)) ||
+  const expected = buildSourceSemanticRequest({ ...input, assertionIds: ids, sourceScope: request.source_request.source_scope });
+  if (canonicalJson(sourceSemanticRequestCatalog(expected)) !== canonicalJson(sourceSemanticRequestCatalog(request)) ||
     canonicalJson(expected.source_request.source_assertions) !== canonicalJson(request.source_request.source_assertions) ||
-    request.schema_version === SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION &&
-      canonicalJson("schema_version" in expected ? expected.source_request.attribution_context : undefined)
-        !== canonicalJson(request.source_request.attribution_context) ||
-    request.source_request.assertion_locations !== undefined && canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {
+    canonicalJson(expected.source_request.attribution_context) !== canonicalJson(request.source_request.attribution_context) ||
+    canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {
     throw new AlayaError("CONFLICT", "source semantic assertion locations differ from the source owner");
   }
   if (semanticSha256(input.sourceCorpus) !== sourceSemanticRequestCatalog(request).source_digest) {
     throw new AlayaError("CONFLICT", "source semantic source generation mismatch");
   }
-}
-
-/** Retained raw/cache requests predate source units. Remove after offline archive migration. */
-function historicalSourceBinding(sourceCorpus: string, ids: readonly number[]) {
-  const source = buildOfficialApiSourceRequest(sourceCorpus, ids);
-  const selectedIds = new Set(ids);
-  const indexed = indexOfficialApiSourceAssertions(sourceCorpus).filter((row) => selectedIds.has(row.assertion_id));
-  return {
-    source_catalog: buildSourceReferenceCatalog(semanticSha256(sourceCorpus), source.source_assertions, semanticSha256),
-    source_request: { source_assertions: source.source_assertions, assertion_locations: indexed.map((row) => {
-      return { assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] };
-    }) }
-  };
 }
 
 function bindAttempt<T>(rawJson: string, request: T): Attempt<T> {

@@ -26,14 +26,20 @@ function quote(text: string, occurrence?: number) {
 function approvalDraft(_catalog: SourceReferenceCatalog) {
   const received = proposeSourceSemantics({ sourceCorpus: SOURCE, assertionIds: [1, 2], sourceScope: "complete-source",
     source_id: "dated-approval-source", source_version: "1", producer_id: "authored-control", producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-    content: { roots: [{ act: "assertion", expression: { kind: "statement",
-      predicate: { kind: "explicit", reading: "approve", support: quote("approved", 0) },
-      arguments: [
-        { role: "approver", target: quote("Noor") },
-        { role: "pilot", target: quote("Cedar pilot", 0) },
-        { role: "approval_date", target: quote("22 September 2026 only") }
-      ] } }], gaps: [{ kind: "unsupported_meaning",
+  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+    content: { roots: [{ act: "assertion", expression: { kind: "content_ref", key: "approval" } }],
+      entities: [
+        { form: "selection", key: "approver", selection: quote("Noor") },
+        { form: "selection", key: "pilot", selection: quote("Cedar pilot", 0) },
+        { form: "selection", key: "date", selection: quote("22 September 2026 only") }
+      ],
+      nodes: [{ kind: "statement", key: "approval",
+        predicate: { kind: "explicit", reading: "approve", support: quote("approved", 0) },
+        arguments: [
+          { role: "approver", target: { kind: "entity_ref", key: "approver" } },
+          { role: "pilot", target: { kind: "entity_ref", key: "pilot" } },
+          { role: "approval_date", target: { kind: "entity_ref", key: "date" } }
+        ], qualifications: [] }], gaps: [{ kind: "unsupported_meaning", affected: [],
       support: [{ assertion_id: 2, text: "I don't know whether" }, { assertion_id: 2, text: "24 September 2026" }],
       description: "The source reports unknown approval for 24 September 2026." }] } }) });
   if (received.draft === undefined || received.interpretation === undefined) {

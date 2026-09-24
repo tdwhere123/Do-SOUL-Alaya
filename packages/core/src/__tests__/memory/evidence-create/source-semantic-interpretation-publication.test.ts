@@ -8,9 +8,7 @@ import {
   normalizeSourceSemantics,
   sourceReferenceResolver,
   sourceSemanticInterpretationIdentity,
-  retainedSourceSemanticInterpretationIdentity,
   SourceSemanticPublishedInterpretationSchema,
-  SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceReferenceCatalog, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
@@ -28,7 +26,7 @@ import { createInMemoryFieldStores } from "../../../memory/evidence-create/field
 import {
   createSourceSemanticInterpretationPublication,
   semanticInterpretationEvidenceId,
-  verifyPublishedSourceSemanticInterpretation, verifyRetainedPublishedSourceSemanticInterpretation
+  verifyPublishedSourceSemanticInterpretation
 } from "../../../memory/evidence-create/source-interpretation-packet-publication.js";
 import { deriveAddressableSpanViews } from "../../../memory/evidence-create/source-span-views.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
@@ -187,7 +185,7 @@ describe("source semantic interpretation publication", () => {
     await expect(fixture.publication.publish({ ...normalizedInput, interpretation: stripped }))
       .rejects.toThrow(/accounting gaps/u);
     await expect(fixture.publication.publish({ ...normalizedInput,
-      interpretation: { ...stripped, normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION } }))
+      interpretation: { ...stripped, normalizer_version: "source-semantic-normalizer-v3" } }))
       .rejects.toThrow(/current normalizer/u);
     fixture.database.close(); databases.delete(fixture.database);
     const reopened = await openFixture(filename);
@@ -510,38 +508,7 @@ it("publishes repeated identical assertions only with distinct exact host locati
   expect(verifyPublishedSourceSemanticInterpretation(fixture.owner, b.bound, REAL_SQLITE_TEST_WORKSPACE_ID).bound).toEqual(b.bound);
 });
 
-it("verifies a retained interpretation without admitting it to current execution", async () => {
-  const fixture = await openFixture();
-  await admitSource(fixture);
-  const published = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION)));
-  const { attribution_context: _historicalAttribution, ...retainedSource } = published.bound.interpretation.source;
-  const interpretation = { ...published.bound.interpretation,
-    source: retainedSource,
-    normalizer_version: SOURCE_SEMANTIC_LEGACY_NORMALIZER_VERSION };
-  const retained = { ...published.bound, contract: "published-source-interpretation-v4", interpretation,
-    interpretation_id: retainedSourceSemanticInterpretationIdentity(interpretation, fieldContractSha256) };
-  await admitSource(fixture, SOURCE, "2", "2026-09-15T00:00:00.000Z");
-  expect(fixture.stores.getCurrentRecord(REAL_SQLITE_TEST_WORKSPACE_ID, "artifact-1")?.identity)
-    .not.toBe(retained.source_target.root_id);
-  expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, retained, REAL_SQLITE_TEST_WORKSPACE_ID))
-    .toThrow();
-  const checked = verifyRetainedPublishedSourceSemanticInterpretation(fixture.owner, retained, REAL_SQLITE_TEST_WORKSPACE_ID);
-  expect(checked.eligibility).toBe("retained_only");
-  expect(checked.verification.bound).toEqual(retained);
-  expect(checked.verification.stored.record.identity).toBe(retained.source_target.root_id);
-  const changedBytesOutsideAssertion = { ...fixture.owner, stores: {
-    ...fixture.stores,
-    getStoredRecord: (workspaceId: string, recordId: string) => {
-      const stored = fixture.stores.getStoredRecord(workspaceId, recordId);
-      return stored === null ? null : { ...stored, content_bytes: `Guest:${ASSERTION}` };
-    }
-  } };
-  expect(() => verifyRetainedPublishedSourceSemanticInterpretation(
-    changedBytesOutsideAssertion, retained, REAL_SQLITE_TEST_WORKSPACE_ID
-  )).toThrow(/stored source body does not match its digest/u);
-});
-
-it("inspects the exact historical source revision without granting current execution", async () => {
+it("retains exact old source bytes after replacement while current interpretation execution rejects it", async () => {
   const fixture = await openFixture();
   const captured = (author_ref: string): UtteranceAttribution => ({
     contract: "utterance-attribution-v1", status: "captured", issuer_scope: "test-issuer",
@@ -553,28 +520,20 @@ it("inspects the exact historical source revision without granting current execu
   const { bound } = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION), {
     attribution_context: original
   }));
+  const originalRecord = fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, bound.source_target.root_id);
+  expect(originalRecord?.content_bytes).toBe(SOURCE);
+  expect(originalRecord?.record.attribution_context).toEqual(original);
   await admitSource(fixture, SOURCE, "2", "2026-09-15T00:00:00.000Z", null, "artifact-1", corrected);
-  const inspect = (owner = fixture.owner, value: unknown = bound) =>
-    verifyRetainedPublishedSourceSemanticInterpretation(owner, value, REAL_SQLITE_TEST_WORKSPACE_ID);
-  expect(inspect()).toMatchObject({ eligibility: "retained_only", verification: {
-    stored: { record: { source_version: "1", attribution_context: original }, content_bytes: SOURCE }, bound
-  } });
+  expect(fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, bound.source_target.root_id))
+    .toEqual(originalRecord);
   expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, bound, REAL_SQLITE_TEST_WORKSPACE_ID))
     .toThrow(/source binding/u);
   const changedInterpretation = { ...bound.interpretation,
     source: { ...bound.interpretation.source, attribution_context: corrected } };
-  expect(() => inspect(fixture.owner, { ...bound, interpretation: changedInterpretation,
-    interpretation_id: sourceSemanticInterpretationIdentity(changedInterpretation, fieldContractSha256) }))
-    .toThrow(/source binding/u);
-  expect(() => inspect({ ...fixture.owner, stores: { ...fixture.stores,
-    getStoredRecord: (workspaceId, recordId) => {
-      const stored = fixture.stores.getStoredRecord(workspaceId, recordId);
-      return stored === null ? null : { ...stored, content_bytes: `Guest:${ASSERTION}` };
-    }
-  } })).toThrow(/stored source body does not match its digest/u);
-  expect(() => inspect({ ...fixture.owner, stores: { ...fixture.stores,
-    getStoredRecord: () => null
-  } })).toThrow(/retained interpretation source is unavailable/u);
+  expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, { ...bound,
+    interpretation: changedInterpretation,
+    interpretation_id: sourceSemanticInterpretationIdentity(changedInterpretation, fieldContractSha256)
+  }, REAL_SQLITE_TEST_WORKSPACE_ID)).toThrow(/source binding/u);
 });
 
 it("publishes only an explicitly unbound normalized interpretation with matching captured attribution", async () => {

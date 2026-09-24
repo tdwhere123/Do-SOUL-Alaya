@@ -262,7 +262,9 @@ export {
 
 export * from "./garden/source-interpretation-profile.js";
 export * from "./garden/source-semantic-draft.js";
-export * from "./garden/source-semantic-proposal.js";
+export { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
+  SourceSemanticTableValidationError, sourceSemanticTableJsonSchema,
+  materializeSourceSemanticTableProposal } from "./garden/source-semantic-table-proposal.js";
 export { canonicalSourceSemanticDecimal, compareSourceSemanticDecimals } from "./garden/source-semantic-quantified-validation.js";
 export { SourceSemanticDiagnosticsSchema, sourceSemanticValidationDiagnostics } from "./garden/source-semantic-diagnostics.js";
 export * from "./garden/source-semantic-interpretation.js";

@@ -58,7 +58,7 @@ describe("bounded complete-source semantic requests", () => {
     expect(() => parseSourceSemanticRequest({ ...current, source_request: unmarked })).toThrow(/eight/u);
     expect(() => parseSourceSemanticRequest({ ...current, source_request: {
       ...current.source_request, source_unit_contract: undefined
-    } })).toThrow(/source unit contract/u);
+    } })).toThrow(/source_unit_contract/u);
   });
 
   it("allows an authored co-reference control to anchor an antecedent and tail pronoun across the former pack boundary", () => {

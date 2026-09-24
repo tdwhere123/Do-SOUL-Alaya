@@ -16,7 +16,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v7",
+      "contract": "source-semantic-proposal-v8",
       "outcome": {
         "status": "interpreted"
       },
@@ -25,241 +25,358 @@
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "event held on date",
-                "support": {
-                  "assertion_id": 1,
-                  "text": "held on"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "this event"
-                      },
-                      {
-                        "assertion_id": 5,
-                        "text": "this event"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event0"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "exact count of different invited speakers who actually spoke at event",
-                "support": [
-                  {
-                    "assertion_id": 2,
-                    "text": "Exactly four different invited"
-                  },
-                  {
-                    "assertion_id": 3,
-                    "text": "speakers actually spoke at this event"
-                  }
-                ]
-              },
-              "arguments": [
-                {
-                  "role": "count",
-                  "target": {
-                    "assertion_id": 2,
-                    "text": "four"
-                  }
-                },
-                {
-                  "role": "population",
-                  "target": {
-                    "kind": "entity",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "different invited"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "speakers"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "actual participation",
-                  "target": {
-                    "assertion_id": 3,
-                    "text": "actually spoke"
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "this event"
-                      },
-                      {
-                        "assertion_id": 5,
-                        "text": "this event"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event1"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 4,
-                "text": "does not"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "report lists speaker names",
-                  "support": {
-                    "assertion_id": 4,
-                    "text": "list their names"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "report",
-                    "target": {
-                      "assertion_id": 4,
-                      "text": "This report"
-                    }
-                  },
-                  {
-                    "role": "names",
-                    "target": {
-                      "assertion_id": 4,
-                      "text": "their names"
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event2"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "count of other invited people who did not speak at event",
-                "support": {
-                  "assertion_id": 5,
-                  "text": "Six other people had been invited to speak but did not speak at this event"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "count",
-                  "target": {
-                    "assertion_id": 5,
-                    "text": "Six"
-                  }
-                },
-                {
-                  "role": "population",
-                  "target": {
-                    "assertion_id": 5,
-                    "text": "other people had been invited to speak but did not speak"
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "this event"
-                      },
-                      {
-                        "assertion_id": 5,
-                        "text": "this event"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event4"
             }
           }
-        ]
+        ],
+        "entities": [
+          {
+            "form": "entity",
+            "key": "entity0",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              },
+              {
+                "assertion_id": 3,
+                "text": "this event"
+              },
+              {
+                "assertion_id": 5,
+                "text": "this event"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity1",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "selection",
+            "key": "entity2",
+            "selection": {
+              "assertion_id": 2,
+              "text": "four"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity3",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "different invited"
+              },
+              {
+                "assertion_id": 3,
+                "text": "speakers"
+              }
+            ]
+          },
+          {
+            "form": "selection",
+            "key": "entity4",
+            "selection": {
+              "assertion_id": 3,
+              "text": "actually spoke"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity5",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              },
+              {
+                "assertion_id": 3,
+                "text": "this event"
+              },
+              {
+                "assertion_id": 5,
+                "text": "this event"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity6",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "selection",
+            "key": "entity7",
+            "selection": {
+              "assertion_id": 4,
+              "text": "This report"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity8",
+            "selection": {
+              "assertion_id": 4,
+              "text": "their names"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity9",
+            "selection": {
+              "assertion_id": 5,
+              "text": "Six"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity10",
+            "selection": {
+              "assertion_id": 5,
+              "text": "other people had been invited to speak but did not speak"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity11",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              },
+              {
+                "assertion_id": 3,
+                "text": "this event"
+              },
+              {
+                "assertion_id": 5,
+                "text": "this event"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity12",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "statement",
+            "key": "event0",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "event held on date",
+              "support": {
+                "assertion_id": 1,
+                "text": "held on"
+              }
+            },
+            "arguments": [
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity0"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity1"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event1",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "exact count of different invited speakers who actually spoke at event",
+              "support": [
+                {
+                  "assertion_id": 2,
+                  "text": "Exactly four different invited"
+                },
+                {
+                  "assertion_id": 3,
+                  "text": "speakers actually spoke at this event"
+                }
+              ]
+            },
+            "arguments": [
+              {
+                "role": "count",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity2"
+                }
+              },
+              {
+                "role": "population",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity3"
+                }
+              },
+              {
+                "role": "actual participation",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity4"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity5"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity6"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event2",
+            "support": {
+              "assertion_id": 4,
+              "text": "does not"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event3"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event3",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "report lists speaker names",
+              "support": {
+                "assertion_id": 4,
+                "text": "list their names"
+              }
+            },
+            "arguments": [
+              {
+                "role": "report",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity7"
+                }
+              },
+              {
+                "role": "names",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity8"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event4",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "count of other invited people who did not speak at event",
+              "support": {
+                "assertion_id": 5,
+                "text": "Six other people had been invited to speak but did not speak at this event"
+              }
+            },
+            "arguments": [
+              {
+                "role": "count",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity9"
+                }
+              },
+              {
+                "role": "population",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity10"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity11"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity12"
+                }
+              }
+            ],
+            "qualifications": []
+          }
+        ],
+        "gaps": []
       }
     }
   },
@@ -286,7 +403,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v7",
+      "contract": "source-semantic-proposal-v8",
       "outcome": {
         "status": "interpreted"
       },
@@ -295,961 +412,1351 @@
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "event held on date",
-                "support": {
-                  "assertion_id": 1,
-                  "text": "on"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event0"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "notebook contains only personally witnessed sessions",
-                "support": [
-                  {
-                    "assertion_id": 2,
-                    "text": "contains only"
-                  },
-                  {
-                    "assertion_id": 3,
-                    "text": "sessions I personally witnessed"
-                  }
-                ]
-              },
-              "arguments": [
-                {
-                  "role": "notebook",
-                  "target": {
-                    "kind": "entity",
-                    "key": "notebook",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Witness notebook"
-                      },
-                      {
-                        "assertion_id": 2,
-                        "text": "This notebook"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event1"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 3,
-                "text": "not a complete list of speakers"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "notebook is complete list of speakers",
-                  "support": {
-                    "assertion_id": 3,
-                    "text": "a complete list of speakers"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "notebook",
-                    "target": {
-                      "kind": "entity",
-                      "key": "notebook",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "Witness notebook"
-                        },
-                        {
-                          "assertion_id": 2,
-                          "text": "This notebook"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "event",
-                    "target": {
-                      "kind": "entity",
-                      "key": "forum",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "Delta Forum"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "date",
-                    "target": {
-                      "kind": "entity",
-                      "key": "event-date",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "2026-05-10"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event2"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "speaker has badge",
-                "support": {
-                  "assertion_id": 4,
-                  "text": "speaker badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-A-17",
-                    "mentions": [
-                      {
-                        "assertion_id": 4,
-                        "text": "Amir Chen"
-                      },
-                      {
-                        "assertion_id": 7,
-                        "text": "the same Amir Chen with badge A-17"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 4,
-                    "text": "A-17"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event4"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "speaker has badge",
-                "support": {
-                  "assertion_id": 5,
-                  "text": "speaker badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-B-92",
-                    "mentions": [
-                      {
-                        "assertion_id": 5,
-                        "text": "Amir Chen"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 5,
-                    "text": "B-92"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event5"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "is a different person from",
-                "support": {
-                  "assertion_id": 5,
-                  "text": "A different person"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-B-92",
-                    "mentions": [
-                      {
-                        "assertion_id": 5,
-                        "text": "Amir Chen"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "other person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-A-17",
-                    "mentions": [
-                      {
-                        "assertion_id": 4,
-                        "text": "Amir Chen"
-                      },
-                      {
-                        "assertion_id": 7,
-                        "text": "the same Amir Chen with badge A-17"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event6"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "was invited speaker",
-                "support": {
-                  "assertion_id": 4,
-                  "text": "was an invited speaker"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-A-17",
-                    "mentions": [
-                      {
-                        "assertion_id": 4,
-                        "text": "Amir Chen"
-                      },
-                      {
-                        "assertion_id": 7,
-                        "text": "the same Amir Chen with badge A-17"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event7"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "was invited speaker",
-                "support": [
-                  {
-                    "assertion_id": 5,
-                    "text": "was an invited"
-                  },
-                  {
-                    "assertion_id": 6,
-                    "text": "speaker"
-                  }
-                ]
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-B-92",
-                    "mentions": [
-                      {
-                        "assertion_id": 5,
-                        "text": "Amir Chen"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event8"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "key": "speech-A-17-09",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "actually spoke",
-                "support": {
-                  "assertion_id": 4,
-                  "text": "spoke at 09:00"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-A-17",
-                    "mentions": [
-                      {
-                        "assertion_id": 4,
-                        "text": "Amir Chen"
-                      },
-                      {
-                        "assertion_id": 7,
-                        "text": "the same Amir Chen with badge A-17"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "time",
-                  "target": {
-                    "assertion_id": 4,
-                    "text": "09:00"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event9"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "key": "speech-B-92-10",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "actually spoke",
-                "support": {
-                  "assertion_id": 6,
-                  "text": "spoke at 10:00"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-B-92",
-                    "mentions": [
-                      {
-                        "assertion_id": 5,
-                        "text": "Amir Chen"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "time",
-                  "target": {
-                    "assertion_id": 6,
-                    "text": "10:00"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event10"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "key": "speech-A-17-14",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "actually spoke",
-                "support": [
-                  {
-                    "assertion_id": 7,
-                    "text": "spoke"
-                  },
-                  {
-                    "assertion_id": 8,
-                    "text": "again"
-                  }
-                ]
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-A-17",
-                    "mentions": [
-                      {
-                        "assertion_id": 4,
-                        "text": "Amir Chen"
-                      },
-                      {
-                        "assertion_id": 7,
-                        "text": "the same Amir Chen with badge A-17"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "time",
-                  "target": {
-                    "assertion_id": 7,
-                    "text": "14:00"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event11"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "person has badge",
-                "support": {
-                  "assertion_id": 9,
-                  "text": "badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-C-11",
-                    "mentions": [
-                      {
-                        "assertion_id": 9,
-                        "text": "Noor"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 9,
-                    "text": "C-11"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event12"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "attended",
-                "support": {
-                  "assertion_id": 9,
-                  "text": "attended"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-C-11",
-                    "mentions": [
-                      {
-                        "assertion_id": 9,
-                        "text": "Noor"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "event",
-                  "target": {
-                    "kind": "entity",
-                    "key": "forum",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Delta Forum"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "date",
-                  "target": {
-                    "kind": "entity",
-                    "key": "event-date",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "2026-05-10"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event13"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 9,
-                "text": "did not"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "actually spoke",
-                  "support": {
-                    "assertion_id": 9,
-                    "text": "speak"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "person",
-                    "target": {
-                      "kind": "entity",
-                      "key": "badge-C-11",
-                      "mentions": [
-                        {
-                          "assertion_id": 9,
-                          "text": "Noor"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "event",
-                    "target": {
-                      "kind": "entity",
-                      "key": "forum",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "Delta Forum"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "date",
-                    "target": {
-                      "kind": "entity",
-                      "key": "event-date",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "2026-05-10"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event14"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "person has badge",
-                "support": {
-                  "assertion_id": 11,
-                  "text": "badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "badge-D-08",
-                    "mentions": [
-                      {
-                        "assertion_id": 11,
-                        "text": "Sol",
-                        "occurrence": 0
-                      },
-                      {
-                        "assertion_id": 11,
-                        "text": "Sol",
-                        "occurrence": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 11,
-                    "text": "D-08"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event16"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "reported",
-              "support": {
-                "assertion_id": 10,
-                "text": "An announcement said that"
-              },
-              "reporter": {
-                "kind": "entity",
-                "key": "announcement",
-                "mentions": [
-                  {
-                    "assertion_id": 10,
-                    "text": "An announcement"
-                  }
-                ]
-              },
-              "content": {
-                "kind": "possible",
-                "support": {
-                  "assertion_id": 11,
-                  "text": "might"
-                },
-                "content": {
-                  "kind": "statement",
-                  "predicate": {
-                    "kind": "explicit",
-                    "reading": "actually spoke",
-                    "support": {
-                      "assertion_id": 11,
-                      "text": "speak"
-                    }
-                  },
-                  "arguments": [
-                    {
-                      "role": "person",
-                      "target": {
-                        "kind": "entity",
-                        "key": "badge-D-08",
-                        "mentions": [
-                          {
-                            "assertion_id": 11,
-                            "text": "Sol",
-                            "occurrence": 0
-                          },
-                          {
-                            "assertion_id": 11,
-                            "text": "Sol",
-                            "occurrence": 1
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "role": "event",
-                      "target": {
-                        "kind": "entity",
-                        "key": "forum",
-                        "mentions": [
-                          {
-                            "assertion_id": 1,
-                            "text": "Delta Forum"
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "role": "date",
-                      "target": {
-                        "kind": "entity",
-                        "key": "event-date",
-                        "mentions": [
-                          {
-                            "assertion_id": 1,
-                            "text": "2026-05-10"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              }
+              "kind": "content_ref",
+              "key": "event17"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 11,
-                "text": "no actual speech"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "witness recorded actual speech",
-                  "support": {
-                    "assertion_id": 11,
-                    "text": "recorded no actual speech by Sol"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "person",
-                    "target": {
-                      "kind": "entity",
-                      "key": "badge-D-08",
-                      "mentions": [
-                        {
-                          "assertion_id": 11,
-                          "text": "Sol",
-                          "occurrence": 0
-                        },
-                        {
-                          "assertion_id": 11,
-                          "text": "Sol",
-                          "occurrence": 1
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "record",
-                    "target": {
-                      "kind": "entity",
-                      "key": "notebook",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "Witness notebook"
-                        },
-                        {
-                          "assertion_id": 2,
-                          "text": "This notebook"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "event",
-                    "target": {
-                      "kind": "entity",
-                      "key": "forum",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "Delta Forum"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "date",
-                    "target": {
-                      "kind": "entity",
-                      "key": "event-date",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "2026-05-10"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event20"
             }
           }
-        ]
+        ],
+        "entities": [
+          {
+            "form": "entity",
+            "key": "entity0",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity1",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity2",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Witness notebook"
+              },
+              {
+                "assertion_id": 2,
+                "text": "This notebook"
+              }
+            ],
+            "semantic_key": "notebook"
+          },
+          {
+            "form": "entity",
+            "key": "entity3",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Witness notebook"
+              },
+              {
+                "assertion_id": 2,
+                "text": "This notebook"
+              }
+            ],
+            "semantic_key": "notebook"
+          },
+          {
+            "form": "entity",
+            "key": "entity4",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity5",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity6",
+            "mentions": [
+              {
+                "assertion_id": 4,
+                "text": "Amir Chen"
+              },
+              {
+                "assertion_id": 7,
+                "text": "the same Amir Chen with badge A-17"
+              }
+            ],
+            "semantic_key": "badge-A-17"
+          },
+          {
+            "form": "selection",
+            "key": "entity7",
+            "selection": {
+              "assertion_id": 4,
+              "text": "A-17"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity8",
+            "mentions": [
+              {
+                "assertion_id": 5,
+                "text": "Amir Chen"
+              }
+            ],
+            "semantic_key": "badge-B-92"
+          },
+          {
+            "form": "selection",
+            "key": "entity9",
+            "selection": {
+              "assertion_id": 5,
+              "text": "B-92"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity10",
+            "mentions": [
+              {
+                "assertion_id": 5,
+                "text": "Amir Chen"
+              }
+            ],
+            "semantic_key": "badge-B-92"
+          },
+          {
+            "form": "entity",
+            "key": "entity11",
+            "mentions": [
+              {
+                "assertion_id": 4,
+                "text": "Amir Chen"
+              },
+              {
+                "assertion_id": 7,
+                "text": "the same Amir Chen with badge A-17"
+              }
+            ],
+            "semantic_key": "badge-A-17"
+          },
+          {
+            "form": "entity",
+            "key": "entity12",
+            "mentions": [
+              {
+                "assertion_id": 4,
+                "text": "Amir Chen"
+              },
+              {
+                "assertion_id": 7,
+                "text": "the same Amir Chen with badge A-17"
+              }
+            ],
+            "semantic_key": "badge-A-17"
+          },
+          {
+            "form": "entity",
+            "key": "entity13",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity14",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity15",
+            "mentions": [
+              {
+                "assertion_id": 5,
+                "text": "Amir Chen"
+              }
+            ],
+            "semantic_key": "badge-B-92"
+          },
+          {
+            "form": "entity",
+            "key": "entity16",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity17",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity18",
+            "mentions": [
+              {
+                "assertion_id": 4,
+                "text": "Amir Chen"
+              },
+              {
+                "assertion_id": 7,
+                "text": "the same Amir Chen with badge A-17"
+              }
+            ],
+            "semantic_key": "badge-A-17"
+          },
+          {
+            "form": "entity",
+            "key": "entity19",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity20",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "selection",
+            "key": "entity21",
+            "selection": {
+              "assertion_id": 4,
+              "text": "09:00"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity22",
+            "mentions": [
+              {
+                "assertion_id": 5,
+                "text": "Amir Chen"
+              }
+            ],
+            "semantic_key": "badge-B-92"
+          },
+          {
+            "form": "entity",
+            "key": "entity23",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity24",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "selection",
+            "key": "entity25",
+            "selection": {
+              "assertion_id": 6,
+              "text": "10:00"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity26",
+            "mentions": [
+              {
+                "assertion_id": 4,
+                "text": "Amir Chen"
+              },
+              {
+                "assertion_id": 7,
+                "text": "the same Amir Chen with badge A-17"
+              }
+            ],
+            "semantic_key": "badge-A-17"
+          },
+          {
+            "form": "entity",
+            "key": "entity27",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity28",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "selection",
+            "key": "entity29",
+            "selection": {
+              "assertion_id": 7,
+              "text": "14:00"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity30",
+            "mentions": [
+              {
+                "assertion_id": 9,
+                "text": "Noor"
+              }
+            ],
+            "semantic_key": "badge-C-11"
+          },
+          {
+            "form": "selection",
+            "key": "entity31",
+            "selection": {
+              "assertion_id": 9,
+              "text": "C-11"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity32",
+            "mentions": [
+              {
+                "assertion_id": 9,
+                "text": "Noor"
+              }
+            ],
+            "semantic_key": "badge-C-11"
+          },
+          {
+            "form": "entity",
+            "key": "entity33",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity34",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity35",
+            "mentions": [
+              {
+                "assertion_id": 9,
+                "text": "Noor"
+              }
+            ],
+            "semantic_key": "badge-C-11"
+          },
+          {
+            "form": "entity",
+            "key": "entity36",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity37",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity38",
+            "mentions": [
+              {
+                "assertion_id": 11,
+                "text": "Sol",
+                "occurrence": 0
+              },
+              {
+                "assertion_id": 11,
+                "text": "Sol",
+                "occurrence": 1
+              }
+            ],
+            "semantic_key": "badge-D-08"
+          },
+          {
+            "form": "selection",
+            "key": "entity39",
+            "selection": {
+              "assertion_id": 11,
+              "text": "D-08"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity40",
+            "mentions": [
+              {
+                "assertion_id": 11,
+                "text": "Sol",
+                "occurrence": 0
+              },
+              {
+                "assertion_id": 11,
+                "text": "Sol",
+                "occurrence": 1
+              }
+            ],
+            "semantic_key": "badge-D-08"
+          },
+          {
+            "form": "entity",
+            "key": "entity41",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity42",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          },
+          {
+            "form": "entity",
+            "key": "entity43",
+            "mentions": [
+              {
+                "assertion_id": 10,
+                "text": "An announcement"
+              }
+            ],
+            "semantic_key": "announcement"
+          },
+          {
+            "form": "entity",
+            "key": "entity44",
+            "mentions": [
+              {
+                "assertion_id": 11,
+                "text": "Sol",
+                "occurrence": 0
+              },
+              {
+                "assertion_id": 11,
+                "text": "Sol",
+                "occurrence": 1
+              }
+            ],
+            "semantic_key": "badge-D-08"
+          },
+          {
+            "form": "entity",
+            "key": "entity45",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Witness notebook"
+              },
+              {
+                "assertion_id": 2,
+                "text": "This notebook"
+              }
+            ],
+            "semantic_key": "notebook"
+          },
+          {
+            "form": "entity",
+            "key": "entity46",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Delta Forum"
+              }
+            ],
+            "semantic_key": "forum"
+          },
+          {
+            "form": "entity",
+            "key": "entity47",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "2026-05-10"
+              }
+            ],
+            "semantic_key": "event-date"
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "statement",
+            "key": "event0",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "event held on date",
+              "support": {
+                "assertion_id": 1,
+                "text": "on"
+              }
+            },
+            "arguments": [
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity0"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity1"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event1",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "notebook contains only personally witnessed sessions",
+              "support": [
+                {
+                  "assertion_id": 2,
+                  "text": "contains only"
+                },
+                {
+                  "assertion_id": 3,
+                  "text": "sessions I personally witnessed"
+                }
+              ]
+            },
+            "arguments": [
+              {
+                "role": "notebook",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity2"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event2",
+            "support": {
+              "assertion_id": 3,
+              "text": "not a complete list of speakers"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event3"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event3",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "notebook is complete list of speakers",
+              "support": {
+                "assertion_id": 3,
+                "text": "a complete list of speakers"
+              }
+            },
+            "arguments": [
+              {
+                "role": "notebook",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity3"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity4"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity5"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event4",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "speaker has badge",
+              "support": {
+                "assertion_id": 4,
+                "text": "speaker badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity6"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity7"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event5",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "speaker has badge",
+              "support": {
+                "assertion_id": 5,
+                "text": "speaker badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity8"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity9"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event6",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "is a different person from",
+              "support": {
+                "assertion_id": 5,
+                "text": "A different person"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity10"
+                }
+              },
+              {
+                "role": "other person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity11"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event7",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "was invited speaker",
+              "support": {
+                "assertion_id": 4,
+                "text": "was an invited speaker"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity12"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity13"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity14"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event8",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "was invited speaker",
+              "support": [
+                {
+                  "assertion_id": 5,
+                  "text": "was an invited"
+                },
+                {
+                  "assertion_id": 6,
+                  "text": "speaker"
+                }
+              ]
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity15"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity16"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity17"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event9",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "actually spoke",
+              "support": {
+                "assertion_id": 4,
+                "text": "spoke at 09:00"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity18"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity19"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity20"
+                }
+              },
+              {
+                "role": "time",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity21"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event10",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "actually spoke",
+              "support": {
+                "assertion_id": 6,
+                "text": "spoke at 10:00"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity22"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity23"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity24"
+                }
+              },
+              {
+                "role": "time",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity25"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event11",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "actually spoke",
+              "support": [
+                {
+                  "assertion_id": 7,
+                  "text": "spoke"
+                },
+                {
+                  "assertion_id": 8,
+                  "text": "again"
+                }
+              ]
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity26"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity27"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity28"
+                }
+              },
+              {
+                "role": "time",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity29"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event12",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "person has badge",
+              "support": {
+                "assertion_id": 9,
+                "text": "badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity30"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity31"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event13",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "attended",
+              "support": {
+                "assertion_id": 9,
+                "text": "attended"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity32"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity33"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity34"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event14",
+            "support": {
+              "assertion_id": 9,
+              "text": "did not"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event15"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event15",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "actually spoke",
+              "support": {
+                "assertion_id": 9,
+                "text": "speak"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity35"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity36"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity37"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event16",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "person has badge",
+              "support": {
+                "assertion_id": 11,
+                "text": "badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity38"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity39"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "reported",
+            "key": "event17",
+            "support": {
+              "assertion_id": 10,
+              "text": "An announcement said that"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event18"
+            },
+            "reporter": {
+              "kind": "entity_ref",
+              "key": "entity43"
+            }
+          },
+          {
+            "kind": "possible",
+            "key": "event18",
+            "support": {
+              "assertion_id": 11,
+              "text": "might"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event19"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event19",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "actually spoke",
+              "support": {
+                "assertion_id": 11,
+                "text": "speak"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity40"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity41"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity42"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event20",
+            "support": {
+              "assertion_id": 11,
+              "text": "no actual speech"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event21"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event21",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "witness recorded actual speech",
+              "support": {
+                "assertion_id": 11,
+                "text": "recorded no actual speech by Sol"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity44"
+                }
+              },
+              {
+                "role": "record",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity45"
+                }
+              },
+              {
+                "role": "event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity46"
+                }
+              },
+              {
+                "role": "date",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity47"
+                }
+              }
+            ],
+            "qualifications": []
+          }
+        ],
+        "gaps": []
       }
     }
   },
@@ -1271,7 +1778,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v7",
+      "contract": "source-semantic-proposal-v8",
       "outcome": {
         "status": "interpreted"
       },
@@ -1280,209 +1787,321 @@
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "employee has badge",
-                "support": {
-                  "assertion_id": 2,
-                  "text": "badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "person",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employee",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "Rana Sethi"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "her",
-                        "occurrence": 0
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "her",
-                        "occurrence": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 2,
-                    "text": "L-19"
-                  }
-                },
-                {
-                  "role": "employer",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employer",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "there"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event0"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "exact elapsed interval from joining employer to promotion there in calendar scope",
-                "support": [
-                  {
-                    "assertion_id": 3,
-                    "text": "elapsed interval between her joining Larch Studio and her promotion there"
-                  },
-                  {
-                    "assertion_id": 4,
-                    "text": "exactly twelve UTC days"
-                  }
-                ]
-              },
-              "arguments": [
-                {
-                  "role": "employee",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employee",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "Rana Sethi"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "her",
-                        "occurrence": 0
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "her",
-                        "occurrence": 1
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "employer",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employer",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "there"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "elapsed value",
-                  "target": {
-                    "assertion_id": 4,
-                    "text": "twelve"
-                  }
-                },
-                {
-                  "role": "unit",
-                  "target": {
-                    "assertion_id": 4,
-                    "text": "UTC days"
-                  }
-                },
-                {
-                  "role": "from event",
-                  "target": {
-                    "assertion_id": 3,
-                    "text": "joining Larch Studio"
-                  }
-                },
-                {
-                  "role": "to event",
-                  "target": {
-                    "assertion_id": 3,
-                    "text": "promotion there"
-                  }
-                },
-                {
-                  "role": "calendar scope",
-                  "target": {
-                    "assertion_id": 4,
-                    "text": "June 2026"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event1"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 5,
-                "text": "not"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "summary records event dates",
-                  "support": {
-                    "assertion_id": 5,
-                    "text": "recorded"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "dates",
-                    "target": {
-                      "assertion_id": 5,
-                      "text": "The two event dates"
-                    }
-                  },
-                  {
-                    "role": "record",
-                    "target": {
-                      "assertion_id": 6,
-                      "text": "this summary"
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event2"
             }
           }
-        ]
+        ],
+        "entities": [
+          {
+            "form": "entity",
+            "key": "entity0",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "Rana Sethi"
+              },
+              {
+                "assertion_id": 3,
+                "text": "her",
+                "occurrence": 0
+              },
+              {
+                "assertion_id": 3,
+                "text": "her",
+                "occurrence": 1
+              }
+            ],
+            "semantic_key": "employee"
+          },
+          {
+            "form": "selection",
+            "key": "entity1",
+            "selection": {
+              "assertion_id": 2,
+              "text": "L-19"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity2",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "there"
+              }
+            ],
+            "semantic_key": "employer"
+          },
+          {
+            "form": "entity",
+            "key": "entity3",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "Rana Sethi"
+              },
+              {
+                "assertion_id": 3,
+                "text": "her",
+                "occurrence": 0
+              },
+              {
+                "assertion_id": 3,
+                "text": "her",
+                "occurrence": 1
+              }
+            ],
+            "semantic_key": "employee"
+          },
+          {
+            "form": "entity",
+            "key": "entity4",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "there"
+              }
+            ],
+            "semantic_key": "employer"
+          },
+          {
+            "form": "selection",
+            "key": "entity5",
+            "selection": {
+              "assertion_id": 4,
+              "text": "twelve"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity6",
+            "selection": {
+              "assertion_id": 4,
+              "text": "UTC days"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity7",
+            "selection": {
+              "assertion_id": 3,
+              "text": "joining Larch Studio"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity8",
+            "selection": {
+              "assertion_id": 3,
+              "text": "promotion there"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity9",
+            "selection": {
+              "assertion_id": 4,
+              "text": "June 2026"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity10",
+            "selection": {
+              "assertion_id": 5,
+              "text": "The two event dates"
+            }
+          },
+          {
+            "form": "selection",
+            "key": "entity11",
+            "selection": {
+              "assertion_id": 6,
+              "text": "this summary"
+            }
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "statement",
+            "key": "event0",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "employee has badge",
+              "support": {
+                "assertion_id": 2,
+                "text": "badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "person",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity0"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity1"
+                }
+              },
+              {
+                "role": "employer",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity2"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event1",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "exact elapsed interval from joining employer to promotion there in calendar scope",
+              "support": [
+                {
+                  "assertion_id": 3,
+                  "text": "elapsed interval between her joining Larch Studio and her promotion there"
+                },
+                {
+                  "assertion_id": 4,
+                  "text": "exactly twelve UTC days"
+                }
+              ]
+            },
+            "arguments": [
+              {
+                "role": "employee",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity3"
+                }
+              },
+              {
+                "role": "employer",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity4"
+                }
+              },
+              {
+                "role": "elapsed value",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity5"
+                }
+              },
+              {
+                "role": "unit",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity6"
+                }
+              },
+              {
+                "role": "from event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity7"
+                }
+              },
+              {
+                "role": "to event",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity8"
+                }
+              },
+              {
+                "role": "calendar scope",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity9"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event2",
+            "support": {
+              "assertion_id": 5,
+              "text": "not"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event3"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event3",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "summary records event dates",
+              "support": {
+                "assertion_id": 5,
+                "text": "recorded"
+              }
+            },
+            "arguments": [
+              {
+                "role": "dates",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity10"
+                }
+              },
+              {
+                "role": "record",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity11"
+                }
+              }
+            ],
+            "qualifications": []
+          }
+        ],
+        "gaps": []
       }
     }
   },
@@ -1502,7 +2121,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v7",
+      "contract": "source-semantic-proposal-v8",
       "outcome": {
         "status": "interpreted"
       },
@@ -1511,183 +2130,264 @@
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "employee has badge in this note",
-                "support": {
-                  "assertion_id": 2,
-                  "text": "employee badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "employee",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employee",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "Rana Sethi"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 2,
-                    "text": "L-19"
-                  }
-                },
-                {
-                  "role": "employer",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employer",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "Larch Studio"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "record",
-                  "target": {
-                    "kind": "entity",
-                    "key": "note",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "joining note"
-                      },
-                      {
-                        "assertion_id": 2,
-                        "text": "this note"
-                      },
-                      {
-                        "assertion_id": 4,
-                        "text": "This note"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event0"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "key": "joining-event",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "joined employer at timestamp",
-                "support": {
-                  "assertion_id": 2,
-                  "text": "joined"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "employee",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employee",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "Rana Sethi"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "employer",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employer",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "Larch Studio"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "timestamp",
-                  "target": {
-                    "assertion_id": 3,
-                    "text": "2026-06-01 00:00 UTC"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event1"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 4,
-                "text": "records no"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "note records event",
-                  "support": {
-                    "assertion_id": 4,
-                    "text": "records"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "record",
-                    "target": {
-                      "kind": "entity",
-                      "key": "note",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "joining note"
-                        },
-                        {
-                          "assertion_id": 2,
-                          "text": "this note"
-                        },
-                        {
-                          "assertion_id": 4,
-                          "text": "This note"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "event type",
-                    "target": {
-                      "assertion_id": 4,
-                      "text": "promotion event"
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event2"
             }
           }
-        ]
+        ],
+        "entities": [
+          {
+            "form": "entity",
+            "key": "entity0",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "Rana Sethi"
+              }
+            ],
+            "semantic_key": "employee"
+          },
+          {
+            "form": "selection",
+            "key": "entity1",
+            "selection": {
+              "assertion_id": 2,
+              "text": "L-19"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity2",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "Larch Studio"
+              }
+            ],
+            "semantic_key": "employer"
+          },
+          {
+            "form": "entity",
+            "key": "entity3",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "joining note"
+              },
+              {
+                "assertion_id": 2,
+                "text": "this note"
+              },
+              {
+                "assertion_id": 4,
+                "text": "This note"
+              }
+            ],
+            "semantic_key": "note"
+          },
+          {
+            "form": "entity",
+            "key": "entity4",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "Rana Sethi"
+              }
+            ],
+            "semantic_key": "employee"
+          },
+          {
+            "form": "entity",
+            "key": "entity5",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "Larch Studio"
+              }
+            ],
+            "semantic_key": "employer"
+          },
+          {
+            "form": "selection",
+            "key": "entity6",
+            "selection": {
+              "assertion_id": 3,
+              "text": "2026-06-01 00:00 UTC"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity7",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "joining note"
+              },
+              {
+                "assertion_id": 2,
+                "text": "this note"
+              },
+              {
+                "assertion_id": 4,
+                "text": "This note"
+              }
+            ],
+            "semantic_key": "note"
+          },
+          {
+            "form": "selection",
+            "key": "entity8",
+            "selection": {
+              "assertion_id": 4,
+              "text": "promotion event"
+            }
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "statement",
+            "key": "event0",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "employee has badge in this note",
+              "support": {
+                "assertion_id": 2,
+                "text": "employee badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "employee",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity0"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity1"
+                }
+              },
+              {
+                "role": "employer",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity2"
+                }
+              },
+              {
+                "role": "record",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity3"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event1",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "joined employer at timestamp",
+              "support": {
+                "assertion_id": 2,
+                "text": "joined"
+              }
+            },
+            "arguments": [
+              {
+                "role": "employee",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity4"
+                }
+              },
+              {
+                "role": "employer",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity5"
+                }
+              },
+              {
+                "role": "timestamp",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity6"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event2",
+            "support": {
+              "assertion_id": 4,
+              "text": "records no"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event3"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event3",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "note records event",
+              "support": {
+                "assertion_id": 4,
+                "text": "records"
+              }
+            },
+            "arguments": [
+              {
+                "role": "record",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity7"
+                }
+              },
+              {
+                "role": "event type",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity8"
+                }
+              }
+            ],
+            "qualifications": []
+          }
+        ],
+        "gaps": []
       }
     }
   },
@@ -1708,7 +2408,7 @@
       "producer_version": "1"
     },
     "proposal": {
-      "contract": "source-semantic-proposal-v7",
+      "contract": "source-semantic-proposal-v8",
       "outcome": {
         "status": "interpreted"
       },
@@ -1717,198 +2417,276 @@
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "employee has badge in this note",
-                "support": {
-                  "assertion_id": 2,
-                  "text": "employee badge"
-                }
-              },
-              "arguments": [
-                {
-                  "role": "employee",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employee",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "Rana Sethi"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "badge",
-                  "target": {
-                    "assertion_id": 2,
-                    "text": "L-19"
-                  }
-                },
-                {
-                  "role": "employer",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employer",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "Larch Studio"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "record",
-                  "target": {
-                    "kind": "entity",
-                    "key": "note",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "promotion note"
-                      },
-                      {
-                        "assertion_id": 2,
-                        "text": "this note"
-                      },
-                      {
-                        "assertion_id": 4,
-                        "text": "This note"
-                      }
-                    ]
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event0"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "statement",
-              "key": "promotion-event",
-              "predicate": {
-                "kind": "explicit",
-                "reading": "was promoted at employer at timestamp",
-                "support": [
-                  {
-                    "assertion_id": 2,
-                    "text": "was"
-                  },
-                  {
-                    "assertion_id": 3,
-                    "text": "promoted"
-                  }
-                ]
-              },
-              "arguments": [
-                {
-                  "role": "employee",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employee",
-                    "mentions": [
-                      {
-                        "assertion_id": 2,
-                        "text": "Rana Sethi"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "employer",
-                  "target": {
-                    "kind": "entity",
-                    "key": "employer",
-                    "mentions": [
-                      {
-                        "assertion_id": 1,
-                        "text": "Larch Studio"
-                      },
-                      {
-                        "assertion_id": 3,
-                        "text": "Larch Studio"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "role": "timestamp",
-                  "target": {
-                    "assertion_id": 3,
-                    "text": "2026-06-13 00:00 UTC"
-                  }
-                }
-              ]
+              "kind": "content_ref",
+              "key": "event1"
             }
           },
           {
             "act": "assertion",
             "expression": {
-              "kind": "not",
-              "support": {
-                "assertion_id": 4,
-                "text": "records no"
-              },
-              "content": {
-                "kind": "statement",
-                "predicate": {
-                  "kind": "explicit",
-                  "reading": "note records event",
-                  "support": {
-                    "assertion_id": 4,
-                    "text": "records"
-                  }
-                },
-                "arguments": [
-                  {
-                    "role": "record",
-                    "target": {
-                      "kind": "entity",
-                      "key": "note",
-                      "mentions": [
-                        {
-                          "assertion_id": 1,
-                          "text": "promotion note"
-                        },
-                        {
-                          "assertion_id": 2,
-                          "text": "this note"
-                        },
-                        {
-                          "assertion_id": 4,
-                          "text": "This note"
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "role": "event type",
-                    "target": {
-                      "kind": "entity",
-                      "mentions": [
-                        {
-                          "assertion_id": 4,
-                          "text": "joining"
-                        },
-                        {
-                          "assertion_id": 5,
-                          "text": "event"
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
+              "kind": "content_ref",
+              "key": "event2"
             }
           }
-        ]
+        ],
+        "entities": [
+          {
+            "form": "entity",
+            "key": "entity0",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "Rana Sethi"
+              }
+            ],
+            "semantic_key": "employee"
+          },
+          {
+            "form": "selection",
+            "key": "entity1",
+            "selection": {
+              "assertion_id": 2,
+              "text": "L-19"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity2",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "Larch Studio"
+              }
+            ],
+            "semantic_key": "employer"
+          },
+          {
+            "form": "entity",
+            "key": "entity3",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "promotion note"
+              },
+              {
+                "assertion_id": 2,
+                "text": "this note"
+              },
+              {
+                "assertion_id": 4,
+                "text": "This note"
+              }
+            ],
+            "semantic_key": "note"
+          },
+          {
+            "form": "entity",
+            "key": "entity4",
+            "mentions": [
+              {
+                "assertion_id": 2,
+                "text": "Rana Sethi"
+              }
+            ],
+            "semantic_key": "employee"
+          },
+          {
+            "form": "entity",
+            "key": "entity5",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "Larch Studio"
+              },
+              {
+                "assertion_id": 3,
+                "text": "Larch Studio"
+              }
+            ],
+            "semantic_key": "employer"
+          },
+          {
+            "form": "selection",
+            "key": "entity6",
+            "selection": {
+              "assertion_id": 3,
+              "text": "2026-06-13 00:00 UTC"
+            }
+          },
+          {
+            "form": "entity",
+            "key": "entity7",
+            "mentions": [
+              {
+                "assertion_id": 1,
+                "text": "promotion note"
+              },
+              {
+                "assertion_id": 2,
+                "text": "this note"
+              },
+              {
+                "assertion_id": 4,
+                "text": "This note"
+              }
+            ],
+            "semantic_key": "note"
+          },
+          {
+            "form": "entity",
+            "key": "entity8",
+            "mentions": [
+              {
+                "assertion_id": 4,
+                "text": "joining"
+              },
+              {
+                "assertion_id": 5,
+                "text": "event"
+              }
+            ]
+          }
+        ],
+        "nodes": [
+          {
+            "kind": "statement",
+            "key": "event0",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "employee has badge in this note",
+              "support": {
+                "assertion_id": 2,
+                "text": "employee badge"
+              }
+            },
+            "arguments": [
+              {
+                "role": "employee",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity0"
+                }
+              },
+              {
+                "role": "badge",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity1"
+                }
+              },
+              {
+                "role": "employer",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity2"
+                }
+              },
+              {
+                "role": "record",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity3"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "statement",
+            "key": "event1",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "was promoted at employer at timestamp",
+              "support": [
+                {
+                  "assertion_id": 2,
+                  "text": "was"
+                },
+                {
+                  "assertion_id": 3,
+                  "text": "promoted"
+                }
+              ]
+            },
+            "arguments": [
+              {
+                "role": "employee",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity4"
+                }
+              },
+              {
+                "role": "employer",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity5"
+                }
+              },
+              {
+                "role": "timestamp",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity6"
+                }
+              }
+            ],
+            "qualifications": []
+          },
+          {
+            "kind": "not",
+            "key": "event2",
+            "support": {
+              "assertion_id": 4,
+              "text": "records no"
+            },
+            "content": {
+              "kind": "content_ref",
+              "key": "event3"
+            }
+          },
+          {
+            "kind": "statement",
+            "key": "event3",
+            "predicate": {
+              "kind": "explicit",
+              "reading": "note records event",
+              "support": {
+                "assertion_id": 4,
+                "text": "records"
+              }
+            },
+            "arguments": [
+              {
+                "role": "record",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity7"
+                }
+              },
+              {
+                "role": "event type",
+                "target": {
+                  "kind": "entity_ref",
+                  "key": "entity8"
+                }
+              }
+            ],
+            "qualifications": []
+          }
+        ],
+        "gaps": []
       }
     }
   }

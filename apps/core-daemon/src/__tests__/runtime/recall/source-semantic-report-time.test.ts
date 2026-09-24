@@ -23,21 +23,28 @@ function quote(text: string) { return { assertion_id: 1, text }; }
 function reportDraft(_catalog: SourceReferenceCatalog) {
   const received = proposeSourceSemantics({ sourceCorpus: SOURCE, assertionIds: [1],
     source_id: "report-time-source", source_version: "1", producer_id: "authored-control", producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-    content: { roots: [{ act: "assertion", expression: { kind: "statement",
-      predicate: { kind: "explicit", reading: "tell", support: quote("told") },
-      arguments: [
-        { role: "speaker", target: quote("Mira") },
-        { role: "recipient", target: quote("me") },
-        { role: "date", target: quote("8 June 2026") },
-        { role: "content", support: quote("Oren inspected"), target: { kind: "statement",
-          predicate: { kind: "explicit", reading: "inspect", support: quote("inspected") },
+  { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+    content: {
+      roots: [{ act: "assertion", expression: { kind: "content_ref", key: "telling" } }],
+      entities: ["Mira", "me", "8 June 2026", "Oren", "valve", "6 June 2026"].map((text, index) => ({
+        form: "selection", key: `participant${index}`, selection: quote(text)
+      })),
+      nodes: [
+        { kind: "statement", key: "telling", predicate: { kind: "explicit", reading: "tell", support: quote("told") },
           arguments: [
-            { role: "agent", target: quote("Oren") },
-            { role: "theme", target: quote("valve") },
-            { role: "date", target: quote("6 June 2026") }
-          ] } }
-      ] } }] } }) });
+            { role: "speaker", target: { kind: "entity_ref", key: "participant0" } },
+            { role: "recipient", target: { kind: "entity_ref", key: "participant1" } },
+            { role: "date", target: { kind: "entity_ref", key: "participant2" } },
+            { role: "content", support: quote("Oren inspected"), target: { kind: "content_ref", key: "inspection" } }
+          ], qualifications: [] },
+        { kind: "statement", key: "inspection", predicate: { kind: "explicit", reading: "inspect", support: quote("inspected") },
+          arguments: [
+            { role: "agent", target: { kind: "entity_ref", key: "participant3" } },
+            { role: "theme", target: { kind: "entity_ref", key: "participant4" } },
+            { role: "date", target: { kind: "entity_ref", key: "participant5" } }
+          ], qualifications: [] }
+      ], gaps: []
+    } }) });
   if (received.draft === undefined || received.interpretation === undefined) {
     throw new Error(`authored source packet failed: ${JSON.stringify(received.outcome)}`);
   }

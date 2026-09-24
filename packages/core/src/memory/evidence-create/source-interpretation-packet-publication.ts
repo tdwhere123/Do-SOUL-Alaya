@@ -2,17 +2,14 @@ import {
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type RequestBudget, canonicalJson, buildSourceReferenceCatalog, sourceReferenceResolver, assertSourceInterpretationPacketProfile, SourceInterpretationPacketSchema,
   PublishedSourceInterpretationPacketSchema, sourceRecallTarget, sourceEvidenceRootTarget,
   normalizeSourceSemantics, sourceSemanticInterpretationIdentity, sourceSemanticStanceLists,
-  retainedSourceSemanticInterpretationIdentity, RetainedSourceSemanticPublishedInterpretationSchema,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SourceRecordIdentitySchema, verifySourceRecordIdentity,
-  hashContentDigest,
   type SourceRecordIdentity, type SourceEvidenceTarget,
   SourceReferenceCatalogSchema, SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema,
   type PublishedSourceInterpretationPacket, type FieldContractSha256,
   type SourceReferenceCatalog, type SourceSemanticInterpretation,
   type SourceSemanticPublishedInterpretation
 } from "@do-soul/alaya-protocol";
-import { bindSourceSemanticLocations, verifySourceSemanticLocations,
-  verifyRetainedSourceSemanticLocations } from "./source-semantic-location.js";
+import { bindSourceSemanticLocations, verifySourceSemanticLocations } from "./source-semantic-location.js";
 import { CoreError } from "../../shared/errors.js";
 import type { FieldFormationStores, StoredSourceRecord } from "./field-stores.js";
 import type { EvidenceService } from "../evidence-service.js";
@@ -304,49 +301,6 @@ export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "
       { details: { admission: "filtered", reason: "retired_interpretation" } });
   }
   return verifyStoredSourceSemanticInterpretation(owner, bound, workspaceId);
-}
-
-/** Exact retained evidence inspection; its result carries no current execution eligibility. */
-export function verifyRetainedPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
-  value: unknown, workspaceId: string) {
-  const current = SourceSemanticPublishedInterpretationSchema.safeParse(value);
-  if (current.success) return { eligibility: "retained_only" as const,
-    verification: verifyLocatedSourceSemanticInterpretation(owner, current.data, workspaceId,
-      resolveRetainedInterpretationSource(owner, current.data.source_target.root_id, workspaceId)) };
-  const bound = RetainedSourceSemanticPublishedInterpretationSchema.parse(value);
-  if (retainedSourceSemanticInterpretationIdentity(bound.interpretation, owner.sha256) !== bound.interpretation_id) {
-    throw new CoreError("VALIDATION", "retained interpretation identity mismatch");
-  }
-  const stored = resolveRetainedInterpretationSource(owner, bound.source_target.root_id, workspaceId);
-  const record = stored.record;
-  const target = sourceRecallTarget({ workspace_id: workspaceId, root_kind: "source_record",
-    root_id: record.identity, source_version: record.source_version, content_digest: record.content_digest,
-    evidence_object_id: record.evidence_object_id });
-  if (canonicalJson(target) !== canonicalJson(sourceEvidenceRootTarget(bound.source_target)) ||
-      bound.interpretation.source.source_id !== record.source_id ||
-      bound.interpretation.source.source_version !== record.source_version ||
-      bound.interpretation.source.content_digest !== record.content_digest) {
-    throw new CoreError("VALIDATION", "retained interpretation source binding mismatch");
-  }
-  const located = verifyRetainedSourceSemanticLocations(stored.content_bytes, bound.interpretation, owner.sha256, owner.meter);
-  if (canonicalJson(located) !== canonicalJson(bound.interpretation)) {
-    throw new CoreError("VALIDATION", "retained interpretation source locations differ");
-  }
-  return { eligibility: "retained_only" as const, verification: { bound, stored } };
-}
-
-function resolveRetainedInterpretationSource(owner: Pick<Owner, "stores" | "sha256">,
-  recordId: string, workspaceId: string): StoredSourceRecord {
-  const stored = owner.stores.getStoredRecord(workspaceId, recordId);
-  if (stored === null) throw new CoreError("VALIDATION", "retained interpretation source is unavailable");
-  const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse(stored.record), owner.sha256);
-  if (record.workspace_id !== workspaceId || record.identity !== recordId) {
-    throw new CoreError("VALIDATION", "retained interpretation source identity mismatch");
-  }
-  if (hashContentDigest(stored.content_bytes, owner.sha256) !== record.content_digest) {
-    throw new CoreError("OBLIGATION_VIOLATION", "stored source body does not match its digest");
-  }
-  return { record, content_bytes: stored.content_bytes };
 }
 
 function verifyStoredSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,

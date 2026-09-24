@@ -7,7 +7,7 @@ import * as core from "@do-soul/alaya-core";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, hashLabeledIdentity,
-  indexEntryCacheKey, materializeSourceSemanticCompactProposal,
+  indexEntryCacheKey, materializeSourceSemanticTableProposal,
   type SourceSemanticCorrespondence, type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SoulInterpretationResponse,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
@@ -71,22 +71,22 @@ function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
   return { assertion_id: assertionId, text };
 }
 
-function compactUse(catalog: SourceReferenceCatalog, assertionId = 1) {
+function tableUse(catalog: SourceReferenceCatalog, assertionId = 1) {
   return {
-    contract: "source-semantic-proposal-v7" as const,
+    contract: "source-semantic-proposal-v8" as const,
     outcome: { status: "interpreted" as const },
     content: {
-      roots: [{
-        act: "assertion" as const,
-        expression: {
-          kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: "use", support: quote(catalog, "uses", assertionId) },
-          arguments: [
-            { role: "agent", target: quote(catalog, "Alice", assertionId) },
-            { role: "theme", target: quote(catalog, "tools", assertionId) }
-          ]
-        }
-      }]
+      roots: [{ act: "assertion" as const, expression: { kind: "content_ref" as const, key: "use" } }],
+      entities: [
+        { form: "selection" as const, key: "actor", selection: quote(catalog, "Alice", assertionId) },
+        { form: "selection" as const, key: "theme", selection: quote(catalog, "tools", assertionId) }
+      ],
+      nodes: [{ kind: "statement" as const, key: "use",
+        predicate: { kind: "explicit" as const, reading: "use", support: quote(catalog, "uses", assertionId) },
+        arguments: [
+          { role: "agent", target: { kind: "entity_ref" as const, key: "actor" } },
+          { role: "theme", target: { kind: "entity_ref" as const, key: "theme" } }
+        ], qualifications: [] }], gaps: []
     }
   };
 }
@@ -97,7 +97,7 @@ function receiveInterpretation(source: string, sourceId: string, raw: object, as
     producer_id: "test-author", producer_version: "p1"
   }, { rawJson: JSON.stringify(raw) });
   if (received.outcome.status !== "interpreted" || received.draft === undefined || received.interpretation === undefined) {
-    throw new Error(`compact receive failed: ${JSON.stringify(received.outcome)}`);
+    throw new Error(`table receive failed: ${JSON.stringify(received.outcome)}`);
   }
   return { ...received, draft: received.draft, interpretation: received.interpretation };
 }
@@ -421,7 +421,7 @@ it.each([0, 5000])("measures a published source through reopened public recall a
   await withHost([{ id: "artifact-alice", content: source }, { id: "artifact-silent", content: SILENT }, ...distractors], async (session, filename) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveInterpretation(source, "artifact-alice", compactUse(prepared.catalog, assertionId), [assertionId]).draft, "p1");
+      receiveInterpretation(source, "artifact-alice", tableUse(prepared.catalog, assertionId), [assertionId]).draft, "p1");
     await closeSession(session, filename);
     const reopened = await openSession(filename);
     try {
@@ -524,7 +524,7 @@ it("keeps a late gold root unavailable after native source access stops while pr
   await withHost(sources, async (session, filename, roots) => {
     const prepared = await prepareSource(session.handler, session.context, "00-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveInterpretation(ALICE, "00-alice", compactUse(prepared.catalog)).draft, "p1");
+      receiveInterpretation(ALICE, "00-alice", tableUse(prepared.catalog)).draft, "p1");
     const lateGold = { ...sourceGoldUnitFromPublishedRoot(published.source_target), root_id: roots["zz-gold"]! };
     await closeSession(session, filename);
     const reopened = await openSession(filename);
@@ -678,7 +678,7 @@ it("retains both semantic correspondence witnesses within one occupied source wh
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
+      receiveInterpretation(ALICE, "artifact-alice", tableUse(prepared.catalog)).draft, "p1");
     const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
     const firstCorrespondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
     const rows = useCorrespondences(published.interpretation);
@@ -730,7 +730,7 @@ it("accepts eleven duplicate semantic_correspondences without overflowing proofs
   await withHost([{ id: "artifact-alice", content: ALICE }, { id: "artifact-silent", content: SILENT }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-alice");
     const published = await proposeDraft(session.handler, session.context, prepared.source_handle,
-      receiveInterpretation(ALICE, "artifact-alice", compactUse(prepared.catalog)).draft, "p1");
+      receiveInterpretation(ALICE, "artifact-alice", tableUse(prepared.catalog)).draft, "p1");
     const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
     const semantic_correspondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
     const recalled = await workerRecall(session, semantics, Array.from({ length: 11 }, () => semantic_correspondence));
@@ -829,27 +829,26 @@ it("keeps native and public source previews on UTF-8 boundaries", async () => {
   });
 }, 60000);
 
-it("proposes compact assertion-two raw through the prepared multi-sentence catalog", async () => {
+it("proposes table assertion-two raw through the prepared multi-sentence catalog", async () => {
   await withHost([{ id: "artifact-multi", content: MULTI }], async (session) => {
     const prepared = await prepareSource(session.handler, session.context, "artifact-multi");
     expect(prepared.catalog.assertions.map((row) => row.assertion_id)).toEqual([1, 2]);
     expect(segment(prepared.catalog, "remains", 2).startsWith("a2s")).toBe(true);
     const raw = {
-      contract: "source-semantic-proposal-v4" as const,
+      contract: "source-semantic-proposal-v8" as const,
       outcome: { status: "interpreted" as const },
       content: {
-        roots: [{
-          act: "assertion" as const,
-          expression: {
-            kind: "statement" as const,
-            predicate: { kind: "explicit" as const, reading: "remain", at: segment(prepared.catalog, "remains", 2) },
-            arguments: [{ role: "theme", target: segment(prepared.catalog, "clause", 2) }]
-          }
-        }]
+        roots: [{ act: "assertion" as const, expression: { kind: "content_ref" as const, key: "event" } }],
+        entities: [{ form: "selection" as const, key: "theme", semantic_key: "clause",
+          selection: { assertion_id: 2, text: "clause" } }],
+        nodes: [{ kind: "statement" as const, key: "event",
+          predicate: { kind: "explicit" as const, reading: "remain", support: { assertion_id: 2, text: "remains" } },
+          arguments: [{ role: "theme", target: { kind: "entity_ref" as const, key: "theme" } }],
+          qualifications: [] }], gaps: []
       }
     };
-    expect(JSON.stringify(raw)).toMatch(/a2s/);
-    const draft = materializeSourceSemanticCompactProposal(raw).draft;
+    const draft = materializeSourceSemanticTableProposal(raw,
+      { catalog: prepared.catalog, sha256: fieldContractSha256 }).draft;
     expect(draft?.mentions.some((row) => row.source_ref.first.startsWith("a2s"))).toBe(true);
     const mcp = await callAlayaMcpMemoryTool(
       { memoryToolHandler: session.handler, contextProvider: () => session.context },

@@ -845,44 +845,31 @@ the canonical interpretation and source response envelope. The attribution cutov
 adds required source-binding attribution and published envelope v5; the source
 response envelope remains v5. Current SOUL request, receive, prompt, schema and
 revision admission require the v8 table request, source units, explicit
-host assertion locations and normalizer-v5. Recorded earlier producer proposals
-and marker-absent normalizer-v3 requests retain their original prompt, schema,
-request and response identities through explicit retained verification only.
-That result is ineligible for new generation, executable cache reuse, import,
-revision preparation, publication and conditional execution. This narrows the
-exported reader APIs; callers inspecting archives must select the retained
-entry and cannot pass its result to a current consumer.
-The current SOUL exports `parseSourceSemanticRequest`,
-`sourceSemanticSystemPrompt`, `sourceSemanticResponseJsonSchema`,
-`receiveSourceSemantics` now reject historical source requests. The current
-official API schema preimage no longer reconstructs their historical schema.
-Historical source records with absent or null attribution remain distinguishable
-from a new explicit `unknown` value. The named retained H reader preserves the
-old source-binding shape and published v4 identity preimage for envelopes v1–v5;
-it is read-only and cannot feed current publication, worker discovery or proof.
-Current H publication requires envelope v6 and published v5 identity. Old Q, H,
-correspondence and cache identities do not gain current authority merely by
-decoding or by replaying their recorded bytes.
-Bench owns the corresponding current request-line,
-Batch, cache and fill gates. Its retained inspectors use SOUL's explicit
-`parseRetainedSourceSemanticRequest`, `retainedSourceSemanticSystemPrompt`,
-`retainedSourceSemanticResponseJsonSchema`,
-`retainedOfficialApiExtractionResponseSchemaPreimage`,
-`verifyRetainedSourceSemantics` and `verifyRetainedEmptySourceSemantics` only
-to reconstruct recorded identities. Core's
-`verifyRetainedPublishedSourceSemanticInterpretation` is likewise read-only;
-the current published verifier is the worker's eligibility gate. The narrowed
-behavior is a major-level API change for consumers of these exported readers
-under invariant §25; this local change does not publish a package version.
-Request/schema identities distinguish the producer wire. Canonical-envelope
-archives retain native request/response replay with their original prompt. Their
-normalizer-v3 manifests remain ineligible for current cache reuse; replay does
-not upgrade or publish an old interpretation. A verified retired cache shard is
-not a miss and cannot trigger fill; its original raw bytes, attempt metadata and
-unknown usage remain available for audit. Current publication requires
-normalizer-v5 and the source's host-provided assertion locations. Stored retired
-interpretations remain inspectable by exact identity but are excluded from
-worker discovery, correspondence and proof, while the underlying source remains.
+host assertion locations and normalizer-v5. Earlier H producer envelopes and marker-absent normalizer-v3 requests remain
+recorded as their original bytes and evidence, with their original commit and
+receipt lineage. They have no current generation, executable cache, import,
+revision, publication, worker discovery or conditional proof eligibility. SOUL
+exports only the current H request, prompt, schema, receive and revision entry
+points. These reject older requests and responses directly. The ordinary
+source record and published canonical H storage paths retain their independent
+identity, currentness, scope and erasure rules. Historical source records with
+absent or null attribution remain distinguishable from a new explicit `unknown`
+value; no historical semantic verifier or published-v4 identity preimage is an
+active API. Current H publication requires envelope v6, normalizer-v5, host
+assertion locations and published-v5 identity.
+
+Bench keeps bounded raw request lines, raw response digests, manifest generation,
+receipt, attempt and lineage evidence for recorded old shards. Its old-H
+classifier can mark a well-bound shard `retired` and an inconsistent record
+`invalid` without decoding an old semantic proposal or reconstructing an old
+prompt/schema/cache key. A retired shard is neither a current hit nor a payable
+miss. Pending, unknown, transport-failed and incomplete attempts retain their
+separate recovery and accounting states. The current request-line, Batch,
+cache and fill gates use the current SOUL receiver; old raw bytes cannot be
+relabeled current. This direct producer-wire cutover changes the exported API
+for historical H readers under invariant §25; it does not publish a package
+version. Provider acceptance and syntactic constraints do not certify language
+fidelity, coverage or operation execution.
 
 Current table requests bind `host-owned-table-schema-v1`. Every source selection
 names an assertion ID and exact text. Occurrences are zero-based among exact
@@ -892,25 +879,18 @@ resolver rejects absent, ambiguous, out-of-range and word-internal selections.
 The historical raw-substring locator does not define this producer's ordinal.
 Discontinuous lists retain their existing bounds. The request carries the original source digest and units;
 the catalog remains host-owned and is reconstructed by the existing owner. The
-table adapter checks key ownership before expansion and lowers through the
-existing selection, compact and expression compiler. There is no fallback producer
-syntax. Retained v7 and earlier raw responses remain historical execution evidence,
-not current v8 admissions.
-Recorded compact expression v4 requests bind `host-owned-expression-schema-v1`. Protocol
-derives each generation schema from its corresponding shapes, with shared acyclic
-definitions spanning the canonical domination-depth limit. Recorded v3 requests
-keep `bounded-expression-schema-v1` or the recursive decoder. SOUL selects the
-schema for structured generation; reference validation and semantic admission
-still run locally after host expansion into the unchanged compiler. Decoder
-acceptance does not prove semantic fidelity or source coverage.
-Recorded requests without this marker keep their original recursive schema.
-Gemini decoding guidance has its own provider projection. Recursive schemas use
-JSON mode with complete schema guidance and strict local admission; no partial
-recursive grammar is transmitted. Safe acyclic schemas retain structured decoding
-and conservative byte/expanded-node bounds. Cache material binds the complete
-schema and actual instruction-only encoding. A recorded request remains bound to its original
-candidate and wire identity. Provider acceptance and syntactic constraints do
-not certify language fidelity, coverage or operation execution.
+table adapter checks key ownership before expansion and lowers through
+internal selection, compact, expression and content compiler phases under one
+resource ledger. Their source selection, scope, co-reference, domain,
+measurement and canonical admission checks remain active; no historical
+producer wrapper is accepted. Retired v7 and earlier responses remain raw
+execution evidence, not current v8 admissions. Gemini decoding guidance has
+its own provider projection: recursive schemas use JSON mode with complete
+schema guidance and strict local admission, while safe acyclic schemas use
+structured decoding within conservative byte and expanded-node bounds. Current
+cache material binds the complete current schema and actual instruction-only
+encoding. A recorded request stays bound to its original candidate and wire
+identity without executable historical schema reconstruction.
 
 Query role references resolve to a unique declared entity, proposition or context without adding embedding or
 changing a root's truth obligation. Proposition/context role references require

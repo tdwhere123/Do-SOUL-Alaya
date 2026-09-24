@@ -50,22 +50,21 @@ function quote(catalog: SourceReferenceCatalog, text: string, assertionId = 1) {
   return { assertion_id: assertionId, text: row.text };
 }
 
-function compactStatement(
+function tableStatement(
   catalog: SourceReferenceCatalog, predicate: string, at: string,
   roles: readonly { role: string; text: string }[]
 ) {
   return {
-    contract: "source-semantic-proposal-v7" as const,
+    contract: "source-semantic-proposal-v8" as const,
     outcome: { status: "interpreted" as const },
     content: {
-      roots: [{
-        act: "assertion" as const,
-        expression: {
-          kind: "statement" as const,
-          predicate: { kind: "explicit" as const, reading: predicate, support: quote(catalog, at) },
-          arguments: roles.map((row) => ({ role: row.role, target: quote(catalog, row.text) }))
-        }
-      }]
+      roots: [{ act: "assertion" as const, expression: { kind: "content_ref" as const, key: "event" } }],
+      entities: roles.map((row, index) => ({ form: "selection" as const, key: `entity${index}`,
+        selection: quote(catalog, row.text) })),
+      nodes: [{ kind: "statement" as const, key: "event",
+        predicate: { kind: "explicit" as const, reading: predicate, support: quote(catalog, at) },
+        arguments: roles.map((row, index) => ({ role: row.role,
+          target: { kind: "entity_ref" as const, key: `entity${index}` } })), qualifications: [] }], gaps: []
     }
   };
 }
@@ -76,7 +75,7 @@ function receiveInterpretation(source: string, sourceId: string, raw: object) {
     producer_id: "test-author", producer_version: "p1"
   }, { rawJson: JSON.stringify(raw) });
   if (received.outcome.status !== "interpreted" || received.draft === undefined || received.interpretation === undefined) {
-    throw new Error(`compact receive failed: ${JSON.stringify(received.outcome)}`);
+    throw new Error(`table receive failed: ${JSON.stringify(received.outcome)}`);
   }
   return { ...received, draft: received.draft, interpretation: received.interpretation };
 }
@@ -244,11 +243,11 @@ it("prepares bounded semantic correspondences from discovered source interpretat
       const alice = await prepareSource(session.handler, session.context, "artifact-alice");
       const silent = await prepareSource(session.handler, session.context, "artifact-silent");
       await proposeDraft(session.handler, session.context, alice.source_handle,
-        receiveInterpretation(ALICE, "artifact-alice", compactStatement(alice.catalog, "use", "uses", [
+        receiveInterpretation(ALICE, "artifact-alice", tableStatement(alice.catalog, "use", "uses", [
           { role: "agent", text: "Alice" }, { role: "theme", text: "tools" }
         ])).draft);
       await proposeDraft(session.handler, session.context, silent.source_handle,
-        receiveInterpretation(SILENT, "artifact-silent", compactStatement(silent.catalog, "stay", "stays", [
+        receiveInterpretation(SILENT, "artifact-silent", tableStatement(silent.catalog, "stay", "stays", [
           { role: "agent", text: "Bob" }, { role: "theme", text: "silent" }
         ])).draft);
       const semantics = receiveQuerySemantics(ORIGINAL);

@@ -13,7 +13,7 @@ import {
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
-  verifyPublishedSourceSemanticInterpretation, verifyRetainedPublishedSourceSemanticInterpretation
+  verifyPublishedSourceSemanticInterpretation
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
@@ -116,10 +116,8 @@ async function expectRetainedPublicationAfterReopen(filename: string, bound: Sou
   try {
     const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
     const owner = { stores, sha256: fieldContractSha256 };
-    const retained = verifyRetainedPublishedSourceSemanticInterpretation(owner, bound, WS);
-    expect(retained.eligibility).toBe("retained_only");
-    expect(retained.verification.bound).toEqual(bound);
-    expect(retained.verification.stored).toMatchObject({ content_bytes: SOURCE,
+    const stored = stores.getStoredRecord(WS, bound.source_target.root_id);
+    expect(stored).toMatchObject({ content_bytes: SOURCE,
       record: { source_version: "1", attribution_context: SOURCE_ATTRIBUTION } });
     expect(stores.getCurrentRecord(WS, "artifact-lathe")?.source_version).toBe("2");
     expect(() => verifyPublishedSourceSemanticInterpretation(owner, bound, WS)).toThrow();
@@ -244,18 +242,24 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
         producer_id: "test-author", producer_version: "p1", attribution_context: SOURCE_ATTRIBUTION
       }, {
         rawJson: JSON.stringify({
-          contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-          content: { roots: [{ act: "assertion", expression: {
-            kind: "possible", support: quote(catalog, "can"),
-            content: {
-              kind: "statement",
-              predicate: { kind: "explicit", reading: "operate", support: quote(catalog, "operate") },
-              arguments: [
-                { role: "agent", target: quote(catalog, "Ada") },
-                { role: "theme", target: quote(catalog, "lathe") }
-              ]
-            }
-          } }] }
+          contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+          content: {
+            roots: [{ act: "assertion", expression: { kind: "content_ref", key: "possible" } }],
+            entities: [
+              { form: "selection", key: "actor", selection: quote(catalog, "Ada") },
+              { form: "selection", key: "theme", selection: quote(catalog, "lathe") }
+            ],
+            nodes: [
+              { kind: "statement", key: "operate",
+                predicate: { kind: "explicit", reading: "operate", support: quote(catalog, "operate") },
+                arguments: [
+                  { role: "agent", target: { kind: "entity_ref", key: "actor" } },
+                  { role: "theme", target: { kind: "entity_ref", key: "theme" } }
+                ], qualifications: [] },
+              { kind: "possible", key: "possible", support: quote(catalog, "can"),
+                content: { kind: "content_ref", key: "operate" } }
+            ], gaps: []
+          }
         })
       });
       if (receivedInterpretation.draft === undefined || receivedInterpretation.interpretation === undefined) {
@@ -376,15 +380,23 @@ it("requires the requested graduate's referent even when another graduate has th
       }
       const proposal = proposeSourceSemantics({ sourceCorpus: content, assertionIds: [1], source_id: sourceId,
         source_version: "1", producer_id: "test-author", producer_version: "p1" }, { rawJson: JSON.stringify({
-          contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" },
-          content: { roots: [
-            { act: "assertion", expression: { kind: "statement", predicate: { kind: "explicit", reading: "graduate", support: quote(prepared.catalog, "graduated") },
-              arguments: [{ role: "agent", target: quote(prepared.catalog, "Mara") },
-                { role: "degree", target: quote(prepared.catalog, "Biology") }] } },
-            { act: "assertion", expression: { kind: "statement", predicate: { kind: "explicit", reading: "graduate", support: quote(prepared.catalog, "earned") },
-              arguments: [{ role: "agent", target: quote(prepared.catalog, "Theo") },
-                { role: "degree", target: quote(prepared.catalog, "Physics") }] } }
-          ] }
+          contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
+          content: {
+            roots: ["maraGraduate", "theoGraduate"].map(key => ({ act: "assertion", expression: { kind: "content_ref", key } })),
+            entities: ["Mara", "Biology", "Theo", "Physics"].map(text => ({
+              form: "selection", key: text, selection: quote(prepared.catalog!, text)
+            })),
+            nodes: [
+              { kind: "statement", key: "maraGraduate",
+                predicate: { kind: "explicit", reading: "graduate", support: quote(prepared.catalog, "graduated") },
+                arguments: [{ role: "agent", target: { kind: "entity_ref", key: "Mara" } },
+                  { role: "degree", target: { kind: "entity_ref", key: "Biology" } }], qualifications: [] },
+              { kind: "statement", key: "theoGraduate",
+                predicate: { kind: "explicit", reading: "graduate", support: quote(prepared.catalog, "earned") },
+                arguments: [{ role: "agent", target: { kind: "entity_ref", key: "Theo" } },
+                  { role: "degree", target: { kind: "entity_ref", key: "Physics" } }], qualifications: [] }
+            ], gaps: []
+          }
         }) });
       if (proposal.draft === undefined || proposal.interpretation === undefined) throw new Error(JSON.stringify(proposal.outcome));
       const result = await interpret(session.handler, { operation: "propose", source_handle: prepared.source_handle,

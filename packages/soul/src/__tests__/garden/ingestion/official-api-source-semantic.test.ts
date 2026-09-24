@@ -1,29 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  sourceReferenceResolver, sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION,
+  sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION,
   normalizeSourceSemantics, UTTERANCE_ATTRIBUTION_CONTRACT,
   encodeSourceSemanticQueryCarrier, type SourceSemanticQueryMeaningBody,
-  type SourceInterpretationProfile, type UtteranceAttribution
+  type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
-  buildSourceSemanticRequest as buildCurrentSourceSemanticRequest, buildSourceSemanticQueryRequest, semanticSha256,
-  sourceSemanticResponseJsonSchema, retainedSourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog,
-  parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, retainedSourceSemanticSystemPrompt
+  buildSourceSemanticRequest, buildSourceSemanticQueryRequest, semanticSha256,
+  sourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog, parseSourceSemanticRequest,
+  sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics, proposeQuerySemantics,
-  proposeSourceSemantics as proposeCurrentSourceSemantics, receiveSourceSemantics, verifyRetainedSourceSemantics
+  proposeSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
-
-const PROFILE: SourceInterpretationProfile = {
-  contract: "source-interpretation-profile-v1", description: "Observed acts of seeing",
-  predicates: [{ symbol: "see", governing_roles: [], meaning: "A perceiver sees a theme." }],
-  roles: [{ symbol: "perceiver", meaning: "Participant perceiving." }, { symbol: "theme", meaning: "What is perceived." }]
-};
 
 const TEXT = "The archivist accessioned folio F into bay B.";
 
@@ -38,8 +32,8 @@ it("keeps source bytes and query text identity stable while changing current H a
   const capturedSource: UtteranceAttribution = { contract: UTTERANCE_ATTRIBUTION_CONTRACT,
     status: "captured", issuer_scope: "authored-harness", utterances: [{ occurrence_id: "source-turn",
       utf8_span: [0, Buffer.byteLength(source.sourceCorpus)], conversation_ref: "conversation-1", author_ref: "author-1" }] };
-  const unknownH = buildCurrentSourceSemanticRequest(source);
-  const capturedH = buildCurrentSourceSemanticRequest({ ...source, attribution_context: capturedSource });
+  const unknownH = buildSourceSemanticRequest(source);
+  const capturedH = buildSourceSemanticRequest({ ...source, attribution_context: capturedSource });
   expect(unknownH.source_digest).toBe(capturedH.source_digest);
   expect(sourceSemanticRequestCatalog(unknownH)).toEqual(sourceSemanticRequestCatalog(capturedH));
   expect(unknownH.source_request.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
@@ -56,21 +50,6 @@ it("keeps source bytes and query text identity stable while changing current H a
   expect(unknownQ.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
   expect(JSON.stringify(unknownQ)).not.toBe(JSON.stringify(capturedQ));
 });
-
-// Archived graph proposals remain replayable; current content compilation has its own suite.
-function buildSourceSemanticRequest(input: Parameters<typeof buildCurrentSourceSemanticRequest>[0]) {
-  const current = buildCurrentSourceSemanticRequest(input);
-  const { attribution_context: _currentAttribution, ...historicalRequest } = current.source_request;
-  return parseRetainedSourceSemanticRequest({ ...current, schema_version: 5,
-    source_digest: undefined, source_catalog: sourceSemanticRequestCatalog(current), source_request: {
-    ...historicalRequest, generation_schema_contract: undefined, proposal_contract: "source-semantic-proposal-v1"
-  } });
-}
-function proposeSourceSemantics(input: Parameters<typeof proposeCurrentSourceSemantics>[0], injected?: { rawJson: string }) {
-  return injected === undefined || input.assertionIds.length === 0 ? proposeCurrentSourceSemantics(input, injected)
-    : verifyRetainedSourceSemantics(injected.rawJson, buildSourceSemanticRequest(input), input).result;
-}
-const SOURCE_SEMANTIC_SYSTEM_PROMPT = retainedSourceSemanticSystemPrompt(buildSourceSemanticRequest(sourceInput()));
 
 function sourceInput(text = TEXT) {
   const sourceCorpus = buildOfficialApiSourceCorpus(text, [{ role: "user", content: text }]);
@@ -125,18 +104,9 @@ function accessionDraft(request: ReturnType<typeof buildSourceSemanticRequest>, 
   };
 }
 
-function interpretedJson(request: ReturnType<typeof buildSourceSemanticRequest>, gaps: readonly object[] = []) {
-  const draft = accessionDraft(request, gaps);
-  return JSON.stringify({
-    contract: "source-semantic-proposal-v1",
-    outcome: { status: "interpreted" },
-    draft
-  });
-}
-
 function currentInterpretation() {
   const input = sourceInput();
-  const request = buildCurrentSourceSemanticRequest(input);
+  const request = buildSourceSemanticRequest(input);
   const normalized = normalizeSourceSemantics({
     draft: accessionDraft(request), catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256,
     source: { source_id: input.source_id, source_version: input.source_version,
@@ -178,209 +148,48 @@ function admittedQuery() {
   };
 }
 
-describe("historical graph proposals and source-independent query producers", () => {
-  it("normalizes the complete neutral prompt example through the real request catalog", () => {
-    const rawJson = SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!;
-    const input = { sourceCorpus: "Mira shelved something. The label is hard to interpret.", assertionIds: [1, 2],
-      source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
-    const received = proposeSourceSemantics(input, { rawJson });
-    expect(received.outcome.status).toBe("interpreted");
-    expect(received.interpretation?.mentions.map((row) => row.text)).toEqual(["Mira", "shelved", "something", "The label is hard to interpret."]);
-    expect(received.interpretation?.gaps).toEqual(JSON.parse(rawJson).draft.gaps);
-    expect(received.interpretation?.gaps).toHaveLength(2);
-    expect(received.interpretation?.frames.map((row) => row.id)).toEqual(["fShelve"]);
-    expect(received.interpretation?.gaps[1]).toMatchObject({ kind: "uninterpreted_clause", affected_ids: ["mClause"] });
-    expect(received.interpretation?.frames[0]?.bindings.map((row) => row.target)).toEqual([
-      { kind: "node", id: "rActor" }, { kind: "node", id: "rItem" }
-    ]);
-  });
-  it.each(["mention_target", "undeclared_gap"] as const)("rejects %s in a partial proposal without repairing its handles", (failure) => {
-    const envelope = JSON.parse(SOURCE_SEMANTIC_SYSTEM_PROMPT.split("Example response:\n")[1]!);
-    const input = { sourceCorpus: "Mira shelved something. The label is hard to interpret.", assertionIds: [1, 2],
-      source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
-    if (failure === "mention_target") envelope.draft.frames[0].bindings[0].target.id = "mActor";
-    else {
-      envelope.draft.gaps[1].affected_ids = ["fOmitted"];
-    }
-    const rawJson = JSON.stringify(envelope);
-    const received = proposeSourceSemantics(input, { rawJson });
-    expect(received.outcome).toMatchObject({ status: "invalid", reason: "malformed_response", diagnostics: [{
-      code: "unknown_cross_reference",
-      path: failure === "mention_target" ? ["draft", "frames", 0, "bindings", 0, "target", "id"] : ["draft", "gaps", 1, "affected_ids", 0],
-      reference: failure === "mention_target" ? "mActor" : "fOmitted"
-    }] });
-    expect(received.rawJson).toBe(rawJson);
-    expect(received.raw_response_id).toBe(`sha256:${semanticSha256(rawJson)}`);
-    expect(received.draft).toBeUndefined();
-    expect(received.interpretation).toBeUndefined();
-  });
-  it("builds an open request with catalog, versions, capability and limits and no mandatory profile", () => {
+describe("current source table proposal entry point", () => {
+  it("builds a source-bound table request with current capability and limits", () => {
     const request = buildSourceSemanticRequest(sourceInput());
-    expect(request.schema_version).toBe(5);
-    expect(request.interpretation_contract).toBe("source-interpretation-v4");
-    expect(request.profile).toBeUndefined();
-    expect(request.source_request.k_version).toBe("source-semantic-k-v3");
-    expect(request.source_request.proposal_contract).toBe("source-semantic-proposal-v1");
+    expect(request.schema_version).toBe(6);
+    expect(request.source_request.proposal_contract).toBe("source-semantic-proposal-v8");
     expect(request.source_request.normalizer_version).toBe("source-semantic-normalizer-v5");
     expect(request.source_request.producer_capability.proposes).toBe("draft_semantics");
     expect(request.source_request.resource_limits.output_byte_limit).toBe(1024 * 1024);
-    expect(sourceSemanticRequestCatalog(request).assertions.length).toBe(1);
-    expect(JSON.stringify(request)).not.toMatch(/profile_id/u);
+    expect(sourceSemanticRequestCatalog(request).assertions).toHaveLength(1);
     expect(() => parseOfficialApiSourcePacketRequest(request)).toThrow();
-    expect(SOURCE_SEMANTIC_SYSTEM_PROMPT).toMatch(/Do not emit host hashes/u);
-    expect(SOURCE_SEMANTIC_SYSTEM_PROMPT).toMatch(/not an admission prerequisite/u);
-    const schema = JSON.stringify(sourceSemanticResponseJsonSchema());
-    expect(schema).not.toContain('"enum":["see"]');
-    expect(schema).not.toContain('"enum":["perceiver","theme"]');
+    expect(sourceSemanticSystemPrompt(request)).toMatch(/The host owns IDs/u);
+    expect(JSON.stringify(sourceSemanticResponseJsonSchema(request))).toContain("source-semantic-proposal-v8");
+    expect(parseSourceSemanticRequest(JSON.parse(JSON.stringify(request)))).toEqual(request);
   });
 
-  it("admits a novel predicate from an injected draft and normalizes catalog first/last", () => {
+  it("keeps abstention, malformed, and incomplete responses distinct from empty success", () => {
     const input = sourceInput();
-    const request = buildSourceSemanticRequest(input);
-    const received = proposeSourceSemantics(input, { rawJson: interpretedJson(request) });
-    expect(received.provider_attempts).toBe(1);
-    expect(received.outcome.status).toBe("interpreted");
-    expect(received.draft?.frames[0]?.predicate_support).toEqual({
-      kind: "explicit", reading: "accession", mentions: ["mAccessioned"]
+    const abstained = proposeSourceSemantics(input, {
+      rawJson: JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "abstained" } })
     });
-    expect(received.interpretation?.frames[0]?.slots.map((row) => row.role_reading)).toEqual(["agent", "folio", "bay"]);
-    const references = sourceReferenceResolver(sourceSemanticRequestCatalog(request), semanticSha256);
-    const mention = received.interpretation!.mentions.find((row) => row.id === "mAccessioned")!;
-    expect(references.resolve(sourceSemanticRequestCatalog(request).catalog_id, mention.assertion_id, mention.source_ref).text)
-      .toBe("accessioned");
-    expect(received.raw_response_id).toMatch(/^sha256:/u);
-    const withProfileInput = { ...input, profile: PROFILE };
-    const withProfile = proposeSourceSemantics(withProfileInput, {
-      rawJson: interpretedJson(buildSourceSemanticRequest(withProfileInput))
-    });
-    expect(withProfile.request.profile).toEqual(PROFILE);
-    expect(withProfile.draft?.frames[0]?.predicate_support.reading).toBe("accession");
-  });
-
-  it("keeps abstention as abstained with a receipt and does not convert it to empty success", () => {
-    const received = proposeSourceSemantics(sourceInput(), {
-      rawJson: JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: { status: "abstained" } })
-    });
-    expect(received.outcome.status).toBe("abstained");
-    expect(received.provider_attempts).toBe(1);
-    expect(received.draft).toBeUndefined();
-    expect(received.interpretation).toBeUndefined();
-    expect(received.raw_response_id).toMatch(/^sha256:/u);
-  });
-
-  it("keeps partial interpretation plus explicit gaps", () => {
-    const input = sourceInput();
-    const request = buildSourceSemanticRequest(input);
-    const gaps = [{ kind: "unresolved_referent", affected_ids: ["rBay"], support: [], description: "bay identity uncertain" }];
-    const received = proposeSourceSemantics(input, { rawJson: interpretedJson(request, gaps) });
-    expect(received.outcome).toEqual({ status: "interpreted", gaps });
-    expect(received.draft?.gaps).toEqual(gaps);
-    expect(received.interpretation?.gaps[0]?.kind).toBe("unresolved_referent");
-  });
-
-  it("rejects outcome-only gaps instead of silently dropping them", () => {
-    const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const envelope = JSON.parse(interpretedJson(request));
-    envelope.outcome.gaps = [{ kind: "unresolved_referent", affected_ids: ["rBay"], support: [] }];
-    const received = proposeSourceSemantics(input, { rawJson: JSON.stringify(envelope) });
-    expect(received.outcome.status).toBe("invalid");
-    expect(received.interpretation).toBeUndefined();
-  });
-
-  it("returns host-accounted missing bindings while retaining the original producer draft", () => {
-    const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const envelope = JSON.parse(interpretedJson(request));
-    envelope.draft.frames[0].bindings.pop();
-    const rawJson = JSON.stringify(envelope);
-    const received = proposeSourceSemantics(input, { rawJson });
-    expect(received.outcome.status).toBe("interpreted");
-    expect(received.draft?.gaps).toEqual([]);
-    expect(received.interpretation?.gaps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "missing_binding", affected_ids: ["fAccession"] })
-    ]));
-    expect(received.outcome).toEqual({ status: "interpreted", gaps: received.interpretation?.gaps });
-    expect(received.rawJson).toBe(rawJson);
-  });
-
-  it("identifies catalog IDs used as graph mention handles without repairing them", () => {
-    const input = sourceInput(), request = buildSourceSemanticRequest(input);
-    const envelope = JSON.parse(interpretedJson(request));
-    const reference = segment(request, "archivist").id;
-    envelope.draft.frames[0].slots[0].support[0].mentions = [reference];
-    const rawJson = JSON.stringify(envelope);
-    const received = proposeSourceSemantics(input, { rawJson });
-    expect(received.outcome).toMatchObject({ status: "invalid", reason: "malformed_response", diagnostics: [{
-      code: "unknown_cross_reference", path: ["draft", "frames", 0, "slots", 0, "support", 0, "mentions", 0], reference
-    }] });
-    expect(received.rawJson).toBe(rawJson);
-    expect(received.raw_response_id).toBe(`sha256:${semanticSha256(rawJson)}`);
-    expect(received.interpretation).toBeUndefined();
-  });
-
-  it("treats a v2 packet:null refusal as invalid instead of successful empty", () => {
-    const received = proposeSourceSemantics(sourceInput(), {
-      rawJson: JSON.stringify({ contract: "source-interpretation-response-v2", packet: null })
-    });
-    expect(received.outcome.status).toBe("invalid");
-    expect(received.provider_attempts).toBe(1);
-    expect(received.raw_response_id).toMatch(/^sha256:/u);
-    expect(received).not.toHaveProperty("packet");
-    expect(received.interpretation).toBeUndefined();
-  });
-
-  it("quarantines bad catalog references rather than admitting a source interpretation", () => {
-    const input = sourceInput();
-    const request = buildSourceSemanticRequest(input);
-    const draft = accessionDraft(request);
-    draft.mentions = draft.mentions.map((row) => row.id === "mF"
-      ? { ...row, source_ref: { first: "a1s999", last: "a1s999" } } : row);
-    const received = proposeSourceSemantics(input, {
-      rawJson: JSON.stringify({
-        contract: "source-semantic-proposal-v1",
-        outcome: { status: "interpreted" },
-        draft
-      })
-    });
-    expect(received.outcome.status).toBe("invalid");
-    expect(received.interpretation).toBeUndefined();
-    expect(received.raw_response_id).toMatch(/^sha256:/u);
-  });
-
-  it("keeps malformed JSON distinct from interpreted empty", () => {
-    const received = proposeSourceSemantics(sourceInput(), { rawJson: '{"contract":true}' });
-    expect(received.outcome.status).toBe("invalid");
-    expect(received.provider_attempts).toBe(1);
-    expect(received.draft).toBeUndefined();
-  });
-
-  it("keeps incomplete JSON as invalid rather than truncated or abstained", () => {
-    for (const rawJson of ['{"contract":"source-interpretation-response-v5"', '{"a":', "[", '{"a":"']) {
-      const received = proposeSourceSemantics(sourceInput(), { rawJson });
-      expect(received.outcome, rawJson).toEqual({ status: "invalid", reason: "malformed_json" });
-      expect(received.provider_attempts).toBe(1);
+    expect(abstained.outcome.status).toBe("abstained");
+    expect(abstained.provider_attempts).toBe(1);
+    expect(abstained.interpretation).toBeUndefined();
+    expect(abstained.raw_response_id).toMatch(/^sha256:/u);
+    for (const rawJson of ['{"contract":true}', '{"contract":"source-semantic-proposal-v8"', '{"a":']) {
+      const received = proposeSourceSemantics(input, { rawJson });
+      expect(received.outcome.status).toBe("invalid");
+      expect(received.interpretation).toBeUndefined();
+      expect(received.rawJson).toBe(rawJson);
     }
   });
 
-  it("bounds raw response bytes before JSON parse", () => {
-    const received = proposeSourceSemantics(sourceInput(), {
-      rawJson: "中".repeat(Math.ceil(MAX_SOURCE_SEMANTIC_RESPONSE_BYTES / 3))
-    });
-    expect(received.outcome.status).toBe("truncated");
-    expect(received.provider_attempts).toBe(1);
-  });
-
-  it("returns no_eligible_source with zero attempts and never dispatches", () => {
-    const received = proposeSourceSemantics({
-      sourceCorpus: "", assertionIds: [], source_id: "src", source_version: "1",
-      producer_id: "authored-producer", producer_version: "p1"
-    }, { rawJson: interpretedJson(buildSourceSemanticRequest(sourceInput())) });
-    expect(received.outcome).toEqual({ status: "no_eligible_source", provider_attempts: 0 });
-    expect(received.provider_attempts).toBe(0);
-    expect(received.raw_response_id).toBeUndefined();
-  });
-
-  it("returns unexercised when no injected response is supplied", () => {
-    expect(proposeSourceSemantics(sourceInput()).outcome.status).toBe("unexercised");
+  it("bounds raw response bytes and avoids dispatch for empty source or no injected response", () => {
+    const input = sourceInput();
+    const truncated = proposeSourceSemantics(input, { rawJson: "中".repeat(Math.ceil(MAX_SOURCE_SEMANTIC_RESPONSE_BYTES / 3)) });
+    expect(truncated.outcome.status).toBe("truncated");
+    expect(truncated.provider_attempts).toBe(1);
+    expect(proposeSourceSemantics(input).outcome.status).toBe("unexercised");
+    const empty = proposeSourceSemantics({ sourceCorpus: "", assertionIds: [], source_id: "src", source_version: "1",
+      producer_id: "authored-producer", producer_version: "p1" }, { rawJson: "{}" });
+    expect(empty.outcome).toEqual({ status: "no_eligible_source", provider_attempts: 0 });
+    expect(empty.raw_response_id).toBeUndefined();
   });
 });
 
@@ -543,43 +352,19 @@ describe("query and semantic_correspondence proposal entry points", () => {
   });
 });
 
-it("retains a located no-proposition disposition without confusing it with abstention", () => {
-  const input = sourceInput("Thank you very much for the detailed response and helpful explanation."), request = buildSourceSemanticRequest(input);
-  const row = sourceSemanticRequestCatalog(request).assertions[0]!;
+it("keeps a located no-proposition disposition distinct from abstention", () => {
+  const input = sourceInput("Thank you very much for the detailed response and helpful explanation.");
+  const row = sourceSemanticRequestCatalog(buildSourceSemanticRequest(input)).assertions[0]!;
   const disposition = { status: "no_executable_proposition", description: "Acknowledgement without an executable proposition",
-    context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
-      source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] };
-  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: disposition }) });
-  expect(received.outcome).toEqual(disposition);
-  expect(received.provider_attempts).toBe(1); expect(received.draft).toBeUndefined(); expect(received.raw_response_id).toBeDefined();
-  const forged = { ...disposition, context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
-    source_ref: { first: "a999s0", last: "a999s0" } }] };
-  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({ contract: "source-semantic-proposal-v1", outcome: forged }) }).outcome.status).toBe("invalid");
-});
-
-it("replays explicitly historical requests without upgrading their normalizer or salvaging current envelopes", () => {
-  const input = sourceInput(), current = buildSourceSemanticRequest(input);
-  const { proposal_contract: _proposalContract, source_unit_contract: _unitContract, ...body } = current.source_request;
-  const legacyBody = { ...body, source_assertions: body.source_assertions.map(({ assertion_id, text }) => ({ assertion_id, text })) };
-  const legacy = parseRetainedSourceSemanticRequest({ ...current, source_request: {
-    ...legacyBody, normalizer_version: "source-semantic-normalizer-v3"
-  } });
-  const rawJson = JSON.stringify({ contract: "source-interpretation-response-v5",
-    outcome: { status: "interpreted", gaps: [] }, draft: accessionDraft(current) });
-  const historical = verifyRetainedSourceSemantics(rawJson, legacy, input).result;
-  expect(historical.outcome.status).toBe("interpreted");
-  expect(historical.interpretation?.normalizer_version).toBe("source-semantic-normalizer-v3");
-  expect(historical.rawJson).toBe(rawJson);
-  expect(receiveSourceSemantics(rawJson, buildCurrentSourceSemanticRequest(input), input).outcome.status).toBe("invalid");
-  expect(verifyRetainedSourceSemantics(interpretedJson(current), legacy, input).result.outcome.status).toBe("invalid");
-  expect(() => parseSourceSemanticRequest({ ...current, source_request: {
-    ...current.source_request, normalizer_version: "source-semantic-normalizer-v3"
-  } })).toThrow(/proposal contract and normalizer version/u);
-  expect(() => parseSourceSemanticRequest({ ...current, source_request: {
-    ...legacyBody, normalizer_version: "source-semantic-normalizer-v5"
-  } })).toThrow(/proposal contract and normalizer version/u);
-  expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(legacy))).toContain("source-interpretation-response-v5");
-  expect(retainedSourceSemanticSystemPrompt(legacy)).toContain('"contract":"source-interpretation-response-v5"');
-  expect(retainedSourceSemanticSystemPrompt(legacy)).not.toContain('"contract":"source-semantic-proposal-v1"');
-  expect(JSON.stringify(retainedSourceSemanticResponseJsonSchema(current))).toContain("source-semantic-proposal-v1");
+    context_support: [{ assertion_id: row.assertion_id, text: "Thank you very much" }] };
+  const received = proposeSourceSemantics(input, { rawJson: JSON.stringify({
+    contract: "source-semantic-proposal-v8", outcome: disposition
+  }) });
+  expect(received.outcome.status).toBe("no_executable_proposition");
+  expect(received.provider_attempts).toBe(1);
+  expect(received.interpretation).toBeUndefined();
+  const forged = { ...disposition, context_support: [{ assertion_id: row.assertion_id, text: "unrecorded" }] };
+  expect(proposeSourceSemantics(input, { rawJson: JSON.stringify({
+    contract: "source-semantic-proposal-v8", outcome: forged
+  }) }).outcome.status).toBe("invalid");
 });

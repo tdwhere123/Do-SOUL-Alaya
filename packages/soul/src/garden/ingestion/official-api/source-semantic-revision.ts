@@ -1,13 +1,10 @@
 import { z } from "zod";
 import {
   AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema, SourceSemanticTableValidationError,
-  materializeSourceSemanticContentProposal, materializeSourceSemanticExpressionProposal,
-  materializeSourceSemanticCompactProposal, materializeSourceSemanticSelectionProposal,
   materializeSourceSemanticTableProposal,
-  SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
   sourceSemanticValidationDiagnostics
 } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, parseRetainedSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
+import { parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
 
 const instruction = "Revise the previous proposal against the unchanged original source. Structural diagnostics describe rejected graph construction. Source review is an explicit reviewer interpretation, not an established fact; verify it against the source. Correct all supported content and scope, including omissions, without inventing facts. Return a complete new proposal, not a patch. The host will apply the same strict admission. Previous failures remain retained.";
 const completedInstruction = "Revise the retained complete producer response against the unchanged original source. Diagnostics describe JSON syntax or rejected graph construction; transport completion does not imply valid JSON or faithful meaning. Source review is an explicit reviewer interpretation, not an established fact; verify it against the source. Return one complete JSON proposal matching the response schema, not a patch, while correcting supported content and scope without inventing facts. The host applies unchanged strict admission. Previous failures remain retained.";
@@ -48,13 +45,6 @@ export function prepareSourceSemanticRevision(requestValue: SourceSemanticReques
   sourceReview: SourceSemanticRevision["source_review"] = [],
   options?: Readonly<{ responseCompletion: "complete" | "truncated" | "unknown" }>): SourceSemanticRevision {
   const request = parseSourceSemanticRequest(requestValue);
-  if (request.source_request.proposal_contract !== "source-semantic-proposal-v2" &&
-      request.source_request.proposal_contract !== "source-semantic-proposal-v3" &&
-      request.source_request.proposal_contract !== "source-semantic-proposal-v4" &&
-      request.source_request.proposal_contract !== SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT &&
-      request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) {
-    throw new AlayaError("VALIDATION", "revision requires the semantic content proposal contract");
-  }
   if (Buffer.byteLength(previousResponse, "utf8") > 524288) throw new AlayaError("VALIDATION", "revision response exceeds its byte bound");
   if (options !== undefined && options.responseCompletion !== "complete") {
     throw new AlayaError("VALIDATION", "revision requires observed completion; truncated or unknown responses remain unrevisable");
@@ -88,7 +78,7 @@ export function validateSourceSemanticRevision(request: SourceSemanticRequest, r
   // Check descending depth before recursive validation; the public cap is three.
   const parentNumber = (parentValue as SourceSemanticRequest)?.source_request?.revision?.revision_number ?? 0;
   if (parentNumber !== revision.revision_number - 1) throw new AlayaError("CONFLICT", "revision does not follow its immediate parent");
-  const parent = parseRetainedSourceSemanticRequest(parentValue);
+  const parent = parseSourceSemanticRequest(parentValue);
   if (JSON.stringify(parent) !== revision.parent_request_json ||
       sourceSemanticBaseRequestDigest(parent) !== revision.base_request_sha256) {
     throw new AlayaError("CONFLICT", "revision parent has a different original request");
@@ -110,16 +100,11 @@ function structuralDiagnostics(raw: string, request: SourceSemanticRequest, comp
     return [{ code: "invalid_json", path: [], message: "The retained complete response is not valid JSON. Return one complete JSON proposal matching the response schema while preserving source content and scope." }];
   }
   try {
-    if (request.source_request.proposal_contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) materializeSourceSemanticTableProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
-    else if (request.source_request.proposal_contract === SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT) materializeSourceSemanticSelectionProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
-    else if (request.source_request.proposal_contract === "source-semantic-proposal-v4") materializeSourceSemanticCompactProposal(previous);
-    else if (request.source_request.proposal_contract === "source-semantic-proposal-v3") materializeSourceSemanticExpressionProposal(previous);
-    else materializeSourceSemanticContentProposal(previous);
+    materializeSourceSemanticTableProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
   }
   catch (error) {
     if (!(error instanceof z.ZodError)) {
-      if (!(error instanceof SourceSemanticTableValidationError) ||
-          request.source_request.proposal_contract !== SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT) throw error;
+      if (!(error instanceof SourceSemanticTableValidationError)) throw error;
       return SourceSemanticDiagnosticsSchema.parse([{ code: "invalid_table_proposal", path: [],
         message: String(error instanceof Error ? error.message : error).slice(0, 256) }]);
     }

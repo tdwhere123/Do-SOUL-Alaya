@@ -29,24 +29,25 @@ function interpretReport(includeReportDate = true): SourceSemanticInterpretation
     expect(SOURCE.indexOf(text, start + 1)).toBe(-1);
     return { assertion_id: 1, text };
   };
-  const proposal = { contract: "source-semantic-proposal-v7", outcome: { status: "interpreted" }, content: {
-    roots: [{ act: "assertion", expression: {
-      kind: "statement", predicate: { kind: "explicit", reading: "report", support: select("reported") },
-      arguments: [
-        { role: "reporter", target: select("Omar") },
-        ...(includeReportDate ? [{ role: "time", target: select(REPORT_DATE) }] : []),
-        { role: "content", support: select("might"), target: {
-          kind: "possible", support: select("might"), content: {
-            kind: "statement", predicate: { kind: "explicit", reading: "approve", support: select("approve") },
-            arguments: [
-              { role: "approver", target: select("Talia") },
-              { role: "item", target: select("grant G-8") },
-              { role: "time", target: select(APPROVAL_DATE) }
-            ]
-          }
-        } }
-      ]
-    } }]
+  const proposal = { contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+    roots: [{ act: "assertion", expression: { kind: "content_ref", key: "report" } }],
+    entities: ["Omar", ...(includeReportDate ? [REPORT_DATE] : []), "Talia", "grant G-8", APPROVAL_DATE]
+      .map((text, index) => ({ form: "selection", key: `entity${index}`, selection: select(text) })),
+    nodes: [
+      { kind: "statement", key: "report", predicate: { kind: "explicit", reading: "report", support: select("reported") },
+        arguments: [
+          { role: "reporter", target: { kind: "entity_ref", key: "entity0" } },
+          ...(includeReportDate ? [{ role: "time", target: { kind: "entity_ref", key: "entity1" } }] : []),
+          { role: "content", support: select("might"), target: { kind: "content_ref", key: "possible" } }
+        ], qualifications: [] },
+      { kind: "possible", key: "possible", support: select("might"), content: { kind: "content_ref", key: "approve" } },
+      { kind: "statement", key: "approve", predicate: { kind: "explicit", reading: "approve", support: select("approve") },
+        arguments: [
+          { role: "approver", target: { kind: "entity_ref", key: includeReportDate ? "entity2" : "entity1" } },
+          { role: "item", target: { kind: "entity_ref", key: includeReportDate ? "entity3" : "entity2" } },
+          { role: "time", target: { kind: "entity_ref", key: includeReportDate ? "entity4" : "entity3" } }
+        ], qualifications: [] }
+    ], gaps: []
   } };
   const received = receiveSourceSemantics(JSON.stringify(proposal), request, input);
   expect(received.outcome).toEqual({ status: "interpreted", gaps: [] });

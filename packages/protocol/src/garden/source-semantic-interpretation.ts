@@ -9,7 +9,7 @@ import { InterpretationNodeCoordinateSchema } from "../recall/conditional-field/
 import { CompletenessReportSchema } from "../recall/conditional-field/index-view.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceAssertionIdSchema, SourceTextSpanSchema } from "../evidence/source-selection.js";
-import { SourceReferenceCatalogSchema, SourceReferenceSchema, sourceReferenceResolver,
+import { SourceReferenceSchema, sourceReferenceResolver,
   SOURCE_REFERENCE_MAX_ASSERTIONS, type SourceReferenceCatalog } from "../evidence/source-reference.js";
 import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
@@ -44,11 +44,6 @@ export const SourceSemanticSourceBindingSchema = z.object({
   content_digest: Sha256DigestSchema,
   attribution_context: UtteranceAttributionSchema,
   assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly().optional()
-}).strict().readonly();
-
-/** Recorded schema-v5 source bindings are inspectable only by retained readers. */
-export const RetainedSourceSemanticSourceBindingSchema = SourceSemanticSourceBindingSchema.unwrap().omit({
-  attribution_context: true
 }).strict().readonly();
 
 const SourceSemanticInterpretationBaseSchema = z.object({
@@ -100,10 +95,6 @@ function refineInterpretation(interpretation: Omit<z.infer<typeof SourceSemantic
 
 export const SourceSemanticInterpretationSchema = SourceSemanticInterpretationBaseSchema
   .superRefine(refineInterpretation).readonly();
-export const RetainedSourceSemanticInterpretationSchema = SourceSemanticInterpretationBaseSchema.extend({
-  source: RetainedSourceSemanticSourceBindingSchema
-}).superRefine(refineInterpretation).readonly();
-
 const SourceSemanticPublishedInterpretationBaseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_PUBLISHED_CONTRACT),
   interpretation_id: Sha256DigestSchema,
@@ -126,11 +117,6 @@ const SourceSemanticPublishedInterpretationBaseSchema = z.object({
   }).strict().readonly()
 }).strict();
 export const SourceSemanticPublishedInterpretationSchema = SourceSemanticPublishedInterpretationBaseSchema.readonly();
-export const RetainedSourceSemanticPublishedInterpretationSchema = SourceSemanticPublishedInterpretationBaseSchema.extend({
-  contract: z.literal("published-source-interpretation-v4"),
-  interpretation: RetainedSourceSemanticInterpretationSchema
-}).readonly();
-
 export const LegacyUnresolvedProjectionSchema = z.object({
   kind: z.literal("legacy_unresolved"),
   source_contract: z.enum(["source-interpretation-v1", "source-interpretation-v2"]),
@@ -176,18 +162,13 @@ const SourceSemanticQueryOutcomeSchema = z.discriminatedUnion("status", [
 ]);
 export type SourceSemanticQueryOutcome = z.infer<typeof SourceSemanticQueryOutcomeSchema>;
 
-const SourceSemanticRequestEnvelopeBaseSchema = z.object({
-  schema_version: z.number().int().min(1).max(SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION),
+export const SourceSemanticRequestEnvelopeSchema = z.object({
+  schema_version: z.literal(SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION),
   interpretation_contract: z.literal(SOURCE_SEMANTIC_PACKET_CONTRACT),
   source_request: z.unknown(),
-  source_catalog: SourceReferenceCatalogSchema.optional(),
-  source_digest: Sha256HexSchema.optional(),
+  source_digest: Sha256HexSchema,
   profile: SourceInterpretationProfileSchema.optional()
-}).strict();
-export const SourceSemanticRequestEnvelopeSchema = SourceSemanticRequestEnvelopeBaseSchema.extend({
-  schema_version: z.literal(SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION)
-}).readonly();
-export const RetainedSourceSemanticRequestEnvelopeSchema = SourceSemanticRequestEnvelopeBaseSchema.readonly();
+}).strict().readonly();
 
 export const SourceSemanticResponseEnvelopeSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_RESPONSE_CONTRACT),
@@ -330,7 +311,6 @@ export const SourceSemanticCacheSchema = z.object({
 export type SourceSemanticNormalizedMention = z.infer<typeof SourceSemanticNormalizedMentionSchema>;
 export type SourceSemanticSourceBinding = z.infer<typeof SourceSemanticSourceBindingSchema>;
 export type SourceSemanticInterpretation = z.infer<typeof SourceSemanticInterpretationSchema>;
-export type RetainedSourceSemanticInterpretation = z.infer<typeof RetainedSourceSemanticInterpretationSchema>;
 export type SourceSemanticPublishedInterpretation = z.infer<typeof SourceSemanticPublishedInterpretationSchema>;
 export type LegacyUnresolvedProjection = z.infer<typeof LegacyUnresolvedProjectionSchema>;
 export type SourceSemanticOutcome = z.infer<typeof SourceSemanticOutcomeSchema>;

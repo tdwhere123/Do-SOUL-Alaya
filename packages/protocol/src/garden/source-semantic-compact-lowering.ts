@@ -5,14 +5,9 @@ import {
   SOURCE_SEMANTIC_GAP_KINDS, SOURCE_SEMANTIC_MAX_DEPTH, SOURCE_SEMANTIC_SOURCE_ACTS,
   SourceSemanticDecimalSchema, SourceSemanticReadingSchema
 } from "./source-semantic-draft.js";
-import { SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, materializeSourceSemanticExpressionProposal } from "./source-semantic-expression-proposal.js";
+import { compileSourceSemanticExpression } from "./source-semantic-expression-lowering.js";
 import { SourceSemanticOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
-
-export const SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT = "source-semantic-proposal-v4" as const;
-export const SOURCE_SEMANTIC_COMPACT_GENERATION_CONTRACT = "host-owned-expression-schema-v1" as const;
-export const SOURCE_SEMANTIC_COMPACT_GENERATION_DEPTH = SOURCE_SEMANTIC_MAX_DEPTH;
-export const SOURCE_SEMANTIC_COMPACT_FEATURES = ["nested_expression", "quantified", "measurement"] as const;
 
 const Key = z.string().min(1).max(64);
 const SegmentId = z.string().regex(/^a[1-9][0-9]*s[0-9]+$/u).max(48);
@@ -87,48 +82,19 @@ function contentShape(expression: z.ZodType<ExpressionValue>) {
 const Content = contentShape(Expression);
 const Outcome = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
   ...SourceSemanticOutcomeSchema.options.filter(option => option.unwrap().shape.status.value !== "interpreted")]);
-const CompactProposal = z.object({
-  contract: z.literal(SOURCE_SEMANTIC_COMPACT_PROPOSAL_CONTRACT),
-  outcome: Outcome, content: Content.optional()
-}).strict().readonly();
 type ContentValue = z.infer<typeof Content>;
 
-/** Decoder syntax only; admission remains the shared expression compiler after host expansion. */
-export const SourceSemanticCompactGenerationSchema = (() => {
-  let expression: z.ZodType<ExpressionValue> | undefined;
-  for (let depth = SOURCE_SEMANTIC_COMPACT_GENERATION_DEPTH; depth >= 0; depth--) {
-    const operand: z.ZodType<OperandValue> = expression === undefined ? ContentReference : z.union([ContentReference, expression]);
-    expression = expressionShape(targetShape(expression), operand);
-  }
-  return CompactProposal.unwrap().extend({ content: contentShape(expression!).optional() }).readonly();
-})();
-
-export const SourceSemanticCompactProposalSchema = z.preprocess((value, context) => {
-  const meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 });
-  try {
-    materializeSourceSemanticCompactProposal(value, meter);
-    meter.retain(value, "compact schema output validation");
-    return value;
-  } catch (error) {
-    if (!(error instanceof z.ZodError)) throw error;
-    for (const issue of error.issues) context.addIssue({ ...issue });
-    return z.NEVER;
-  }
-}, CompactProposal);
-
-export function materializeSourceSemanticCompactProposal(value: unknown,
-  meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })): SourceSemanticResponseEnvelope {
-  preflight(value, meter);
-  const proposal = CompactProposal.parse(value);
-  if ((proposal.outcome.status === "interpreted") !== (proposal.content !== undefined)) {
+/** Current table compiler phase: compact anchors expand to expression evidence. */
+export function compileSourceSemanticCompact(contentValue: unknown, outcomeValue: unknown,
+  meter: SourceSemanticResourceLedger): SourceSemanticResponseEnvelope {
+  preflight({ outcome: outcomeValue, content: contentValue }, meter);
+  const outcome = Outcome.parse(outcomeValue);
+  if ((outcome.status === "interpreted") !== (contentValue !== undefined)) {
     invalid(["content"], "outcome_content_mismatch", "", "Interpreted outcome requires content; other outcomes must not carry content.");
   }
-  const expanded = {
-    contract: SOURCE_SEMANTIC_EXPRESSION_PROPOSAL_CONTRACT, outcome: proposal.outcome,
-    ...(proposal.content === undefined ? {} : { content: new CompactExpander(meter).expand(proposal.content) })
-  };
-  meter.retain(expanded, "compact expression expansion");
-  return materializeSourceSemanticExpressionProposal(expanded, meter);
+  const expanded = contentValue === undefined ? undefined : new CompactExpander(meter).expand(Content.parse(contentValue));
+  meter.retain({ outcome, content: expanded }, "compact expression expansion");
+  return compileSourceSemanticExpression(expanded, outcome, meter);
 }
 
 function preflight(value: unknown, meter: SourceSemanticResourceLedger): void {

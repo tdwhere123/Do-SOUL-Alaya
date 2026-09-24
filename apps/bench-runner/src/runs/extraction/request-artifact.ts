@@ -11,11 +11,10 @@ import {
   prepareSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
   type OfficialApiSourcePacketRequest, type SourceSemanticRequest, type SourceSemanticHostPreparation,
   SourceSemanticRevisionSchema, sourceSemanticBaseRequestDigest, type SourceSemanticRevision,
-  parseRetainedSourceSemanticRequest, retainedSourceSemanticSystemPrompt
 } from "@do-soul/alaya-soul";
 import type { LongMemEvalExtractionTurn } from "./turn-contents.js";
 import { createHash } from "node:crypto";
-import { computeCacheKey, computeRetainedCacheKey } from "../compile-seed/cache/cache-key.js";
+import { computeCacheKey } from "../compile-seed/cache/cache-key.js";
 import { z } from "zod";
 import { parseSourceSemanticRequest, sourceSemanticSystemPrompt } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
@@ -53,22 +52,6 @@ export function parseSourceSemanticRequestLine(
     throw new AlayaError("CONFLICT", "source semantic request line identity mismatch");
   }
   return line;
-}
-
-/** Verifies a recorded logical identity without making that line dispatchable. */
-export function verifyRetainedSourceSemanticRequestLine(
-  value: unknown, config: Pick<CompileSeedExtractionConfig, "model" | "requestProfile">
-) {
-  const line = SourceRequestLineSchema.parse(value);
-  const request = parseRetainedSourceSemanticRequest(JSON.parse(line.userPrompt));
-  const userPrompt = JSON.stringify(request);
-  const systemPrompt = retainedSourceSemanticSystemPrompt(request);
-  const expected = { key: computeRetainedCacheKey(config.model, config.requestProfile, systemPrompt, userPrompt),
-    unitKeys: line.unitKeys, requestSha256: createHash("sha256").update(userPrompt).digest("hex"), systemPrompt, userPrompt };
-  if (canonicalJson(line) !== canonicalJson(expected)) {
-    throw new AlayaError("CONFLICT", "retained source semantic request line identity mismatch");
-  }
-  return { eligibility: "retained_only" as const, line, request };
 }
 
 export function prepareSourceSemanticRequestLine(
