@@ -4,6 +4,7 @@ import {
   normalizeSourceSemantics, sourceSemanticInterpretationIdentity, sourceSemanticStanceLists,
   retainedSourceSemanticInterpretationIdentity, RetainedSourceSemanticPublishedInterpretationSchema,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SourceRecordIdentitySchema, verifySourceRecordIdentity,
+  hashContentDigest,
   type SourceRecordIdentity, type SourceEvidenceTarget,
   SourceReferenceCatalogSchema, SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema,
   type PublishedSourceInterpretationPacket, type FieldContractSha256,
@@ -318,6 +319,9 @@ export function verifyRetainedPublishedSourceSemanticInterpretation(owner: Pick<
   const stored = owner.stores.getStoredRecord(workspaceId, bound.source_target.root_id);
   if (stored === null) throw new CoreError("VALIDATION", "retained interpretation source is unavailable");
   const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse(stored.record), owner.sha256);
+  if (hashContentDigest(stored.content_bytes, owner.sha256) !== record.content_digest) {
+    throw new CoreError("OBLIGATION_VIOLATION", "stored source body does not match its digest");
+  }
   const target = sourceRecallTarget({ workspace_id: workspaceId, root_kind: "source_record",
     root_id: record.identity, source_version: record.source_version, content_digest: record.content_digest,
     evidence_object_id: record.evidence_object_id });

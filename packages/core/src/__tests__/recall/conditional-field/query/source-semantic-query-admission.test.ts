@@ -311,6 +311,25 @@ describe("source semantic query admission", () => {
     expect(admitSourceSemanticQuery(undefined, SAME_PARCEL).kind).toBe("absent");
   });
 
+  it("binds captured occurrence ranges to the exact original UTF-8 query", () => {
+    const original = `${SAME_PARCEL} café`;
+    const start = Buffer.byteLength(`${SAME_PARCEL} `, "utf8");
+    const base = { ...sameParcelQuery(), original_query_digest: digestOriginalQuery(original) };
+    const captured = (utf8_span: readonly [number, number]) => ({
+      contract: "utterance-attribution-v1" as const, status: "captured" as const,
+      issuer_scope: "test-issuer", utterances: [{ occurrence_id: "query-utterance",
+        utf8_span, conversation_ref: null, author_ref: "author-1" }]
+    });
+    const admitted = { ...base, attribution_context: captured([start, start + Buffer.byteLength("café", "utf8")]) };
+    const outside = { ...base, attribution_context: captured([0, 999999]) };
+    const splitCharacter = { ...base, attribution_context: captured([start + 4, start + 5]) };
+    expect(admitSourceSemanticQuery(admitted, original).kind).toBe("admitted");
+    expect(SourceSemanticQuerySchema.safeParse(outside).success).toBe(true);
+    expect(SourceSemanticQuerySchema.safeParse(splitCharacter).success).toBe(true);
+    expect(admitSourceSemanticQuery(outside, original).kind).toBe("invalid");
+    expect(admitSourceSemanticQuery(splitCharacter, original).kind).toBe("invalid");
+  });
+
   it("rejects foreign gap excerpts and undeclared affected handles at query admission", () => {
     const gap = { kind: "unsupported_meaning", affected_ids: [],
       support: [{ kind: "query_text", excerpt: "an unrelated qualification" }] };

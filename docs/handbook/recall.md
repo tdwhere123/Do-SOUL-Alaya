@@ -715,7 +715,8 @@ implementation guidance or target KPI certification.
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
 Garden v1. Protocol 12.0.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
-`source-semantic-correspondence-v3`, source response envelope v6, published source interpretation v5,
+`source-semantic-correspondence-v3`, source request envelope v6, source response envelope v5,
+published source interpretation v5,
 reasoning v5, cache v3,
 library v5, public/worker recall protocol 6, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
@@ -726,7 +727,7 @@ separate regression contracts.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Current query request/response v8 use the same recursive meaning schema as
+operation. Current query request v8 and response v7 use the same recursive meaning schema as
 local receive admission; depth and byte limits remain local requirements. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
 The canonical query also binds the complete host-approved fixed context

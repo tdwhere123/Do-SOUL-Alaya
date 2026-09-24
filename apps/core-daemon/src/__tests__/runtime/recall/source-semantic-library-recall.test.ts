@@ -260,6 +260,29 @@ it("keeps a retained stored interpretation out of worker discovery and proof whi
   }, 1, 0, true);
 });
 
+it("reports invalid captured query ranges through the reopened read worker", async () => {
+  await withLibrary(async ({ execute }) => {
+    const original = `${ORIGINAL} café`;
+    const start = Buffer.byteLength(`${ORIGINAL} `, "utf8");
+    const base = { ...queryOf(), original_query_digest: digestOriginalQuery(original) };
+    const captured = (utf8_span: readonly [number, number]) => ({
+      contract: "utterance-attribution-v1" as const, status: "captured" as const,
+      issuer_scope: "test-issuer", utterances: [{ occurrence_id: "question-utterance",
+        utf8_span, conversation_ref: null, author_ref: "author-1" }]
+    });
+    const prepare = async (utf8_span: readonly [number, number]) => call(execute, {
+      kind: "prepare_query", original_query: original,
+      query_semantics: { ...base, attribution_context: captured(utf8_span) }, budget: BUDGET
+    });
+    expect((await prepare([start, start + Buffer.byteLength("café", "utf8")])).query_semantics_status)
+      .toMatchObject({ status: "admitted" });
+    expect((await prepare([0, 999999])).query_semantics_status)
+      .toEqual({ status: "unavailable", reason: "invalid" });
+    expect((await prepare([start + 4, start + 5])).query_semantics_status)
+      .toEqual({ status: "unavailable", reason: "invalid" });
+  }, 1);
+});
+
 it("discovers a relevant interpretation after the first descriptor page and keeps a source without a source interpretation", async () => {
   await withLibrary(async ({ allIds, execute, filename }) => {
     const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });

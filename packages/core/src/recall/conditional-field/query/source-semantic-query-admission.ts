@@ -1,4 +1,5 @@
 import {
+  bindUtteranceAttribution,
   SourceSemanticQuerySchema,
   sourceSemanticQueryIdentity,
   type SourceSemanticQueryStatus,
@@ -34,6 +35,11 @@ export function admitSourceSemanticQuery(
   const parsed = SourceSemanticQuerySchema.safeParse(query);
   if (!parsed.success) return { kind: "invalid" };
   if (parsed.data.original_query_digest !== digestOriginalQuery(originalQuery)) {
+    return { kind: "invalid" };
+  }
+  try {
+    bindUtteranceAttribution(parsed.data.attribution_context, originalQuery);
+  } catch {
     return { kind: "invalid" };
   }
   const excerpts = [
