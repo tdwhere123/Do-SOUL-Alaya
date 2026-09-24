@@ -807,7 +807,12 @@ Direct answer conditions preserve every original restriction even when inputs
 are also declared. An unrepresented answer relation remains explicit.
 
 Reasoning `binding_results` distinguish `answer` from `evidence`; evidence
-always has `query_complete: false`. Both use the same execution, projection and
+always has `query_complete: false`. For an execution-owned answer binding,
+`query_complete` means that the supplied Q has no declared gaps. It does not
+certify complete original-language meaning or faithful H/C premises. Producer
+`interpreted` means decoded/materialized output; Core admission checks the
+conditional premise's structure, identity and evidence references. Neither is a
+language-truth certificate. Both binding kinds use the same execution, projection and
 proof verifier. Each occupied source root retains all delivered binding witnesses
 and their required explanation forests. `semantic_proof` means verified conditional
 evidence, not necessarily a complete answer. The shared query-support projection
@@ -1146,13 +1151,20 @@ ordinary observation envelope. The shared access input identity includes the
 `empty-interpretation-reserve-v1` resource contract so frozen pools cannot cross
 allocation semantics; continuation and direct Recall behavior remain unchanged.
 Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
-cross-interpretation join. Native delivery selects at most five source roots
+cross-interpretation join. Each local reader enumerates that prepared premise
+population. Its exhaustion closes only that domain, not unobserved sources or
+alternative language interpretations. Source-local H does not itself require all
+future reasoning to remain source-local; cross-source reasoning would need a
+separate explicit identity and joint-rule contract. Current input coverage keeps
+compatibility and distinctness unknown. Native delivery selects at most five source roots
 (`source_gold_root_identity`) after reserving their complete support packages.
 It prefers a qualified direct answer, then uncovered original-query evidence inputs,
 then additional qualified local witnesses with unknown cross-source identity, and
 finally raw sources in the native access order. A bounded one-root exchange repairs
 overlapping greedy coverage when the complete replacement page fits. This is not a
-global optimum or a distinct-person count. Canonical order remains a diagnostic
+global optimum or a distinct-person count. These lexicographic preferences are a
+ranking policy whose recall utility requires paired evidence. Candidate coverage
+is not joint answer sufficiency. Canonical order remains a diagnostic
 control and tie-break. Proof-bearing slots
 keep source-interpretation, query-semantics, semantic-correspondence, and conditional-computation closure. Delivery and first-exposure `object_kind` is
 `semantic_proof` on those slots and `source_evidence` on a source excerpt
@@ -1163,6 +1175,10 @@ assertion truth or source-interpretation or semantic-correspondence success. Ove
 omitted rather than delivered after stripping assumptions. First exposure is the
 initial membership page recorded by the existing `FirstExposureSession` owner.
 This path does not replace ordinary `soul.recall`.
+Library continuations transfer the already frozen page/witness plan without
+source observation, solver replay or re-selection. Ordinary field continuation
+has a separate contract. Raw-source entries derive eligibility from current
+source/version/authorization and delivery owners, without semantic proof membership.
 
 The separately named source-bearing union metric scores the same initial occupied
 slots across source evidence and validated semantic proofs. The entire delivered
