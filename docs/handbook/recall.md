@@ -727,8 +727,13 @@ separate regression contracts.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Current query request v8 and response v7 use the same recursive meaning schema as
-local receive admission; depth and byte limits remain local requirements. Nested
+operation. Current query request v9 and response v8 serialize expression occurrences
+in a bounded acyclic `nodes` table; condition and operand positions carry separate
+serialization tokens. Protocol derives this wire schema from the same expression
+authority used by local receive admission. The host checks references, cycles,
+reachability, depth, expanded work and bytes before expanding into that unchanged
+meaning compiler. Historical recursive responses retain their recorded wire and
+cache identities and cannot enter current execution. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
 The canonical query also binds the complete host-approved fixed context
 (`null` when none was supplied) and one `utterance-attribution-v1` value. Its

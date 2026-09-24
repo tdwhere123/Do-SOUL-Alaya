@@ -6,7 +6,7 @@ import { dirname } from "node:path";
 import { expect } from "vitest";
 import { SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
@@ -21,6 +21,7 @@ import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artif
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { interpretedQueryRaw } from "../query-producer-fixture.js";
 
 /** Authored engineering outputs enter the existing raw/authority/receive owners; no model fidelity claim. */
 export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot: string, cacheRoots: string[]) {
@@ -174,10 +175,9 @@ export async function assertPerQueryOpportunity(config: SemanticChainConfig, roo
 function authoredQuery(userPrompt: string) {
   const original = (JSON.parse(userPrompt) as { original_query: string }).original_query;
   const predicate = original === "What was repaired?" ? "repair" : "complete";
-  return JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-    outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
+  return interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
       kind: "statement", key: "condition", predicate, arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
-    }] }], gaps: [] } });
+    }] }], gaps: [] });
 }
 
 function authoredCorrespondence(userPrompt: string) {

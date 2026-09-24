@@ -3,11 +3,20 @@ import {
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
+  encodeSourceSemanticQueryCarrier, type SourceSemanticQueryMeaningBody,
   type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics,
+  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
   type SourceSemanticQueryProposalInput, type SourceSemanticCorrespondenceProposalInput } from "@do-soul/alaya-soul";
+
+/** Encode authored nested meaning through the current producer wire for native boundary tests. */
+export function queryWire(rawJson: string): string {
+  const response = JSON.parse(rawJson);
+  return JSON.stringify({ ...response, contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+    query: encodeSourceSemanticQueryCarrier(response.query as SourceSemanticQueryMeaningBody) });
+}
 
 /** Authored native queries isolate worker semantics from producer-language tests. */
 export function authoredQuerySemantics(input: SourceSemanticQueryProposalInput, body: unknown) {

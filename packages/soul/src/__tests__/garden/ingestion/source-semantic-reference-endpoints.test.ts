@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { sourceSemanticInterpretationIdentity } from "@do-soul/alaya-protocol";
+import { sourceSemanticInterpretationIdentity, encodeSourceSemanticQueryCarrier,
+  type SourceSemanticQueryMeaningBody } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticCorrespondenceRequest, semanticSha256 }
   from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { proposeQuerySemantics, proposeSourceSemantics }
@@ -52,10 +53,10 @@ function chargerQuery(original_query: string, answer: "recipient" | "lender") {
   const received = proposeQuerySemantics({ original_query,
     approved_fixed_context: { context_id: "avery-utterance", notes: "Avery authored unquoted I/me in this question." },
     producer_id: "authored-control", producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-query-response-v7",
+  { rawJson: JSON.stringify({ contract: "source-semantic-query-response-v8",
     outcome: { status: "interpreted", gaps: [] },
-    query: { contract: "source-semantic-query-meaning-v5", gaps: [],
-      alternatives: [{ conditions: answer === "recipient" ? [take, lend] : [lend, take] }] } }) });
+    query: encodeSourceSemanticQueryCarrier({ contract: "source-semantic-query-meaning-v5", gaps: [],
+      alternatives: [{ conditions: answer === "recipient" ? [take, lend] : [lend, take] }] } as SourceSemanticQueryMeaningBody) }) });
   if (received.query === undefined) throw new Error(`authored Q failed: ${JSON.stringify(received.outcome)}`);
   return received.query;
 }

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
+import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
@@ -91,10 +91,9 @@ describe("complete-source census and publication", () => {
       inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
     const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
       config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-      extractor: { extract: async () => ({ rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-        outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
+      extractor: { extract: async () => ({ rawJson: interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
           kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
-        }] }], gaps: [] } }), responseMetadata: { finishReason: "STOP" },
+        }] }], gaps: [] }), responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
     expect(filled.newly_admitted).toBe(2);
     const prepared = await prepareLongMemEvalSemanticRun(root);

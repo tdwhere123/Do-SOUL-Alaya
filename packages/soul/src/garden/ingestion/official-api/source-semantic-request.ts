@@ -17,7 +17,7 @@ import {
   SourceSemanticQueryGapSchema,
 
 
-  SourceSemanticQueryMeaningBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
+  SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceSelectionSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog, canonicalJson,
   sourceReferenceCapacityReason, SourceReferenceCapacityExceeded, SourceReferenceCapacityReasonSchema,
   SOURCE_REFERENCE_MAX_ASSERTIONS,
@@ -27,7 +27,8 @@ import {
   bindUtteranceAttribution, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
-import { sourceSemanticQueryExamples } from "./source-semantic-query-examples.js";
+import { sourceSemanticQueryExamples, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
+export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as CONTENT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-content-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as EXPRESSION_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-expression-guidance.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT as COMPACT_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-compact-guidance.js";
@@ -36,8 +37,7 @@ import { CANONICAL_SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-canon
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-selection-guidance.js";
 
-export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v8" as const;
-export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v7" as const;
+export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_REQUEST_CONTRACT = "source-semantic-correspondence-request-v5" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v3" as const;
 
@@ -468,7 +468,7 @@ export function sourceSemanticQueryResponseJsonSchema(): object {
   return producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
     outcome: QueryCorrespondenceGenerationOutcomeSchema,
-    query: SourceSemanticQueryMeaningBodySchema.optional()
+    query: SourceSemanticQueryCarrierBodySchema.optional()
   }).strict().readonly(), "ref");
 }
 
@@ -565,6 +565,7 @@ export function retainedSourceSemanticSystemPrompt(request: SourceSemanticReques
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   `Propose query meaning for the original query only, using ${SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT}.`,
   "Describe meaning, not answers or execution. The host builds IDs, sorts, incidence and evidence branches; do not emit graphs, hashes, programs, execution statistics, ranking or verdicts. Omit optional statement/operator keys unless referenced elsewhere. Entity keys express identity; unknown answer values are free targets, not unresolved meaning.",
+  "Serialize each expression occurrence once in query.nodes with its own node token. alternatives.conditions and evidence_inputs[].conditions are arrays of node tokens. A statement/operator content, antecedent, consequent or operands field contains node tokens, never an embedded expression. Tokens are serialization references, separate from semantic local keys. Every token must resolve once; declare no unreachable nodes or cycles. An occurrence node uses its semantic key to refer to a declared event and still has its own serialization token.",
   "Decide the answer branch before adding inputs. Put the requested relation, its participants and every stated qualification in conditions; conditions are one conjunction, so do not require operand facts merely because they could help derive an answer. A Boolean question returns no fabricated result entity. A source can state the requested relation directly without supplying operands. For a requested calculation or other operation, also retain requested_operation:{reading,support:{kind:query_text,excerpt}} and independently useful evidence_inputs:[{conditions:[...]}]. Each input branch carries its own event, participant, time and other qualifications. Input facts never execute the operation or prove the answer. If no faithful answer relation is expressible, conditions:[] may accompany the operation and inputs; do not turn the inputs into a claimed answer.",
   `A nesting path may contain at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes. Deeper meaning must remain a located gap; never silently truncate its scope.`,
   'An unknown answer or lawful witness is free; a named person or definite participant is named even when source identity is unknown. Shared incidence does not replace the named participant’s referent obligation. A named target preserves a referentially constrained expression in the original query, including a speaker, addressee, name or definite description; give it one exact query excerpt. A free target binds a value without an additional referent constraint; its excerpt supports a role, not a person. If authorized query context leaves the intended named referent genuinely unresolved, retain named and locate an unresolved_referent gap on it, or abstain when no faithful usable query can be proposed. Unknown source correspondence alone requires no gap. Local keys are arbitrary identifiers, never text evidence or identity. Declare named/free entities inline or in the optional entities table, not both; reuse them with {kind:"reference",key}. Free targets, including a free reported.reporter or evidence-input value, need exact support on target or role. Reporter targets remain entities.',
@@ -575,7 +576,7 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   'Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"} with no nested meaning. Pairwise strict is true only for lt/gt; extrema omit right and explicitly choose strictness. Return only operand keys.',
   "Declare comparison operands as entities; the evaluation refers to their keys. Use only the original query and approved fixed context, never source interpretations or proposed correspondences.",
   'Retain residual meaning in query.gaps:[{kind,affected_ids,support:[{kind:"query_text",excerpt}],description?}]. Excerpts copy exact original text; affected_ids names declared targets or [] for unrepresented meaning. Omit outcome.gaps to let the host echo this single gap list. A gap preserves a limitation; it does not replace meaning that the chosen structure can express.',
-  `Complete neutral examples, not the current input: ${JSON.stringify(sourceSemanticQueryExamples)}. Nested content is not independently asserted; domains are not closed censuses; retained inputs do not claim a computed answer.`
+  `Complete neutral examples, not the current input: ${JSON.stringify(sourceSemanticQueryExamples)}. Referenced content is not independently asserted; domains are not closed censuses; retained inputs do not claim a computed answer.`
 ].join(" ");
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT = [

@@ -21,7 +21,8 @@ import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
+  type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
+import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { setExtractionCredentialFixture } from "./fixture.js";
 import { inspectExtractionAuthority } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
@@ -257,10 +258,9 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
   await executeSemanticProposalFill({ workset: config.chain.query_workset, cacheRoot: config.chain.query_cache_root,
     authority: queryAuthority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-        outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+      rawJson: interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
           alternatives: [{ conditions: [{ kind: "statement", key: "complete", predicate: "complete",
-            arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }] }] }], gaps: [] } }),
+            arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }] }] }], gaps: [] }),
       responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
     }) } });
   const root = join(cacheRoot, "duplicate-stage");

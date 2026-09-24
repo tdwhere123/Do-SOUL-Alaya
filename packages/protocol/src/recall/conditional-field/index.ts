@@ -296,12 +296,15 @@ export { sourceSemanticQueryBranchViews, type SourceSemanticQueryBranchView } fr
 export {
   SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH,
+  SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES,
   SourceSemanticQueryMeaningBodySchema,
+  SourceSemanticQueryCarrierBodySchema,
   materializeSourceSemanticQueryMeaning,
   type QueryMeaning,
   type SourceSemanticQueryMeaningBody,
   type SourceSemanticQueryMeaningEnvelope
 } from "./semantic-query-meaning.js";
+export { expandSourceSemanticQueryCarrier, encodeSourceSemanticQueryCarrier } from "./semantic-query-carrier.js";
 export {
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_RELATION,

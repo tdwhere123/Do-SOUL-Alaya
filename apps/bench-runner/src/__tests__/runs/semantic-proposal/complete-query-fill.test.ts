@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { encodeSourceSemanticQueryCarrier } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticQuery, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
 import { proposeQuerySemantics } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
@@ -74,9 +75,9 @@ function extractor(raws: string[], extra: { finish?: string | null; usage?: bool
 
 function meaningBody(themeExcerpt: string): string {
   return JSON.stringify({
-    contract: "source-semantic-query-response-v7",
+    contract: "source-semantic-query-response-v8",
     outcome: { status: "interpreted" },
-    query: {
+    query: encodeSourceSemanticQueryCarrier({
       contract: "source-semantic-query-meaning-v5",
       alternatives: [{ conditions: [{
         kind: "statement", key: "send", predicate: "send",
@@ -87,7 +88,7 @@ function meaningBody(themeExcerpt: string): string {
         ]
       }] }],
       gaps: []
-    }
+    })
   });
 }
 

@@ -11,7 +11,7 @@ import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { ACCESS_BUDGET, WS, withAccessLibrary } from "./source-semantic-access.test-support.js";
-import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
+import { queryWire, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 
 const QUESTION = "Did the supervised run for batch Kestrel take longer than the supervised run for batch Lark?";
 const MEASURED = "For batch Kestrel, setup took 8 minutes and the supervised run took 13 minutes. For batch Lark, setup took 11 minutes and the supervised run took 9 minutes.";
@@ -91,7 +91,7 @@ function comparisonQuery() {
   });
   const received = proposeQuerySemantics({ original_query: QUESTION,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-query-response-v7",
+  { rawJson: queryWire(JSON.stringify({ contract: "source-semantic-query-response-v8",
     outcome: { status: "interpreted", gaps: [] },
     query: { contract: "source-semantic-query-meaning-v5", gaps: [],
       requested_operation: { reading: "compare the supervised-run durations",
@@ -99,7 +99,7 @@ function comparisonQuery() {
       alternatives: [{ conditions: [answer], evidence_inputs: [
         input("KestrelDuration", "Kestrel", "KestrelRun", "durationKestrel"),
         input("LarkDuration", "Lark", "LarkRun", "durationLark")
-      ] }] } }) });
+      ] }] } })) });
   if (received.query === undefined) throw new Error(`comparison Q failed: ${JSON.stringify(received.outcome)}`);
   return received.query;
 }

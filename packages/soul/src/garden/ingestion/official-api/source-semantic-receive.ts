@@ -5,6 +5,7 @@ import {
   SourceSemanticGapSchema, SourceSemanticOutcomeSchema,
   SourceSemanticQueryGapSchema, SourceSemanticQueryOutcomeGapBindingSchema,
   SourceSemanticQuerySchema, SourceSemanticCorrespondenceSelectionSchema, materializeSourceSemanticQueryMeaning,
+  expandSourceSemanticQueryCarrier,
   materializeSourceSemanticCorrespondenceSelection,
   SourceSemanticResponseEnvelopeSchema, SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
   SourceSemanticInterpretationSchema,
@@ -399,7 +400,7 @@ function materializeQuery(body: unknown, request: SourceSemanticQueryRequest): S
     approved_fixed_context: request.approved_fixed_context ?? null,
     attribution_context: request.attribution_context
   };
-  return materializeSourceSemanticQueryMeaning(record, envelope);
+  return materializeSourceSemanticQueryMeaning(expandSourceSemanticQueryCarrier(record, request.resource_limits), envelope);
 }
 
 function selectionGroupCompleteness(

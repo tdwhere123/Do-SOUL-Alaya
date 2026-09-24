@@ -1,19 +1,74 @@
 import { describe, expect, it } from "vitest";
 import {
   SourceSemanticQuerySchema, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
-  sourceSemanticQueryBranchViews, UNKNOWN_UTTERANCE_ATTRIBUTION
+  sourceSemanticQueryBranchViews, UNKNOWN_UTTERANCE_ATTRIBUTION, encodeSourceSemanticQueryCarrier,
+  expandSourceSemanticQueryCarrier,
+  type SourceSemanticQueryMeaningBody
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
   semanticSha256, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import {
-  proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics
+  proposeCorrespondenceSemantics, proposeQuerySemantics as receiveQuerySemantics, proposeSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { sourceSemanticQueryExamples } from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
 
 const TEXT = "The archivist accessioned folio F into bay B.";
 const EXISTENTIAL = "which folio was accessioned into bay B?";
+
+type NestedFixtureExpression = Record<string, unknown>;
+type NestedFixtureBody = Record<string, unknown> & { alternatives?: readonly {
+  conditions?: readonly NestedFixtureExpression[];
+  evidence_inputs?: readonly { conditions?: readonly NestedFixtureExpression[] }[]
+}[] };
+
+function fixtureWire(query: unknown): unknown {
+  try { return encodeSourceSemanticQueryCarrier(query as SourceSemanticQueryMeaningBody); }
+  catch {
+    // Malformed fixture bodies must still reach the receiver as malformed wire.
+    const body = query as NestedFixtureBody;
+    const nodes: Record<string, unknown>[] = [];
+    const put = (expression: NestedFixtureExpression): string => {
+      const node = `n${nodes.length + 1}`;
+      const row: Record<string, unknown> = { ...expression, node };
+      nodes.push(row);
+      for (const field of ["content", "antecedent", "consequent"]) {
+        if (row[field] !== undefined && typeof row[field] === "object") row[field] = put(row[field] as NestedFixtureExpression);
+      }
+      if (Array.isArray(row.operands)) row.operands = (row.operands as NestedFixtureExpression[]).map(put);
+      return node;
+    };
+    return { ...body, alternatives: body.alternatives?.map(alternative => ({ ...alternative,
+      conditions: alternative.conditions?.map(put),
+      ...(alternative.evidence_inputs === undefined ? {} : { evidence_inputs: alternative.evidence_inputs.map(input => ({
+        ...input, conditions: input.conditions?.map(put)
+      })) })
+    })), nodes };
+  }
+}
+
+function proposeQuerySemantics(...args: Parameters<typeof receiveQuerySemantics>): ReturnType<typeof receiveQuerySemantics> {
+  const [input, injected, parseQuery] = args;
+  if (injected === undefined) return receiveQuerySemantics(input, injected, parseQuery);
+  const response = JSON.parse(injected.rawJson);
+  if (response.query !== undefined && response.query.nodes === undefined && response.query.alternatives !== undefined) {
+    response.query = fixtureWire(response.query);
+  }
+  return receiveQuerySemantics(input, { rawJson: JSON.stringify(response) }, parseQuery);
+}
+
+type EditableWireNode = { node: string; arguments: { excerpt?: string; target: { excerpt?: string } }[] };
+function inputNode(response: unknown, inputIndex: number, conditionIndex: number): EditableWireNode {
+  const query = (response as { query: {
+    nodes: EditableWireNode[];
+    alternatives: { evidence_inputs: { conditions: string[] }[] }[]
+  } }).query;
+  const token = query.alternatives[0]!.evidence_inputs[inputIndex]!.conditions[conditionIndex]!;
+  const node = query.nodes.find(row => row.node === token);
+  if (node === undefined) throw new Error(`fixture node ${token} missing`);
+  return node;
+}
 
 function sourceInput(text = TEXT) {
   const sourceCorpus = buildOfficialApiSourceCorpus(text, [{ role: "user", content: text }]);
@@ -79,6 +134,16 @@ function canonicalQuery(original: string, body: object) {
 }
 
 describe("query meaning receive and semantic_correspondence selection", () => {
+  it("keeps the retired recursive response outside current query admission", () => {
+    const example = sourceSemanticQueryExamples[0]!;
+    const old = { ...example.response, contract: "source-semantic-query-response-v7",
+      query: expandSourceSemanticQueryCarrier(example.response.query) };
+    const received = receiveQuerySemantics({ original_query: example.original_query,
+      producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify(old) });
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.query).toBeUndefined();
+  });
+
   it.each(["free", "named"] as const)("rejects contradictory entity kinds in %s-first order without replacing a free answer", first => {
     const input = { original_query: "Who told Mira that Lee might leave?",
       producer_id: "alaya.source.semantic.query.soul.v1", producer_version: "1" };
@@ -87,7 +152,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         { role: "teller", target: { kind: "free", key: "teller", excerpt: "Who", return: true } },
         { role: "recipient", target: { kind: "named", key: recipient, excerpt: "Mira" } }
       ];
-      return { contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      return { contract: "source-semantic-query-response-v8", outcome: { status: "interpreted" },
         query: { contract: "source-semantic-query-meaning-v5", gaps: [],
           alternatives: [{ conditions: [{ kind: "statement", key: "tell", predicate: "tell",
             arguments: first === "named" ? args.reverse() : args,
@@ -113,14 +178,14 @@ describe("query meaning receive and semantic_correspondence selection", () => {
 
   it.each(["person", "Who", "speaker", "local73"])("receives a supported free reporter with arbitrary handle %s", key => {
     const received = proposeQuerySemantics({ original_query: "Who reported that Lee left?", producer_id: "query-producer", producer_version: "1" }, {
-      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      rawJson: JSON.stringify({ contract: "source-semantic-query-response-v8", outcome: { status: "interpreted" },
         query: { contract: "source-semantic-query-meaning-v5", gaps: [], entities: [{ kind: "free", key, excerpt: "Who", return: true }],
           alternatives: [{ conditions: [{ kind: "reported", key: "report", reporter: { kind: "reference", key },
             content: { kind: "statement", key: "leave", predicate: "left", arguments: [
               { role: "agent", target: { kind: "named", key: "lee", excerpt: "Lee" } }
             ] } }] }] } })
     });
-    expect(received.request.contract).toBe("source-semantic-query-request-v8");
+    expect(received.request.contract).toBe("source-semantic-query-request-v9");
     expect(received.outcome.status).toBe("interpreted");
     expect(received.query?.alternatives[0]?.frames[0]?.role_requirements).toEqual([
       { id: "reporter", role_reading: "reporter", target_variable: key, support: { kind: "query_text", excerpt: "Who" } }
@@ -131,7 +196,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
   it("retains an unresolved speaker expression without assigning a speaker identity", () => {
     const original_query = "What degree did I graduate with?";
     const body = (target: object, gaps: object[]) => ({
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      contract: "source-semantic-query-response-v8", outcome: { status: "interpreted" },
       query: { contract: "source-semantic-query-meaning-v5", gaps,
         alternatives: [{ conditions: [{ kind: "statement", predicate: "graduate", arguments: [
           { role: "agent", target },
@@ -174,11 +239,11 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(universal.evaluation).toEqual({ kind: "forall", domain: "sensors", binder: "sensor", local_variables: ["sensor", "calibration"] });
     expect(universal.return_variables).toEqual([]);
     expect(universal.alternatives[0]!.frames[0]!.role_requirements[0]!.target_variable).toBe("sensor");
-    expect(results[2]!.query!.gaps).toEqual(sourceSemanticQueryExamples[2].response.query.gaps);
-    expect(results[2]!.outcome).toEqual({ status: "interpreted", gaps: sourceSemanticQueryExamples[2].response.query.gaps });
+    expect(results[2]!.query!.gaps).toEqual(sourceSemanticQueryExamples[2]!.response.query.gaps);
+    expect(results[2]!.outcome).toEqual({ status: "interpreted", gaps: sourceSemanticQueryExamples[2]!.response.query.gaps });
     const operation = results[3]!.query!;
     const alternative = operation.alternatives[0]!;
-    expect(operation.requested_operation).toEqual(sourceSemanticQueryExamples[3].response.query.requested_operation);
+    expect(operation.requested_operation).toEqual(sourceSemanticQueryExamples[3]!.response.query.requested_operation);
     expect(operation.return_variables).toEqual([]);
     expect(operation.evaluation).toBeUndefined();
     expect(alternative.answer_frames).toEqual([alternative.frames[0]!.id]);
@@ -219,7 +284,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
   });
 
   it("keeps the two qualified event inputs distinct from the requested elapsed-hours answer", () => {
-    const example = sourceSemanticQueryExamples[10];
+    const example = sourceSemanticQueryExamples[10]!;
     const received = proposeQuerySemantics({ original_query: example.original_query,
       producer_id: "query-producer", producer_version: "1"
     }, { rawJson: JSON.stringify(example.response) });
@@ -240,15 +305,15 @@ describe("query meaning receive and semantic_correspondence selection", () => {
     expect(query.requested_operation?.reading).toBe("Calculate elapsed hours from the sealing time to the opening time.");
 
     const withoutRoleSupport = structuredClone(example.response);
-    Object.assign(withoutRoleSupport.query.alternatives[0].evidence_inputs[0].conditions[1].arguments[0], { excerpt: undefined });
+    Object.assign(inputNode(withoutRoleSupport, 0, 1).arguments[0]!, { excerpt: undefined });
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(withoutRoleSupport) }).outcome.status).toBe("invalid");
     const forgedRoleSupport = structuredClone(example.response);
-    Object.assign(forgedRoleSupport.query.alternatives[0].evidence_inputs[0].conditions[1].arguments[0], { excerpt: "invented event" });
+    Object.assign(inputNode(forgedRoleSupport, 0, 1).arguments[0]!, { excerpt: "invented event" });
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(forgedRoleSupport) }).outcome.status).toBe("invalid");
     const withoutFreeInputSupport = structuredClone(example.response);
-    Object.assign(withoutFreeInputSupport.query.alternatives[0].evidence_inputs[1].conditions[1].arguments[1].target,
+    Object.assign(inputNode(withoutFreeInputSupport, 1, 1).arguments[1]!.target,
       { excerpt: undefined });
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(withoutFreeInputSupport) }).outcome.status).toBe("invalid");
@@ -263,7 +328,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
       [8, "did that technician use", "use_event"], [9, "did someone use", "use_event"]
     ] as const;
     for (const [index, phrase, affected] of past) {
-      const example = sourceSemanticQueryExamples[index];
+      const example = sourceSemanticQueryExamples[index]!;
       const received = proposeQuerySemantics({ original_query: example.original_query,
         producer_id: "query-producer", producer_version: "1"
       }, { rawJson: JSON.stringify(example.response) });
@@ -271,7 +336,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         && gap.affected_ids.includes(affected) && gap.support.some(row => row.excerpt === phrase)), example.original_query).toBe(true);
     }
     for (const index of [1, 3, 10] as const) {
-      const example = sourceSemanticQueryExamples[index];
+      const example = sourceSemanticQueryExamples[index]!;
       const received = proposeQuerySemantics({ original_query: example.original_query,
         producer_id: "query-producer", producer_version: "1"
       }, { rawJson: JSON.stringify(example.response) });
@@ -280,12 +345,12 @@ describe("query meaning receive and semantic_correspondence selection", () => {
   });
 
   it("binds required evidence act support to the current original query and rejects replaced producer syntax", () => {
-    const example = sourceSemanticQueryExamples[5];
-    const received = (query: object, original_query: string = example.original_query, contract = "source-semantic-query-response-v7") =>
+    const example = sourceSemanticQueryExamples[5]!;
+    const received = (query: object, original_query: string = example.original_query, contract = "source-semantic-query-response-v8") =>
       proposeQuerySemantics({ original_query, producer_id: "query-producer", producer_version: "1" }, {
         rawJson: JSON.stringify({ contract, outcome: { status: "interpreted" }, query })
       });
-    const body = (constraint: object) => ({ ...example.response.query,
+    const body = (constraint: object) => ({ ...expandSourceSemanticQueryCarrier(example.response.query),
       alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish", arguments: [], ...constraint }] }] });
     const invalidBodies = [
       { ...example.response.query, contract: "source-semantic-query-meaning-v4" },
@@ -305,7 +370,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
   });
 
   it("rejects legacy source-interpretation mention support instead of claiming that it locates a query gap", () => {
-    const example = sourceSemanticQueryExamples[2];
+    const example = sourceSemanticQueryExamples[2]!;
     const query = { ...example.response.query, gaps: [{ kind: "unsupported_meaning", affected_ids: ["arrival"],
       support: [{ kind: "lexical", mentions: ["arrival"] }] }] };
     const result = proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
@@ -319,7 +384,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
       original_query: "Who sent the sample to Mira?", producer_id: "query-producer", producer_version: "1"
     }, {
       rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v7",
+        contract: "source-semantic-query-response-v8",
         outcome: { status: "interpreted" },
         query: {
           contract: "source-semantic-query-meaning-v5",
@@ -399,7 +464,7 @@ describe("query meaning receive and semantic_correspondence selection", () => {
         query: existentialBody()
       })
     });
-    expect(query.request.contract).toBe("source-semantic-query-request-v8");
+    expect(query.request.contract).toBe("source-semantic-query-request-v9");
     expect(query.outcome.status).toBe("invalid");
     expect(query.query).toBeUndefined();
 

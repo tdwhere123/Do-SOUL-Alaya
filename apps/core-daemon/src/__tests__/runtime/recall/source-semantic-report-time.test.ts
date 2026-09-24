@@ -11,7 +11,7 @@ import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { ACCESS_BUDGET, WS, withAccessLibrary } from "./source-semantic-access.test-support.js";
-import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
+import { queryWire, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 
 const SOURCE = 'On 8 June 2026, Mira told me, "Oren inspected the valve on 6 June 2026."';
 const INSPECTION = "According to Mira, when did Oren inspect the valve?";
@@ -61,9 +61,9 @@ function query(question: string, answerEvent: "inspect" | "tell") {
   ], content: inner };
   const received = proposeQuerySemantics({ original_query: question,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1" },
-  { rawJson: JSON.stringify({ contract: "source-semantic-query-response-v7",
+  { rawJson: queryWire(JSON.stringify({ contract: "source-semantic-query-response-v8",
     outcome: { status: "interpreted", gaps: [] },
-    query: { contract: "source-semantic-query-meaning-v5", alternatives: [{ conditions: [outer] }], gaps: [] } }) });
+    query: { contract: "source-semantic-query-meaning-v5", alternatives: [{ conditions: [outer] }], gaps: [] } })) });
   if (received.query === undefined) throw new Error(`authored query packet failed: ${JSON.stringify(received.outcome)}`);
   return received.query;
 }

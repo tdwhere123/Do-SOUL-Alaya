@@ -3,8 +3,8 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
-import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { registerExtractionFillHooks, setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
@@ -186,12 +186,11 @@ it("joins two native Step owners for a later original question and retains unsup
       .toEqual(census.records.map((source) => ({ source_id: source.source_id,
         event_time: source.source_observed_at, source_body: source.content_bytes })));
   } finally { db.close(); }
-  const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-    outcome: { status: "interpreted" }, query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  const queryRawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
       requested_operation: { reading: "Fixture query", support: { kind: "query_text", excerpt: "Fixture query" } },
       alternatives: [{ conditions: [{ kind: "statement", key: "condition", predicate: "complete",
         arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "Fixture" }] }] }],
-      gaps: [] } });
+      gaps: [] });
   const queryPreflight = prepareSemanticProposal(frozen.query_workset, frozen.config.query_cache_root, 4096, 1);
   const queryAuthority = pinSemanticProposalAuthority({ preflight: queryPreflight,
     inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,

@@ -13,6 +13,7 @@ import {
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v5" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
+export const SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES = 8192;
 
 const Key = SourceSemanticHandleSchema;
 const Reading = SourceSemanticReadingSchema;
@@ -106,60 +107,77 @@ export type QueryOpaqueMeaning = Readonly<{
 }>;
 export type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
 
-function meaningShape(operand: z.ZodType<QueryMeaning>): z.ZodType<QueryMeaning> {
+function meaningShape(operand: z.ZodTypeAny, serializedId?: typeof Key): z.ZodTypeAny {
+  const token = serializedId === undefined ? {} : { node: serializedId };
   return z.discriminatedUnion("kind", [
     z.object({
+      ...token,
       kind: z.literal("statement"), key: Key.optional(), predicate: Reading,
       arguments: z.array(RoleArgument).max(8).readonly(), content: operand.optional(),
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional(), return: z.boolean().optional()
     }).strict().readonly(),
     z.object({
+      ...token,
       kind: z.literal("not"), key: Key.optional(), return: z.boolean().optional(), content: operand,
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
+      ...token,
       kind: z.literal("possible"), key: Key.optional(), return: z.boolean().optional(), content: operand,
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
+      ...token,
       kind: z.literal("reported"), key: Key.optional(), return: z.boolean().optional(), content: operand, reporter: EntityTarget.optional(),
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
+      ...token,
       kind: z.literal("conditional"), key: Key.optional(), return: z.boolean().optional(), antecedent: operand, consequent: operand,
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
     z.object({
+      ...token,
       kind: z.literal("opaque"), key: Key.optional(), return: z.boolean().optional(), operands: z.array(operand).min(1).max(8).readonly(),
       obligation: Obligation.optional(), required_evidence_act: RequiredEvidenceAct.optional()
     }).strict().readonly(),
-    Occurrence
+    serializedId === undefined ? Occurrence : Occurrence.unwrap().safeExtend({ node: serializedId }).readonly()
   ]);
 }
 
-const Meaning: z.ZodType<QueryMeaning> = z.lazy(() => meaningShape(Meaning));
-const Conditions = z.array(Meaning).max(16).readonly();
-
-const Alternative = z.object({
-  conditions: Conditions,
-  evidence_inputs: z.array(z.object({ conditions: Conditions.unwrap().min(1).readonly() })
-    .strict().readonly()).min(1).max(16).readonly().optional(),
-  purpose: z.enum(["support", "counterexample"]).optional()
-}).strict().readonly();
+const Meaning: z.ZodType<QueryMeaning> = z.lazy(() => meaningShape(Meaning)) as z.ZodType<QueryMeaning>;
+/** One structural authority projected with either nested operands or serialization references. */
+const SourceSemanticQueryCarrierNodeSchema = meaningShape(Key, Key);
+function alternativeShape<Condition extends z.ZodTypeAny>(condition: Condition) {
+  const conditions = z.array(condition).max(16).readonly();
+  return z.object({
+    conditions,
+    evidence_inputs: z.array(z.object({ conditions: z.array(condition).min(1).max(16).readonly() })
+      .strict().readonly()).min(1).max(16).readonly().optional(),
+    purpose: z.enum(["support", "counterexample"]).optional()
+  }).strict().readonly();
+}
+const Alternative = alternativeShape(Meaning);
 
 const Domain = z.object({
   key: Key, excerpt: z.string().min(1).max(1024)
 }).strict().readonly();
 
-export const SourceSemanticQueryMeaningBodySchema = z.object({
+function meaningBodyShape<AlternativeSchema extends z.ZodTypeAny>(alternative: AlternativeSchema, nodes?: z.ZodTypeAny) {
+  return {
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT),
-    alternatives: z.array(Alternative).min(1).max(16).readonly(),
+    alternatives: z.array(alternative).min(1).max(16).readonly(),
     gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly(),
     domains: z.array(Domain).max(64).readonly().optional(),
     entities: z.array(z.discriminatedUnion("kind", [FreeTarget, NamedTarget])).max(64).readonly().optional(),
     evaluation: SourceSemanticQueryEvaluationSchema.optional(),
-    requested_operation: SourceSemanticRequestedOperationSchema.optional()
-  }).strict().readonly().superRefine((body, context) => {
+    requested_operation: SourceSemanticRequestedOperationSchema.optional(),
+    ...(nodes === undefined ? {} : { nodes })
+  };
+}
+
+function validateMeaningBody(body: { evaluation?: { kind: string }; requested_operation?: unknown;
+  alternatives: readonly { conditions: readonly unknown[]; evidence_inputs?: unknown }[] }, context: z.RefinementCtx): void {
   const comparison = body.evaluation?.kind === "comparison";
   for (const [index, alternative] of body.alternatives.entries()) {
     if (comparison && alternative.conditions.length > 0) {
@@ -178,7 +196,13 @@ export const SourceSemanticQueryMeaningBodySchema = z.object({
         message: "finite evaluation cannot include independent evidence branches" });
     }
   }
-});
+}
+
+export const SourceSemanticQueryMeaningBodySchema = z.object(meaningBodyShape(Alternative))
+  .strict().readonly().superRefine(validateMeaningBody);
+export const SourceSemanticQueryCarrierBodySchema = z.object(meaningBodyShape(alternativeShape(Key),
+  z.array(SourceSemanticQueryCarrierNodeSchema).max(SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES).readonly()))
+  .strict().readonly().superRefine(validateMeaningBody);
 
 export type SourceSemanticQueryMeaningBody = z.infer<typeof SourceSemanticQueryMeaningBodySchema>;
 

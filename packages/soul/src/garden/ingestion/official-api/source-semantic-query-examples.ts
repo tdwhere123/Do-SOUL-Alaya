@@ -1,11 +1,14 @@
-import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrier,
+  type SourceSemanticQueryMeaningBody } from "@do-soul/alaya-protocol";
+
+export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v8" as const;
 
 /** Complete neutral producer examples; their admission and incidence are tested. */
-export const sourceSemanticQueryExamples = [
+const nestedSourceSemanticQueryExamples = [
   {
     original_query: "Who was asked to polish the lens?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["request"],
@@ -28,7 +31,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Is every registered sensor calibrated?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
         domains: [{ key: "sensors", excerpt: "every registered sensor" }],
@@ -43,7 +46,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Who has already arrived?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         alternatives: [{ conditions: [{
@@ -59,7 +62,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Does tray T contain more amber beads than blue beads?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
         requested_operation: { reading: "Compare the amber and blue bead counts in tray T.",
@@ -94,7 +97,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Did ringing precede flashing?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["before", "ring", "flash"],
@@ -114,7 +117,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Which question asked whether the lens was polished?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["polish"],
@@ -130,7 +133,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Which directive required polishing the lens?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["polish"],
@@ -146,7 +149,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Which tool did the workshop steward use?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["use_event"],
@@ -162,7 +165,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Which tool did that technician use?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         alternatives: [{ conditions: [{ kind: "statement", key: "use_event", predicate: "use", arguments: [
@@ -183,7 +186,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "Which tool did someone use?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["use_event"],
@@ -199,7 +202,7 @@ export const sourceSemanticQueryExamples = [
   {
     original_query: "What is the elapsed time in hours between Tara sealing crate C on 3 March 2024 and Tara opening crate C on 4 March 2024?",
     response: {
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+      outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
         requested_operation: { reading: "Calculate elapsed hours from the sealing time to the opening time.",
@@ -253,3 +256,11 @@ export const sourceSemanticQueryExamples = [
     }
   }
 ] as const;
+
+export const sourceSemanticQueryExamples = nestedSourceSemanticQueryExamples.map(example => ({
+  ...example, response: {
+    ...example.response,
+    contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+    query: encodeSourceSemanticQueryCarrier(example.response.query as SourceSemanticQueryMeaningBody)
+  }
+}));

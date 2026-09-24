@@ -11,7 +11,7 @@ import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { ACCESS_BUDGET, WS, withAccessLibrary } from "./source-semantic-access.test-support.js";
-import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
+import { queryWire, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 
 const SOURCE = "Noor approved the Cedar pilot for 22 September 2026 only. I don't know whether anyone has approved the Cedar pilot for 24 September 2026.";
 const DATED = "Who approved the Cedar pilot for 22 September 2026?";
@@ -47,15 +47,15 @@ function approvalQuery(question: string, dateExcerpt: string) {
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1" };
   const request = buildSourceSemanticQueryRequest(input);
   expect(request.approved_fixed_context).toEqual(CONTEXT);
-  const received = proposeQuerySemantics(input, { rawJson: JSON.stringify({
-    contract: "source-semantic-query-response-v7", outcome: { status: "interpreted", gaps: [] },
+  const received = proposeQuerySemantics(input, { rawJson: queryWire(JSON.stringify({
+    contract: "source-semantic-query-response-v8", outcome: { status: "interpreted", gaps: [] },
     query: { contract: "source-semantic-query-meaning-v5", gaps: [], alternatives: [{ conditions: [{
       kind: "statement", key: "approval", predicate: "approve", arguments: [
         { role: "approver", target: { kind: "free", key: "answerPerson", return: true }, excerpt: "Who" },
         { role: "pilot", target: { kind: "named", key: "pilot", excerpt: "Cedar pilot" }, excerpt: "Cedar pilot" },
         { role: "approval_date", target: { kind: "named", key: "approvalDate", excerpt: dateExcerpt }, excerpt: dateExcerpt }
       ] }] }] }
-  }) });
+  })) });
   if (received.query === undefined) throw new Error(`authored approval query failed: ${JSON.stringify(received.outcome)}`);
   return received.query;
 }

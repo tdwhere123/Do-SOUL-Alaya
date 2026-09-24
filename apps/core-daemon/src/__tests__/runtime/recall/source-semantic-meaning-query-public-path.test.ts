@@ -1,4 +1,4 @@
-import { receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
+import { queryWire, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,8 +43,8 @@ const QUERY_ATTRIBUTION: UtteranceAttribution = { contract: UTTERANCE_ATTRIBUTIO
     utf8_span: [0, Buffer.byteLength(ORIGINAL)], conversation_ref: "conversation-1", author_ref: "person-1" }] };
 
 /** Contract-migrated meaning fixture for the model response receiver. */
-const FROZEN_MEANING_RAW = JSON.stringify({
-  contract: "source-semantic-query-response-v7",
+const FROZEN_MEANING_RAW = queryWire(JSON.stringify({
+  contract: "source-semantic-query-response-v8",
   outcome: { status: "interpreted", gaps: [] },
   query: {
     contract: "source-semantic-query-meaning-v5",
@@ -62,7 +62,7 @@ const FROZEN_MEANING_RAW = JSON.stringify({
     gaps: [],
     entities: [{ kind: "named", key: "lathe", excerpt: "lathe" }]
   }
-});
+}));
 
 type Handler = ReturnType<typeof createMcpMemoryToolHandler>;
 type Context = { workspaceId: string; runId: string; agentTarget: string; sessionId: string };
@@ -200,7 +200,7 @@ function receiveLatheCorrespondence(querySemantics: SourceSemanticQuery, sourceI
  */
 it("recalls admitted query meaning through SQLite reopen, worker, and public interpretation", async () => {
   const receivedQuerySemantics = receiveFrozenQuerySemantics(QUERY_ATTRIBUTION);
-  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v8");
+  expect(receivedQuerySemantics.request.contract).toBe("source-semantic-query-request-v9");
   expect(receivedQuerySemantics.query.alternatives[0]?.frames.some((row) => row.operator === "possible")).toBe(true);
 
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-meaning-public-"));
@@ -259,7 +259,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
     const reopened = await openSession(filename);
     try {
       const admitted = receiveFrozenQuerySemantics(QUERY_ATTRIBUTION);
-      expect(admitted.request.contract).toBe("source-semantic-query-request-v8");
+      expect(admitted.request.contract).toBe("source-semantic-query-request-v9");
       const querySemanticsAfter = admitted.query;
       const semantic_correspondence = receiveLatheCorrespondence(querySemanticsAfter, sourceInterpretation, sourceInterpretationId);
       const recalled = await interpret(reopened.handler, {
@@ -381,14 +381,14 @@ it("requires the requested graduate's referent even when another graduate has th
       expect(interpretation.frames.filter(row => row.predicate_support.reading === "graduate")).toHaveLength(2);
       const check = async (original_query: string, target: object, expected: string[], constrained: boolean) => {
         const received = proposeQuerySemantics({ original_query, producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
-          producer_version: "1" }, { rawJson: JSON.stringify({
-            contract: "source-semantic-query-response-v7", outcome: { status: "interpreted" },
+          producer_version: "1" }, { rawJson: queryWire(JSON.stringify({
+            contract: "source-semantic-query-response-v8", outcome: { status: "interpreted" },
             query: { contract: "source-semantic-query-meaning-v5", gaps: [],
               alternatives: [{ conditions: [{ kind: "statement", predicate: "graduate", arguments: [
                 { role: "agent", target },
                 { role: "degree", target: { kind: "free", key: "degree", excerpt: "What degree", return: true } }
               ] }] }] }
-          }) });
+          })) });
         if (received.query === undefined) throw new Error(JSON.stringify(received.outcome));
         const query = received.query;
         expect(query.variables.find(row => row.id === "actor")?.reference?.excerpt).toBe(constrained ? "Mara" : undefined);

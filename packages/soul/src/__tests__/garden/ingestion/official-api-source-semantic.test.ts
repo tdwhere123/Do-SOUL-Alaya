@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   sourceReferenceResolver, sourceSemanticInterpretationIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION,
   normalizeSourceSemantics, UTTERANCE_ATTRIBUTION_CONTRACT,
+  encodeSourceSemanticQueryCarrier, type SourceSemanticQueryMeaningBody,
   type SourceInterpretationProfile, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
@@ -25,6 +26,12 @@ const PROFILE: SourceInterpretationProfile = {
 };
 
 const TEXT = "The archivist accessioned folio F into bay B.";
+
+function currentQueryWire(rawJson: string): string {
+  const response = JSON.parse(rawJson);
+  return JSON.stringify({ ...response, contract: "source-semantic-query-response-v8",
+    query: encodeSourceSemanticQueryCarrier(response.query as SourceSemanticQueryMeaningBody) });
+}
 
 it("keeps source bytes and query text identity stable while changing current H and Q request context", () => {
   const source = sourceInput();
@@ -398,8 +405,8 @@ describe("query and semantic_correspondence proposal entry points", () => {
       expect(preparedQuery.system_prompt).toBe(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT);
       expect(preparedCorrespondence.system_prompt).toContain("request-local handle source1, source2");
       for (const valid of [false, true]) {
-        const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? JSON.stringify({
-          contract: "source-semantic-query-response-v7", outcome: { status: "interpreted", gaps: [] },
+        const querySemantics = proposeQuerySemantics(queryInput, { rawJson: valid ? currentQueryWire(JSON.stringify({
+          contract: "source-semantic-query-response-v8", outcome: { status: "interpreted", gaps: [] },
           query: {
             contract: "source-semantic-query-meaning-v5",
             alternatives: [{ conditions: [{
@@ -411,7 +418,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
             }] }],
             gaps: []
           }
-        }) : "{}" });
+        })) : "{}" });
         const semanticCorrespondence = proposeCorrespondenceSemantics(correspondenceInput, { rawJson: valid ? JSON.stringify({
           contract: "source-semantic-correspondence-response-v3", outcome: { status: "interpreted", gaps: [] },
           semantic_correspondence: { contract: "source-semantic-correspondence-selection-v2", source_interpretation_handle: "source1", selections: [] }
@@ -431,14 +438,14 @@ describe("query and semantic_correspondence proposal entry points", () => {
     const gaps = [{ kind: "unresolved_referent", affected_ids: ["bay"],
       support: [{ kind: "query_text", excerpt: "bay B" }] }];
     const received = proposeQuerySemantics({ original_query: "which folio was accessioned into bay B?",
-      producer_id: "query-producer", producer_version: "1" }, { rawJson: JSON.stringify({
-      contract: "source-semantic-query-response-v7", outcome: { status: "interpreted", gaps },
+      producer_id: "query-producer", producer_version: "1" }, { rawJson: currentQueryWire(JSON.stringify({
+      contract: "source-semantic-query-response-v8", outcome: { status: "interpreted", gaps },
       query: { contract: "source-semantic-query-meaning-v5", alternatives: [{ conditions: [{
         kind: "statement", key: "accession", predicate: "accession", arguments: [
           { role: "object", target: { kind: "free", key: "folio", return: true }, excerpt: "folio" },
           { role: "bay", target: { kind: "named", key: "bay", excerpt: "bay B" }, excerpt: "bay B" }
         ] }] }], gaps: matching ? gaps : [] }
-    }) });
+    })) });
     if (matching) {
       expect(received.outcome).toEqual({ status: "interpreted", gaps });
       expect(received.query?.gaps).toEqual(gaps);
@@ -467,8 +474,8 @@ describe("query and semantic_correspondence proposal entry points", () => {
       approved_fixed_context: { context_id: "fixed-ctx" },
       producer_id: "query-producer", producer_version: "1"
     }, {
-      rawJson: JSON.stringify({
-        contract: "source-semantic-query-response-v7",
+      rawJson: currentQueryWire(JSON.stringify({
+        contract: "source-semantic-query-response-v8",
         outcome: { status: "interpreted", gaps: [] },
         query: {
           contract: "source-semantic-query-meaning-v5",
@@ -481,7 +488,7 @@ describe("query and semantic_correspondence proposal entry points", () => {
           }] }],
           gaps: []
         }
-      })
+      }))
     });
     expect(received.request.contract).toBe(SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT);
     expect(received.request.original_query).toBe("which folio was accessioned into bay B?");

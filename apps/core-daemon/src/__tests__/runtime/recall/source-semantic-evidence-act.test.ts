@@ -2,7 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { type SourceSemanticInterpretation, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { type SourceSemanticInterpretation, type SourceSemanticQuery,
+  encodeSourceSemanticQueryCarrier, expandSourceSemanticQueryCarrier } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication,
   EvidenceService, fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
@@ -27,9 +28,18 @@ const CLOCK = "2026-09-23T00:00:00.000Z";
 const BUDGET = { schema_version: 1 as const, work_units: 200_000, memory_bytes: 20_000_000,
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
 const CASES = [
-  { act: "question", text: "Was the lens polished?", predicate: "polished", example: sourceSemanticQueryExamples[5] },
-  { act: "directive", text: "Polish the lens.", predicate: "Polish", example: sourceSemanticQueryExamples[6] }
+  { act: "question", text: "Was the lens polished?", predicate: "polished", example: sourceSemanticQueryExamples[5]! },
+  { act: "directive", text: "Polish the lens.", predicate: "Polish", example: sourceSemanticQueryExamples[6]! }
 ] as const;
+
+function withExplicitObligation(response: (typeof CASES)[number]["example"]["response"], obligation: "asserted_at_source" | "entailed_at_source") {
+  const changed = structuredClone(response);
+  const token = changed.query.alternatives[0]!.conditions[0]!;
+  const node = (changed.query.nodes as { node: string; obligation?: string }[]).find(row => row.node === token);
+  if (node === undefined) throw new Error("evidence act fixture node missing");
+  node.obligation = obligation;
+  return changed;
+}
 
 function proposed(original: string, response: unknown) {
   const received = proposeQuerySemantics({ original_query: original,
@@ -128,15 +138,16 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
       const other = CASES.find(row => row.act !== act)!;
       expect(execute(other.example.original_query, other.example.response).result.binding_results).toEqual([]);
       for (const obligation of [undefined, "asserted_at_source", "entailed_at_source"] as const) {
-        const actual = execute("Was the lens polished?", { ...example.response, query: { ...example.response.query,
+        const meaning = expandSourceSemanticQueryCarrier(example.response.query);
+        const first = meaning.alternatives[0]!.conditions[0]!;
+        if (first.kind !== "statement") throw new Error("evidence act fixture must be a statement");
+        const { required_evidence_act: _act, ...statement } = first;
+        const actual = execute("Was the lens polished?", { ...example.response, query: encodeSourceSemanticQueryCarrier({ ...meaning,
           gaps: [{ kind: "unsupported_meaning", affected_ids: ["polish"],
             support: [{ kind: "query_text", excerpt: "Was the lens polished" }],
             description: "The past polishing qualification is not encoded by the retained predicate." }],
-          alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish",
-            arguments: example.response.query.alternatives[0].conditions[0].arguments,
-            ...(obligation === undefined ? {} : { obligation })
-          }] }]
-        } });
+          alternatives: [{ conditions: [{ ...statement, ...(obligation === undefined ? {} : { obligation }) }] }]
+        }) });
         expect(actual.query.alternatives[0]!.context_obligations).toEqual([
           { frame: "polish", kind: obligation ?? "asserted_at_source" }
         ]);
@@ -154,9 +165,7 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
 
 it.each(CASES)("rejects explicit assertion and entailment conflicts for $act at proposal and canonical admission", ({ example }) => {
   for (const obligation of ["asserted_at_source", "entailed_at_source"] as const) {
-    const response = { ...example.response, query: { ...example.response.query, alternatives: [{ conditions: [
-      { ...example.response.query.alternatives[0].conditions[0], obligation }
-    ] }] } };
+    const response = withExplicitObligation(example.response, obligation);
     const received = proposeQuerySemantics({ original_query: example.original_query,
       producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1" }, { rawJson: JSON.stringify(response) });
     expect(received.outcome.status).toBe("invalid");

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
-import { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
+import { SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { hashSourceRecordId, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SELECTION_CONTRACT, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
@@ -22,6 +22,7 @@ import { assertPerQueryOpportunity } from "./native-semantic-arm.test-support.js
 import { assertSemanticChainArchiveAdmission } from "./semantic-chain-archive-admission.test-support.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
+import { interpretedQueryRaw } from "../query-producer-fixture.js";
 
 export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySnapshot: { snapshot_path: string; db_sha256: string }): Promise<void> {
   const queryWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", provider_url: "http://127.0.0.1:9",
@@ -136,11 +137,10 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     query_semantics_unavailable: "cache_unavailable" }]);
 
   const oneQuery = { ...queryWorkset, items: queryWorkset.items.slice(0, 1) };
-  const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
-    query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
+  const queryRawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
       kind: "statement", key: "complete", predicate: "complete",
       arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
-    }] }], gaps: [] } });
+    }] }], gaps: [] });
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(oneQuery, queryCache, 4096),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const fill = await executeSemanticProposalFill({ workset: oneQuery, cacheRoot: queryCache, authority,
@@ -294,12 +294,11 @@ async function assertEvidenceInputWithdrawal(cacheRoot: string, config: Semantic
     { conditions: [{ kind: "statement", key: "second", predicate: "complete",
       arguments: [{ role: "theme", target: { kind: "free", key: "theme" }, excerpt: "What" }] }] }
   ];
-  const queryRawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" },
-    query: { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+  const queryRawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
       requested_operation: { reading: "What was completed?", support: { kind: "query_text", excerpt: "What was completed?" } },
       alternatives: [{ conditions: [{ kind: "statement", key: "answer", predicate: "complete",
         arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }] }], evidence_inputs }],
-      gaps: [] } });
+      gaps: [] });
   const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, queryCache, config.max_output_tokens),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   const queryFill = await executeSemanticProposalFill({ workset, cacheRoot: queryCache, authority: queryAuthority,

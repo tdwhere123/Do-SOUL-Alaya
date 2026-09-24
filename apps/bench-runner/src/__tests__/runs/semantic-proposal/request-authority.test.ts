@@ -10,15 +10,16 @@ import { afterEach, expect, it } from "vitest";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
-import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset, proposalCacheKey } from "../../../runs/semantic-proposal/workset.js";
 import { listExtractionAttemptLedgerRecords, openExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { readProviderRawAttempt, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
-import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
+import { inspectSemanticProposalShard, semanticProposalShardPath, writeSemanticProposalShard,
+  SEMANTIC_PROPOSAL_CACHE_CONTRACT } from "../../../runs/semantic-proposal/artifact.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
-const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v7", outcome: { status: "abstained" } });
+const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v8", outcome: { status: "abstained" } });
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 function root() { const value = mkdtempSync(join(tmpdir(), "proposal-request-authority-")); roots.push(value); return value; }
@@ -33,6 +34,33 @@ function pin(prepared: ReturnType<typeof workset>, cacheRoot: string, price = 1)
 function config(providerUrl = "http://127.0.0.1:9"): CompileSeedExtractionConfig {
   return { model, requestProfile, providerUrl, apiKey: "loopback-only" };
 }
+
+it("keeps recorded recursive-wire cache evidence inspectable without current workset replay", () => {
+  const prepared = workset();
+  const current = materializeSemanticProposalLines(prepared, 128)[0]!;
+  const historicalPrompt = current.userPrompt.replace("source-semantic-query-request-v9", "source-semantic-query-request-v8");
+  const historicalSchema = { type: "object", properties: { contract: { const: "source-semantic-query-response-v7" } } };
+  const historicalSystemPrompt = "recorded recursive-wire guidance";
+  const historicalKey = proposalCacheKey(model, requestProfile, historicalSystemPrompt, historicalPrompt,
+    historicalSchema, 128, prepared.provider_url);
+  expect(historicalKey).not.toBe(current.key);
+  const cacheRoot = root();
+  const historical = {
+    contract: SEMANTIC_PROPOSAL_CACHE_CONTRACT, kind: "query" as const, cache_key: historicalKey,
+    model, request_profile: requestProfile, original_query: current.original_query,
+    system_prompt: historicalSystemPrompt, user_prompt: historicalPrompt,
+    raw_json: JSON.stringify({ contract: "source-semantic-query-response-v7", outcome: { status: "abstained" } }),
+    outcome: { status: "abstained" }, admitted: false, attempt_ordinal: 1,
+    attempt_lineage_digest: "a".repeat(64), request_digest: "b".repeat(64), extracted_at: "recorded",
+    transport_provenance: current.transportProvenance
+  };
+  writeSemanticProposalShard(cacheRoot, historical);
+  expect(inspectSemanticProposalShard(cacheRoot, historicalKey,
+    { kind: "query", model, request_profile: requestProfile })).toEqual(historical);
+  expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.shard).toBeUndefined();
+  expect(inspectSemanticProposalShard(cacheRoot, historicalKey,
+    { kind: "query", model, request_profile: requestProfile })).toEqual(historical);
+});
 
 it("requires Step workset version and selected Plan route before authority", () => {
   const body = { contract: "source-semantic-proposal-workset-v4", kind: "query",

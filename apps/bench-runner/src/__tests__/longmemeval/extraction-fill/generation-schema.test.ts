@@ -208,41 +208,38 @@ describe("Gemini complete generation schema guidance", () => {
       }
     );
     const encoded = JSON.stringify(body);
-    expect(encoded).toContain("complete response envelope including its contract, outcome and body");
+    expect(encoded).toContain("responseJsonSchema");
     expect(encoded).not.toContain("source-semantic-proposal-v4");
     expect(encoded).not.toContain(SOURCE_SEMANTIC_SELECTION_PROPOSAL_CONTRACT);
     expect(encoded).toContain("application/json");
     const projected = projectGeminiGenerationSchema(schema);
-    expect(projected.recursive).toBe(true);
-    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
-    expect(projected.schema).toBeUndefined();
-    expect(projected.instruction).toContain(JSON.stringify(schema));
-    const oldStructuredKey = createHash("sha256").update([
-      "gemini-3.1-flash-lite", "gemini-3.1-minimal-v1", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
-      request, JSON.stringify(schema), "4096"
-    ].join("\0")).digest("hex");
+    expect(projected.recursive).toBe(false);
+    expect(projected.schema).toBeDefined();
+    expect(projected.instruction).toBeUndefined();
+    expect(body).toHaveProperty("generationConfig.responseJsonSchema");
+    expect((body as { systemInstruction: { parts: unknown[] } }).systemInstruction.parts).toHaveLength(1);
+    expect(countGeminiEnvelopeExpandedNodes(schema)).toBeLessThan(1024);
     expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
-      SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(oldStructuredKey);
+      SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(
+      proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
+        SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, { ...schema, description: "changed" }, 4096, "http://127.0.0.1:9"));
     expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
       SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(
       proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
         `${SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT} revised`, request, schema, 4096, "http://127.0.0.1:9"));
   });
 
-  it("retains complete source and query schemas without a weaker recursive decoder", () => {
+  it("retains the recursive source schema and projects the complete acyclic query schema", () => {
     const source = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
-    for (const schema of [source, sourceSemanticQueryResponseJsonSchema()]) {
-      const before = structuredClone(schema);
-      const projected = projectGeminiGenerationSchema(schema);
-      expect(projected.recursive).toBe(true);
-      expect(projected.schema).toBeUndefined();
-      expect(projected.instruction).toContain(JSON.stringify(before));
-      expect(schema).toEqual(before);
-      expect(projectGeminiGenerationSchema(schema)).toEqual(projected);
-    }
+    const query = sourceSemanticQueryResponseJsonSchema();
+    expect(projectGeminiGenerationSchema(source).recursive).toBe(true);
+    expect(projectGeminiGenerationSchema(source).schema).toBeUndefined();
+    expect(projectGeminiGenerationSchema(query)).toMatchObject({ recursive: false });
+    expect(projectGeminiGenerationSchema(query).schema).toBeDefined();
+    expect(projectGeminiGenerationSchema(query).instruction).toBeUndefined();
   });
 
-  it("sends complete recursive guidance without a partial schema through an actual local SSE socket", async () => {
+  it("sends the complete structured query schema through an actual local SSE socket", async () => {
     const wires: { url: string | undefined; body: unknown }[] = [];
     const raw = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "abstained" } });
     const server = createServer((request, response) => {
@@ -270,10 +267,10 @@ describe("Gemini complete generation schema guidance", () => {
       expect(wires).toHaveLength(1);
       expect(wires[0]?.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
       const material = JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema)));
-      expect(material.response_schema).toBeNull();
-      expect(wires[0]?.body).not.toHaveProperty("generationConfig.responseJsonSchema");
+      expect(material).toEqual(schema);
+      expect(wires[0]?.body).toHaveProperty("generationConfig.responseJsonSchema");
       expect(wires[0]?.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
-        systemInstruction: { parts: [{ text: line.systemPrompt }, { text: material.instruction }] } });
+        systemInstruction: { parts: [{ text: line.systemPrompt }] } });
       expect(wires[0]?.body).toEqual(encodeGeminiGenerateContent(line, { ...config, maxOutputTokens: 4096,
         includeThoughts: true, responseJsonSchema: schema }));
     } finally {
