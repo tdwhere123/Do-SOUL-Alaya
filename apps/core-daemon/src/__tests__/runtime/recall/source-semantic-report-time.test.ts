@@ -136,7 +136,7 @@ it("keeps the reported inspection and telling dates attached through public work
       };
       const sourceId = ids.get("report-time-source")?.[0];
       if (sourceId === undefined) throw new Error("published report fixture missing");
-      for (const [question, event, expected, forbidden] of [
+      for (const [question, event, expectedDate, forbiddenDate] of [
         [INSPECTION, "inspect", "6 June 2026", "8 June 2026"],
         [TELLING, "tell", "8 June 2026", "6 June 2026"]
       ] as const) {
@@ -155,11 +155,11 @@ it("keeps the reported inspection and telling dates attached through public work
           producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }).catalog;
         const queried = semantics.alternatives[0]!.frames.find(row => row.predicate_reading === event)!;
         const focal = catalog.query_endpoints.find(row => row.kind === "predicate" && row.frame === queried.id);
-        const positive = catalog.source_endpoints.find(row => row.kind === "frame" && row.frame === (event === "tell" ? telling.id : inspection.id));
-        const forbidden = catalog.source_endpoints.find(row => row.kind === "frame" && row.frame === (event === "tell" ? inspection.id : telling.id));
+        const positiveEndpoint = catalog.source_endpoints.find(row => row.kind === "frame" && row.frame === (event === "tell" ? telling.id : inspection.id));
+        const forbiddenEndpoint = catalog.source_endpoints.find(row => row.kind === "frame" && row.frame === (event === "tell" ? inspection.id : telling.id));
         expect(focal?.handle).toMatch(/^qe[1-9]/u);
-        expect(positive?.handle).toMatch(/^se[1-9]/u);
-        expect(forbidden?.handle).not.toBe(positive?.handle);
+        expect(positiveEndpoint?.handle).toMatch(/^se[1-9]/u);
+        expect(forbiddenEndpoint?.handle).not.toBe(positiveEndpoint?.handle);
         const aligned = correspondence(question, semantics, descriptor.interpretation, sourceId);
         const recalled = await call({ operation: "recall", accepts_unreviewed_conditional_results: true,
           original_query: question, query_semantics: semantics, semantic_correspondences: [aligned],
@@ -170,11 +170,12 @@ it("keeps the reported inspection and telling dates attached through public work
         const answer = proof?.binding_results?.find(row => row.kind === "answer");
         expect(answer?.returned.answerDate?.node_id).toBeDefined();
         const bound = descriptor.interpretation.referents.find(row => row.id === answer?.returned.answerDate?.node_id);
-        expect(bound?.mentions.map(id => descriptor.interpretation!.mentions.find(row => row.id === id)?.text)).toContain(expected);
-        expect(bound?.mentions.map(id => descriptor.interpretation!.mentions.find(row => row.id === id)?.text)).not.toContain(forbidden);
+        const boundTexts = bound?.mentions.map(id => descriptor.interpretation!.mentions.find(row => row.id === id)?.text);
+        expect(boundTexts).toContain(expectedDate);
+        expect(boundTexts).not.toContain(forbiddenDate);
         expect(recalled.slot_qualifiers?.some(row => row.source_interpretation_id === sourceId && row.evidence_kind === "semantic_proof")).toBe(true);
         expect(recalled.results?.some(row => row.content_preview?.includes("Mira told me")
-          && row.content_preview.includes("Oren inspected") && row.content_preview.includes(expected))).toBe(true);
+          && row.content_preview.includes("Oren inspected") && row.content_preview.includes(expectedDate))).toBe(true);
       }
     });
 }, 60_000);
