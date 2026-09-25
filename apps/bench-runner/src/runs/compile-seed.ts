@@ -1,7 +1,6 @@
 export { createCachingSignalExtractor } from "./compile-seed/compile-seed-cache.js";
 export {
   EXTRACTION_CACHE_ROOT,
-  resolveBenchAllowLiveExtraction,
   resolveCompileSeedExtractionConfig,
   resolveEffectiveExtractionCacheRoot,
   toSeedExtractionPathKpi
@@ -49,8 +48,9 @@ import { seedCompileTurn } from "./compile-seed/compile-seed-turn.js";
  * @anchor longmemeval-compile-seed
  *
  * Field-standard ingestion for the LongMemEval bench seed path. Each haystack
- * turn is run through production garden extraction from a validated cache or
- * an explicitly enabled live transport. The full-turn fallback is reserved
+ * turn is run through production garden extraction from a validated cache.
+ * Live extraction belongs to extraction-fill's receipt/attempt authority.
+ * The full-turn fallback is reserved
  * for the manifest-less no-credentials path. The runner keeps one stats object
  * for the whole bench run so archive KPIs disclose the actual extraction path
  * and every drop stage.

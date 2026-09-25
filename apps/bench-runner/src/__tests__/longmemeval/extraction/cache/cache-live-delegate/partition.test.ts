@@ -108,10 +108,10 @@ describe("extraction live delegate partition accounting", () => {
     changedAggregate.response_metadata.usage.input_tokens += 1;
     await writeFile(shardPath, JSON.stringify(changedAggregate), "utf8");
     const aggregateStatus = inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status;
-    expect([childStatus, aggregateStatus]).toEqual(["invalid", "invalid"]);
+    expect([childStatus, aggregateStatus]).toEqual(["quarantined", "invalid"]);
     shard.provider_responses[1].witness.httpResponse.bodyBase64 = "AA==";
     await writeFile(shardPath, JSON.stringify(shard), "utf8");
-    expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status).toBe("invalid");
+    expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status).toBe("quarantined");
     await writeFile(shardPath, shardBytes, "utf8");
     const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${"5".repeat(64)}.json`);
     const persisted = JSON.parse(await readFile(ledgerPath, "utf8"));

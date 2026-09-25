@@ -123,7 +123,7 @@ describe("preflightExtractionCache", () => {
         config: CONFIG,
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
       })
-    ).toThrow(/coverage 50\.0% is below.*--allow-live-extraction/su);
+    ).toThrow(/coverage 50\.0% is below.*Run extraction-fill/su);
   });
 
   it("allows a coverage gap when allowLiveExtraction is true", () => {
@@ -181,7 +181,7 @@ describe("preflightExtractionCache", () => {
         config: CONFIG,
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
       })
-    ).toThrow(/no coverage field.*--allow-live-extraction/su);
+    ).toThrow(/no coverage field.*Run extraction-fill/su);
   });
 
   it("allows a NO-coverage manifest when allowLiveExtraction is true", () => {

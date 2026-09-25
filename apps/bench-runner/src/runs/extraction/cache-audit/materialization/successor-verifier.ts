@@ -2,6 +2,7 @@ import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
+import { inspectCachedRawExtraction } from "../../../compile-seed/cache/cache-shard.js";
 import {
   buildExtractionContentClosureIndex, computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
@@ -58,6 +59,7 @@ export function verifyCommittedMaterializationSuccessor(input: {
   assertExtractionTargetSelectionRootBinding(commit.target_selection, input.targetRoot, input.targetLease);
   assertOriginShards(targetRoot, commit);
   const manifest = readSuccessorManifest(targetRoot);
+  assertOriginAdmission(targetRoot, commit);
   if (manifest.manifestSha256 === commit.target_manifest_sha256) {
     assertOriginState(targetRoot, commit, manifest.manifest);
     input.targetLease.assertOwned();
@@ -130,6 +132,21 @@ function assertOriginShards(
     assertFileMatches(
       cacheFilePath(targetRoot, descriptor.cache_key), descriptor, commit.max_shard_bytes
     );
+  }
+}
+
+function assertOriginAdmission(
+  targetRoot: string,
+  commit: ExtractionCacheMaterializationCommit
+): void {
+  for (const descriptor of commit.shards) {
+    const admitted = inspectCachedRawExtraction(targetRoot, descriptor.cache_key,
+      commit.initial_target_manifest.extraction_model,
+      commit.initial_target_manifest.request_profile);
+    if (admitted.status !== "hit" ||
+        admitted.rawJsonSha256 !== descriptor.raw_json_sha256) {
+      throw new Error(`materialized successor origin shard ${descriptor.cache_key} is not reader-admitted`);
+    }
   }
 }
 

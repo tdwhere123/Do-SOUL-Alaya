@@ -1,4 +1,4 @@
-import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, parseEnvBoolean, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceInterpretationProfileSchema, type SourceInterpretationProfile, ExtractionSourcePackingSchema, DEFAULT_EXTRACTION_SOURCE_PACKING, parseDefaultOnFlag, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
   EXTRACTION_OPEN_SEMANTICS_GENERATION, assertExclusiveExtractionGeneration, parseExtractionOpenSemanticsGeneration,
   type ExtractionOpenSemanticsGeneration
@@ -58,19 +58,6 @@ const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 const EXTRACTION_TRANSPORT_PROVIDER_URL_ENV =
   "ALAYA_BENCH_EXTRACTION_TRANSPORT_PROVIDER_URL";
 const EXTRACTION_TRANSPORT_MODEL_ENV = "ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL";
-const ALLOW_LIVE_EXTRACTION_ENV = "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION";
-
-/**
- * Single source for the operator opt-in that relaxes the run-start coverage
- * gate so a run may deliberately live-extract the uncovered cache gap. Shared
- * by the three LongMemEval entrypoints so the flag is resolved one way.
- */
-export function resolveBenchAllowLiveExtraction(
-  env: NodeJS.ProcessEnv = process.env
-): boolean {
-  return parseEnvBoolean(env[ALLOW_LIVE_EXTRACTION_ENV], ALLOW_LIVE_EXTRACTION_ENV);
-}
-
 export function toSeedExtractionPathKpi(
   stats: CompileSeedExtractionStats
 ): SeedExtractionPathKpi {

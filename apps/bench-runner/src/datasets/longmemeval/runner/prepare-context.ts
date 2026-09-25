@@ -260,7 +260,6 @@ function createLongMemEvalSeedRunner(
     requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
     requiredQuestionWindow,
     cacheRoot: extractionCacheRoot,
-    allowLiveExtraction: false,
     ...(extractionCachePreflightProof === undefined ? {} : {
       extractionCachePreflightProof
     }),

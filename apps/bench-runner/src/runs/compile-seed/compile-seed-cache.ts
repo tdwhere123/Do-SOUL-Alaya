@@ -37,6 +37,7 @@ import {
   cachedExtractionResult,
   persistedResponseMetadata
 } from "./cache/cached-response-metadata.js";
+import { inspectRetainedInteractiveResponses } from "./cache/provider-response-witness.js";
 import {
   inspectCachedExtraction,
   writeCachedExtraction
@@ -246,7 +247,21 @@ async function extractWithCache(
     }
     return persistDeterministicEmpty(options, cacheRoot, cacheKey, input);
   }
+  assertLiveAttemptAuthority(options);
   return extractLive(options, cacheRoot, cacheKey, input);
+}
+
+function assertLiveAttemptAuthority(options: CachingSignalExtractorOptions): void {
+  if (options.onTransportAttempt === undefined ||
+      options.providerAttemptLineageDigest === undefined ||
+      !/^[a-f0-9]{64}$/u.test(options.providerAttemptLineageDigest) ||
+      options.onLiveProviderExtractionSucceeded === undefined ||
+      options.onLiveExtractionFailed === undefined ||
+      options.onLiveExtractionOutcome === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "live extraction requires provider attempt reservation, settlement, and shard admission authority"
+    );
+  }
 }
 
 async function persistDeterministicEmpty(
@@ -366,10 +381,11 @@ async function extractLiveWithLease(
   if (recached.status === "retired") {
     return refuseRetiredExtraction(cacheKey, recached.reason);
   }
+  assertLiveAttemptAuthority(options);
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
   markLiveExtractionStarted(stats, cacheKey);
-  let providerAttemptAuthorized = options.onTransportAttempt === undefined;
+  let providerAttemptAuthorized = false;
   let lastAttemptOrdinal: number | undefined;
   let lastAttemptUsage: BenchProviderUsage | null | undefined;
   const attemptOrdinals: number[] = [];
@@ -390,7 +406,7 @@ async function extractLiveWithLease(
     onFailure: () => options.onLiveExtractionFailed?.(cacheKey),
     onOutcome: (outcome) => {
       if (!providerAttemptAuthorized) return;
-      providerAttemptAuthorized = options.onTransportAttempt === undefined;
+      providerAttemptAuthorized = false;
       if (outcome.attemptUsages !== undefined) lastAttemptUsage = outcome.attemptUsages.at(-1);
       if (options.onTransportAttempt !== undefined && outcome.attemptResponses !== undefined) {
         if (outcome.attemptResponses.length !== attemptOrdinals.length) {
@@ -424,11 +440,23 @@ async function extractLiveWithLease(
     request,
     requireExtractSourceCorpus(input)
   ).status;
-  const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion,
-    lastAttemptOrdinal === undefined || options.providerAttemptLineageDigest === undefined ? undefined : {
-      attemptOrdinal: lastAttemptOrdinal, authorityLineageDigest: options.providerAttemptLineageDigest,
-      ...(lastAttemptUsage === undefined ? {} : { lastUsage: lastAttemptUsage })
-    }, undefined, { systemPrompt: input.systemPrompt, userPrompt: input.userPrompt }, retainedResponses);
+  let persisted: ReturnType<typeof persistExtraction>;
+  try {
+    persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion,
+      lastAttemptOrdinal === undefined || options.providerAttemptLineageDigest === undefined ? undefined : {
+        attemptOrdinal: lastAttemptOrdinal, authorityLineageDigest: options.providerAttemptLineageDigest,
+        ...(lastAttemptUsage === undefined ? {} : { lastUsage: lastAttemptUsage })
+      }, undefined, { systemPrompt: input.systemPrompt, userPrompt: input.userPrompt }, retainedResponses);
+    inspectRetainedInteractiveResponses({ cacheKey, model: options.config.model,
+      requestProfile: options.config.requestProfile, rawJson: result.rawJson,
+      attemptOrdinal: lastAttemptOrdinal ?? 0,
+      requestIdentity: { system_prompt: input.systemPrompt, user_prompt: input.userPrompt },
+      responses: retainedResponses,
+      responseMetadata: persistedResponseMetadata(result.responseMetadata, result.usage, true).response_metadata });
+  } catch (cause) {
+    options.onLiveExtractionFailed?.(cacheKey);
+    throw cause;
+  }
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
 }
@@ -601,6 +629,9 @@ function withAuthorityAttemptHook(
     ...input,
     onTransportAttempt: async (signal) => {
       const ordinal = await options.onTransportAttempt?.(cacheKey, signal);
+      if (!Number.isSafeInteger(ordinal) || (ordinal ?? 0) < 1) {
+        throw new ExtractionCacheInvariantError("provider attempt reservation did not return an ordinal");
+      }
       markProviderAttemptAuthorized(ordinal);
       await input.onTransportAttempt?.(signal);
     }

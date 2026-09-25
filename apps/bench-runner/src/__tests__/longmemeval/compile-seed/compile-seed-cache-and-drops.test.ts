@@ -31,6 +31,7 @@ import {
   OFFLINE_CONFIG,
   providerBackedResult,
   makeSeed,
+  admitCompileSeedTurnCache,
   interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import {
@@ -148,12 +149,9 @@ describe("extraction cache key — load-bearing inputs only", () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const firstRaw = interpretationsEnvelope([{ matched: "Turn one." }]);
     const secondRaw = interpretationsEnvelope([{ matched: "Turn two." }]);
-    const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce(providerBackedResult(firstRaw))
-        .mockResolvedValueOnce(providerBackedResult(secondRaw))
-    };
+    const delegate: BenchSignalExtractor = { extract: vi.fn((input) =>
+      providerBackedResponseResult(input,
+        input.userPrompt.includes("Turn one.") ? firstRaw : secondRaw)) };
     const extractor = createCachingSignalExtractor({
       delegate,
       config: {
@@ -161,7 +159,9 @@ describe("extraction cache key — load-bearing inputs only", () => {
         providerUrl: TEST_EXTRACTION_PROVIDER_URL,
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
+        requestProfile: "provider-default-v1", startingMissing: 2 })
     });
     await extractor.extract({
       systemPrompt: "sys",
@@ -195,7 +195,9 @@ describe("extraction cache key — load-bearing inputs only", () => {
       onTransportAttempt: async () => {
         throw stopped;
       },
+      providerAttemptLineageDigest: "a".repeat(64),
       onLiveExtractionOutcome,
+      onLiveProviderExtractionSucceeded: vi.fn(),
       onLiveExtractionFailed
     });
 
@@ -227,6 +229,11 @@ describe("bench evidence capsule — production-faithful span", () => {
   });
 
   it("seeds the located assertion and retains the full turn as source evidence", async () => {
+    const fullTurn =
+      "Yesterday I moved to Berlin. It has been a long week of unpacking.";
+    const turnMessages = [{ message_id: "u1", role: "user" as const, content: fullTurn }];
+    await admitCompileSeedTurnCache({ cacheRoot, turnContent: fullTurn, turnMessages,
+      rawJson: interpretationsEnvelope([{ matched: "I moved to Berlin" }]) });
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -241,24 +248,12 @@ describe("bench evidence capsule — production-faithful span", () => {
     });
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => ({
-          ...providerBackedResult(""),
-          rawJson: interpretationsEnvelope([{
-            matched: "I moved to Berlin",
-            }])
-        })
-      })
+      cacheRoot
     });
-
-    const fullTurn =
-      "Yesterday I moved to Berlin. It has been a long week of unpacking.";
     await runner.seedTurn({
       daemon,
       turnContent: fullTurn,
-      turnMessages: [{ message_id: "u1", role: "user", content: fullTurn }],
+      turnMessages,
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       workspaceId: "ws-test",

@@ -12,8 +12,11 @@ import {
 import {
   createCompileSeedRunner
 } from "../../../runs/compile-seed.js";
-import type { LongMemEvalQuestion } from
-  "../../../datasets/longmemeval/ingestion/dataset.js";
+import {
+  buildLongMemEvalRoundMessages,
+  pairSessionIntoRounds,
+  type LongMemEvalQuestion
+} from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { seedLongMemEvalQuestion } from
   "../../../datasets/longmemeval/runner/question/runner-question-seeding.js";
 import { buildLongMemEvalSnapshotQuestion } from
@@ -22,9 +25,10 @@ import { assertSnapshotDatasetSubstrateIdentity } from
   "../../../runs/snapshot/substrate-binding.js";
 import { RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION } from
   "../../../runs/snapshot/materialize.js";
-import { CREDENTIALLED_CONFIG, withOpenSemanticFactorGraph } from
+import { admitCompileSeedTurnCache, CREDENTIALLED_CONFIG, interpretationsEnvelope,
+  withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
-import { providerBackedExtractionResult, writeExtractionCacheTestManifest } from
+import { writeExtractionCacheTestManifest } from
   "../extraction/extraction-cache-test-fixture.js";
 
 let daemon: BenchDaemonHandle | undefined;
@@ -48,23 +52,22 @@ describe("LongMemEval source evidence fallback integration", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    const question = sourceEvidenceQuestion();
+    const session = question.haystack_sessions[0]!;
+    const round = pairSessionIntoRounds(session)[0]!;
+    await admitCompileSeedTurnCache({ cacheRoot, turnContent: round.content,
+      turnMessages: buildLongMemEvalRoundMessages(session, round,
+        `${question.question_id}-s0-r0`), rawJson: '{"interpretations":[]}' });
     daemon = await startBenchDaemon({
       dataDirRoot: root,
       workspaceId: "source-evidence-workspace",
       runId: "source-evidence-run"
     });
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedExtractionResult("{\"interpretations\":[]}")
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const state = await seedLongMemEvalQuestion({
       workspace: { ...daemon, detach: async () => undefined },
-      question: sourceEvidenceQuestion(),
+      question,
       seedRunner: runner,
       seedFormationMode: "treatment_neutral"
     });
@@ -94,14 +97,14 @@ describe("LongMemEval source evidence fallback integration", () => {
         evidenceId: entries[0]?.objectId
       }]
     });
-    const recallResult = await daemon.recall(sourceEvidenceQuestion().question, {
+    const recallResult = await daemon.recall(question.question, {
       maxResults: 10,
-      referenceTime: sourceEvidenceQuestion().question_date
+      referenceTime: question.question_date
     });
     expect(recallResult.results.length).toBeGreaterThan(0);
     expect(recallResult.results.every((row) => row.object_kind === "source_evidence")).toBe(true);
     const snapshotQuestion = buildLongMemEvalSnapshotQuestion({
-      question: sourceEvidenceQuestion(),
+      question,
       workspace: { ...daemon, detach: async () => undefined },
       seedState: state
     });
@@ -112,7 +115,7 @@ describe("LongMemEval source evidence fallback integration", () => {
         variant: "longmemeval_s",
         questions: [snapshotQuestion]
       },
-      questions: [sourceEvidenceQuestion()],
+      questions: [question],
       runtimeIdentity: "sidecar_bound"
     })).not.toThrow();
 
@@ -172,6 +175,14 @@ describe("LongMemEval source evidence fallback integration", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    const turnMessages = [{ message_id: "user-1", role: "user" as const,
+      content: "I take the 7:15 train." }];
+    // The historical receive fixture bypasses extraction; this admitted turn
+    // supplies the runner's exact cache coverage and request identity.
+    await admitCompileSeedTurnCache({ cacheRoot,
+      turnContent: "I take the 7:15 train.",
+      turnMessages,
+      rawJson: interpretationsEnvelope([{ matched: "I take the 7:15 train." }]) });
     daemon = await startBenchDaemon({
       dataDirRoot: root,
       workspaceId: "unroutable-evidence-workspace",
@@ -191,23 +202,12 @@ describe("LongMemEval source evidence fallback integration", () => {
               }
             })]
           }));
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => { throw new Error("historical replay must not call the live extractor"); }
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn({
       daemon,
       turnContent: "I take the 7:15 train.",
-      turnMessages: [{
-        message_id: "user-1",
-        role: "user",
-        content: "I take the 7:15 train."
-      }],
+      turnMessages,
       evidenceRefBase: "q-unroutable-s0-r0",
       seedIndex: 0,
       workspaceId: daemon.workspaceId,
@@ -260,6 +260,12 @@ describe("LongMemEval source evidence fallback integration", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    const turnMessages = [{ message_id: "user-1", role: "user" as const,
+      content: "I take the 7:15 train." }];
+    await admitCompileSeedTurnCache({ cacheRoot,
+      turnContent: "I take the 7:15 train.",
+      turnMessages,
+      rawJson: interpretationsEnvelope([{ matched: "I take the 7:15 train." }]) });
     daemon = await startBenchDaemon({
       dataDirRoot: root,
       workspaceId: "no-created-evidence-workspace",
@@ -279,23 +285,12 @@ describe("LongMemEval source evidence fallback integration", () => {
               }
             })]
           }));
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => { throw new Error("historical replay must not call the live extractor"); }
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn({
       daemon,
       turnContent: "I take the 7:15 train.",
-      turnMessages: [{
-        message_id: "user-1",
-        role: "user",
-        content: "I take the 7:15 train."
-      }],
+      turnMessages,
       evidenceRefBase: "q-deferred-s0-r0",
       seedIndex: 0,
       workspaceId: daemon.workspaceId,

@@ -1,9 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("node:dns/promises", () => ({
   lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
@@ -11,28 +7,11 @@ vi.mock("node:dns/promises", () => ({
     return options?.all === true ? [answer] : answer;
   })
 }));
+import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT,
-  OfficialApiGardenProvider,
-  parseOfficialApiSignals
-} from "@do-soul/alaya-soul";
-import {
-  computeNextTurnSeedRefs,
-  createCachingSignalExtractor,
-  createCompileSeedRunner,
   createGardenHttpExtractor,
-  resolveCompileSeedExtractionConfig,
-  toSeedExtractionPathKpi,
-  type BenchSignalExtractor,
-  type CompileSeedDaemon,
-  type CompileSeedExtractionConfig,
-  type CompileSeedExtractionStats
+  type CompileSeedExtractionConfig
 } from "../../../runs/compile-seed.js";
-import {
-  buildCompileSeedDaemon,
-  CREDENTIALLED_CONFIG
-} from "./compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
 // Some OpenAI-compatible providers answer chat/completions only as an SSE delta
 // stream; a non-stream request can return an empty
@@ -371,111 +350,5 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect(benchRetry?.retryClassification).toBe("failure_timeout");
     // 2 = first attempt + 1 timeout retry; each settles via the backstop.
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-// invariant: a full-bench seed-extraction failure must (a) bump
-// liveExtractionFailures, (b) drop a diagnostic dump whose
-// retry_classification field surfaces the terminal outcome, (c) end up
-// blocked via seedExtractionReleaseBlocker because
-// live_extraction_failures > 0.
-// see also: packages/eval/src/gates/seed-extraction-blocker.ts —
-// evaluateSeedExtractionReleaseBlocker checks live_extraction_failures.
-describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", () => {
-  let cacheRoot: string;
-  let diagnosticDir: string;
-
-  beforeEach(async () => {
-    cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-cache-"));
-    diagnosticDir = await mkdtemp(join(tmpdir(), "compile-seed-diag-"));
-  });
-
-  afterEach(async () => {
-    await rm(cacheRoot, { recursive: true, force: true });
-    await rm(diagnosticDir, { recursive: true, force: true });
-  });
-
-  it.each([
-    {
-      classification: "failure_non_retryable_4xx" as const,
-      message: "garden extraction HTTP 401 unauthorized",
-      status: 401
-    },
-    {
-      classification: "failure_non_retryable_response" as const,
-      message: "garden extraction chat completion chunk is not valid JSON"
-    }
-  ])("dumps retry_classification=$classification from a live extraction failure", async (scenario) => {
-    const failingDelegate: BenchSignalExtractor = {
-      async extract() {
-        const err = new Error(scenario.message);
-        if ("status" in scenario) {
-          (err as { status?: number }).status = scenario.status;
-        }
-        (err as { benchRetry?: unknown }).benchRetry = {
-          retryCount: 0,
-          retryClassification: scenario.classification
-        };
-        throw err;
-      }
-    };
-
-    writeExtractionCacheTestManifest({
-      cacheRoot,
-      model: CREDENTIALLED_CONFIG.model,
-      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
-      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
-    });
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => failingDelegate,
-      diagnosticDir
-    });
-
-    let seedCalls = 0;
-    const daemon = buildCompileSeedDaemon((_input) => ({
-      memoryId: `memory-${(seedCalls += 1)}`,
-      signalId: "signal-x",
-      proposalId: "proposal-x",
-      evidenceId: "evidence-x",
-      truncated: false,
-      charsClipped: 0
-    }));
-
-    await expect(
-      runner.seedTurn({
-        daemon,
-        turnContent: "I prefer tea over coffee.",
-        evidenceRefBase: "evidence-1",
-        seedIndex: 0,
-        workspaceId: "ws-test",
-        runId: "run-test"
-      })
-    ).rejects.toThrow("Official garden provider returned an invalid response.");
-
-    // (a) liveExtractionFailures bumped — the blocker depends on this.
-    expect(runner.stats.liveExtractionFailures).toBe(1);
-    expect(runner.stats.offlineFallbacks).toBe(0);
-    expect(seedCalls).toBe(0);
-
-    // (b) dump file written and carries retry_classification.
-    const dumpFiles = readdirSync(diagnosticDir).filter(
-      (f) => f.startsWith("compile-seed-") && f.endsWith(".json")
-    );
-    expect(dumpFiles).toHaveLength(1);
-    const envelope = JSON.parse(
-      readFileSync(join(diagnosticDir, dumpFiles[0]!), "utf8")
-    ) as {
-      retry_classification: string;
-      retry_count: number | null;
-      live_extraction_failures: number;
-      last_extraction_source: string;
-    };
-    expect(envelope.retry_classification).toBe(scenario.classification);
-    expect(envelope.retry_count).toBe(0);
-    expect(envelope.live_extraction_failures).toBe(1);
-    expect(envelope.last_extraction_source).toBe("live");
   });
 });

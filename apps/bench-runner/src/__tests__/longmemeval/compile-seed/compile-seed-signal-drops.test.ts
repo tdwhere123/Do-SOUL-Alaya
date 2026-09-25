@@ -2,7 +2,7 @@ import { computeCacheKey } from "../../../runs/compile-seed/compile-seed-cache.j
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 // @ts-nocheck
 import { inspectExtractionRawJson } from "../../../runs/extraction/content-closure.js";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +33,7 @@ import {
   CREDENTIALLED_CONFIG,
   OFFLINE_CONFIG,
   makeSeed,
-  providerBackedResult,
+  admitCompileSeedTurnCache,
   interpretationsEnvelope,
   withOpenSemanticFactorGraph
 } from "./compile-seed-fixture.js";
@@ -43,6 +43,8 @@ import {
   providerBackedResponseResult,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
+import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { computeSourceTurnCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 
 describe("compile() signal-drop count is observable", () => {
   let cacheRoot: string;
@@ -67,12 +69,12 @@ describe("compile() signal-drop count is observable", () => {
       { assertion_id: 1, relations: [{ predicate: null }] }
     ] });
     expect(inspectExtractionRawJson(raw)).toMatchObject({ rawSignalCount: 2, parsedDraftCount: 1 });
-    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot, allowLiveExtraction: true,
-      extractorFactory: () => ({ extract: async () => providerBackedResult(raw) }) });
-    const daemon = buildCompileSeedDaemon(() => { throw new Error("incomplete response must not materialize"); });
-    await expect(runner.seedTurn({ daemon, turnContent: "I have a dog.", evidenceRefBase: "q1-s0-t0",
-      seedIndex: 0, workspaceId: "ws-test", runId: "run-test" })).rejects.toThrow("invalid response");
-    expect(readdirSync(cacheRoot)).toEqual(["manifest.json"]);
+    await expect(admitCompileSeedTurnCache({ cacheRoot, turnContent: "I have a dog.",
+      rawJson: raw })).rejects.toThrow("official API completed result contains rejected interpretation entries");
+    const key = computeSourceTurnCacheKey(CREDENTIALLED_CONFIG.model,
+      CREDENTIALLED_CONFIG.requestProfile, OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: "I have a dog." });
+    expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
   });
 
   it("isolates per-signal materialization drops by reason and keeps healthy batch-mates", async () => {
@@ -108,21 +110,14 @@ describe("compile() signal-drop count is observable", () => {
       }),
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => ({
-          ...providerBackedResult(""),
-          rawJson: interpretationsEnvelope([
-            { matched: "Intro span" },
-            { matched: "Middle span", assertionId: 2 },
-            { matched: "Closing span", assertionId: 3 }
-          ])
-        })
-      })
-    });
+    await admitCompileSeedTurnCache({ cacheRoot,
+      turnContent: "Intro span. Middle span. Closing span.",
+      rawJson: interpretationsEnvelope([
+        { matched: "Intro span" },
+        { matched: "Middle span", assertionId: 2 },
+        { matched: "Closing span", assertionId: 3 }
+      ]) });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn({
       daemon,
@@ -170,17 +165,9 @@ describe("compile() signal-drop count is observable", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => ({
-          ...providerBackedResult(""),
-          rawJson: interpretationsEnvelope([{ matched: "Intro span" }])
-        })
-      })
-    });
+    await admitCompileSeedTurnCache({ cacheRoot, turnContent: "Intro span.",
+      rawJson: interpretationsEnvelope([{ matched: "Intro span" }]) });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     await expect(
       runner.seedTurn({

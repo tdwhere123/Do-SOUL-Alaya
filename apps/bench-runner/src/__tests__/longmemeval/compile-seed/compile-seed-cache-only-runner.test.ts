@@ -182,7 +182,6 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
         requestProfile: REQUEST_PROFILE,
         apiKey: "test-secret-never-used"
       },
-      allowLiveExtraction: false,
       skipPreflight: true,
       extractorFactory: () => ({ extract: delegate }),
       diagnosticDir: null

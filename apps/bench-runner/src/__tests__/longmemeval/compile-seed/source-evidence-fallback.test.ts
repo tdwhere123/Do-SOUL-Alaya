@@ -14,7 +14,7 @@ import type { SeededObjectResult } from
   "../../../harness/daemon/seed/daemon-seed-types.js";
 import {
   CREDENTIALLED_CONFIG,
-  providerBackedResult,
+  admitCompileSeedTurnCache,
   interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from
@@ -38,6 +38,10 @@ describe("compile seed source evidence fallback", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    const turnMessages = structuredTurnMessages();
+    const turnContent = structuredTurnContent(turnMessages);
+    await admitCompileSeedTurnCache({ cacheRoot, turnContent, turnMessages,
+      rawJson: '{"interpretations":[]}' });
     const received: BenchSignalSeedInput[] = [];
     const evidence: SeededObjectResult = {
       kind: "evidence_capsule",
@@ -57,19 +61,11 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"interpretations\":[]}")
-      })
-    });
-    const turnMessages = structuredTurnMessages();
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn({
       daemon,
-      turnContent: structuredTurnContent(turnMessages),
+      turnContent,
       turnMessages,
       evidenceRefBase: "q-source-s0-r0",
       seedIndex: 0,
@@ -82,7 +78,7 @@ describe("compile seed source evidence fallback", () => {
     expect(received).toEqual([
       expect.objectContaining({
         evidenceFallbackReason: "empty_extraction",
-        turnContent: structuredTurnContent(turnMessages),
+        turnContent,
         turnMessages,
         extractionProvider: "official_api_compile"
       })
@@ -99,6 +95,9 @@ describe("compile seed source evidence fallback", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    const turnContent = structuredTurnContent(structuredTurnMessages());
+    await admitCompileSeedTurnCache({ cacheRoot, turnContent,
+      turnMessages: structuredTurnMessages(), rawJson: '{"interpretations":[]}' });
     const daemon: CompileSeedDaemon = {
       importSourceRecord: async () => undefined,
       proposeMemoryFromSignal: async () => {
@@ -114,14 +113,7 @@ describe("compile seed source evidence fallback", () => {
       }),
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"interpretations\":[]}")
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn(seedInput(daemon));
 
@@ -142,6 +134,9 @@ describe("compile seed source evidence fallback", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    await admitCompileSeedTurnCache({ cacheRoot,
+      turnContent: "I take the 7:15 train.",
+      rawJson: interpretationsEnvelope([{ matched: "I take the 7:15 train." }]) });
     const received: BenchSignalSeedInput[] = [];
     const daemon: CompileSeedDaemon = {
       importSourceRecord: async () => undefined,
@@ -166,19 +161,7 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => ({
-          ...providerBackedResult(""),
-          rawJson: interpretationsEnvelope([{
-            matched: "I take the 7:15 train."
-          }])
-        })
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn({
       daemon,
@@ -236,7 +219,7 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createRunnerWithOneClaim(cacheRoot);
+    const runner = await createRunnerWithOneClaim(cacheRoot);
 
     const result = await runner.seedTurn(seedInput(daemon));
 
@@ -285,7 +268,7 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createRunnerWithOneClaim(cacheRoot);
+    const runner = await createRunnerWithOneClaim(cacheRoot);
 
     const result = await runner.seedTurn(seedInput(daemon));
 
@@ -325,7 +308,7 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createRunnerWithOneClaim(cacheRoot);
+    const runner = await createRunnerWithOneClaim(cacheRoot);
 
     const result = await runner.seedTurn(seedInput(daemon));
 
@@ -342,6 +325,9 @@ describe("compile seed source evidence fallback", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    await admitCompileSeedTurnCache({ cacheRoot,
+      turnContent: structuredTurnContent(structuredTurnMessages()),
+      turnMessages: structuredTurnMessages(), rawJson: '{"interpretations":[]}' });
     let compileSeedCalls = 0;
     const daemon: CompileSeedDaemon = {
       importSourceRecord: async () => undefined,
@@ -354,14 +340,7 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"interpretations\":[]}")
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     const result = await runner.seedTurn({
       ...seedInput(daemon),
@@ -380,6 +359,8 @@ describe("compile seed source evidence fallback", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
+    await admitCompileSeedTurnCache({ cacheRoot,
+      turnContent: "I take the 7:15 train.", rawJson: '{"interpretations":[]}' });
     let compileSeedCalls = 0;
     const daemon: CompileSeedDaemon = {
       importSourceRecord: async () => undefined,
@@ -392,14 +373,7 @@ describe("compile seed source evidence fallback", () => {
       },
       proposeSynthesis: async () => ({ synthesisId: null })
     };
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: async () => providerBackedResult("{\"interpretations\":[]}")
-      })
-    });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
     const result = await runner.seedTurn({
       daemon,
       turnContent: "I take the 7:15 train.",
@@ -414,14 +388,16 @@ describe("compile seed source evidence fallback", () => {
   });
 });
 
-function createRunnerWithOneClaim(cacheRoot: string) {
-  return createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot, allowLiveExtraction: true,
-    extractorFactory: () => ({ extract: async ({ userPrompt }) => {
-      const assertion = JSON.parse(userPrompt).source_assertions[0];
-      return providerBackedResult(interpretationsEnvelope([{ matched: assertion.text,
-        assertionId: assertion.assertion_id }]));
-    } })
-  });
+async function createRunnerWithOneClaim(cacheRoot: string) {
+  await admitCompileSeedTurnCache({ cacheRoot,
+    turnContent: structuredTurnContent(structuredTurnMessages()),
+    turnMessages: structuredTurnMessages(),
+    rawJson: (request) => {
+      const assertion = request.source_assertions[0]!;
+      return interpretationsEnvelope([{ matched: assertion.text,
+        assertionId: assertion.assertion_id }]);
+    } });
+  return createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 }
 
 function seedInput(daemon: CompileSeedDaemon) {

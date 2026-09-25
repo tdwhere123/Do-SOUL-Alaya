@@ -237,12 +237,6 @@ export interface CompileSeedRunnerOptions {
     config: CompileSeedExtractionConfig
   ) => BenchSignalExtractor;
   /**
-   * Opt out of the run-start coverage guard so the run may live-extract the
-   * uncovered cache gap on purpose (extraction-fill / explicit live re-run).
-   * The model + prompt guards still apply; only the coverage gate is relaxed.
-   */
-  readonly allowLiveExtraction?: boolean;
-  /**
    * The distinct turn contents THIS run will extract. When provided, the
    * run-start preflight switches from the manifest coverage scalar to
    * window-containment: every one of these turns must already have a fixture on

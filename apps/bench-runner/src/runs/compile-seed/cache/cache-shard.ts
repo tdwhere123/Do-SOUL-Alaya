@@ -252,10 +252,9 @@ function inspectRawExtraction(
         throw new Error("ordinary Batch retained request/response transport binding mismatch");
       }
     } else if (attempt?.kind === "interactive") {
-      inspectRetainedInteractiveResponses({ cacheKey, model, requestProfile,
-        rawJson: cached.entry.raw_json, attemptOrdinal: attempt.attempt_ordinal,
-        requestIdentity: cached.entry.request_identity,
-        responses: cached.entry.provider_responses });
+      const quarantine = inspectInteractiveResponseWitness(cached.entry,
+        cacheKey, model, requestProfile, attempt.attempt_ordinal, rawJsonSha256);
+      if (quarantine !== undefined) return quarantine;
     }
     const envelope = inspectExtractionRawEnvelope(cached.entry.raw_json);
     const classification = resolveStoredEmptyClassification(
@@ -317,6 +316,25 @@ function inspectRawExtraction(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { status: "invalid", reason: `invalid cached raw extraction: ${reason}`, rawJsonSha256 };
+  }
+}
+
+function inspectInteractiveResponseWitness(
+  entry: CachedExtractionEntry, cacheKey: string, model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  attemptOrdinal: number, rawJsonSha256: string
+): Extract<CachedRawExtractionInspection, { status: "quarantined" }> | undefined {
+  try {
+    inspectRetainedInteractiveResponses({ cacheKey, model, requestProfile,
+      rawJson: entry.raw_json, attemptOrdinal,
+      requestIdentity: entry.request_identity, responses: entry.provider_responses,
+      responseMetadata: entry.response_metadata });
+  } catch (error) {
+    const envelope = inspectExtractionRawEnvelope(entry.raw_json);
+    return { status: "quarantined",
+      reason: error instanceof Error ? error.message : String(error),
+      rawJson: entry.raw_json, rawJsonSha256,
+      rawSignalCount: envelope.rawSignalCount };
   }
 }
 

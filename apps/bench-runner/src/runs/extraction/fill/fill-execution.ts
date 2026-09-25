@@ -180,9 +180,7 @@ function createFillCachingExtractor(
     cacheRoot,
     stats,
     writeLease,
-    // The injected extractor is a test seam; the built-in provider never reaches
-    // a live request unless a verified authority receipt is present.
-    allowLiveExtraction: authority !== undefined || options.extractorFactory !== undefined,
+    allowLiveExtraction: authority !== undefined,
     requireProviderBackedExtraction: authority?.receipt.catalog_refill !== undefined,
     ...(authority === undefined ? {} : {
       onTransportAttempt: authority.reserveAttempt,

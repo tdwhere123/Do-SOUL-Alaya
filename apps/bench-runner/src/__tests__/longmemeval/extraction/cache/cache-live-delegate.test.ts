@@ -26,6 +26,7 @@ import { computeCacheKey } from
   "../../../../runs/compile-seed/cache/cache-key.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
+  providerBackedResponseResult,
   writeExtractionCacheTestManifest
 } from "../extraction-cache-test-fixture.js";
 import {
@@ -160,6 +161,49 @@ describe("extraction live delegate atomic persistence", () => {
       expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status)
         .toBe("missing");
     });
+  });
+
+  it("retains physical output-limit bytes and settlement without admitting normalized stop", async () => {
+    const rawJson = '{"interpretations":[]}';
+    const lineageDigest = "d".repeat(64);
+    const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
+    const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(),
+      userPrompt: userPromptWithAssertions() };
+    const cacheKey = computeCacheKey(MODEL, REQUEST_PROFILE, request.systemPrompt, request.userPrompt);
+    let physicalBytes: Buffer | undefined;
+    let delegateCalls = 0;
+    const delegate: BenchSignalExtractor = { extract: async (input) => {
+      delegateCalls += 1;
+      const result = await providerBackedResponseResult(input, rawJson);
+      const physical = JSON.parse(Buffer.from(result.httpResponse.bodyBase64, "base64").toString("utf8"));
+      physical.choices[0].finish_reason = "length";
+      physicalBytes = Buffer.from(JSON.stringify(physical));
+      return { ...result, httpResponse: { ...result.httpResponse,
+        bodyBase64: physicalBytes.toString("base64"), bodyByteLength: physicalBytes.length,
+        bodySha256: createHash("sha256").update(physicalBytes).digest("hex") } };
+    } };
+    const extractor = createCachingSignalExtractor({ delegate, config: extractionConfig(), cacheRoot,
+      onTransportAttempt: ledger.reserveAttemptOrdinal, providerAttemptLineageDigest: lineageDigest,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard });
+
+    await expect(extractor.extract(request)).rejects.toThrow(/physical provider response is incomplete/u);
+    const shard = JSON.parse(readFileSync(cacheFilePath(cacheRoot, cacheKey), "utf8")) as {
+      provider_responses: readonly {
+      witness: { httpResponse: { bodyBase64: string } } }[] };
+    expect(Buffer.from(shard.provider_responses[0]!.witness.httpResponse.bodyBase64, "base64"))
+      .toEqual(physicalBytes);
+    expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status)
+      .toBe("quarantined");
+    await expect(extractor.extract(request)).rejects.toThrow(/quarantined.*physical provider response is incomplete/u);
+    expect(delegateCalls).toBe(1);
+    expect(Buffer.from(JSON.parse(readFileSync(cacheFilePath(cacheRoot, cacheKey), "utf8"))
+      .provider_responses[0].witness.httpResponse.bodyBase64, "base64")).toEqual(physicalBytes);
+    expect(ledger.snapshot()).toMatchObject({ attempts: 1, successfulShards: 0,
+      pendingKeys: [], settledAttempts: [{ attemptOrdinal: 1, cacheKey }] });
   });
 
   it("persists a completed empty result once and reuses it without a paid recheck", async () => {

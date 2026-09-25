@@ -2,7 +2,7 @@ import { lstatSync } from "node:fs";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
-import { inspectCachedExtractionContent, retainedOnlyOrdinaryExtractionReason,
+import { inspectCachedExtractionContent, inspectCachedRawExtraction, retainedOnlyOrdinaryExtractionReason,
   type CachedExtractionEntry } from
   "../../../compile-seed/cache/cache-shard.js";
 import { isExtractionTransportProvenance } from "../../transport-route.js";
@@ -81,6 +81,14 @@ function inspectShard(
     return { shard: audited };
   }
   if (shard.status !== "hit" || shard.rawJsonSha256 === undefined) return { shard };
+  const admitted = inspectCachedRawExtraction(input.sourceRoot, cacheKey,
+    input.model, input.requestProfile);
+  if (admitted.status !== "hit" || admitted.rawJsonSha256 !== shard.rawJsonSha256) {
+    throw new Error(`materialization source shard ${cacheKey} is not reader-admitted`);
+  }
+  if (admitted.transportProvenance !== undefined) {
+    throw new Error(`provider-backed source shard ${cacheKey} requires root-local admission evidence; materialization is unsupported`);
+  }
   return {
     shard,
     descriptor: Object.freeze({

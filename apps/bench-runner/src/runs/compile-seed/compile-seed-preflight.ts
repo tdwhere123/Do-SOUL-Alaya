@@ -32,16 +32,14 @@ import type {
 } from "./compile-seed-types.js";
 import type { LongMemEvalExtractionTurn } from "../extraction/turn-contents.js";
 
-// Run-start coverage threshold. A populated cache below this coverage means a
-// run would live-extract a large gap; the operator must pass an explicit
-// allow-live / fill flag rather than have a slow live run start silently.
+// Run-start coverage threshold. A populated cache below this coverage cannot
+// establish that the requested runner window is fully served.
 const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
 
 /**
  * Run-start fail-loud guard. Runs in ~1s (file read + sha256, zero LLM) and
- * turns the otherwise-silent "wrong model / changed prompt / uncovered cache"
- * failures — which today only surface as a 466h slow run — into an immediate,
- * actionable throw.
+ * turns "wrong model / changed prompt / uncovered cache" failures into an
+ * immediate, actionable throw.
  *
  * Behaviour by case:
  *   - NO manifest with requireManifest=false: allow inspection/offline
@@ -53,14 +51,11 @@ const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
  *   - manifest present, `sha256(systemPrompt) !== manifest.system_prompt_sha256`:
  *     throw — the prompt drifted, so every key changed and the whole cache is
  *     dead.
- *   - manifest present, NO `coverage` field AND not an allow-live/fill run:
- *     throw — a pre-fill manifest cannot prove the cache covers the dataset,
- *     so it is a gap requiring `--allow-live-extraction`. extraction-fill
- *     always writes coverage, so a coverage-less manifest means an unfilled
- *     cache.
- *   - manifest present, `coverage < threshold` AND not an allow-live/fill run:
- *     throw, telling the operator to run extraction-fill or pass
- *     `--allow-live-extraction`.
+ *   - manifest present, NO `coverage` field AND not a fill run:
+ *     throw — a pre-fill manifest cannot prove the cache covers the dataset.
+ *     extraction-fill writes coverage before ordinary seed consumption.
+ *   - manifest present, `coverage < threshold` AND not a fill run:
+ *     throw, telling the operator to run extraction-fill.
  *
  * cross-file: apps/bench-runner/src/datasets/longmemeval/extraction-cache-manifest.ts
  */
@@ -392,11 +387,10 @@ function assertWindowContainment(input: {
       "[longmemeval preflight] extraction cache covers only part of this " +
         `run's question window: ${unavailable.missing} missing and ` +
         `${unavailable.invalid} invalid fixture(s) among ${total} distinct turns, ` +
-        "so this run would live-extract the gap. The cache " +
+        "so the cache cannot serve the full window. The cache " +
         "manifest's coverage scalar is relative to the window the last " +
         "extraction-fill recorded, not this run's window. Run extraction-fill " +
-        "for the FULL --limit/--offset window of this run, or pass " +
-        "--allow-live-extraction to live-extract the gap on purpose."
+        "for the FULL --limit/--offset window of this run."
     );
   }
 }
@@ -413,15 +407,14 @@ function assertCoverageScalar(
   // would silently re-open the 466h live-run hole the guard exists to close.
   // extraction-fill now always writes coverage, so a coverage-less manifest
   // means the cache was never filled against a known denominator. Require the
-  // same explicit opt-in a low-coverage manifest requires.
+  // same coverage proof as a low-coverage manifest.
   if (coverage === undefined) {
     if (!allowLiveExtraction && liveExtractionPossible) {
       throw new Error(
         "[longmemeval preflight] extraction cache manifest has no coverage " +
           "field; the cache was never filled against a known dataset " +
-          "denominator, so this run could live-extract an unknown gap. Run " +
-          "extraction-fill (which writes coverage) to populate the cache, or " +
-          "pass --allow-live-extraction to live-extract on purpose."
+          "denominator, so this run cannot prove the cache is complete. Run " +
+          "extraction-fill (which writes coverage) to populate the cache."
       );
     }
     return;
@@ -434,9 +427,8 @@ function assertCoverageScalar(
     const coveragePct = (coverage * 100).toFixed(1);
     throw new Error(
       "[longmemeval preflight] extraction cache coverage " +
-        `${coveragePct}% is below the ${(minimumCoverage * 100).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
-        "gap. Run extraction-fill to populate the cache, or pass " +
-        "--allow-live-extraction to live-extract the gap on purpose."
+        `${coveragePct}% is below the ${(minimumCoverage * 100).toFixed(0)}% threshold; the cache cannot prove complete coverage. ` +
+        "Run extraction-fill to populate the cache."
     );
   }
 }

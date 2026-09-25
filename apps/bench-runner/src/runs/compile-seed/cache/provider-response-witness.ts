@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@do-soul/alaya-protocol";
-import { decodeGeminiGenerateContent, parseGeminiGenerateContentBody } from
+import { decodeGeminiGenerateContent, isCompleteGeminiFinish, parseGeminiGenerateContentBody } from
   "../../extraction/fill/batch/native-codec.js";
 import { decodeBoundedResponseBytes } from "../../extraction/fill/batch/http.js";
 import { inspectProviderChatCompletionResponse } from
@@ -11,6 +11,7 @@ import { computeCacheKey } from "./cache-key.js";
 import { parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import { assertRetainedPartitionedRequests, composePartitionedExtraction } from
   "../http/garden-http-assertion-partition.js";
+import type { CachedExtractionResponseMetadata } from "./cached-response-metadata.js";
 
 export interface CachedProviderResponseWitness {
   readonly attempt_ordinal: number;
@@ -26,6 +27,7 @@ export function inspectRetainedInteractiveResponses(input: {
   readonly attemptOrdinal: number;
   readonly requestIdentity?: { readonly system_prompt: string; readonly user_prompt: string };
   readonly responses?: readonly CachedProviderResponseWitness[];
+  readonly responseMetadata?: CachedExtractionResponseMetadata;
 }): readonly CachedProviderResponseWitness[] {
   const { requestIdentity, responses } = input;
   if (requestIdentity === undefined || responses === undefined || responses.length === 0 ||
@@ -34,6 +36,8 @@ export function inspectRetainedInteractiveResponses(input: {
     throw new Error("interactive provider request/response witness is missing");
   }
   let previousOrdinal = 0;
+  let physicalFinish: string | null = null;
+  let physicalWitness: string | undefined;
   for (const response of responses) {
     if (!Number.isSafeInteger(response.attempt_ordinal) ||
         response.attempt_ordinal <= previousOrdinal ||
@@ -60,12 +64,26 @@ export function inspectRetainedInteractiveResponses(input: {
       : inspectProviderChatCompletionResponse(body,
         physical.contentType, 200);
     const rawJson = "rawJson" in decoded ? decoded.rawJson : decoded.text;
+    physicalFinish = "rawJson" in decoded ? decoded.responseMetadata.finishReason : decoded.finishReason;
+    physicalWitness = "rawJson" in decoded
+      ? decoded.responseMetadata.completionWitness : decoded.completion?.witness;
+    if ("rawJson" in decoded ? !isCompleteGeminiFinish(physicalFinish) :
+        physicalFinish === "length" || decoded.completion?.complete !== true) {
+      throw new Error("interactive physical provider response is incomplete");
+    }
     if (rawJson !== response.witness.rawJson ||
         canonicalJson(decoded.usage ?? null) !== canonicalJson(response.usage)) {
       throw new Error("interactive provider response decoding changed");
     }
   }
   const last = responses.at(-1)!;
+  const metadata = input.responseMetadata;
+  if (metadata?.completion_contract_version !== 1 ||
+      (responses.length === 1
+        ? metadata.finish_reason !== physicalFinish || metadata.completion_witness !== physicalWitness
+        : metadata.finish_reason !== null || metadata.completion_witness !== "partition_composition")) {
+    throw new Error("interactive provider completion differs from retained physical responses");
+  }
   if (last.attempt_ordinal !== input.attemptOrdinal ||
       responses.length === 1 && last.witness.userPrompt !== requestIdentity.user_prompt ||
       responses.length === 1 && last.witness.rawJson !== input.rawJson) {

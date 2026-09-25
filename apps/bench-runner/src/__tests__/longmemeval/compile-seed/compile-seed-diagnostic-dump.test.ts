@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   createCompileSeedRunner,
@@ -31,14 +31,9 @@ describe("compile-seed extraction failure diagnostic", () => {
     await rm(diagnosticDir, { recursive: true, force: true });
   });
 
-  it("records only a bounded immediate cause without sensitive inputs", async () => {
-    const turnContent = "Turn whose extraction blows up.";
+  it("records an unauthorized cache miss without sensitive inputs or transport", async () => {
+    const turnContent = "Turn whose extraction cache is missing.";
     const apiKey = "PRIVATE_API_KEY_DO_NOT_PERSIST";
-    const deepCause = new Error("PRIVATE_RAW_RESPONSE_DO_NOT_PERSIST");
-    const immediateCause = new Error(
-      `garden extraction HTTP 500 from provider: ${"x".repeat(1_024)}`,
-      { cause: deepCause }
-    );
     const config: CompileSeedExtractionConfig = {
       providerUrl: "https://example.test/v1",
       model: "gpt-test-mini",
@@ -57,16 +52,13 @@ describe("compile-seed extraction failure diagnostic", () => {
         throw new Error("seed path must not run after extraction failure");
       }
     };
+    const delegate = vi.fn();
     const runner = createCompileSeedRunner({
       config,
       cacheRoot,
-      allowLiveExtraction: true,
       diagnosticDir,
-      extractorFactory: () => ({
-        extract: async () => {
-          throw immediateCause;
-        }
-      })
+      skipPreflight: true,
+      extractorFactory: () => ({ extract: delegate })
     });
 
     await expect(runner.seedTurn({
@@ -90,13 +82,11 @@ describe("compile-seed extraction failure diagnostic", () => {
       "Official garden provider returned an invalid response."
     );
     expect(dump.error_cause_message).toEqual(expect.any(String));
-    expect(dump.error_cause_message as string).toMatch(
-      /^garden extraction HTTP 500 from provider:/u
-    );
+    expect(dump.error_cause_message as string).toMatch(/live extraction disabled/u);
     expect((dump.error_cause_message as string).length).toBeLessThanOrEqual(512);
+    expect(delegate).not.toHaveBeenCalled();
     const serializedDump = JSON.stringify(dump);
     expect(serializedDump).not.toContain(turnContent);
     expect(serializedDump).not.toContain(apiKey);
-    expect(serializedDump).not.toContain("PRIVATE_RAW_RESPONSE_DO_NOT_PERSIST");
   });
 });

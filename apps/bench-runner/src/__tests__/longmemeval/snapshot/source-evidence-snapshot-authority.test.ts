@@ -411,7 +411,6 @@ async function seedFixture(
   const runner = createCompileSeedRunner({
     config: CREDENTIALLED_CONFIG,
     cacheRoot,
-    allowLiveExtraction,
     requiredTurnContents: keySpace.distinctTurnContents,
     requiredExtractionTurns: keySpace.distinctExtractionTurns,
     requiredQuestionWindow: { offset: 0, limit: 1 },

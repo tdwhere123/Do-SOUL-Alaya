@@ -61,10 +61,7 @@ export function createCompileSeedRunnerContext(
         process.env, manifest, options.sourcePacking, options.config.sourcePacking
       ) };
   const credentialled = config.apiKey !== null;
-  const cacheOnly =
-    manifest !== undefined &&
-    !credentialled &&
-    options?.allowLiveExtraction !== true;
+  const cacheOnly = manifest !== undefined && !credentialled;
   const extractionCachePreflightProof = runExtractionCachePreflight(
     options, cacheRoot, config, credentialled, manifestIdentity
   );
@@ -139,9 +136,6 @@ function runExtractionCachePreflight(
     liveExtractionPossible: credentialled,
     requireManifest: resolveBenchRequireExtractionCacheManifest(),
     ...(minimumCoverage === undefined ? {} : { minimumCoverage }),
-    ...(options?.allowLiveExtraction === undefined
-      ? {}
-      : { allowLiveExtraction: options.allowLiveExtraction }),
     ...(options?.requiredTurnContents === undefined
       ? {}
       : { requiredTurnContents: options.requiredTurnContents }),
@@ -225,7 +219,7 @@ function createOfficialApiProvider(input: {
     stats: input.stats,
     trackTurnShards: true,
     rawShardInspector: input.rawShardInspector,
-    allowLiveExtraction: input.credentialled && input.options?.allowLiveExtraction === true
+    allowLiveExtraction: false
   });
   return new OfficialApiGardenProvider({
     sourcePacking: input.config.sourcePacking,

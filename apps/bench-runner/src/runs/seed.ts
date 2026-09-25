@@ -1,6 +1,5 @@
 import {
   createCompileSeedRunner,
-  resolveBenchAllowLiveExtraction,
   type CompileSeedExtractionStats,
   type CompileSeedRunner
 } from "./compile-seed.js";
@@ -12,8 +11,7 @@ export function createCampaignSeedRunner(input: {
 }): CompileSeedRunner {
   return createCompileSeedRunner({
     requiredTurnContents: input.requiredTurnContents,
-    requiredQuestionWindow: { offset: input.offset, limit: input.windowLength },
-    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+    requiredQuestionWindow: { offset: input.offset, limit: input.windowLength }
   });
 }
 

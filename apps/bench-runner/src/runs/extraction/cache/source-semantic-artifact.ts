@@ -333,7 +333,7 @@ function inspectRetiredSourceSemanticEntry(entry: CachedExtractionEntry, cacheRo
     return;
   }
   if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
-    inspectInteractiveTransportEvidence(typed, entry, cacheRoot);
+    inspectInteractiveTransportEvidence(typed, entry, cacheRoot, true);
     return;
   }
   if (typed.kind !== "gemini_batch") throw new AlayaError("CONFLICT", "retained source transport kind is unknown");

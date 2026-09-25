@@ -37,7 +37,7 @@ it("reuses raw interpretations while deriving inclusive memory dates from each r
       userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(source, messages)),
       sourceCorpus: buildOfficialApiSourceCorpus(source, messages) });
     const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot,
-      extractorFactory: () => ({ extract }), allowLiveExtraction: true, skipPreflight: true });
+      extractorFactory: () => ({ extract }), skipPreflight: true });
     daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"), workspaceId: "observed-source", runId: "observed-source-run" });
     const memoryIds: string[] = [];
     for (const [index, sourceObservedAt] of ["2024-06-15T14:30:00.000Z", "2024-06-16T14:30:00.000Z"].entries()) {

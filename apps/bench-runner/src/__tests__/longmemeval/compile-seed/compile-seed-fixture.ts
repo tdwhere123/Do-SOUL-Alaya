@@ -5,9 +5,18 @@ import type {
 import type { SeededObjectResult } from
   "../../../harness/daemon/seed/daemon-seed-types.js";
 import {
+  createCachingSignalExtractor,
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig
 } from "../../../runs/compile-seed.js";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus,
+  collectOfficialApiExtractionCoverage, stringifyOfficialApiExtractionRequest
+} from "@do-soul/alaya-soul";
+import { fixtureAttemptAuthority, providerBackedResponseResult } from
+  "../extraction/extraction-cache-test-fixture.js";
 
 /**
  * A test CompileSeedDaemon stub. The compile (credentialled) seed path
@@ -65,6 +74,37 @@ export const OFFLINE_CONFIG: CompileSeedExtractionConfig = {
   requestProfile: "provider-default-v1",
   apiKey: null
 };
+
+/** Prewarm the actual runner's request keys through an admitted local attempt ledger. */
+export async function admitCompileSeedTurnCache(input: {
+  readonly cacheRoot: string;
+  readonly turnContent: string;
+  readonly turnMessages?: Parameters<typeof collectOfficialApiExtractionCoverage>[1];
+  readonly config?: CompileSeedExtractionConfig;
+  readonly rawJson: string | ((request: ReturnType<typeof collectOfficialApiExtractionCoverage>["requests"][number],
+    index: number) => string);
+}): Promise<void> {
+  const config = input.config ?? CREDENTIALLED_CONFIG;
+  const messages = input.turnMessages ?? [];
+  const coverage = collectOfficialApiExtractionCoverage(
+    input.turnContent, messages, config.sourcePacking);
+  const manifestPath = join(input.cacheRoot, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  writeFileSync(manifestPath, JSON.stringify({ ...manifest,
+    requested_turns: coverage.requests.length,
+    cached_turns: coverage.requests.length, coverage: 1 }));
+  const authority = fixtureAttemptAuthority({ cacheRoot: input.cacheRoot,
+    model: config.model, requestProfile: config.requestProfile,
+    startingMissing: Math.max(1, coverage.requests.length) });
+  const sourceCorpus = buildOfficialApiSourceCorpus(input.turnContent, messages);
+  for (const [index, request] of coverage.requests.entries()) {
+    const rawJson = typeof input.rawJson === "string" ? input.rawJson : input.rawJson(request, index);
+    const extractor = createCachingSignalExtractor({ cacheRoot: input.cacheRoot, config,
+      ...authority, delegate: { extract: (attempt) => providerBackedResponseResult(attempt, rawJson) } });
+    await extractor.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(request), sourceCorpus });
+  }
+}
 
 export function interpretationsEnvelope(
   facts: readonly { matched: string; assertionId?: number }[]

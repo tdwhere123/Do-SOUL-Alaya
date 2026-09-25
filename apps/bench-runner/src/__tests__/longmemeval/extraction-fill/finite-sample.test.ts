@@ -225,7 +225,7 @@ it("reopens singleton manifests, submits once through HTTP, and keeps sample res
   expect(() => createCompileSeedRunner({ cacheRoot: roots.cacheRoot,
     requiredTurnContents: fixture.turns.distinctTurnContents,
     requiredExtractionTurns: fixture.turns.distinctExtractionTurns,
-    requiredQuestionWindow: { offset: 0, limit: 100 }, allowLiveExtraction: false,
+    requiredQuestionWindow: { offset: 0, limit: 100 },
     diagnosticDir: null })).toThrow(/incomplete|missing|coverage|in_progress/iu);
 });
 

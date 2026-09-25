@@ -22,6 +22,7 @@ import {
   providerBackedResult,
   OFFLINE_CONFIG,
   makeSeed,
+  admitCompileSeedTurnCache,
   interpretationsEnvelope
 } from "./compile-seed-fixture.js";
 import {
@@ -94,18 +95,13 @@ describe("canonical extraction request cache identity", () => {
       providerUrl: CREDENTIALLED_CONFIG.providerUrl,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    const runner = createCompileSeedRunner({
-      config: CREDENTIALLED_CONFIG,
-      cacheRoot,
-      allowLiveExtraction: true,
-      extractorFactory: () => ({
-        extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
-      })
-    });
     const source = Array.from(
       { length: 9 },
       (_, index) => `I recorded durable detail number ${index + 1}.`
     ).join(" ");
+    await admitCompileSeedTurnCache({ cacheRoot, turnContent: source,
+      rawJson: '{"interpretations":[]}' });
+    const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot });
 
     await runner.seedTurn({
       daemon: buildCompileSeedDaemon(() => makeSeed("unexpected")),
@@ -117,7 +113,8 @@ describe("canonical extraction request cache identity", () => {
     });
 
     expect(runner.stats.extractionAttempts).toBe(2);
-    expect(runner.stats.llmCalls).toBe(2);
+    expect(runner.stats.cacheHits).toBe(2);
+    expect(runner.stats.llmCalls).toBe(0);
     expect(runner.stats.lastExtractionShards).toHaveLength(2);
     expect(runner.stats.lastExtractionShards?.map(({ cacheKey }) => cacheKey)).toEqual(
       computeSourceTurnCacheKeys(
@@ -230,6 +227,8 @@ describe("canonical extraction request cache identity", () => {
         delegate,
         config: testCacheConfig(),
         cacheRoot,
+        ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
+          requestProfile: "provider-default-v1" })
       })
     });
 
@@ -248,7 +247,7 @@ describe("canonical extraction request cache identity", () => {
     });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async (input) =>
-        providerBackedResult(buildGroundedInterpretationResponse(input.userPrompt)))
+        providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt)))
     };
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
@@ -260,7 +259,9 @@ describe("canonical extraction request cache identity", () => {
           providerUrl: TEST_EXTRACTION_PROVIDER_URL,
           requestProfile: "provider-default-v1"
         },
-        cacheRoot
+        cacheRoot,
+        ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
+          requestProfile: "provider-default-v1", startingMissing: 2 })
       })
     });
     const turnContent = "User: I chose A.\nAssistant: You chose B.";
