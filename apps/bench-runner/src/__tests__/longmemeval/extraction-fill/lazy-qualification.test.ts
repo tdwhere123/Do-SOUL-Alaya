@@ -96,7 +96,9 @@ it("delivers a raw source outside the frozen qualification window after final na
     "A short unrelated note.",
     "Another short unrelated note."
   ];
-  const { config } = await preparedSourceFixture(contents, 21600);
+  // The complete native page includes its access receipt. This cap fits two long
+  // selected previews plus a short outsider, while the next long preview does not fit.
+  const { config } = await preparedSourceFixture(contents, 17700);
   const root = join(cacheRoot, "raw-outside-stage");
   const window = await prepareLazyQualificationWindow(config, root);
   expect(window.window).toHaveLength(10);
@@ -521,14 +523,15 @@ async function fillAuthoredCompletionQuery(workset: Parameters<typeof prepareSem
   await executeSemanticProposalFill({ workset,
     cacheRoot: queryCacheRoot, authority: queryAuthority,
     config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
-      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => {
+      const rawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
           alternatives: [{ conditions: [{ kind: "statement", key: "complete", predicate: "complete",
             arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true },
-              excerpt: "What" }] }] }], gaps: [] }),
-      responseMetadata: { finishReason: "STOP" },
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
-    }) } });
+              excerpt: "What" }] }] }], gaps: [] });
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
+        responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
+    } } });
 }
 
 function shortSourceBatchResponse(line: { key: string; request: { contents: { parts: { text: string }[] }[] } }) {
@@ -601,8 +604,8 @@ async function fillAuthoredCompletionCorrespondence(
     correspondenceCacheRoot, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   return executeSemanticProposalFill({ workset: selected, cacheRoot: correspondenceCacheRoot,
     authority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
-      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => {
+      const rawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
         outcome: { status: "interpreted" }, semantic_correspondence: {
           contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT,
           source_interpretation_handle: "source1", assessments: assessmentForTestPairs(request.catalog, request.original_query, [
@@ -611,9 +614,11 @@ async function fillAuthoredCompletionCorrespondence(
                 [{ kind: "lexical", mentions: support.mentions }] : [] },
             { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What",
               source_semantic_support: interpretation.frames[0]!.slots[0]!.support }
-          ]) } }), responseMetadata: { finishReason: "STOP" },
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
-    }) } });
+          ]) } });
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
+        responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
+    } } });
 }
 
 async function fillFrozenShortSources(selectedKeys: readonly string[]) {

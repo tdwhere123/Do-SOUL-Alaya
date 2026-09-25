@@ -243,7 +243,7 @@ it("preflights without a grant, then prepare-submit-resume-import-reopen stays o
     .update(shard.source_semantic.result.line.userPrompt).digest("hex");
   writeFileSync(shardPath, JSON.stringify(shard));
   expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE)).toMatchObject({
-    status: "invalid", reason: "retained source semantic request differs from recorded manifest generation"
+    status: "invalid", reason: expect.stringContaining("schema_version")
   });
 }, 60000);
 

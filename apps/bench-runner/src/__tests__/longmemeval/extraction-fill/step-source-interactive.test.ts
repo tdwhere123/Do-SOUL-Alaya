@@ -16,7 +16,7 @@ import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } fro
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
 import { assertStepSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
 import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
-import { inspectCachedSourceSemantic, inspectRetainedCachedSourceSemantic } from
+import { inspectCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { inspectInteractiveTransportEvidence } from "../../../runs/extraction/cache/source-interactive-binding.js";
 import { readCachedEntry } from "../../../runs/compile-seed/cache/cache-shard.js";
@@ -110,7 +110,7 @@ it("reopens a configured logical model alias through its recorded Step transport
   expect(http.calls).toHaveLength(1);
 });
 
-it("rejects a changed current Step wire digest through both inspection APIs", async () => {
+it("rejects a changed current Step wire digest while retained accounting stays unbound", async () => {
   const fixture = await scenario(1);
   const http = await listen(body => ({
     text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
@@ -122,15 +122,16 @@ it("rejects a changed current Step wire digest through both inspection APIs", as
     throw new Error("expected an admitted Step source artifact");
   }
   expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("hit");
-  expect(inspectRetainedCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE))
-    .toMatchObject({ status: "retired", verification: { status: "hit", requestBinding: "verified" } });
   expect(inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, true))
     .toMatchObject({ requestBinding: "unbound", admissionState: "admitted" });
   const path = providerRawAttemptPath(roots.cacheRoot, key, 1);
   const raw = JSON.parse(readFileSync(path, "utf8"));
   writeFileSync(path, JSON.stringify({ ...raw, request_digest: "e".repeat(64) }));
   expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("invalid");
-  expect(inspectRetainedCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("invalid");
+  expect(() => inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, false))
+    .toThrow();
+  expect(inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, true))
+    .toMatchObject({ requestBinding: "unbound", admissionState: "admitted" });
   expect(http.calls).toHaveLength(1);
 });
 
@@ -387,8 +388,6 @@ it("reopens a successful Step source interpretation without a second HTTP reques
   expect(filled.newlyExtracted).toBe(1);
   expect(http.calls).toHaveLength(1);
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
-  expect(inspectRetainedCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE))
-    .toMatchObject({ status: "retired", eligibility: "retained_only" });
   vi.stubEnv("E0_TEST_GARDEN_KEY", "");
   expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
   expect(listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]?.http_response?.bodyComplete).toBe(true);

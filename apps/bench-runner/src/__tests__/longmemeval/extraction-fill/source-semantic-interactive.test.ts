@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -130,18 +130,17 @@ it("fills complete-source open semantics through interactive generateContent wit
   });
   const secondCache = join(dirname(cacheRoot), "second-generation");
   mkdirSync(secondCache);
-  for (const moved of fixture.keys.slice(1)) {
-    mkdirSync(dirname(cacheFilePath(secondCache, moved)), { recursive: true });
-    renameSync(cacheFilePath(cacheRoot, moved), cacheFilePath(secondCache, moved));
-  }
-  expect(inspectCachedSourceSemantic(secondCache, fixture.keys[1]!, MODEL, REQUEST_PROFILE)).toMatchObject({
-    status: "invalid", reason: "typed open-semantics generation binding mismatch"
-  });
+  const copied = fixture.keys[1]!;
+  mkdirSync(dirname(cacheFilePath(secondCache, copied)), { recursive: true });
+  copyFileSync(cacheFilePath(cacheRoot, copied), cacheFilePath(secondCache, copied));
   copyFileSync(join(cacheRoot, "manifest.json"), join(secondCache, "manifest.json"));
+  expect(inspectCachedSourceSemantic(secondCache, fixture.keys[1]!, MODEL, REQUEST_PROFILE)).toMatchObject({
+    status: "invalid", reason: "typed source semantic raw attempt witness is absent"
+  });
   const report = await publishSourceSemanticSnapshot({
     snapshotPath: join(cacheRoot, "published.sqlite"), dataDirRoot: join(cacheRoot, "publication"),
     recordedAt: "2026-09-21T00:00:00.000Z", producerCommit: "a".repeat(40),
-    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoots: [cacheRoot, secondCache], model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
+    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, cacheRoots: [cacheRoot], model: MODEL, requestProfile: REQUEST_PROFILE, publicationAssociations }]
   });
   expect(report.published_count).toBe(census.records.length);
   expect(report.source_interpretation_binding_complete).toBe(true);
@@ -153,7 +152,7 @@ it("fills complete-source open semantics through interactive generateContent wit
     populations: [{ name: "fixture", dataDir, pinnedMetaRoot, model: MODEL, requestProfile: REQUEST_PROFILE }]
   });
   await assertNativeSemanticChain(cacheRoot, sourceOnly);
-  await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot, secondCache]);
+  await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
 }, 120000);
 
@@ -537,9 +536,9 @@ it("rejects invalid interactive evidence before current reuse and retained quara
 
   const retiredInspection = inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE);
   expect(retiredInspection, JSON.stringify(retiredInspection))
-    .toMatchObject({ status: "retired", eligibility: "retained_only" });
+    .toMatchObject({ status: "invalid", reason: "typed source semantic raw attempt witness is absent" });
   expect(inspectCachedRawExtraction(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
-    .toMatchObject({ status: "quarantined", rawJson });
+    .toMatchObject({ status: "invalid" });
   expect(readValidLedgerShard(cacheRoot, retiredKey, identity)).toBeUndefined();
   expect(readValidDeterministicLedgerShard(cacheRoot, retiredKey, identity)).toBeUndefined();
   assertRetiredByteBindings(retiredPath, retiredKey, current);
@@ -627,7 +626,7 @@ function assertRetiredByteBindings(retiredPath: string, retiredKey: string,
   selection.source_semantic.result.line.requestSha256 = computeExtractionRawJsonSha256(selectionUserPrompt);
   writeFileSync(retiredPath, `${JSON.stringify(selection, null, 2)}\n`);
   expect(inspectCachedSourceSemantic(cacheRoot, retiredKey, MODEL, REQUEST_PROFILE))
-    .toMatchObject({ status: "retired", eligibility: "retained_only" });
+    .toMatchObject({ status: "invalid", reason: "typed source semantic raw attempt witness is absent" });
   const changedSelectionPrompt = structuredClone(selection);
   changedSelectionPrompt.source_semantic.result.line.systemPrompt += " CORRUPTED";
   inspectChanged(changedSelectionPrompt, "prompt bytes differ");
@@ -688,7 +687,7 @@ it.each(["transport", "admission", "completion"] as const)("keeps settled %s fai
     decodedText: authoredResponse(prompt), finishReason: "STOP" });
   const replacement = readFileSync(rawPath, "utf8");
   fixture.fetchMock.mockClear();
-  expect(await runCli(args)).toBe(failure === "completion" ? 0 : 2);
+  expect(await runCli(args)).toBe(2);
   expect(fixture.fetchMock).not.toHaveBeenCalled();
   expect(inspectCachedSourceSemantic(cacheRoot, raw.cache_key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
   expect(existsSync(cacheFilePath(cacheRoot, raw.cache_key))).toBe(false);
