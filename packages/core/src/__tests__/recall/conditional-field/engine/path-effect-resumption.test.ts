@@ -4,6 +4,7 @@ import { createAdjacencyEffectCursor, adjacencyEffectsForRows } from "../../../.
 import { composedFacetPathId, facetBelongsToOutput } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
 import { applyObserverPage, createConditionalField, type FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
 import type { ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
@@ -27,6 +28,38 @@ function setup(program: QueryProgram) {
 }
 
 describe("bounded path effect continuation", () => {
+  it("resumes facet lookup under the same small work allowance until its effect commits", () => {
+    const program = relation("p");
+    const interpretation = query(program);
+    const programState = seedProgramStates(program)[0]!;
+    let state = createConditionalField({ interpretation,
+      budget: defaultBudget({ work_units: 1000000, memory_bytes: 10000000 }),
+      seeds: Array.from({ length: 64 }, (_, index) => ({ schema_version: 1,
+        state: productKey(`node-${index}`, "h0", "unbound", programState), milligrades: 1000 })) });
+    let visits = 0;
+    const liveStates = new Proxy(state.seen_identities, { get(target, property) {
+      if (property === "at") return (index: number) => { visits += 1; return target.at(index); };
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    const cursor = { schema_version: 1 as const, cursor_id: "adjacency", region_id: "adjacency",
+      query_id: interpretation.query_id, snapshot_id: SNAPSHOT_ID, position: null, committed_through: null };
+    state = { ...state, pending_path_effects: { offset: 0, retained_bytes: 0,
+      page: { schema_version: 1, query_id: interpretation.query_id, snapshot_id: SNAPSHOT_ID,
+        cursor, observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] },
+      input: { rows: [{ ...row("p", "target", "edge"), sourceObjectId: "node-63" }],
+        options: { interpretation, asOf: AS_OF, liveStates, overlay: {},
+          sourceFacts: new Map([["target", { object_id: "target", source_revision: "rev" }]]) } } } };
+    for (let turn = 0; turn < 80 && state.pending_path_effects !== undefined; turn += 1) {
+      visits = 0;
+      state = resumePathEffects({ ...state, remaining_exploration: 24, memory_exhausted: false });
+      expect(visits).toBeLessThanOrEqual(24);
+      expect(state.remaining_exploration).toBeGreaterThanOrEqual(0);
+    }
+    expect(state.pending_path_effects).toBeUndefined();
+    expect(state.transitions.some((edge) => productSubjectId(edge.to) === "target")).toBe(true);
+  });
+
   it("finishes sparse endpoint matching within a bounded cursor allowance", () => {
     const { interpretation, state } = setup(relation("p")), programState = state.seen_identities.at(0)!.program_state;
     const liveStates = Array.from({ length: 64 }, (_, i) => productKey(`node-${i}`, "h0", "unbound", programState));

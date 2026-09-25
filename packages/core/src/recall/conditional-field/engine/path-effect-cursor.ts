@@ -3,11 +3,27 @@ import type { ObserverPage } from "@do-soul/alaya-protocol";
 import { BindingContextResourceError, type BindingContextStore } from "./binding-environment.js";
 import { ProgramAutomatonResourceError } from "./program-automaton.js";
 import type { AdjacencyRow } from "./path-matching.js";
+import type { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 
 export type PathComputationStep = Readonly<{ kind: "work"; retained_bytes?: number; retention?: "effect_payload" }>
   | Readonly<{ kind: "effect"; effect: CompiledAdjacencyEffect }>;
 export type PathComputation<Result> = Generator<PathComputationStep, Result, void>;
-export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; guards_seen?: boolean; facet_resume_offset?: number; page: ObserverPage;
+export type PathEffectPreparation = Readonly<{
+  effects: readonly CompiledAdjacencyEffect[];
+  next_offset: number;
+  status: "open" | "complete";
+  effect_index: number;
+  stage: "start" | "pair" | "source" | "facet";
+  facet_scan_index: number;
+  facet_resume_offset: number;
+  pair_demands: PersistentStringMap<true>;
+  pair_bytes: number;
+  source_demands: PersistentStringMap<"pending" | "done">;
+  source_pending: number;
+  source_bytes: number;
+  retained_bytes: number;
+}>;
+export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; guards_seen?: boolean; facet_resume_offset?: number; preparation?: PathEffectPreparation; page: ObserverPage;
   input: Readonly<{ rows: Iterable<AdjacencyRow>; options: AdjacencyEffectsInput }> }>;
 const EFFECT_LOG_SLOT_BYTES = 64;
 

@@ -207,7 +207,8 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
   cursors.set(action.region_id, observed.page.cursor);
   const bindingContexts = forkBindingContexts(session.state);
   let effects: readonly FieldObservationEffect[];
-  try { effects = measurementEffectsFor(observed, interpretation, input.as_of, session.state.measurements, bindingContexts); }
+  try { effects = measurementEffectsFor(observed, interpretation, input.as_of, session.state.measurements,
+    bindingContexts, session.state.compiled_automaton); }
   catch (error) { return rejectBindingResource(session, error); }
   session.missingMeasurement ||= measurementIsMissing(effects);
   session.state = applyObserverPage(retainBindingContexts(session.state, bindingContexts), { page: observed.page, effects, work: observed.work,

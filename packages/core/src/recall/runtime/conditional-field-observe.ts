@@ -212,7 +212,8 @@ function startObservedField(
       remaining_exploration: exploration,
       remaining_reserve: input.budget.finalization_reserve,
       remaining_memory_bytes: Math.max(0, input.budget.memory_bytes
-        - (resumed.pending_path_effects?.retained_bytes ?? 0) - (resumed.binding_context_bytes ?? 0)
+        - (resumed.pending_path_effects?.retained_bytes ?? 0)
+        - (resumed.pending_path_effects?.preparation?.retained_bytes ?? 0) - (resumed.binding_context_bytes ?? 0)
         - (resumed.solver_retained_bytes ?? 0) - resumed.pair_demand_bytes - resumed.pair_progress_bytes
         - resumed.source_fact_demand_bytes - (resumed.source_fact_bytes ?? 0)
         - (resumed.observed_relation_bytes ?? 0)

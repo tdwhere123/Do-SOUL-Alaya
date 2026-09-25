@@ -47,11 +47,11 @@ export function meterReaders(
       const hit = cache.get(args.objectId);
       if (hit !== undefined) return { ...hit, rowsRead: 0, bytesRead: 0 };
       const byteLimit = Math.min(args.byteLimit ?? 65536, 65536, memory.remaining);
-      if (byteLimit < 1) return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
+      if (byteLimit < 1) return { row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true };
       const page = source({ ...args, byteLimit });
       memory.remaining = Math.max(0, memory.remaining - page.bytesRead);
       memory.cachedBytes += page.bytesRead;
-      cache.set(args.objectId, page);
+      if (page.resourceLimited !== true) cache.set(args.objectId, page);
       return page;
     } }),
     ...(readers.sourceRoots === undefined ? {} : {

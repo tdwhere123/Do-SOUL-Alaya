@@ -7,6 +7,7 @@ import type { FieldEngineState } from "../../../../recall/conditional-field/engi
 import type { SourceObserverPage } from "../../../../recall/conditional-field/observers/observe.js";
 import { encodeSourceFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
 import { RequestCostLedger } from "../../../../recall/runtime/request-cost-ledger.js";
+import { meterReaders } from "../../../../recall/runtime/observer-reader-budget.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const AS_OF = "2026-09-07T00:00:00.000Z";
@@ -85,6 +86,42 @@ function fixture(program: QueryProgram, rows: readonly ReturnType<typeof edge>[]
 }
 
 describe("consumer-directed physical observation", () => {
+  it("keeps a memory refusal and a limited source page out of the completed source cache", () => {
+    let calls = 0;
+    const memory = { remaining: 0, cachedBytes: 0 };
+    const cache = new Map();
+    const readers = meterReaders({ source: () => {
+      calls += 1;
+      return calls === 1 ? { row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true }
+        : { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
+    } }, memory, cache);
+    const key = { workspaceId: "ws", objectId: "x" };
+    expect(readers.source!(key)).toMatchObject({ resourceLimited: true, unavailable: false });
+    expect(calls).toBe(0);
+    memory.remaining = 32;
+    expect(readers.source!(key).resourceLimited).toBe(true);
+    expect(calls).toBe(1);
+    expect(readers.source!(key).unavailable).toBe(true);
+    expect(readers.source!(key).resourceLimited).toBeUndefined();
+    expect(readers.source!(key).unavailable).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("settles an actually unavailable bound source without retrying it", () => {
+    const guard: Guard = { schema_version: 1, kind: "authorization", variable: "c",
+      authorization_scope: "project", time_scope: "none", verdict: "unresolved" };
+    const interpretation = { hypotheses: [{ schema_version: 1 as const, hypothesis_id: "h",
+      bindings: [{ schema_version: 1 as const, variable: "c", value: "x" }] }] };
+    const program = relation("p", "s", "t", guard);
+    const first = fixture(program, [edge("a", "b", "p")], { interpretation, sourceRows: { x: null } });
+    expect(first.sourceCalls).toContain("x");
+    expect(first.state.source_fact_demands.get("x")).toBe("done");
+    const continued = fixture(program, [edge("a", "b", "p")], {
+      interpretation, sourceRows: { x: null }, resume: first.state });
+    expect(continued.sourceCalls).not.toContain("x");
+    expect(continued.state.source_fact_demands.get("x")).toBe("done");
+  });
+
   it("reads claim evidence for an accepting epsilon product", () => {
     const view = { ...defaultView(), claim_demands: [{ variable: "h", proposition_kind: "cause",
       argument_variables: ["c", "h"], required_claim: "supported" as const }] };

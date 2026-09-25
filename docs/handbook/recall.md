@@ -221,6 +221,9 @@ Path cursors retain immutable input versions; their owners replace versions
 instead of mutating arrays or maps held by an interrupted cursor. Native
 relation-page exhaustion does not establish semantic closure: newly admitted
 product states and facets must still consume the retained relation evidence.
+Path-effect admission retains metered facet lookup and demand preparation across
+small continuations. A prepared batch commits its effects and demand maps
+together only after its work and retained bytes fit.
 Conditional-field adjacency reads are demanded by reachable program advances,
 hyperedge premises, routing discovery and bound claim evidence. A bound guard
 may require a direct authorized source-fact read before its retained relation
@@ -234,8 +237,9 @@ guards remain open. A continuation keeps completed keys only within the same
 query, interpretation, scope and semantic population.
 Bound source-fact demands retain a metered scan cursor and pending count. A
 resource-limited read stays pending for continuation; completed absence or
-unavailability settles that demand. The scan, snapshot pin and possible
-one-row read consume work before the demand can be marked done.
+unavailability settles that demand. A source reader's memory refusal remains
+resource-limited even when the native read was never invoked. The scan, snapshot
+pin and possible one-row read consume work before the demand can be marked done.
 
 Dependency equations retain independent rule instances and shared compatible
 alternatives. Generated derivations declare `provenance_layout: local_leaves.v1`:
