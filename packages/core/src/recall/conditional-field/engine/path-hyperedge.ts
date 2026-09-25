@@ -381,10 +381,10 @@ function* groundPremiseAssignments(
     transitions, derivations: groundDerivations, transition_derivations: roots, allowance: 1 };
   let grounded = groundedOutputDerivations(groundInput);
   while (!grounded.complete) {
-    yield { kind: "work", retained_bytes: Math.max(0, grounded.retained_bytes) };
+    yield { kind: "work", retained_bytes: grounded.admitted_bytes };
     grounded = groundedOutputDerivations({ ...groundInput, progress: grounded.progress });
   }
-  yield { kind: "work", retained_bytes: Math.max(0, grounded.retained_bytes) };
+  yield { kind: "work", retained_bytes: grounded.admitted_bytes };
   const forest: Derivation[] = [];
   for (const row of grounded.progress.forest.values()) { yield { kind: "work", retained_bytes: 8 }; forest.push(row); }
   const assignments: PremiseAssignment[] = [];

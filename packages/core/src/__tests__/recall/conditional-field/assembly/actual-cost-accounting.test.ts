@@ -219,8 +219,32 @@ describe("conditional-field actual request cost", () => {
     const secondActual = requireActual(second.execution_receipt.actual);
     expect(secondActual.phases.observe.relaxations).toBe(0);
     expect(secondActual.phases.observe.state_creates).toBe(0);
+    expect(secondActual.phases.observe.charged_retained_bytes).toBe(0);
     expect(secondActual.retained_states_current).toBe(firstActual.retained_states_current);
     expect(secondActual.retained_states_current).toBeGreaterThan(secondActual.phases.observe.state_creates);
+  });
+
+  it("charges a fresh observation owner after the as-of changes on a continuation", async () => {
+    const slice = await openSourceSlice((database) => databases.add(database));
+    await plantHub(slice, 8);
+    const budget = defaultBudget({ page_budget: 1, work_units: 10_000, finalization_reserve: 512 });
+    const request = { workspace_id: WS, query_text: QUERY, budget, result_kind_view: "memory_only" as const,
+      snapshot_id: SNAPSHOT_ID, interpretation_clock: CLOCK, as_of: CLOCK,
+      expires_at: FAR_FUTURE_EXPIRY, authorized_scopes: null };
+    const first = runConditionalFieldRecallWithReceipt({ ...request, readers: readersFor(slice) });
+    expect(first.index.continuation).not.toBeNull();
+    const changedAsOf = "2026-09-08T00:00:00.000Z";
+    const continued = runConditionalFieldRecallWithReceipt({ ...request, as_of: changedAsOf,
+      continuation: first.index.continuation, readers: readersFor(slice) });
+    const fresh = runConditionalFieldRecallWithReceipt({ ...request, as_of: changedAsOf,
+      readers: readersFor(slice) });
+    expect(continued.index.completeness.logical_index).not.toBe("invalidated");
+    const continuedObserve = requireActual(continued.execution_receipt.actual).phases.observe;
+    const freshObserve = requireActual(fresh.execution_receipt.actual).phases.observe;
+    expect(continuedObserve.charged_retained_bytes).toBe(freshObserve.charged_retained_bytes);
+    expect(continuedObserve.relaxations).toBe(freshObserve.relaxations);
+    expect(continuedObserve.state_creates).toBe(freshObserve.state_creates);
+    expect(continuedObserve.charged_retained_bytes).toBeGreaterThan(0);
   });
 
   it("does not bill remaining join units as performed adjacency joins", async () => {

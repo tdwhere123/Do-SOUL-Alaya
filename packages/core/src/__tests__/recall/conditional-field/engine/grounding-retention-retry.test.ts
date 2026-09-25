@@ -20,6 +20,7 @@ describe("grounding retention after memory refusal", () => {
       const refused = groundedOutputDerivations({ ...input, memory_bytes: refusedMemory, progress });
       expect(refused.complete).toBe(false);
       expect(refused.retained_bytes).toBe(0);
+      expect(refused.admitted_bytes).toBe(0);
       expect(refused.progress.retained_bytes).toBe(0);
       expect(refused.progress.forest.size).toBe(0);
       expect(refused.progress.incoming.size).toBe(0);
@@ -28,8 +29,24 @@ describe("grounding retention after memory refusal", () => {
     const recovered = groundedOutputDerivations({ ...input, memory_bytes: 100_000, progress });
     expect(recovered.complete).toBe(admitted.complete);
     expect(recovered.retained_bytes).toBe(admitted.retained_bytes);
+    expect(recovered.admitted_bytes).toBe(admitted.admitted_bytes);
     expect(recovered.progress.retained_bytes).toBe(admitted.progress.retained_bytes);
     expect([...recovered.progress.forest]).toEqual([...admitted.progress.forest]);
     expect([...recovered.progress.root_map]).toEqual([...admitted.progress.root_map]);
+  });
+
+  it("separates a released owner from an equal-size replacement allocation", () => {
+    const input = { seeds: [seed], transitions: [], derivations: [], transition_derivations: {} };
+    const before = groundedOutputDerivations({ ...input, allowance: 1 });
+    const changed = { ...input, seeds: [{ ...seed, state: state("b") }] };
+    const released = groundedOutputDerivations({ ...changed, allowance: 0, progress: before.progress });
+    expect(released.admitted_bytes).toBe(0);
+    expect(released.retained_bytes).toBe(-before.progress.retained_bytes);
+    expect(released.progress.retained_bytes).toBe(0);
+
+    const rebuilt = groundedOutputDerivations({ ...changed, allowance: 1, progress: before.progress });
+    expect(rebuilt.progress.retained_bytes).toBe(before.progress.retained_bytes);
+    expect(rebuilt.retained_bytes).toBe(0);
+    expect(rebuilt.admitted_bytes).toBe(rebuilt.progress.retained_bytes);
   });
 });

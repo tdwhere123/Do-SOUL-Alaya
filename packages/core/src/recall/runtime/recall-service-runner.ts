@@ -288,6 +288,7 @@ function runCompiledConditionalFieldRecall(
       interpretationIdentity({ interpretation_clock: restored.interpretation.interpretation_clock })));
     return annotatePublicIndex(invalidatedPublicIndex(interpretation, input), interpretation);
   }
+  let reusedCostOwner: FieldEngineState | undefined;
   const field = cost.time("observe", () => observeField(interpretation, {
     workspace_id: input.workspace_id,
     query_text: input.query_text,
@@ -295,13 +296,14 @@ function runCompiledConditionalFieldRecall(
     as_of: input.as_of,
     readers: input.readers,
     cost,
+    on_reused_cost_owner: (owner) => { reusedCostOwner = owner; },
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes }),
     ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
     ...(restored === undefined ? {} : { resume_field: restored }),
     ...(pin === undefined ? {} : { expected_source_revision: pin.source_revision })
   }));
   // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
-  cost.add("observe", thisRequestObservedWork(restored, field, input.budget.memory_bytes));
+  cost.add("observe", thisRequestObservedWork(reusedCostOwner, field, input.budget.memory_bytes));
   const assessed = assessUnknownCause(field, input);
   cost.add("index", { charged_retained_bytes: Math.max(0,
     (assessed.admitted_allocation_bytes ?? 0) - (field.admitted_allocation_bytes ?? 0)) });

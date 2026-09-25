@@ -47,6 +47,9 @@ export function groundedOutputDerivations(input: GroundingInput): {
   derivations: readonly Derivation[];
   roots: Readonly<Record<string, readonly string[]>>;
   work: number;
+  /** New logical allocation admitted by this call, independent of a prior owner's release. */
+  admitted_bytes: number;
+  /** Signed change in the retained grounding level for available-memory adjustment. */
   retained_bytes: number;
   complete: boolean;
   progress: GroundingProgress;
@@ -67,6 +70,7 @@ export function groundedOutputDerivations(input: GroundingInput): {
     get derivations() { return [...progress.forest.values()]; },
     get roots() { return Object.fromEntries(progress.root_map); },
     work: machine.work,
+    admitted_bytes: machine.retainedBytes,
     retained_bytes: machine.retainedBytes - (prior === undefined ? input.progress?.retained_bytes ?? 0 : 0),
     complete: machine.complete,
     progress,

@@ -299,7 +299,7 @@ function applyProjectionGrounding(input: AcceptingProjectionInput): AcceptingPro
   // Grounding forest work this page; field max-min is observed separately.
   input.cost?.add("solve", {
     relaxations: grounded.work,
-    charged_retained_bytes: grounded.retained_bytes
+    charged_retained_bytes: grounded.admitted_bytes
   });
   input.on_grounding_progress?.(grounded.progress, grounded.retained_bytes);
   return { ...input, derivations: grounded.derivations, output_derivations: grounded.roots, grounding_progress: grounded.progress,

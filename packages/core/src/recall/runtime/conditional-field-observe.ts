@@ -59,6 +59,7 @@ export type ObserveFieldInput = Readonly<{
   readonly model_id?: string;
   readonly expected_model_id?: string;
   readonly cost?: RequestCostLedger;
+  readonly on_reused_cost_owner?: (reused: FieldEngineState | undefined) => void;
 }>;
 
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
@@ -208,6 +209,7 @@ function startObservedField(
     && resumed.observation_query_text === input.query_text
     && resumed.observation_as_of === input.as_of
     && resumed.observation_source_revision === input.expected_source_revision) {
+    input.on_reused_cost_owner?.(resumed);
     const exploration = Math.max(0, input.budget.work_units - input.budget.finalization_reserve);
     const restored: FieldEngineState = {
       ...resumed,
@@ -229,6 +231,7 @@ function startObservedField(
     const { binding, ...pending } = restored;
     return bindEngineState({ ...pending, proven_binding: binding });
   }
+  input.on_reused_cost_owner?.(undefined);
   return { ...createConditionalField({
     interpretation,
     budget: input.budget,
