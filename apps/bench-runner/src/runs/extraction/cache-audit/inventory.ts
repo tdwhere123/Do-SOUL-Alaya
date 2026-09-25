@@ -122,7 +122,7 @@ function inspectShard(
   return Object.freeze({
     cacheKey,
     status: result.status,
-    ...(result.status === "invalid" || result.status === "quarantined" ? {
+    ...(result.status === "invalid" || result.status === "quarantined" || result.status === "retired" ? {
       reason: result.reason,
       ...(result.rawJsonSha256 === undefined ? {} : {
         rawJsonSha256: result.rawJsonSha256
@@ -211,7 +211,8 @@ function countsFor(shards: readonly ExtractionCacheShard[], orphanKeys: readonly
     hit: shards.filter((shard) => shard.status === "hit").length,
     missing: shards.filter((shard) => shard.status === "missing").length,
     invalid: shards.filter((shard) =>
-      shard.status === "invalid" || shard.status === "quarantined").length,
+      shard.status === "invalid" || shard.status === "quarantined" ||
+      shard.status === "retired").length,
     orphan: orphanKeys.length
   };
 }

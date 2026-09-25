@@ -8,7 +8,6 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   createGardenHttpExtractor,
-  extractContentFromChatCompletionBody,
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,
@@ -37,7 +36,8 @@ import {
   computeSourceTurnCacheKeys,
   computeSourceTurnCacheKey
 } from "../../../runs/compile-seed/compile-seed-cache.js";
-import { writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { inspectCachedExtraction, inspectCachedExtractionContent,
+  writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 
 describe("canonical extraction request cache identity", () => {
   let cacheRoot: string;
@@ -283,7 +283,7 @@ describe("canonical extraction request cache identity", () => {
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 
-  it("replays a non-empty canonical shard against its assertion id", async () => {
+  it("retains historical non-empty content without admitting it to current extraction", async () => {
     writeExtractionCacheTestManifest({
       cacheRoot,
       model: "test-model",
@@ -307,19 +307,35 @@ describe("canonical extraction request cache identity", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => providerBackedResult('{"interpretations":[]}'))
     };
+    const historical = inspectCachedExtractionContent({
+      raw_json: interpretationsEnvelope([{ assertionId: 3, matched: "I avoid any." }])
+    });
+    expect(historical.status).toBe("hit");
+    expect(inspectCachedExtraction(cacheRoot, canonicalKey, "test-model", "provider-default-v1"))
+      .toMatchObject({ status: "retired", eligibility: "retained_only" });
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",
       model: "test-model",
-      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot })
+      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot,
+        allowLiveExtraction: false })
     });
 
-    const located = await provider.extractSourceInterpretations(source, {
+    await expect(provider.extractSourceInterpretations(source, {
       workspace_id: "ws-1", run_id: "run-legacy-id", surface_id: null,
       turn_messages: messages
+    })).rejects.toMatchObject({ cause: { message: expect.stringContaining("retained-only") } });
+
+    const liveProvider = new OfficialApiGardenProvider({
+      apiKey: "test-key", model: "test-model",
+      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot,
+        allowLiveExtraction: true })
     });
+    await expect(liveProvider.extractSourceInterpretations(source, {
+      workspace_id: "ws-1", run_id: "run-legacy-live", surface_id: null,
+      turn_messages: messages
+    })).rejects.toMatchObject({ cause: { message: expect.stringContaining("retained-only") } });
 
     expect(delegate.extract).not.toHaveBeenCalled();
-    expect(located.find((item) => item.assertion_binding.assertion_id === 3)).toMatchObject({ outcome: "candidates", assertion_binding: { text: "I avoid any." } });
   });
 
   it("uses the same changed-catalog key in preflight and the live provider", async () => {

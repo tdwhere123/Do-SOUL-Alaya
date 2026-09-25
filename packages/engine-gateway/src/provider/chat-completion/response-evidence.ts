@@ -3,10 +3,18 @@ import { ProviderChatCompletionError } from "./errors.js";
 import type { ProviderHttpResponseEvidence } from "./types.js";
 
 export const MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES = 64 * 1024;
+// Full response evidence is base64-encoded beside decoded content in a 32 MiB shard.
+export const MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+/** Match Response.text() while retaining the original bytes for evidence. */
+export function decodeProviderResponseBytes(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8").decode(bytes);
+}
 
 export async function readProviderResponseWithEvidence(
   response: Response,
-  observe?: (snapshot: () => ProviderHttpResponseEvidence) => void
+  observe?: (snapshot: () => ProviderHttpResponseEvidence) => void,
+  maxRetainedBytes = MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
 ): Promise<{
   readonly bodyText: string;
   readonly evidence: ProviderHttpResponseEvidence;
@@ -23,7 +31,7 @@ export async function readProviderResponseWithEvidence(
     bodyBase64: Buffer.concat(retained).toString("base64"),
     bodyByteLength: byteLength,
     bodySha256: digest.copy().digest("hex"),
-    bodyTruncated: byteLength > MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
+    bodyTruncated: byteLength > maxRetainedBytes,
     bodyComplete
   });
   observe?.(() => evidence(completed));
@@ -40,15 +48,15 @@ export async function readProviderResponseWithEvidence(
       chunks.push(bytes);
       byteLength += bytes.byteLength;
       digest.update(bytes);
-      if (retainedLength < MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) {
-        const prefix = bytes.subarray(0, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES - retainedLength);
+      if (retainedLength < maxRetainedBytes) {
+        const prefix = bytes.subarray(0, maxRetainedBytes - retainedLength);
         retained.push(prefix);
         retainedLength += prefix.byteLength;
       }
     }
     completed = true;
     const complete = evidence(true);
-    return { bodyText: Buffer.concat(chunks).toString("utf8"), evidence: complete };
+    return { bodyText: decodeProviderResponseBytes(Buffer.concat(chunks)), evidence: complete };
   } catch (cause) {
     throw new ProviderChatCompletionError(
       "provider chat completion body read failed",

@@ -3,7 +3,8 @@ import { canonicalJson } from "@do-soul/alaya-protocol";
 import { decodeGeminiGenerateContent, parseGeminiGenerateContentBody } from
   "../../extraction/fill/batch/native-codec.js";
 import { decodeBoundedResponseBytes } from "../../extraction/fill/batch/http.js";
-import { inspectChatCompletionResponse } from "../../extraction/chat-completion-response.js";
+import { inspectProviderChatCompletionResponse } from
+  "@do-soul/alaya-engine-gateway";
 import { isNativeGeminiRequestProfile } from "../../extraction/request-profile.js";
 import type { BenchProviderUsage, BenchTransportResponseWitness } from "../compile-seed-types.js";
 import { computeCacheKey } from "./cache-key.js";
@@ -56,8 +57,9 @@ export function inspectRetainedInteractiveResponses(input: {
     }
     const decoded = isNativeGeminiRequestProfile(input.requestProfile)
       ? decodeGeminiGenerateContent(parseGeminiGenerateContentBody(decodeBoundedResponseBytes(body)))
-      : inspectChatCompletionResponse(body.toString("utf8"), physical.contentType);
-    const rawJson = "rawJson" in decoded ? decoded.rawJson : decoded.content;
+      : inspectProviderChatCompletionResponse(body,
+        physical.contentType, 200);
+    const rawJson = "rawJson" in decoded ? decoded.rawJson : decoded.text;
     if (rawJson !== response.witness.rawJson ||
         canonicalJson(decoded.usage ?? null) !== canonicalJson(response.usage)) {
       throw new Error("interactive provider response decoding changed");

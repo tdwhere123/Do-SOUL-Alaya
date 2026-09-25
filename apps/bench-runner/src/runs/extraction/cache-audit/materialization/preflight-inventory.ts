@@ -2,7 +2,8 @@ import { lstatSync } from "node:fs";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
-import { inspectCachedExtractionContent, type CachedExtractionEntry } from
+import { inspectCachedExtractionContent, retainedOnlyOrdinaryExtractionReason,
+  type CachedExtractionEntry } from
   "../../../compile-seed/cache/cache-shard.js";
 import { isExtractionTransportProvenance } from "../../transport-route.js";
 import {
@@ -116,6 +117,12 @@ function inspectShardBytes(
   const identityError = cachedIdentityError(parsed, cacheKey, model, requestProfile);
   if (identityError !== undefined) return invalid(cacheKey, identityError);
   const content = inspectCachedExtractionContent(parsed as unknown as CachedExtractionEntry);
+  const retiredReason = content.status === "hit" ? retainedOnlyOrdinaryExtractionReason(
+    parsed as unknown as CachedExtractionEntry, content.rawSignalCount
+  ) : undefined;
+  if (retiredReason !== undefined) {
+    return Object.freeze({ cacheKey, status: "retired", reason: retiredReason });
+  }
   return content.status === "hit" ? Object.freeze({ cacheKey, status: content.status,
     rawJsonSha256: content.rawJsonSha256, rawSignalCount: content.rawSignalCount,
     parsedDraftCount: content.parsedDraftCount }) :
@@ -153,7 +160,8 @@ function countsFor(shards: readonly ExtractionCacheShard[], orphanKeys: readonly
     expected: shards.length,
     hit: shards.filter((shard) => shard.status === "hit").length,
     missing: shards.filter((shard) => shard.status === "missing").length,
-    invalid: shards.filter((shard) => shard.status === "invalid").length,
+    invalid: shards.filter((shard) => shard.status === "invalid" ||
+      shard.status === "retired" || shard.status === "quarantined").length,
     orphan: orphanKeys.length
   });
 }

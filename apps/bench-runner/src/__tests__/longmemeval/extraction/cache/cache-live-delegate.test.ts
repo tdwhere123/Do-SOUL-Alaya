@@ -1,4 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createServer, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,14 +12,16 @@ import {
 } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
+  createGardenHttpExtractor,
   type BenchSignalExtractor
 } from "../../../../runs/compile-seed.js";
 import { extractLiveDelegate } from
   "../../../../runs/extraction/cache/cache-live-delegate.js";
 import { openExtractionAttemptLedger } from
   "../../../../runs/extraction/authority/attempt-ledger.js";
-import { inspectCachedRawExtraction } from
+import { inspectCachedExtraction, inspectCachedRawExtraction } from
   "../../../../runs/compile-seed/cache/cache-shard.js";
+import { cacheFilePath } from "../../../../runs/compile-seed/compile-seed-cache.js";
 import { computeCacheKey } from
   "../../../../runs/compile-seed/cache/cache-key.js";
 import {
@@ -52,7 +58,108 @@ describe("extraction live delegate atomic persistence", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(cacheRoot, { recursive: true, force: true });
+  });
+
+  it("reopens exact BOM and large response bytes with optional usage from loopback HTTP", async () => {
+    const rawJson = '{"interpretations":[]}';
+    const responseBytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify({
+      choices: [{ message: { content: rawJson }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30,
+        prompt_tokens_details: { cached_tokens: 2 },
+        completion_tokens_details: { reasoning_tokens: 3 } },
+      padding: " ".repeat(65_536)
+    }))]);
+    let requests = 0;
+    await withLoopbackResponse((response) => {
+      requests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(responseBytes);
+    }, async (providerUrl) => {
+      vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "1");
+      writeExtractionCacheTestManifest({ cacheRoot, model: MODEL, providerUrl,
+        requestProfile: REQUEST_PROFILE, systemPrompt: SYSTEM_PROMPT });
+      const config = { ...extractionConfig(), providerUrl };
+      const lineageDigest = "b".repeat(64);
+      const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+        cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+        startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
+      const options = { delegate: createGardenHttpExtractor({ ...config, apiKey: "test-key" }),
+        config, cacheRoot, onTransportAttempt: ledger.reserveAttemptOrdinal,
+        providerAttemptLineageDigest: lineageDigest,
+        onLiveExtractionOutcome: ledger.recordTransportOutcome,
+        onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+        onLiveExtractionFailed: ledger.abandonPendingShard };
+      const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(),
+        userPrompt: userPromptWithAssertions() };
+      const cacheKey = computeCacheKey(MODEL, REQUEST_PROFILE, request.systemPrompt, request.userPrompt);
+      const result = await createCachingSignalExtractor(options).extract(request);
+      expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20, totalTokens: 30 });
+      expect(inspectCachedExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status).toBe("hit");
+      const shard = JSON.parse(readFileSync(cacheFilePath(cacheRoot, cacheKey), "utf8")) as {
+        provider_responses: readonly { usage: { cachedInputTokens?: number;
+          reasoningOutputTokens?: number }; witness: { httpResponse: { bodyBase64: string;
+          bodyByteLength: number; bodySha256: string; bodyTruncated: boolean } } }[]
+      };
+      const physical = shard.provider_responses[0]!.witness.httpResponse;
+      expect(shard.provider_responses[0]!.usage).toMatchObject({
+        cachedInputTokens: 2, reasoningOutputTokens: 3
+      });
+      expect(physical.bodyByteLength).toBe(responseBytes.length);
+      expect(physical.bodyTruncated).toBe(false);
+      expect(Buffer.from(physical.bodyBase64, "base64")).toEqual(responseBytes);
+      expect(physical.bodySha256).toBe(createHash("sha256").update(responseBytes).digest("hex"));
+      expect(ledger.snapshot()).toMatchObject({ successfulShards: 1, unresolvedAttempts: [],
+        telemetry: { inputTokens: 10, outputTokens: 20, totalTokens: 30 } });
+      await expect(createCachingSignalExtractor({ ...options, allowLiveExtraction: false })
+        .extract(request)).resolves.toMatchObject({ rawJson });
+      expect(requests).toBe(1);
+    });
+  });
+
+  it("settles observed usage when a complete response exceeds the cache retention bound", async () => {
+    const responseBytes = Buffer.from(JSON.stringify({
+      choices: [{ message: { content: '{"interpretations":[]}' }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
+      padding: " ".repeat(9 * 1024 * 1024)
+    }));
+    let requests = 0;
+    await withLoopbackResponse((response) => {
+      requests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(responseBytes);
+    }, async (providerUrl) => {
+      vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "1");
+      writeExtractionCacheTestManifest({ cacheRoot, model: MODEL, providerUrl,
+        requestProfile: REQUEST_PROFILE, systemPrompt: SYSTEM_PROMPT });
+      const config = { ...extractionConfig(), providerUrl };
+      const lineageDigest = "c".repeat(64);
+      const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+        cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+        startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
+      const extractor = createCachingSignalExtractor({
+        delegate: createGardenHttpExtractor({ ...config, apiKey: "test-key" }),
+        config, cacheRoot, onTransportAttempt: ledger.reserveAttemptOrdinal,
+        providerAttemptLineageDigest: lineageDigest,
+        onLiveExtractionOutcome: ledger.recordTransportOutcome,
+        onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+        onLiveExtractionFailed: ledger.abandonPendingShard
+      });
+      const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(),
+        userPrompt: userPromptWithAssertions() };
+      const cacheKey = computeCacheKey(MODEL, REQUEST_PROFILE, request.systemPrompt, request.userPrompt);
+      await expect(extractor.extract(request)).rejects.toThrow(/physical responses/u);
+      expect(requests).toBe(1);
+      expect(ledger.snapshot()).toMatchObject({ attempts: 1, successfulShards: 0,
+        pendingKeys: [], unresolvedAttempts: [],
+        settledAttempts: [{ attemptOrdinal: 1, cacheKey,
+          responseSha256: createHash("sha256").update(responseBytes).digest("hex") }],
+        telemetry: { inputTokens: 12, outputTokens: 8, totalTokens: 20,
+          unresolvedTransportAttempts: 0, usageUnknownAttempts: 0 } });
+      expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status)
+        .toBe("missing");
+    });
   });
 
   it("persists a completed empty result once and reuses it without a paid recheck", async () => {
@@ -125,7 +232,7 @@ describe("extraction live delegate atomic persistence", () => {
     expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toMatchObject(expected);
   });
 
-  it("keeps a successful response without physical bytes unresolved for recovery", async () => {
+  it("settles a successful response with missing physical bytes before refusing its shard", async () => {
     const lineageDigest = "a".repeat(64);
     const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
       cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
@@ -145,7 +252,9 @@ describe("extraction live delegate atomic persistence", () => {
 
     await expect(extractor.extract(request)).rejects.toThrow(/physical responses/u);
     expect(ledger.snapshot()).toMatchObject({ attempts: 1, successfulShards: 0,
-      unresolvedAttempts: [{ attemptOrdinal: 1, cacheKey }] });
+      pendingKeys: [], unresolvedAttempts: [],
+      settledAttempts: [{ attemptOrdinal: 1, cacheKey }],
+      telemetry: { unresolvedTransportAttempts: 0, usageUnknownAttempts: 1 } });
     expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status).toBe("missing");
   });
 
@@ -327,3 +436,18 @@ describe("extraction live delegate atomic persistence", () => {
     expect(result.rawJson).toBe(rawJson);
   });
 });
+
+async function withLoopbackResponse(
+  respond: (response: ServerResponse) => void,
+  run: (providerUrl: string) => Promise<void>
+): Promise<void> {
+  const server = createServer((_request, response) => respond(response));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    await run(`http://127.0.0.1:${address.port}/v1`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}

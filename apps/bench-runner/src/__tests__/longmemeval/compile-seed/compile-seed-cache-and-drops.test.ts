@@ -16,7 +16,6 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   createGardenHttpExtractor,
-  extractContentFromChatCompletionBody,
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,

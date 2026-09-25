@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { inspectProviderChatCompletionResponse, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
+import { inspectProviderChatCompletionResponse,
+  MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
   type ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
 import { decodeGeminiGenerateContent, isGeminiGenerateContentProfile,
   parseGeminiGenerateContentBody } from "./batch/native-codec.js";
@@ -277,7 +278,7 @@ function assertCompletePhysicalResponse(raw: ProviderRawAttempt, httpBytes: Buff
     if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") {
       const http = raw.http_response;
       if (http?.bodyComplete && !http.bodyTruncated && httpBytes !== undefined) {
-        decoded = inspectProviderChatCompletionResponse(httpBytes.toString("utf8"), http.contentType, 200,
+        decoded = inspectProviderChatCompletionResponse(httpBytes, http.contentType, 200,
           { sseCompletionPolicy: "require_witness" });
       }
     } else if (isGeminiGenerateContentProfile(raw.request_profile) &&

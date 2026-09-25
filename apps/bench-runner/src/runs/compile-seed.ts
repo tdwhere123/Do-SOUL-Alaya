@@ -7,8 +7,7 @@ export {
   toSeedExtractionPathKpi
 } from "./compile-seed/compile-seed-config.js";
 export {
-  createGardenHttpExtractor,
-  extractContentFromChatCompletionBody
+  createGardenHttpExtractor
 } from "./compile-seed/compile-seed-http.js";
 // Bench HTTP extractor surface; git workspace rate limits live in core-daemon
 // (createWorkspaceGitRateLimiter), not here.

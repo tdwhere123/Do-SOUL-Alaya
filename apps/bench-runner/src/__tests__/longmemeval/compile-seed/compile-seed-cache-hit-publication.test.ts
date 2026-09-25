@@ -1,11 +1,13 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
 import {
-  OFFICIAL_API_SYSTEM_PROMPT
+  OFFICIAL_API_SYSTEM_PROMPT,
+  buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus,
+  stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
 import {
   initDatabase,
@@ -16,13 +18,12 @@ import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemo
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
   createCompileSeedRunner,
+  createCachingSignalExtractor,
   type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
-import {
-  cacheFilePath,
-  computeSourceTurnCacheKey
-} from "../../../runs/compile-seed/compile-seed-cache.js";
-import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
+import { fixtureAttemptAuthority, providerBackedResponseResult,
+  TEST_EXTRACTION_PROVIDER_URL, writeExtractionCacheTestManifest } from
+  "../extraction/extraction-cache-test-fixture.js";
 
 const MODEL = "cache-only-model";
 const REQUEST_PROFILE = "provider-default-v1";
@@ -53,7 +54,7 @@ describe("compile-seed cache-hit seedTurn publication", () => {
 
   it("publishes a cache-hit seedTurn observation through SQLite and reopens it", async () => {
     writeManifest();
-    writeShard(JSON.stringify({
+    await writeShard(JSON.stringify({
       interpretations: [{
         assertion_id: 1,
         relations: [{
@@ -141,21 +142,19 @@ describe("compile-seed cache-hit seedTurn publication", () => {
     });
   }
 
-  function writeShard(rawJson: string): void {
-    const cacheKey = computeSourceTurnCacheKey(
-      MODEL,
-      REQUEST_PROFILE,
-      OFFICIAL_API_SYSTEM_PROMPT,
-      { turnContent: TURN }
-    );
-    const filePath = cacheFilePath(cacheRoot, cacheKey);
-    mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify({
-      model: MODEL,
-      request_profile: REQUEST_PROFILE,
-      cache_key: cacheKey,
-      raw_json: rawJson,
-      extracted_at: CLOCK
-    }), "utf8");
+  async function writeShard(rawJson: string): Promise<void> {
+    const authority = fixtureAttemptAuthority({ cacheRoot, model: MODEL,
+      requestProfile: REQUEST_PROFILE });
+    await createCachingSignalExtractor({
+      cacheRoot,
+      config: { model: MODEL, modelFamily: MODEL,
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: REQUEST_PROFILE },
+      delegate: { extract: (input) => providerBackedResponseResult(input, rawJson) },
+      ...authority
+    }).extract({
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(TURN, [])),
+      sourceCorpus: buildOfficialApiSourceCorpus(TURN, [])
+    });
   }
 });

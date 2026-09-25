@@ -3,8 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import {
+  createCachingSignalExtractor,
   createCompileSeedRunner,
   type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
@@ -18,7 +20,9 @@ import {
   OFFLINE_CONFIG,
   interpretationsEnvelope
 } from "./compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
+import { fixtureAttemptAuthority, providerBackedResponseResult,
+  TEST_EXTRACTION_PROVIDER_URL, writeExtractionCacheTestManifest } from
+  "../extraction/extraction-cache-test-fixture.js";
 
 const MODEL = "cache-only-model";
 const REQUEST_PROFILE = "provider-default-v1";
@@ -38,9 +42,9 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  it("uses official_api_compile from a complete cache without an API secret", async () => {
+  it("uses an admitted provider cache without an API secret", async () => {
     writeManifest();
-    writeShard(interpretationsEnvelope([
+    await writeAdmittedShard(interpretationsEnvelope([
       { matched: "Alice moved to Berlin." }
     ]));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
@@ -82,7 +86,7 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
     });
   });
 
-  it("uses the manifest cache with an explicit credentialless config", async () => {
+  it("rejects a historical nonempty shard with an explicit credentialless config", async () => {
     writeManifest();
     writeShard(interpretationsEnvelope([
       { matched: "Alice moved to Berlin." }
@@ -101,7 +105,7 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
       diagnosticDir: null
     });
 
-    const result = await runner.seedTurn({
+    await expect(runner.seedTurn({
       daemon: buildCompileSeedDaemon(() => ({
         memoryId: "memory-explicit",
         signalId: "signal-explicit",
@@ -115,13 +119,13 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
       seedIndex: 0,
       workspaceId: "ws-test",
       runId: "run-test"
-    });
+    })).rejects.toMatchObject({ kind: "invalid_response",
+      cause: { message: expect.stringContaining("retained-only") } });
 
-    expect(result.seeds).toHaveLength(1);
     expect(delegate).not.toHaveBeenCalled();
     expect(runner.stats).toMatchObject({
       path: "official_api_compile",
-      cacheHits: 1,
+      cacheHits: 0,
       llmCalls: 0,
       offlineFallbacks: 0
     });
@@ -204,7 +208,7 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
 
   it("does not attribute a miss to the preceding cache hit", async () => {
     writeManifest();
-    writeShard(interpretationsEnvelope([
+    await writeAdmittedShard(interpretationsEnvelope([
       { matched: "Alice moved to Berlin." }
     ]));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>();
@@ -294,6 +298,22 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
       model: MODEL,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
       requestProfile: REQUEST_PROFILE
+    });
+  }
+
+  async function writeAdmittedShard(rawJson: string): Promise<void> {
+    const authority = fixtureAttemptAuthority({ cacheRoot, model: MODEL,
+      requestProfile: REQUEST_PROFILE });
+    await createCachingSignalExtractor({
+      cacheRoot,
+      config: { model: MODEL, modelFamily: MODEL,
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: REQUEST_PROFILE },
+      delegate: { extract: (input) => providerBackedResponseResult(input, rawJson) },
+      ...authority
+    }).extract({
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(TURN, [])),
+      sourceCorpus: buildOfficialApiSourceCorpus(TURN, [])
     });
   }
 

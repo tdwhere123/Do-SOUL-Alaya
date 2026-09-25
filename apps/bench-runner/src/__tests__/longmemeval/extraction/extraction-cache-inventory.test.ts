@@ -27,7 +27,8 @@ describe("extraction cache inventory", () => {
   it("accounts for every expected shard and surfaces an orphan without reading a provider", () => {
     const root = cacheRoot();
     const [first, second] = ["a".repeat(64), "b".repeat(64)];
-    writeShard(root, first);
+    writeShard(root, first, '{"signals":[]}', undefined, false,
+      { empty_classification: "deterministic_empty" });
     writeShard(root, "c".repeat(64));
 
     const inventory = inspectExtractionCacheInventory({
@@ -100,7 +101,7 @@ describe("extraction cache inventory", () => {
     expect(inventory.shards[0]?.reason).toMatch(/strict JSON/u);
   });
 
-  it("rejects cached length truncation while retaining metadata-less legacy shards", () => {
+  it("rejects cached length truncation and retires metadata-less nonempty shards", () => {
     const root = cacheRoot();
     const truncated = "d".repeat(64);
     const legacy = "e".repeat(64);
@@ -119,11 +120,11 @@ describe("extraction cache inventory", () => {
 
     expect(inventory.shards.map((shard) => [shard.cacheKey, shard.status])).toEqual([
       [truncated, "invalid"],
-      [legacy, "hit"]
+      [legacy, "retired"]
     ]);
     expect(inventory.shards[0]?.reason).toMatch(/finish_reason.*length/u);
     expect(inventory.counts).toEqual({
-      expected: 2, hit: 1, missing: 0, invalid: 1, orphan: 0
+      expected: 2, hit: 0, missing: 0, invalid: 2, orphan: 0
     });
   });
 
@@ -156,7 +157,7 @@ describe("extraction cache inventory", () => {
   });
 
   it.each(["deterministic_empty", "legacy_nonempty"] as const)(
-    "preserves the exact audited inventory shape for a qualified %s shard", (kind) => {
+    "preserves the exact audited inventory status for a %s shard", (kind) => {
       const root = cacheRoot();
       const key = "a".repeat(64);
       writeShard(root, key, kind === "legacy_nonempty" ? legacyNonempty : '{"signals":[]}',
@@ -164,12 +165,11 @@ describe("extraction cache inventory", () => {
       const audited = inspectExtractionCacheInventory({ cacheRoot: root, cacheKeys: [key], model, requestProfile });
       const bounded = inspectBoundedMaterializationInventory({ sourceRoot: root, audited,
         model, requestProfile, maxShardBytes: 32_768 });
-      expect(audited.counts.hit).toBe(1);
+      expect(audited.counts).toMatchObject(kind === "legacy_nonempty"
+        ? { hit: 0, invalid: 1 } : { hit: 1, invalid: 0 });
       expect(bounded.inventory).toEqual(audited);
-      expect(bounded.descriptors).toHaveLength(1);
-      expect(Object.keys(bounded.inventory.shards[0]!).sort()).toEqual([
-        "cacheKey", "parsedDraftCount", "rawJsonSha256", "rawSignalCount", "status"
-      ]);
+      expect(bounded.descriptors).toHaveLength(kind === "legacy_nonempty" ? 0 : 1);
+      expect(bounded.inventory.shards[0]?.status).toBe(kind === "legacy_nonempty" ? "retired" : "hit");
     });
 
   it("rejects a completed-empty provider shard without its physical attempt", () => {

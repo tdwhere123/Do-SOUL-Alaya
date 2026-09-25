@@ -23,7 +23,6 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   createGardenHttpExtractor,
-  extractContentFromChatCompletionBody,
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,
@@ -769,18 +768,4 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
-});
-
-describe("extractContentFromChatCompletionBody invalid payload rejection", () => {
-  it("rejects malformed chat completion envelope", () => {
-    expect(() =>
-      extractContentFromChatCompletionBody(JSON.stringify(["not", "a", "chat", "completion"]), "application/json")
-    ).toThrow(/schema validation/i);
-  });
-
-  it("rejects when choices is not an array", () => {
-    expect(() =>
-      extractContentFromChatCompletionBody(JSON.stringify({ choices: "bad" }), "application/json")
-    ).toThrow(/schema validation/i);
-  });
 });

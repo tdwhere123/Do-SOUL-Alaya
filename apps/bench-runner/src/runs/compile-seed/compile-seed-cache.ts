@@ -229,6 +229,9 @@ async function extractWithCache(
   if (cached.status === "quarantined") {
     return refuseQuarantinedExtraction(cacheKey, cached.reason);
   }
+  if (cached.status === "retired") {
+    return refuseRetiredExtraction(cacheKey, cached.reason);
+  }
   if (options.allowLiveExtraction === false) {
     throw new Error(
       `[longmemeval cache-only] extraction fixture ${cached.status}: ` +
@@ -264,6 +267,9 @@ async function persistDeterministicEmpty(
     }
     if (recached.status === "quarantined") {
       return refuseQuarantinedExtraction(cacheKey, recached.reason);
+    }
+    if (recached.status === "retired") {
+      return refuseRetiredExtraction(cacheKey, recached.reason);
     }
     const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
     const result = { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE };
@@ -357,6 +363,9 @@ async function extractLiveWithLease(
   if (recached.status === "quarantined") {
     return refuseQuarantinedExtraction(cacheKey, recached.reason);
   }
+  if (recached.status === "retired") {
+    return refuseRetiredExtraction(cacheKey, recached.reason);
+  }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
   markLiveExtractionStarted(stats, cacheKey);
@@ -393,6 +402,9 @@ async function extractLiveWithLease(
             (outcome.attemptResponses!.length === 1 ? outcome.usage ?? null : null)
         }]);
       }
+      options.onLiveExtractionOutcome?.(cacheKey, outcome,
+        outcome.attemptUsages === undefined && outcome.retryCount === 0 && outcome.successfulRequestCount === 1 &&
+        outcome.unknownRequestCount === undefined ? lastAttemptOrdinal : undefined);
       if (options.onTransportAttempt !== undefined &&
           outcome.terminalRetryClassification === undefined && outcome.postComposeFailure !== true &&
           (retainedResponses?.length !== (outcome.successfulRequestCount ?? 1) ||
@@ -402,9 +414,6 @@ async function extractLiveWithLease(
           "successful provider requests lack retained physical responses"
         );
       }
-      options.onLiveExtractionOutcome?.(cacheKey, outcome,
-        outcome.attemptUsages === undefined && outcome.retryCount === 0 && outcome.successfulRequestCount === 1 &&
-        outcome.unknownRequestCount === undefined ? lastAttemptOrdinal : undefined);
     }
   });
   lease.assertOwned();
@@ -573,6 +582,12 @@ function refuseQuarantinedExtraction(
   reason: string
 ): never {
   throw new ExtractionCacheInvariantError(`extraction cache shard ${cacheKey} is quarantined: ${reason}`);
+}
+
+function refuseRetiredExtraction(cacheKey: string, reason: string): never {
+  throw new ExtractionCacheInvariantError(
+    `extraction cache shard ${cacheKey} is retained-only: ${reason}`
+  );
 }
 
 function withAuthorityAttemptHook(

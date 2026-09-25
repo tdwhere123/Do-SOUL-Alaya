@@ -50,6 +50,16 @@ import { inspectRetainedInteractiveResponses,
   type CachedProviderResponseWitness } from "./provider-response-witness.js";
 
 export const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
+const HISTORICAL_NONEMPTY_REASON =
+  "historical nonempty extraction has no current provider attempt authority";
+
+export function retainedOnlyOrdinaryExtractionReason(
+  entry: Pick<CachedExtractionEntry, "transport_provenance">,
+  rawSignalCount: number
+): string | undefined {
+  return entry.transport_provenance === undefined && rawSignalCount > 0
+    ? HISTORICAL_NONEMPTY_REASON : undefined;
+}
 
 export type CachedExtractionAdmissionIdentity = NonNullable<
   import("@do-soul/alaya-protocol").PublishedSourceInterpretationPacket["provenance"]["cache_admission"]>;
@@ -127,6 +137,7 @@ export type CachedRawExtractionInspection =
       readonly usageSha256?: string; readonly responseSha256?: string;
       readonly aggregateUsageSha256?: string }
   | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string }
+  | { readonly status: "retired"; readonly eligibility: "retained_only"; readonly reason: string }
   | {
       readonly status: "quarantined";
       readonly reason: string;
@@ -261,6 +272,10 @@ function inspectRawExtraction(
         rawJsonSha256,
         rawSignalCount: envelope.rawSignalCount
       };
+    }
+    const retiredReason = retainedOnlyOrdinaryExtractionReason(cached.entry, envelope.rawSignalCount);
+    if (requireAdmission && retiredReason !== undefined) {
+      return { status: "retired", eligibility: "retained_only", reason: retiredReason };
     }
     if (requireAdmission && cached.entry.transport_provenance !== undefined) {
       if (attempt === undefined) return { status: "invalid", reason: "provider attempt binding is missing", rawJsonSha256 };

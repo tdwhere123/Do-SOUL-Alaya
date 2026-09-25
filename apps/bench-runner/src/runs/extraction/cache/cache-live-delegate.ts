@@ -37,12 +37,20 @@ export async function extractLiveDelegate(input: {
   } catch (cause) {
     recordRetryFailure(input.stats, cause);
     const outcome = failureOutcome(cause);
-    if (outcome !== undefined) input.onOutcome?.(outcome);
-    input.onFailure();
+    try {
+      if (outcome !== undefined) input.onOutcome?.(outcome);
+    } finally {
+      input.onFailure();
+    }
     throw cause;
   }
   recordRetrySuccess(input.stats, result.extractorMeta);
-  input.onOutcome?.(successOutcome(result, input.request));
+  try {
+    input.onOutcome?.(successOutcome(result, input.request));
+  } catch (cause) {
+    input.onFailure();
+    throw cause;
+  }
   return result;
 }
 

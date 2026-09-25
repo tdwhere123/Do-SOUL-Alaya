@@ -9,7 +9,10 @@ import {
   type ProviderResponseInspectionReason
 } from "./inspect-response.js";
 import { assertAllowedProviderChatUrlResolved } from "./provider-url-guard.js";
-import { readProviderResponseWithEvidence } from "./response-evidence.js";
+import {
+  MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
+  readProviderResponseWithEvidence
+} from "./response-evidence.js";
 import {
   buildProviderChatRequestInit,
   providerChatCompletionsUrl
@@ -85,7 +88,9 @@ async function runProviderChatRequest(
   }
   await throwIfHttpError(response);
   if (request.retainHttpResponseEvidence === true) {
-    const { bodyText, evidence } = await readProviderResponseWithEvidence(response, observeResponse);
+    const { bodyText, evidence } = await readProviderResponseWithEvidence(
+      response, observeResponse, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
+    );
     return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
   }
   const bodyText = await readBody(response);

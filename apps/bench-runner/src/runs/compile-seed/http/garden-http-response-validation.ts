@@ -1,4 +1,3 @@
-import type { ChatCompletionResponseInspection } from "../../extraction/chat-completion-response.js";
 import type { BenchProviderUsage } from "../compile-seed-types.js";
 import type { ProviderCompletionWitness } from "@do-soul/alaya-engine-gateway";
 import {
@@ -7,8 +6,14 @@ import {
 import { markGardenHttpFailure } from "./garden-http-failure-attempt.js";
 import { inspectExtractionRawEnvelope } from "../../extraction/content-closure.js";
 
+type GardenHttpResponseContent = Readonly<{
+  content: string;
+  finishReason: string | null;
+  usage?: BenchProviderUsage;
+}>;
+
 export function extractValidGardenHttpContent(
-  response: ChatCompletionResponseInspection,
+  response: GardenHttpResponseContent,
   validation: "default_envelope" | "caller_owned" = "default_envelope"
 ): string {
   if (response.finishReason === "length") {
@@ -35,7 +40,7 @@ export function extractValidGardenHttpContent(
 }
 
 export function buildGardenHttpAttemptResponse(
-  response: ChatCompletionResponseInspection,
+  response: GardenHttpResponseContent,
   maxOutputTokens: number | undefined,
   validation: "default_envelope" | "caller_owned",
   completion?: ProviderCompletionWitness

@@ -195,8 +195,9 @@ function applySettledOutcome(
       } : exactAttempt && unresolved.length === 1 ? {
         usage_sha256: settledAttemptUsageDigest(input.usage)
       } : {}),
-      ...(input.attemptResponses?.[index] === undefined || input.attemptResponses[index] === null ? {} : {
-        response_sha256: transportResponseDigest(input.attemptResponses[index])
+      ...(input.attemptResponses?.[index] === undefined || input.attemptResponses[index] === null ||
+        input.attemptResponses[index].httpResponse?.bodyComplete !== true ? {} : {
+        response_sha256: input.attemptResponses[index].httpResponse.bodySha256
       }),
       ...(input.attemptResponses?.some((response) => response !== null) &&
         index === unresolved.length - 1 ? {
@@ -296,8 +297,7 @@ function assertOutcome(input: ExtractionTransportOutcome): void {
           (typeof witness.userPrompt !== "string" ||
            createHash("sha256").update(witness.userPrompt, "utf8").digest("hex") !== witness.requestSha256 ||
            typeof witness.rawJson !== "string" ||
-           witness.httpResponse === undefined || !witness.httpResponse.bodyComplete ||
-           witness.httpResponse.bodyTruncated || !isDigest(witness.httpResponse.bodySha256))))) ||
+           witness.httpResponse !== undefined && !isDigest(witness.httpResponse.bodySha256))))) ||
       (input.usage !== undefined && (!isNonNegativeSafeInteger(input.usage.inputTokens) ||
         !isNonNegativeSafeInteger(input.usage.outputTokens) ||
         !isNonNegativeSafeInteger(input.usage.totalTokens)))) {

@@ -51,7 +51,6 @@ import {
 import {
   isExtractionPlanDeadlineError
 } from "./http/extraction-plan-deadline.js";
-export { extractContentFromChatCompletionBody } from "../extraction/chat-completion-response.js";
 export { EXTRACTION_HTTP_MAX_RETRY_JITTER_MS } from "./http/garden-http-retry-policy.js";
 export { EXTRACTION_REQUEST_TIMEOUT_MS };
 

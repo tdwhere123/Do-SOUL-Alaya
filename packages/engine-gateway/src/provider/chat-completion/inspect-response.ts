@@ -3,6 +3,7 @@ import type {
   ProviderSseCompletionPolicy,
   ProviderUsage
 } from "./types.js";
+import { decodeProviderResponseBytes } from "./response-evidence.js";
 
 export type ProviderResponseInspectionReason = "parse" | "schema" | "incomplete_stream";
 
@@ -24,11 +25,12 @@ const MIXED_STREAM_MESSAGE =
   "garden extraction chat completion stream mixes delta and message content";
 
 export function inspectProviderChatCompletionResponse(
-  bodyText: string,
+  body: string | Uint8Array,
   contentType: string | null,
   httpStatus: number,
   options?: { readonly sseCompletionPolicy?: ProviderSseCompletionPolicy }
 ): ProviderChatCompletionResult {
+  const bodyText = typeof body === "string" ? body : decodeProviderResponseBytes(body);
   const inspection = isSseBody(bodyText, contentType)
     ? inspectSse(bodyText, options?.sseCompletionPolicy ?? "require_witness")
     : inspectJson(bodyText);
@@ -50,7 +52,7 @@ function inspectJson(bodyText: string): Omit<ProviderChatCompletionResult, "http
       readNestedString(choice, "message", "reasoning")),
     finishReason: stringOrNull(choice?.finish_reason),
     completion: { mode: "json", complete: true, witness: "message" },
-    ...usageFields(usageFromUnknown(payload.usage))
+    ...usageFields(normalizeProviderUsage(payload.usage))
   };
 }
 
@@ -100,7 +102,7 @@ function inspectSse(
       text = message;
     }
     finishReason = stringOrNull(choice?.finish_reason) ?? finishReason;
-    usage = usageFromUnknown(chunk.usage) ?? usage;
+    usage = normalizeProviderUsage(chunk.usage) ?? usage;
   }
   const witness = sawDone
     ? "done_sentinel"
@@ -157,7 +159,7 @@ function firstChoice(payload: Record<string, unknown>): Record<string, unknown> 
     : undefined;
 }
 
-function usageFromUnknown(value: unknown): ProviderUsage | undefined {
+function normalizeProviderUsage(value: unknown): ProviderUsage | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const usage = value as {
     readonly prompt_tokens?: unknown;
