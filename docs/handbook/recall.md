@@ -1216,7 +1216,7 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. Protocol owns the complete delivery identity: protocol 6, library v5,
+owner. Protocol owns the complete delivery identity: protocol 7, library v6,
 membership purpose and the five-slot page budget. Worker and public readers derive
 from it; a public outcome-only response contains no partial delivery fields and
 is unavailable for measurement. Unknown/obsolete delivery versions are invalid.
