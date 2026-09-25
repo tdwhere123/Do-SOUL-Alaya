@@ -4,7 +4,8 @@ import {
   type SourceSemanticAccessReceipt, type SourceSemanticAccessSignal, type SourceSemanticAccessPolicy,
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget
 } from "@do-soul/alaya-protocol";
-import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256 } from "@do-soul/alaya-core";
+import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
+  projectSourceDisclosure } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { admissionOf, loadVerified, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
@@ -285,7 +286,7 @@ function readInterpretationHeaderPage(runtime: RecallReadWorkerRuntime, workspac
   return { ...page, rows, rawEmpty };
 }
 
-export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace: string, authorized: readonly string[] | null,
+export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace: string, asOf: string, authorized: readonly string[] | null,
   meter: SourceSemanticReadBudget, pool: SourceSemanticAccessPool, offset: number) {
   const delivery = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const candidates: SourceSemanticHandleDescriptor[] = [];
@@ -293,7 +294,9 @@ export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace
   try {
     for (const descriptor of pool.descriptors.slice(offset, offset + SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE)) {
       const checked = loadVerified(runtime, workspace, descriptor.interpretation_id, authorized, delivery);
-      const candidate = { ...descriptor, interpretation: checked.bound.interpretation };
+      const candidate = { ...descriptor, interpretation: checked.bound.interpretation,
+        source_disclosure: projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: asOf,
+          source: checked.stored.record }) };
       delivery.retain(candidate, "access descriptor delivery");
       const size = Buffer.byteLength(JSON.stringify(candidate));
       if (outputBytes + size > 800_000) break;

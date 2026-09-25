@@ -51,6 +51,15 @@ const WORK = {
   rss_bytes: 32
 } as const;
 
+const SOURCE_DISCLOSURE = {
+  material_kind: "original_body",
+  source_binding: "checked_record",
+  evaluated_as_of: "2026-09-18T00:00:00.000Z",
+  validity: { kind: "unknown", reason: "not_recorded" },
+  temporal_state: "unknown",
+  proof_use: { kind: "source_only", qualification: "not_current_proof" }
+} as const;
+
 const DRAFT = {
   contract: "source-interpretation-v4" as const,
   mentions: [{ id: "mSent", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" } }],
@@ -71,6 +80,7 @@ const DRAFT = {
 function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorkerResult {
   if (request.kind === "validate_source") return { kind: "validate_source", source_id: "artifact-1", source_version: "1",
     content_digest: `sha256:${fieldContractSha256(SOURCE)}`, source: SOURCE, catalog: CATALOG,
+    source_disclosure: SOURCE_DISCLOSURE,
     attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
     assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(SOURCE)] }], coverage: IDLE, work: WORK };
   if (request.kind === "prepare_source") {
@@ -80,6 +90,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
       source_id: request.source_id,
       source_version: "1",
       content_digest: `sha256:${fieldContractSha256(SOURCE)}`,
+      source_disclosure: SOURCE_DISCLOSURE,
       attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       catalog: CATALOG,
       coverage: { ...IDLE, discovery: "complete" },
@@ -99,6 +110,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
   }
   return {
     kind: "reason",
+    source_disclosure: { ...SOURCE_DISCLOSURE, material_kind: "interpretation" },
     result: {
       contract: "source-interpretation-reasoning-v5",
       semantic_status: "unreviewed",

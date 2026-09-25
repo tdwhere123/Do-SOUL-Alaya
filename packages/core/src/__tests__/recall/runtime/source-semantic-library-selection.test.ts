@@ -6,6 +6,11 @@ import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSeman
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
+const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = {
+  material_kind: "original_body", source_binding: "unbound", evaluated_as_of: "2026-09-18T00:00:00.000Z",
+  validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
+  proof_use: { kind: "source_only", qualification: "not_current_proof" }
+};
 const evidenceQuery: SourceSemanticQuery = { ...query(), requested_operation: { reading: "collect tools", support: { kind: "query_text", excerpt: "tools" } },
   alternatives: query().alternatives.map(row => ({ ...row, answer_frames: [], evidence_inputs: [{ frames: ["qUse"] }] })) };
 function witnessed(id: string, semantics = evidenceQuery): SourceSemanticLibraryPackage {
@@ -13,12 +18,14 @@ function witnessed(id: string, semantics = evidenceQuery): SourceSemanticLibrary
   const actual = deliveredProofFixture({ interpretation, semantics, correspondence: correspondenceFor(interpretation, semantics), library: true });
   expect(actual.proof.binding_results?.length).toBeGreaterThan(0);
   return { entry: actual.entry, entries: actual.index.entries, explanations: actual.index.explanations ?? [],
-    proofs: [actual.proof], preview: "Alice uses X.", access_position: 10, payload_support: "available" };
+    proofs: [actual.proof], preview: "Alice uses X.", source_disclosure: disclosure,
+    access_position: 10, payload_support: "available" };
 }
 function raw(id: string, position = 0): SourceSemanticLibraryPackage {
   const entry = sourceSemanticLibrarySourceEntry({ workspaceId: "ws", root_id: id, source_version: "1",
     content_digest: `sha256:${"ab".repeat(32)}`, evidence_object_id: null, hypothesis_id: "library" });
-  return { entry, entries: [entry], explanations: [], proofs: [], preview: "weather", access_position: position, payload_support: "not_applicable" };
+  return { entry, entries: [entry], explanations: [], proofs: [], preview: "weather", source_disclosure: disclosure,
+    access_position: position, payload_support: "not_applicable" };
 }
 const qualified = Array.from({ length: 6 }, (_, index) => witnessed(`speaker-${index}`));
 
@@ -36,7 +43,8 @@ function demandWitnesses() {
         : inputs.map(input => ({ ...row, query_endpoint: { ...row.query_endpoint, frame: `qUse${input}` } }))) };
     const actual = deliveredProofFixture({ interpretation, semantics, correspondence, library: true });
     return { entry: actual.entry, entries: actual.index.entries, explanations: actual.index.explanations ?? [],
-      proofs: [actual.proof], preview: id, access_position: 0, payload_support: "available" };
+      proofs: [actual.proof], preview: id, source_disclosure: disclosure,
+      access_position: 0, payload_support: "available" };
   };
 }
 

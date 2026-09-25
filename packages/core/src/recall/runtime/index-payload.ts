@@ -17,6 +17,7 @@ import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engin
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
 import { createContentPreview } from "./recall-service-helpers.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
+import { projectSourceDisclosure } from "./source-disclosure.js";
 
 export class BoundedIndexPayload {
   public readonly previews: Map<string, string>;
@@ -31,6 +32,7 @@ export class BoundedIndexPayload {
     readonly previewCache?: Readonly<Record<string, string>>;
     readonly readers: ObserverReaders;
     readonly workspaceId: string;
+    readonly asOf?: string;
     readonly remainingMemoryBytes: number;
     readonly manifestationFor: (objectId: string) => ManifestationState;
     readonly payloadContinuation?: PayloadContinuationRequest;
@@ -68,7 +70,7 @@ export class BoundedIndexPayload {
       const facts = this.input.sourceFacts?.get(sourceFactKey(entry.target));
       const factsMatchEntry = observedMemoryRevisionMatches(entry, facts?.source_revision);
       if (this.sourceMetadata[cacheKey] === undefined && facts !== undefined && factsMatchEntry) {
-        const metadata = sourceMetadataFrom(facts);
+        const metadata = sourceMetadataFrom(facts, this.input.asOf, entry.target.kind === "source_evidence" ? entry.target.root_kind : undefined);
         const bytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) {
           complete = false;
@@ -84,8 +86,12 @@ export class BoundedIndexPayload {
         || (objectId !== undefined
           && entry.target.kind !== "memory_entry"
           && this.previews.has(objectId));
-      if (continued === undefined && cachedPreview) {
+      if (continued === undefined && cachedPreview && (entry.target.kind !== "source_evidence"
+        || this.sourceMetadata[cacheKey]?.source_disclosure !== undefined)) {
         continue;
+      }
+      if (entry.target.kind === "source_evidence" && this.sourceMetadata[cacheKey]?.source_disclosure === undefined) {
+        forgetPreview(this.previews, cacheKey, objectId);
       }
       const retainedContent = factsMatchEntry
         ? (facts?.content
@@ -127,7 +133,7 @@ export class BoundedIndexPayload {
         forgetPreview(this.previews, cacheKey, objectId);
         continue;
       }
-      const metadata = sourceMetadataFrom(page.row);
+      const metadata = sourceMetadataFrom(page.row, this.input.asOf);
       const metadataBytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
       if (metadataBytes > this.remainingMemoryBytes) { complete = false; continue; }
       this.remainingMemoryBytes -= metadataBytes;
@@ -190,6 +196,14 @@ export class BoundedIndexPayload {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
     const truncated = page.resourceLimited === true || page.row.content_complete === false;
+    const metadata = sourceMetadataFrom(page.row, this.input.asOf, target.root_kind);
+    const requiredBytes = metadata.source_disclosure === undefined || this.sourceMetadata[cacheKey]?.source_disclosure !== undefined
+      ? 0 : Buffer.byteLength(JSON.stringify([cacheKey, metadata]), "utf8");
+    if (requiredBytes > this.remainingMemoryBytes) {
+      forgetPreview(this.previews, cacheKey, undefined);
+      return { ok: false, remaining: nextRemaining, retryable: true };
+    }
+    this.remainingMemoryBytes -= requiredBytes;
     this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
     {
       rememberPreview(
@@ -198,9 +212,9 @@ export class BoundedIndexPayload {
         undefined,
         page.row.content
       );
-      const metadata = sourceMetadataFrom(page.row);
       if (metadata.dimension !== undefined || metadata.scope_class !== undefined
-        || metadata.evidence_refs !== undefined || metadata.staged_warnings !== undefined) {
+        || metadata.evidence_refs !== undefined || metadata.staged_warnings !== undefined
+        || metadata.source_disclosure !== undefined) {
         rememberMetadata(this.sourceMetadata, cacheKey, undefined, { ...this.sourceMetadata[cacheKey], ...metadata });
       }
     }
@@ -288,7 +302,10 @@ function sourceMetadataFrom(row: Readonly<{
   readonly staged_warnings?: RecallSourceMetadata["staged_warnings"];
   readonly dimension?: string;
   readonly scope_class?: string;
-}>): RecallSourceMetadata {
+  readonly retained_extent?: "body" | "excerpt" | "gist";
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
+}>, asOf?: string, rootKind?: "source_record" | "evidence_capsule"): RecallSourceMetadata {
   const dimension = knownEnum(row.dimension, MemoryDimension);
   const scopeClass = knownEnum(row.scope_class, ScopeClass);
   return {
@@ -296,7 +313,13 @@ function sourceMetadataFrom(row: Readonly<{
     ...(row.evidence_refs === undefined ? {} : { evidence_refs: row.evidence_refs }),
     ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings }),
     ...(dimension === undefined ? {} : { dimension }),
-    ...(scopeClass === undefined ? {} : { scope_class: scopeClass })
+    ...(scopeClass === undefined ? {} : { scope_class: scopeClass }),
+    ...(rootKind === undefined || asOf === undefined ? {} : { source_disclosure: projectSourceDisclosure({
+      material_kind: rootKind === "source_record" ? "original_body"
+        : row.retained_extent === "gist" ? "retained_gist" : "retained_excerpt",
+      evaluated_as_of: asOf,
+      ...(rootKind === "source_record" ? { source: row } : {})
+    }) })
   };
 }
 

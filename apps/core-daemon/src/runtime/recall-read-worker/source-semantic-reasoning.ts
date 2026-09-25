@@ -4,7 +4,7 @@ import {
   sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
-  fieldContractSha256, reasonSourceSemanticInterpretation } from "@do-soul/alaya-core";
+  fieldContractSha256, reasonSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
@@ -77,7 +77,9 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
   meter.charge(cost.work_units, cost.memory_bytes, "source references");
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(stored.content_bytes), assertions, fieldContractSha256);
   const fields = { source_id: sourceId, source_version: stored.record.source_version, content_digest: stored.record.content_digest,
-    attribution_context: attribution, catalog };
+    attribution_context: attribution, catalog,
+    source_disclosure: projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: payload.as_of,
+      source: stored.record }) };
   if (request.kind === "validate_source") return SourceSemanticWorkerResultSchema.parse({
     kind: request.kind, ...fields, source: stored.content_bytes,
     assertion_locations: units.map((unit) => ({ assertion_id: unit.assertion_id,
@@ -129,7 +131,7 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
     { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics });
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
-  const discovery = accessDescriptorPage(runtime, payload.workspace_id, authorized, meter, pool, prior?.access_offset ?? 0);
+  const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;
   const access = preparationAccessReceipt(pool, sourceOffset, prior?.access_offset ?? 0, discovery.candidates.length, meter);
   const nextSourceOffset = sourceOffset + access.source_candidates.length;
@@ -173,6 +175,8 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
     throw new CoreError("VALIDATION", "reason lacks its prepared source interpretation, query semantics, and semantic correspondence");
   }
   const checked = loadVerified(runtime, payload.workspace_id, sourceInterpretationId, authorized, meter);
+  const source_disclosure = projectSourceDisclosure({ material_kind: "interpretation",
+    evaluated_as_of: lease?.as_of ?? payload.as_of, source: checked.stored.record });
   meter.retain(querySemantics, "query semantics admission");
   meter.retain(correspondence, "semantic correspondence admission");
   const admission = admitSourceSemanticCorrespondence({
@@ -190,6 +194,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
         outcome: { status: "invalid", reason: admission.kind === "unsupported" ? "unsupported_producer" : "malformed_correspondence" },
         consumed_leaves: []
       },
+      source_disclosure,
       coverage: { discovery, source_interpretation: "open", query_semantics: queryCoverage, semantic_correspondence: "open", conditional_computation: "unexercised", payload: "complete" },
       work: workOf(meter)
     });
@@ -212,9 +217,14 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
   };
   const packages = { interpretation: admission.interpretation, query: admission.query,
     semantic_correspondence: admission.semantic_correspondence, context: admission.context };
-  const full = SourceSemanticWorkerResultSchema.parse({ kind: "reason", result, ...packages, coverage, work: workOf(meter) });
+  const full = SourceSemanticWorkerResultSchema.parse({ kind: "reason", result, ...packages,
+    source_disclosure: result.binding_results?.length
+      ? projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: lease?.as_of ?? payload.as_of,
+        source: checked.stored.record, proof_use: "conditional_support" }) : source_disclosure,
+    coverage, work: workOf(meter) });
   if (Buffer.byteLength(JSON.stringify(full)) <= request.output_byte_limit) return full;
   const limited = SourceSemanticWorkerResultSchema.parse({ kind: "reason",
+    source_disclosure,
     result: { contract: result.contract, conditional_computation_id: result.conditional_computation_id, source_interpretation_id: result.source_interpretation_id, query_semantics_id: result.query_semantics_id, semantic_correspondence_id: result.semantic_correspondence_id,
       semantic_status: result.semantic_status, conclusion_scope: result.conclusion_scope, world_claim: result.world_claim,
       outcome: { status: "truncated" }, consumed_leaves: [] },

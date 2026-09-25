@@ -13,6 +13,7 @@ import {
 import { MemoryDimensionSchema } from "../memory/memory-entry.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ClaimLifecycleStateSchema } from "../memory/claim-form.js";
+import { SourceDisclosureSchema } from "../recall/source-disclosure.js";
 import { PathGovernanceClassSchema } from "../relations/path-relation.js";
 import {
   RecallBudgetStateSchema,
@@ -60,6 +61,7 @@ export const MemorySearchResultSchema = z
     // Do not re-sort on this field or score_factors.relevance.
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
+    source_disclosure: SourceDisclosureSchema.optional(),
     evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
     hypothesis_id: NonEmptyStringSchema.optional(),
     program_state: NonEmptyStringSchema.optional(),
@@ -102,7 +104,13 @@ export const MemorySearchResultSchema = z
       }
       return;
     }
+    if (value.source_disclosure === undefined) {
+      context.addIssue({ code: "custom", path: ["source_disclosure"], message: "source result requires disclosure" });
+    } else if (value.source_disclosure.proof_use.kind !== (value.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND ? "conditional_support" : "source_only")) {
+      context.addIssue({ code: "custom", path: ["source_disclosure", "proof_use"], message: "disclosure must match delivered proof kind" });
+    }
     if (value.object_id !== undefined) {
+      // Source-record-only products have no memory object identity.
       context.addIssue({
         code: "custom",
         path: ["object_id"],

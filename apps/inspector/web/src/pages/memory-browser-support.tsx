@@ -1,3 +1,5 @@
+import type { EvidenceTextDisclosures } from "@do-soul/alaya-protocol";
+
 export interface MemoryEntryRow {
   readonly object_id: string;
   readonly object_kind: string;
@@ -23,6 +25,7 @@ export interface EvidenceCapsuleShape {
   readonly object_kind: string;
   readonly gist?: string | null;
   readonly excerpt?: string | null;
+  readonly text_disclosures: EvidenceTextDisclosures;
 }
 
 export interface EvidenceEnvelope {

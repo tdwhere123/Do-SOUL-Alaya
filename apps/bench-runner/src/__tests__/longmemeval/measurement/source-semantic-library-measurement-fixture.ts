@@ -1,6 +1,6 @@
-import { IndexEntrySchema, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+import { IndexEntrySchema, indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   SourceSemanticWorkerResultSchema, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex,
+import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, projectSourceDisclosure,
   sourceSemanticLibrarySourceEntry, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
 import { deliveredProofFixture, source } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { sourceGoldUnitFromPublishedRoot } from "../../../runs/measurement/source-gold-join.js";
@@ -52,6 +52,9 @@ export function workerRecall(index: InformationIndex) {
         support: { answer: "open", evidence_inputs: [], operation: "not_requested", compatibility: "unknown", distinctness: "unknown" } }
       : { evidence_kind: "source_evidence" as const })
   }));
+  const source_disclosures = Object.fromEntries(index.entries.map((entry, offset) => [indexEntryCacheKey(entry),
+    projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: index.as_of ?? CLOCK,
+      proof_use: slot_qualifiers[offset]?.evidence_kind === "semantic_proof" ? "conditional_support" : "source_only" })]));
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "recall", request_budget: REQUEST, delivery_id: "delivery", request_identity: `sha256:${"c".repeat(64)}`,
     query_semantics_status: { status: "admitted", query_semantics_id: DIGEST },
@@ -63,7 +66,7 @@ export function workerRecall(index: InformationIndex) {
       examined_source_interpretation_ids: [], unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0,
       examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, open_residuals: false, truncated: false
     },
-    order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers,
+    order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers, source_disclosures,
     coverage: {
       discovery: "complete", source_interpretation: proofsPresent(index) ? "open" : "unexercised",
       query_semantics: "complete", semantic_correspondence: proofsPresent(index) ? "open" : "unexercised",

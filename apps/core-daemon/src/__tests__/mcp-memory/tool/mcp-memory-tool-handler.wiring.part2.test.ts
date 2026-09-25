@@ -117,7 +117,7 @@ describe("mcp memory tool handler wiring", () => {
       lifecycle_state: "active",
       evidence_health_state: "verified",
       gist: "distilled fact gist",
-      excerpt: "raw turn excerpt material the agent should see when opening a pointer"
+      excerpt: "retained excerpt material the agent should see when opening a pointer"
     }));
     const depsWithEvidence = {
       ...deps,
@@ -140,7 +140,10 @@ describe("mcp memory tool handler wiring", () => {
         object_id: "evidence-1",
         object_kind: "evidence_capsule",
         gist: "distilled fact gist",
-        excerpt: "raw turn excerpt material the agent should see when opening a pointer"
+        excerpt: "retained excerpt material the agent should see when opening a pointer",
+        text_disclosures: { gist: { material_kind: "retained_gist", source_binding: "unbound",
+          validity: { kind: "unknown", reason: "unbound" } },
+          excerpt: { material_kind: "retained_excerpt", proof_use: { kind: "source_only", qualification: "not_current_proof" } } }
       }
     });
   });

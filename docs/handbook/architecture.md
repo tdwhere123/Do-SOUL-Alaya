@@ -244,6 +244,12 @@ fallback parity with MCP is enforced by tests. The Inspector consumes
 daemon HTTP routes only and has its own contract surface (httpOnly session cookie
   + JSON over HTTP, no SSE / WebSocket).
 
+Source-bearing views across these surfaces use the Protocol `SourceDisclosure`
+contract and Core's read-time projection. The qualification is outside stored
+original or retained reduction text. Evidence HTTP and pointer reads preserve
+the existing workspace authorization and report unknown original validity when
+no checked source record is available.
+
 Persistent daemon HTTP authentication has an explicit operator-owned
 lifecycle: `ALAYA_REQUEST_TOKEN` remains stable across restarts, and changing
 that value then restarting rotates the credential so the old token is rejected.

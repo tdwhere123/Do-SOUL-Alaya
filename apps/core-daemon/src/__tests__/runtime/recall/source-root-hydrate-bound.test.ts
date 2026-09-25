@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
+import { InformationIndexSchema, sourceIndexEntry } from "@do-soul/alaya-protocol";
 import { sourceRootEligible } from "../../../../../../packages/core/src/recall/conditional-field/observers/observation-admission.js";
+import { BoundedIndexPayload } from "../../../../../../packages/core/src/recall/runtime/index-payload.js";
+import { encodeRecallResult } from "../../../../../../packages/core/src/recall/runtime/recall-result-encoding.js";
 import type { ObserveConditionalFieldInput } from "../../../../../../packages/core/src/recall/conditional-field/observers/observe.js";
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import {
@@ -17,6 +20,39 @@ afterEach(() => {
 });
 
 describe("worker source-root hydrate", () => {
+  it("carries checked SQL validity through ordinary source payload and candidate encoding", () => {
+    const database = openFieldDatabase();
+    tracked.add(database);
+    const record = new SqliteFieldSourceRecordRepo(database, fieldSha256).insert({
+      ...hashedRecord("workspace-1", "Historical original body", "src-history"),
+      valid_from: "2026-09-01T00:00:00.000Z", valid_to: "2026-09-10T00:00:00.000Z"
+    });
+    const asOf = "2026-09-09T12:00:00.000Z";
+    const entry = sourceIndexEntry({ workspace_id: "workspace-1", root_kind: "source_record",
+      root_id: record.record_id, source_version: record.source_version,
+      content_digest: record.content_digest, evidence_object_id: null,
+      hypothesis_id: "h0", output_binding: "source-evidence", role: "requested",
+      association_milligrades: 1000, claim: "unknown", explanation_ids: [] });
+    const payload = new BoundedIndexPayload({ readers: createConditionalFieldObserverReaders(database),
+      workspaceId: "workspace-1", asOf, remainingMemoryBytes: 30_000,
+      manifestationFor: () => "excerpt" });
+    expect(payload.finalize([entry], 500).complete).toBe(true);
+    const index = payload.applyDeliveredSpans(InformationIndexSchema.parse({
+      schema_version: 1, query_id: "history", snapshot_id: `sha256:${"a".repeat(64)}`,
+      result_version: "v1", as_of: asOf, entries: [entry],
+      completeness: { schema_version: 1, logical_index: "complete", observed_coverage: "complete",
+        transport: "complete", payload: "complete", representation: "complete" }, continuation: null,
+      representation: { schema_version: 1, policy: "construct_index_then_page_then_payload",
+        page_budget: 5, identity_tie_break: "serialization" }
+    }));
+    const result = encodeRecallResult(index, payload.previews, undefined, payload.sourceMetadata);
+    expect(result.candidates[0]).toMatchObject({ content_preview: "Historical original body",
+      source_disclosure: { material_kind: "original_body", source_binding: "checked_record",
+        evaluated_as_of: asOf, validity: { kind: "bounded", from: "2026-09-01T00:00:00.000Z",
+          to_exclusive: "2026-09-10T00:00:00.000Z" }, temporal_state: "within_interval",
+        proof_use: { kind: "source_only", qualification: "not_current_proof" } } });
+  });
+
   it("hydrates a native root through the request byte limit instead of loading the body", () => {
     const database = openFieldDatabase();
     tracked.add(database);

@@ -109,16 +109,21 @@ describe("routes-memory port batch", () => {
     const evidenceService = {
       findByWorkspaceId: vi.fn(),
       findByRunId: vi.fn(),
-      findByIdScoped: vi.fn(async () => ({ object_id: "e1", workspace_id: "ws-1" }))
+      findByIdScoped: vi.fn(async () => ({ object_id: "e1", workspace_id: "ws-1",
+        gist: "retained summary", excerpt: "retained excerpt" }))
     };
     registerEvidenceRoutes(app, evidenceRouteServices({ workspaceService, runService, evidenceService }));
 
     const response = await app.request("/workspaces/ws-1/evidence/e1");
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      success: true,
-      data: { object_id: "e1", workspace_id: "ws-1" }
-    });
+    const body = await response.json() as { data: { text_disclosures: { content: { evaluated_as_of: string } } } };
+    expect(body).toMatchObject({ success: true, data: { object_id: "e1", workspace_id: "ws-1",
+      text_disclosures: {
+        content: { material_kind: "retained_excerpt", source_binding: "unbound",
+          validity: { kind: "unknown", reason: "unbound" }, proof_use: { kind: "source_only", qualification: "not_current_proof" } },
+        gist: { material_kind: "retained_gist" }, excerpt: { material_kind: "retained_excerpt" }
+      } } });
+    expect(Date.parse(body.data.text_disclosures.content.evaluated_as_of)).not.toBeNaN();
     expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
     expect(evidenceService.findByIdScoped).toHaveBeenCalledWith("e1", "ws-1");
   });

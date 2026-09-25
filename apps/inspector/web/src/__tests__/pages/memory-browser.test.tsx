@@ -139,6 +139,39 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
     expect(panel.className).toContain("md:w-96");
   });
 
+  it("labels retained evidence text and unknown original validity before displaying it", async () => {
+    const evaluatedAt = "2026-09-18T12:00:00.000Z";
+    const disclosure = (material_kind: "retained_gist" | "retained_excerpt") => ({
+      material_kind, source_binding: "unbound", evaluated_as_of: evaluatedAt,
+      validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
+      proof_use: { kind: "source_only", qualification: "not_current_proof" }
+    });
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/memory-entries/ws1")) return jsonResponse({ success: true, data: [
+        { ...SAMPLE_ROWS[0]!, evidence_refs: ["evidence-original-1"] }
+      ] }, 200, { "x-total-count": "1", "x-limit": "200", "x-offset": "0" });
+      if (url.includes("/pointers/ws1/evidence-original-1")) return jsonResponse({ success: true, data: {
+        object_id: "evidence-original-1", object_kind: "evidence_capsule", gist: "Retained summary",
+        excerpt: "Retained excerpt", text_disclosures: { content: disclosure("retained_excerpt"),
+          gist: disclosure("retained_gist"), excerpt: disclosure("retained_excerpt") }
+      } });
+      return jsonResponse({}, 404);
+    });
+
+    renderMemoryBrowser();
+    fireEvent.click(await screen.findByText("remember preference"));
+    fireEvent.click(screen.getByRole("button", { name: "evidence-ori…" }));
+    expect(await screen.findByText("Retained excerpt")).not.toBeNull();
+    const disclosures = screen.getAllByTestId("source-disclosure");
+    expect(disclosures).toHaveLength(2);
+    expect(disclosures[0]?.textContent).toContain("Retained gist, not original body");
+    expect(disclosures[1]?.textContent).toContain("Retained excerpt, not original body");
+    expect(disclosures[1]?.textContent).toContain("Original validity unknown");
+    expect(disclosures[1]?.textContent).toContain(evaluatedAt);
+    expect(disclosures[1]?.textContent).toContain("Not current proof");
+  });
+
   it("renders localized operator state and evidence labels in zh", async () => {
     fetchMock.mockImplementation(async (input: FetchInput) => {
       const url = urlOf(input);

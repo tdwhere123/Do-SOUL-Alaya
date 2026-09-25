@@ -246,6 +246,7 @@ function sourceIndex(entries: readonly IndexEntry[]) {
     query_id: "source-payload",
     snapshot_id: SNAPSHOT_ID,
     result_version: "v1",
+    as_of: INTERPRETATION_CLOCK,
     entries,
     completeness: {
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,

@@ -7,12 +7,14 @@ import {
   type SourceEvidenceTarget, type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
   SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
-  type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget
+  type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
+  type SourceDisclosure
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { makeTokenEstimator } from "./recall-service-port-helpers.js";
 import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
+import { projectSourceDisclosure } from "./source-disclosure.js";
 
 /** Offline evidence binds its recorded result contract; live requests use the current version. */
 export function sourceSemanticLibraryQueryIdentity(originalQuery: string, resultVersion: string = SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION): string {
@@ -188,7 +190,8 @@ export function encodeSourceSemanticLibraryResults(
   index: InformationIndex,
   previews: ReadonlyMap<string, string> = new Map(),
   maxTotalTokens = SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS,
-  atomic = false
+  atomic = false,
+  sourceDisclosures: Readonly<Record<string, SourceDisclosure>> = {}
 ): MemorySearchResult[] {
   const encoded: MemorySearchResult[] = [];
   const estimator = makeTokenEstimator();
@@ -206,6 +209,10 @@ export function encodeSourceSemanticLibraryResults(
     const payload = payloads[offset]!;
     // Proof support is atomic. The selector must reserve it before choosing the root.
     const proof = entry.interpretation_node !== undefined && entry.explanation_ids.length > 0;
+    const disclosure = sourceDisclosures[indexEntryCacheKey(entry)] ?? projectSourceDisclosure({
+      material_kind: "original_body", evaluated_as_of: sourceClock(index),
+      proof_use: proof ? "conditional_support" : "source_only"
+    });
     const prefix = payload.available ? atomic || proof ? payload.text : previewWithinTokens(payload.text, allowances[offset]!, estimator) : "";
     const content = prefix.length === 0 ? "[payload omitted]" : prefix;
     const tokenEstimate = estimator.estimate(content);
@@ -216,6 +223,7 @@ export function encodeSourceSemanticLibraryResults(
       target: entry.target,
       relevance_score: score,
       content_preview: content,
+      source_disclosure: disclosure,
       evidence_pointers: [],
       hypothesis_id: entry.hypothesis_id,
       program_state: entry.program_state ?? "accepting",
@@ -239,6 +247,11 @@ export function encodeSourceSemanticLibraryResults(
     });
   }
   return encoded;
+}
+
+function sourceClock(index: InformationIndex): string {
+  if (index.as_of === undefined) throw new Error("library source disclosure requires an evaluation clock");
+  return index.as_of;
 }
 
 /** Reserve every occupied slot before redistributing unused preview allowance. */
@@ -276,7 +289,8 @@ export function encodeSourceSemanticLibraryResponse(
   result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>
 ): SoulInterpretationResponse {
   const { kind: _kind, previews, coverage, ...rest } = result;
-  const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true);
+  const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true,
+    result.source_disclosures);
   const omitted = results.some((row) => !row.budget_state.within_budget);
   const incomplete = omitted || coverage.payload !== "complete";
   return SoulInterpretationResponseSchema.parse({ operation: "recall", ...rest, results,

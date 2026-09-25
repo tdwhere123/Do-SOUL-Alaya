@@ -1,4 +1,5 @@
 import { RefreshCcw, X } from "lucide-react";
+import type { SourceDisclosure } from "@do-soul/alaya-protocol";
 import { useI18n } from "../i18n/locale";
 import {
   DIMENSION_OPTIONS,
@@ -347,22 +348,37 @@ function PointerDetails(props: { readonly t: Translate; readonly pointer: Eviden
         <div>{props.pointer.object_kind}</div>
       </div>
       {props.pointer.gist !== undefined && props.pointer.gist !== null ? (
-        <PointerText label={props.t("memoryBrowser:detail.gist")} value={props.pointer.gist} />
+        <PointerText label={props.t("memoryBrowser:detail.gist")} value={props.pointer.gist}
+          disclosure={props.pointer.text_disclosures.gist} t={props.t} />
       ) : null}
       {props.pointer.excerpt !== undefined && props.pointer.excerpt !== null ? (
         <PointerText
           label={props.t("memoryBrowser:detail.excerpt")}
           value={props.pointer.excerpt}
+          disclosure={props.pointer.text_disclosures.excerpt} t={props.t}
         />
       ) : null}
     </>
   );
 }
 
-function PointerText({ label, value }: { readonly label: string; readonly value: string }) {
+function PointerText({ label, value, disclosure, t }: { readonly label: string; readonly value: string;
+  readonly disclosure?: SourceDisclosure; readonly t: Translate }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-widest text-ink-500">{label}</div>
+      {disclosure === undefined ? null : <div className="mb-2 text-xs text-ink-500" data-testid="source-disclosure">
+        {t(disclosure.material_kind === "retained_gist" ? "memoryBrowser:detail.retainedGist"
+          : "memoryBrowser:detail.retainedExcerpt")}.{' '}
+        {disclosure.validity.kind === "unknown"
+          ? t("memoryBrowser:detail.originalValidityUnknown")
+          : disclosure.validity.kind === "open"
+            ? t("memoryBrowser:detail.validOpen", { from: disclosure.validity.from })
+            : t("memoryBrowser:detail.validBounded", { from: disclosure.validity.from,
+              to: disclosure.validity.to_exclusive })}.{' '}
+        {t("memoryBrowser:detail.evaluatedAt", { at: disclosure.evaluated_as_of })}.{' '}
+        {t("memoryBrowser:detail.notCurrentProof")}
+      </div>}
       <div className="whitespace-pre-wrap">{value}</div>
     </div>
   );

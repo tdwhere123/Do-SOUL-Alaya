@@ -24,6 +24,8 @@ export * from "./relations/relation-assertions/relation-projection-policy.js";
 export * from "./relations/producers/path-candidate-sink.js";
 export * from "./relations/path-relations/path-failure-health-inbox.js";
 export * from "./recall/embedding-mcp-degradation.js";
+export { projectSourceDisclosure } from "./recall/runtime/source-disclosure.js";
+export { projectEvidenceRead } from "./memory/evidence-read-projection.js";
 export * from "./runtime/dirty-state-panic-service.js";
 export * from "./dynamics/dynamics-constants-runtime.js";
 export * from "./dynamics/dynamics-service.js";

@@ -1,8 +1,8 @@
 import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticInterpretation, type SoulInterpretationRequest,
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
-  type AuthorizedScopesAdmission } from "@do-soul/alaya-protocol";
-import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256 } from "@do-soul/alaya-core";
+  type AuthorizedScopesAdmission, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { ToolUnavailableError, ToolValidationError } from "./tool-handler-support.js";
 import type { McpMemoryToolCallContext } from "./tool-handler-types.js";
@@ -27,6 +27,7 @@ export type SourceSemanticPublicationPort = Readonly<{
     provenance: Readonly<{ producer_id: string; principal?: string; preparation_handle?: string }>;
     draft: unknown; producer_version: string; contract_version: string; budget?: RequestBudget;
   }>): Promise<Readonly<{ bound: SourceSemanticPublishedInterpretation; evidence: Readonly<{ object_id: string }>;
+    source_record?: SourceRecordIdentity;
     resource_usage?: Readonly<{ work_units: number; memory_bytes: number; native_work?: number; native_bytes?: number }> }>>;
 }>;
 type Dependencies = Readonly<{ now: () => string; interpretationClock?: string; sourceSemanticsPort?: SourceSemanticHostPort; publication?: SourceSemanticPublicationPort }>;
@@ -89,6 +90,9 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       meter.charge(cost.work_units, cost.memory_bytes, "disposition validation");
       const outcome = verifySourceSemanticDisposition(request.disposition, prepared.catalog, fieldContractSha256);
       return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome, semantic_status: "unreviewed",
+        source_disclosure: projectSourceDisclosure({ material_kind: "interpretation",
+          evaluated_as_of: prepared.source_disclosure.evaluated_as_of,
+          source: validityFromDisclosure(prepared.source_disclosure) }),
         source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest,
           attribution_context: prepared.attribution_context },
         coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes }, provider_attempts: 0 });
@@ -105,6 +109,9 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       draft: request.draft, producer_version: request.producer_version, contract_version: request.contract_version });
     return SoulInterpretationResponseSchema.parse({ operation: "propose",
       outcome: { status: "interpreted", gaps: published.bound.interpretation.gaps }, published: published.bound,
+      source_disclosure: projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: input.interpretationClock ?? input.now(),
+        ...(published.source_record === undefined ? { source: validityFromDisclosure(prepared.source_disclosure) }
+          : { source: published.source_record }) }),
       evidence_object_id: published.evidence.object_id, coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" },
       work: { ...prepared.work, native_work: prepared.work.native_work + (published.resource_usage?.native_work ?? 0),
         native_bytes: prepared.work.native_bytes + (published.resource_usage?.native_bytes ?? 0), logical_work: usedWork + (published.resource_usage?.work_units ?? 0),
@@ -134,6 +141,14 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
     }
     throw error;
   }
+}
+
+function validityFromDisclosure(disclosure: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
+  { valid_from?: string | null; valid_to?: string | null } {
+  const validity = disclosure.validity;
+  if (validity.kind === "bounded") return { valid_from: validity.from, valid_to: validity.to_exclusive };
+  if (validity.kind === "open") return { valid_from: validity.from, valid_to: null };
+  return validity.reason === "not_recorded" ? { valid_from: null, valid_to: null } : {};
 }
 
 async function executeWorker(input: Dependencies, context: McpMemoryToolCallContext, request: SourceSemanticWorkerRequest,

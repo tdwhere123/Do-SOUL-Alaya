@@ -97,6 +97,9 @@ export type BoundSourceFacts = Readonly<{
   readonly content?: string;
   readonly content_complete?: boolean;
   readonly original_complete?: boolean;
+  readonly retained_extent?: "body" | "excerpt" | "gist";
+  readonly valid_from?: string | null;
+  readonly valid_to?: string | null;
   readonly content_start?: number;
   readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly role?: string;

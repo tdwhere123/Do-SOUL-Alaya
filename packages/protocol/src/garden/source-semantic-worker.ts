@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
+import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
 import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema, SOURCE_REFERENCE_MAX_ASSERTIONS } from "../evidence/source-reference.js";
@@ -9,7 +10,8 @@ import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
 import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
-import { ContinuationSchema, InformationIndexSchema, SOURCE_SEMANTIC_PROOF_OBJECT_KIND } from "../recall/conditional-field/index-view.js";
+import { ContinuationSchema, InformationIndexSchema, SOURCE_SEMANTIC_PROOF_OBJECT_KIND,
+  indexEntryCacheKey } from "../recall/conditional-field/index-view.js";
 import {
   SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema
 } from "./source-semantic-interpretation.js";
@@ -19,8 +21,8 @@ export const SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP = 32 as const;
 export const SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE = 16 as const;
-export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v5" as const;
-export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 6 as const;
+export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v6" as const;
+export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 7 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY = "source_gold_root_identity" as const;
 export const SOURCE_SEMANTIC_LIBRARY_TIE_POLICY = "canonical_identity" as const;
 
@@ -81,8 +83,13 @@ export const SourceSemanticHandleDescriptorSchema = z.object({
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,
-  interpretation: SourceSemanticInterpretationSchema.optional()
-}).strict().readonly();
+  interpretation: SourceSemanticInterpretationSchema.optional(),
+  source_disclosure: SourceDisclosureSchema.optional()
+}).strict().superRefine((value, context) => {
+  if (value.interpretation !== undefined && value.source_disclosure === undefined) {
+    context.addIssue({ code: "custom", path: ["source_disclosure"], message: "delivered interpretation requires disclosure" });
+  }
+}).readonly();
 
 export const SourceSemanticWorkerWorkSchema = z.object({
   native_work: z.number().int().nonnegative(),
@@ -232,6 +239,7 @@ type LibraryDeliveryConsistency = Readonly<{
   slot_qualifiers: readonly SourceSemanticLibrarySlotQualifier[];
   proofs?: readonly SourceSemanticLibraryProof[];
   results?: readonly Readonly<{ object_kind: string }>[];
+  source_disclosures?: Readonly<Record<string, SourceDisclosure>>;
   index: z.infer<typeof InformationIndexSchema>;
   coverage?: SourceSemanticCoverage;
 }>;
@@ -239,6 +247,21 @@ type DeliveryRefinementContext = { addIssue(issue: { code: "custom"; path?: (str
 
 /** Availability and proof claims share one admission rule across worker and public deliveries. */
 export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsistency, context: DeliveryRefinementContext): void {
+  if (value.source_disclosures !== undefined) {
+    const keys = new Set(value.index.entries.map(indexEntryCacheKey));
+    for (const [position, entry] of value.index.entries.entries()) {
+      const disclosure = value.source_disclosures[indexEntryCacheKey(entry)];
+      const expected = value.slot_qualifiers.find(row => row.index === position)?.evidence_kind === "semantic_proof"
+        ? "conditional_support" : "source_only";
+      if (disclosure === undefined || disclosure.proof_use.kind !== expected) {
+        context.addIssue({ code: "custom", path: ["source_disclosures", indexEntryCacheKey(entry)],
+          message: "each delivered source requires the matching proof qualification" });
+      }
+    }
+    if (Object.keys(value.source_disclosures).some(key => !keys.has(key))) {
+      context.addIssue({ code: "custom", path: ["source_disclosures"], message: "disclosure cannot expose an undelivered source" });
+    }
+  }
   const status = value.query_semantics_status;
   if (status.status === "unavailable") {
     if ((value.proofs?.length ?? 0) > 0 || value.results?.some((result) => result.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND)
@@ -284,6 +307,7 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   discovery: SourceSemanticLibraryDiscoverySchema,
   order: SourceSemanticLibraryOrderSchema,
   slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
+  source_disclosures: z.record(z.string(), SourceDisclosureSchema),
   proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   request_budget: RequestBudgetSchema.optional()
 }).strict().superRefine(refineSourceSemanticLibraryDelivery);
@@ -292,6 +316,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("validate_source"), source_id: BoundedIdSchema, source_version: BoundedIdSchema,
     content_digest: Sha256DigestSchema, source: z.string().max(65536), catalog: SourceReferenceCatalogSchema,
+    source_disclosure: SourceDisclosureSchema,
     attribution_context: UtteranceAttributionSchema,
     assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly(),
     ...CoverageWork
@@ -304,6 +329,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
     content_digest: Sha256DigestSchema,
     attribution_context: UtteranceAttributionSchema,
     catalog: SourceReferenceCatalogSchema,
+    source_disclosure: SourceDisclosureSchema,
     ...CoverageWork
   }).strict().readonly(),
   z.object({
@@ -325,6 +351,7 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
     query: SourceSemanticQuerySchema.optional(),
     semantic_correspondence: SourceSemanticCorrespondenceSchema.optional(),
     context: SourceSemanticEvaluationContextSchema.optional(),
+    source_disclosure: SourceDisclosureSchema,
     ...CoverageWork
   }).strict().readonly(),
   z.object({

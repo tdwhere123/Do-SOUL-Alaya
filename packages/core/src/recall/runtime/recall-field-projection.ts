@@ -79,6 +79,7 @@ export function projectFromField(
   }
   const payload = new BoundedIndexPayload({ sourceFacts: state.source_facts,
     previewCache: state.preview_cache, readers: input.readers, workspaceId: input.workspace_id,
+    asOf: interpretation.interpretation_clock,
     remainingMemoryBytes: state.remaining_memory_bytes, manifestationFor,
     ...(input.payload_continuation === undefined
       ? {}

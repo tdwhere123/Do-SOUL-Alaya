@@ -710,15 +710,40 @@ Their scores and approval records are historical evidence, not current
 implementation guidance or target KPI certification.
 
 
+## Historical source disclosure
+
+Permitted reads of retained originals carry a required `source_disclosure`
+view. It identifies original body versus retained excerpt, gist or interpretation,
+the exact read evaluation clock, the admitted source interval when checked, and
+the interval's relation to that clock. A bounded end is exclusive; a future
+start is `before_start`, not expired. A null or unavailable interval remains
+explicitly unknown. The comparison uses the full UTC precision of stored
+timestamps. Ordinary Recall uses its pinned interpretation clock; frozen library
+pages keep the first request's clock while their separate lifetime lease expires.
+
+`source_only` says `not_current_proof`; an actually delivered conditional proof
+says `conditional_support` and remains an unreviewed interpretation with an
+unknown world claim. The view does not change source eligibility, proof admission,
+ranking, erasure, current-source selection or source identity. Retained capsule
+gist and excerpt are independent reductions: completeness of the reduction does
+not make it an original body. Their original validity stays unknown without a
+checked source binding. Evidence pointer and HTTP reads disclose each text field;
+Inspector shows the qualification outside the stored text.
+
+The required public fields are a Protocol 13.0.0 major cutover under invariant
+§25. The semantic library delivery identity is v6 with worker/public protocol 7;
+old response bytes and continuations are not relabeled. Source-record and
+interpretation identity algorithms remain unchanged.
+
 ## Opt-in open source semantics
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 12.0.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
+Garden v1. Protocol 13.0.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
 `source-semantic-correspondence-v3`, source request envelope v6, source response envelope v5,
 published source interpretation v5,
 reasoning v5, cache v3,
-library v5, public/worker recall protocol 6, and `source-semantic-k-v3`,
+library v6, public/worker recall protocol 7, and `source-semantic-k-v3`,
 `source-semantic-normalizer-v5` and `source-semantic-lowering-v6`. Each complete
 source-frame group is a jointly constrained compile alternative; slots must not
 float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.

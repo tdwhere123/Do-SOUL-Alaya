@@ -34,6 +34,7 @@ import {
   type SoulListPendingProposalsResponse,
   type SoulOpenPointerRequest,
   type SoulOpenPointerResponse,
+  type EvidenceTextDisclosures,
   type SoulProposeEdgeRequest,
   type SoulProposeEdgeResponse,
   type SoulProposeMemoryUpdateRequest,
@@ -42,6 +43,7 @@ import {
   type SoulReviewMemoryProposalRequest,
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
+import { projectEvidenceRead } from "@do-soul/alaya-core";
 import {
   ToolNotFoundError,
   ToolUnavailableError,
@@ -136,7 +138,7 @@ async function openPointer(
   const memory = await deps.memoryService.findByIdScoped(request.object_id, context.workspaceId);
   if (memory !== null) return memoryPointerResponse(memory);
   const evidence = await deps.evidenceService?.findByIdScoped?.(request.object_id, context.workspaceId);
-  if (evidence !== undefined && evidence !== null) return evidencePointerResponse(evidence);
+  if (evidence !== undefined && evidence !== null) return evidencePointerResponse(projectEvidenceRead(evidence, new Date().toISOString()));
   throw new ToolNotFoundError(`Pointer object not found: ${request.object_id}`);
 }
 
@@ -162,6 +164,7 @@ function evidencePointerResponse(evidence: {
   readonly schema_version: number;
   readonly gist: string | null;
   readonly excerpt: string | null;
+  readonly text_disclosures: EvidenceTextDisclosures;
 }) {
   return SoulOpenPointerResponseSchema.parse({
     object_id: evidence.object_id,
@@ -174,7 +177,8 @@ function evidencePointerResponse(evidence: {
       domain_tags: [],
       evidence_refs: [],
       gist: evidence.gist,
-      excerpt: evidence.excerpt
+      excerpt: evidence.excerpt,
+      text_disclosures: evidence.text_disclosures
     }
   });
 }

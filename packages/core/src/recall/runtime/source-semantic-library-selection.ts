@@ -1,6 +1,6 @@
 import { canonicalJson, compareCodeUnits, SourceSemanticResourceExhausted, type Derivation, type IndexEntry, type SourceSemanticLibraryProof,
   type SourceSemanticQuerySupport, type SourceSemanticResourceLedger, type SourceSemanticLibrarySlotQualifier,
-  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, type SourceDisclosure } from "@do-soul/alaya-protocol";
 import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
 import { sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
 
@@ -8,6 +8,7 @@ import { sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
 export type SourceSemanticLibraryPackage = Readonly<{
   entry: IndexEntry; entries: readonly IndexEntry[]; explanations: readonly Derivation[];
   proofs: readonly SourceSemanticLibraryProof[]; preview: string;
+  source_disclosure: SourceDisclosure;
   access_position: number;
   payload_support: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]>;
   selection_basis?: SourceSemanticLibrarySlotQualifier["selection_basis"];

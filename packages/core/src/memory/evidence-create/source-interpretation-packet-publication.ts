@@ -171,7 +171,9 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
       const existing = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
       current();
       if (existing !== null) {
+        const checked = current();
         return { bound: storedBound(existing), evidence: existing,
+          source_record: checked.stored.record,
           resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
       }
       let evidence;
@@ -187,12 +189,14 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
       } catch (error) {
         const raced = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
         if (raced === null) throw error;
-        current();
+        const checked = current();
         return { bound: storedBound(raced), evidence: raced,
+          source_record: checked.stored.record,
           resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
       }
-      current();
-      return { bound, evidence, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
+      const checked = current();
+      return { bound, evidence, source_record: checked.stored.record,
+        resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } };
     }
   };
 }

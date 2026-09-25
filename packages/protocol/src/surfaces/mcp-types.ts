@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EvidenceTextDisclosuresSchema } from "../recall/source-disclosure.js";
 import {
   EmitCandidateSignalResponseSchema,
   McpEmitCandidateSignalRequestSchema
@@ -127,8 +128,8 @@ export const SoulOpenPointerRequestSchema = z
 // Public projection: only the fields agents may read. MemoryEntry internals
 // (lifecycle_state, created_by, storage_tier, workspace_id, ...) are not
 // exposed (invariants §29 Default Scope). EvidenceCapsule projection adds
-// gist / excerpt so attached agents can resolve evidence_refs back to raw
-// turn material via the same soul.open_pointer entry point.
+// gist / excerpt so attached agents can inspect retained evidence reductions.
+// They are not necessarily original turn bytes or current semantic proof.
 export const SoulOpenPointerContentSchema = z
   .object({
     object_id: NonEmptyStringSchema,
@@ -138,9 +139,15 @@ export const SoulOpenPointerContentSchema = z
     domain_tags: z.array(NonEmptyStringSchema).readonly(),
     evidence_refs: z.array(NonEmptyStringSchema).readonly(),
     gist: BoundedContentSchema.nullable().optional(),
-    excerpt: BoundedContentSchema.nullable().optional()
+    excerpt: BoundedContentSchema.nullable().optional(),
+    text_disclosures: EvidenceTextDisclosuresSchema.optional()
   })
   .strict()
+  .superRefine((value, context) => {
+    if (value.object_kind === "evidence_capsule" && value.text_disclosures === undefined) {
+      context.addIssue({ code: "custom", path: ["text_disclosures"], message: "evidence pointer requires text disclosure" });
+    }
+  })
   .readonly();
 
 export const SoulOpenPointerResponseSchema = z

@@ -10,7 +10,7 @@ import {
   type RecallCandidate,
   type SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
-import { mapEmbeddingProviderDiagnosticToMcpReason } from "@do-soul/alaya-core";
+import { mapEmbeddingProviderDiagnosticToMcpReason, projectSourceDisclosure } from "@do-soul/alaya-core";
 
 /** Diagnostics slice needed for honest MCP degradation_reason. */
 export type RecallMcpHonestyDiagnostics = Readonly<{
@@ -27,6 +27,7 @@ export function encodeIndexResults(
     readonly evidence_refs?: readonly string[];
     readonly staged_warnings?: StagedWarningArray;
     readonly source_lookup_reasons?: RecallCandidate["source_lookup_reasons"];
+    readonly source_disclosure?: RecallCandidate["source_disclosure"];
   }>>> = {}
 ): readonly MemorySearchResult[] {
   if (index.entries.some((entry) => entry.interpretation_node !== undefined)) {
@@ -49,16 +50,26 @@ export function encodeIndexResults(
         ?? (entry.target.kind === "source_evidence" ? entry.target.root_id : warning.target_object_id)
     }));
     const reasons = metadata?.source_lookup_reasons;
+    const disclosure = entry.target.kind === "source_evidence" ? metadata?.source_disclosure
+      ?? projectSourceDisclosure({
+        material_kind: entry.target.root_kind === "source_record" ? "original_body"
+          : entry.target.span?.retained_extent === "gist" ? "retained_gist" : "retained_excerpt",
+        evaluated_as_of: sourceClock(index)
+      }) : undefined;
+    const disclosureBytes = disclosure === undefined ? 0 : Buffer.byteLength(JSON.stringify({ source_disclosure: disclosure }), "utf8");
     const withReasonBytes = Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: reasons }), "utf8");
     // This surface budgets one token per UTF-8 byte. Keep a preview byte too;
     // bounded optional diagnostics may be omitted when the wire budget is tight.
     const retainedReasons = withReasonBytes < maxTotalTokens - usedTokens ? reasons : undefined;
-    const metadataBytes = evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0 && retainedReasons === undefined
-      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: retainedReasons }), "utf8");
+    const metadataBytes = disclosureBytes + (evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0 && retainedReasons === undefined
+      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: retainedReasons }), "utf8"));
+    // A source row is indivisible from its required disclosure. The framed index
+    // reports an omitted payload when this suffix cannot be carried.
+    if (disclosure !== undefined && metadataBytes > maxTotalTokens - usedTokens) break;
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
     const omitted = fitted === null;
     const content = omitted ? "[payload omitted]" : fitted.preview;
-    const tokenEstimate = omitted ? 0 : fitted.tokenEstimate;
+    const tokenEstimate = omitted ? metadataBytes : fitted.tokenEstimate;
     const usedThrough = usedTokens + tokenEstimate;
     usedTokens = usedThrough;
     encoded.push({
@@ -67,6 +78,7 @@ export function encodeIndexResults(
       target: deliveredTarget(entry.target, content, !omitted && retainedPreview !== undefined),
       relevance_score: score,
       content_preview: content,
+      ...(disclosure === undefined ? {} : { source_disclosure: disclosure }),
       evidence_pointers: evidencePointers,
       ...(stagedWarnings === undefined ? {} : { staged_warnings: stagedWarnings }),
       ...(retainedReasons === undefined ? {} : { source_lookup_reasons: retainedReasons }),
@@ -88,6 +100,12 @@ export function encodeIndexResults(
     });
   }
   return encoded;
+}
+
+function sourceClock(index: InformationIndex): string {
+  const clock = index.as_of ?? index.continuation?.interpretation_clock;
+  if (clock === undefined) throw new AlayaError("VALIDATION", "source disclosure requires an evaluation clock");
+  return clock;
 }
 
 export function frameEncodedIndex(

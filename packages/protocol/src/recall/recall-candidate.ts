@@ -11,6 +11,7 @@ import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ActivationWeightsSchema } from "./recall-policy.js";
 import { StagedWarningArraySchema } from "../governance/staged-warning.js";
 import { RecallTargetRefSchema, SourceEvidenceTargetSchema } from "./conditional-field/product-identity.js";
+import { SourceDisclosureSchema } from "./source-disclosure.js";
 
 const SourceLookupRoleSchema = z.object({ role: BoundedLabelSchema, phrase: z.string().min(1).max(4096) }).strict().readonly();
 const SourceLookupReasonSchema = z.object({
@@ -105,6 +106,7 @@ export const RecallCandidateSchema = z
     activation_score: z.number().min(0).max(1),
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
+    source_disclosure: SourceDisclosureSchema.optional(),
     token_estimate: NonNegativeIntSchema,
     manifestation: ManifestationStateSchema,
     // invariant: memory products require these; source_evidence omits them unless
@@ -132,6 +134,11 @@ export const RecallCandidateSchema = z
   .strict()
   .superRefine((value, context) => {
     if (value.object_kind === "source_evidence" || value.object_kind === "semantic_proof") {
+      if (value.source_disclosure === undefined) {
+        context.addIssue({ code: "custom", path: ["source_disclosure"], message: "source candidate requires disclosure" });
+      } else if (value.source_disclosure.proof_use.kind !== (value.object_kind === "semantic_proof" ? "conditional_support" : "source_only")) {
+        context.addIssue({ code: "custom", path: ["source_disclosure", "proof_use"], message: "disclosure must match delivered proof kind" });
+      }
       if (value.target === undefined || value.target.kind !== "source_evidence") {
         context.addIssue({
           code: "custom",

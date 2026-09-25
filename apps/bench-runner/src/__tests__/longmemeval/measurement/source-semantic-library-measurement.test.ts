@@ -238,6 +238,10 @@ describe("source semantic library measurement", () => {
       else if (kind === "missing_total_count") Reflect.deleteProperty(response, "total_count");
       else if (kind === "qualifier") Object.assign(response, { slot_qualifiers: [response.slot_qualifiers[0], response.slot_qualifiers[0]] });
       else Object.assign(result, { [kind]: "forged-coordinate" });
+      if (kind === "object_kind") {
+        expect(() => recordSourceSemanticLibraryFirstExposure(response)).toThrow();
+        return;
+      }
       const firstExposurePage = recordSourceSemanticLibraryFirstExposure(response);
       expect(measureSourceSemanticLibraryResponse({ recallResult: response, firstExposurePage, requestBudget: REQUEST, goldSourceUnits: [GOLD] }))
         .toMatchObject({ measurement: { status: "invalid" }, sourceBearingUnion: null,

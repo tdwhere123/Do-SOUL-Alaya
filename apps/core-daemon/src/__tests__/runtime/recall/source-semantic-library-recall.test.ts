@@ -146,7 +146,8 @@ function correspondenceOf(sourceInterpretationId: string, querySemantics: Source
 async function withLibrary(body: (input: {
   allIds: readonly string[]; execute: Execute; filename: string;
   sourceTarget: SourceEvidenceTarget;
-}) => Promise<void>, count: number, obsoleteVersions = 0, retiredFirst = false) {
+}) => Promise<void>, count: number, obsoleteVersions = 0, retiredFirst = false,
+  validity: { valid_from: string | null; valid_to: string | null } = { valid_from: null, valid_to: null }) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -166,7 +167,7 @@ async function withLibrary(body: (input: {
   }
   await admission.admit({
     workspace_id: WS, source_id: "artifact-1", source_version: "1", content_bytes: SOURCE,
-    evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
+    evidence_object_id: null, recorded_at: CLOCK, event_time: null, ...validity,
     speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
   }, { workspaceId: WS });
   await admission.admit({
@@ -219,6 +220,41 @@ async function withLibrary(body: (input: {
     await client.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true });
   }
 }
+
+it("discloses the original interval through reopened worker and public delivery without reviving expired proof", async () => {
+  const from = "2026-09-17T00:00:00Z";
+  const to = "2026-09-18T00:00:00.0000003Z";
+  await withLibrary(async ({ allIds, execute }) => {
+    const correspondence = correspondenceOf(allIds[0]!, queryOf());
+    const request = recallRequest([correspondence]);
+    const read = async (as_of: string) => {
+      const worker = await execute({ workspace_id: WS, as_of, authorized_scopes: { mode: "named", scopes: ["project"] }, request });
+      if (worker.kind !== "recall") throw new Error("library recall expected");
+      const publicResult = encodeSourceSemanticLibraryResponse(worker);
+      if (publicResult.operation !== "recall") throw new Error("public recall expected");
+      return { worker, publicResult };
+    };
+    const before = await read("2026-09-16T23:59:59Z");
+    expect(before.publicResult.results?.[0]?.source_disclosure).toMatchObject({
+      material_kind: "original_body", validity: { kind: "bounded", from, to_exclusive: to },
+      temporal_state: "before_start", proof_use: { kind: "source_only", qualification: "not_current_proof" }
+    });
+    expect(before.worker.proofs ?? []).toHaveLength(0);
+    const inside = await read("2026-09-18T00:00:00.0000002Z");
+    expect(inside.publicResult.results?.[0]?.source_disclosure).toMatchObject({
+      temporal_state: "within_interval", evaluated_as_of: "2026-09-18T00:00:00.0000002Z",
+      proof_use: { kind: "conditional_support", qualification: "not_world_claim" }
+    });
+    expect(inside.worker.proofs?.length).toBeGreaterThan(0);
+    const ended = await read(to);
+    expect(ended.publicResult.results?.[0]?.content_preview).toContain(SOURCE);
+    expect(ended.publicResult.results?.[0]?.source_disclosure).toMatchObject({
+      validity: { kind: "bounded", from, to_exclusive: to }, temporal_state: "at_or_after_end",
+      proof_use: { kind: "source_only", qualification: "not_current_proof" }
+    });
+    expect(ended.worker.proofs ?? []).toHaveLength(0);
+  }, 1, 0, false, { valid_from: from, valid_to: to });
+}, 60000);
 
 async function call<K extends SourceSemanticWorkerRequest["kind"]>(execute: Execute, request: Extract<SourceSemanticWorkerRequest, { kind: K }>) {
   const result = await execute({
@@ -498,9 +534,13 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
         : { ...entry, target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } }) },
         proofs: withCorrespondence.proofs?.map((row) => ({ ...row, source_target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } })) }
     ];
-    for (const response of tampered) {
+    for (const [tamperIndex, response] of tampered.entries()) {
       const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
         firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources }).measurement;
+      if (tamperIndex === 7) {
+        expect(measured).toMatchObject({ status: "invalid", reason: "invalid_response" });
+        continue;
+      }
       expect(measured).toMatchObject({ status: "validated",
         metrics: { proof_conditioned_first_exposure: { any_at_10: { status: "unavailable", value: null } } } });
       if (measured?.status !== "validated") throw new Error("mixed source measurement missing");

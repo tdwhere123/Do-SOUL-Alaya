@@ -3,6 +3,7 @@ import type { ConditionalFieldRecallResult } from "./recall-service-runner.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { previewTokenEstimate } from "./recall-service-helpers.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
+import { projectSourceDisclosure } from "./source-disclosure.js";
 
 export function encodeRecallResult(
   index: InformationIndex,
@@ -44,6 +45,17 @@ export function encodeRecallResult(
       activation_score: score,
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
+      ...(entry.target.kind !== "source_evidence" ? {} : { source_disclosure: kind === "semantic_proof"
+        ? { ...(metadata?.source_disclosure ?? projectSourceDisclosure({
+          material_kind: entry.target.root_kind === "source_record" ? "original_body"
+            : entry.target.span?.retained_extent === "gist" ? "retained_gist" : "retained_excerpt",
+          evaluated_as_of: sourceClock(encodedIndex)
+        })), proof_use: { kind: "conditional_support" as const, qualification: "not_world_claim" as const } }
+        : metadata?.source_disclosure ?? projectSourceDisclosure({
+          material_kind: entry.target.root_kind === "source_record" ? "original_body"
+            : entry.target.span?.retained_extent === "gist" ? "retained_gist" : "retained_excerpt",
+          evaluated_as_of: sourceClock(encodedIndex)
+        }) }),
       token_estimate: previewTokenEstimate(excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW),
       manifestation: governance === undefined || objectId === undefined ? "excerpt" as const
         : governanceManifestationFor(objectId, ceilings,
@@ -73,6 +85,12 @@ export function encodeRecallResult(
     provider_calls: 0,
     garden_enqueue: 0
   };
+}
+
+function sourceClock(index: InformationIndex): string {
+  const clock = index.as_of ?? index.continuation?.interpretation_clock;
+  if (clock === undefined) throw new Error("source disclosure requires an evaluation clock");
+  return clock;
 }
 
 function encodedPreview(

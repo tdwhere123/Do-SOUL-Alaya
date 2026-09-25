@@ -1,7 +1,7 @@
 import { SourceSemanticResourceExhausted, type IndexEntry, type SourceSemanticLibraryProof,
   type SourceSemanticLibrarySlotQualifier } from "@do-soul/alaya-protocol";
 import { CoreError, authorizeSemanticScope, hydrateUtf8Chunk, sourceSemanticSupportWindow, sourceSemanticLibraryRawPreview,
-  sourceGoldRootIdentity, fieldContractSha256, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
+  sourceGoldRootIdentity, fieldContractSha256, projectSourceDisclosure, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION } from "@do-soul/alaya-storage";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
@@ -27,14 +27,16 @@ export function prepareLibraryPackages(runtime: RecallReadWorkerRuntime, payload
     try {
       const retained = readSource(runtime, payload, authorized, meter, entry);
       if (retained === undefined) { incomplete = true; continue; }
-      const semantic = supportPackage(entry, position, branches[0]?.source ?? retained.text, branches, meter);
+      const disclosure = projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: payload.as_of,
+        source: retained.record });
+      const semantic = supportPackage(entry, position, branches[0]?.source ?? retained.text, branches, meter, disclosure);
       if (semantic.package !== undefined) packages.push(semantic.package);
       const chunk = hydrate(meter, retained.text, 0, DISPLAY_BYTES);
       if (chunk.status !== "chunk") { incomplete = true; continue; }
       const preview = sourceSemanticLibraryRawPreview(chunk.text, sources.length);
       const raw = spanEntry(entry, 0, Buffer.byteLength(preview), retained.bytes);
       packages.push({ entry: raw, entries: [raw], explanations: [], proofs: [], preview,
-        access_position: position, payload_support: semantic.reason });
+        access_position: position, payload_support: semantic.reason, source_disclosure: disclosure });
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)
         && !(error instanceof CoreError && (error.code === "NOT_FOUND" || admissionOf(error) === "filtered"))) throw error;
@@ -46,7 +48,7 @@ export function prepareLibraryPackages(runtime: RecallReadWorkerRuntime, payload
 }
 
 function supportPackage(entry: IndexEntry, position: number, source: string, branches: readonly LibraryExecutedSupport[],
-  meter: SourceSemanticReadBudget): { package?: SourceSemanticLibraryPackage; reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]> } {
+  meter: SourceSemanticReadBudget, source_disclosure: SourceSemanticLibraryPackage["source_disclosure"]): { package?: SourceSemanticLibraryPackage; reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]> } {
   if (branches.length === 0) return { reason: "not_applicable" };
   let start = Infinity, end = 0;
   for (const row of branches) {
@@ -63,7 +65,7 @@ function supportPackage(entry: IndexEntry, position: number, source: string, bra
   return { reason: "envelope_budget", package: {
     entry: spanEntry(representative, start, end, Buffer.byteLength(source)), entries,
     explanations: branches.flatMap(row => row.group.explanations), proofs: branches.map(row => row.proof),
-    preview: chunk.text, access_position: position, payload_support: "available"
+    preview: chunk.text, access_position: position, payload_support: "available", source_disclosure
   } };
 }
 
@@ -77,7 +79,8 @@ function hydrate(meter: SourceSemanticReadBudget, source: string, offset: number
   return hydrateUtf8Chunk(source, { offset, byteLimit: bytes });
 }
 function readSource(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, entry: IndexEntry): { text: string; bytes: number } | undefined {
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, entry: IndexEntry): { text: string; bytes: number;
+    record: { valid_from: string | null; valid_to: string | null } } | undefined {
   if (entry.target.kind !== "source_evidence") return undefined;
   meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "library raw prefix");
   const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
@@ -87,5 +90,6 @@ function readSource(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWor
   if (stored === null || record == null || record.source_body === null || record.record_id !== entry.target.root_id
     || record.source_version !== entry.target.source_version || record.content_digest !== entry.target.content_digest) return undefined;
   authorizeSemanticScope(record.scope_class, authorized);
-  return { text: record.source_body, bytes: stored.bodyBytes };
+  return { text: record.source_body, bytes: stored.bodyBytes,
+    record: { valid_from: record.valid_from, valid_to: record.valid_to } };
 }

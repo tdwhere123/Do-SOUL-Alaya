@@ -30,13 +30,24 @@ describe("conditional-field result encoding", () => {
       association_milligrades: 1000, hypothesis_id: "h0", output_binding: "default", program_state: "accepting", time_state: "now" });
     const entry = { ...root, target: { ...root.target,
       span: { content_start: 0, content_end: 8, content_complete: true, original_complete: true, retained_extent: "body" as const } } };
-    const index = { ...stubRecallIndex([]), entries: [entry] };
-    const results = encodeIndexResults(index, new Map([[indexEntryCacheKey(entry), "😀😀"]]), 6);
+    const index = { ...stubRecallIndex([]), as_of: "2026-09-25T00:00:00Z", entries: [entry] };
+    const disclosure = { material_kind: "original_body" as const, source_binding: "checked_record" as const,
+      evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown" as const, reason: "not_recorded" as const },
+      temporal_state: "unknown" as const, proof_use: { kind: "source_only" as const, qualification: "not_current_proof" as const } };
+    const disclosureBytes = Buffer.byteLength(JSON.stringify({ source_disclosure: disclosure }));
+    const results = encodeIndexResults(index, new Map([[indexEntryCacheKey(entry), "😀😀"]]), disclosureBytes + 4,
+      { [indexEntryCacheKey(entry)]: { source_disclosure: disclosure } });
     expect(results[0]?.content_preview).toBe("😀");
-    expect(results[0]?.target).toMatchObject({ span: { content_start: 0, content_end: 4, content_complete: false } });
+    expect(results[0]?.target).toMatchObject({ span: { content_start: 0,
+      content_end: Buffer.byteLength(results[0]!.content_preview), content_complete: false } });
     const framed = frameEncodedIndex(index, results);
     expect(framed.entries[0]?.target).toEqual(results[0]?.target);
     expect(framed.completeness.payload).toBe("partial");
+    const omitted = encodeIndexResults(index, new Map([[indexEntryCacheKey(entry), "😀😀"]]), disclosureBytes,
+      { [indexEntryCacheKey(entry)]: { source_disclosure: disclosure } });
+    expect(omitted[0]).toMatchObject({ content_preview: "[payload omitted]",
+      budget_state: { token_estimate: disclosureBytes, remaining_tokens: 0 },
+      source_disclosure: disclosure });
   });
   it("rejects a missing authoritative index before recording any delivery", async () => {
     const deps = createDeps();
@@ -153,6 +164,7 @@ describe("conditional-field result encoding", () => {
     });
     const index = {
       ...stubRecallIndex([]),
+      as_of: "2026-09-25T00:00:00Z",
       entries: [entry],
       representation: { ...stubRecallIndex([]).representation, page_budget: 1 }
     };
@@ -167,6 +179,9 @@ describe("conditional-field result encoding", () => {
     expect(parsed.object_id).toBeUndefined();
     expect(parsed.target).toEqual(entry.target);
     expect(parsed.object_kind).not.toBe("memory_entry");
+    const tooTight = encodeIndexResults(index, new Map([["rec-1", "quoted source excerpt"]]), 8);
+    expect(tooTight).toEqual([]);
+    expect(frameEncodedIndex(index, tooTight).completeness.payload).toBe("omitted");
   });
 
   it("rejects an undeclared mixed consumer before execute instead of emitting source rows", async () => {

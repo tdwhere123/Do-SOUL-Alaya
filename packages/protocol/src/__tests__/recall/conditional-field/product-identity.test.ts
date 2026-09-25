@@ -110,6 +110,9 @@ describe("conditional-field product identity", () => {
     const encoded = MemorySearchResultSchema.parse({
       object_kind: "source_evidence",
       target: source.target,
+      source_disclosure: { material_kind: "original_body", source_binding: "checked_record",
+        evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "not_recorded" },
+        temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } },
       relevance_score: 0.6,
       content_preview: "quoted excerpt",
       evidence_pointers: [],
@@ -157,6 +160,8 @@ describe("conditional-field product identity", () => {
     expect(MemorySearchResultSchema.parse({
       object_kind: "semantic_proof",
       target: source.target,
+      source_disclosure: { ...encoded.source_disclosure,
+        proof_use: { kind: "conditional_support", qualification: "not_world_claim" } },
       relevance_score: 0.6,
       content_preview: "quoted excerpt",
       evidence_pointers: [],

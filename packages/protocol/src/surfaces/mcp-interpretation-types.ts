@@ -17,6 +17,7 @@ import {
   SourceSemanticReasoningResultSchema
 } from "../garden/source-semantic-interpretation.js";
 import { MemorySearchResultSchema } from "./mcp-memory-search-types.js";
+import { SourceDisclosureSchema } from "../recall/source-disclosure.js";
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
@@ -117,9 +118,14 @@ export const SoulInterpretationPrepareSourceResponseSchema = z.object({
   content_digest: Sha256DigestSchema.optional(),
   attribution_context: UtteranceAttributionSchema.optional(),
   catalog: SourceReferenceCatalogSchema.optional(),
+  source_disclosure: SourceDisclosureSchema.optional(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   ...CoverageWork
-}).strict().readonly();
+}).strict().superRefine((value, context) => {
+  if (value.catalog !== undefined && value.source_disclosure === undefined) {
+    context.addIssue({ code: "custom", path: ["source_disclosure"], message: "source catalog requires disclosure" });
+  }
+}).readonly();
 
 export const SoulInterpretationProposeResponseSchema = z.object({
   operation: z.literal("propose"),
@@ -128,8 +134,13 @@ export const SoulInterpretationProposeResponseSchema = z.object({
   semantic_status: z.literal("unreviewed").optional(),
   published: SourceSemanticPublishedInterpretationSchema.optional(),
   evidence_object_id: BoundedIdSchema.optional(),
+  source_disclosure: SourceDisclosureSchema.optional(),
   ...CoverageWork
-}).strict().readonly();
+}).strict().superRefine((value, context) => {
+  if ((value.published !== undefined || value.source_binding !== undefined) && value.source_disclosure === undefined) {
+    context.addIssue({ code: "custom", path: ["source_disclosure"], message: "bound interpretation requires disclosure" });
+  }
+}).readonly();
 
 export const SoulInterpretationPrepareQueryResponseSchema = z.object({
   operation: z.literal("prepare_query"),
@@ -151,9 +162,14 @@ export const SoulInterpretationReasonResponseSchema = z.object({
   query: SourceSemanticQuerySchema.optional(),
   semantic_correspondence: SourceSemanticCorrespondenceSchema.optional(),
   context: SourceSemanticEvaluationContextSchema.optional(),
+  source_disclosure: SourceDisclosureSchema.optional(),
   outcome: SourceSemanticOutcomeSchema.optional(),
   ...CoverageWork
-}).strict().readonly();
+}).strict().superRefine((value, context) => {
+  if (value.result !== undefined && value.source_disclosure === undefined) {
+    context.addIssue({ code: "custom", path: ["source_disclosure"], message: "reasoning result requires disclosure" });
+  }
+}).readonly();
 
 const SoulInterpretationRecallDeliveryBaseSchema = z.object({
   ...SourceSemanticLibraryDeliverySchema.shape,

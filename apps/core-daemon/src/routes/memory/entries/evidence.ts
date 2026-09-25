@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { CoreError, type EvidenceService, type RunService, type WorkspaceService } from "@do-soul/alaya-core";
+import { CoreError, projectEvidenceRead, type EvidenceService, type RunService, type WorkspaceService } from "@do-soul/alaya-core";
 import { parseListPagination } from "../../shared/shared.js";
 
 export interface EvidenceRouteServices {
@@ -16,14 +16,16 @@ export function registerEvidenceRoutes(app: Hono, services: EvidenceRouteService
       workspaceId,
       parseListPagination(context)
     );
-    return context.json({ success: true, data: evidence }, 200);
+    const evaluatedAsOf = new Date().toISOString();
+    return context.json({ success: true, data: evidence.map((row) => projectEvidenceRead(row, evaluatedAsOf)) }, 200);
   });
 
   app.get("/runs/:runId/evidence", async (context) => {
     const runId = context.req.param("runId");
     await services.runService.getById(runId);
     const evidence = await services.evidenceService.findByRunId(runId, parseListPagination(context));
-    return context.json({ success: true, data: evidence }, 200);
+    const evaluatedAsOf = new Date().toISOString();
+    return context.json({ success: true, data: evidence.map((row) => projectEvidenceRead(row, evaluatedAsOf)) }, 200);
   });
 
   // invariant: workspace-scoped pointer resolution. Mirrors the MCP
@@ -40,6 +42,6 @@ export function registerEvidenceRoutes(app: Hono, services: EvidenceRouteService
     if (evidence === null) {
       throw new CoreError("NOT_FOUND", "Evidence not found in workspace");
     }
-    return context.json({ success: true, data: evidence }, 200);
+    return context.json({ success: true, data: projectEvidenceRead(evidence, new Date().toISOString()) }, 200);
   });
 }

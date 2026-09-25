@@ -3,7 +3,7 @@ import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attr
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
 import { SourceSemanticAccessReceiptSchema } from "../../garden/source-semantic-access.js";
-import { InformationIndexSchema } from "../../recall/conditional-field/index-view.js";
+import { InformationIndexSchema, sourceIndexEntry, indexEntryCacheKey } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import {
@@ -23,6 +23,9 @@ const coverage = {
   conditional_computation: "unexercised" as const, payload: "complete" as const
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
+const disclosure = { material_kind: "interpretation", source_binding: "unbound",
+  evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "unbound" },
+  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } };
 const validQuery = SourceSemanticQuerySchema.parse({
   contract: "source-semantic-query-v4", original_query_digest: digest,
   approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
@@ -106,6 +109,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
   }).kind).toBe("recall");
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "reason",
+    source_disclosure: disclosure,
     result: {
       contract: "source-interpretation-reasoning-v5",
       outcome: { status: "truncated" }, consumed_leaves: [],
@@ -135,7 +139,7 @@ function libraryDelivery() {
       visited_source_interpretation_descriptors: 0, candidate_prefix: [], examined_source_interpretation_ids: [],
       unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0, examination_cap: 32, open_residuals: false, truncated: false },
     order: { enumeration_policy: "evidence_support", tie_policy: "canonical_identity", occupancy: "source_gold_root_identity", occupancy_prefix: 5, page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET },
-    slot_qualifiers: [], coverage, work };
+    slot_qualifiers: [], source_disclosures: {}, coverage, work };
 }
 
 it("shares current delivery version, membership and page budget admission between worker and public surfaces", () => {
@@ -180,9 +184,27 @@ it("binds availability, semantic coverage and qualified slots on both delivery s
     coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot] })).toEqual([false, false]);
 });
 
+it("requires a disclosure for each delivered source and rejects metadata for an undelivered source", () => {
+  const entry = sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "record",
+    source_version: "v1", content_digest: digest, evidence_object_id: null,
+    hypothesis_id: "h0", output_binding: "source-evidence", role: "requested", association_milligrades: 0,
+    claim: "unknown", explanation_ids: [] });
+  const key = indexEntryCacheKey(entry);
+  const { coverage: _coverage, work: _work, ...baseDelivery } = libraryDelivery();
+  const delivery = { ...baseDelivery, total_count: 1,
+    index: { ...baseDelivery.index, entries: [entry] },
+    slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
+    source_disclosures: { [key]: { ...disclosure, material_kind: "original_body" } } };
+  const accepted = SourceSemanticLibraryDeliverySchema.safeParse(delivery);
+  expect(accepted.success, accepted.success ? "" : JSON.stringify(accepted.error.issues)).toBe(true);
+  expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...delivery, source_disclosures: {} }).success).toBe(false);
+  expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...delivery,
+    source_disclosures: { ...delivery.source_disclosures, extra: disclosure } }).success).toBe(false);
+});
+
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {
   const delivery = libraryDelivery();
-  for (const key of ["delivery_id", "request_identity", "query_semantics_status", "protocol_version", "total_count", "index", "page_purpose", "discovery", "order", "slot_qualifiers"]) {
+  for (const key of ["delivery_id", "request_identity", "query_semantics_status", "protocol_version", "total_count", "index", "page_purpose", "discovery", "order", "slot_qualifiers", "source_disclosures"]) {
     const partial = { ...delivery };
     Reflect.deleteProperty(partial, key);
     expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...partial }).success, key).toBe(false);

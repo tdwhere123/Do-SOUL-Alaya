@@ -1,5 +1,6 @@
 import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
+  type SourceSemanticAccessReceipt,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
   preparedDeliveryId, selectSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
@@ -16,30 +17,40 @@ export type LibraryDeliveryPlan = Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string; expires_at: string;
   query_semantics_status: SourceSemanticQueryStatus;
   // Continuation identity retains exact wire inputs; public identity binds the resolved request.
-  authorized: readonly string[] | null; request_identity: string; public_request_identity: string; pool: SourceSemanticAccessPool;
+  authorized: readonly string[] | null; request_identity: string; public_request_identity: string;
   discovery: SourceSemanticLibraryDiscovery; coverage: SourceSemanticCoverage;
   pages: readonly (readonly SourceSemanticLibraryPackage[])[];
+  page_access: readonly SourceSemanticAccessReceipt[];
 }>;
-type PlanBase = Omit<LibraryDeliveryPlan, "pages">;
+type PlanBase = Omit<LibraryDeliveryPlan, "pages" | "page_access"> & Readonly<{ pool: SourceSemanticAccessPool }>;
 
 /** Freeze membership, witness packages and support reservations before exposing any page. */
 export function prepareLibraryDelivery(base: PlanBase, candidates: readonly SourceSemanticLibraryPackage[],
   request: Request, meter: SourceSemanticReadBudget): LibraryDeliveryPlan {
   const pages: SourceSemanticLibraryPackage[][] = [];
+  const pageAccess: SourceSemanticAccessReceipt[] = [];
   let remaining = [...candidates], offset = 0, incomplete = false;
   while (remaining.length > 0) {
     try {
+      const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
       const selected = selectSourceSemanticLibraryPage({ candidates: remaining, meter, fits: page => {
-        const result = pageResult(base, page, offset, true, request, meter, true);
+        const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
+          page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
+        const result = pageResult(base, page, offset, true, request, meter, true, access);
         const encoded = encodeSourceSemanticLibraryResponse(result);
         meter.retain(encoded, "candidate delivery encoding");
         const bytes = Buffer.byteLength(JSON.stringify(encoded));
         meter.charge(1, bytes * 2, "candidate delivery bytes");
-        return bytes <= request.output_byte_limit && "results" in encoded
+        const fits = bytes <= request.output_byte_limit && "results" in encoded
           && encoded.results !== undefined && encoded.results.every(row => row.budget_state.within_budget);
+        if (fits) accessByPage.set(pageKey(page), access);
+        return fits;
       } });
       if (selected.length === 0) { incomplete = true; break; }
+      const access = accessByPage.get(pageKey(selected));
+      if (access === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selected library page has no reserved access receipt");
       pages.push([...selected]); offset += selected.length;
+      pageAccess.push(access);
       const roots = new Set(selected.map(root));
       remaining = remaining.filter(row => !roots.has(root(row)));
     } catch (error) {
@@ -47,7 +58,12 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
       incomplete = true; break;
     }
   }
-  return { ...base, pages: pages.length === 0 ? [[]] : pages,
+  const frozenPages = pages.length === 0 ? [[]] : pages;
+  const page_access = pages.length === 0
+    ? [libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids, [], meter)]
+    : pageAccess;
+  const { pool: _pool, ...frozenBase } = base;
+  return { ...frozenBase, pages: frozenPages, page_access,
     coverage: incomplete ? { ...base.coverage, payload: "truncated" } : base.coverage,
     discovery: incomplete ? { ...base.discovery, truncated: true, open_residuals: true } : base.discovery };
 }
@@ -59,7 +75,8 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
   const pageIndex = plan.pages.findIndex(page => { const matches = position === offset; position += page.length; return matches; });
   if (pageIndex < 0) throw new CoreError("VALIDATION", "library continuation offset is not a frozen page boundary");
   const page = plan.pages[pageIndex]!;
-  const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false);
+  const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
+    plan.page_access[pageIndex]!);
   if (result.index.continuation !== null) {
     const continuation = result.index.continuation;
     issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,
@@ -75,8 +92,8 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
   return final;
 }
 
-function pageResult(base: PlanBase, page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean,
-  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean): Recall {
+function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean,
+  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticAccessReceipt): Recall {
   const assembled = assembleSourceSemanticLibraryIndex({ ...base, authorized_scopes: base.authorized,
     source_entries: page.map(row => row.entry), proof_groups: page.filter(row => row.proofs.length > 0),
     selected_entries: page.map(row => row.entry), root_order: page.map(root),
@@ -86,8 +103,13 @@ function pageResult(base: PlanBase, page: readonly SourceSemanticLibraryPackage[
   };
   const proofs = page.flatMap(row => row.proofs);
   const previews = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), row.preview]));
-  const discovery = { ...base.discovery, access: libraryAccessReceipt(base.pool,
-    base.discovery.examined_source_interpretation_ids, page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter) };
+  const source_disclosures = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), {
+    ...row.source_disclosure,
+    proof_use: row.proofs.length > 0
+      ? { kind: "conditional_support" as const, qualification: "not_world_claim" as const }
+      : { kind: "source_only" as const, qualification: "not_current_proof" as const }
+  }]));
+  const discovery = { ...base.discovery, access };
   const work = reserveWork ? { native_work: request.budget.work_units, logical_work: request.budget.work_units,
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes, rss_bytes: Number.MAX_SAFE_INTEGER } : workOf(meter);
   const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget,
@@ -97,7 +119,7 @@ function pageResult(base: PlanBase, page: readonly SourceSemanticLibraryPackage[
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
     discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map((row, position) => ({ ...row,
       payload_support: page[position]!.payload_support, selection_basis: page[position]!.selection_basis })),
-    ...(proofs.length === 0 ? {} : { proofs }), previews, work,
+    ...(proofs.length === 0 ? {} : { proofs }), previews, source_disclosures, work,
     coverage: { ...base.coverage, conditional_computation: base.query_semantics_status.status === "unavailable" ? "unexercised"
       : proofs.length > 0 && base.coverage.conditional_computation !== "open" ? "complete" : "open",
       payload: page.some(row => row.entry.target.kind === "source_evidence" && !row.entry.target.span?.content_complete)
@@ -109,4 +131,7 @@ function pageResult(base: PlanBase, page: readonly SourceSemanticLibraryPackage[
 function root(row: SourceSemanticLibraryPackage): string {
   if (row.entry.target.kind !== "source_evidence") throw new CoreError("OBLIGATION_VIOLATION", "library package has no source root");
   return sourceGoldRootIdentity(row.entry.target);
+}
+function pageKey(page: readonly SourceSemanticLibraryPackage[]): string {
+  return JSON.stringify(page.map(row => indexEntryCacheKey(row.entry)));
 }
