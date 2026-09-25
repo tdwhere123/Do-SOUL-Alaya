@@ -235,10 +235,43 @@ export const SourceSemanticLibraryProofSchema = SourceSemanticReasoningResultSch
 }).strict().readonly();
 export type SourceSemanticLibraryProof = z.infer<typeof SourceSemanticLibraryProofSchema>;
 
+/** Current, completed computation without a binding; this is control evidence, not a proof or source fact. */
+const SourceRecordFields = SourceRecordIdentitySchema.unwrap().shape;
+export const SourceSemanticLibraryUnprovedComputationSchema = z.object({
+  kind: z.literal("complete_zero_binding"),
+  conclusion_scope: z.literal("conditional_on_interpretation"),
+  world_claim: z.literal("unknown"),
+  source_record: z.object({
+    workspace_id: SourceRecordFields.workspace_id, source_id: SourceRecordFields.source_id,
+    identity: SourceRecordFields.identity, source_version: SourceRecordFields.source_version,
+    content_digest: SourceRecordFields.content_digest
+  }).strict().readonly(),
+  source_interpretation_id: Sha256DigestSchema,
+  query_semantics_id: Sha256DigestSchema,
+  semantic_correspondence_id: Sha256DigestSchema,
+  conditional_computation_id: Sha256DigestSchema,
+  completeness: SourceSemanticReasoningResultSchema.unwrap().shape.completeness.unwrap(),
+  attention: SourceSemanticReasoningResultSchema.unwrap().shape.attention.unwrap().optional()
+}).strict().superRefine((value, context) => {
+  const attention = value.attention;
+  if (value.completeness.logical_index !== "complete" || attention !== undefined && (attention.kind !== "computed"
+    || attention.source_interpretation_id !== value.source_interpretation_id
+    || attention.query_semantics_id !== value.query_semantics_id
+    || attention.semantic_correspondence_id !== value.semantic_correspondence_id
+    || attention.conditional_computation_id !== value.conditional_computation_id
+    || attention.source_id !== value.source_record.source_id
+    || attention.source_version !== value.source_record.source_version
+    || attention.content_digest !== value.source_record.content_digest)) {
+    context.addIssue({ code: "custom", message: "unproved computation requires completed current source and Q/H/C attention" });
+  }
+}).readonly();
+export type SourceSemanticLibraryUnprovedComputation = z.infer<typeof SourceSemanticLibraryUnprovedComputationSchema>;
+
 type LibraryDeliveryConsistency = Readonly<{
   query_semantics_status: SourceSemanticQueryStatus;
   slot_qualifiers: readonly SourceSemanticLibrarySlotQualifier[];
   proofs?: readonly SourceSemanticLibraryProof[];
+  unproved_computations?: readonly SourceSemanticLibraryUnprovedComputation[];
   results?: readonly Readonly<{ object_kind: string }>[];
   source_disclosures?: Readonly<Record<string, SourceDisclosure>>;
   index: z.infer<typeof InformationIndexSchema>;
@@ -265,7 +298,8 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
   }
   const status = value.query_semantics_status;
   if (status.status === "unavailable") {
-    if ((value.proofs?.length ?? 0) > 0 || value.results?.some((result) => result.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND)
+    if ((value.proofs?.length ?? 0) > 0 || (value.unproved_computations?.length ?? 0) > 0
+      || value.results?.some((result) => result.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND)
       || value.slot_qualifiers.some((slot) => slot.evidence_kind !== "source_evidence"
       || slot.query_semantics_id !== undefined || slot.semantic_correspondence_id !== undefined
       || slot.conditional_computation_id !== undefined || slot.witnesses !== undefined || slot.support !== undefined)
@@ -282,10 +316,21 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
   }
   if (value.slot_qualifiers.some((slot) => slot.evidence_kind === "semantic_proof"
     && slot.query_semantics_id !== status.query_semantics_id)
+    || value.unproved_computations?.some((row) => row.query_semantics_id !== status.query_semantics_id)
     || value.proofs?.some((proof) => proof.query_semantics_id !== status.query_semantics_id
       || proof.semantic_correspondence.query_semantics_id !== status.query_semantics_id
       || proof.context.query_semantics_id !== status.query_semantics_id)) {
     context.addIssue({ code: "custom", message: "delivered proof query identity differs from admitted query semantics" });
+  }
+  if (value.unproved_computations !== undefined) {
+    const delivered = new Set(value.index.entries.flatMap(entry => entry.target.kind === "source_evidence"
+      ? [`${entry.target.workspace_id}\0${entry.target.root_id}\0${entry.target.source_version}\0${entry.target.content_digest}`] : []));
+    for (const [position, row] of value.unproved_computations.entries()) {
+      if (!delivered.has(`${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`)) {
+        context.addIssue({ code: "custom", path: ["unproved_computations", position],
+          message: "unproved computation cannot expose an undelivered source" });
+      }
+    }
   }
 }
 
@@ -310,6 +355,8 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
   source_disclosures: z.record(z.string(), SourceDisclosureSchema),
   proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
+  unproved_computations: z.array(SourceSemanticLibraryUnprovedComputationSchema)
+    .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   request_budget: RequestBudgetSchema.optional()
 }).strict().superRefine(refineSourceSemanticLibraryDelivery);
 

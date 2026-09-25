@@ -25,7 +25,7 @@ import {
 export const EXTRACTION_ATTEMPT_LEDGER_VERSION = 5;
 const PREVIOUS_LEDGER_VERSION = 4;
 const LEGACY_LEDGER_VERSION = 3;
-const MAX_ATTEMPT_LEDGER_BYTES = 32 * 1024 * 1024;
+export const MAX_ATTEMPT_LEDGER_BYTES = 32 * 1024 * 1024;
 
 export interface ExtractionAttemptReservationRecord {
   readonly attempt_ordinal: number;
@@ -79,12 +79,13 @@ export function readAttemptLedgerRecord(path: string): ExtractionAttemptLedgerRe
   return readAttemptLedgerRecordEnvelope(path).record;
 }
 
-export function readAttemptLedgerRecordEnvelope(path: string): {
+export function readAttemptLedgerRecordEnvelope(path: string, maxBytes = MAX_ATTEMPT_LEDGER_BYTES): {
   readonly record: ExtractionAttemptLedgerRecord;
   readonly rawSha256: string;
+  readonly byteLength: number;
 } {
   const text = readBoundedCanonicalUtf8Artifact({
-    path, maxBytes: MAX_ATTEMPT_LEDGER_BYTES, label: "extraction attempt ledger"
+    path, maxBytes: Math.min(maxBytes, MAX_ATTEMPT_LEDGER_BYTES), label: "extraction attempt ledger"
   });
   const raw = Buffer.from(text, "utf8");
   let parsed: unknown;
@@ -95,11 +96,11 @@ export function readAttemptLedgerRecordEnvelope(path: string): {
   }
   const rawSha256 = createHash("sha256").update(raw).digest("hex");
   if (isAttemptLedgerRecord(parsed)) {
-    return { record: withNormalizedTelemetry(parsed), rawSha256 };
+    return { record: withNormalizedTelemetry(parsed), rawSha256, byteLength: raw.length };
   }
   const migrated = migrateLegacyRecord(parsed);
   if (migrated !== undefined) {
-    return { record: withNormalizedTelemetry(migrated), rawSha256 };
+    return { record: withNormalizedTelemetry(migrated), rawSha256, byteLength: raw.length };
   }
   throw new Error(`extraction attempt ledger is invalid: ${path}`);
 }

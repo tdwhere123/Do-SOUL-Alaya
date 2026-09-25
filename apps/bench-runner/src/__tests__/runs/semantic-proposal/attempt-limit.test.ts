@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,6 +8,8 @@ import { afterEach, expect, it } from "vitest";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { pinSemanticProposalAuthority, verifySemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
+import { ledgerPath, listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
+import { readAttemptLedgerRecordEnvelope } from "../../../runs/extraction/authority/attempt-ledger/contract.js";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { providerRawAttemptPath, requestEnvelopeDigest, retainedFailureOutcome, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
@@ -27,6 +29,58 @@ function fixture(prepared = workset, maxAttemptsPerKey = 1) {
   const authority = pinSemanticProposalAuthority({ preflight, inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   return { cacheRoot, authority };
 }
+
+it("refuses an oversized physical ledger directory before opening a new proposal attempt", async () => {
+  const { cacheRoot, authority } = fixture();
+  for (let index = 0; index <= 32_768; index += 1) writeFileSync(join(cacheRoot, `unrelated-${index}`), "");
+  expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/exceeds bounded inventory/u);
+  let calls = 0;
+  await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor: {
+    extract: async () => { calls += 1; throw new Error("inventory must reject before dispatch"); }
+  } })).rejects.toThrow(/exceeds bounded inventory/u);
+  expect(calls).toBe(0);
+});
+
+it("rejects cumulative ledger input and unreadable retained history without a payable miss", async () => {
+  const { cacheRoot, authority } = fixture();
+  const names = Array.from({ length: 4 }, (_, index) => join(cacheRoot,
+    `extraction-attempt-ledger.${index.toString(16).padStart(64, "0")}.json`));
+  for (const name of names) { writeFileSync(name, ""); truncateSync(name, 32 * 1024 * 1024); }
+  expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/exceeds retained input limit/u);
+  for (const name of names) rmSync(name);
+  writeFileSync(names[0]!, "{");
+  expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/unreadable/u);
+  let calls = 0;
+  await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor: {
+    extract: async () => { calls += 1; throw new Error("unreadable history must reject before dispatch"); }
+  } })).rejects.toThrow(/unreadable/u);
+  expect(calls).toBe(0);
+});
+
+it("keeps the actual unresolved attempt in a bounded retained inventory", () => {
+  const { cacheRoot, authority } = fixture();
+  const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+  ledger.reserveAttemptOrdinal(materializeSemanticProposalLines(workset, 128)[0]!.key);
+  const records = listExtractionAttemptLedgerRecords(cacheRoot);
+  expect(records).toHaveLength(1);
+  expect(records[0]?.attempts).toBe(1);
+  expect(records[0]?.unresolved_attempts).toHaveLength(1);
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot()).toMatchObject({
+    attempts: 1, unresolvedAttempts: [expect.any(Object)]
+  });
+});
+
+it("bounds a ledger that grows past the remaining inventory allowance before decoding it", () => {
+  const { cacheRoot, authority } = fixture();
+  const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+  ledger.reserveAttemptOrdinal(materializeSemanticProposalLines(workset, 128)[0]!.key);
+  const record = listExtractionAttemptLedgerRecords(cacheRoot)[0]!;
+  const path = ledgerPath(cacheRoot, record.lineage_digest);
+  const allowance = statSync(path).size;
+  appendFileSync(path, " ");
+  expect(() => readAttemptLedgerRecordEnvelope(path, allowance)).toThrow(/size limit/u);
+  expect(readAttemptLedgerRecordEnvelope(path).byteLength).toBe(allowance + 1);
+});
 
 it("limits each failed HTTP request to one attempt and preserves the next key's opportunity", async () => {
   let calls = 0;

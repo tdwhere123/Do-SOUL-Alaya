@@ -1,7 +1,7 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { unlinkSync, readdirSync } from "node:fs";
+import { unlinkSync, opendirSync, lstatSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   completeBenchTerminalRetryClassifications,
@@ -16,6 +16,7 @@ import {
 import { computeExtractionFillAttemptCeiling } from "./receipt-limits.js";
 import {
   EXTRACTION_ATTEMPT_LEDGER_VERSION,
+  MAX_ATTEMPT_LEDGER_BYTES,
   assertStoredAttemptLedgerRecord,
   emptyAttemptTelemetry,
   hasCompleteAttemptHistory,
@@ -38,15 +39,52 @@ import {
   commitProviderBackedShard,
   sortedSuccessfulShards
 } from "./attempt-ledger/success.js";
-import { boundedArtifactEntryExists } from "../cache-audit/bounded-artifact-reader.js";
+import { boundedArtifactEntryExists, withRootBoundDirectory } from "../cache-audit/bounded-artifact-reader.js";
 
 export { ExtractionAttemptLimitError } from "./attempt-ledger/outcome.js";
 export const computeExtractionAttemptCeiling = computeExtractionFillAttemptCeiling;
+const MAX_ATTEMPT_LEDGER_INVENTORY_ENTRIES = 32_768;
+const MAX_ATTEMPT_LEDGER_INVENTORY_BYTES = 100_000_000;
 /** Read-only inventory; a new execution must not hide older reservation history. */
 export function listExtractionAttemptLedgerRecords(cacheRoot: string): readonly ExtractionAttemptLedgerRecord[] {
   if (!boundedArtifactEntryExists(cacheRoot)) return [];
-  return readdirSync(cacheRoot).filter(name => /^extraction-attempt-ledger\.[0-9a-f]{64}\.json$/u.test(name))
-    .map(name => readAttemptLedgerRecord(join(cacheRoot, name)));
+  return withRootBoundDirectory({ root: cacheRoot, label: "extraction attempt ledger inventory" }, directory => {
+    const before = statSync(directory, { bigint: true });
+    const names: string[] = [];
+    const handle = opendirSync(directory);
+    let visited = 0, announcedBytes = 0;
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (++visited > MAX_ATTEMPT_LEDGER_INVENTORY_ENTRIES) {
+          throw new AlayaError("UNAVAILABLE", "extraction attempt ledger directory exceeds bounded inventory");
+        }
+        if (!/^extraction-attempt-ledger\.[0-9a-f]{64}\.json$/u.test(entry.name)) continue;
+        const stats = lstatSync(join(directory, entry.name));
+        if (!stats.isFile() || stats.size > MAX_ATTEMPT_LEDGER_BYTES ||
+            (announcedBytes += stats.size) > MAX_ATTEMPT_LEDGER_INVENTORY_BYTES) {
+          throw new AlayaError("UNAVAILABLE", "extraction attempt ledger inventory exceeds retained input limit");
+        }
+        names.push(entry.name);
+      }
+    } finally { handle.closeSync(); }
+    const records: ExtractionAttemptLedgerRecord[] = [];
+    let retainedBytes = 0;
+    for (const name of names) {
+      const remainingBytes = MAX_ATTEMPT_LEDGER_INVENTORY_BYTES - retainedBytes;
+      if (remainingBytes <= 0) {
+        throw new AlayaError("UNAVAILABLE", "extraction attempt ledger inventory exceeds retained input limit");
+      }
+      const envelope = readAttemptLedgerRecordEnvelope(join(directory, name), remainingBytes);
+      retainedBytes += envelope.byteLength;
+      records.push(envelope.record);
+    }
+    const after = statSync(directory, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.mtimeNs !== after.mtimeNs
+      || before.ctimeNs !== after.ctimeNs) {
+      throw new AlayaError("UNAVAILABLE", "extraction attempt ledger directory changed during inventory");
+    }
+    return records;
+  });
 }
 export interface ExtractionAttemptLedgerSnapshot {
   readonly rawLedgerSha256: string;

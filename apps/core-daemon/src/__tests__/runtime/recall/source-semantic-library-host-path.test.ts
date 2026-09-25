@@ -574,6 +574,9 @@ it("retains a native unvisited interpretation residual when the delivered raw sl
     expect(recalled.discovery).toMatchObject({ open_residuals: true, truncated: true,
       access: { observed_source_count: 7, unvisited_sources: false, unvisited_interpretations: true } });
     expect(recalled.discovery.access?.stopping_reasons).toContain("budget");
+    expect(recalled.coverage.discovery).toBe("truncated");
+    expect(recalled.coverage.conditional_computation).toBe("unexercised");
+    expect(recalled.unproved_computations).toBeUndefined();
     expect(recalled.discovery.access?.observed_interpretation_count).toBeLessThan(60);
     expect(recalled.index.entries).toHaveLength(5);
     const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -612,6 +615,8 @@ it("delivers frozen five-source pages through the public MCP request without rer
     expect(first.discovery).toMatchObject({ open_residuals: false, truncated: false,
       access: { observed_source_count: 12, unvisited_sources: false, unvisited_interpretations: false } });
     expect(first.coverage.discovery).toBe("complete");
+    expect(first.coverage.conditional_computation).toBe("unexercised");
+    expect(first.unproved_computations).toBeUndefined();
     expect(first.index?.completeness.logical_index).toBe("partial");
     expect(first.index?.entries.some(entry => entry.target.kind === "source_evidence"
       && entry.target.root_id === roots["raw-11"])).toBe(false);

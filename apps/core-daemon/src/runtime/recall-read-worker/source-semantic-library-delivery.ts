@@ -1,6 +1,7 @@
 import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
   type SourceSemanticAccessReceipt,
+  type SourceSemanticLibraryUnprovedComputation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
   preparedDeliveryId, selectSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
@@ -19,6 +20,7 @@ export type LibraryDeliveryPlan = Readonly<{
   // Continuation identity retains exact wire inputs; public identity binds the resolved request.
   authorized: readonly string[] | null; request_identity: string; public_request_identity: string;
   discovery: SourceSemanticLibraryDiscovery; coverage: SourceSemanticCoverage;
+  unproved_computations: readonly SourceSemanticLibraryUnprovedComputation[];
   pages: readonly (readonly SourceSemanticLibraryPackage[])[];
   page_access: readonly SourceSemanticAccessReceipt[];
 }>;
@@ -102,6 +104,11 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
     ...assembled.index, continuation: sealIssuedContinuation(assembled.index.continuation)
   };
   const proofs = page.flatMap(row => row.proofs);
+  const deliveredSources = new Set(page.flatMap(row => row.entry.target.kind === "source_evidence"
+    ? [`${row.entry.target.workspace_id}\0${row.entry.target.root_id}\0${row.entry.target.source_version}\0${row.entry.target.content_digest}`] : []));
+  meter.charge(base.unproved_computations.length + page.length, 0, "library unproved computation page selection");
+  const unproved = base.unproved_computations.filter(row => deliveredSources.has(
+    `${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`));
   const previews = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), row.preview]));
   const source_disclosures = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), {
     ...row.source_disclosure,
@@ -119,9 +126,10 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
     discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map((row, position) => ({ ...row,
       payload_support: page[position]!.payload_support, selection_basis: page[position]!.selection_basis })),
-    ...(proofs.length === 0 ? {} : { proofs }), previews, source_disclosures, work,
+    ...(proofs.length === 0 ? {} : { proofs }),
+    ...(unproved.length === 0 ? {} : { unproved_computations: unproved }), previews, source_disclosures, work,
     coverage: { ...base.coverage, conditional_computation: base.query_semantics_status.status === "unavailable" ? "unexercised"
-      : proofs.length > 0 && base.coverage.conditional_computation !== "open" ? "complete" : "open",
+      : base.coverage.conditional_computation,
       payload: page.some(row => row.entry.target.kind === "source_evidence" && !row.entry.target.span?.content_complete)
         ? "truncated" : base.coverage.payload }
   });

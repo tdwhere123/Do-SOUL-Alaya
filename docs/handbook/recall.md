@@ -783,6 +783,14 @@ Computed attention binds the admitted Q/H/C/computation and actual demand state;
 preparation attention names a missing Q or C without inventing its identity.
 Unreached or unattributable branches remain unknown or unobserved. Attention is
 control information for one correction cycle, never source fact or proof authority.
+Protocol 13.3.0 optionally delivers completed zero-binding computations for
+delivered source records as bounded `unproved_computations`. Each control binds the
+current source and Q/H/C/computation identities, logical completeness, and any
+keyed attention. It conveys no answer binding or source fact. Conditional
+computation coverage follows actual execution; missing dependencies remain
+unexercised, while resource-limited execution remains open. Frozen continuation
+pages and the immutable first-exposure row retain only controls for their
+delivered source records.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested

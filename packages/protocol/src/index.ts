@@ -281,12 +281,12 @@ export {
   SourceSemanticWorkerWorkSchema, SourceSemanticWorkerRequestSchema,
   SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
   SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
-  SourceSemanticLibraryProofSchema, SourceSemanticLibraryDeliverySchema,
+  SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
   SourceSemanticWorkerResultSchema
 } from "./garden/source-semantic-worker.js";
 export type {
   SourceSemanticQueryUnavailableReason, SourceSemanticQueryStatus, SourceSemanticQuerySupport,
-  SourceSemanticLibraryProof, SourceSemanticCoverage, SourceSemanticHandleDescriptor,
+  SourceSemanticLibraryProof, SourceSemanticLibraryUnprovedComputation, SourceSemanticCoverage, SourceSemanticHandleDescriptor,
   SourceSemanticWorkerWork, SourceSemanticWorkerRequest, SourceSemanticWorkerResult,
   SourceSemanticLibraryDiscovery, SourceSemanticLibraryOrder, SourceSemanticLibrarySlotQualifier
 } from "./garden/source-semantic-worker.js";

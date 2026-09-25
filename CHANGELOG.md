@@ -8,9 +8,14 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.2.0, engine gateway 1.0.0
+## Unreleased — protocol 13.3.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.3.0 adds optional bounded, current-source zero-binding computation
+control to the `soul.interpretation` library delivery under invariant §25
+(minor: additive field). It carries Q/H/C/computation identity and keyed
+attention through native first exposure without declaring answer support.
 
 Protocol 13.2.0 adds optional product and phase coordinates to bounded
 `soul.interpretation` attention entries under invariant §25 (minor: additive

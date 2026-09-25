@@ -1,8 +1,8 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
-  SourceSemanticResourceExhausted, canonicalJson,
+  SourceSemanticResourceExhausted, SourceSemanticLibraryUnprovedComputationSchema, canonicalJson,
   type SourceSemanticCorrespondence, type SourceSemanticHandleDescriptor,
-  type SourceSemanticLibraryProof, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticQueryStatus,
+  type SourceSemanticLibraryProof, type SourceSemanticLibraryUnprovedComputation, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticQueryStatus,
   type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
@@ -104,7 +104,8 @@ export function runSourceSemanticLibraryRecall(
   const branches = admission.kind === "admitted"
     ? executeLibraryBranches(runtime, payload, authorized, exploration,
       discovered.descriptors, request, admission.query, original)
-    : { proofGroups: [], proofs: [], examined: [], supports: [], pairs: 0, computeOpen: false, interpretationTruncated: false };
+    : { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
+      executedCount: 0, computeOpen: false, interpretationTruncated: false };
   meter.absorb(exploration);
   return deliverLibraryPage(runtime, payload, authorized, meter, request, boundStatus,
     admission.kind === "admitted" ? admission.query : undefined,
@@ -120,9 +121,10 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
   const proofGroups: { entries: ReturnType<typeof proofEntriesFromBranch>["entries"];
     explanations: ReturnType<typeof proofEntriesFromBranch>["explanations"] }[] = [];
   const proofs: SourceSemanticLibraryProof[] = [];
+  const unproved: SourceSemanticLibraryUnprovedComputation[] = [];
   const examined: string[] = [];
   const supports: LibraryExecutedSupport[] = [];
-  let pairs = 0, computeOpen = false;
+  let pairs = 0, executedCount = 0, computeOpen = false;
   for (const descriptor of descriptors) {
     const prepared = semantic_correspondences.get(descriptor.interpretation_id) ?? [];
     if (prepared.length === 0) continue;
@@ -139,7 +141,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
         const aligned = admitSourceSemanticCorrespondence({
           semantic_correspondence, source_interpretation: checked.bound.interpretation, query_semantics: query, original_query: original
         });
-        if (aligned.kind !== "admitted") continue;
+        if (aligned.kind !== "admitted") { computeOpen = true; continue; }
         const executed = executeSourceSemanticInterpretation({
           request: {
             contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
@@ -151,14 +153,32 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
           authorizedScopes: authorized, asOf: payload.as_of, sourceValidity: checked.stored.record,
           source_target: checked.bound.source_target
         });
+        executedCount += 1;
         if (executed.result.resource_usage !== undefined) {
           meter.charge(executed.result.resource_usage.work_units, executed.result.resource_usage.memory_bytes, "library branch");
         }
-        if (executed.result.outcome.status === "resource_exhausted") computeOpen = true;
-        if (executed.index === null || (executed.result.binding_results ?? []).length === 0) {
-          if (executed.result.outcome.status === "resource_exhausted") { computeOpen = true; }
+        if (executed.result.outcome.status === "resource_exhausted"
+          || executed.result.completeness?.logical_index !== "complete") computeOpen = true;
+        if ((executed.result.binding_results ?? []).length === 0) {
+          if (executed.result.outcome.status === "interpreted" && executed.result.completeness?.logical_index === "complete") {
+            meter.charge(1, 0, "library unproved computation projection");
+            const control = SourceSemanticLibraryUnprovedComputationSchema.parse({
+              kind: "complete_zero_binding", conclusion_scope: executed.result.conclusion_scope,
+              world_claim: executed.result.world_claim,
+              source_record: { workspace_id: checked.stored.record.workspace_id,
+                source_id: checked.stored.record.source_id, identity: checked.stored.record.identity,
+                source_version: checked.stored.record.source_version, content_digest: checked.stored.record.content_digest },
+              source_interpretation_id: aligned.interpretation_id,
+              query_semantics_id: aligned.query_id, semantic_correspondence_id: aligned.semantic_correspondence_id,
+              conditional_computation_id: executed.result.conditional_computation_id,
+              completeness: executed.result.completeness, attention: executed.result.attention
+            });
+            meter.retain(control, "library unproved computation");
+            unproved.push(control);
+          }
           continue;
         }
+        if (executed.index === null) { computeOpen = true; continue; }
         const scoped = scopeSourceSemanticLibraryBranch(executed.index, executed.result);
         const group = proofEntriesFromBranch(scoped.index, scoped.result);
         if (group.entries.length === 0) continue;
@@ -179,7 +199,7 @@ function executeLibraryBranches(runtime: RecallReadWorkerRuntime, payload: Sourc
     }
     if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) break;
   }
-  return { proofGroups, proofs, examined, supports, pairs, computeOpen, interpretationTruncated };
+  return { proofGroups, proofs, unproved, examined, supports, pairs, executedCount, computeOpen, interpretationTruncated };
 }
 
 function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
@@ -224,6 +244,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
     query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
     as_of: payload.as_of, authorized, request_identity: requestIdentity, public_request_identity: publicRequestIdentity, pool: discovered.pool,
     query_semantics_status: queryStatus,
+    unproved_computations: branches.unproved,
     expires_at: new Date(Date.parse(sourceSemanticLifetimeNow(payload)) + 5 * 60_000).toISOString(),
     coverage: {
       discovery: openResiduals ? "truncated" : "complete",
@@ -231,7 +252,8 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
       query_semantics: query === undefined ? "unexercised" : query.gaps.length === 0 ? "complete" : "open",
       semantic_correspondence: examined.length === 0 ? "unexercised" : "open",
       conditional_computation: queryStatus.status === "unavailable" ? "unexercised"
-        : computeOpen ? "open" : "complete", payload: prepared.incomplete ? "truncated" : "complete"
+        : computeOpen ? "open" : branches.executedCount === 0 ? "unexercised" : "complete",
+      payload: prepared.incomplete ? "truncated" : "complete"
     },
     discovery: {
       eligible_source_count: sourceEntries.length, visited_source_pages: sources.pages, visited_source_interpretation_pages: interpretationPages,

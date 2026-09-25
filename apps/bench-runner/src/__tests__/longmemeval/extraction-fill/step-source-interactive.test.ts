@@ -308,11 +308,11 @@ it("binds an explicit source cap to encoded HTTP, retained bounds, receipt price
 it("rejects a Step sample authority whose cap, input reservation, or selected proof differs before dispatch", async () => {
   const fixture = await scenario(1, 16384);
   expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
-    outputTokenCap: { field: "max_tokens", value: 4096 } })).toThrow(/differs from its retained source preflight/u);
+    outputTokenCap: { field: "max_tokens", value: 4096 } })).toThrow(/interactive source sample authority differs from retained preflight/u);
   expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
     priceEstimate: { ...fixture.receiptInput.priceEstimate,
       maximumInputTokensPerAttempt: fixture.preflight.maximum_input_tokens_per_attempt - 1 } }))
-    .toThrow(/differs from its retained source preflight/u);
+    .toThrow(/interactive source sample authority differs from retained preflight/u);
   expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
     sourcePreflight: { ...fixture.preflight, selected_keys: ["f".repeat(64)] } }))
     .toThrow(/foreign ready key/u);
@@ -320,13 +320,13 @@ it("rejects a Step sample authority whose cap, input reservation, or selected pr
     sourcePreflight: { ...fixture.preflight, config: { ...fixture.preflight.config,
       providerUrl: "https://logical-other.example.test/v1",
       transportProviderUrl: fixture.preflight.config.providerUrl } } }))
-    .toThrow(/differs from its retained source preflight/u);
+    .toThrow(/interactive source sample authority differs from retained preflight/u);
   expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
     sourcePreflight: { ...fixture.preflight, config: { ...fixture.preflight.config,
       modelFamily: "different-logical-family" } } }))
-    .toThrow(/differs from its retained source preflight/u);
+    .toThrow(/interactive source sample authority differs from retained preflight/u);
   expect(() => createExtractionAuthorityReceipt({ ...fixture.receiptInput,
-    sourcePreflight: undefined })).toThrow(/requires its retained source preflight/u);
+    sourcePreflight: undefined })).toThrow(/interactive source sample requires retained preflight and native scope/u);
 });
 
 it("rejects altered retained Step preflight wire, route, and selected-key proof", async () => {

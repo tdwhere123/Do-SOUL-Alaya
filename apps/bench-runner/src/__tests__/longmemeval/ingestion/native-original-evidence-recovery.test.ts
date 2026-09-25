@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renam
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
   SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION } from "@do-soul/alaya-core";
 import { parseSourceSemanticRequest, type SourceSemanticCorrespondenceProposalInput } from "@do-soul/alaya-soul";
@@ -373,9 +373,14 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     operation: string; proofs?: { source_interpretation_id: string; binding_results?: {
       kind: string; returned: { answer?: { node_id: string } } }[] }[];
     results?: { content_preview?: string }[]; slot_qualifiers?: { evidence_kind: string;
-      selection_basis?: string; payload_support?: string }[] } }[] };
+      selection_basis?: string; payload_support?: string }[];
+    unproved_computations?: { source_record: { source_id: string; source_version: string; content_digest: string };
+      source_interpretation_id: string; query_semantics_id: string; semantic_correspondence_id: string;
+      conditional_computation_id: string; completeness: { logical_index: string; observed_coverage: string };
+      attention?: { kind: string; source_interpretation_id?: string; entries?: { state: string }[] } }[];
+    coverage?: { conditional_computation: string } } }[] };
   const recall = replay.rows[0]?.response;
-  expect(recall?.operation).toBe("recall");
+  if (recall?.operation !== "recall") throw new Error("final native replay row lacks its recall response");
   const final = readChainArtifact(join(recoveryRoot, "final-qualified.json")) as {
     descriptor_export: { descriptor: { source_interpretation_id: string; interpretation: {
       referents: { id: string; mentions: string[] }[]; mentions: { id: string; text: string }[] } } }[] };
@@ -383,6 +388,32 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     .filter(row => row.kind === "answer").map(row => ({ proof, node: row.returned.answer?.node_id })));
   if (world.answer === null) {
     expect(answers).toHaveLength(0);
+    expect(recall?.unproved_computations).toHaveLength(2);
+    expect(recall?.coverage?.conditional_computation).toBe("complete");
+    expect(recall?.unproved_computations?.every(row => row.completeness.logical_index === "complete"
+      && row.attention?.kind === "computed"
+      && row.attention.source_interpretation_id === row.source_interpretation_id)).toBe(true);
+    expect(recall?.unproved_computations?.some(row => row.attention?.entries?.some(entry => entry.state === "unobserved"))).toBe(true);
+    expect(recall?.unproved_computations?.every(row => final.descriptor_export.some(exported =>
+      exported.descriptor.source_interpretation_id === row.source_interpretation_id))).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(recall))).toBeLessThanOrEqual(1_000_000);
+    const firstControl = recall?.unproved_computations?.[0];
+    if (firstControl === undefined) throw new Error("completed final computation control is absent");
+    expect(SoulInterpretationResponseSchema.safeParse({ ...recall, unproved_computations: [{ ...firstControl,
+      query_semantics_id: `sha256:${"f".repeat(64)}` }, ...recall.unproved_computations!.slice(1)] }).success).toBe(false);
+    expect(SoulInterpretationResponseSchema.safeParse({ ...recall, unproved_computations: [{ ...firstControl,
+      source_record: { ...firstControl.source_record, source_version: "foreign-version" } },
+    ...recall.unproved_computations!.slice(1)] }).success).toBe(false);
+    expect(SoulInterpretationResponseSchema.safeParse({ ...recall, unproved_computations: [{ ...firstControl,
+      source_record: { ...firstControl.source_record, workspace_id: "foreign-workspace" } },
+    ...recall.unproved_computations!.slice(1)] }).success).toBe(false);
+    expect(SoulInterpretationResponseSchema.safeParse({ ...recall, query_semantics_status: {
+      status: "unavailable", reason: "producer_failure" } }).success).toBe(false);
+    const firstExposureIdentity = chainIdentity(exposure);
+    expect(await runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot])).toBe(0);
+    expect(chainIdentity(readChainArtifact(join(recoveryRoot, "first-exposure.json")))).toBe(firstExposureIdentity);
+    const reopened = readChainArtifact(exposure.replay_path) as typeof replay;
+    expect(reopened.rows[0]?.response?.unproved_computations).toEqual(recall?.unproved_computations);
   } else {
     expect(answers).toHaveLength(1);
     expect(answers.some(({ proof, node }) => {
