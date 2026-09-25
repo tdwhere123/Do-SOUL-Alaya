@@ -23,8 +23,7 @@ import {
   type FieldEngineState
 } from "../conditional-field/engine/field-engine.js";
 import { adjacencyKindsFor } from "../conditional-field/engine/path-composition-adjacency.js";
-import { runtimeProgram, seedProgramStates } from "../conditional-field/engine/path-composition-seed.js";
-import { compileProgramAutomaton } from "../conditional-field/engine/program-automaton.js";
+import { seedProgramStates } from "../conditional-field/engine/path-composition-seed.js";
 import { hasOpenPairs, routingOverlayKinds } from "../conditional-field/engine/path-routing.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
 import { ObservedSourceFacts } from "./observed-source-facts.js";
@@ -56,7 +55,6 @@ export type ObserveFieldInput = Readonly<{
   readonly model_id?: string;
   readonly expected_model_id?: string;
   readonly cost?: RequestCostLedger;
-  readonly observation_order?: "state_guided";
 }>;
 
 const MAX_FINALIZATION_MEMORY_BYTES = 65_536;
@@ -158,30 +156,11 @@ function observeWithinMemory(
     ),
     ...(interpretation.view.claim_demands ?? []).map((demand) => demand.proposition_kind)
   ])];
-  let demandAutomaton: ReturnType<typeof compileProgramAutomaton> | undefined;
-  let demandBytes = 0;
-  if (input.observation_order === "state_guided") {
-    const program = runtimeProgram(interpretation.program);
-    if (program !== "empty" && program !== "epsilon") {
-      const programBytes = Buffer.byteLength(JSON.stringify(program), "utf8");
-      const compileWork = 1 + Math.ceil(programBytes / 16);
-      const reservedBytes = 1152 + programBytes * 8;
-      if (state.remaining_exploration > compileWork && state.remaining_memory_bytes >= reservedBytes) {
-        demandAutomaton = compileProgramAutomaton(program);
-        demandBytes = reservedBytes;
-        input.cost?.add("adjacency", { joins: compileWork, charged_retained_bytes: demandBytes });
-        state = { ...state, remaining_exploration: state.remaining_exploration - compileWork,
-          remaining_memory_bytes: state.remaining_memory_bytes - demandBytes };
-      }
-    }
-  }
   if (hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) state = reopenAdjacency(state);
-  const observed = runObservationRounds({ state, interpretation, input: observedInput, lease, cursors, pairProgress,
+  return runObservationRounds({ state, interpretation, input: observedInput, lease, cursors, pairProgress,
     subjects, relationRows, observedAt, sourceFacts, memoryBox, predicates, seedUnitCost,
     storedKindsOpen: storedKinds.open, pairIndex: state.pair_scan_offset, unresolvedGuard, missingMeasurement,
-    sourceFamilyUnavailable: false, demandAutomaton });
-  return demandBytes === 0 ? observed : { ...observed,
-    remaining_memory_bytes: observed.remaining_memory_bytes + demandBytes };
+    sourceFamilyUnavailable: false });
 }
 
 function startObservedField(

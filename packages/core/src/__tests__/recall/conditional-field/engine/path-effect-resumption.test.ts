@@ -74,9 +74,7 @@ describe("bounded path effect continuation", () => {
     expect(complete.effects.flatMap(effect => effect.transition === undefined ? [] : [productSubjectId(effect.transition.to)])).toEqual(["b"]);
   });
 
-  it.each([
-    ["seed", undefined], ["seed", "state_guided"], ["facet", undefined], ["facet", "state_guided"]
-  ] as const)("re-fires an already observed row after a later %s changes its semantic input with %s order", (delta, observationOrder) => {
+  it.each(["seed", "facet"])("re-fires an already observed row after a later %s changes its semantic input", (delta) => {
     const { interpretation, state } = setup(relation("p"));
     let nativeRows = 0;
     const readers: ObserverReaders = {
@@ -91,8 +89,7 @@ describe("bounded path effect continuation", () => {
       }
     };
     const request = { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers,
-      authorized_scopes: null, budget: defaultBudget({ work_units: 10000, memory_bytes: 1000000 }),
-      ...(observationOrder === undefined ? {} : { observation_order: observationOrder }) };
+      authorized_scopes: null, budget: defaultBudget({ work_units: 10000, memory_bytes: 1000000 }) };
     const observed = observeField(interpretation, { ...request, resume_field: state });
     expect(observed.pending_path_effects).toBeUndefined();
     expect(nativeRows).toBe(1);

@@ -1,6 +1,4 @@
-import { productEndpointId, type ProductStateKey } from "@do-soul/alaya-protocol";
 import { type AdjacencyRow, type NamedKindOverlay } from "./path-matching.js";
-import type { ProgramAutomaton } from "./program-automaton.js";
 import { ObservationSubjects } from "./observation-frontier.js";
 
 export type RoutingDiscovery = Readonly<{
@@ -61,36 +59,6 @@ export function mergeDiscoveries(
 
 export function pairKey(subject: string, predicate: string): string {
   return `${subject}\0${predicate}`;
-}
-
-// This only changes request order. The ordinary pair scan remains responsible
-// for complete observation, including independent seeds and later states.
-export function nextStateDemandedPair(
-  states: Readonly<{ readonly length: number; at(index: number): ProductStateKey | undefined }>,
-  automaton: ProgramAutomaton,
-  subjects: ReadonlySet<string>,
-  predicates: readonly string[],
-  pairProgress: Readonly<{ has(id: string): boolean }>
-): Readonly<{ readonly pair?: Readonly<{ subject: string; predicate: string }>; readonly work: number }> {
-  let work = 0;
-  for (let index = states.length - 1; index >= 0; index -= 1) {
-    const state = states.at(index)!;
-    const subject = productEndpointId(state);
-    work += 1;
-    if (!subjects.has(subject)) continue;
-    for (const advance of automaton.advances) {
-      work += 1;
-      if (advance.from !== state.program_state) continue;
-      const predicate = advance.relation.relation_kind;
-      work += predicates.length;
-      if (!predicates.includes(predicate)) continue;
-      work += 1;
-      if (!pairProgress.has(`${pairKey(subject, predicate)}:done`)) {
-        return { pair: { subject, predicate }, work };
-      }
-    }
-  }
-  return { work };
 }
 
 export function nextAdjacencyPair(

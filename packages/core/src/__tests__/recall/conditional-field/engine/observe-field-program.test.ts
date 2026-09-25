@@ -42,18 +42,13 @@ describe("observeField program-state stepping", () => {
     expect(grade(reversed, "end", "accepting")).toBe(0);
     expect(bestGrade(reversed, "seed")).toBe(1000);
 
-    const blockedQuery = interpretation({
+    const blocked = observeField(interpretation({
       schema_version: 1,
       kind: "sequence",
       steps: [relation("observed_log", "s", "m", "false"), relation("config_direct", "m", "e")]
-    });
-    const blocked = observeField(blockedQuery, input());
-    const guidedBlocked = observeField(blockedQuery, { ...input(), observation_order: "state_guided" });
+    }), input());
     expect(grade(blocked, "end", "accepting")).toBe(0);
     expect(bestGrade(blocked, "middle")).toBe(0);
-    expect(grade(guidedBlocked, "end", "accepting")).toBe(0);
-    expect(bestGrade(guidedBlocked, "middle")).toBe(0);
-    expect(guidedBlocked.residuals).toEqual(blocked.residuals);
 
     const incompleteAnd = observeField(interpretation({
       schema_version: 1,
