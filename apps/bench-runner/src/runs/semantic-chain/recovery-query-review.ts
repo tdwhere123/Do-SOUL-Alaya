@@ -28,21 +28,22 @@ function originalQuery(root: string) {
 export function prepareRecoveryQueryReview(rootInput: string) {
   const root = resolve(rootInput);
   reserveRecoveryRead(root, "prepare original-only Q review");
-  const { plan, query, settled } = originalQuery(root);
+  const { plan, query, settled, window } = originalQuery(root);
   const revision = prepareRetainedSemanticProposalRevision({ workset: plan.config.query_workset,
     parentCacheRoot: plan.config.query_cache_root, maxOutputTokens: plan.config.max_output_tokens,
     itemIndex: 0, reviewComments: [] });
   const item = plan.config.query_workset.items[0] as Record<string, unknown>;
   const workset = parseSemanticProposalWorkset({ ...plan.config.query_workset,
     revision_parent_cache_root: plan.config.query_cache_root, items: [{ ...item, revision }] });
-  const path = join(root, "query-review-workset.json"), cacheRoot = join(root, "query-review-cache");
+  const path = join(root, "query-review-workset.json"), cacheRoot = window.query_review_cache_root;
   reserveRecoveryHostEffect(root, "Q-review-workset", chainIdentity({ workset,
     original: query.query_key, qualified: settled.publication_identity }),
     readChainArtifact(join(root, "query-review-binding.json")) !== undefined);
   writeChainJson(path, workset);
   writeChainArtifact(join(root, "query-review-binding.json"), {
     original_query_key: query.query_key, qualified_snapshot_identity: settled.publication_identity,
-    workset_identity: chainIdentity(workset), parent_raw_sha256: revision.previous_response_sha256
+    workset_identity: chainIdentity(workset), parent_raw_sha256: revision.previous_response_sha256,
+    child_cache_root: cacheRoot
   });
   return { workset_path: path, workset_identity: chainIdentity(workset), child_cache_root: cacheRoot };
 }
@@ -51,15 +52,17 @@ export function prepareRecoveryQueryReview(rootInput: string) {
 function currentRecoveryQueryReview(rootInput: string) {
   const root = resolve(rootInput);
   reserveRecoveryRead(root, "admit Q review physical child");
-  const { plan, query, settled } = originalQuery(root);
+  const { plan, query, settled, window } = originalQuery(root);
   const workset = parseSemanticProposalWorkset(JSON.parse(readBoundedCanonicalUtf8Artifact({
     path: join(root, "query-review-workset.json"), maxBytes: 32 * 1024 * 1024, label: "Q review workset" })));
   const binding = readChainArtifact(join(root, "query-review-binding.json")) as {
-    original_query_key?: string; qualified_snapshot_identity?: string; workset_identity?: string } | undefined;
+    original_query_key?: string; qualified_snapshot_identity?: string; workset_identity?: string;
+    child_cache_root?: string } | undefined;
   if (binding?.original_query_key !== query.query_key ||
       binding.qualified_snapshot_identity !== settled.publication_identity ||
-      binding.workset_identity !== chainIdentity(workset)) throw new AlayaError("CONFLICT", "Q review workset changed");
-  const results = readSemanticChainProposalResults(workset, join(root, "query-review-cache"), plan.config.max_output_tokens);
+      binding.workset_identity !== chainIdentity(workset) ||
+      binding.child_cache_root !== window.query_review_cache_root) throw new AlayaError("CONFLICT", "Q review workset or physical owner changed");
+  const results = readSemanticChainProposalResults(workset, window.query_review_cache_root, plan.config.max_output_tokens);
   if (results.length !== 1) throw new AlayaError("CONFLICT", "Q review child denominator changed");
   const row = results[0]!;
   if (row.shard === undefined || row.status === "unattempted" || row.status === "pending" ||
@@ -74,7 +77,7 @@ function currentRecoveryQueryReview(rootInput: string) {
     active_query: child ?? query.query_semantics,
     active_query_origin: child === undefined ? "original" : "admitted_child",
     changed: child !== undefined && canonicalJson(child) !== canonicalJson(query.query_semantics) };
-  return { result, workset, cacheRoot: join(root, "query-review-cache"), plan, query };
+  return { result, workset, cacheRoot: window.query_review_cache_root, plan, query };
 }
 
 export function settleRecoveryQueryReview(rootInput: string) {

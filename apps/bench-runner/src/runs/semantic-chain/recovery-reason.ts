@@ -7,7 +7,7 @@ import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, withSemantic
   writeChainArtifact } from "./contract.js";
 import { parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { admitInitialQualified } from "./recovery-publication.js";
+import { admitInitialQualified, initialSourcePhysicalOwner } from "./recovery-publication.js";
 import { reserveRecoveryEffect } from "./recovery-window.js";
 import { SourceSemanticReasoningResultSchema } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
@@ -35,15 +35,17 @@ function recoveryNomination(root: string, reason: { identity?: string; qualified
     return source === undefined ? [] : [{ source, attention }];
   });
   const nominated = candidates.find(row => !row.source.complete) ?? candidates[0];
-  const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path: settled.source_preflight_path, maxBytes: 32 * 1024 * 1024, label: "initial H parent preflight" })));
   const eligible = window.window.filter(source => {
     if (settled.descriptor_export.some(row => row.source_id === source.source_id &&
         row.source_version === source.source_version && row.record_id === source.record_id)) return true;
-    const parent = preflight.ready_requests.find(row => row.key === source.initial_key);
-    if (parent === undefined) return false;
     try {
-      readCompleteRetainedSourceResponse({ cacheRoot: settled.source_cache_root, preflight, line: parent });
+      if (source.initial_key === null) return false;
+      const physical = initialSourcePhysicalOwner(settled, source.initial_key);
+      const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
+        path: physical.preflightPath, maxBytes: 32 * 1024 * 1024, label: "initial H parent preflight" })));
+      const parent = preflight.ready_requests.find(row => row.key === source.initial_key);
+      if (parent === undefined) return false;
+      readCompleteRetainedSourceResponse({ cacheRoot: physical.cacheRoot, preflight, line: parent });
       return true;
     } catch { return false; }
   });

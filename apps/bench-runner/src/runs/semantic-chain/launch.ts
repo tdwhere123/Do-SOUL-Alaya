@@ -28,7 +28,8 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     const [operation, ...rest] = args;
     const flags = new Map<string, string>();
     const allowed = new Set(["--root", "--config", "--replay", "--gold", "--evaluator-root", "--arm", "--out", "--leaf-trials",
-      "--population", "--source-preflight", "--source-cache-root", "--recorded-at", "--producer-commit"]);
+      "--population", "--source-preflight", "--source-cache-root", "--source-owners",
+      "--source-physical-preflight", "--recorded-at", "--producer-commit"]);
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
       if (!allowed.has(key) || flags.has(key) || value === undefined) throw new AlayaError("VALIDATION", "invalid semantic chain arguments");
@@ -43,7 +44,8 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     else if (operation === "recover-freeze") result = await freezeNativeRecoveryWindow(json(required("--config")), required("--root"));
     else if (operation === "recover-publish-initial") result = await publishInitialRecoverySemantics({
       root: required("--root"), sourcePreflightPath: required("--source-preflight"),
-      sourceCacheRoot: required("--source-cache-root") });
+      sourceCacheRoot: required("--source-cache-root"),
+      ...(flags.get("--source-owners") === undefined ? {} : { sourceOwnersPath: flags.get("--source-owners")! }) });
     else if (operation === "recover-prepare-initial-c") result = prepareInitialRecoveryCorrespondence(required("--root"));
     else if (operation === "recover-prepare-final-c") result = prepareFinalRecoveryCorrespondence(required("--root"));
     else if (operation === "recover-reason-initial") result = await reasonInitialRecovery(required("--root"));
@@ -53,7 +55,9 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     else if (operation === "recover-prepare-h-revision") result = prepareRecoverySourceRevision(required("--root"));
     else if (operation === "recover-publish-final") result = await publishFinalRecoverySemantics({
       root: required("--root"), childPreflightPath: required("--source-preflight"),
-      childCacheRoot: required("--source-cache-root") });
+      childCacheRoot: required("--source-cache-root"),
+      ...(flags.get("--source-physical-preflight") === undefined ? {} : {
+        childPhysicalPreflightPath: flags.get("--source-physical-preflight")! }) });
     else if (operation === "recover-final-deliver") result = await deliverFinalRecoveryFirstExposure(required("--root"));
     else if (operation === "prepare") result = await prepareSemanticChain(json(required("--config")), required("--root"));
     else if (operation === "bind-lazy") result = await writeDirectLazyConfig({ root: required("--root"),

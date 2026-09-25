@@ -8,7 +8,7 @@ import { censusNativeSourceRecords } from "../snapshot/source-records/census.js"
 import { nativeSourceOccurrenceId, nativeSourceRequestInventory } from "../extraction/fill/source-request-workset.js";
 import { parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "./contract.js";
-import { admitInitialQualified } from "./recovery-publication.js";
+import { admitInitialQualified, initialSourcePhysicalOwner } from "./recovery-publication.js";
 import { reserveRecoveryRead, reserveRecoveryHostEffect } from "./recovery-allowance.js";
 
 /** The unchanged complete source and its physical parent define exactly one child H request. */
@@ -29,8 +29,10 @@ export function prepareRecoverySourceRevision(rootInput: string) {
       prepared.content_digest !== source.content_digest) {
     throw new AlayaError("CONFLICT", "H revision source catalog changed");
   }
+  if (source.initial_key === null) throw new AlayaError("CONFLICT", "selected H source has no physical parent key");
+  const physicalOwner = initialSourcePhysicalOwner(settled, source.initial_key);
   const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path: settled.source_preflight_path, maxBytes: 32 * 1024 * 1024, label: "H parent preflight" })));
+    path: physicalOwner.preflightPath, maxBytes: 32 * 1024 * 1024, label: "H parent preflight" })));
   const parentLine = preflight.ready_requests.find(line => line.key === source.initial_key);
   if (parentLine === undefined) throw new AlayaError("CONFLICT", "H revision lacks selected physical parent key");
   const parent = parseSourceSemanticRequest(JSON.parse(parentLine.userPrompt));
@@ -41,7 +43,7 @@ export function prepareRecoverySourceRevision(rootInput: string) {
         assertion_id: row.assertion_id, text: row.text })))) {
     throw new AlayaError("CONFLICT", "fresh native source catalog differs from unchanged H request");
   }
-  const physical = readCompleteRetainedSourceResponse({ cacheRoot: settled.source_cache_root,
+  const physical = readCompleteRetainedSourceResponse({ cacheRoot: physicalOwner.cacheRoot,
     preflight, line: parentLine });
   const review = [] as { assertion_ids: number[]; comment: string }[];
   for (let offset = 0; offset < catalogRows.length; offset += 8) review.push({
@@ -75,7 +77,9 @@ export function prepareRecoverySourceRevision(rootInput: string) {
   const result = { contract: "source-semantic-source-revision-v1", source_read_identity: read.identity,
     qualified_snapshot_identity: settled.publication_identity,
     source_id: source.source_id, source_version: source.source_version, record_id: source.record_id,
-    parent_key: parentLine.key, child_key: child.line.key, selected_occurrence: occurrenceId,
+    parent_key: parentLine.key, parent_cache_root: physicalOwner.cacheRoot,
+    parent_preflight_path: physicalOwner.preflightPath,
+    child_key: child.line.key, selected_occurrence: occurrenceId,
     generation_path: generationPath, generation_identity: chainIdentity(generation),
     child_request_sha256: child.line.requestSha256, parent_response_sha256: revision.previous_response_sha256 };
   writeChainArtifact(join(root, "source-revision.json"), result);

@@ -404,7 +404,7 @@ it("composes earlier and current owning roots for one original question with uns
   expect(sameOccurrence.planned_requests[0]?.unitKeys).toEqual(first.preflight.planned_requests[0]?.unitKeys);
   writeFileSync(duplicatePath, JSON.stringify(sameOccurrence));
   await expect(prepareSourcePublicationAssociations(population, duplicateOwner, rejected))
-    .rejects.toThrow("repeat a source assignment");
+    .rejects.toThrow("retained source overlap lacks a complete immediate parent");
   expect(existsSync(rejected)).toBe(false);
   renameSync(alphaPath, foreignPath);
   const displaced = await prepareSourcePublicationAssociations(population, owners, join(cacheRoot, "displaced.json"));

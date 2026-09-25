@@ -9,7 +9,11 @@ import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { nativeSourceRequestInventory } from "../extraction/fill/source-request-workset.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from
   "../extraction/request-artifact.js";
+import type { SourceRequestLine } from "../extraction/request-artifact.js";
 import { inspectCachedSourceSemantic } from "../extraction/cache/source-semantic-artifact.js";
+import { readCompletePhysicalSourceResponseForRequest } from "../extraction/cache/source-interactive-binding.js";
+import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
+import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { EXTRACTION_REQUEST_PROFILES } from "../extraction/request-profile.js";
 import { SemanticChainConfigSchema, SemanticChainPlanSchema, chainIdentity, readChainArtifact,
   writeChainArtifact } from "./contract.js";
@@ -20,10 +24,14 @@ import { RecoveryAllowanceSchema, freezeRecoveryAllowance, recoveryAllowanceIden
 import { recordRecoveryNativeWork } from "./recovery-allowance.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
+const PhysicalSourceOwnerSchema = z.object({ key: Digest, cache_root: z.string().min(1),
+  physical_preflight_path: z.string().min(1) }).strict();
 const RecoveryFreezeInputSchema = z.object({
   native_snapshot_path: z.string().min(1), population: z.string().min(1),
   source_model: z.string().min(1), source_request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
   source_cache_root: z.string().min(1), recorded_at: z.string().datetime(),
+  query_review_cache_root: z.string().min(1).optional(),
+  initial_h_physical_owners: z.array(PhysicalSourceOwnerSchema).max(10).optional(),
   producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
   allowance: RecoveryAllowanceSchema,
   open_semantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional(),
@@ -44,6 +52,8 @@ const RecoveryWindowSchema = z.object({ contract: z.literal("source-semantic-rec
   query_key: Digest, query_state_identity: Digest, initial_access: SourceSemanticAccessReceiptSchema,
   initial_discovery_work: z.unknown(), initial_host_elapsed_ms: z.number().nonnegative(),
   source_cache_root: z.string(), population: z.string(), source_model: z.string(),
+  query_review_cache_root: z.string(),
+  initial_h_physical_owners: z.array(PhysicalSourceOwnerSchema).max(10),
   source_request_profile: z.enum(EXTRACTION_REQUEST_PROFILES), open_semantics: z.unknown(), recorded_at: z.string().datetime(),
   producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
   allowance_identity: Digest,
@@ -81,6 +91,18 @@ export function reserveRecoveryEffect(path: string, identity: string, completed:
 
 type FreezeInput = z.infer<typeof RecoveryFreezeInputSchema>;
 
+function admitPhysicalSourceOwner(owner: z.infer<typeof PhysicalSourceOwnerSchema>,
+  line: SourceRequestLine, model: string, requestProfile: string): void {
+  const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path: owner.physical_preflight_path, maxBytes: 32 * 1024 * 1024, label: "original H physical preflight" })));
+  if (preflight.config.model !== model || preflight.config.requestProfile !== requestProfile ||
+      !preflight.ready_requests.some(row => row.key === owner.key)) {
+    throw new AlayaError("CONFLICT", "shared H physical owner differs from the frozen exact request");
+  }
+  readCompletePhysicalSourceResponseForRequest({ cacheRoot: owner.cache_root,
+    physicalPreflight: preflight, currentLine: line });
+}
+
 function admitPreviouslyFrozenWindow(root: string, input: FreezeInput, inputIdentity: string,
   nativeSnapshot: ReturnType<typeof readVerifiedNativeSourceSnapshot>,
   census: ReturnType<typeof censusNativeSourceRecords>, rawPath: string): RecoveryWindow | undefined {
@@ -111,7 +133,12 @@ function projectInitialWindow(input: FreezeInput, census: ReturnType<typeof cens
   const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
     model: input.source_model, requestProfile: input.source_request_profile,
     sourcePacking: "complete-source", openSemantics: generation });
-  const requestByCorpus = new Map(inventory.requests.map(row => [row.sourceCorpus, row.line.key]));
+  const requestByCorpus = new Map(inventory.requests.map(row => [row.sourceCorpus, row.line]));
+  const physicalOwners = (input.initial_h_physical_owners ?? []).map(row => ({ ...row,
+    cache_root: resolve(row.cache_root), physical_preflight_path: resolve(row.physical_preflight_path) }));
+  const physicalByKey = new Map(physicalOwners.map(row => [row.key, row]));
+  if (physicalByKey.size !== physicalOwners.length) throw new AlayaError("CONFLICT", "frozen H physical owners repeat a key");
+  const physicalChecked = new Set<string>();
   const seen = new Set<string>();
   const window = access.source_candidates.slice(0, 10).map((candidate, index) => {
     const source = sourceById.get(candidate.source_id);
@@ -123,9 +150,18 @@ function projectInitialWindow(input: FreezeInput, census: ReturnType<typeof cens
       throw new AlayaError("CONFLICT", "initial recovery window contains stale or foreign source");
     }
     seen.add(candidate.record_id);
-    const key = requestByCorpus.get(source.content_bytes) ?? null;
-    const cache = key === null ? "unsupported" : inspectCachedSourceSemantic(input.source_cache_root,
+    const line = requestByCorpus.get(source.content_bytes);
+    const key = line?.key ?? null;
+    const owner = key === null ? undefined : physicalByKey.get(key);
+    const cache = key === null ? "unsupported" : inspectCachedSourceSemantic(owner?.cache_root ?? input.source_cache_root,
       key, input.source_model, input.source_request_profile).status;
+    if (owner !== undefined && !physicalChecked.has(key!)) {
+      if (cache !== "hit" || line === undefined) {
+        throw new AlayaError("CONFLICT", "shared H physical owner is not a complete current cache hit");
+      }
+      admitPhysicalSourceOwner(owner, line, input.source_model, input.source_request_profile);
+      physicalChecked.add(key!);
+    }
     return WindowSourceSchema.parse({ rank: index + 1, source_id: source.source_id,
       source_version: source.source_version, record_id: candidate.record_id,
       content_digest: source.content_digest, corpus_digest: source.corpus_digest,
@@ -136,7 +172,10 @@ function projectInitialWindow(input: FreezeInput, census: ReturnType<typeof cens
   });
   const selected = [...new Set(window.filter(row => row.initial_cache_status === "missing" && row.initial_key !== null)
     .map(row => row.initial_key!))].sort();
-  return { window, selected, generation };
+  if (physicalChecked.size !== physicalOwners.length) {
+    throw new AlayaError("CONFLICT", "frozen H physical owner is outside the first native source window");
+  }
+  return { window, selected, generation, physicalOwners };
 }
 
 /** The raw publication and one native page are separate, durable actions before H funding. */
@@ -197,7 +236,7 @@ export async function freezeNativeRecoveryWindow(value: unknown, rootInput: stri
   if (first.access.trace.kind !== "preparation_page" || first.access.trace.source_offset !== 0) {
     throw new AlayaError("CONFLICT", "recovery native page differs from the bounded initial window");
   }
-  const { window, selected, generation } = projectInitialWindow(input, census, report, first.access);
+  const { window, selected, generation, physicalOwners } = projectInitialWindow(input, census, report, first.access);
   const initialHStage = { contract: "source-semantic-recovery-initial-H-stage-v1",
     input_identity: inputIdentity, source_census_identity: census.dataset_sha256,
     selected_keys: selected, model: input.source_model, request_profile: input.source_request_profile };
@@ -214,6 +253,8 @@ export async function freezeNativeRecoveryWindow(value: unknown, rootInput: stri
     query_state_identity: plan.input_identity, initial_access: first.access,
     initial_discovery_work: first.work, initial_host_elapsed_ms: query.initial_discovery_elapsed_ms,
     source_cache_root: resolve(input.source_cache_root), population: input.population,
+    query_review_cache_root: resolve(input.query_review_cache_root ?? join(root, "query-review-cache")),
+    initial_h_physical_owners: physicalOwners,
     source_model: input.source_model, source_request_profile: input.source_request_profile,
     open_semantics: generation, recorded_at: input.recorded_at, producer_commit: input.producer_commit,
     allowance_identity: recoveryAllowanceIdentity(root),
@@ -238,6 +279,19 @@ export function admitRecoveryWindow(rootInput: string): RecoveryWindow {
     model?: string; request_profile?: string } | undefined;
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(window.initial_chain_root, "prepare.json")));
   verifySemanticChainQueries(plan);
+  if (window.initial_h_physical_owners.length > 0) {
+    const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
+      model: window.source_model, requestProfile: window.source_request_profile,
+      sourcePacking: "complete-source", openSemantics: parseExtractionOpenSemanticsGeneration(window.open_semantics) });
+    for (const owner of window.initial_h_physical_owners) {
+      const line = inventory.requests.find(row => row.line.key === owner.key)?.line;
+      if (line === undefined || !window.window.some(row => row.initial_key === owner.key &&
+          row.initial_cache_status === "hit")) {
+        throw new AlayaError("CONFLICT", "shared H physical owner no longer belongs to the frozen source window");
+      }
+      admitPhysicalSourceOwner(owner, line, window.source_model, window.source_request_profile);
+    }
+  }
   const first = plan.queries[0]?.status === "blocked" ? undefined : plan.queries[0]?.discovery_trace[0];
   if (initialHStage?.input_identity !== window.input_identity ||
       initialHStage.source_census_identity !== window.source_census_identity ||

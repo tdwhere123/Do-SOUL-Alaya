@@ -5,7 +5,8 @@ import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { inspectCachedSourceSemantic } from "../extraction/cache/source-semantic-artifact.js";
-import { readCompleteRetainedSourceResponse } from "../extraction/cache/source-interactive-binding.js";
+import { readCompletePhysicalSourceResponseForRequest,
+  readCompleteRetainedSourceResponse } from "../extraction/cache/source-interactive-binding.js";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
 import { parseExtractionOpenSemanticsGeneration, SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
   SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION } from "../extraction/request-artifact.js";
@@ -15,7 +16,8 @@ import { prepareSourcePublicationAssociations } from "../snapshot/source-records
 import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport,
   type SourcePublicationAssociation } from "../snapshot/source-records/publish.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "./contract.js";
-import { admitInitialQualified } from "./recovery-publication.js";
+import { admitInitialQualified, initialSourceAssociationOwners,
+  initialSourcePhysicalOwner } from "./recovery-publication.js";
 import { reserveRecoveryEffect } from "./recovery-window.js";
 import { reserveRecoveryRead, reserveRecoveryHostEffect } from "./recovery-allowance.js";
 import type { RecoveryWindow } from "./recovery-window.js";
@@ -26,6 +28,7 @@ const FinalQualifiedSchema = z.object({ contract: z.literal("source-semantic-fin
   source_outcome: z.enum(["child_published", "initial_reused_terminal_child"]),
   initial_publication_identity: z.string(), revision_identity: z.string(),
   source_preflight_identity: z.string(), source_preflight_path: z.string(), source_cache_root: z.string(),
+  source_physical_preflight_identity: z.string(), source_physical_preflight_path: z.string(),
   association_identity: z.string(), snapshot_path: z.string(), snapshot_sha256: z.string(),
   publication_identity: z.string(), active_selected_keys: z.array(z.object({ source_id: z.string(),
     source_version: z.string(), record_id: z.string(), generation_key: z.string() }).strict()),
@@ -37,8 +40,10 @@ const FinalQualifiedSchema = z.object({ contract: z.literal("source-semantic-fin
 
 /** The physical raw parser owns terminal meaning; a missing/corrupt admitted cache cannot turn interpreted H into rejection. */
 function terminalChildInterpreted(window: RecoveryWindow, source: RecoveryWindow["window"][number],
-  preflight: SourceSemanticInteractivePreflight, line: SourceRequestLine, cacheRoot: string): boolean {
-  const raw = readCompleteRetainedSourceResponse({ cacheRoot, preflight, line });
+  preflight: SourceSemanticInteractivePreflight, physicalPreflight: SourceSemanticInteractivePreflight,
+  line: SourceRequestLine, cacheRoot: string): boolean {
+  const raw = readCompletePhysicalSourceResponseForRequest({ cacheRoot, currentPreflight: preflight,
+    physicalPreflight, currentLine: line });
   const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
   const occurrence = censusNativeSourceRecords({ population: window.population,
     snapshotPath: window.native_snapshot_path }).records.find(row => row.source_id === source.source_id &&
@@ -71,12 +76,16 @@ export function admitFinalRecoveryQualified(rootInput: string) {
   const revision = readChainArtifact(join(root, "source-revision.json"));
   const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
     path: final.source_preflight_path, maxBytes: 32 * 1024 * 1024, label: "retained H child preflight" })));
+  const physicalPreflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path: final.source_physical_preflight_path, maxBytes: 32 * 1024 * 1024,
+    label: "retained H child physical preflight" })));
   const childKey = (revision as { child_key?: string } | undefined)?.child_key;
   const childLine = preflight.ready_requests.find(row => row.key === childKey);
   const associations = readChainArtifact(join(root, "final-associations.json"));
   if (revision === undefined || childLine === undefined ||
       final.revision_identity !== chainIdentity(revision) ||
       final.source_preflight_identity !== chainIdentity(preflight) ||
+      final.source_physical_preflight_identity !== chainIdentity(physicalPreflight) ||
       (final.source_outcome === "child_published" &&
         (associations === undefined || final.association_identity !== chainIdentity(associations))) ||
       (final.source_outcome === "initial_reused_terminal_child" &&
@@ -87,7 +96,15 @@ export function admitFinalRecoveryQualified(rootInput: string) {
     row.source_version === (revision as { source_version?: string }).source_version &&
     row.record_id === (revision as { record_id?: string }).record_id);
   if (selected === undefined) throw new AlayaError("CONFLICT", "H child lost its frozen source tuple");
-  const childInterpreted = terminalChildInterpreted(window, selected, preflight, childLine, final.source_cache_root);
+  const retainedRevision = revision as { parent_key?: string; parent_cache_root?: string;
+    parent_preflight_path?: string };
+  const parentOwner = initialSourcePhysicalOwner(settled, retainedRevision.parent_key ?? "");
+  if (retainedRevision.parent_cache_root !== parentOwner.cacheRoot ||
+      retainedRevision.parent_preflight_path !== parentOwner.preflightPath) {
+    throw new AlayaError("CONFLICT", "final H child lost its immediate physical parent");
+  }
+  const childInterpreted = terminalChildInterpreted(window, selected, preflight,
+    physicalPreflight, childLine, final.source_cache_root);
   if (final.source_outcome === "child_published" ? !childInterpreted : childInterpreted) {
     throw new AlayaError("CONFLICT", "final H child disposition changed after settlement");
   }
@@ -111,15 +128,18 @@ export function admitFinalRecoveryQualified(rootInput: string) {
 
 type FinalPublicationInput = Readonly<{
   root: string; childPreflightPath: string; childCacheRoot: string;
+  childPhysicalPreflightPath?: string;
 }>;
 
 function admitFinalChildForPublication(input: FinalPublicationInput) {
   const root = resolve(input.root);
-  reserveRecoveryRead(root, "publish final H inputs", [input.childPreflightPath]);
+  reserveRecoveryRead(root, "publish final H inputs", [input.childPreflightPath,
+    ...(input.childPhysicalPreflightPath === undefined ? [] : [input.childPhysicalPreflightPath])]);
   const { window, settled, report: initialReport } = admitInitialQualified(root);
   const revision = readChainArtifact(join(root, "source-revision.json")) as {
     source_id?: string; source_version?: string; record_id?: string;
-    parent_key?: string; child_key?: string; generation_path?: string } | undefined;
+    parent_key?: string; parent_cache_root?: string; parent_preflight_path?: string;
+    child_key?: string; generation_path?: string } | undefined;
   const selected = window.window.find(row => row.source_id === revision?.source_id &&
     row.source_version === revision?.source_version && row.record_id === revision?.record_id &&
     row.initial_key === revision?.parent_key);
@@ -129,41 +149,54 @@ function admitFinalChildForPublication(input: FinalPublicationInput) {
   const generation = parseExtractionOpenSemanticsGeneration(JSON.parse(readBoundedCanonicalUtf8Artifact({
     path: revision.generation_path, maxBytes: 1_000_000, label: "source revision generation" })));
   const preflightPath = resolve(input.childPreflightPath), cacheRoot = resolve(input.childCacheRoot);
+  const physicalPreflightPath = resolve(input.childPhysicalPreflightPath ?? input.childPreflightPath);
   const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
     path: preflightPath, maxBytes: 32 * 1024 * 1024, label: "H child preflight" })));
+  const physicalPreflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path: physicalPreflightPath, maxBytes: 32 * 1024 * 1024, label: "H child physical preflight" })));
   if (preflight.config.model !== window.source_model ||
       preflight.config.requestProfile !== window.source_request_profile ||
       preflight.dataset_revision !== window.source_census_identity ||
       canonicalJson(parseExtractionOpenSemanticsGeneration(preflight.config.openSemantics)) !== canonicalJson(generation) ||
       preflight.maximum_attempts_per_key !== 1 || preflight.ready_requests.length !== 1 ||
-      preflight.ready_requests[0]?.key !== revision.child_key) {
+      preflight.ready_requests[0]?.key !== revision.child_key ||
+      preflight.selected_requests !== (preflightPath === physicalPreflightPath ? 1 : 0) ||
+      preflight.cached_requests !== (preflightPath === physicalPreflightPath ? 0 : 1)) {
     throw new AlayaError("CONFLICT", "H child preflight exceeds its one selected revised source key");
   }
   const childLine = preflight.ready_requests[0]!;
   const child = parseSourceSemanticRequest(JSON.parse(childLine.userPrompt));
+  const physicalOwner = initialSourcePhysicalOwner(settled, revision.parent_key!);
+  if (revision.parent_cache_root !== physicalOwner.cacheRoot ||
+      revision.parent_preflight_path !== physicalOwner.preflightPath) {
+    throw new AlayaError("CONFLICT", "H revision changed its immediate physical parent owner");
+  }
   const parentPreflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
-    path: settled.source_preflight_path, maxBytes: 32 * 1024 * 1024, label: "H parent preflight" })));
+    path: physicalOwner.preflightPath, maxBytes: 32 * 1024 * 1024, label: "H parent preflight" })));
   const parentLine = parentPreflight.ready_requests.find(row => row.key === revision.parent_key);
   if (parentLine === undefined || child.source_request.revision?.parent_request_json !== parentLine.userPrompt ||
       child.source_request.revision.previous_response !== readCompleteRetainedSourceResponse({
-        cacheRoot: settled.source_cache_root, preflight: parentPreflight, line: parentLine })) {
+        cacheRoot: physicalOwner.cacheRoot, preflight: parentPreflight, line: parentLine })) {
     throw new AlayaError("CONFLICT", "H child no longer follows its complete selected physical parent");
   }
-  const childInterpreted = terminalChildInterpreted(window, selected, preflight, childLine, cacheRoot);
+  const childInterpreted = terminalChildInterpreted(window, selected, preflight,
+    physicalPreflight, childLine, cacheRoot);
   return { root, window, settled, initialReport, revision, selected, generation,
-    preflightPath, cacheRoot, preflight, childInterpreted };
+    preflightPath, physicalPreflightPath, cacheRoot, preflight, physicalPreflight, childInterpreted };
 }
 
 /** Only the selected source takes its physical H child; the rest retain their original H keys. */
 export async function publishFinalRecoverySemantics(input: FinalPublicationInput) {
   const admitted = admitFinalChildForPublication(input);
   const { root, window, settled, initialReport, revision, selected, generation,
-    preflightPath, cacheRoot, preflight, childInterpreted } = admitted;
+    preflightPath, physicalPreflightPath, cacheRoot, preflight, physicalPreflight, childInterpreted } = admitted;
   const prior = readChainArtifact(join(root, "final-qualified.json"));
   if (prior !== undefined) {
     const final = admitFinalRecoveryQualified(root).final;
     if (final.source_preflight_path !== preflightPath || final.source_cache_root !== cacheRoot ||
+        final.source_physical_preflight_path !== physicalPreflightPath ||
         final.source_preflight_identity !== chainIdentity(preflight) ||
+        final.source_physical_preflight_identity !== chainIdentity(physicalPreflight) ||
         final.revision_identity !== chainIdentity(revision)) {
       throw new AlayaError("CONFLICT", "reopened final publication used a different H child authority");
     }
@@ -179,6 +212,8 @@ export async function publishFinalRecoverySemantics(input: FinalPublicationInput
       source_outcome: "initial_reused_terminal_child", initial_publication_identity: settled.publication_identity,
       revision_identity: chainIdentity(revision), source_preflight_identity: chainIdentity(preflight),
       source_preflight_path: preflightPath, source_cache_root: cacheRoot,
+      source_physical_preflight_path: physicalPreflightPath,
+      source_physical_preflight_identity: chainIdentity(physicalPreflight),
       association_identity: settled.association_identity, snapshot_path: settled.snapshot_path,
       snapshot_sha256: settled.snapshot_sha256, publication_identity: settled.publication_identity,
       active_selected_keys: activeSelected, descriptor_export: settled.descriptor_export });
@@ -190,9 +225,10 @@ export async function publishFinalRecoverySemantics(input: FinalPublicationInput
 
 async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChildForPublication>) {
   const { root, window, settled, initialReport, revision, selected, generation,
-    preflightPath, cacheRoot, preflight } = admitted;
-  const owners = [{ cacheRoot: settled.source_cache_root, retainedPreparationPath: settled.source_preflight_path },
-    { cacheRoot, retainedPreparationPath: preflightPath }];
+    preflightPath, physicalPreflightPath, cacheRoot, preflight, physicalPreflight } = admitted;
+  const owners = [...initialSourceAssociationOwners(settled.source_owners),
+    { cacheRoot, retainedPreparationPath: preflightPath,
+      ...(preflightPath === physicalPreflightPath ? {} : { physicalPreparationPath: physicalPreflightPath }) }];
   const associationsPath = join(root, "final-associations.json");
   const associationIdentity = chainIdentity({ window: chainIdentity(window), revision: chainIdentity(revision),
     owners: owners.map(row => ({ ...row })) });
@@ -230,7 +266,7 @@ async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChi
     descriptorExportSourceIds: window.window.map(row => row.source_id),
     populations: [{ name: window.population, nativeSnapshotPath: window.native_snapshot_path,
       model: window.source_model, requestProfile: window.source_request_profile,
-      cacheRoots: [settled.source_cache_root, cacheRoot], publicationAssociations: active }] });
+      cacheRoots: owners.map(row => row.cacheRoot), publicationAssociations: active }] });
   const report = readNativeSourcePublicationReport(snapshotPath, window.native_snapshot_path);
   const exported = report.sources.flatMap(source => source.correspondence_descriptor === undefined ? [] : [{
     source_id: source.source_id, source_version: source.source_version, record_id: source.record_id,
@@ -240,7 +276,9 @@ async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChi
     source_outcome: "child_published",
     initial_publication_identity: settled.publication_identity, revision_identity: chainIdentity(revision),
     source_preflight_identity: chainIdentity(preflight), source_preflight_path: preflightPath,
-    source_cache_root: cacheRoot, association_identity: chainIdentity(associations),
+    source_cache_root: cacheRoot, source_physical_preflight_path: physicalPreflightPath,
+    source_physical_preflight_identity: chainIdentity(physicalPreflight),
+    association_identity: chainIdentity(associations),
     snapshot_path: snapshotPath, snapshot_sha256: report.db_sha256,
     publication_identity: chainIdentity(report), active_selected_keys: activeSelected, descriptor_export: exported });
   writeChainArtifact(join(root, "final-qualified.json"), result);

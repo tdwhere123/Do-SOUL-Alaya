@@ -16,15 +16,16 @@ function obligationState(obligation: SourceSemanticLoweredObligation, state: Fie
   if (state.closure.observation === "unavailable") return "unavailable";
   if (state.closure.observation === "unknown" || state.closure.observation === "invalidated") return "unknown";
   const advances = state.compiled_automaton?.advances ?? [];
-  const matching = new Set<(typeof advances)[number]["relation"]>();
+  let relation: (typeof advances)[number]["relation"] | undefined;
   for (const advance of advances) {
     meter.charge(1, 0, "semantic attention automaton provenance");
     if (advance.relation.relation_kind === obligation.relation_kind &&
-        advance.relation.source_variable === obligation.source_variable) matching.add(advance.relation);
+        advance.relation.source_variable === obligation.source_variable) {
+      if (relation !== undefined && relation !== advance.relation) return "unknown";
+      relation = advance.relation;
+    }
   }
   // Repeated or renamed relations cannot be assigned to this Q occurrence.
-  if (matching.size > 1) return "unknown";
-  const relation = matching.values().next().value;
   if (relation === undefined) return "unobserved";
   let reached = false, open = false, empty = false, rejected = false, advanced = false;
   for (const live of state.seen_identities) {
