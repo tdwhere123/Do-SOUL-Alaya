@@ -12,7 +12,9 @@ import {
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 import { hasCompleteExtractionFillAuthority } from "./fill-authority.js";
 import { assertClaimedHistoricalKeyRawClosure } from "./manifest/substrate-key-raw-closure.js";
-import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import type { ExtractionFillVariant } from "./fill-window.js";
+import type { SourceCensusRecord } from "../../snapshot/source-records/census.js";
+import { nativeSourceRequestInventory } from "./source-request-workset.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
   assertExtractionFillComplete,
@@ -55,7 +57,8 @@ export interface PreparedExtractionFill {
   readonly unsupportedSourceOccurrences: number;
   readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
-  readonly variant: LongMemEvalVariant;
+  readonly nativeSourceRecords?: readonly SourceCensusRecord[];
+  readonly variant: ExtractionFillVariant;
   readonly windowOffset: number;
   readonly windowLimit: number;
   readonly questionBatchLimit?: number;
@@ -75,7 +78,8 @@ export interface InspectedExtractionFill {
   readonly unsupportedSourceOccurrences: number;
   readonly executionRequestedTurns: number;
   readonly datasetRevision: string;
-  readonly variant: LongMemEvalVariant;
+  readonly nativeSourceRecords?: readonly SourceCensusRecord[];
+  readonly variant: ExtractionFillVariant;
   readonly windowOffset: number;
   readonly windowLimit: number;
   readonly questionBatchLimit?: number;
@@ -122,6 +126,7 @@ function adoptInspectedExtractionFill(
     distinctExtractionTurns: inspected.distinctExtractionTurns,
     executionExtractionTurns: inspected.executionExtractionTurns,
     occurrenceExtractionTurns: inspected.occurrenceExtractionTurns,
+    nativeSourceRecords: inspected.nativeSourceRecords,
     requestedTurns: inspected.requestedTurns,
     sourceOccurrences: inspected.sourceOccurrences,
     unsupportedSourceOccurrences: inspected.unsupportedSourceOccurrences,
@@ -158,6 +163,7 @@ export async function inspectExtractionFillPreparation(
     distinctExtractionTurns: window.distinctExtractionTurns,
     executionExtractionTurns: window.executionExtractionTurns,
     occurrenceExtractionTurns: window.occurrenceExtractionTurns,
+    nativeSourceRecords: window.nativeSourceRecords,
     requestedTurns: window.requestedTurns,
     sourceOccurrences: window.windowTurnOccurrences,
     unsupportedSourceOccurrences: window.unsupportedSourceOccurrences,
@@ -209,6 +215,7 @@ export function pinInspectedExtractionFill(
     distinctExtractionTurns: inspected.distinctExtractionTurns,
     executionExtractionTurns: inspected.executionExtractionTurns,
     occurrenceExtractionTurns: inspected.occurrenceExtractionTurns,
+    nativeSourceRecords: inspected.nativeSourceRecords,
     requestedTurns: inspected.requestedTurns,
     sourceOccurrences: inspected.sourceOccurrences,
     unsupportedSourceOccurrences: inspected.unsupportedSourceOccurrences,
@@ -237,8 +244,12 @@ export function restoreInspectedExtractionFill(
 export function inspectFillWindow(
   cacheRoot: string,
   config: CompileSeedExtractionConfig,
-  extractionTurns: readonly LongMemEvalExtractionTurn[]
+  extractionTurns: readonly LongMemEvalExtractionTurn[],
+  nativeSourceRecords?: readonly SourceCensusRecord[],
+  datasetRevision?: string
 ): ExtractionFillCompletion {
+  const expectedRequestKeys = nativeSourceRecords === undefined ? undefined :
+    nativeSourceRequestInventory(nativeSourceRecords, datasetRevision!, config).requests.map(item => item.line.key);
   return inspectExtractionFillCompletion({
     cacheRoot,
     model: config.model,
@@ -247,7 +258,7 @@ export function inspectFillWindow(
     sourceInterpretationProfile: config.sourceInterpretationProfile,
     openSemantics: config.openSemantics,
     systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics),
-    extractionTurns
+    ...(expectedRequestKeys === undefined ? { extractionTurns } : { expectedRequestKeys })
   });
 }
 
@@ -272,13 +283,15 @@ async function inspectPreparedFillWindow(input: {
   readonly config: CompileSeedExtractionConfig;
   readonly expansion: PreparedExpansionFillAuthority | undefined;
 }) {
-  const window = await prepareExtractionFillWindow({ ...input.options, sourcePacking: input.config.sourcePacking, openSemantics: input.config.openSemantics !== undefined }, input.expansion);
+  const window = await prepareExtractionFillWindow({ ...input.options, config: input.config,
+    sourcePacking: input.config.sourcePacking, openSemantics: input.config.openSemantics !== undefined }, input.expansion);
   assertPreparationIdentityUnchanged(
     input.startingIdentity,
     readExtractionCacheManifestIdentity(input.cacheRoot)
   );
   const completion = inspectFillWindow(
-    input.cacheRoot, input.config, window.distinctExtractionTurns
+    input.cacheRoot, input.config, window.distinctExtractionTurns,
+    window.nativeSourceRecords, window.datasetRevision
   );
   if (input.expansion !== undefined) revalidateExpansionFillAuthority(input.expansion);
   assertDemandWindowMatchesSubstrate(input.options.ingestionMode, completion);
@@ -292,7 +305,7 @@ function preflightAndPinExtractionIdentity(input: {
   readonly distinctTurns: readonly string[];
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly log: (message: string) => void;
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
   readonly datasetRevision: string;
   readonly windowOffset: number;
   readonly windowLimit: number;

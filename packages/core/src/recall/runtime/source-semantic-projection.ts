@@ -7,6 +7,7 @@ import type { admitSourceSemanticCorrespondence } from "../conditional-field/que
 import type { SourceSemanticExecutionPlan } from "../conditional-field/query/compile-source-semantic-finite.js";
 import type { SourceSemanticPremisePopulation } from "./source-semantic-premises.js";
 import { deliverSourceSemanticProof } from "./source-semantic-delivery.js";
+import { sourceSemanticBranchAttention } from "./source-semantic-attention.js";
 
 export type SourceSemanticResultBody = Omit<SourceSemanticReasoningResult, "contract" | "semantic_status" | "conclusion_scope" | "world_claim">;
 
@@ -43,13 +44,15 @@ export function projectSourceSemanticState(input: Readonly<{
   if (index.entries.some((entry) => entry.interpretation_node?.packet_id !== admission.interpretation_id || entry.hypothesis_id !== admission.context_id)) {
     throw new CoreError("OBLIGATION_VIOLATION", "conditional result escaped its evaluation context");
   }
-  const { proofComplete, ...proof } = deliverSourceSemanticProof({ index, query: admission.query, population,
+  const { proofComplete, acceptedBranchIndices, ...proof } = deliverSourceSemanticProof({ index, query: admission.query, population,
     bindings: state.binding_contexts, meter, execution });
+  const attention = sourceSemanticBranchAttention(admission, execution, state, acceptedBranchIndices, meter);
   const complete = proofComplete && state.binding.solver_complete && state.closure.observation === "exhausted"
     && !state.memory_exhausted && state.remaining_work.length === 0 && index.continuation === null
     && Object.entries(index.completeness).every(([key, value]) => ["schema_version", "certificate_id", "interpretation_coverage"].includes(key)
       || value === "complete" || key === "observed_coverage" && value === "exhausted_empty");
   const body: SourceSemanticResultBody = { ...qualified, ...proof, completeness: index.completeness,
+    ...(attention === undefined ? {} : { attention }),
     outcome: complete ? { status: "interpreted", gaps: admission.interpretation.gaps } : { status: "resource_exhausted" } };
   return { body, index };
 }

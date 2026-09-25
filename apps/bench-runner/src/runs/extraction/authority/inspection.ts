@@ -23,7 +23,8 @@ import {
   computeSystemPromptSha256,
   readExtractionCacheManifestIdentity
 } from "../cache/extraction-cache-manifest.js";
-import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import type { ExtractionFillVariant } from "../fill/fill-window.js";
+import { nativeSourceRequestInventory } from "../fill/source-request-workset.js";
 import { inspectExtractionFillCompletion } from "../fill/fill-completion.js";
 import { prepareExtractionFillWindow } from "../fill/fill-window.js";
 import type {
@@ -71,7 +72,8 @@ export async function inspectExtractionAuthority(input: {
   readonly sourcePacking?: ExtractionSourcePacking;
   readonly sourceInterpretationProfile?: SourceInterpretationProfile;
   readonly openSemantics?: boolean | ExtractionOpenSemanticsGeneration;
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
+  readonly nativeSourcePopulation?: Readonly<{ name: string; snapshotPath: string }>;
   readonly limit?: number;
   readonly offset?: number;
   readonly questionBatchLimit?: number;
@@ -92,15 +94,16 @@ export async function inspectExtractionAuthority(input: {
       `extraction authority refuses obsolete request profile ${config.requestProfile}`
     );
   }
-  const window = await prepareExtractionFillWindow({ ...input, sourcePacking: config.sourcePacking, openSemantics: config.openSemantics !== undefined }, undefined);
+  const window = await prepareExtractionFillWindow({ ...input, config,
+    sourcePacking: config.sourcePacking, openSemantics: config.openSemantics !== undefined }, undefined);
   const authorizedTurns = input.repairInvalidShards === true
     ? window.executionExtractionTurns
     : window.distinctExtractionTurns;
-  const completion = inspectAuthorityCompletion(input, config, authorizedTurns);
+  const completion = inspectAuthorityCompletion(input, config, authorizedTurns, window);
   const shardStatus = collectShardStatus(
     input.cacheRoot,
     config,
-    authorizedTurns,
+    authorizedTurns, window,
     new Set(input.preservedValidExclusionKeys ?? [])
   );
   const observation = buildAuthorityObservation(input, manifestIdentity, config, window, completion);
@@ -110,7 +113,8 @@ export async function inspectExtractionAuthority(input: {
 function inspectAuthorityCompletion(
   input: ExtractionAuthorityInspectionInput,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  authorizedTurns: readonly LongMemEvalExtractionTurn[]
+  authorizedTurns: readonly LongMemEvalExtractionTurn[],
+  window: ExtractionAuthorityWindow
 ): ExtractionAuthorityCompletion {
   return inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
@@ -120,7 +124,9 @@ function inspectAuthorityCompletion(
     sourceInterpretationProfile: config.sourceInterpretationProfile,
     openSemantics: config.openSemantics,
     systemPrompt: extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics),
-    extractionTurns: authorizedTurns,
+    ...(window.nativeSourceRecords === undefined ? { extractionTurns: authorizedTurns } : {
+      expectedRequestKeys: nativeSourceRequestInventory(window.nativeSourceRecords,
+        window.datasetRevision, config).requests.map(item => item.line.key) }),
     ...(input.excludeContentClosureKeys === undefined ? {} : {
       excludeContentClosureKeys: input.excludeContentClosureKeys
     })
@@ -236,6 +242,7 @@ function collectShardStatus(
   cacheRoot: string,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
   turns: readonly LongMemEvalExtractionTurn[],
+  window: ExtractionAuthorityWindow,
   preservedValidExclusionKeys: ReadonlySet<string>
 ): {
   readonly missingKeys: readonly string[];
@@ -251,17 +258,23 @@ function collectShardStatus(
   const invalidShards: ExtractionRepairShard[] = [];
   const validEntries: ExtractionContentClosureEntry[] = [];
   const revisionsSeen = new Set<string>();
-  for (const turn of turns) {
-    const keys = computeExtractionTurnCacheKeys(
-      config.model, config.requestProfile, extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics), turn, config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics
-    );
-    const requests = extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics);
-    for (const request of requests) {
-      const revision = request.semantic?.source_request.revision;
-      if (revision !== undefined) revisionsSeen.add(revision.base_request_sha256);
-    }
-    for (const [index, key] of keys.entries()) {
-      if (requests[index]!.source.source_assertions.length > 0) nonemptyKeys.push(key);
+  const requests = window.nativeSourceRecords === undefined
+    ? turns.flatMap(turn => {
+      const keys = computeExtractionTurnCacheKeys(config.model, config.requestProfile,
+        extractionArtifactPrompt(config.sourceInterpretationProfile, config.openSemantics), turn,
+        config.sourcePacking, config.sourceInterpretationProfile, config.openSemantics);
+      return extractionArtifactRequests(turn, config.sourcePacking, config.sourceInterpretationProfile,
+        config.openSemantics).map((request, index) => ({ key: keys[index]!,
+          nonempty: request.source.source_assertions.length > 0,
+          revision: request.semantic?.source_request.revision?.base_request_sha256 }));
+    })
+    : nativeSourceRequestInventory(window.nativeSourceRecords, window.datasetRevision, config).requests
+      .map(item => ({ key: item.line.key, nonempty: item.request.source_assertions.length > 0,
+        revision: JSON.parse(item.line.userPrompt).source_request.revision?.base_request_sha256 as string | undefined }));
+  for (const request of requests) {
+      const { key } = request;
+      if (request.revision !== undefined) revisionsSeen.add(request.revision);
+      if (request.nonempty) nonemptyKeys.push(key);
       const shard = inspectCachedExtractionArtifact(
         cacheRoot, key, config.model, config.requestProfile, extractionTypedArtifactMode(config)
       );
@@ -284,7 +297,6 @@ function collectShardStatus(
       if (shard.status === "invalid" && shard.rawJsonSha256 !== undefined) {
         invalidShards.push({ cache_key: key, raw_json_sha256: shard.rawJsonSha256 });
       }
-    }
   }
   if (config.openSemantics?.revisions?.some((row) => !revisionsSeen.has(row.base_request_sha256))) {
     throw new AlayaError("CONFLICT", "source revision registry is not covered by the original source inventory");

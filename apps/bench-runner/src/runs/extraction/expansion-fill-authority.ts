@@ -1,6 +1,7 @@
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
-import type { LongMemEvalQuestion, LongMemEvalVariant } from
+import type { LongMemEvalQuestion } from
   "../../datasets/longmemeval/ingestion/dataset.js";
+import type { ExtractionFillVariant } from "./fill/fill-window.js";
 import type { LongMemEvalExpansionCapability } from
   "../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
 import type {
@@ -16,7 +17,7 @@ import type { ExtractionFillCompletion } from "./fill/fill-completion.js";
 import type { LongMemEvalExtractionTurn } from "./turn-contents.js";
 
 export interface ExpansionFillAuthorityOptions {
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
   readonly limit?: number;
   readonly offset?: number;
   readonly dataDir?: string;

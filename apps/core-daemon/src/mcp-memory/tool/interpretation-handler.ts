@@ -38,8 +38,8 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
   return async (request, context) => {
     throwIfAborted(context.abortSignal);
     if (request.operation === "propose") return propose(input, request, context);
-    if (request.operation === "reason" && (request.semantic_correspondence === undefined || request.query_handle === undefined &&
-        (request.source_interpretation_id === undefined || request.query_semantics === undefined || request.original_query === undefined))) {
+    if (request.operation === "reason" && request.source_interpretation_id === undefined &&
+        request.semantic_correspondence === undefined) {
       return SoulInterpretationResponseSchema.parse({ operation: "reason",
         outcome: { status: "preparation_required", missing: request.semantic_correspondence === undefined ? request.query_semantics === undefined && request.query_handle === undefined ? "query_semantics_and_correspondence" : "semantic_correspondence" : "query_semantics" },
         coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });

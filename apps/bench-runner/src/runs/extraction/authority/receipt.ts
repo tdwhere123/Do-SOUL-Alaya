@@ -52,7 +52,7 @@ import {
 } from "./receipt/artifact-io.js";
 import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
 import { assertStepQuoteBasis, assertStepQuoteRates, stepQuoteBasis } from "./step-quote.js";
-import { bindStepSourcePreflight } from "./source-preflight-binding.js";
+import { bindInteractiveSourcePreflight } from "./source-preflight-binding.js";
 import {
   CURRENT_RECEIPT_VERSION,
   LEGACY_RECEIPT_VERSION,
@@ -156,7 +156,7 @@ export interface ExtractionAuthorityReceiptInput {
 
 export function createExtractionAuthorityReceipt(input: ExtractionAuthorityReceiptInput): ExtractionAuthorityReceipt {
   assertReceiptCreationInput(input);
-  const sourcePreflightDigest = bindStepSourcePreflight(input);
+  const sourcePreflightDigest = bindInteractiveSourcePreflight(input);
   const unsigned = buildUnsignedReceipt(input, sourcePreflightDigest);
   assertExtractionAuthorityRenewal(unsigned);
   const receipt = Object.freeze({ ...unsigned, receipt_digest: computeReceiptDigest(unsigned) });

@@ -4,14 +4,17 @@ import {
 } from "@do-soul/alaya-protocol";
 import { sourceSemanticRelationKey as key, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
 import type { SourceSemanticBranchPlan } from "../../runtime/source-semantic-branch-plan.js";
-import { compileSourceSemanticAlternative, compileSourceSemanticGroupProgram } from "./compile-source-semantic-query.js";
+import { compileSourceSemanticAlternative, compileSourceSemanticGroupProgram,
+  type SourceSemanticLoweredObligation } from "./compile-source-semantic-query.js";
 import { semanticRelation as rel, semanticSequence as sequence, semanticAlternatives as alternatives,
   semanticOwnerProof, emptySemanticProgram } from "./source-semantic-proof-program.js";
 
 export type SourceSemanticProofBranch = Readonly<{ purpose: "support" | "counterexample" | "incomparable" | "empty_domain";
-  alternative: number; candidate?: string; candidate_variable?: string; plan?: SourceSemanticBranchPlan }>;
+  alternative: number; candidate?: string; candidate_variable?: string; plan?: SourceSemanticBranchPlan;
+  obligations?: readonly SourceSemanticLoweredObligation[] }>;
 export type SourceSemanticGroupPhase = Readonly<{
   program: QueryProgram; alternative: number; acceptIndex: number; groupFrame?: string; plan: SourceSemanticBranchPlan;
+  obligations: readonly SourceSemanticLoweredObligation[];
 }>;
 export type SourceSemanticExecutionPlan = Readonly<{
   program: QueryProgram; branches: readonly SourceSemanticProofBranch[]; domain?: SourceSemanticDomain;
@@ -27,11 +30,15 @@ export function compileSourceSemanticExecution(input: Input): SourceSemanticExec
   const { query_semantics: querySemantics, source_interpretation: sourceInterpretation, semantic_correspondence: semanticCorrespondence, meter, population } = input;
   if (querySemantics.evaluation === undefined) {
     const finite = { source_interpretation: sourceInterpretation, population, semantic_correspondence: semanticCorrespondence };
-    const groupPhases = input.branches.map(plan => ({
-      program: compileSourceSemanticGroupProgram(querySemantics, plan.view, plan.alternative, meter, finite, plan.groupFrame, plan.acceptIndex, plan.groupQueryFrame),
-      alternative: plan.alternative, acceptIndex: plan.acceptIndex, groupFrame: plan.groupFrame, plan
-    }));
-    const branches = groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative, plan: phase.plan }));
+    const groupPhases = input.branches.map(plan => {
+      const obligations: SourceSemanticLoweredObligation[] = [];
+      const program = compileSourceSemanticGroupProgram(querySemantics, plan.view, plan.alternative, meter, finite,
+        plan.groupFrame, plan.acceptIndex, plan.groupQueryFrame, obligations);
+      return { program, alternative: plan.alternative, acceptIndex: plan.acceptIndex, groupFrame: plan.groupFrame,
+        plan, obligations };
+    });
+    const branches = groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative,
+      plan: phase.plan, obligations: phase.obligations }));
     return {
       program: groupPhases[0]?.program ?? emptySemanticProgram,
       branches, missingOperands: false, groupPhases

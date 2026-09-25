@@ -1,13 +1,16 @@
 import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
-import { censusCompleteSourceRecords } from "./census.js";
+import { parseSourceSemanticRequest, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
+import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provider-http.js";
+import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus } from "./census.js";
 import { listRetainedSourceSemanticKeys, parseSourcePublicationAssociations, type SourcePublicationAssociation,
   type SourcePublicationPopulation } from "./publish.js";
 import { inspectCachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
-import { bindProviderRawAttempt, listProviderRawAttempts } from "../../extraction/fill/provider-raw-attempt.js";
+import { bindProviderRawAttempt, readSingleSourceRawAttempt } from "../../extraction/fill/provider-raw-attempt.js";
+import { readCompleteRetainedSourceResponse } from "../../extraction/cache/source-interactive-binding.js";
+import { nativeSourceOccurrenceId } from "../../extraction/fill/source-request-workset.js";
 import { parseSourceSemanticInteractivePreflight } from "../../extraction/fill/source-semantic-interactive-preflight.js";
 import { parseRetainedBatchPreflight } from "../../extraction/fill/batch-preflight.js";
 import { sourceSemanticRequestWireDigest } from "../../extraction/fill/source-semantic-interactive-request.js";
@@ -22,13 +25,13 @@ type RetainedOwner = Readonly<{ cacheRoot: string; digest: string;
   contract: "extraction-batch-preflight-v2" | "source-semantic-interactive-preflight-v3";
   selectedRequestCount: number }>;
 
-function matchesRetainedStepAttempt(input: { cacheRoot: string; key: string; model: string;
+function matchesRetainedInteractiveAttempt(input: { cacheRoot: string; key: string; model: string;
   requestProfile: string; wireDigest: string; rawJsonSha256: string }): boolean {
-  const attempts = listProviderRawAttempts(input.cacheRoot, input.key);
-  if (attempts.length !== 1) return false;
-  const raw = bindProviderRawAttempt(attempts[0]!, { cacheKey: input.key, model: input.model,
+  const attempt = readSingleSourceRawAttempt(input.cacheRoot, input.key);
+  if (attempt === undefined) return false;
+  const raw = bindProviderRawAttempt(attempt, { cacheKey: input.key, model: input.model,
     requestProfile: input.requestProfile, requestDigest: input.wireDigest, kind: "source_semantic" });
-  return raw.transport_failure === undefined && raw.finish_reason === "stop" &&
+  return raw.transport_failure === undefined && isCompleteSemanticFinish(input.requestProfile, raw.finish_reason) &&
     raw.decoded_text_digest === input.rawJsonSha256;
 }
 
@@ -38,8 +41,9 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
   generation: ExtractionOpenSemanticsGeneration, datasetSha256: string) {
   if (owners.length === 0) throw new AlayaError("VALIDATION", "association preparation requires owning cache roots");
   const roots = new Set<string>();
-  const owned = new Map<string, Readonly<{ line: SourceRequestLine; cacheRoot: string; wireDigest?: string }>>();
-  const units = new Set<string>();
+  const owned = new Map<string, Readonly<{ line: SourceRequestLine; cacheRoot: string; wireDigest?: string;
+    preflight?: ReturnType<typeof parseSourceSemanticInteractivePreflight> }>>();
+  const unitOwners = new Map<string, string[]>();
   const retained: RetainedOwner[] = [];
   for (const owner of owners) {
     if (!owner.cacheRoot || !owner.retainedPreparationPath) throw new AlayaError("VALIDATION", "association owner requires root and retained preparation");
@@ -53,21 +57,21 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
     const contract = z.object({ contract: z.string() }).passthrough().parse(artifact).contract;
     let preparationContract: RetainedOwner["contract"];
     let selectedRequestCount: number;
-    let requests: readonly Readonly<{ line: SourceRequestLine; wireDigest?: string }>[];
+    let requests: readonly Readonly<{ line: SourceRequestLine; wireDigest?: string;
+      preflight?: ReturnType<typeof parseSourceSemanticInteractivePreflight> }>[];
     if (contract === "source-semantic-interactive-preflight-v3") {
       const report = parseSourceSemanticInteractivePreflight(artifact);
       preparationContract = report.contract;
       selectedRequestCount = report.selected_requests;
       if (report.config.model !== population.model || report.config.requestProfile !== population.requestProfile ||
-          report.dataset_revision !== datasetSha256 ||
-          canonicalJson(report.config.openSemantics) !== canonicalJson(generation)) {
-        throw new AlayaError("CONFLICT", "retained Step source preparation differs from the current source population");
+          report.dataset_revision !== datasetSha256) {
+        throw new AlayaError("CONFLICT", "retained interactive source preparation differs from the current source population");
       }
       const wireByKey = new Map(report.planned_requests.map(row => [row.key, row.request_digest]));
       requests = report.ready_requests.map(line => {
         const noAssertions = parseSourceSemanticRequest(JSON.parse(line.userPrompt))
           .source_request.source_assertions.length === 0;
-        return { line, ...(!noAssertions ? { wireDigest: wireByKey.get(line.key) ?? sourceSemanticRequestWireDigest({ ...report.config,
+        return { line, preflight: report, ...(!noAssertions ? { wireDigest: wireByKey.get(line.key) ?? sourceSemanticRequestWireDigest({ ...report.config,
           openSemantics: parseExtractionOpenSemanticsGeneration(report.config.openSemantics) }, line, report.max_output_tokens) } : {}) };
       });
     } else {
@@ -80,18 +84,35 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
       }
       requests = report.planned_requests.map(line => ({ line }));
     }
-    for (const { line, wireDigest } of requests) {
+    for (const { line, wireDigest, preflight } of requests) {
       try { parseSourceSemanticRequestLine(line, population); }
       catch (cause) { throw new AlayaError("CONFLICT", "retained source preflight has foreign or duplicate request identity", { cause }); }
       if (owned.has(line.key)) throw new AlayaError("CONFLICT", "retained source preparations repeat an owning request key");
       for (const unit of line.unitKeys) {
-        if (units.has(unit)) throw new AlayaError("CONFLICT", "retained source preparations repeat a source assignment");
-        units.add(unit);
+        const keys = unitOwners.get(unit) ?? [];
+        keys.push(line.key); unitOwners.set(unit, keys);
       }
-      owned.set(line.key, { line, cacheRoot, ...(wireDigest === undefined ? {} : { wireDigest }) });
+      owned.set(line.key, { line, cacheRoot, ...(wireDigest === undefined ? {} : { wireDigest }),
+        ...(preflight === undefined ? {} : { preflight }) });
     }
     retained.push({ cacheRoot, digest: chainIdentity(artifact), contract: preparationContract,
       selectedRequestCount });
+  }
+  for (const keys of unitOwners.values()) {
+    if (keys.length === 1) continue;
+    if (keys.length !== 2) throw new AlayaError("CONFLICT", "retained source assignment has unrelated overlap");
+    const pair = keys.map(key => owned.get(key)!);
+    const child = pair.find(item => parseSourceSemanticRequest(JSON.parse(item.line.userPrompt))
+      .source_request.revision !== undefined);
+    const parent = pair.find(item => item !== child);
+    const revision = child === undefined ? undefined : parseSourceSemanticRequest(JSON.parse(child.line.userPrompt))
+      .source_request.revision;
+    if (child === undefined || parent === undefined || parent.preflight === undefined || revision === undefined ||
+        revision.parent_request_json !== parent.line.userPrompt ||
+        readCompleteRetainedSourceResponse({ cacheRoot: parent.cacheRoot, preflight: parent.preflight,
+          line: parent.line }) !== revision.previous_response) {
+      throw new AlayaError("CONFLICT", "retained source overlap lacks a complete immediate parent");
+    }
   }
   return { retained, owned };
 }
@@ -104,20 +125,42 @@ export async function prepareSourcePublicationAssociations(
   owners: readonly SourceAssociationCacheOwner[], outputPath: string
 ) {
   const generation = parseExtractionOpenSemanticsGeneration(population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
-  const census = await censusCompleteSourceRecords({ population: population.name,
-    dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
-    ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow }) });
+  let census: SourceCensus;
+  if (population.nativeSnapshotPath !== undefined) {
+    census = censusNativeSourceRecords({ population: population.name, snapshotPath: population.nativeSnapshotPath });
+  } else {
+    const { dataDir, pinnedMetaRoot } = population;
+    if (dataDir === undefined || pinnedMetaRoot === undefined) {
+      throw new AlayaError("VALIDATION", "LongMemEval association requires pinned dataset paths");
+    }
+    census = await censusCompleteSourceRecords({ population: population.name,
+      dataDir, pinnedMetaRoot,
+      ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow }) });
+  }
   const { retained, owned } = readRetainedSourcePublicationOwners(owners, population, generation, census.dataset_sha256);
   const physical = new Map<string, string>();
-  for (const owner of retained) {
-    const keys = listRetainedSourceSemanticKeys(owner.cacheRoot);
-    if (new Set(keys).size !== keys.length) throw new AlayaError("CONFLICT", "retained source cache repeats an owning request key");
-    for (const key of keys) {
-      if (physical.has(key)) throw new AlayaError("CONFLICT", "request key occurs in multiple physical cache roots");
-      physical.set(key, owner.cacheRoot);
+  if (population.nativeSnapshotPath !== undefined) {
+    // The retained preflight is the exact physical authority. Scanning unrelated cache entries
+    // would make one selected native source pay for an unbounded root-wide directory walk.
+    for (const key of owned.keys()) {
+      for (const owner of retained) {
+        if (!existsSync(join(owner.cacheRoot, key.slice(0, 2), `${key}.json`))) continue;
+        if (physical.has(key)) throw new AlayaError("CONFLICT", "request key occurs in multiple physical cache roots");
+        physical.set(key, owner.cacheRoot);
+      }
+    }
+  } else {
+    for (const owner of retained) {
+      const keys = listRetainedSourceSemanticKeys(owner.cacheRoot);
+      if (new Set(keys).size !== keys.length) throw new AlayaError("CONFLICT", "retained source cache repeats an owning request key");
+      for (const key of keys) {
+        if (physical.has(key)) throw new AlayaError("CONFLICT", "request key occurs in multiple physical cache roots");
+        physical.set(key, owner.cacheRoot);
+      }
     }
   }
   const expected = new Map<string, { requestDigest: string; sources: typeof census.records[number][] }>();
+  const nativeUnits = new Map<string, Set<string>>();
   const unsupported = new Map<string, Extract<SourcePublicationAssociation, { status: "unsupported_source" }>>();
   for (const source of census.records) {
     const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
@@ -130,6 +173,20 @@ export async function prepareSourcePublicationAssociations(
       continue;
     }
     const line = prepareSourceSemanticRequestLine(prepared.semantic, [], population);
+    if (population.nativeSnapshotPath !== undefined) {
+      const occurrence = nativeSourceOccurrenceId(source);
+      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrence], census.dataset_sha256);
+      const byAssertion = new Map(units.map(unit => [unit.assertionId, unit]));
+      const assigned = nativeUnits.get(line.key) ?? new Set<string>();
+      for (const assertion of prepared.semantic.source_request.source_assertions) {
+        const unit = byAssertion.get(assertion.assertion_id);
+        if (unit === undefined || unit.text !== assertion.text) {
+          throw new AlayaError("CONFLICT", "native source association lost its exact assertion occurrence");
+        }
+        assigned.add(unit.binding.occurrenceIdentity);
+      }
+      nativeUnits.set(line.key, assigned);
+    }
     const match = expected.get(line.key) ?? { requestDigest: line.requestSha256, sources: [] };
     if (match.requestDigest !== line.requestSha256) throw new AlayaError("CONFLICT", "current source requests have ambiguous owning key");
     match.sources.push(source);
@@ -139,6 +196,10 @@ export async function prepareSourcePublicationAssociations(
     const retainedLine = owned.get(key)?.line;
     if (retainedLine !== undefined && retainedLine.requestSha256 !== current.requestDigest) {
       throw new AlayaError("CONFLICT", "retained source request conflicts with the current key identity");
+    }
+    if (population.nativeSnapshotPath !== undefined && retainedLine !== undefined &&
+        canonicalJson(retainedLine.unitKeys) !== canonicalJson([...nativeUnits.get(key)!].sort())) {
+      throw new AlayaError("CONFLICT", "retained native source request changed its exact occurrence assignments");
     }
   }
   const associations: SourcePublicationAssociation[] = [...unsupported.values()];
@@ -157,7 +218,7 @@ export async function prepareSourcePublicationAssociations(
       if (belongsHere) for (const source of current?.sources ?? []) reasons.set(source.source_id, "invalid_current_artifact");
       continue;
     }
-    const rawMatchesPreparation = owner?.wireDigest === undefined || matchesRetainedStepAttempt({
+    const rawMatchesPreparation = owner?.wireDigest === undefined || matchesRetainedInteractiveAttempt({
       cacheRoot, key, model: population.model, requestProfile: population.requestProfile,
       wireDigest: owner.wireDigest, rawJsonSha256: native.rawJsonSha256
     });

@@ -26,7 +26,7 @@ import {
   prepareExpansionFillAuthority,
   type PreparedExpansionFillAuthority
 } from "./expansion-fill-authority.js";
-import type { LongMemEvalVariant } from "../../datasets/longmemeval/ingestion/dataset.js";
+import type { ExtractionFillVariant } from "./fill/fill-window.js";
 import type { LongMemEvalExpansionCapability } from
   "../../datasets/longmemeval/promotion/expansion/expansion-capability.js";
 import type { ExpansionSpendApproval } from "../../datasets/longmemeval/promotion/expansion-spend-approval.js";
@@ -91,7 +91,8 @@ export interface ExtractionFillOptions {
     readonly reconcile?: { readonly localJob: string; readonly remoteJob: string };
   };
   readonly batchHttp?: import("./fill/batch/contract.js").GeminiBatchHttp;
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
+  readonly nativeSourcePopulation?: Readonly<{ name: string; snapshotPath: string }>;
   readonly limit?: number;
   readonly offset?: number;
   readonly concurrency?: number;

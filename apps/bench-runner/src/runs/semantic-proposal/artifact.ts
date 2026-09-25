@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
@@ -7,8 +7,10 @@ import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durabl
 import { proposalCacheKey, type SemanticProposalKind } from "./workset.js";
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import { ExtractionTransportProvenanceSchema, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
+import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 
 export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v3" as const;
+export const SEMANTIC_PROPOSAL_SHARD_MAX_BYTES = 32 * 1024 * 1024;
 
 export class SemanticProposalIdentityError extends Error {
   constructor(message: string) {
@@ -70,7 +72,8 @@ export function semanticProposalShardPath(cacheRoot: string, key: string): strin
 export function readSemanticProposalShard(cacheRoot: string, key: string): SemanticProposalShard | undefined {
   const path = semanticProposalShardPath(cacheRoot, key);
   if (!existsSync(path)) return undefined;
-  return ShardSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+  return ShardSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({ path,
+    maxBytes: SEMANTIC_PROPOSAL_SHARD_MAX_BYTES, label: "semantic proposal shard" })));
 }
 
 export function inspectSemanticProposalShard(
@@ -80,7 +83,8 @@ export function inspectSemanticProposalShard(
   if (!existsSync(path)) return undefined;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(readBoundedCanonicalUtf8Artifact({ path,
+      maxBytes: SEMANTIC_PROPOSAL_SHARD_MAX_BYTES, label: "semantic proposal shard" }));
   } catch {
     throw new SemanticProposalIdentityError(`semantic proposal cache is malformed: ${key}`);
   }
@@ -157,8 +161,12 @@ export function writeSemanticProposalShard(cacheRoot: string, shard: SemanticPro
     return;
   }
   try {
+    const bytes = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    if (bytes.length > SEMANTIC_PROPOSAL_SHARD_MAX_BYTES) {
+      throw new SemanticProposalIdentityError(`semantic proposal shard exceeds supported byte bound: ${parsed.cache_key}`);
+    }
     publishBytesExclusiveDurable({ destination: path,
-      bytes: Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8"),
+      bytes,
       ownerIdentity: `${parsed.cache_key}:${parsed.attempt_ordinal}`, temporaryDirectory: dirname(path) });
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
@@ -200,7 +208,9 @@ export function listSemanticProposalKeys(cacheRoot: string, kind: SemanticPropos
       if (bucket.name !== key.slice(0, 2)) {
         throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
       }
-      const shard = ShardSchema.safeParse(JSON.parse(readFileSync(join(cacheRoot, bucket.name, file), "utf8")));
+      const shard = ShardSchema.safeParse(JSON.parse(readBoundedCanonicalUtf8Artifact({
+        path: join(cacheRoot, bucket.name, file), maxBytes: SEMANTIC_PROPOSAL_SHARD_MAX_BYTES,
+        label: "semantic proposal shard inventory" })));
       if (!shard.success || shard.data.cache_key !== key) {
         throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
       }

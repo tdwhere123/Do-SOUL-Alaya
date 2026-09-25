@@ -8,6 +8,7 @@ import {
   buildLongMemEvalRoundMessages, pairSessionIntoRounds, type LongMemEvalQuestion
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { requireLongMemEvalTimestamp } from "../../../datasets/longmemeval/ingestion/source-time.js";
+import { readVerifiedNativeSourceSnapshot } from "./native.js";
 
 export type SourceCensusUnit = Readonly<{
   assertion_id: number;
@@ -17,10 +18,13 @@ export type SourceCensusUnit = Readonly<{
 
 export type SourceCensusRecord = Readonly<{
   population: string;
-  question_id: string;
-  session_id: string;
-  session_index: number;
-  round_index: number;
+  question_id?: string;
+  session_id?: string;
+  session_index?: number;
+  round_index?: number;
+  native_record_id?: string;
+  recorded_at?: string;
+  title?: string;
   source_id: string;
   source_version: string;
   content_bytes: string;
@@ -38,6 +42,35 @@ export type SourceCensus = Readonly<{
   dataset_sha256: string;
   records: readonly SourceCensusRecord[];
 }>;
+export type LongMemEvalSourceCensusRecord = SourceCensusRecord & Required<Pick<SourceCensusRecord,
+  "question_id" | "session_id" | "session_index" | "round_index">>;
+export type LongMemEvalSourceCensus = Readonly<{ population: string; dataset_sha256: string;
+  records: readonly LongMemEvalSourceCensusRecord[] }>;
+
+/** Native origin is read from its complete sealed SQLite inventory, never from supplied census rows. */
+export function censusNativeSourceRecords(input: Readonly<{ population: string; snapshotPath: string }>): SourceCensus {
+  const native = readVerifiedNativeSourceSnapshot(input.snapshotPath);
+  const records = native.records.map(row => {
+    const packs = collectSourceSemanticUnitPacks(row.content_bytes, "complete-source");
+    if (packs.length !== 1 || packs[0] === undefined) {
+      throw new AlayaError("CONFLICT", "native complete source has no single host preparation");
+    }
+    const units = Object.freeze(packs[0].source_assertions.map(unit => Object.freeze({
+      assertion_id: unit.assertion_id, text: unit.text, source_role: unit.source_role
+    })));
+    return Object.freeze({
+      population: input.population, native_record_id: row.record.identity, title: row.title,
+      source_id: row.source_id, source_version: row.source_version,
+      content_bytes: row.content_bytes, content_digest: row.record.content_digest,
+      corpus_digest: fieldContractSha256(row.content_bytes),
+      source_observed_at: row.source_observed_at, recorded_at: row.recorded_at,
+      roles: Object.freeze([]) as readonly ("user" | "assistant")[], units,
+      repeated_assertion_text: hasRepeatedAssertionText(units)
+    });
+  });
+  return Object.freeze({ population: input.population, dataset_sha256: native.manifest.identity,
+    records: Object.freeze(records) });
+}
 
 /** Frozen dataset membership, independent of extraction cache filenames. */
 export async function censusCompleteSourceRecords(input: Readonly<{
@@ -45,7 +78,7 @@ export async function censusCompleteSourceRecords(input: Readonly<{
   dataDir: string;
   pinnedMetaRoot: string;
   questionWindow?: Readonly<{ offset: number; limit: number }>;
-}>): Promise<SourceCensus> {
+}>): Promise<LongMemEvalSourceCensus> {
   const loaded = await loadDatasetWindowWithIdentity("longmemeval_s", {
     dataDir: input.dataDir, pinnedMetaRoot: input.pinnedMetaRoot, offset: input.questionWindow?.offset ?? 0,
     ...(input.questionWindow === undefined ? {} : { limit: input.questionWindow.limit })
@@ -61,9 +94,9 @@ function collectCompleteSourceRecords(
   population: string,
   sourceVersion: string,
   questions: readonly LongMemEvalQuestion[]
-): readonly SourceCensusRecord[] {
+): readonly LongMemEvalSourceCensusRecord[] {
   const seen = new Set<string>();
-  const records: SourceCensusRecord[] = [];
+  const records: LongMemEvalSourceCensusRecord[] = [];
   for (const question of questions) {
     for (const [sessionIndex, rawSession] of question.haystack_sessions.entries()) {
       const session = rawSession.map(({ role, content }) => ({ role, content }));

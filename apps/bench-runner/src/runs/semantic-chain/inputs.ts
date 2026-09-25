@@ -17,16 +17,34 @@ import { join } from "node:path";
 export function semanticChainCacheInputPaths(value: unknown): readonly string[] {
   const paths: string[] = [];
   const tokens = retainedArtifactField(value, "config", "max_output_tokens");
+  const generationCap = retainedArtifactField(value, "config", "correspondence_generation", "max_output_tokens");
+  const correspondenceTokens = typeof generationCap === "number" ? generationCap : tokens;
+  const owners = retainedArtifactField(value, "config", "correspondence_cache_owners");
   for (const [rootKeys, worksetKeys] of [
     [["config", "query_cache_root"], ["config", "query_workset"]],
     [["config", "correspondence_cache_root"], ["correspondence_workset"]]
   ] as const) {
+    if (rootKeys[1] === "correspondence_cache_root" && Array.isArray(owners)) continue;
     const root = retainedArtifactPathField(value, ...rootKeys);
     if (root === undefined) continue;
     paths.push(root);
     const workset = SemanticProposalWorksetSchema.safeParse(retainedArtifactField(value, ...worksetKeys));
-    if (workset.success && typeof tokens === "number" && Number.isInteger(tokens) && tokens >= 1 && tokens <= 65536) {
-      paths.push(...semanticProposalCacheInputPaths(workset.data, root, tokens));
+    const cap = rootKeys[1] === "correspondence_cache_root" ? correspondenceTokens : tokens;
+    if (workset.success && typeof cap === "number" && Number.isInteger(cap) && cap >= 1 && cap <= 65536) {
+      paths.push(...semanticProposalCacheInputPaths(workset.data, root, cap));
+    }
+  }
+  const workset = SemanticProposalWorksetSchema.safeParse(retainedArtifactField(value, "correspondence_workset"));
+  if (Array.isArray(owners) && workset.success && typeof correspondenceTokens === "number" &&
+      Number.isInteger(correspondenceTokens) && correspondenceTokens >= 1 && correspondenceTokens <= 65536) {
+    for (const owner of owners) {
+      if (typeof owner !== "object" || owner === null || typeof owner.key !== "string" ||
+          typeof owner.cache_root !== "string") continue;
+      const items = workset.data.items.filter(item => {
+        try { return materializeSemanticProposalLines({ ...workset.data, items: [item] }, correspondenceTokens)[0]?.key === owner.key; }
+        catch { return false; }
+      });
+      if (items.length === 1) paths.push(...semanticProposalCacheInputPaths({ ...workset.data, items }, owner.cache_root, correspondenceTokens));
     }
   }
   return paths;
@@ -40,7 +58,12 @@ export function retainedSemanticChainCacheInputPaths(root: string): readonly str
 export function readSemanticChainProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
   return materializeSemanticProposalLines(workset, maxOutputTokens).map((line, index) => {
     try {
-      const result = readSemanticProposalResults({ ...workset, items: [workset.items[index]] }, cacheRoot, maxOutputTokens)[0]!;
+      const item = workset.items[index];
+      const revised = typeof item === "object" && item !== null && "revision" in item;
+      const { revision_parent_cache_root: parentRoot, ...base } = workset;
+      const single = { ...base, ...(revised && parentRoot !== undefined
+        ? { revision_parent_cache_root: parentRoot } : {}), items: [item] };
+      const result = readSemanticProposalResults(single, cacheRoot, maxOutputTokens)[0]!;
       return { ...result, cache_identity: result.shard === undefined ? null : chainIdentity(result.shard) };
     } catch (error) {
       let cacheIdentity = null;
@@ -98,10 +121,25 @@ export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
 }
 
 export function readSemanticChainCorrespondences(plan: SemanticChainPlan, arm: "retained" | "without_semantic_correspondences") {
-  const semantic_correspondences = plan.correspondence_workset === null ? [] : readSemanticChainProposalResults(
-    plan.correspondence_workset, plan.config.correspondence_cache_root, plan.config.max_output_tokens);
+  const semantic_correspondences = plan.correspondence_workset === null ? [] : readSemanticChainCorrespondenceOwners(
+    plan.correspondence_workset, plan.config.correspondence_cache_root,
+    plan.config.correspondence_generation?.max_output_tokens ?? plan.config.max_output_tokens,
+    plan.config.correspondence_cache_owners);
   const identity = chainIdentity({ plan, arm, semantic_correspondences: semanticChainProposalStates(semantic_correspondences) });
   return { semantic_correspondences, identity };
+}
+
+/** Each exact C key retains its own physical attempt root, including warm unchanged keys. */
+export function readSemanticChainCorrespondenceOwners(workset: SemanticProposalWorkset, defaultRoot: string,
+  cap: number, owners?: readonly { key: string; cache_root: string }[]) {
+  const lines = materializeSemanticProposalLines(workset, cap);
+  if (owners !== undefined && (owners.length !== lines.length ||
+      new Set(owners.map(owner => owner.key)).size !== owners.length ||
+      lines.some(line => !owners.some(owner => owner.key === line.key)))) {
+    throw new AlayaError("CONFLICT", "correspondence cache owners do not cover the exact current request set");
+  }
+  return lines.flatMap((line, index) => readSemanticChainProposalResults({ ...workset, items: [workset.items[index]] },
+    owners?.find(owner => owner.key === line.key)?.cache_root ?? defaultRoot, cap));
 }
 
 /** Replay and archive admission use the same per-query correspondence set and retained outcomes. */

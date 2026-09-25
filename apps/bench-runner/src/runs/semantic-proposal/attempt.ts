@@ -42,6 +42,16 @@ export function semanticProposalCacheInputPaths(
     paths.push(dirname(shard), shard, ledgerPath(cacheRoot,
       semanticProposalLookup(workset, line, maxOutputTokens).attempt_lineage_digest!),
       ...providerRawAttemptInputPaths(cacheRoot, line.key));
+    if (line.request.revision !== undefined && workset.revision_parent_cache_root !== undefined &&
+        typeof item === "object" && item !== null && !Array.isArray(item)) {
+      const { revision: _revision, ...baseItem } = item as Record<string, unknown>;
+      const parent = materializeSemanticProposalLines({ ...workset, items: [baseItem] }, maxOutputTokens)[0]!;
+      const parentRoot = workset.revision_parent_cache_root;
+      const parentShard = semanticProposalShardPath(parentRoot, parent.key);
+      paths.push(parentRoot, dirname(parentShard), parentShard,
+        ledgerPath(parentRoot, semanticProposalLookup(workset, parent, maxOutputTokens).attempt_lineage_digest!),
+        ...providerRawAttemptInputPaths(parentRoot, parent.key));
+    }
   }
   return paths;
 }

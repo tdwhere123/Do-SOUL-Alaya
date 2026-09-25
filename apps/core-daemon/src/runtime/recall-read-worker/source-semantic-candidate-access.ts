@@ -2,7 +2,7 @@ import {
   SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   SourceSemanticResourceExhausted, canonicalJson, type SourceRecordIdentity,
   type SourceSemanticAccessReceipt, type SourceSemanticAccessSignal, type SourceSemanticAccessPolicy,
-  type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget
+  type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents
 } from "@do-soul/alaya-protocol";
 import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
   projectSourceDisclosure } from "@do-soul/alaya-core";
@@ -27,27 +27,43 @@ export type SourceSemanticAccessPool = Readonly<{
   sources: readonly SourceRecordIdentity[];
   descriptors: readonly SourceSemanticHandleDescriptor[];
   access: Omit<SourceSemanticAccessReceipt, "trace">;
+  sourcePreviewExtents?: SourceSemanticPreviewExtents;
   sourcePages: number; interpretationPages: number;
 }>;
 type EmptyCompletion = Readonly<{ leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
-  policy: SourceSemanticAccessPolicy, sourceId?: string): string {
+  policy: SourceSemanticAccessPolicy, sourceId?: string, sourcePreviewExtents?: SourceSemanticPreviewExtents): string {
   return sourceSemanticAccessInputIdentity({ original_query: original, query_semantics: query,
-    source_id: sourceId, budget, policy });
+    source_id: sourceId, budget, policy,
+    ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }) });
+}
+
+function previewExtent(record: SourceRecordIdentity, extents: SourceSemanticPreviewExtents): number {
+  const bound = extents.find(row => row.source_id === record.source_id);
+  if (bound?.source_version !== record.source_version || bound.record_id !== record.identity) {
+    throw new CoreError("VALIDATION", "source preview extent is not bound to the current source tuple", { details: { admission: "bound" } });
+  }
+  return bound.byte_extent;
 }
 
 /** Observe once, score once, then order the whole observed pool before any descriptor or correspondence page. */
 export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
-  sourceId?: string, completion?: EmptyCompletion): SourceSemanticAccessPool {
+  sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents): SourceSemanticAccessPool {
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, observation, authorized)
     : restrictedSource(runtime, payload.workspace_id, sourceId, authorized, observation);
   const records = sources.sources;
+  if (sourcePreviewExtents !== undefined) {
+    if (sourcePreviewExtents.length !== records.length) {
+      throw new CoreError("VALIDATION", "source preview extents do not cover the native source population", { details: { admission: "bound" } });
+    }
+    for (const record of records) previewExtent(record, sourcePreviewExtents);
+  }
   meter.charge(records.length, records.length * 16, "access source record lookup");
   const byId = new Map(records.map((record) => [record.identity, record]));
   const sourceRows = new Map<string, SourceObservation>();
@@ -60,7 +76,7 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
         runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
         policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
         suppliedQuerySemantics: completion.suppliedQuerySemantics
-      }));
+      }), sourcePreviewExtents);
   } finally {
     // The navigation/header child already ran even when completion planning fails.
     meter.absorb(observation);
@@ -77,15 +93,17 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
     .map(({ identity: _identity, ...row }) => row);
   const orderedInterpretations = policy.order(reconciled.map((row) => ({ ...row, identity: row.interpretation_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
-  const inputId = accessInputIdentity(original, query, budget, policyName, sourceId);
+  const inputId = accessInputIdentity(original, query, budget, policyName, sourceId, sourcePreviewExtents);
   const receipt = sourceSemanticAccessReceiptValue(policyName, inputId, orderedSources, orderedInterpretations,
-    sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops]);
+    sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops],
+    sourcePreviewExtents);
   meter.retain(receipt, "access receipt identity");
   const access = { ...receipt, pool_id: `sha256:${fieldContractSha256(canonicalJson({ receipt,
     workspace: payload.workspace_id, authorized, revision: sourceSemanticRevision(runtime) }))}` };
   return { sources: orderedSources.map((row) => byId.get(row.record_id)!),
     descriptors: orderedInterpretations.map((row) => interpretations.descriptors.get(row.interpretation_id)!),
-    access, sourcePages: sources.pages, interpretationPages: interpretations.pages };
+    access, ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
+    sourcePages: sources.pages, interpretationPages: interpretations.pages };
 }
 
 function restrictedSource(runtime: RecallReadWorkerRuntime, workspace: string, sourceId: string,
@@ -96,7 +114,7 @@ function restrictedSource(runtime: RecallReadWorkerRuntime, workspace: string, s
 }
 
 function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordIdentity, policy: Policy,
-  meter: SourceSemanticReadBudget): Pick<SourceObservation, "read_bytes" | "body_bytes" | "complete" | "signal"> {
+  meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number): Pick<SourceObservation, "read_bytes" | "body_bytes" | "complete" | "signal"> {
   const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
   let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false;
   const chunks: string[] = [];
@@ -106,11 +124,14 @@ function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordId
     meter.read(5, extent === null ? 0 : extent.nativeBytes + extent.metadataBytes);
     bodyBytes = extent?.bodyBytes ?? null;
     if (extent?.record?.source_body == null) return { read_bytes: 0, body_bytes: bodyBytes, complete: false, signal: UNKNOWN };
+    if (bodyBytes === 0) complete = true;
     while (true) {
-      const chunkBytes = Math.min(4096, extent.bodyBytes - offset);
+      const chunkBytes = Math.min(4096, extent.bodyBytes - offset,
+        sourcePreviewByteExtent === undefined ? 4096 : sourcePreviewByteExtent - offset);
+      if (chunkBytes <= 0) break;
       const reserve = policy.sourceCost(characters + chunkBytes);
       meter.reserve(chunkBytes + 5 + reserve.work_units, RETAINED_SOURCE_READ_RESERVATION + 2 * reserve.memory_bytes + 8 * chunkBytes, "access source extent");
-      const page = repo.findByIdBounded(record.workspace_id, record.identity, 4096, offset);
+      const page = repo.findByIdBounded(record.workspace_id, record.identity, chunkBytes, offset);
       meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
       if (page === null) break;
       bodyBytes = page.bodyBytes;
@@ -130,7 +151,7 @@ function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordId
 function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
   records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>,
-  stops: Set<Stop>, sourceId?: string, onConclusiveEmpty?: () => void) {
+  stops: Set<Stop>, sourceId?: string, onConclusiveEmpty?: () => void, sourcePreviewExtents?: SourceSemanticPreviewExtents) {
   const descriptors = new Map<string, SourceSemanticHandleDescriptor>();
   const rows: InterpretationObservation[] = [];
   let pending: InterpretationHeader[] = [], exploration: InterpretationHeader[] = [];
@@ -164,7 +185,8 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
         const record = records[sourceOffset++]!;
         meter.charge(1, 0, "access observed source check");
         if (sources.get(record.identity)?.complete === true) continue;
-        const observation = readSourceText(runtime, record, policy, meter);
+        const observation = readSourceText(runtime, record, policy, meter,
+          sourcePreviewExtents === undefined ? undefined : previewExtent(record, sourcePreviewExtents));
         sources.set(record.identity, { source_id: record.source_id, record_id: record.identity,
           ...observation });
         policy.associateSourceHint(record.content_digest, observation.signal, meter);
@@ -177,7 +199,8 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
       for (const row of scheduled.slice(0, count)) {
         seen.set(row.identity, null);
         try {
-          const verified = observeInterpretation(runtime, payload.workspace_id, row, authorized, meter, policy, records, byId, sources, sourceId);
+          const verified = observeInterpretation(runtime, payload.workspace_id, row, authorized, meter, policy, records, byId, sources, sourceId,
+            sourcePreviewExtents);
           if (verified === null) continue;
           descriptors.set(verified.descriptor.interpretation_id, verified.descriptor); rows.push(verified.observation);
         } catch (error) {
@@ -202,17 +225,19 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
 
 function observeInterpretation(runtime: RecallReadWorkerRuntime, workspace: string, row: InterpretationHeader,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
-  records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>, sourceId?: string) {
+  records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>, sourceId?: string,
+  sourcePreviewExtents?: SourceSemanticPreviewExtents) {
   const checked = loadVerified(runtime, workspace, { evidence_object_id: row.object_id }, authorized, meter);
   if (checked === null) return null;
   const record = checked.stored.record, interpretation = checked.bound.interpretation;
   if (sourceId !== undefined && record.source_id !== sourceId) return null;
+  if (sourcePreviewExtents !== undefined) previewExtent(record, sourcePreviewExtents);
   if (!byId.has(record.identity)) {
     meter.retain(record, "access discovered current source");
     meter.charge(1, 24, "access discovered source lookup");
     byId.set(record.identity, record); records.push(record);
   }
-  if (sources.get(record.identity)?.complete !== true) {
+  if (sourcePreviewExtents === undefined && sources.get(record.identity)?.complete !== true) {
     meter.charge(checked.stored.content_bytes.length, 0, "access verified source extent");
     const bodyBytes = Buffer.byteLength(checked.stored.content_bytes);
     const source = { source_id: record.source_id, record_id: record.identity,

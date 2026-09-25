@@ -6,7 +6,8 @@ import {
 } from "@do-soul/alaya-core";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import {
-  proposeCorrespondenceSemantics, proposeQuerySemantics,
+  prepareSourceSemanticProposalRevision, proposeCorrespondenceSemantics, proposeQuerySemantics,
+  type SourceSemanticProposalRevision,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
 import { readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
@@ -18,6 +19,7 @@ import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-t
 import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/receipt-limits.js";
 import { acquireExtractionCacheWriteLease, type ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { assertStepReportedUsage, baseReportedUsage } from "../extraction/authority/step-quote.js";
+import { canonicalExtractionTargetRoot } from "../extraction/authority/target-root-binding.js";
 import {
   listProviderRawAttempts, readProviderRawAttempt,
   writeProviderRawAttempt, retainedFailureOutcome, providerRawSuccessEvidenceState, type ProviderRawAttempt
@@ -58,6 +60,7 @@ export function prepareSemanticProposal(
   workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number, maxAttemptsPerKey?: number
 ) {
   const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
+  assertRetainedProposalRevisionParents(workset, cacheRoot, maxOutputTokens, lines);
   const cachedKeys = new Set<string>();
   for (const line of lines) {
     const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
@@ -93,6 +96,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
   }
   const maxOutputTokens = authority.limits.max_output_tokens;
   const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens);
+  assertRetainedProposalRevisionParents(input.workset, input.cacheRoot, maxOutputTokens, lines);
   assertAuthorizedProposalRequest(input, lines, maxOutputTokens);
   const authorized = new Set(authority.keys);
   const dispatch: SemanticProposalLine[] = [];
@@ -199,7 +203,9 @@ function assertAuthorizedProposalRequest(
 
 /** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
 export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
-  return materializeSemanticProposalLines(workset, maxOutputTokens).map((line) => {
+  const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
+  assertRetainedProposalRevisionParents(workset, cacheRoot, maxOutputTokens, lines);
+  return lines.map((line) => {
     const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
     const shard = state.shard;
     if (state.status !== "settled") return { line, shard, status: state.status };
@@ -221,6 +227,67 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
     if (!isCoreAdmittedProposal(line, received)) throw new SemanticProposalIdentityError("cached proposal no longer admits");
     return { line, shard, received, status: "interpreted" as const };
   });
+}
+
+/** Revisions use the exact durable parent raw and terminal physical response, including rejected semantics. */
+export function prepareRetainedSemanticProposalRevision(input: Readonly<{
+  workset: SemanticProposalWorkset; parentCacheRoot: string; maxOutputTokens: number; itemIndex: number;
+  reviewComments?: readonly string[]; attentionRequestSha256?: string;
+}>): SourceSemanticProposalRevision {
+  const item = input.workset.items[input.itemIndex];
+  if (item === undefined || typeof item !== "object" || item === null || Array.isArray(item) ||
+      Object.hasOwn(item, "revision")) {
+    throw new AlayaError("VALIDATION", "proposal revision requires one unrevised original item");
+  }
+  const parent = materializeSemanticProposalLines({ ...input.workset, items: [item] }, input.maxOutputTokens)[0]!;
+  const raw = completeProposalParentRaw(input.workset, input.parentCacheRoot, input.maxOutputTokens, parent);
+  return prepareSourceSemanticProposalRevision({ kind: input.workset.kind,
+    parent_request: parent.request, previous_response: raw,
+    response_completion: "complete", review_comments: input.reviewComments,
+    attention_request_sha256: input.attentionRequestSha256 });
+}
+
+function assertRetainedProposalRevisionParents(workset: SemanticProposalWorkset, cacheRoot: string,
+  maxOutputTokens: number, lines: readonly SemanticProposalLine[]): void {
+  const revised = lines.some(line => line.request.revision !== undefined);
+  if (revised !== (workset.revision_parent_cache_root !== undefined)) {
+    throw new AlayaError("CONFLICT", "proposal revision requires one explicit physical parent root");
+  }
+  if (revised && canonicalExtractionTargetRoot(workset.revision_parent_cache_root!) ===
+      canonicalExtractionTargetRoot(cacheRoot)) {
+    throw new AlayaError("CONFLICT", "proposal revision requires an isolated child cache root");
+  }
+  for (const [index, line] of lines.entries()) {
+    const revision = line.request.revision;
+    if (revision === undefined) continue;
+    const item = workset.items[index];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new AlayaError("CONFLICT", "proposal revision lost its original workset item");
+    }
+    const { revision: _revision, ...baseItem } = item as Record<string, unknown>;
+    const parent = materializeSemanticProposalLines({ ...workset, items: [baseItem] }, maxOutputTokens)[0]!;
+    if (parent.userPrompt !== revision.parent_request_json ||
+        completeProposalParentRaw(workset, workset.revision_parent_cache_root!, maxOutputTokens, parent) !== revision.previous_response) {
+      throw new AlayaError("CONFLICT", "proposal revision differs from its complete retained parent");
+    }
+  }
+}
+
+function completeProposalParentRaw(workset: SemanticProposalWorkset, cacheRoot: string,
+  maxOutputTokens: number, parent: SemanticProposalLine): string {
+  const state = readSemanticProposalAttemptState(cacheRoot, parent.key,
+    semanticProposalLookup(workset, parent, maxOutputTokens));
+  const shard = state.shard;
+  if (state.status !== "settled" || shard === undefined || !hasVerifiedProposalCompletion(shard)) {
+    throw new AlayaError("CONFLICT", "proposal revision requires a settled complete physical parent");
+  }
+  const raw = readProviderRawAttempt(cacheRoot, parent.key, shard.attempt_ordinal);
+  if (raw === undefined || raw.decoded_text !== shard.raw_json || !raw.full_replay_possible ||
+      providerRawSuccessEvidenceState(raw) !== "bound" || raw.transport_failure !== undefined ||
+      raw.finish_reason !== shard.finish_reason || raw.completion_witness !== "finish_reason") {
+    throw new AlayaError("CONFLICT", "proposal revision parent has no complete retained response witness");
+  }
+  return raw.decoded_text;
 }
 
 type ProposalLedger = ReturnType<typeof openSemanticProposalAttemptLedger>;
@@ -488,7 +555,8 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
       producer_version: request.producer_capability.producer_version,
       resource_limits: request.resource_limits,
       ...(request.approved_fixed_context === undefined ? {} : { approved_fixed_context: request.approved_fixed_context }),
-      attribution_context: request.attribution_context
+      attribution_context: request.attribution_context,
+      ...(request.revision === undefined ? {} : { revision: request.revision })
     }, { rawJson });
     if (canonicalJson(received.request) !== canonicalJson(request)) {
       throw new AlayaError("INTERNAL", "semantic proposal receive lost the retained request envelope");
@@ -501,7 +569,8 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
     admitted_query_semantics: request.admitted_query_semantics, source_interpretation_descriptors: request.source_interpretation_descriptors,
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version,
-    resource_limits: request.resource_limits
+    resource_limits: request.resource_limits,
+    ...(request.revision === undefined ? {} : { revision: request.revision })
   }, { rawJson });
   if (canonicalJson(received.request) !== canonicalJson(request)) {
     throw new AlayaError("INTERNAL", "semantic proposal receive lost the retained request envelope");

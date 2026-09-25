@@ -8,6 +8,11 @@ import { semanticInstanceProof } from "./source-semantic-proof-program.js";
 const GUARD = { schema_version: 1 as const, kind: "query_predicate" as const, verdict: "unresolved" as const, time_scope: "none" as const };
 type Edge = Readonly<{ from: string; to: string; forward: string; backward: string }>;
 type Graph = Readonly<{ edges: readonly Edge[]; properties: ReadonlyMap<string, readonly string[]> }>;
+export type SourceSemanticLoweredObligation = Readonly<{
+  relation_kind: string; source_variable: string; alternative: number; frame: string;
+  obligation: "predicate" | "slot" | "referent" | "source_evidence" | "source_act" | "context" | "sort";
+  role?: string; variable?: string;
+}>;
 
 /** Finite graph walk; every conjunct is visited, including reverse and non-tree edges. */
 export type SourceSemanticCompilation = Readonly<{
@@ -17,8 +22,9 @@ export type SourceSemanticCompilation = Readonly<{
 /** One jointly constrained walk; callers observe each group separately so kinds do not union. */
 export function compileSourceSemanticGroupProgram(query: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative,
   alt: number, meter: SourceSemanticResourceLedger, finite: SourceSemanticCompilation | undefined,
-  groupFrame: string | undefined, acceptIndex: number, groupQueryFrame?: string): QueryProgram {
-  return compileSourceSemanticAlternative(query, alternative, alt, meter, finite, false, groupFrame, acceptIndex, groupQueryFrame);
+  groupFrame: string | undefined, acceptIndex: number, groupQueryFrame?: string,
+  obligations?: SourceSemanticLoweredObligation[]): QueryProgram {
+  return compileSourceSemanticAlternative(query, alternative, alt, meter, finite, false, groupFrame, acceptIndex, groupQueryFrame, obligations);
 }
 
 function rel(predicate: string, from: string, to: string, meter: SourceSemanticResourceLedger): QueryProgram {
@@ -29,8 +35,8 @@ function rel(predicate: string, from: string, to: string, meter: SourceSemanticR
 
 export function compileSourceSemanticAlternative(querySemantics: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
   meter: SourceSemanticResourceLedger, finite?: SourceSemanticCompilation, omitAccept = false, groupFrame?: string,
-  acceptIndex?: number, groupQueryFrame?: string): QueryProgram {
-  const graph = buildGraph(querySemantics, alternative, alt, meter, groupFrame, groupQueryFrame);
+  acceptIndex?: number, groupQueryFrame?: string, obligations?: SourceSemanticLoweredObligation[]): QueryProgram {
+  const graph = buildGraph(querySemantics, alternative, alt, meter, groupFrame, groupQueryFrame, obligations);
   const root = alternative.frames[0]!.variable;
   const seed = groupFrame === undefined ? `@seed:${alt}` : `@seed:${alt}:${groupFrame}`;
   const steps = [rel(key("candidate_route"), seed, root, meter)];
@@ -94,8 +100,14 @@ function sequence(steps: readonly QueryProgram[]): QueryProgram {
 }
 
 function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQueryAlternative, alt: number,
-  meter: SourceSemanticResourceLedger, groupFrame?: string, groupQueryFrame?: string): Graph {
+  meter: SourceSemanticResourceLedger, groupFrame?: string, groupQueryFrame?: string,
+  obligations?: SourceSemanticLoweredObligation[]): Graph {
   const edges: Edge[] = [], properties = new Map<string, string[]>();
+  const record = (row: SourceSemanticLoweredObligation) => {
+    if (obligations === undefined) return;
+    meter.charge(1, 128 + 4 * row.relation_kind.length, "query obligation provenance");
+    obligations.push(row);
+  };
   const addKey = (variable: string, predicate: string) => {
     meter.charge(1, 512, "query obligation");
     const list = properties.get(variable) ?? []; list.push(predicate); properties.set(variable, list);
@@ -108,17 +120,32 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
   for (const [fi, frame] of alternative.frames.entries()) {
     const frameGroup = frame.id === groupQueryFrame ? groupFrame : undefined;
     used.add(frame.variable); add(frame.variable, "source_interpretation_presence");
-    if (frame.operator === undefined) addKey(frame.variable, correspondencePredicateKey(alt, frame.id, frameGroup));
+    record({ relation_kind: key("source_interpretation_presence"), source_variable: frame.variable,
+      alternative: alt, frame: frame.id, obligation: "source_evidence" });
+    if (frame.operator === undefined) {
+      const predicate = correspondencePredicateKey(alt, frame.id, frameGroup);
+      addKey(frame.variable, predicate);
+      record({ relation_kind: predicate, source_variable: frame.variable,
+        alternative: alt, frame: frame.id, obligation: "predicate" });
+    }
     else add(frame.variable, "source_interpretation_operator", frame.operator);
-    if (frame.source_act !== undefined) add(frame.variable, "source_act", frame.source_act);
+    if (frame.source_act !== undefined) {
+      add(frame.variable, "source_act", frame.source_act);
+      record({ relation_kind: key("source_act", frame.source_act), source_variable: frame.variable,
+        alternative: alt, frame: frame.id, obligation: "source_act" });
+    }
     for (const [ri, role] of frame.role_requirements.entries()) {
       used.add(role.target_variable);
       if (frame.operator === "reported") {
         edge(frame.variable, role.target_variable, key("source_interpretation_content", "operator_operand", "reporter"), key("source_interpretation_content_inverse", "operator_operand", "reporter"));
       } else {
         const slot = groupFrame === undefined ? `@slot:${alt}:${fi}:${ri}` : `@slot:${alt}:${fi}:${ri}:${groupFrame}`;
-        edge(frame.variable, slot, correspondenceSlotKey("semantic_correspondence_slot", alt, frame.id, role.id, frameGroup),
+        const predicate = correspondenceSlotKey("semantic_correspondence_slot", alt, frame.id, role.id, frameGroup);
+        edge(frame.variable, slot, predicate,
           correspondenceSlotKey("semantic_correspondence_slot_inverse", alt, frame.id, role.id, frameGroup));
+        record({ relation_kind: predicate, source_variable: frame.variable,
+          alternative: alt, frame: frame.id, obligation: "slot",
+          role: role.id, variable: role.target_variable });
         edge(slot, role.target_variable, key("source_interpretation_binding"), key("source_interpretation_binding_inv"));
       }
     }
@@ -128,6 +155,10 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
     add(frame.variable, obligation.kind === "asserted_at_source" ? "source_interpretation_assertion_permission"
       : obligation.kind === "entailed_at_source" ? "source_interpretation_entailed_permission"
       : obligation.kind === "explicit_embedded_structure" ? "source_interpretation_embedded" : "open_context");
+    if (obligation.kind !== "entailed_at_source") record({ relation_kind: key(obligation.kind === "asserted_at_source"
+      ? "source_interpretation_assertion_permission" : obligation.kind === "explicit_embedded_structure"
+        ? "source_interpretation_embedded" : "open_context"), source_variable: frame.variable,
+      alternative: alt, frame: frame.id, obligation: "context" });
     if (obligation.incidence !== undefined) {
       const incidence = obligation.incidence;
       edge(byFrame.get(incidence.other_frame)!.variable, frame.variable,
@@ -137,7 +168,17 @@ function buildGraph(query: SourceSemanticQuery, alternative: SourceSemanticQuery
   for (const variable of query.variables) {
     if (!used.has(variable.id)) continue;
     add(variable.id, "source_interpretation_sort", variable.sort);
-    if (variable.reference !== undefined) add(variable.id, "semantic_correspondence_referent", variable.id);
+    const frame = alternative.frames.find(row => row.variable === variable.id ||
+      row.role_requirements.some(role => role.target_variable === variable.id))?.id ?? alternative.frames[0]!.id;
+    record({ relation_kind: key("source_interpretation_sort", variable.sort), source_variable: variable.id,
+      alternative: alt, frame,
+      obligation: "sort", variable: variable.id });
+    if (variable.reference !== undefined) {
+      add(variable.id, "semantic_correspondence_referent", variable.id);
+      record({ relation_kind: key("semantic_correspondence_referent", variable.id), source_variable: variable.id,
+        alternative: alt, frame,
+        obligation: "referent", variable: variable.id });
+    }
   }
   return { edges, properties };
 }

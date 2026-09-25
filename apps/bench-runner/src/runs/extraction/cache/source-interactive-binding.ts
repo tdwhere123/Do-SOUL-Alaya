@@ -6,7 +6,7 @@ import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../c
 import { inspectExtractionAttemptLedger } from "../authority/attempt-ledger.js";
 import { baseReportedUsage } from "../authority/step-quote.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
-import { providerRawSuccessEvidenceState, readProviderRawAttempt,
+import { bindProviderRawAttempt, readSingleSourceRawAttempt, providerRawSuccessEvidenceState, readProviderRawAttempt,
   verifyProviderRawReservation } from "../fill/provider-raw-attempt.js";
 import { readRetainedInteractiveAuthority } from "../fill/retained-interactive-authority.js";
 import { sourceSemanticRequestWireDigest } from "../fill/source-semantic-interactive-request.js";
@@ -14,6 +14,47 @@ import { assertExtractionAuthorityKeyInScope } from "../authority/receipt/scope.
 import { buildExtractionTransportProvenance, isExtractionTransportProvenance } from "../transport-route.js";
 import { computeSystemPromptSha256, readRetainedSourceSemanticManifestIdentity } from "./extraction-cache-manifest.js";
 import type { CachedSourceSemantic, InteractiveSemanticProvenance } from "./source-semantic-artifact.js";
+import type { SourceSemanticInteractivePreflight } from "../fill/source-semantic-interactive-preflight.js";
+import { assertInteractiveSourcePreflightReceipt } from "../authority/source-preflight-binding.js";
+import type { SourceRequestLine } from "../request-artifact.js";
+
+/** A complete rejected response is still a physical parent, while its rejection stays settled. */
+export function readCompleteRetainedSourceResponse(input: Readonly<{
+  cacheRoot: string; preflight: SourceSemanticInteractivePreflight; line: SourceRequestLine;
+}>): string {
+  const { cacheRoot, preflight, line } = input;
+  const planned = preflight.planned_requests.find(row => row.key === line.key);
+  if (planned === undefined || !preflight.ready_requests.some(row => canonicalJson(row) === canonicalJson(line))) {
+    throw new AlayaError("CONFLICT", "source revision parent is outside its selected physical preparation");
+  }
+  const raw = readSingleSourceRawAttempt(cacheRoot, line.key);
+  if (raw === undefined) throw new AlayaError("CONFLICT", "source revision requires one retained physical response for this request");
+  if (raw.kind !== "source_semantic" || raw.authority_receipt_digest === undefined ||
+      raw.authority_lineage_digest === undefined) {
+    throw new AlayaError("CONFLICT", "source revision parent has no retained source authority");
+  }
+  const receipt = readRetainedInteractiveAuthority(cacheRoot, raw.authority_receipt_digest,
+    raw.authority_lineage_digest);
+  assertInteractiveSourcePreflightReceipt(preflight, receipt);
+  assertExtractionAuthorityKeyInScope(receipt, line.key);
+  bindProviderRawAttempt(raw, { kind: "source_semantic", cacheKey: line.key,
+    model: preflight.config.model, requestProfile: preflight.config.requestProfile,
+    requestDigest: planned.request_digest, authorityReceiptDigest: receipt.receipt_digest,
+    authorityLineageDigest: receipt.lineage_digest, sourceRequestSha256: line.requestSha256 });
+  const ledger = inspectExtractionAttemptLedger({ cacheRoot, lineageDigest: receipt.lineage_digest,
+    cacheIdentity: { model: preflight.config.model, requestProfile: preflight.config.requestProfile } });
+  // A complete quarantined response can parent a revision, but it still needs
+  // the same exact settlement witness as an admitted executable response.
+  verifyProviderRawReservation(raw, ledger, "executable");
+  if (!ledger?.historyComplete || !ledger.settledAttempts.some(row =>
+      row.cacheKey === line.key && row.attemptOrdinal === raw.attempt_ordinal) ||
+      raw.transport_failure !== undefined || !raw.full_replay_possible ||
+      providerRawSuccessEvidenceState(raw) !== "bound" ||
+      !isCompleteSemanticFinish(preflight.config.requestProfile, raw.finish_reason)) {
+    throw new AlayaError("CONFLICT", "source revision parent has no complete settled physical response");
+  }
+  return raw.decoded_text;
+}
 
 export function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
   const transport = requestProfile === STEP_SEMANTIC_REQUEST_PROFILE

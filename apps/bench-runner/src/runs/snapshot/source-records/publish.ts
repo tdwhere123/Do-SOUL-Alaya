@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -8,6 +8,7 @@ import {
 import { prepareSourceSemanticRequest, sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
   type SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
 import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson,
+  sourceSemanticInterpretationIdentity,
   SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase, initDatabase, sourceRecordFromRow, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
@@ -21,7 +22,9 @@ import { hashRegularFileNoFollow } from "../bound-file.js";
 import { checkpointAndCopyBenchDb } from "../freeze/db-copy.js";
 import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
-import { censusCompleteSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
+import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
+import { readVerifiedNativeSourceSnapshot } from "./native.js";
+import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION } from "../../extraction/request-artifact.js";
 
 type UnsupportedPreparation = Extract<SourceSemanticHostPreparation, { status: "unsupported_source" }>;
@@ -59,16 +62,18 @@ export function parseSourcePublicationAssociations(value: unknown): readonly Sou
     publicationAssociations: z.array(SourcePublicationAssociationRowSchema).max(10000) }).strict().parse(value).publicationAssociations;
 }
 
-export type SourcePublicationPopulation = Readonly<{
+type SourcePublicationPopulationBase = Readonly<{
   name: string;
-  dataDir: string;
-  pinnedMetaRoot: string;
-  questionWindow?: Readonly<{ offset: number; limit: number }>;
   cacheRoots?: readonly string[];
   model: string;
   requestProfile: ExtractionRequestProfile;
   publicationAssociations?: readonly SourcePublicationAssociation[];
 }>;
+export type SourcePublicationPopulation = SourcePublicationPopulationBase & (
+  Readonly<{ dataDir: string; pinnedMetaRoot: string; questionWindow?: Readonly<{ offset: number; limit: number }>;
+    nativeSnapshotPath?: never }> |
+  Readonly<{ nativeSnapshotPath: string; dataDir?: never; pinnedMetaRoot?: never; questionWindow?: never }>
+);
 
 export type SourcePublicationDisposition = Readonly<{
   source_id: string;
@@ -76,10 +81,13 @@ export type SourcePublicationDisposition = Readonly<{
   content_digest: string;
   corpus_digest: string;
   population: string;
-  question_id: string;
-  session_id: string;
-  session_index: number;
-  round_index: number;
+  question_id?: string;
+  session_id?: string;
+  session_index?: number;
+  round_index?: number;
+  native_record_id?: string;
+  recorded_at?: string;
+  title?: string;
   speaker: "user" | "assistant" | "system" | null;
   roles: readonly ("user" | "assistant")[];
   repeated_assertion_text: boolean;
@@ -89,13 +97,15 @@ export type SourcePublicationDisposition = Readonly<{
   admission_reason?: string;
   record_id?: string;
   source_record?: import("@do-soul/alaya-protocol").SourceRecordIdentity;
-  source_interpretation: "interpreted" | "abstained" | "no_executable_proposition" | "no_eligible_source" | "absent" | "invalid" | "conflict";
+  source_interpretation: "interpreted" | "abstained" | "no_executable_proposition" | "no_eligible_source" | "absent" | "invalid" | "conflict" | "copied_uninspected";
   source_interpretation_generation_key?: string;
   source_interpretation_binding?: Readonly<{ kind: "host_publication_association"; request_digest: string }>;
   publication: "published" | "not_attempted" | "failed";
   publication_error?: string;
   interpretation_id?: string;
   evidence_object_id?: string;
+  correspondence_descriptor?: Readonly<{ source_interpretation_id: string;
+    interpretation: import("@do-soul/alaya-protocol").SourceSemanticInterpretation }>;
 }>;
 
 export type SourcePublicationReport = Readonly<{
@@ -117,12 +127,62 @@ export type SourcePublicationReport = Readonly<{
   source_interpretation_binding_complete: boolean;
 }>;
 
+const NativePublicationReportSchema = z.object({
+  schema_version: z.literal(3), artifact_domain: z.literal("source_semantic_publication"),
+  workspace_id: z.string(), run_id: z.string(), snapshot_path: z.string(), db_sha256: z.string(),
+  census_count: z.number().int().nonnegative(), admitted_count: z.number().int().nonnegative(),
+  rejected_count: z.number().int().nonnegative(),
+  sources: z.array(z.object({ source_id: z.string(), source_version: z.string(),
+    content_digest: z.string(), corpus_digest: z.string(), record_id: z.string(),
+    source_record: z.object({ identity: z.string(), source_version: z.string(),
+      content_digest: z.string(), recorded_at: z.string(), event_time: z.string().nullable() }).passthrough(),
+    admission: z.enum(["admitted", "rejected"]), source_interpretation: z.string(),
+    source_interpretation_generation_key: z.string().optional(),
+    interpretation_id: z.string().optional(),
+    correspondence_descriptor: z.object({ source_interpretation_id: z.string(),
+      interpretation: SourceSemanticInterpretationSchema }).strict().optional()
+  }).passthrough())
+}).passthrough();
+
+/** Read a sealed native publication against the complete original snapshot and current source identities. */
+export function readNativeSourcePublicationReport(snapshotPathInput: string, originalSnapshotPath: string) {
+  const snapshotPath = resolve(snapshotPathInput);
+  const original = readVerifiedNativeSourceSnapshot(originalSnapshotPath);
+  const report = NativePublicationReportSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path: `${snapshotPath}.publication.json`, maxBytes: 32 * 1024 * 1024, label: "native source publication" })));
+  if (report.snapshot_path !== snapshotPath || hashRegularFileNoFollow(snapshotPath) !== report.db_sha256 ||
+      report.workspace_id !== original.manifest.workspace_id || report.run_id !== original.manifest.run_id ||
+      report.census_count !== original.records.length || report.sources.length !== original.records.length ||
+      report.admitted_count !== original.records.length || report.rejected_count !== 0) {
+    throw new AlayaError("CONFLICT", "native source publication differs from sealed original population");
+  }
+  for (const [index, source] of original.records.entries()) {
+    const published = report.sources[index];
+    if (published?.admission !== "admitted" || published.source_id !== source.source_id ||
+        published.source_version !== source.source_version || published.record_id !== source.record.identity ||
+        published.content_digest !== source.record.content_digest ||
+        published.corpus_digest !== fieldContractSha256(source.content_bytes) ||
+        published.source_record.identity !== source.record.identity ||
+        published.source_record.recorded_at !== source.recorded_at ||
+        published.source_record.event_time !== source.source_observed_at ||
+        published.correspondence_descriptor !== undefined &&
+          (published.source_interpretation !== "interpreted" ||
+            published.correspondence_descriptor.source_interpretation_id !== published.interpretation_id ||
+            sourceSemanticInterpretationIdentity(published.correspondence_descriptor.interpretation,
+              fieldContractSha256) !== published.interpretation_id)) {
+      throw new AlayaError("CONFLICT", "native source publication changed current membership or clocks");
+    }
+  }
+  return report;
+}
+
 type UnboundSourceInterpretationArtifact = Readonly<{ population: string; generation_key: string; status: "invalid" | "unbound" }>;
 
 export async function publishSourceSemanticSnapshot(input: Readonly<{
   snapshotPath: string;
   dataDirRoot: string;
   populations: readonly SourcePublicationPopulation[];
+  descriptorExportSourceIds?: readonly string[];
   recordedAt: string;
   producerCommit: string;
   workspaceId?: string;
@@ -136,15 +196,29 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   const workspaceId = input.workspaceId ?? "source-semantic-library";
   const runId = input.runId ?? "source-semantic-library-run";
   const census = await loadCensus(input.populations);
+  const nativePopulation = input.populations.find(population => population.nativeSnapshotPath !== undefined);
+  if (nativePopulation !== undefined && (input.populations.length !== 1 ||
+      nativePopulation.nativeSnapshotPath === undefined)) {
+    throw new AlayaError("VALIDATION", "native source publication requires one complete source population");
+  }
   const preparations = prepareCensusSources(census);
+  const descriptorExport = new Set(input.descriptorExportSourceIds ?? []);
+  if (descriptorExport.size !== (input.descriptorExportSourceIds?.length ?? 0) || descriptorExport.size > 10 ||
+      [...descriptorExport].some(id => !census.some(row => row.records.some(source => source.source_id === id)))) {
+    throw new AlayaError("VALIDATION", "publication descriptor export must select at most ten current sources");
+  }
   // Validate and inspect associations before creating any database or source record.
   const retained = indexRetainedSemantics(census, input.populations, preparations);
   return withSnapshotPublishLock(snapshotPath, () => withSnapshotPublishLock(join(dataDirRoot, "source-semantic-publication"), async () => {
     bindIsolatedSnapshot(dataDirRoot, snapshotPath);
-    const dispositions = await admitCensusSources(dataDirRoot, snapshotPath, census, preparations, {
-      recordedAt: input.recordedAt, workspaceId, runId
-    });
-    await publishRetainedSemantics(snapshotPath, census, retained.joined, dispositions, workspaceId, runId);
+    const dispositions = nativePopulation === undefined
+      ? await admitCensusSources(dataDirRoot, snapshotPath, census, preparations, {
+        recordedAt: input.recordedAt, workspaceId, runId
+      })
+      : copyAdmittedNativeSources(nativePopulation.nativeSnapshotPath!, snapshotPath, census[0]!, preparations,
+        workspaceId, runId);
+    await publishRetainedSemantics(snapshotPath, census, retained.joined, dispositions, workspaceId, runId,
+      descriptorExport);
     checkpointSnapshot(snapshotPath);
     const report = sealReport({
       recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions, unbound: retained.unbound
@@ -173,12 +247,43 @@ async function loadCensus(populations: readonly SourcePublicationPopulation[]): 
   for (const population of populations) {
     if (names.has(population.name)) throw new AlayaError("VALIDATION", `duplicate source population '${population.name}'`);
     names.add(population.name);
-    loaded.push(await censusCompleteSourceRecords({
-      population: population.name, dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
-      ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow })
-    }));
+    if (population.nativeSnapshotPath !== undefined) {
+      if (population.dataDir !== undefined || population.pinnedMetaRoot !== undefined || population.questionWindow !== undefined) {
+        throw new AlayaError("VALIDATION", "native source population cannot carry LongMemEval input fields");
+      }
+      loaded.push(censusNativeSourceRecords({ population: population.name, snapshotPath: population.nativeSnapshotPath }));
+    } else {
+      if (population.dataDir === undefined || population.pinnedMetaRoot === undefined) {
+        throw new AlayaError("VALIDATION", "LongMemEval source population requires pinned dataset paths");
+      }
+      loaded.push(await censusCompleteSourceRecords({
+        population: population.name, dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
+        ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow })
+      }));
+    }
   }
   return loaded;
+}
+
+function copyAdmittedNativeSources(sourceSnapshotPath: string, outputPath: string, census: SourceCensus,
+  preparations: ReadonlyMap<string, HostPreparation>, workspaceId: string, runId: string): SourcePublicationDisposition[] {
+  const native = readVerifiedNativeSourceSnapshot(sourceSnapshotPath);
+  if (native.manifest.workspace_id !== workspaceId || native.manifest.run_id !== runId ||
+      native.manifest.identity !== census.dataset_sha256 || native.records.length !== census.records.length) {
+    throw new AlayaError("CONFLICT", "native publication source differs from verified complete census");
+  }
+  copyFileSync(resolve(sourceSnapshotPath), outputPath);
+  return census.records.map((source, index) => {
+    const record = native.records[index]?.record;
+    if (record === undefined || record.identity !== source.native_record_id) {
+      throw new AlayaError("CONFLICT", "native publication record differs from the sealed census");
+    }
+    const preparation = preparations.get(source.source_id)!;
+    return { ...dispositionBase(source), host_preparation: preparation,
+      ...(preparation.status === "unsupported_source" ? { provider_attempts: 0 as const } : {}),
+      admission: "admitted" as const, record_id: record.identity, source_record: record,
+      source_interpretation: "copied_uninspected" as const, publication: "not_attempted" as const };
+  });
 }
 
 function bindIsolatedSnapshot(dataDirRoot: string, snapshotPath: string): void {
@@ -239,7 +344,7 @@ async function publishRetainedSemantics(
   snapshotPath: string, census: readonly SourceCensus[],
   joined: ReadonlyMap<string, RetainedSemantics>,
   dispositions: SourcePublicationDisposition[],
-  workspaceId: string, runId: string
+  workspaceId: string, runId: string, descriptorExport: ReadonlySet<string>
 ): Promise<void> {
   const database = initDatabase({ filename: snapshotPath });
   try {
@@ -256,7 +361,8 @@ async function publishRetainedSemantics(
       const current = dispositions[index]!;
       if (current.admission !== "admitted" || current.host_preparation.status === "unsupported_source") continue;
       dispositions[index] = await publishOneSource(
-        publication, joined.get(source.source_id), source, current, workspaceId, runId
+        publication, joined.get(source.source_id), source, current, workspaceId, runId,
+        descriptorExport.has(source.source_id)
       );
     }
   } finally {
@@ -269,7 +375,7 @@ async function publishOneSource(
   retained: RetainedSemantics | undefined,
   source: SourceCensusRecord,
   current: SourcePublicationDisposition,
-  workspaceId: string, runId: string
+  workspaceId: string, runId: string, exportDescriptor: boolean
 ): Promise<SourcePublicationDisposition> {
   if (retained === undefined) return current;
   if (retained.status !== "hit") {
@@ -306,7 +412,10 @@ async function publishOneSource(
     });
     return {
       ...current, ...generation, publication: "published",
-      interpretation_id: published.bound.interpretation_id, evidence_object_id: published.evidence.object_id
+      interpretation_id: published.bound.interpretation_id, evidence_object_id: published.evidence.object_id,
+      ...(exportDescriptor ? { correspondence_descriptor: {
+        source_interpretation_id: published.bound.interpretation_id,
+        interpretation: published.bound.interpretation } } : {})
     };
   } catch (error) {
     return {
@@ -439,7 +548,7 @@ function sealReport(input: Readonly<{
 }>): SourcePublicationReport {
   const interpretationCounts = {
     interpreted: 0, abstained: 0, no_executable_proposition: 0, no_eligible_source: 0,
-    absent: 0, invalid: 0, conflict: 0
+    absent: 0, invalid: 0, conflict: 0, copied_uninspected: 0
   };
   for (const row of input.dispositions) interpretationCounts[row.source_interpretation] += 1;
   return {
@@ -456,7 +565,8 @@ function sealReport(input: Readonly<{
       unsupported_source: input.dispositions.filter((row) => row.host_preparation.status === "unsupported_source").length
     },
     unbound_source_interpretation_artifacts: input.unbound, source_interpretation_binding_complete: input.unbound.length === 0 &&
-      input.dispositions.every((row) => row.source_interpretation !== "invalid" && row.source_interpretation !== "conflict")
+      input.dispositions.every((row) => row.source_interpretation !== "invalid" && row.source_interpretation !== "conflict" &&
+        row.source_interpretation !== "copied_uninspected")
   };
 }
 
@@ -471,8 +581,14 @@ function dispositionBase(source: SourceCensusRecord): Omit<SourcePublicationDisp
   "admission" | "source_interpretation" | "publication" | "host_preparation"> {
   return {
     source_id: source.source_id, source_version: source.source_version, content_digest: source.content_digest,
-    corpus_digest: source.corpus_digest, population: source.population, question_id: source.question_id,
-    session_id: source.session_id, session_index: source.session_index, round_index: source.round_index,
+    corpus_digest: source.corpus_digest, population: source.population,
+    ...(source.question_id === undefined ? {} : { question_id: source.question_id }),
+    ...(source.session_id === undefined ? {} : { session_id: source.session_id }),
+    ...(source.session_index === undefined ? {} : { session_index: source.session_index }),
+    ...(source.round_index === undefined ? {} : { round_index: source.round_index }),
+    ...(source.native_record_id === undefined ? {} : { native_record_id: source.native_record_id }),
+    ...(source.recorded_at === undefined ? {} : { recorded_at: source.recorded_at }),
+    ...(source.title === undefined ? {} : { title: source.title }),
     speaker: source.speaker ?? null, roles: source.roles, repeated_assertion_text: source.repeated_assertion_text
   };
 }

@@ -26,6 +26,7 @@ import { sourceSemanticQueryExamples, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CON
 export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
+import { assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
@@ -131,6 +132,7 @@ export type SourceSemanticQueryProposalInput = Readonly<{
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
+  revision?: SourceSemanticProposalRevision;
 }>;
 
 export type SourceSemanticCorrespondenceProposalInput = Readonly<{
@@ -140,6 +142,7 @@ export type SourceSemanticCorrespondenceProposalInput = Readonly<{
   producer_id: string;
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
+  revision?: SourceSemanticProposalRevision;
 }>;
 
 export type SourceSemanticQueryRequest = Readonly<{
@@ -151,6 +154,7 @@ export type SourceSemanticQueryRequest = Readonly<{
   attribution_context: UtteranceAttribution;
   producer_capability: z.infer<typeof ProducerCapability>;
   resource_limits: SourceSemanticResourceLimits;
+  revision?: SourceSemanticProposalRevision;
 }>;
 
 export type SourceSemanticCorrespondenceRequest = Readonly<{
@@ -163,6 +167,7 @@ export type SourceSemanticCorrespondenceRequest = Readonly<{
   resource_limits: SourceSemanticResourceLimits;
   catalog: SourceSemanticCorrespondenceEndpointCatalog;
   endpoint_evidence: SourceSemanticCorrespondenceEndpointEvidence;
+  revision?: SourceSemanticProposalRevision;
 }>;
 
 export function semanticSha256(text: string): string {
@@ -287,7 +292,7 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
   rejectForbiddenProposalInput(input);
   const original_query = input.original_query;
   const original_query_digest = originalQueryDigest(original_query);
-  return {
+  const base: SourceSemanticQueryRequest = {
     contract: SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     original_query,
@@ -298,6 +303,13 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits)
   };
+  const request = input.revision === undefined ? base : {
+    ...base, revision: assertSourceSemanticProposalRevision("query", base, input.revision)
+  };
+  if (Buffer.byteLength(JSON.stringify(request), "utf8") > 1_000_000) {
+    throw new AlayaError("VALIDATION", "query proposal request exceeds its byte bound");
+  }
+  return request;
 }
 
 export function buildSourceSemanticCorrespondenceRequest(
@@ -327,9 +339,12 @@ export function buildSourceSemanticCorrespondenceRequest(
   };
   const baseBytes = countSourceSemanticCorrespondenceJsonBytes({ ...requestBase, endpoint_evidence: null },
     SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) - 4;
-  const request: SourceSemanticCorrespondenceRequest = { ...requestBase,
+  const base: SourceSemanticCorrespondenceRequest = { ...requestBase,
     endpoint_evidence: buildSourceSemanticCorrespondenceEndpointEvidence(admitted_query_semantics, descriptors, catalog,
       SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES - baseBytes)
+  };
+  const request = input.revision === undefined ? base : {
+    ...base, revision: assertSourceSemanticProposalRevision("semantic_correspondence", base, input.revision)
   };
   if (Buffer.byteLength(JSON.stringify(request)) > SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) {
     throw new AlayaError("VALIDATION", "semantic_correspondence request exceeds input budget");

@@ -26,6 +26,7 @@ export function deliverSourceSemanticProof(input: Readonly<{
   const byId = new Map(derivations.map((row) => [row.derivation_id, row]));
   let proofComplete = true;
   const binding_results: SourceSemanticBindingResult[] = [];
+  const acceptedBranchIndices = new Set<number>();
   const observed: { branch: SourceSemanticProofBranch; ids: readonly string[] }[] = [];
   const derivedIds = new Set(population.derivedNodes.filter((row) => row.kind === "query_entity" || row.kind === "instantiation").map((row) => row.node_id));
   for (const entry of index.entries) {
@@ -37,6 +38,7 @@ export function deliverSourceSemanticProof(input: Readonly<{
     const accepted = [...env.keys()].filter((key) => key.startsWith("@accepted:"));
     if (accepted.length !== 1) throw new CoreError("OBLIGATION_VIOLATION", "accepting binding lacks its unique alternative marker");
     const branchIndex = Number(accepted[0]!.slice("@accepted:".length));
+    acceptedBranchIndices.add(branchIndex);
     const compiledBranch = input.execution?.branches[branchIndex];
     const alternative = compiledBranch?.alternative ?? branchIndex;
     const branch = query.alternatives[alternative];
@@ -86,7 +88,8 @@ export function deliverSourceSemanticProof(input: Readonly<{
   if (derived_nodes.length > 4096) throw new SourceSemanticResourceExhausted("derived proof coordinates");
   const evaluation = evaluationReport(query, input.execution, observed, binding_results.length);
   meter.retain([binding_results, evidence_leaves, consumed_leaves, derived_nodes, evaluation], "proof encoding");
-  return { binding_results, derivations, evidence_leaves, consumed_leaves, proofComplete, derived_nodes,
+  return { binding_results, acceptedBranchIndices,
+    derivations, evidence_leaves, consumed_leaves, proofComplete, derived_nodes,
     ...(evaluation === undefined ? {} : { evaluation }) };
 }
 

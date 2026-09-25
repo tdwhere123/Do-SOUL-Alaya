@@ -1,5 +1,10 @@
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
+import { censusNativeSourceRecords, type SourceCensusRecord } from "../../snapshot/source-records/census.js";
+import { nativeSourceRequestInventory } from "./source-request-workset.js";
+import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
+
+export type ExtractionFillVariant = LongMemEvalVariant | "native_source_snapshot";
 import { loadDatasetWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import type { PreparedExpansionFillAuthority } from "../expansion-fill-authority.js";
 import {
@@ -10,7 +15,9 @@ import {
 interface ExtractionFillWindowOptions {
   readonly openSemantics?: boolean;
   readonly sourcePacking?: ExtractionSourcePacking;
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
+  readonly nativeSourcePopulation?: Readonly<{ name: string; snapshotPath: string }>;
+  readonly config?: CompileSeedExtractionConfig;
   readonly limit?: number;
   readonly offset?: number;
   readonly questionBatchLimit?: number;
@@ -24,6 +31,7 @@ interface ExtractionFillWindow {
   readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly occurrenceExtractionTurns?: readonly LongMemEvalExtractionTurn[];
+  readonly nativeSourceRecords?: readonly SourceCensusRecord[];
   readonly requestedTurns: number;
   readonly executionRequestedTurns: number;
   readonly windowUniqueCacheKeys: number;
@@ -41,9 +49,32 @@ export async function prepareExtractionFillWindow(
   expansion: PreparedExpansionFillAuthority | undefined
 ): Promise<ExtractionFillWindow> {
   if (expansion !== undefined) {
+    if (options.nativeSourcePopulation !== undefined) throw new Error("native source population cannot mix expansion");
     return prepareExpansionWindow(options, expansion);
   }
+  if (options.variant === "native_source_snapshot") {
+    return prepareNativeWindow(options);
+  }
+  if (options.nativeSourcePopulation !== undefined) throw new Error("native source population requires its own variant");
   return await prepareDatasetWindow(options);
+}
+
+function prepareNativeWindow(options: ExtractionFillWindowOptions): ExtractionFillWindow {
+  if (options.nativeSourcePopulation === undefined || options.config === undefined ||
+      options.sourcePacking !== "complete-source" || !options.openSemantics ||
+      options.offset !== undefined || options.limit !== undefined || options.questionBatchLimit !== undefined) {
+    throw new Error("native source window requires one complete verified snapshot and semantic generation");
+  }
+  const census = censusNativeSourceRecords({ population: options.nativeSourcePopulation.name,
+    snapshotPath: options.nativeSourcePopulation.snapshotPath });
+  const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, options.config);
+  // The legacy window counters here count native source occurrences, not dialogue turns/questions.
+  return { distinctTurns: [], executionTurns: [], distinctExtractionTurns: [], executionExtractionTurns: [],
+    nativeSourceRecords: census.records, requestedTurns: inventory.requests.length,
+    executionRequestedTurns: inventory.requests.length, windowUniqueCacheKeys: inventory.requests.length,
+    windowTurnOccurrences: census.records.length, unsupportedSourceOccurrences: inventory.unsupportedSources.length,
+    executionTurnOccurrences: census.records.length, questionCount: census.records.length,
+    datasetRevision: census.dataset_sha256, windowOffset: 0 };
 }
 
 function prepareExpansionWindow(
@@ -77,6 +108,7 @@ function prepareExpansionWindow(
 async function prepareDatasetWindow(
   options: ExtractionFillWindowOptions
 ): Promise<ExtractionFillWindow> {
+  if (options.variant === "native_source_snapshot") throw new Error("native source snapshot requires native preparation");
   const dataset = await loadDatasetWithIdentity(options.variant, {
     dataDir: options.dataDir,
     pinnedMetaRoot: options.pinnedMetaRoot

@@ -1,38 +1,40 @@
 import { createHash } from "node:crypto";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
+import { isNativeGeminiRequestProfile } from "../request-profile.js";
 import { parseSourceSemanticInteractivePreflight } from "../fill/source-semantic-interactive-preflight.js";
 import { resolveExtractionTransportRoute } from "../transport-route.js";
 import { computeSystemPromptSha256 } from "../cache/extraction-cache-manifest.js";
 import { resolveVendorModel } from "../../provider/catalog.js";
 import type { ExtractionAuthorityReceipt, ExtractionAuthorityReceiptInput } from "./receipt.js";
 
-/** Verify a retained Step report against the proof carried by an issued receipt. */
-export function assertStepSourcePreflightReceipt(
+/** Verify a retained interactive report against the proof carried by an issued receipt. */
+export function assertInteractiveSourcePreflightReceipt(
   value: unknown, receipt: ExtractionAuthorityReceipt
 ): ReturnType<typeof parseSourceSemanticInteractivePreflight> {
   const report = parseSourceSemanticInteractivePreflight(value);
   if (receipt.source_preflight_digest === undefined ||
       receipt.source_preflight_digest !== sourcePreflightDigest(report)) {
-    throw new AlayaError("CONFLICT", "retained Step source preflight differs from its authority receipt");
+    throw new AlayaError("CONFLICT", "retained interactive source preflight differs from its authority receipt");
   }
   return report;
 }
 
-/** A Step sample can only reserve the exact provider-free preparation it names. */
-export function bindStepSourcePreflight(input: ExtractionAuthorityReceiptInput): string | undefined {
-  const stepSample = input.action === "sample" &&
-    input.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE &&
+/** An interactive sample can only reserve the exact provider-free preparation it names. */
+export function bindInteractiveSourcePreflight(input: ExtractionAuthorityReceiptInput): string | undefined {
+  const interactiveSample = input.action === "sample" &&
+    (input.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ||
+      isNativeGeminiRequestProfile(input.observation.extraction.requestProfile) && input.sourcePreflight !== undefined) &&
     input.observation.extraction.sourcePacking === "complete-source";
-  if (!stepSample) {
+  if (!interactiveSample) {
     if (input.sourcePreflight !== undefined) {
-      throw new AlayaError("VALIDATION", "Step source preflight proof is only valid for a Step sample");
+      throw new AlayaError("VALIDATION", "interactive source preflight proof requires a source sample");
     }
     return undefined;
   }
   if (input.sourcePreflight === undefined || input.sampleScope === undefined ||
       !("missingKeys" in input.inspection)) {
-    throw new AlayaError("VALIDATION", "Step sample requires its retained source preflight and native scope");
+    throw new AlayaError("VALIDATION", "interactive source sample requires retained preflight and native scope");
   }
   const report = parseSourceSemanticInteractivePreflight(input.sourcePreflight);
   const observation = input.observation;
@@ -60,10 +62,11 @@ export function bindStepSourcePreflight(input: ExtractionAuthorityReceiptInput):
       input.priceEstimate.maximumInputTokensPerAttempt !== report.maximum_input_tokens_per_attempt ||
       input.priceEstimate.inputUsdPerMillion !== report.quote_basis.input_usd_equivalent_per_million ||
       input.priceEstimate.outputUsdPerMillion !== report.quote_basis.output_usd_equivalent_per_million) {
-    throw new AlayaError("CONFLICT", "Step sample authority differs from its retained source preflight");
+    throw new AlayaError("CONFLICT", "interactive source sample authority differs from retained preflight");
   }
   return sourcePreflightDigest(report);
 }
+
 
 function sourcePreflightDigest(report: ReturnType<typeof parseSourceSemanticInteractivePreflight>): string {
   return createHash("sha256").update(canonicalJson(report), "utf8").digest("hex");

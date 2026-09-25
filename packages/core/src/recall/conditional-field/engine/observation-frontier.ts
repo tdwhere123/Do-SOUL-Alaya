@@ -1,4 +1,5 @@
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
+import { pairKey } from "./path-routing.js";
 
 export class ObservationSubjects implements ReadonlySet<string> {
   public constructor(public snapshot: PersistentStringMap<true>) {}
@@ -31,6 +32,11 @@ export class ObservationPairs implements ReadonlyMap<string, string | null> {
     this.snapshot = this.snapshot.with(id, value); this.revision += 1;
   }
   public hasOpenDemand(): boolean { return this.completed < this.demanded.size; }
+  public status(subject: string, predicate: string): "unobserved" | "open" | "complete" {
+    const key = pairKey(subject, predicate);
+    if (!this.demanded.has(key)) return "unobserved";
+    return this.snapshot.has(`${key}:done`) ? "complete" : "open";
+  }
   public nextDemand(start: number, allowance: number): Readonly<{
     key?: string; next: number; work: number;
   }> {

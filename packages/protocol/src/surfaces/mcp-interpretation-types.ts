@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
-import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "../garden/source-semantic-access.js";
+import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "../garden/source-semantic-access.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
@@ -65,6 +65,7 @@ export const SoulInterpretationProposeRequestSchema = z.object({
 export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   operation: z.literal("prepare_query"),
   access_policy: SourceSemanticAccessPolicySchema.optional(),
+  source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
   query_semantics_unavailable: SourceSemanticQueryUnavailableReasonSchema.exclude(["absent"]).optional(),

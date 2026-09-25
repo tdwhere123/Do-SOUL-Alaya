@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema } from "./source-semantic-access.js";
+import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
@@ -108,6 +108,7 @@ const PrepareSourceRequestSchema = z.object({
 const PrepareQueryRequestSchema = z.object({
   kind: z.literal("prepare_query"),
   access_policy: SourceSemanticAccessPolicySchema.optional(),
+  source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
   query_semantics_unavailable: SourceSemanticQueryUnavailableReasonSchema.exclude(["absent"]).optional(),
@@ -131,13 +132,13 @@ const ReasonRequestSchema = z.object({
   budget: RequestBudgetSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000)
 }).strict().superRefine((request, context) => {
-  const leased = request.query_handle !== undefined && request.semantic_correspondence !== undefined;
-  const oneshot = request.source_interpretation_id !== undefined && request.query_semantics !== undefined &&
-    request.semantic_correspondence !== undefined && request.original_query !== undefined;
+  const leased = request.query_handle !== undefined &&
+    (request.semantic_correspondence !== undefined || request.source_interpretation_id !== undefined);
+  const oneshot = request.source_interpretation_id !== undefined && request.original_query !== undefined;
   if (!leased && !oneshot) {
     context.addIssue({
       code: "custom",
-      message: "reason requires a query handle plus semantic correspondence, or one-shot source interpretation, query semantics, and semantic correspondence"
+      message: "reason requires a query handle and source interpretation, or a one-shot source interpretation and original query"
     });
   }
 }).readonly();

@@ -90,7 +90,7 @@ export function runSourceSemanticLibraryRecall(
     output_byte_limit: request.output_byte_limit, access_policy: policy
   });
   const inputId = accessInputIdentity(original, admission.kind === "admitted" ? admission.query : undefined,
-    request.budget, policy, lease?.source_id);
+    request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents);
   if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
   }

@@ -13,7 +13,7 @@ import {
   inspectSemanticProposalShard, hasAdmittedProposalOutcome, semanticProposalShardPath
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
-  executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
+  executeSemanticProposalFill, prepareRetainedSemanticProposalRevision, prepareSemanticProposal, readSemanticProposalResults
 } from "../../../runs/semantic-proposal/fill.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
@@ -130,6 +130,39 @@ it("commits a complete STOP query after settling the reserved attempt", async ()
   expect(replayed.cache_hits).toBe(1);
   expect(replayed.newly_admitted).toBe(0);
   expect(replayed.interpreted).toBe(1);
+});
+
+it("admits one Q child only with its complete retained physical parent in a separate stage root", async () => {
+  const root = tempRoot(), parentRoot = join(root, "parent"), childRoot = join(root, "child");
+  const parent = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(parent, parentRoot, 128, 1),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset: parent, cacheRoot: parentRoot, authority,
+    config: config(), extractor: extractor([meaningBody("sample")]) });
+  const revision = prepareRetainedSemanticProposalRevision({ workset: parent, parentCacheRoot: parentRoot,
+    maxOutputTokens: 128, itemIndex: 0 });
+  const child = parseSemanticProposalWorkset({ ...parent, revision_parent_cache_root: parentRoot,
+    items: [{ original_query: MIRA_QUERY, revision }] });
+  expect(() => prepareSemanticProposal(child, childRoot, 128, 1)).not.toThrow();
+  expect(() => prepareSemanticProposal(child, parentRoot, 128, 1)).toThrow(/isolated child cache root/u);
+  const childAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(child, childRoot, 128, 1),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const result = await executeSemanticProposalFill({ workset: child, cacheRoot: childRoot,
+    authority: childAuthority, config: config(), extractor: extractor([meaningBody("sample")]) });
+  expect(result.interpreted).toBe(1);
+  expect(readSemanticProposalResults(child, childRoot, 128)[0]?.status).toBe("interpreted");
+  expect(() => prepareSemanticProposal({ ...child, revision_parent_cache_root: join(root, "missing") },
+    join(root, "invalid-child"), 128, 1)).toThrow(/complete physical parent/u);
+});
+
+it("refuses a Q child after an incomplete physical parent spent its attempt", async () => {
+  const parentRoot = join(tempRoot(), "incomplete-parent"), parent = queryWorkset(MIRA_QUERY);
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(parent, parentRoot, 128, 1),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset: parent, cacheRoot: parentRoot, authority,
+    config: config(), extractor: extractor([meaningBody("sample")], { finish: "MAX_TOKENS" }) });
+  expect(() => prepareRetainedSemanticProposalRevision({ workset: parent,
+    parentCacheRoot: parentRoot, maxOutputTokens: 128, itemIndex: 0 })).toThrow(/complete physical parent/u);
 });
 
 it("sends the pinned Step query body through localhost HTTP and reopens the exact raw response", async () => {

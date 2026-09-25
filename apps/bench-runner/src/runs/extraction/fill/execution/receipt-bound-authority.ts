@@ -167,6 +167,7 @@ function extractionInspectionInput(input: {
     (receipt.continuation !== undefined || receipt.catalog_refill !== undefined);
   return {
     variant: options.variant,
+    ...(options.nativeSourcePopulation === undefined ? {} : { nativeSourcePopulation: options.nativeSourcePopulation }),
     sourcePacking: options.sourcePacking,
     sourceInterpretationProfile: options.sourceInterpretationProfile,
     openSemantics: options.openSemantics,

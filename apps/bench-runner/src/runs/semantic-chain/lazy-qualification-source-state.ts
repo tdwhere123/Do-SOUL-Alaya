@@ -1,5 +1,5 @@
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
-import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
+import type { SourceCensusRecord } from "../snapshot/source-records/census.js";
 import { readRetainedSourcePublicationOwners } from "../snapshot/source-records/prepare-associations.js";
 import { inspectCachedSourceSemantic } from "../extraction/cache/source-semantic-artifact.js";
 import { listProviderRawAttempts } from "../extraction/fill/provider-raw-attempt.js";
@@ -37,7 +37,7 @@ function sourceAttemptHistory(cacheRoot: string, key: string, config: LazyQualif
     digest: row.decoded_text_digest, extracted_at: row.extracted_at })), complete };
 }
 
-export function selectedSourceState(source: Awaited<ReturnType<typeof censusCompleteSourceRecords>>["records"][number],
+export function selectedSourceState(source: SourceCensusRecord,
   config: LazyQualificationConfig, owned: ReturnType<typeof readRetainedSourcePublicationOwners>["owned"],
   artifacts: readonly { key: string; cache_root: string; status: string; reason?: string }[]) {
   const generation = parseExtractionOpenSemanticsGeneration(config.source_population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);

@@ -14,7 +14,7 @@ import { createExtractionSampleScope } from "../../../runs/extraction/authority/
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
   "../../../runs/extraction/authority/receipt.js";
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
-import { assertStepSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
+import { assertInteractiveSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
 import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
 import { inspectCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
@@ -293,8 +293,8 @@ it("binds an explicit source cap to encoded HTTP, retained bounds, receipt price
   ) / 1_000_000);
   expect(fixture.receipt.limits.max_output_tokens).toBe(16384);
   expect(fixture.receipt.source_preflight_digest).toMatch(/^[a-f0-9]{64}$/u);
-  expect(assertStepSourcePreflightReceipt(fixture.preflight, fixture.receipt)).toEqual(fixture.preflight);
-  expect(() => assertStepSourcePreflightReceipt({ ...fixture.preflight,
+  expect(assertInteractiveSourcePreflightReceipt(fixture.preflight, fixture.receipt)).toEqual(fixture.preflight);
+  expect(() => assertInteractiveSourcePreflightReceipt({ ...fixture.preflight,
     max_output_tokens: 4096 }, fixture.receipt)).toThrow();
   expect(fixture.receipt.price.estimated_upper_usd).toBe(fixture.preflight.cost_bound_usd);
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;

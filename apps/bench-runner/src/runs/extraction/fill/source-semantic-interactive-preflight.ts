@@ -8,18 +8,30 @@ import { ExtractionTransportProvenanceSchema, buildExtractionTransportProvenance
   resolveExtractionTransportRoute } from "../transport-route.js";
 import { inspectExtractionFillPreparation } from "./fill-preparation.js";
 import { prepareSourceRequestWorkset } from "./source-request-workset.js";
-import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest } from "./source-semantic-interactive-request.js";
+import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest,
+  sourceSemanticInteractiveWireSha256, SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT } from "./source-semantic-interactive-request.js";
 import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
+import { isNativeGeminiRequestProfile } from "../request-profile.js";
 import { SourceRequestLineSchema, parseExtractionOpenSemanticsGeneration,
   parseSourceSemanticRequestLine } from "../request-artifact.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 
 export const STEP_SOURCE_OUTPUT_TOKEN_DEFAULT = 4096;
-const StepSourceOutputTokenCapSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const InteractiveSourceOutputTokenCapSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
 const DigestSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+const GeminiQuoteBasisSchema = z.object({
+  contract: z.literal("gemini-source-experimental-quote-v1"),
+  selected_model: z.literal("gemini-3.1-flash-lite"),
+  selected_provider_url: z.literal("https://generativelanguage.googleapis.com"),
+  value_kind: z.literal("declared_experimental_usd_policy_not_invoice"),
+  input_usd_equivalent_per_million: z.number().positive().finite(),
+  output_usd_equivalent_per_million: z.number().positive().finite()
+}).strict();
+const QuoteBasisSchema = z.union([StepQuoteBasisSchema, GeminiQuoteBasisSchema]);
 const PlannedRequestSchema = SourceRequestLineSchema.unwrap().extend({
   request_digest: DigestSchema,
+  wire_sha256: DigestSchema.optional(),
   request_url: z.string().url(),
   input_byte_upper: z.number().int().nonnegative()
 }).strict().readonly();
@@ -45,14 +57,16 @@ const RetainedPreflightSchema = z.object({
     transportProviderUrl: z.string().min(1).optional(),
     transportModel: z.string().min(1).optional(),
     modelFamily: z.string().min(1).optional(),
-    requestProfile: z.literal(STEP_SEMANTIC_REQUEST_PROFILE),
+    requestProfile: z.string().refine(profile => profile === STEP_SEMANTIC_REQUEST_PROFILE ||
+      isNativeGeminiRequestProfile(profile)),
     apiKey: z.null(), sourcePacking: z.literal("complete-source"),
     openSemantics: z.unknown()
   }).strict(),
   transport_provenance: ExtractionTransportProvenanceSchema,
-  quote_basis: StepQuoteBasisSchema,
-  max_output_tokens: StepSourceOutputTokenCapSchema,
-  output_token_field: z.literal("max_tokens"),
+  quote_basis: QuoteBasisSchema,
+  max_output_tokens: InteractiveSourceOutputTokenCapSchema,
+  wire_digest_contract: z.literal(SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT).optional(),
+  output_token_field: z.enum(["max_tokens", "maxOutputTokens"]),
   maximum_attempts_per_key: z.literal(1),
   maximum_input_tokens_per_attempt: z.number().int().nonnegative(),
   input_token_bound: z.number().int().nonnegative(),
@@ -68,9 +82,21 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   const config = { ...report.config,
     openSemantics: parseExtractionOpenSemanticsGeneration(report.config.openSemantics) };
   const route = resolveExtractionTransportRoute(config);
-  assertStepQuoteBasis(config.requestProfile, route.model, route.providerUrl, report.quote_basis);
+  if (config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE) {
+    assertStepQuoteBasis(config.requestProfile, route.model, route.providerUrl, report.quote_basis);
+    if (report.output_token_field !== "max_tokens" || report.quote_basis.contract !== "step-plan-policy-quote-v1" ||
+        report.wire_digest_contract !== undefined) {
+      throw new AlayaError("CONFLICT", "retained Step preflight profile and quote differ");
+    }
+  } else if (report.output_token_field !== "maxOutputTokens" ||
+      report.quote_basis.contract !== "gemini-source-experimental-quote-v1" ||
+      report.wire_digest_contract !== SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT ||
+      route.model !== report.quote_basis.selected_model ||
+      route.providerUrl !== report.quote_basis.selected_provider_url) {
+    throw new AlayaError("CONFLICT", "retained Gemini preflight profile and declared quote differ");
+  }
   if (canonicalJson(report.transport_provenance) !== canonicalJson(buildExtractionTransportProvenance(config))) {
-    throw new AlayaError("CONFLICT", "retained Step preflight transport provenance differs from its config");
+    throw new AlayaError("CONFLICT", "retained interactive preflight transport provenance differs from its config");
   }
   const sortedKeys = [...report.selected_keys].sort();
   if (new Set(report.selected_keys).size !== report.selected_keys.length ||
@@ -83,19 +109,19 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
       report.unsupported_source_occurrences !== report.unsupported_sources.length ||
       report.unsupported_source_occurrences > report.source_occurrences ||
       report.unsupported_sources.some(row => row.dataset_revision !== report.dataset_revision)) {
-    throw new AlayaError("CONFLICT", "retained Step preflight population or selected keys are inconsistent");
+    throw new AlayaError("CONFLICT", "retained interactive preflight population or selected keys are inconsistent");
   }
   const selected = new Set(report.selected_keys);
   const ready = new Map<string, typeof report.ready_requests[number]>();
   for (const row of report.ready_requests) {
     const line = parseSourceSemanticRequestLine(row, config);
     if (!selected.has(line.key) || ready.has(line.key)) {
-      throw new AlayaError("CONFLICT", "retained Step preflight repeats or selects a foreign ready key");
+      throw new AlayaError("CONFLICT", "retained interactive preflight repeats or selects a foreign ready key");
     }
     ready.set(line.key, line);
   }
   if (canonicalJson([...ready.keys()].sort()) !== canonicalJson(report.selected_keys)) {
-    throw new AlayaError("CONFLICT", "retained Step preflight ready inventory differs from selected keys");
+    throw new AlayaError("CONFLICT", "retained interactive preflight ready inventory differs from selected keys");
   }
   const planned = new Set<string>();
   let largestInput = 0, inputBound = 0, costBound = 0;
@@ -106,14 +132,16 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
     }, config);
     if (!selected.has(line.key) || planned.has(line.key) ||
         canonicalJson(ready.get(line.key)) !== canonicalJson(line)) {
-      throw new AlayaError("CONFLICT", "retained Step preflight repeats or selects a foreign ready key");
+      throw new AlayaError("CONFLICT", "retained interactive preflight repeats or selects a foreign ready key");
     }
     planned.add(line.key);
     const wire = prepareSourceSemanticRequestWire(config, line, report.max_output_tokens);
     const input = attemptInputByteUpperBound(wire.body);
+    const wireSha256 = sourceSemanticInteractiveWireSha256(config, line, report.max_output_tokens);
     if (row.request_digest !== sourceSemanticRequestWireDigest(config, line, report.max_output_tokens) ||
+        (config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? row.wire_sha256 !== undefined : row.wire_sha256 !== wireSha256) ||
         row.request_url !== wire.url.href || row.input_byte_upper !== input) {
-      throw new AlayaError("CONFLICT", "retained Step preflight request differs from its encoded wire");
+      throw new AlayaError("CONFLICT", "retained interactive preflight request differs from its encoded wire");
     }
     largestInput = Math.max(largestInput, input);
     inputBound += input;
@@ -122,13 +150,13 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   }
   if (report.maximum_input_tokens_per_attempt !== largestInput ||
       report.input_token_bound !== inputBound || report.cost_bound_usd !== costBound) {
-    throw new AlayaError("CONFLICT", "retained Step preflight bounds differ from its exact planned requests");
+    throw new AlayaError("CONFLICT", "retained interactive preflight bounds differ from its exact planned requests");
   }
   const deterministic = report.ready_requests.filter(line =>
     parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request.source_assertions.length === 0);
   if (deterministic.length !== report.deterministic_requests ||
       deterministic.some(line => planned.has(line.key))) {
-    throw new AlayaError("CONFLICT", "retained Step preflight deterministic source count differs from ready requests");
+    throw new AlayaError("CONFLICT", "retained interactive preflight deterministic source count differs from ready requests");
   }
   return report;
 }
@@ -138,32 +166,40 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
   readonly cacheRoot: string;
   readonly preflightKeys?: unknown;
   readonly preflightOutputTokenCap?: number;
+  readonly geminiQuoteRates?: Readonly<{ inputUsdPerMillion: number; outputUsdPerMillion: number }>;
 }) {
-  const maxOutputTokens = StepSourceOutputTokenCapSchema.parse(
+  const maxOutputTokens = InteractiveSourceOutputTokenCapSchema.parse(
     options.preflightOutputTokenCap === undefined
       ? STEP_SOURCE_OUTPUT_TOKEN_DEFAULT : options.preflightOutputTokenCap);
   if (options.batch !== undefined || options.authorityReceiptPath !== undefined ||
       options.ingestionMode === "lazy_field" || options.extractorFactory !== undefined ||
       options.expansionCapability !== undefined || options.openSemantics === undefined ||
       options.sourcePacking !== "complete-source") {
-    throw new AlayaError("VALIDATION", "Step source dry preflight requires complete-source open semantics without execution authority");
+    throw new AlayaError("VALIDATION", "interactive source dry preflight requires complete-source open semantics without execution authority");
   }
   const inspected = await inspectExtractionFillPreparation(options, options.cacheRoot, undefined);
-  if (inspected.config.requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
-    throw new AlayaError("VALIDATION", "interactive source dry preflight requires the Step request profile");
+  const step = inspected.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE;
+  if (!step && !isNativeGeminiRequestProfile(inspected.config.requestProfile)) {
+    throw new AlayaError("VALIDATION", "interactive source dry preflight requires a native Step or Gemini profile");
   }
   const selectedKeys = options.preflightKeys === undefined ? undefined :
     new Set(parseExtractionSampleKeys(options.preflightKeys));
   const workset = prepareSourceRequestWorkset({ prepared: inspected, cacheRoot: options.cacheRoot,
     ...(selectedKeys === undefined ? {} : { executionCacheKeys: selectedKeys }) });
   if (workset.unsupportedSources.length !== inspected.unsupportedSourceOccurrences) {
-    throw new AlayaError("CONFLICT", "Step host preparation lost unsupported source occurrences");
+    throw new AlayaError("CONFLICT", "interactive host preparation lost unsupported source occurrences");
   }
   const route = resolveExtractionTransportRoute(inspected.config);
-  const quote = stepQuoteBasis(route.model, route.providerUrl);
+  const quote = step ? stepQuoteBasis(route.model, route.providerUrl) : GeminiQuoteBasisSchema.parse({
+    contract: "gemini-source-experimental-quote-v1", selected_model: route.model,
+    selected_provider_url: route.providerUrl, value_kind: "declared_experimental_usd_policy_not_invoice",
+    input_usd_equivalent_per_million: options.geminiQuoteRates?.inputUsdPerMillion,
+    output_usd_equivalent_per_million: options.geminiQuoteRates?.outputUsdPerMillion
+  });
   const requests = workset.lines.map((line) => {
     const wire = prepareSourceSemanticRequestWire(inspected.config, line, maxOutputTokens);
     return { ...line, request_digest: sourceSemanticRequestWireDigest(inspected.config, line, maxOutputTokens),
+      ...(step ? {} : { wire_sha256: sourceSemanticInteractiveWireSha256(inspected.config, line, maxOutputTokens) }),
       request_url: wire.url.href, input_byte_upper: attemptInputByteUpperBound(wire.body) };
   });
   const maximumInputTokensPerAttempt = requests.reduce((max, row) => Math.max(max, row.input_byte_upper), 0);
@@ -188,7 +224,9 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     config: { ...inspected.config, apiKey: null },
     transport_provenance: buildExtractionTransportProvenance(inspected.config),
     quote_basis: quote,
-    max_output_tokens: maxOutputTokens, output_token_field: "max_tokens" as const,
+    max_output_tokens: maxOutputTokens,
+    ...(step ? {} : { wire_digest_contract: SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT }),
+    output_token_field: step ? "max_tokens" as const : "maxOutputTokens" as const,
     maximum_attempts_per_key: 1 as const,
     maximum_input_tokens_per_attempt: maximumInputTokensPerAttempt,
     input_token_bound: requests.reduce((sum, row) => sum + row.input_byte_upper, 0),

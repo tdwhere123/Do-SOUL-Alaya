@@ -1,6 +1,7 @@
 import {
   canonicalJson, type RequestBudget, type SourceSemanticAccessPolicy, type SourceSemanticAccessSignal,
-  type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticResourceLedger
+  type SourceSemanticInterpretation, type SourceSemanticQuery, type SourceSemanticResourceLedger,
+  type SourceSemanticPreviewExtents
 } from "@do-soul/alaya-protocol";
 import { scoreQueryEvidenceContent } from "../../embedding-recall/evidence/query-evidence-scoring.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -16,10 +17,11 @@ function sourceSemanticAccessOrderCost(count: number): Readonly<{ work_units: nu
 
 export function sourceSemanticAccessInputIdentity(input: Readonly<{
   original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string;
-  budget: RequestBudget; policy: SourceSemanticAccessPolicy;
+  budget: RequestBudget; policy: SourceSemanticAccessPolicy; source_preview_extents?: SourceSemanticPreviewExtents;
 }>): string {
   return `sha256:${fieldContractSha256(canonicalJson({ original_query: input.original_query,
     query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy,
+    ...(input.source_preview_extents === undefined ? {} : { source_preview_extents: input.source_preview_extents }),
     resource_contract: SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT }))}`;
 }
 

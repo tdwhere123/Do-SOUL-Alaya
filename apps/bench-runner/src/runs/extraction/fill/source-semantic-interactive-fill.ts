@@ -1,7 +1,6 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
 import { readGeminiFailureResponse } from "../../compile-seed/http/gemini-http.js";
@@ -72,8 +71,8 @@ export async function executeOpenSemanticsInteractiveFill(
     ...(selected === undefined ? {} : { executionCacheKeys: selected })
   });
   const maxOutputTokens = authority.receipt.limits.max_output_tokens;
-  if (profile === STEP_SEMANTIC_REQUEST_PROFILE && input.concurrency !== 1) {
-    throw new AlayaError("VALIDATION", "Step source fill requires one sequential request");
+  if ((profile === STEP_SEMANTIC_REQUEST_PROFILE || authority.receipt.action === "sample") && input.concurrency !== 1) {
+    throw new AlayaError("VALIDATION", "selected interactive source fill requires one sequential request");
   }
   for (const line of workset.lines) {
     assertAttemptInputWithinReceiptLimit(
@@ -88,8 +87,8 @@ export async function executeOpenSemanticsInteractiveFill(
     const outcome = await fillInteractiveLine(input, workset, line, extractor, maxOutputTokens);
     if (outcome === "admitted") {
       newlyExtracted += 1;
-    } else if (profile === STEP_SEMANTIC_REQUEST_PROFILE) {
-      throw new AlayaError("CONFLICT", `Step source fill stopped after ${outcome} for ${line.key}`);
+    } else if (profile === STEP_SEMANTIC_REQUEST_PROFILE || authority.receipt.action === "sample") {
+      throw new AlayaError("CONFLICT", `selected interactive source fill stopped after ${outcome} for ${line.key}`);
     }
   });
   importDeterministicEmpty(input, workset);
@@ -105,8 +104,8 @@ function assertInteractiveOpenSemanticsScope(input: InteractiveFillInput): void 
     throw new AlayaError("VALIDATION", "open-semantics interactive fill requires an extraction authority receipt");
   }
   if (input.authority.receipt.action === "sample" &&
-      input.prepared.config.requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
-    throw new AlayaError("CONFLICT", "Gemini sample authority is Batch-only");
+      input.authority.receipt.source_preflight_digest === undefined) {
+    throw new AlayaError("CONFLICT", "interactive source sample lacks its retained preflight proof");
   }
   if (input.authority.receipt.repair_scope !== undefined) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill needs a fill or probe authority");
@@ -134,8 +133,7 @@ async function fillInteractiveLine(
   if (replayed !== undefined) return replayed;
   const retained = new Set(input.authority!.snapshot()?.transportFailures
     .filter((item) => item.cacheKey === line.key).map((item) => item.attemptOrdinal));
-  const attemptLimit = input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
-    ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
+  const attemptLimit = interactiveAttemptLimit(input);
   let last: "quarantined" | "transport_exhausted" = "transport_exhausted";
   for (let attempt = retained.size; attempt < attemptLimit; attempt += 1) {
     const outcome = await dispatchInteractiveLine(input, workset, line, extractor, maxOutputTokens);
@@ -170,9 +168,14 @@ function replayInteractiveRaws(
     const outcome = importInteractiveFromRaw(input, line, sourceCorpus, raw);
     if (outcome === "admitted" || outcome === "quarantined") return outcome;
   }
-  const attemptLimit = input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
-    ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
+  const attemptLimit = interactiveAttemptLimit(input);
   return raws.length >= attemptLimit ? "transport_exhausted" : undefined;
+}
+
+function interactiveAttemptLimit(input: InteractiveFillInput): number {
+  return input.authority!.receipt.action === "sample" || input.authority!.receipt.action === "probe" ||
+    input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
 }
 
 function importInteractiveFromRaw(
@@ -222,7 +225,7 @@ function importInteractiveFromRaw(
 }
 
 function boundSourceCorpus(workset: SourceRequestWorkset, line: SourceRequestLine): string {
-  const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.units[0]?.sourceCorpus;
+  const sourceCorpus = workset.requests.find((request) => request.line.key === line.key)?.sourceCorpus;
   if (sourceCorpus === undefined) throw new AlayaError("INTERNAL", "open-semantics interactive fill lost its bound source corpus");
   return sourceCorpus;
 }
@@ -393,10 +396,10 @@ function recordInteractiveOutcome(
 }
 
 function importDeterministicEmpty(input: InteractiveFillInput, workset: SourceRequestWorkset): void {
-  for (const { line, sourceTurn } of workset.deterministicEmptyRequests) {
+  for (const { line, sourceCorpus } of workset.deterministicEmptyRequests) {
     writeDeterministicSourceSemanticArtifact({
       config: input.prepared.config, cacheRoot: input.cacheRoot, writeLease: input.writeLease, line,
-      sourceCorpus: buildOfficialApiSourceCorpus(sourceTurn.turnContent, sourceTurn.turnMessages)
+      sourceCorpus
     });
     input.authority!.commitDeterministicShard(line.key);
   }
@@ -406,7 +409,8 @@ function publishInteractiveFill(
   input: InteractiveFillInput, workset: SourceRequestWorkset, newlyExtracted: number
 ): ExtractionFillResult {
   input.writeLease.assertOwned();
-  const completion = inspectFillWindow(input.cacheRoot, input.prepared.config, input.prepared.distinctExtractionTurns);
+  const completion = inspectFillWindow(input.cacheRoot, input.prepared.config,
+    input.prepared.distinctExtractionTurns, input.prepared.nativeSourceRecords, input.prepared.datasetRevision);
   let status: "complete" | "in_progress" = "complete";
   try { assertExtractionFillComplete(completion); }
   catch (cause) {

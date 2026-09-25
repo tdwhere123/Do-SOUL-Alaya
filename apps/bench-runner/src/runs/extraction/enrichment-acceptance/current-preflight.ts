@@ -218,7 +218,7 @@ export async function runCurrentEnrichmentPreflight(options: {
           })),
           user_prompt: item.line.userPrompt,
           unit_keys: item.line.unitKeys,
-          message_ids: Object.freeze(item.sourceTurn.turnMessages.map((message) => message.message_id))
+          message_ids: Object.freeze(item.sourceTurn?.turnMessages.map((message) => message.message_id) ?? [])
         });
       })),
       packs: packs.packs,

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
+  SourceSemanticProposalRevisionSchema,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest,
   sourceSemanticCorrespondenceResponseJsonSchema, sourceSemanticQueryResponseJsonSchema,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
@@ -29,13 +30,15 @@ export function semanticProposalWorksetContract(requestProfile: string) {
 const QueryItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
   approved_fixed_context: ApprovedSemanticContextSchema.optional(),
-  attribution_context: UtteranceAttributionSchema.optional()
+  attribution_context: UtteranceAttributionSchema.optional(),
+  revision: SourceSemanticProposalRevisionSchema.optional()
 }).strict();
 
 const CorrespondenceItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
   admitted_query_semantics: z.unknown(),
-  source_interpretation_descriptors: z.array(z.unknown()).min(1).max(1)
+  source_interpretation_descriptors: z.array(z.unknown()).min(1).max(1),
+  revision: SourceSemanticProposalRevisionSchema.optional()
 }).strict();
 
 export const SemanticProposalWorksetSchema = z.object({
@@ -46,6 +49,7 @@ export const SemanticProposalWorksetSchema = z.object({
   request_profile: z.string().min(1),
   producer_id: z.string().min(1).optional(),
   producer_version: z.string().min(1).optional(),
+  revision_parent_cache_root: z.string().min(1).optional(),
   items: z.array(z.unknown()).min(1)
 }).strict();
 
@@ -93,7 +97,8 @@ export function materializeSemanticProposalLines(
       const request = buildSourceSemanticQueryRequest({
         original_query: parsed.original_query, producer_id, producer_version,
         ...(parsed.approved_fixed_context === undefined ? {} : { approved_fixed_context: parsed.approved_fixed_context }),
-        attribution_context: parsed.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION
+        attribution_context: parsed.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION,
+        ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
       });
       return bindLine(workset, "query", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema,
         parsed.original_query, maxOutputTokens);
@@ -108,7 +113,8 @@ export function materializeSemanticProposalLines(
       original_query: parsed.original_query,
       admitted_query_semantics: parsed.admitted_query_semantics as SourceSemanticCorrespondenceRequest["admitted_query_semantics"],
       source_interpretation_descriptors: parsed.source_interpretation_descriptors as SourceSemanticCorrespondenceRequest["source_interpretation_descriptors"],
-      producer_id, producer_version
+      producer_id, producer_version,
+      ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
     });
     return bindLine(workset, "semantic_correspondence", SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, request, schema,
       parsed.original_query, maxOutputTokens);

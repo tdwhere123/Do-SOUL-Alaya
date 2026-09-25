@@ -119,7 +119,8 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
   }
   const query = admission.kind === "admitted" ? admission.query : undefined;
   const policy = request.access_policy ?? prior?.access_pool?.access.policy ?? "query-conditioned-v1";
-  const inputId = accessInputIdentity(request.original_query, query, request.budget, policy, scopeLease?.source_id);
+  const inputId = accessInputIdentity(request.original_query, query, request.budget, policy,
+    scopeLease?.source_id, request.source_preview_extents);
   if (prior !== undefined && prior.access_pool?.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "preparation continuation access policy or budget changed", { details: { admission: "bound" } });
   }
@@ -129,7 +130,8 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
     query_semantics_status: queryStatus, query_semantics: query };
   const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
-    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics });
+    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
+    request.source_preview_extents);
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;
@@ -171,12 +173,39 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
   if (lease !== undefined && (sourceInterpretationId === undefined || !lease.candidates?.includes(sourceInterpretationId))) {
     throw new CoreError("VALIDATION", "source interpretation is outside this preparation's candidates", { details: { admission: "bound" } });
   }
-  if (original === undefined || querySemantics === undefined || correspondence === undefined || sourceInterpretationId === undefined) {
+  if (original === undefined || sourceInterpretationId === undefined) {
     throw new CoreError("VALIDATION", "reason lacks its prepared source interpretation, query semantics, and semantic correspondence");
   }
   const checked = loadVerified(runtime, payload.workspace_id, sourceInterpretationId, authorized, meter);
   const source_disclosure = projectSourceDisclosure({ material_kind: "interpretation",
     evaluated_as_of: lease?.as_of ?? payload.as_of, source: checked.stored.record });
+  if (querySemantics === undefined || correspondence === undefined) {
+    const missing = querySemantics === undefined
+      ? correspondence === undefined ? "query_semantics_and_correspondence" as const : "query_semantics" as const
+      : "semantic_correspondence" as const;
+    const queryAdmission = admitSourceSemanticQuery(querySemantics, original);
+    if (querySemantics !== undefined) meter.retain(querySemantics, "reason available query admission");
+    const result = {
+      contract: "source-interpretation-reasoning-v5" as const, semantic_status: "unreviewed" as const,
+      conclusion_scope: "conditional_on_interpretation" as const, world_claim: "unknown" as const,
+      outcome: { status: "preparation_required" as const, missing }, consumed_leaves: [],
+      source_interpretation_id: sourceInterpretationId,
+      ...(queryAdmission.kind === "admitted" ? { query_semantics_id: queryAdmission.query_id } : {}),
+      source_target: checked.bound.source_target,
+      attention: { contract: "source-semantic-attention-v1" as const, kind: "preparation" as const,
+        source_interpretation_id: sourceInterpretationId,
+        ...(queryAdmission.kind === "admitted" ? { query_semantics_id: queryAdmission.query_id } : {}),
+        source_id: checked.stored.record.source_id, source_version: checked.stored.record.source_version,
+        content_digest: checked.stored.record.content_digest, missing, observation: "not_executed" as const }
+    };
+    return SourceSemanticWorkerResultSchema.parse({ kind: "reason", result,
+      interpretation: checked.bound.interpretation,
+      ...(queryAdmission.kind === "admitted" ? { query: queryAdmission.query } : {}),
+      source_disclosure,
+      coverage: { ...IDLE, discovery: lease === undefined ? "unexercised" : "complete",
+        source_interpretation: "open", query_semantics: queryAdmission.kind === "admitted" ? "complete" : "unexercised" },
+      work: workOf(meter) });
+  }
   meter.retain(querySemantics, "query semantics admission");
   meter.retain(correspondence, "semantic correspondence admission");
   const admission = admitSourceSemanticCorrespondence({

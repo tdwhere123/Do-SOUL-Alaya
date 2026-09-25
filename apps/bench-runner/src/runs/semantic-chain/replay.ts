@@ -24,6 +24,8 @@ import { SemanticChainPlanSchema, SemanticChainQuerySchema, chainIdentity, readC
 import { readSemanticChainCorrespondences, semanticChainQueryCorrespondences, verifySemanticChainQueries } from "./inputs.js";
 import { semanticChainCacheInputPaths } from "./inputs.js";
 import { discoverSemanticChainQuery } from "./prepare.js";
+import type { BenchDaemonHandle } from "../../harness/daemon.js";
+import type { SemanticChainConfig } from "./contract.js";
 
 export function inspectSemanticChainReplayTarget(root: string, arm: "retained" | "without_semantic_correspondences") {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
@@ -77,48 +79,130 @@ export async function replaySemanticChain(root: string, arm: "retained" | "witho
           query.status === "raw_ready" && query.query_semantics_unavailable !== "absent"
             ? query.query_semantics_unavailable : undefined); }
         catch (error) { preparationError = error instanceof Error ? error.message : String(error); }
-        const preparationElapsed = performance.now() - started;
-        if (prepared?.query_handle === undefined || !sameSealedSnapshotObservation(query, prepared.discovery)) {
-          const row = { query_key: query.query_key, status: "native_unavailable", reason: prepared === undefined ? "preparation_unavailable"
-            : prepared.query_handle === undefined ? "handle_unavailable" : "prepared_access_pool_mismatch",
-            correspondence_outcomes: outcomes, first_exposure: null,
-            preparation_trace: prepared?.discovery.discovery_trace ?? null, preparation_error: preparationError,
-            preparation_elapsed_ms: preparationElapsed,
-            native_elapsed_ms: performance.now() - started };
-          writeChainArtifact(rowPath, row); rows.push(row); continue;
-        }
-        const poolId = prepared.discovery.discovery_trace.at(-1)!.access.pool_id;
-        const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
-          SoulInterpretationRequestSchema.parse({ operation: "recall", original_query: query.original_query,
-            ...(query.status === "ready" ? { query_semantics: query.query_semantics }
-              : query.query_semantics_unavailable === "absent" ? {} : { query_semantics_unavailable: query.query_semantics_unavailable }),
-            query_handle: prepared.query_handle,
-            semantic_correspondences: arm === "retained" ? ready : [], accepts_unreviewed_conditional_results: true,
-            budget: config.budget, output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes,
-            access_policy: config.access_policy })));
-        if (response.operation !== "recall") throw new AlayaError("INTERNAL", "native recall returned a different operation");
-        if (response.query_semantics_status !== undefined &&
-          canonicalJson(response.query_semantics_status) !== canonicalJson(prepared.discovery.discovery_trace.at(-1)?.query_semantics_status)) {
-          throw new AlayaError("CONFLICT", "native recall changed prepared query semantic availability");
-        }
-        if (response.index !== undefined && (response.discovery?.access?.policy !== config.access_policy
-          || response.discovery.access.pool_id !== poolId)) {
-          throw new AlayaError("CONFLICT", "native recall did not bind the prepared access pool");
-        }
-        const exposure = response.index === undefined || response.delivery_id === undefined ? null
-          : recordSourceSemanticLibraryFirstExposure(response);
-        const row = { query_key: query.query_key, status: exposure === null ? "native_unavailable" : "replayed",
-          correspondence_outcomes: outcomes, response, first_exposure: exposure,
-          preparation_trace: prepared.discovery.discovery_trace, preparation_elapsed_ms: preparationElapsed,
-          native_elapsed_ms: performance.now() - started };
-        writeChainArtifact(rowPath, row); rows.push(row);
+        const row = await deliverPreparedSemanticChainQuery({ daemon, config, query, prepared,
+          ready: arm === "retained" ? ready : [], outcomes, rowPath, replayIdentity: identity,
+          preparationElapsed: performance.now() - started, preparationError, started });
+        rows.push(row);
       }
     });
-    const result = { contract: "source-semantic-chain-replay-v3", plan_identity: chainIdentity(plan),
-      identity, arm, provider_calls: 0, rows };
+    const result = semanticChainReplayAggregate(plan, identity, arm, rows);
     writeChainArtifact(output, result);
     return { path: output, result };
   });
+}
+
+function semanticChainReplayAggregate(plan: SemanticChainPlan, identity: string,
+  arm: "retained" | "without_semantic_correspondences", rows: readonly unknown[]) {
+  return { contract: "source-semantic-chain-replay-v3", plan_identity: chainIdentity(plan),
+    identity, arm, provider_calls: 0, rows };
+}
+
+/** After a crash past the immutable response row, close the replay archive without observing again. */
+export async function closeSemanticChainReplayFromDurableRows(root: string,
+  arm: "retained" | "without_semantic_correspondences" = "retained") {
+  const { plan, identity, output, rowPaths } = inspectSemanticChainReplayTarget(root, arm);
+  return withSnapshotPublishLock(output, async () => {
+    const prior = readChainArtifact(output);
+    if (prior !== undefined) return { path: output, result: ReplaySchema.parse(prior) };
+    const rows: unknown[] = [];
+    for (const query of plan.queries) {
+      if (query.status === "blocked") { rows.push(query); continue; }
+      const rowPath = rowPaths.get(query.query_key)!;
+      const row = readChainArtifact(rowPath);
+      if (row === undefined) return null;
+      const reservation = readChainArtifact(`${rowPath}.reserved`);
+      if (canonicalJson(reservation) !== canonicalJson({ replay_identity: identity, query_key: query.query_key })) {
+        throw new AlayaError("CONFLICT", "durable native response row lacks its exact exposure reservation");
+      }
+      rows.push(row);
+    }
+    const result = ReplaySchema.parse(semanticChainReplayAggregate(plan, identity, arm, rows));
+    writeChainArtifact(output, result);
+    return { path: output, result };
+  });
+}
+
+/** Deliver one already prepared live pool; the caller owns its prior native admission. */
+export async function deliverLivePreparedSemanticChain(root: string, daemon: BenchDaemonHandle,
+  liveHandles: ReadonlyMap<string, string | undefined>) {
+  const { plan, config, semantic_correspondences, identity, rowPaths } = inspectSemanticChainReplayTarget(root, "retained");
+  if (plan.queries.length !== 1 || plan.queries[0]?.status !== "ready") {
+    throw new AlayaError("CONFLICT", "live prepared delivery requires one admitted query");
+  }
+  const query = plan.queries[0];
+  const handle = liveHandles.get(query.query_key);
+  if (handle === undefined || handle.length === 0) {
+    throw new AlayaError("CONFLICT", "live prepared delivery lost its actual native handle");
+  }
+  const rowPath = rowPaths.get(query.query_key)!;
+  const { ready, outcomes } = semanticChainQueryCorrespondences(query, semantic_correspondences);
+  if (readChainArtifact(rowPath) === undefined) {
+    const reservation = `${rowPath}.reserved`;
+    if (readChainArtifact(reservation) !== undefined) {
+      throw new AlayaError("CONFLICT", "live native first exposure was reserved without a durable row");
+    }
+    writeChainArtifact(reservation, { replay_identity: identity, query_key: query.query_key });
+    const started = performance.now();
+    await deliverPreparedSemanticChainQuery({ daemon, config, query,
+      prepared: { query_handle: handle, discovery: query }, ready, outcomes,
+      rowPath, replayIdentity: identity, preparationElapsed: 0, preparationError: null, started });
+  }
+  const aggregate = await closeSemanticChainReplayFromDurableRows(root);
+  if (aggregate === null) throw new AlayaError("CONFLICT", "live prepared delivery has no durable response row");
+  return aggregate;
+}
+
+/** The same live-handle recall, immutable response row and first-exposure owner serve replay and recovery. */
+export async function deliverPreparedSemanticChainQuery(input: Readonly<{
+  daemon: BenchDaemonHandle; config: SemanticChainConfig;
+  query: Exclude<SemanticChainPlan["queries"][number], { status: "blocked" }>;
+  prepared: Awaited<ReturnType<typeof discoverSemanticChainQuery>> | undefined;
+  ready: ReturnType<typeof semanticChainQueryCorrespondences>["ready"];
+  outcomes: ReturnType<typeof semanticChainQueryCorrespondences>["outcomes"];
+  rowPath: string; replayIdentity: string; preparationElapsed: number;
+  preparationError: string | null; started: number;
+}>) {
+  const { daemon, config, query, prepared, ready, outcomes, rowPath, replayIdentity,
+    preparationElapsed, preparationError, started } = input;
+  const reservation = readChainArtifact(`${rowPath}.reserved`);
+  if (canonicalJson(reservation) !== canonicalJson({ replay_identity: replayIdentity, query_key: query.query_key })) {
+    throw new AlayaError("CONFLICT", "native delivery lacks its exact prior exposure reservation");
+  }
+  if (prepared?.query_handle === undefined || !sameSealedSnapshotObservation(query, prepared.discovery)) {
+    const row = { query_key: query.query_key, status: "native_unavailable", reason: prepared === undefined ? "preparation_unavailable"
+      : prepared.query_handle === undefined ? "handle_unavailable" : "prepared_access_pool_mismatch",
+      correspondence_outcomes: outcomes, first_exposure: null,
+      preparation_trace: prepared?.discovery.discovery_trace ?? null, preparation_error: preparationError,
+      preparation_elapsed_ms: preparationElapsed, native_elapsed_ms: performance.now() - started };
+    writeChainArtifact(rowPath, row);
+    return row;
+  }
+  const poolId = prepared.discovery.discovery_trace.at(-1)!.access.pool_id;
+  const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
+    SoulInterpretationRequestSchema.parse({ operation: "recall", original_query: query.original_query,
+      ...(query.status === "ready" ? { query_semantics: query.query_semantics }
+        : query.query_semantics_unavailable === "absent" ? {} : { query_semantics_unavailable: query.query_semantics_unavailable }),
+      query_handle: prepared.query_handle, semantic_correspondences: ready,
+      accepts_unreviewed_conditional_results: true, budget: config.budget,
+      output_byte_limit: config.output_byte_limit, authorized_scopes: config.authorized_scopes,
+      access_policy: config.access_policy })));
+  if (response.operation !== "recall") throw new AlayaError("INTERNAL", "native recall returned a different operation");
+  if (response.query_semantics_status !== undefined &&
+    canonicalJson(response.query_semantics_status) !== canonicalJson(prepared.discovery.discovery_trace.at(-1)?.query_semantics_status)) {
+    throw new AlayaError("CONFLICT", "native recall changed prepared query semantic availability");
+  }
+  if (response.index !== undefined && (response.discovery?.access?.policy !== config.access_policy
+    || response.discovery.access.pool_id !== poolId)) {
+    throw new AlayaError("CONFLICT", "native recall did not bind the prepared access pool");
+  }
+  const exposure = response.index === undefined || response.delivery_id === undefined ? null
+    : recordSourceSemanticLibraryFirstExposure(response);
+  const row = { query_key: query.query_key, status: exposure === null ? "native_unavailable" : "replayed",
+    correspondence_outcomes: outcomes, response, first_exposure: exposure,
+    preparation_trace: prepared.discovery.discovery_trace, preparation_elapsed_ms: preparationElapsed,
+    native_elapsed_ms: performance.now() - started };
+  writeChainArtifact(rowPath, row);
+  return row;
 }
 
 /** Replay of the same sealed SQLite under the existing snapshot/revision guards, not general cross-library equivalence.
@@ -286,7 +370,9 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
   if (trace == null || trace.length === 0 || !sameSealedSnapshotObservation(query, { ...query, discovery_trace: trace })
     || access === undefined || access.pool_id !== trace.at(-1)!.access.pool_id || access.policy !== config.access_policy
     || access.input_id !== sourceSemanticAccessInputIdentity({ original_query: query.original_query, query_semantics: querySemantics,
-      budget: config.budget, policy: config.access_policy })) throw new AlayaError("CONFLICT", "native delivery does not bind the prepared access pool");
+      budget: config.budget, policy: config.access_policy,
+      ...(config.source_preview_extents === undefined ? {} : { source_preview_extents: config.source_preview_extents })
+    })) throw new AlayaError("CONFLICT", "native delivery does not bind the prepared access pool");
   if (query.status === "raw_ready" && (response.proofs?.length ?? 0) > 0) {
     throw new AlayaError("CONFLICT", "unavailable query semantics cannot deliver a semantic proof");
   }

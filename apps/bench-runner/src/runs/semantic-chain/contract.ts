@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissionSchema,
   SourceSemanticQuerySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticAccessPolicySchema,
-  SourceSemanticAccessReceiptSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
+  SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
   SourceSemanticQueryStatusSchema, SourceSemanticQueryUnavailableReasonSchema,
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
@@ -23,8 +23,13 @@ export const SemanticChainConfigSchema = z.object({
   workspace_id: z.string().min(1), run_id: z.string().min(1),
   query_workset: SemanticProposalWorksetSchema.refine((value) => value.kind === "query", "query workset required"),
   query_cache_root: z.string().min(1), correspondence_cache_root: z.string().min(1),
+  correspondence_cache_owners: z.array(z.object({ key: Digest, cache_root: z.string().min(1) }).strict())
+    .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).optional(),
   max_output_tokens: z.number().int().min(1).max(65536),
+  correspondence_generation: z.object({ model: z.string().min(1), request_profile: z.string().min(1),
+    provider_url: z.string().min(1), max_output_tokens: z.number().int().min(1).max(65536) }).strict().optional(),
   discovery_page_cap: z.number().int().min(1).max(64),
+  source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
   // Candidate opportunity per query; the proposal authority owns global spend.
   correspondence_pair_cap: z.number().int().min(0).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
   access_policy: SourceSemanticAccessPolicySchema,
@@ -40,6 +45,7 @@ const Discovery = {
     access: SourceSemanticAccessReceiptSchema, query_semantics_status: SourceSemanticQueryStatusSchema,
     continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict()),
   discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
+  initial_discovery_elapsed_ms: z.number().nonnegative().optional(),
   unvisited_source_interpretation_count: z.number().int().nonnegative().nullable(), discovery_truncated: z.boolean()
 };
 export const SemanticChainQuerySchema = z.discriminatedUnion("status", [

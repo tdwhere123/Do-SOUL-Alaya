@@ -6,6 +6,7 @@ import type { ExtractionAuthorityReceipt } from "./receipt.js";
 import type { ExtractionFillOptions } from "../extraction-fill.js";
 import { requiresExtractionTargetSelection } from "./target-selection/receipt.js";
 import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
+import { isNativeGeminiRequestProfile } from "../request-profile.js";
 
 const SampleKeysSchema = z.array(z.string().regex(/^[a-f0-9]{64}$/u)).min(1).readonly();
 const SampleScopeSchema = z.object({
@@ -20,6 +21,14 @@ export function isStepInteractiveSampleReceipt(receipt: ExtractionAuthorityRecei
   return receipt.action === "sample" &&
     receipt.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE &&
     receipt.observation.extraction.sourcePacking === "complete-source";
+}
+
+/** Gemini Batch remains distinct; an interactive sample carries a retained native preflight proof. */
+export function isInteractiveSourceSampleReceipt(receipt: ExtractionAuthorityReceipt): boolean {
+  return receipt.action === "sample" && receipt.observation.extraction.sourcePacking === "complete-source" &&
+    (isStepInteractiveSampleReceipt(receipt) ||
+      isNativeGeminiRequestProfile(receipt.observation.extraction.requestProfile) &&
+      receipt.source_preflight_digest !== undefined);
 }
 
 /** A syntactic key proposal has no authority until a receipt binds its inspected scope. */
@@ -72,7 +81,8 @@ export function assertSampleReceipt(receipt: ExtractionAuthorityReceipt): void {
       receipt.direct_spend !== undefined || receipt.repair_scope !== undefined ||
       receipt.catalog_refill !== undefined || receipt.continuation !== undefined ||
       receipt.probe_key !== undefined ||
-      (isStepInteractiveSampleReceipt(receipt) !== (receipt.source_preflight_digest !== undefined)) ||
+      (isStepInteractiveSampleReceipt(receipt) && receipt.source_preflight_digest === undefined) ||
+      (receipt.source_preflight_digest !== undefined && !isInteractiveSourceSampleReceipt(receipt)) ||
       receipt.observation.inventory.invalidTurns !== 0 ||
       count > receipt.observation.inventory.missingTurns ||
       receipt.limits.starting_missing !== receipt.observation.inventory.missingTurns || receipt.limits.maximum_attempts !== count ||
@@ -113,7 +123,7 @@ export function assertSampleExecutionOptions(
   if (receipt.action !== "sample") return;
   assertSampleReceipt(receipt);
   const batch = options.batch;
-  if (isStepInteractiveSampleReceipt(receipt) &&
+  if (isInteractiveSourceSampleReceipt(receipt) &&
       batch === undefined && options.openSemantics !== undefined &&
       options.sourcePacking === "complete-source" && options.concurrency === 1 &&
       options.questionBatchLimit === undefined && options.cacheKeyAllowlist === undefined &&
@@ -122,7 +132,7 @@ export function assertSampleExecutionOptions(
       options.expansionSpendApproval === undefined) {
     return;
   }
-  if (batch === undefined || batch.limits.maxJobs !== 1 ||
+  if (isInteractiveSourceSampleReceipt(receipt) || batch === undefined || batch.limits.maxJobs !== 1 ||
       batch.limits.maxRequestsPerJob !== receipt.sample_scope!.keys.length ||
       batch.requestLimit !== undefined || options.questionBatchLimit !== undefined ||
       options.cacheKeyAllowlist !== undefined || options.predecessorAuthorityReceiptPath !== undefined ||

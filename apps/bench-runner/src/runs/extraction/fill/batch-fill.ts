@@ -280,17 +280,17 @@ async function importBatchLine(input: BatchFillInput, workset: SourceRequestWork
 
 async function importEmptyRequests(input: BatchFillInput, workset: SourceRequestWorkset): Promise<void> {
   if (input.prepared.config.openSemantics !== undefined) {
-    for (const { line, sourceTurn } of workset.deterministicEmptyRequests) {
+    for (const { line, sourceCorpus } of workset.deterministicEmptyRequests) {
       writeDeterministicSourceSemanticArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
-        writeLease: input.writeLease, line, sourceCorpus: buildOfficialApiSourceCorpus(sourceTurn.turnContent, sourceTurn.turnMessages) });
+        writeLease: input.writeLease, line, sourceCorpus });
       input.authority!.commitDeterministicShard(line.key);
     }
     return;
   }
   if (input.prepared.config.sourceInterpretationProfile !== undefined) {
-    for (const { line, sourceTurn } of workset.deterministicEmptyRequests) {
+    for (const { line, sourceCorpus } of workset.deterministicEmptyRequests) {
       writeDeterministicSourcePacketArtifact({ config: input.prepared.config, cacheRoot: input.cacheRoot,
-        writeLease: input.writeLease, line, sourceCorpus: buildOfficialApiSourceCorpus(sourceTurn.turnContent, sourceTurn.turnMessages) });
+        writeLease: input.writeLease, line, sourceCorpus });
       input.authority!.commitDeterministicShard(line.key);
     }
     return;

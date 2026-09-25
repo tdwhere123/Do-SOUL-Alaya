@@ -64,6 +64,7 @@ export function inspectExtractionFillCompletion(input: {
   readonly systemPrompt: string;
   readonly turnContents?: readonly string[];
   readonly extractionTurns?: readonly LongMemEvalExtractionTurn[];
+  readonly expectedRequestKeys?: readonly string[];
   readonly excludeContentClosureKeys?: readonly string[];
 }): ExtractionFillCompletion {
   const expectedKeys = expectedCacheKeys(input);
@@ -93,6 +94,7 @@ export function inspectExtractionFillCompletion(input: {
 }
 
 function expectedCacheKeys(input: Parameters<typeof inspectExtractionFillCompletion>[0]): Set<string> {
+  if (input.expectedRequestKeys !== undefined) return new Set(input.expectedRequestKeys);
   if (input.extractionTurns !== undefined) {
     return new Set(input.extractionTurns.flatMap((turn) => computeExtractionTurnCacheKeys(
       input.model, input.requestProfile, input.systemPrompt, turn, input.sourcePacking, input.sourceInterpretationProfile, input.openSemantics

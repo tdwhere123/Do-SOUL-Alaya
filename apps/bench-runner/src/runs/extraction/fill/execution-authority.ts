@@ -1,4 +1,4 @@
-import { assertSampleKeys, assertSampleReceipt, isStepInteractiveSampleReceipt } from "../authority/sample-scope.js";
+import { assertSampleKeys, assertSampleReceipt, isInteractiveSourceSampleReceipt } from "../authority/sample-scope.js";
 import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import { readRootBatchRuns } from "./batch/store.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
@@ -93,14 +93,14 @@ function createLedgerExecutionAuthority(
   return {
     receipt,
     reserveAttempt: async (cacheKey, signal) => {
-      if (receipt.sample_scope !== undefined && !isStepInteractiveSampleReceipt(receipt)) {
+      if (receipt.sample_scope !== undefined && !isInteractiveSourceSampleReceipt(receipt)) {
         throw new Error("sample requires the exact Batch submission reservation");
       }
       return reserveAttemptOrdinal(cacheKey, signal);
     },
-    reserveAttemptOrdinal: receipt.sample_scope === undefined || isStepInteractiveSampleReceipt(receipt)
+    reserveAttemptOrdinal: receipt.sample_scope === undefined || isInteractiveSourceSampleReceipt(receipt)
       ? reserveAttemptOrdinal : undefined,
-    reserveSampleBatch: receipt.sample_scope === undefined ? undefined : async (keys, signal) => {
+    reserveSampleBatch: receipt.sample_scope === undefined || isInteractiveSourceSampleReceipt(receipt) ? undefined : async (keys, signal) => {
       assertSampleKeys(receipt.sample_scope!, keys);
       assertTarget();
       if (writeLease === undefined) throw new Error("sample requires the cache write lease");
@@ -161,8 +161,9 @@ function openReceiptAttemptLedger(receipt: ExtractionAuthorityReceipt, cacheRoot
     cacheIdentity: receiptExtractionCacheIdentity(receipt),
     startingMissing: receipt.limits.starting_missing,
     maximumAttempts: receipt.limits.maximum_attempts,
-    ...(receipt.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE &&
-      receipt.observation.extraction.sourcePacking === "complete-source"
+    ...((receipt.observation.extraction.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE &&
+      receipt.observation.extraction.sourcePacking === "complete-source" ||
+      isInteractiveSourceSampleReceipt(receipt))
       ? { maximumAttemptsPerKey: 1 } : {}),
     successfulShardCeiling: receipt.limits.successful_shard_ceiling
   });

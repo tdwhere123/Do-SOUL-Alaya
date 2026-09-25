@@ -8,9 +8,16 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 11.0.0, engine gateway 1.0.0
+## Unreleased — protocol 13.1.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.1.0 adds optional native semantic source preview extents and bounded
+reasoning attention to the `soul.interpretation` MCP request/result under invariant
+§25 (minor: additive fields). Exact source tuples bind preview limits; missing C
+has an explicit preparation state. Existing requests and results remain valid.
+The previous Unreleased heading still named protocol 11.0.0 after the package and
+SemVer sidecar had advanced to 13.0.0; the older 11.0.0 history below is retained.
 
 Protocol 11.0.0 changes `soul.interpretation` prepare-query and recall delivery
 under invariant §25 (major: a required public semantic-availability status and

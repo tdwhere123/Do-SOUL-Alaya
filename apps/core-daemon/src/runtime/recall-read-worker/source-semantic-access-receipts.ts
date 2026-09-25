@@ -1,5 +1,5 @@
 import { SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-  type SourceSemanticAccessPolicy, type SourceSemanticAccessReceipt } from "@do-soul/alaya-protocol";
+  type SourceSemanticAccessPolicy, type SourceSemanticAccessReceipt, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 
 type Stops = SourceSemanticAccessReceipt["stopping_reasons"];
 type Pageable = Readonly<{
@@ -10,8 +10,10 @@ type Pageable = Readonly<{
 /** The retained access receipt shape shared by observation and its conservative completion bound. */
 export function sourceSemanticAccessReceiptValue<Source, Interpretation, Unvisited>(policy: SourceSemanticAccessPolicy, inputId: string,
   sources: readonly Source[], interpretations: readonly Interpretation[],
-  unvisitedSources: Unvisited, unvisitedInterpretations: Unvisited, stops: Stops) {
+  unvisitedSources: Unvisited, unvisitedInterpretations: Unvisited, stops: Stops,
+  sourcePreviewExtents?: SourceSemanticPreviewExtents) {
   return { contract: "source-semantic-access-v1" as const, policy, input_id: inputId,
+    ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }),
     observed_source_count: sources.length, observed_interpretation_count: interpretations.length,
     source_candidates: sources, interpretation_candidates: interpretations,
     unvisited_sources: unvisitedSources, unvisited_interpretations: unvisitedInterpretations,

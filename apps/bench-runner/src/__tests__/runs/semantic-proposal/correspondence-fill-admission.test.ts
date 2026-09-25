@@ -11,7 +11,7 @@ import {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import {
-  AlayaError, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
+  AlayaError, canonicalJson, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
   SourceSemanticInterpretationSchema, SourceSemanticQuerySchema,
   buildSourceSemanticCorrespondenceEndpointCatalog, buildSourceSemanticCorrespondenceEndpointEvidence,
   sourceSemanticInterpretationIdentity,
@@ -25,7 +25,7 @@ import {
   inspectSemanticProposalShard, hasAdmittedProposalOutcome
 } from "../../../runs/semantic-proposal/artifact.js";
 import {
-  executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
+  executeSemanticProposalFill, prepareRetainedSemanticProposalRevision, prepareSemanticProposal, readSemanticProposalResults
 } from "../../../runs/semantic-proposal/fill.js";
 import {
   materializeSemanticProposalLines, parseSemanticProposalWorkset
@@ -393,6 +393,29 @@ async function fillCorrespondence(inventedSupport = false) {
   });
   return { cacheRoot, prepared, authority, first, result, key: authority.keys[0]!, received, core };
 }
+
+it("binds a C child to its settled physical parent and current request attention", async () => {
+  const { cacheRoot: parentRoot, prepared } = await fillCorrespondence();
+  const parentLine = materializeSemanticProposalLines(prepared, 128)[0]!;
+  const attentionRequestSha256 = sha256(canonicalJson(parentLine.request));
+  expect(() => prepareRetainedSemanticProposalRevision({ workset: prepared, parentCacheRoot: parentRoot,
+    maxOutputTokens: 128, itemIndex: 0, reviewComments: ["Inspect the unresolved role binding."],
+    attentionRequestSha256: "0".repeat(64) })).toThrow(/current request/u);
+  const revision = prepareRetainedSemanticProposalRevision({ workset: prepared, parentCacheRoot: parentRoot,
+    maxOutputTokens: 128, itemIndex: 0, reviewComments: ["Inspect the unresolved role binding."],
+    attentionRequestSha256 });
+  const child = parseSemanticProposalWorkset({ ...prepared, revision_parent_cache_root: parentRoot,
+    items: [{ ...(prepared.items[0] as object), revision }] });
+  const childRoot = join(tempRoot(), "child");
+  const childLine = materializeSemanticProposalLines(child, 128)[0]!;
+  expect(childLine.key).not.toBe(parentLine.key);
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(child, childRoot, 128, 1),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const result = await executeSemanticProposalFill({ workset: child, cacheRoot: childRoot,
+    authority, config: config(), extractor: extractor([assessmentBody(childLine.request as SourceSemanticCorrespondenceRequest)]) });
+  expect(result.interpreted).toBe(1);
+  expect(readSemanticProposalResults(child, childRoot, 128)[0]?.status).toBe("interpreted");
+});
 
 it("admits an semantic_correspondence shard only after Core admission", async () => {
   expect(admitSourceSemanticQuery(admittedQuery(), ORIGINAL).kind).toBe("admitted");

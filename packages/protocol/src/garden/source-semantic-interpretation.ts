@@ -15,6 +15,7 @@ import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema, Sha256HexSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQueryGapSchema, SourceSemanticQueryTargetSchema } from "../recall/conditional-field/semantic-query.js";
+import { ObserverStatusSchema } from "../recall/conditional-field/observer.js";
 import { SourceInterpretationProfileSchema } from "./source-interpretation-profile.js";
 import {
   SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticDraftSchema,
@@ -280,6 +281,37 @@ export const SourceSemanticBindingResultSchema = z.discriminatedUnion("kind", [
   BindingResult.merge(SourceSemanticQueryTargetSchema.options[1].unwrap()).extend({ query_complete: z.literal(false) }).readonly()
 ]);
 
+/** Bounded branch-obligation control; it cannot certify source facts or answer content. */
+const ComputedSourceSemanticAttentionSchema = z.object({
+  contract: z.literal("source-semantic-attention-v1"),
+  kind: z.literal("computed"),
+  conditional_computation_id: Sha256DigestSchema,
+  source_interpretation_id: Sha256DigestSchema,
+  query_semantics_id: Sha256DigestSchema,
+  semantic_correspondence_id: Sha256DigestSchema,
+  source_id: BoundedIdSchema, source_version: BoundedLabelSchema, content_digest: Sha256DigestSchema,
+  entries: z.array(z.object({
+    alternative: z.number().int().nonnegative(), frame: BoundedIdSchema.nullable(),
+    obligation: z.enum(["predicate", "slot", "referent", "source_evidence", "source_act", "context", "sort", "branch"]),
+    role: BoundedIdSchema.optional(), variable: BoundedIdSchema.optional(),
+    state: z.enum(["correspondence_missing", "observed_no_match", "unobserved", "unavailable",
+      "unknown", "resource_incomplete"]),
+    observation: ObserverStatusSchema
+  }).strict().readonly()).max(64).readonly(),
+  truncated: z.boolean()
+}).strict().readonly();
+const PreparationSourceSemanticAttentionSchema = z.object({
+  contract: z.literal("source-semantic-attention-v1"), kind: z.literal("preparation"),
+  source_interpretation_id: Sha256DigestSchema,
+  query_semantics_id: Sha256DigestSchema.optional(),
+  source_id: BoundedIdSchema, source_version: BoundedLabelSchema, content_digest: Sha256DigestSchema,
+  missing: z.enum(["query_semantics", "semantic_correspondence", "query_semantics_and_correspondence"]),
+  observation: z.literal("not_executed")
+}).strict().readonly();
+export const SourceSemanticAttentionSchema = z.discriminatedUnion("kind", [
+  ComputedSourceSemanticAttentionSchema, PreparationSourceSemanticAttentionSchema
+]);
+
 export const SourceSemanticReasoningResultSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_REASONING_CONTRACT),
   outcome: SourceSemanticOutcomeSchema,
@@ -293,6 +325,7 @@ export const SourceSemanticReasoningResultSchema = z.object({
   evidence_leaves: z.array(z.object({ observation_id: BoundedIdSchema, leaf: SourceSemanticConsumedLeafSchema }).strict().readonly()).max(4096).readonly().optional(),
   completeness: CompletenessReportSchema.optional(),
   query_gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional(),
+  attention: SourceSemanticAttentionSchema.optional(),
   source_target: SourceEvidenceTargetSchema.optional(),
   resource_usage: z.object({ work_units: z.number().int().nonnegative(), memory_bytes: z.number().int().nonnegative() }).strict().readonly().optional(),
   derived_nodes: z.array(SourceSemanticDerivedNodeSchema).max(4096).readonly().optional(),
@@ -322,4 +355,5 @@ export type SourceSemanticDerivedNode = z.infer<typeof SourceSemanticDerivedNode
 export type SourceSemanticEvaluationReport = z.infer<typeof SourceSemanticEvaluationReportSchema>;
 export type SourceSemanticBindingResult = z.infer<typeof SourceSemanticBindingResultSchema>;
 export type SourceSemanticReasoningResult = z.infer<typeof SourceSemanticReasoningResultSchema>;
+export type SourceSemanticAttention = z.infer<typeof SourceSemanticAttentionSchema>;
 export type SourceSemanticCache = z.infer<typeof SourceSemanticCacheSchema>;

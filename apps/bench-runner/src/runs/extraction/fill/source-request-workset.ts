@@ -20,6 +20,8 @@ import {
   type LongMemEvalExtractionTurn
 } from "../turn-contents.js";
 import type { PreparedExtractionFill } from "./fill-preparation.js";
+import type { SourceCensusRecord } from "../../snapshot/source-records/census.js";
+import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 
 export type BatchExtractionSourceUnit = ReturnType<
   typeof planOfficialApiSemanticWorkset
@@ -28,7 +30,8 @@ export type BatchExtractionSourceUnit = ReturnType<
 export interface SourceExtractionRequest {
   readonly line: SourceRequestLine;
   readonly request: ExtractionArtifactSource;
-  readonly sourceTurn: LongMemEvalExtractionTurn;
+  readonly sourceTurn?: LongMemEvalExtractionTurn;
+  readonly sourceCorpus: string;
   readonly units: readonly BatchExtractionSourceUnit[];
 }
 
@@ -49,7 +52,7 @@ export type UnsupportedSourceRequest = Readonly<{
 }>;
 
 type BatchPreparedSources = Pick<PreparedExtractionFill,
-  "config" | "datasetRevision" | "executionExtractionTurns" | "occurrenceExtractionTurns">;
+  "config" | "datasetRevision" | "executionExtractionTurns" | "occurrenceExtractionTurns" | "nativeSourceRecords">;
 
 /** Cache request shards and source work units retain separate identities. */
 export function prepareSourceRequestWorkset(input: {
@@ -59,6 +62,9 @@ export function prepareSourceRequestWorkset(input: {
   readonly executionCacheKeys?: ReadonlySet<string>;
 }): SourceRequestWorkset {
   const prepared = input.prepared;
+  if (prepared.nativeSourceRecords !== undefined) {
+    return prepareNativeSourceRequestWorkset(input, prepared.nativeSourceRecords);
+  }
   const turns = input.turns ?? prepared.executionExtractionTurns;
   const selectedKeys = selectedRequestKeys(prepared, turns, input.executionCacheKeys);
   const requests = collectBatchRequests(prepared, turns, selectedKeys);
@@ -187,8 +193,95 @@ function collectBatchRequests(
       const corpus = buildOfficialApiSourceCorpus(item.sourceTurn.turnContent, item.sourceTurn.turnMessages);
       if (prepared.config.sourceInterpretationProfile !== undefined) assertSourcePacketShardCapacity(corpus, line);
       if (prepared.config.openSemantics !== undefined) assertSourceSemanticShardCapacity(corpus, line);
-      return Object.freeze({ line, request: item.request, sourceTurn: item.sourceTurn, units });
+      return Object.freeze({ line, request: item.request, sourceTurn: item.sourceTurn, sourceCorpus: corpus, units });
     }));
+}
+
+/** One exact native occurrence keeps its source record identity, without dialogue rendering. */
+export function nativeSourceOccurrenceId(source: SourceCensusRecord): string {
+  if (source.native_record_id === undefined) {
+    throw new ExtractionCacheInvariantError("native source occurrence lacks its verified record identity");
+  }
+  return JSON.stringify([source.source_id, source.source_version, source.native_record_id]);
+}
+
+export function nativeSourceRequestInventory(
+  records: readonly SourceCensusRecord[], datasetRevision: string,
+  config: Pick<CompileSeedExtractionConfig,
+    "model" | "requestProfile" | "sourcePacking" | "sourceInterpretationProfile" | "openSemantics">
+): Readonly<{ requests: readonly SourceExtractionRequest[]; unsupportedSources: readonly UnsupportedSourceRequest[] }> {
+  if (config.openSemantics === undefined || config.sourcePacking !== "complete-source") {
+    throw new ExtractionCacheInvariantError("native source requests require complete-source semantics");
+  }
+  const collected = new Map<string, { line: SourceRequestLine; request: ExtractionArtifactSource;
+    sourceCorpus: string; units: Map<string, BatchExtractionSourceUnit> }>();
+  const unsupported: UnsupportedSourceRequest[] = [];
+  for (const source of records) {
+    const occurrenceId = nativeSourceOccurrenceId(source);
+    const prepared = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", config.openSemantics);
+    for (const item of prepared) {
+      if (item.status === "unsupported_source") {
+        unsupported.push(Object.freeze({ messageIds: [occurrenceId], datasetRevision,
+          disposition: item.disposition, sourceUnitCount: item.source.source_assertions.length }));
+        continue;
+      }
+      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrenceId], datasetRevision);
+      const byAssertion = new Map(units.map(unit => [unit.assertionId, unit]));
+      const assigned = item.source.source_assertions.map(assertion => {
+        const unit = byAssertion.get(assertion.assertion_id);
+        if (unit === undefined || unit.text !== assertion.text) {
+          throw new ExtractionCacheInvariantError("native source request lost exact assertion occurrence");
+        }
+        return unit;
+      });
+      const expectedLine = prepareSourceSemanticRequestLine(item.semantic, [], config);
+      const existing = collected.get(expectedLine.key);
+      if (existing !== undefined && (existing.sourceCorpus !== source.content_bytes ||
+          existing.line.requestSha256 !== expectedLine.requestSha256)) {
+        throw new ExtractionCacheInvariantError("native source request key spans different complete records");
+      }
+      const unitsByOccurrence = existing?.units ?? new Map<string, BatchExtractionSourceUnit>();
+      for (const unit of assigned) unitsByOccurrence.set(unit.binding.occurrenceIdentity, unit);
+      collected.set(expectedLine.key, { line: expectedLine, request: item.source,
+        sourceCorpus: source.content_bytes, units: unitsByOccurrence });
+    }
+  }
+  const requests = [...collected].sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => {
+    const units = Object.freeze([...item.units.values()].sort((a, b) =>
+      a.binding.occurrenceIdentity.localeCompare(b.binding.occurrenceIdentity)));
+    const line = prepareSourceSemanticRequestLine(JSON.parse(item.line.userPrompt),
+      units.map(unit => unit.binding.occurrenceIdentity), config);
+    if (line.key !== key) throw new ExtractionCacheInvariantError("native source request key changed with occurrence assignment");
+    assertSourceSemanticShardCapacity(item.sourceCorpus, line);
+    return Object.freeze({ line, request: item.request, sourceCorpus: item.sourceCorpus, units });
+  });
+  return Object.freeze({ requests: Object.freeze(requests), unsupportedSources: Object.freeze(unsupported) });
+}
+
+function prepareNativeSourceRequestWorkset(input: Parameters<typeof prepareSourceRequestWorkset>[0],
+  records: readonly SourceCensusRecord[]): SourceRequestWorkset {
+  const inventory = nativeSourceRequestInventory(records, input.prepared.datasetRevision, input.prepared.config);
+  const available = new Set(inventory.requests.map(item => item.line.key));
+  const selected = input.executionCacheKeys ?? available;
+  if ([...selected].some(key => !available.has(key))) {
+    throw new ExtractionCacheInvariantError("native execution key is outside the verified source population");
+  }
+  const requests = inventory.requests.filter(item => selected.has(item.line.key));
+  const lines: SourceRequestLine[] = [], cachedRequests: SourceExtractionRequest[] = [];
+  const deterministicEmptyRequests: SourceExtractionRequest[] = [];
+  for (const item of requests) {
+    const cached = inspectCachedExtractionArtifact(input.cacheRoot, item.line.key,
+      input.prepared.config.model, input.prepared.config.requestProfile, "open_semantics");
+    if (cached.status === "invalid" || cached.status === "retired") {
+      throw new ExtractionCacheInvariantError(`native source shard ${item.line.key} is ${cached.status}`);
+    }
+    if (cached.status === "hit") cachedRequests.push(item);
+    else if (item.request.source_assertions.length === 0) deterministicEmptyRequests.push(item);
+    else lines.push(item.line);
+  }
+  return Object.freeze({ requests: Object.freeze(requests), lines: Object.freeze(lines),
+    cachedRequests: Object.freeze(cachedRequests), deterministicEmptyRequests: Object.freeze(deterministicEmptyRequests),
+    units: Object.freeze(requests.flatMap(item => item.units)), unsupportedSources: inventory.unsupportedSources });
 }
 
 function coveragePrompts(

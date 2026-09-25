@@ -335,6 +335,37 @@ function assertOracle(
 }
 
 describe("source semantic query compilation", () => {
+  it("retains an unresolved alternative when another branch has an accepting proof", () => {
+    const interpretation = orionInterpretation({ inspectTarget: "rQ" });
+    const base = sendInspectQuery();
+    const both = base.alternatives[0]!;
+    const semantics = { ...base, alternatives: [
+      { frames: [both.frames[0]!], context_obligations: [both.context_obligations[0]!] }, both
+    ] } satisfies SourceSemanticQuery;
+    const map = correspondenceOf(interpretation, semantics, AND_QUERY, [
+      endpointCorrespondence({ kind: "predicate", alternative: 0, frame: "qSend" },
+        { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 0, frame: "qSend", slot: "object" },
+        { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mP1"),
+      endpointCorrespondence({ kind: "predicate", alternative: 1, frame: "qSend" },
+        { kind: "frame", frame: "fSend" }, "sent", "mSent"),
+      endpointCorrespondence({ kind: "slot", alternative: 1, frame: "qSend", slot: "object" },
+        { kind: "slot", frame: "fSend", slot: "object" }, "parcel", "mP1"),
+      endpointCorrespondence({ kind: "predicate", alternative: 1, frame: "qInspect" },
+        { kind: "frame", frame: "fInspect" }, "inspected", "mInspect"),
+      endpointCorrespondence({ kind: "slot", alternative: 1, frame: "qInspect", slot: "object" },
+        { kind: "slot", frame: "fInspect", slot: "object" }, "parcel", "mQ")
+    ]);
+    const result = reason(interpretation, semantics, map, AND_QUERY);
+    expect(result.binding_results?.some(row => row.alternative === 0)).toBe(true);
+    expect(result.binding_results?.some(row => row.alternative === 1)).toBe(false);
+    expect(result.attention?.kind).toBe("computed");
+    if (result.attention?.kind !== "computed") return;
+    expect(result.attention.entries.some(row => row.alternative === 1 &&
+      ["unknown", "unobserved", "resource_incomplete"].includes(row.state))).toBe(true);
+    expect(result.attention.entries.some(row => row.alternative === 0 && row.frame === null)).toBe(false);
+  });
+
   it("joins a shared-variable AND on the same parcel", () => {
     const interpretation = mixedInterpretation();
     const semantics = sendInspectQuery();

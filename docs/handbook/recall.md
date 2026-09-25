@@ -763,7 +763,7 @@ interpretation identity algorithms remain unchanged.
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent
 query semantics, explicit semantic correspondence, and selected conditional computation. It does not replace ordinary `soul.recall` or
-Garden v1. Protocol 13.0.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
+Garden v1. Protocol 13.1.0 uses `source-interpretation-v4`, `source-semantic-query-v4`,
 `source-semantic-correspondence-v3`, source request envelope v6, source response envelope v5,
 published source interpretation v5,
 reasoning v5, cache v3,
@@ -773,6 +773,16 @@ source-frame group is a jointly constrained compile alternative; slots must not
 float off that group's predicate frame. An older open source interpretation is not relabeled or silently promoted; recreate its interpretation explicitly.
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
+
+The additive MCP request may bind finite preview byte extents to exact current
+source tuples. Native source reads expose the bytes actually observed and retain
+unread tails as open; an available empty body is complete. A later `prepare_source`
+performs a separately metered fresh read. A handleless `reason` on a sealed H-bearing
+snapshot can return bounded branch attention before accepting bindings exist.
+Computed attention binds the admitted Q/H/C/computation and actual demand state;
+preparation attention names a missing Q or C without inventing its identity.
+Unreached or unattributable branches remain unknown or unobserved. Attention is
+control information for one correction cycle, never source fact or proof authority.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested

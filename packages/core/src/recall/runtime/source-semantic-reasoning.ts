@@ -3,7 +3,7 @@ import {
   SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema, SOURCE_SEMANTIC_K_VERSION,
   SourceSemanticReasoningRequestSchema, SourceSemanticReasoningResultSchema,
   type InformationIndex, type SourceEvidenceTarget, type SourceSemanticReasoningRequest,
-  type SourceSemanticReasoningResult
+  type SourceSemanticReasoningResult, type SourceSemanticAttention
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -171,7 +171,7 @@ function observeCorrespondenceGroups(input: Readonly<{
   const { request, meter, original, admission, population, snapshot, qualified, sourceTarget } = input;
   type PhaseRun = Readonly<{
     state: FieldEngineState; query: ReturnType<typeof compileConditionalFieldQuery>;
-    execution: SourceSemanticExecutionPlan; remaining: typeof input.remaining;
+    execution: SourceSemanticExecutionPlan; remaining: typeof input.remaining; phase: SourceSemanticGroupPhase;
   }>;
   const runs: PhaseRun[] = [];
   let remaining = input.remaining;
@@ -190,9 +190,18 @@ function observeCorrespondenceGroups(input: Readonly<{
     const beforeProjection = Math.max(0, state.remaining_exploration + state.remaining_reserve);
     meter.charge(Math.max(0, remaining.work_units - beforeProjection), Math.max(0, remaining.memory_bytes - state.remaining_memory_bytes), "engine");
     remaining = { ...remaining, ...meter.remaining(), work_units: Math.max(0, beforeProjection), memory_bytes: state.remaining_memory_bytes };
-    if (state.binding.kind === "bound") runs.push({ state, query, execution, remaining });
+    if (state.binding.kind === "bound") runs.push({ state, query, execution, remaining, phase });
   }
-  if (runs.length === 0) return { body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] }, index: null };
+  const projectedPhases = new Set<SourceSemanticGroupPhase>();
+  for (const run of runs) { meter.charge(1, 8, "projected semantic group reference"); projectedPhases.add(run.phase); }
+  const unprojected: SourceSemanticGroupPhase[] = [];
+  for (const phase of input.phases) {
+    meter.charge(1, 0, "semantic group execution disposition");
+    if (!projectedPhases.has(phase)) { meter.charge(0, 8, "unprojected semantic group reference"); unprojected.push(phase); }
+  }
+  const unprojectedAttention = unexecutedGroupAttention(admission, unprojected, meter);
+  if (runs.length === 0) return { body: { ...qualified, outcome: { status: "resource_exhausted" },
+    consumed_leaves: [], ...(unprojectedAttention === undefined ? {} : { attention: unprojectedAttention }) }, index: null };
   const prefixWork = meter.spentWork, prefixBytes = meter.spentBytes;
   const projected = runs.map((run, index) => {
     const result = projectSourceSemanticState({
@@ -204,7 +213,7 @@ function observeCorrespondenceGroups(input: Readonly<{
   });
   const incomplete = runs.length !== input.phases.length || projected.some(row => row.body.outcome.status !== "interpreted");
   const baseline = {
-    body: mergeGroupBodies(qualified, projected.map((row) => row.body), incomplete),
+    body: mergeGroupBodies(qualified, projected.map((row) => row.body), meter, incomplete, unprojectedAttention),
     index: mergeGroupIndexes(projected.map((row) => row.index).filter((row): row is NonNullable<typeof row> => row !== null), incomplete)
   };
   if (input.input.withdrawal_trial_limit === undefined) return baseline;
@@ -221,7 +230,7 @@ function observeCorrespondenceGroups(input: Readonly<{
             execution: run.execution, sourceTarget, qualified
           }).body, `g${index}:`);
         });
-        return finish({ ...mergeGroupBodies(qualified, trials, incomplete),
+        return finish({ ...mergeGroupBodies(qualified, trials, trialMeter, incomplete, unprojectedAttention),
           resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -235,7 +244,7 @@ function observeCorrespondenceGroups(input: Readonly<{
 function executionForPhase(phase: SourceSemanticGroupPhase): SourceSemanticExecutionPlan {
   const branches = Array.from({ length: phase.acceptIndex + 1 }, (_, index) => ({
     purpose: "support" as const, alternative: index === phase.acceptIndex ? phase.alternative : 0,
-    ...(index === phase.acceptIndex ? { plan: phase.plan } : {})
+    ...(index === phase.acceptIndex ? { plan: phase.plan, obligations: phase.obligations } : {})
   }));
   return { program: phase.program, branches, missingOperands: false };
 }
@@ -265,11 +274,32 @@ function prefixGroupIndex(index: InformationIndex | null, prefix: string): Infor
 }
 
 function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<SourceSemanticReasoningResult, "conditional_computation_id" | "source_interpretation_id" | "query_semantics_id" | "semantic_correspondence_id" | "source_target" | "query_gaps">,
-  bodies: readonly ResultBody[], incomplete = false): ResultBody {
+  bodies: readonly ResultBody[], meter: SourceSemanticResourceLedger, incomplete = false,
+  unprojected?: Extract<SourceSemanticAttention, { kind: "computed" }>): ResultBody {
   const first = bodies[0]!;
   const open = incomplete || bodies.some(row => row.outcome.status !== "interpreted");
+  let attentionTemplate: Extract<SourceSemanticAttention, { kind: "computed" }> | undefined;
+  const attentionEntries: Extract<SourceSemanticAttention, { kind: "computed" }>["entries"][number][] = [];
+  let attentionTruncated = incomplete;
+  const mergeAttention = (current: SourceSemanticAttention | undefined): void => {
+    meter.charge(1, 0, "merged semantic attention body");
+    if (current?.kind !== "computed") return;
+    attentionTemplate ??= current;
+    if (current.truncated) attentionTruncated = true;
+    for (const entry of current.entries) {
+      meter.charge(1, 0, "merged semantic attention entry inspection");
+      if (attentionEntries.length === 64) { attentionTruncated = true; break; }
+      meter.charge(1, 8, "merged semantic attention retention");
+      attentionEntries.push(entry);
+    }
+  };
+  for (const body of bodies) mergeAttention(body.attention);
+  if (unprojected !== undefined) mergeAttention(unprojected);
+  const attention = attentionTemplate === undefined ? undefined : { ...attentionTemplate,
+    entries: attentionEntries, truncated: attentionTruncated };
   return {
     ...qualified, ...first,
+    ...(attention === undefined ? {} : { attention }),
     binding_results: bodies.flatMap((row) => row.binding_results ?? []),
     derivations: bodies.flatMap((row) => row.derivations ?? []),
     evidence_leaves: bodies.flatMap((row) => row.evidence_leaves ?? []),
@@ -280,6 +310,26 @@ function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<Sou
     outcome: open ? { status: "resource_exhausted" }
       : { status: "interpreted", gaps: first.outcome.status === "interpreted" ? first.outcome.gaps : [] }
   };
+}
+
+function unexecutedGroupAttention(admission: Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, { kind: "admitted" }>,
+  phases: readonly SourceSemanticGroupPhase[], meter: SourceSemanticResourceLedger):
+  Extract<SourceSemanticAttention, { kind: "computed" }> | undefined {
+  if (phases.length === 0) return undefined;
+  const entries: Extract<SourceSemanticAttention, { kind: "computed" }>["entries"][number][] = [];
+  for (const phase of phases) {
+    meter.charge(1, 0, "unprojected semantic group inspection");
+    if (entries.length === 64) break;
+    meter.charge(1, 256, "unprojected semantic group attention");
+    entries.push({ alternative: phase.alternative, frame: null, obligation: "branch",
+      state: "unknown", observation: "unknown" });
+  }
+  const source = admission.interpretation.source;
+  return { contract: "source-semantic-attention-v1", kind: "computed",
+    conditional_computation_id: admission.context_id, source_interpretation_id: admission.interpretation_id,
+    query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
+    source_id: source.source_id, source_version: source.source_version, content_digest: source.content_digest,
+    entries, truncated: phases.length > entries.length };
 }
 
 function mergeGroupIndexes(indexes: InformationIndex[], incomplete = false): InformationIndex | null {

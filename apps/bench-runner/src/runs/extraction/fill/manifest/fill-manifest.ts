@@ -3,7 +3,7 @@ import { extractionArtifactPrompt } from "../../request-artifact.js";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { CompileSeedExtractionConfig } from "../../../compile-seed/compile-seed-types.js";
-import type { LongMemEvalVariant } from "../../../../datasets/longmemeval/ingestion/dataset.js";
+import type { ExtractionFillVariant } from "../fill-window.js";
 import type { ExtractionFillCompletion } from "../fill-completion.js";
 import type {
   ExtractionFillManifestContract,
@@ -29,7 +29,7 @@ import type { SupplementalSourceManifestBinding } from
 
 export function buildFillManifest(input: {
   readonly config: CompileSeedExtractionConfig;
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
   readonly existingManifest: ExtractionCacheManifest | undefined;
   readonly datasetRevision: string;
   readonly status: ExtractionFillStatus;
@@ -181,7 +181,7 @@ function requireContentClosure(
 export function pinExtractionCacheIdentity(input: {
   readonly cacheRoot: string;
   readonly config: CompileSeedExtractionConfig;
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
   readonly existingIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>;
   readonly datasetRevision: string;
   readonly windowOffset: number;

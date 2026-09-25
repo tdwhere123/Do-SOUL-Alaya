@@ -11,14 +11,13 @@ import { publishSourceSemanticSnapshot, SourcePublicationAssociationRowSchema,
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
-import { readSemanticChainProposalResults, semanticChainProposalStates, semanticChainQueryAvailability,
+import { readSemanticChainProposalResults, semanticChainProposalStates,
   verifySemanticChainQueries } from "./inputs.js";
-import { discoverSemanticChainQuery } from "./prepare.js";
 import { prepareSemanticChain } from "./prepare.js";
 import { admitSemanticChainReplay, inspectSemanticChainReplayTarget, ReplaySchema,
   replaySemanticChain, semanticChainReplayPath } from "./replay.js";
 import { SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
-  withSemanticChainDaemon, writeChainArtifact, writeChainJson } from "./contract.js";
+  writeChainArtifact, writeChainJson } from "./contract.js";
 import { Digest, SourceTuple, PublicationReport, LazyQualificationConfigSchema,
   admitNativeLazyConfig, type LazyQualificationConfig } from "./bind-lazy.js";
 import { selectedProducerAttempts, selectedSourceState } from "./lazy-qualification-source-state.js";
@@ -266,13 +265,14 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
   if (query.identity !== config.initial_query_state_identity) {
     throw new AlayaError("CONFLICT", "query state changed after the bound initial preparation");
   }
-  const availability = semanticChainQueryAvailability(query.row);
-  const started = performance.now();
-  const observed = await withSemanticChainDaemon(config.chain, root, async daemon => discoverSemanticChainQuery(daemon,
-    { ...config.chain, discovery_page_cap: 1 }, query.row.line.original_query,
-    availability.status === "admitted" ? availability.query : undefined,
-    availability.status === "unavailable" && availability.unavailable !== "absent" ? availability.unavailable : undefined));
-  const first = observed.discovery.discovery_trace[0];
+  const initialPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(config.initial_chain_root, "prepare.json")));
+  const initialQuery = initialPlan.queries[0];
+  if (initialPlan.queries.length !== 1 || initialQuery === undefined ||
+      initialQuery.status === "blocked" || initialQuery.discovery_pages < 1 ||
+      initialQuery.query_key !== query.row.line.key || initialQuery.initial_discovery_elapsed_ms === undefined) {
+    throw new AlayaError("CONFLICT", "frozen lazy window requires one retained initial native preparation page");
+  }
+  const first = initialQuery.discovery_trace[0];
   if (first === undefined || first.access.trace.kind !== "preparation_page" || first.access.trace.source_offset !== 0) {
     throw new AlayaError("CONFLICT", "native access did not expose the first bounded raw source window");
   }
@@ -306,7 +306,7 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
     starting_access: first.access,
     window_open: first.access.unvisited_sources || first.access.source_candidates.length < Math.min(10, first.access.observed_source_count),
     starting_discovery_work: first.work,
-    starting_host_elapsed_ms: performance.now() - started,
+    starting_host_elapsed_ms: initialQuery.initial_discovery_elapsed_ms,
     starting_associations: starting.publicationAssociations, window, selected_missing_keys: selectedMissingKeys });
   writeChainArtifact(join(root, "window.json"), result);
   writeChainJson(join(root, "selected-source-keys.json"), selectedMissingKeys);

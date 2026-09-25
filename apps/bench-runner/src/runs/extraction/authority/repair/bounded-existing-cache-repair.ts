@@ -1,8 +1,8 @@
-import type { LongMemEvalVariant } from "../../../../datasets/longmemeval/ingestion/dataset.js";
+import type { ExtractionFillVariant } from "../../fill/fill-window.js";
 import type { ExtractionAuthorityReceipt } from "../receipt.js";
 
 interface BoundedRepairOptions {
-  readonly variant: LongMemEvalVariant;
+  readonly variant: ExtractionFillVariant;
   readonly limit?: number;
   readonly offset?: number;
   readonly questionBatchLimit?: number;
