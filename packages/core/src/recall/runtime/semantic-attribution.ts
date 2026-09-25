@@ -7,6 +7,7 @@ import { assessEvidence, observationsFromOwners, type RelationAssertionRead } fr
 import type { EvidenceAccess } from "../conditional-field/evidence/types.js";
 import { prepareProductEvidence } from "../conditional-field/evidence/product-evidence.js";
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
+import { claimDemandForState } from "../conditional-field/index/claim-obligation.js";
 import type { RelationObserverRow } from "../conditional-field/observers/observe.js";
 
 export function assessUnknownCause(state: FieldEngineState, input: { readonly as_of: string }): FieldEngineState {
@@ -100,7 +101,7 @@ export function rolesFrom(state: FieldEngineState): Readonly<{ get(id: string): 
 
 function claimForProduct(state: FieldEngineState, value: FieldValue) {
   const env = parseBindingContext(value.state.binding_context, state.binding_contexts);
-  const claimDemand = state.interpretation.view.claim_demands?.find((demand) => env.get(demand.variable) === productSubjectId(value.state));
+  const claimDemand = claimDemandForState(value.state, state.interpretation.view, state.binding_contexts);
   const causeDemand = claimDemand !== undefined;
   const claimKind = claimDemand?.proposition_kind ?? "association";
   const arguments_ = claimDemand?.argument_variables.map((variable) => env.get(variable) ?? "unbound") ?? [productSubjectId(value.state)];

@@ -25,6 +25,50 @@ export type ProgramAutomaton = Readonly<{
   readonly localVariables: ReadonlyMap<string, readonly string[]>;
 }>;
 
+export class ProgramAutomatonResourceError extends Error {}
+
+export type ProgramAutomatonCost = Readonly<{ work_units: number; retained_bytes: number }>;
+
+/** Count repeat expansion before creating states, edges or epsilon-closure arrays. */
+export function programAutomatonCost(program: QueryProgram): ProgramAutomatonCost {
+  const size = expandedSize(program);
+  const closedEntries = size.edges * Math.max(1, size.states);
+  const workUnits = size.states + size.edges + closedEntries;
+  const retainedBytes = 256 + size.states * 96 + size.edges * 128 + closedEntries * 16;
+  if (!Number.isSafeInteger(workUnits) || !Number.isSafeInteger(retainedBytes)) {
+    throw new ProgramAutomatonResourceError("program automaton expansion exceeds representable resource accounting");
+  }
+  return { work_units: workUnits, retained_bytes: retainedBytes };
+}
+
+function expandedSize(program: QueryProgram): Readonly<{ states: number; edges: number }> {
+  switch (program.kind) {
+    case "empty": return { states: 2, edges: 0 };
+    case "epsilon": return { states: 1, edges: 0 };
+    case "relation":
+    case "hyperedge": return { states: 2, edges: 1 };
+    case "sequence": {
+      const parts = program.steps.map(expandedSize);
+      return { states: parts.reduce((sum, part) => sum + part.states, 0),
+        edges: parts.reduce((sum, part) => sum + part.edges, 0) };
+    }
+    case "alternative": {
+      const parts = program.options.map(expandedSize);
+      return { states: 2 + parts.reduce((sum, part) => sum + part.states, 0),
+        edges: parts.reduce((sum, part) => sum + part.edges, 0) };
+    }
+    case "repeat": {
+      const part = expandedSize(program.body);
+      return program.count === 0 ? { states: 1, edges: 0 }
+        : { states: part.states * program.count, edges: part.edges * program.count };
+    }
+    case "closure": {
+      const part = expandedSize(program.body);
+      return { states: part.states + 2, edges: part.edges };
+    }
+  }
+}
+
 type Fragment = Readonly<{
   readonly start: string;
   readonly accept: string;
@@ -39,6 +83,7 @@ type Builder = {
 };
 
 export function compileProgramAutomaton(program: QueryProgram): ProgramAutomaton {
+  programAutomatonCost(program);
   if (program.kind === "empty") return emptyAutomaton();
   if (program.kind === "epsilon") return epsilonAutomaton();
   const builder: Builder = { next: 0, eps: new Map(), advances: [], hyperedgeAdvances: [], locals: new Map() };

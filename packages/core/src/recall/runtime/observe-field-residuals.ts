@@ -11,7 +11,7 @@ import {
 import { startObserverCursor } from "../conditional-field/observers/observe.js";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { isPhysicalRegionKind } from "../conditional-field/engine/field-update.js";
-import { hasOpenPairs } from "../conditional-field/engine/path-routing.js";
+import { ObservationPairs } from "../conditional-field/engine/observation-frontier.js";
 
 const INCOMPLETE_OBSERVER: ReadonlySet<ObserverStatus> = new Set([
   "cancelled",
@@ -68,9 +68,7 @@ export function settleDiscoveryResidual(
   state: FieldEngineState,
   interpretation: QueryInterpretation,
   cursors: Map<string, ObserverCursor>,
-  subjects: ReadonlySet<string>,
-  predicates: readonly string[],
-  pairProgress: ReadonlyMap<string, string | null>
+  pairProgress: ObservationPairs
 ): FieldEngineState {
   if (incompleteObserver(state.last_observer_status) || terminalObserver(state.last_observer_status)) {
     return state;
@@ -78,7 +76,8 @@ export function settleDiscoveryResidual(
   const adjacency = state.residuals.find((region) => region.kind === "adjacency");
   const busy = adjacency?.status === "open"
     || adjacency?.status === "interrupted"
-    || hasOpenPairs(subjects, predicates, pairProgress, [], state.pair_completed_count);
+    || pairProgress.hasOpenDemand() || state.pending_path_effects !== undefined
+    || [...state.source_fact_demands.values()].includes("pending");
   const status = state.memory_exhausted || adjacency?.status === "interrupted" || state.last_observer_status === "interrupted"
     ? "interrupted"
     : busy ? "open" : "exhausted";

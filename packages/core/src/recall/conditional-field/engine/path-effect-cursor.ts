@@ -1,12 +1,13 @@
 import type { AdjacencyEffectsInput, CompiledAdjacencyEffect } from "./path-composition-adjacency.js";
 import type { ObserverPage } from "@do-soul/alaya-protocol";
 import { BindingContextResourceError, type BindingContextStore } from "./binding-environment.js";
+import { ProgramAutomatonResourceError } from "./program-automaton.js";
 import type { AdjacencyRow } from "./path-matching.js";
 
 export type PathComputationStep = Readonly<{ kind: "work"; retained_bytes?: number; retention?: "effect_payload" }>
   | Readonly<{ kind: "effect"; effect: CompiledAdjacencyEffect }>;
 export type PathComputation<Result> = Generator<PathComputationStep, Result, void>;
-export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; page: ObserverPage;
+export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; guards_seen?: boolean; facet_resume_offset?: number; page: ObserverPage;
   input: Readonly<{ rows: Iterable<AdjacencyRow>; options: AdjacencyEffectsInput }> }>;
 const EFFECT_LOG_SLOT_BYTES = 64;
 
@@ -67,7 +68,7 @@ export class PathEffectCursor {
         let next: IteratorResult<PathComputationStep, void>;
         try { next = this.computation.next(); }
         catch (error) {
-          if (!(error instanceof BindingContextResourceError)) throw error;
+          if (!(error instanceof BindingContextResourceError) && !(error instanceof ProgramAutomatonResourceError)) throw error;
           this.retainedBytes += (this.bindingContexts?.bytes ?? 0) - previousBytes;
           this.resourceFailed = true;
           return { offset: initialOffset, work, completed_work: this.completedWork, progress_position: this.progressPosition, retained_bytes: this.retainedBytes,

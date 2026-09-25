@@ -7,6 +7,12 @@ export type EngineCostField = Readonly<{
   readonly pending_path_effects?: { readonly retained_bytes?: number };
   readonly binding_contexts?: { readonly bytes: number };
   readonly binding_context_bytes?: number;
+  readonly pair_demand_bytes?: number;
+  readonly pair_progress_bytes?: number;
+  readonly source_fact_demand_bytes?: number;
+  readonly source_fact_bytes?: number;
+  readonly observed_relation_bytes?: number;
+  readonly compiled_automaton_bytes?: number;
 }>;
 
 export type EngineWorkMeters = Readonly<{
@@ -39,7 +45,11 @@ export function snapshotRestoredEngineWork(
     solver_completed_work: field.solver_completed_work ?? 0,
     charged_identities: field.seen_identities.length,
     remaining_memory_bytes: Math.max(0, memoryBytes - (field.pending_path_effects?.retained_bytes ?? 0)
-      - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0) - (field.solver_retained_bytes ?? 0))
+      - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0) - (field.solver_retained_bytes ?? 0)
+      - (field.pair_demand_bytes ?? 0) - (field.pair_progress_bytes ?? 0)
+      - (field.source_fact_demand_bytes ?? 0)
+      - (field.source_fact_bytes ?? 0) - (field.observed_relation_bytes ?? 0)
+      - (field.compiled_automaton_bytes ?? 0))
   };
 }
 

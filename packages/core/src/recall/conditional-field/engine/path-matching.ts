@@ -21,6 +21,7 @@ import {
 } from "../cap-contract.js";
 import {
   decideGuards,
+  guardSourceFactDependency,
   encodeBindingContext,
   parseBindingContext,
   unifyBinding,
@@ -69,6 +70,10 @@ export function relationMatches(programKind: string, storedPredicate: string): b
   if (programKind === storedPredicate) return true;
   if (programKind === STORED_RELATION_KIND) return false;
   return (SUPPORTED_RELATION_ALIASES[programKind] ?? []).includes(storedPredicate);
+}
+
+export function relationPhysicalCandidates(programKind: string): readonly string[] {
+  return [programKind, ...(SUPPORTED_RELATION_ALIASES[programKind] ?? [])];
 }
 
 export function overlayBlocksTransfer(
@@ -195,6 +200,12 @@ export function* admitRelationRow(
   if (overlayBlocksTransfer(input.overlay, row.predicate, relation.relation_kind)) return;
   const unified = unifyAdvance(from, relation, row, input.bindingContexts);
   if (unified === undefined) return;
+  const dependency = guardSourceFactDependency(relation.guard, unified.env,
+    { sourceId: row.sourceObjectId, targetId: row.targetObjectId });
+  if (dependency !== undefined) yield { kind: "effect", effect: {
+    observation_id: `source-fact-demand:${row.assertionId}:${dependency}`,
+    source_fact_demand: dependency
+  } };
   const decision = decideGuards([relation.guard], unified.env, input.sourceFacts ?? new Map(),
     { sourceId: row.sourceObjectId, targetId: row.targetObjectId });
   if (decision === "false") return;

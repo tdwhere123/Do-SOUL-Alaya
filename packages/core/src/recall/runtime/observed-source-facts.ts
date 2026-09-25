@@ -2,6 +2,7 @@ import { SourceLookupReasonsSchema, sameSourceEvidenceRoot, type TypedObservatio
 import type { ObserverReaders, SourceRootObserverRow } from "../conditional-field/observers/observe.js";
 import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
+import { sourceFactEligible } from "../conditional-field/observers/observation-admission.js";
 
 type FactWriter = Readonly<{ has(id: string): boolean; set(id: string, facts: BoundSourceFacts): unknown }>;
 
@@ -23,6 +24,8 @@ export class ObservedSourceFacts {
 type ObservedFactInput = Readonly<{
   readonly workspace_id: string;
   readonly readers: ObserverReaders;
+  readonly authorized_scopes?: readonly string[] | null;
+  readonly as_of?: string;
 }>;
 
 export function recordObservedAt(
@@ -37,11 +40,22 @@ export function recordObservedAt(
     if (sourceFacts.has(objectId)) continue;
     const page = source({ workspaceId: input.workspace_id, objectId });
     const row = page.row;
-    if (row === null) continue;
+    if (row === null || !sourceFactEligible(row, input.authorized_scopes, input.as_of)) continue;
+    retainSourceFact(sourceFacts, objectId, row, input.workspace_id, observedAt);
+  }
+}
+
+export function retainSourceFact(
+  sourceFacts: FactWriter,
+  objectId: string,
+  row: NonNullable<ReturnType<NonNullable<ObserverReaders["source"]>>["row"]>,
+  workspaceId: string,
+  observedAt: Record<string, string>
+): void {
     sourceFacts.set(objectId, {
       object_id: row.object_id,
       ...(row.interpretation_node === undefined ? {} : { interpretation_node: row.interpretation_node }),
-      workspace_id: input.workspace_id,
+      workspace_id: workspaceId,
       source_revision: row.sourceRevision,
       ...(row.content === undefined ? {} : { content: row.content }),
       ...(row.predicates === undefined ? {} : { predicates: row.predicates }),
@@ -55,7 +69,6 @@ export function recordObservedAt(
       ...(row.staged_warnings === undefined ? {} : { staged_warnings: row.staged_warnings })
     });
     if (row.observed_at !== undefined) observedAt[objectId] = row.observed_at;
-  }
 }
 
 export function recordSourceRootFacts(

@@ -221,6 +221,17 @@ Path cursors retain immutable input versions; their owners replace versions
 instead of mutating arrays or maps held by an interrupted cursor. Native
 relation-page exhaustion does not establish semantic closure: newly admitted
 product states and facets must still consume the retained relation evidence.
+Conditional-field adjacency reads are demanded by reachable program advances,
+hyperedge premises, routing discovery and bound claim evidence. A bound guard
+may require a direct authorized source-fact read before its retained relation
+can be decided. The physical pair cursor retains completion for each demanded
+subject and relation kind. Its exhaustion means only that these consumer-relative
+keys completed for this query and snapshot; it does not certify all possible
+relations or completeness of the original source language. New identities,
+facets, discoveries and facts re-run the affected demand producers. A resolved
+guard is replaced only after a complete reevaluation; independent unknown
+guards remain open. A continuation keeps completed keys only within the same
+query, interpretation, scope and semantic population.
 
 Dependency equations retain independent rule instances and shared compatible
 alternatives. Generated derivations declare `provenance_layout: local_leaves.v1`:

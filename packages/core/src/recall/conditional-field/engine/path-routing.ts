@@ -1,5 +1,4 @@
 import { type AdjacencyRow, type NamedKindOverlay } from "./path-matching.js";
-import { ObservationSubjects } from "./observation-frontier.js";
 
 export type RoutingDiscovery = Readonly<{
   readonly source_id: string;
@@ -59,55 +58,4 @@ export function mergeDiscoveries(
 
 export function pairKey(subject: string, predicate: string): string {
   return `${subject}\0${predicate}`;
-}
-
-export function nextAdjacencyPair(
-  subjects: ReadonlySet<string>,
-  predicates: readonly string[],
-  pairProgress: ReadonlyMap<string, string | null>,
-  pairIndex: number,
-  discoveries: readonly RoutingDiscovery[] = []
-): Readonly<{ readonly subject: string; readonly predicate: string }> | undefined {
-  const merged = adjacencySubjects(subjects, discoveries);
-  return scanAdjacencyPairs(merged, predicates, pairProgress, pairIndex, merged.size * predicates.length).pair;
-}
-
-function adjacencySubjects(
-  subjects: ReadonlySet<string>,
-  discoveries: readonly RoutingDiscovery[]
-): Readonly<{ readonly size: number; at(index: number): string | undefined }> {
-  if (subjects instanceof ObservationSubjects) return subjects.includingDiscoveries(discoveries);
-  const indexed = subjects as ReadonlySet<string> & { at?: (index: number) => string | undefined };
-  if (discoveries.length === 0 && typeof indexed.at === "function") return indexed as ObservationSubjects;
-  const subjectList = [...new Set([...subjects, ...discoveries.map((row) => row.subject_id)])];
-  return { size: subjectList.length, at: (index) => subjectList[index] };
-}
-
-export function scanAdjacencyPairs(subjects: Readonly<{ size: number; at(index: number): string | undefined }>,
-  predicates: readonly string[], pairProgress: Readonly<{ has(id: string): boolean }>, start: number, allowance: number): Readonly<{
-    pair?: Readonly<{ subject: string; predicate: string }>; next: number; work: number;
-  }> {
-  const total = subjects.size * predicates.length;
-  let work = 0;
-  for (; work < Math.min(total, allowance);) {
-    const index = (start + work) % total;
-    const subject = subjects.at(Math.floor(index / predicates.length))!;
-    const predicate = predicates[index % predicates.length]!;
-    work += 1;
-    if (!pairProgress.has(`${pairKey(subject, predicate)}:done`)) {
-      return { pair: { subject, predicate }, next: index + 1, work };
-    }
-  }
-  return { next: total === 0 ? 0 : (start + work) % total, work };
-}
-
-export function hasOpenPairs(
-  subjects: ReadonlySet<string>,
-  predicates: readonly string[],
-  pairProgress: ReadonlyMap<string, string | null>,
-  discoveries: readonly RoutingDiscovery[] = [],
-  completedPairs?: number
-): boolean {
-  if (completedPairs !== undefined) return completedPairs < subjects.size * predicates.length;
-  return nextAdjacencyPair(subjects, predicates, pairProgress, 0, discoveries) !== undefined;
 }

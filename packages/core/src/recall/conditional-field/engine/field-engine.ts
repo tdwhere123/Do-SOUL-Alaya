@@ -145,6 +145,10 @@ export type FieldEngineState = Readonly<{
   readonly epoch: number;
   readonly interpretation: QueryInterpretation;
   readonly authorized_scopes?: readonly string[] | null;
+  readonly observation_workspace_id?: string;
+  readonly observation_query_text?: string;
+  readonly observation_as_of?: string;
+  readonly observation_source_revision?: string;
   readonly budget: RequestBudget;
   readonly remaining_exploration: number;
   readonly solver_completed_work?: number;
@@ -165,7 +169,10 @@ export type FieldEngineState = Readonly<{
   readonly observation_gaps?: Readonly<{ guards: boolean; measurements: boolean }>;
   readonly unresolved_seed_count?: number;
   readonly pending_path_effects?: PendingPathEffects;
-  readonly path_effect_frontier?: Readonly<{ identities: number; facets: RetainedRows<FacetVector>; discoveries: number }>;
+  readonly compiled_automaton?: import("./program-automaton.js").ProgramAutomaton;
+  readonly compiled_automaton_bytes?: number;
+  readonly path_effect_frontier?: Readonly<{ identities: number; facets: RetainedRows<FacetVector>; discoveries: number;
+    sourceFacts?: PersistentStringMap<BoundSourceFacts> }>;
   readonly source_facts?: PersistentStringMap<BoundSourceFacts>;
   readonly source_fact_bytes?: number;
   readonly observed_relation_bytes?: number;
@@ -209,6 +216,11 @@ export type FieldEngineState = Readonly<{
   readonly last_observer_status: ObserverStatus | undefined;
   readonly resume_cursors: Readonly<Record<string, string | null>>;
   readonly pair_progress: PersistentStringMap<string | null>;
+  readonly pair_demands: PersistentStringMap<true>;
+  readonly pair_demand_bytes: number;
+  readonly pair_progress_bytes: number;
+  readonly source_fact_demands: PersistentStringMap<"pending" | "done">;
+  readonly source_fact_demand_bytes: number;
   readonly pair_completed_count: number;
   readonly pair_revision: number;
   readonly pair_scan_offset: number;
@@ -280,7 +292,10 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     remaining_work: [],
     last_observer_status: undefined,
     resume_cursors: {},
-    pair_progress: new PersistentStringMap(), pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
+    pair_progress: new PersistentStringMap(), pair_demands: new PersistentStringMap(), pair_demand_bytes: 0,
+    pair_progress_bytes: 0,
+    source_fact_demands: new PersistentStringMap(), source_fact_demand_bytes: 0,
+    pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
     resume_subjects: new PersistentStringMap(),
     discoveries: []
   });
@@ -570,7 +585,10 @@ function rejectedField(
     remaining_work: [],
     last_observer_status: undefined,
     resume_cursors: {},
-    pair_progress: new PersistentStringMap(), pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
+    pair_progress: new PersistentStringMap(), pair_demands: new PersistentStringMap(), pair_demand_bytes: 0,
+    pair_progress_bytes: 0,
+    source_fact_demands: new PersistentStringMap(), source_fact_demand_bytes: 0,
+    pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
     resume_subjects: new PersistentStringMap(),
     discoveries: [],
     closure: {

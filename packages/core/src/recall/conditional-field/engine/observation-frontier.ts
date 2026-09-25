@@ -1,31 +1,11 @@
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 
 export class ObservationSubjects implements ReadonlySet<string> {
-  private mergedSnapshot?: PersistentStringMap<true>;
-  private mergedDiscoveries?: readonly Readonly<{ subject_id: string }>[];
-  private mergedView?: ObservationSubjects;
-
   public constructor(public snapshot: PersistentStringMap<true>) {}
   public get size(): number { return this.snapshot.size; }
   public get [Symbol.toStringTag](): string { return "ObservationSubjects"; }
   public has(id: string): boolean { return this.snapshot.has(id); }
   public add(id: string): void { if (!this.snapshot.has(id)) this.snapshot = this.snapshot.with(id, true); }
-  public at(index: number): string | undefined { return this.snapshot.entryAt(index)?.[0]; }
-  public includingDiscoveries(discoveries: readonly Readonly<{ subject_id: string }>[]): ObservationSubjects {
-    if (discoveries.length === 0) return this;
-    if (this.mergedView !== undefined && this.mergedDiscoveries === discoveries && this.mergedSnapshot === this.snapshot) {
-      return this.mergedView;
-    }
-    let next = this.snapshot;
-    for (const row of discoveries) {
-      if (!next.has(row.subject_id)) next = next.with(row.subject_id, true);
-    }
-    const view = next === this.snapshot ? this : new ObservationSubjects(next);
-    this.mergedSnapshot = this.snapshot;
-    this.mergedDiscoveries = discoveries;
-    this.mergedView = view;
-    return view;
-  }
   public keys(): SetIterator<string> { return this.snapshot.keys(); }
   public values(): SetIterator<string> { return this.snapshot.keys(); }
   public [Symbol.iterator](): SetIterator<string> { return this.snapshot.keys(); }
@@ -36,15 +16,33 @@ export class ObservationSubjects implements ReadonlySet<string> {
 }
 
 export class ObservationPairs implements ReadonlyMap<string, string | null> {
-  public constructor(public snapshot: PersistentStringMap<string | null>, public completed: number, public revision: number) {}
+  public constructor(public snapshot: PersistentStringMap<string | null>, public completed: number, public revision: number,
+    public demanded: PersistentStringMap<true> = new PersistentStringMap(), public bytes = 0) {}
   public get size(): number { return this.snapshot.size; }
   public get [Symbol.toStringTag](): string { return "ObservationPairs"; }
   public has(id: string): boolean { return this.snapshot.has(id); }
   public get(id: string): string | null | undefined { return this.snapshot.get(id); }
   public set(id: string, value: string | null): void {
     if (this.snapshot.has(id) && this.snapshot.get(id) === value) return;
+    const previous = this.snapshot.get(id);
+    this.bytes += this.snapshot.has(id) ? Buffer.byteLength(value ?? "", "utf8") - Buffer.byteLength(previous ?? "", "utf8")
+      : 96 + Buffer.byteLength(id, "utf8") + Buffer.byteLength(value ?? "", "utf8");
     if (id.endsWith(":done") && !this.snapshot.has(id)) this.completed += 1;
     this.snapshot = this.snapshot.with(id, value); this.revision += 1;
+  }
+  public hasOpenDemand(): boolean { return this.completed < this.demanded.size; }
+  public nextDemand(start: number, allowance: number): Readonly<{
+    key?: string; next: number; work: number;
+  }> {
+    const total = this.demanded.size;
+    let work = 0;
+    while (work < Math.min(total, allowance)) {
+      const index = (start + work) % total;
+      const key = this.demanded.entryAt(index)?.[0];
+      work += 1;
+      if (key !== undefined && !this.snapshot.has(`${key}:done`)) return { key, next: index + 1, work };
+    }
+    return { next: total === 0 ? 0 : (start + work) % total, work };
   }
   public keys(): MapIterator<string> { return this.snapshot.keys(); }
   public values(): MapIterator<string | null> { return this.snapshot.values(); }

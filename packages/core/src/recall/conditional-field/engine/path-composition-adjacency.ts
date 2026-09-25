@@ -33,6 +33,7 @@ import {
 import {
   inactiveResolution,
   relationMatches,
+  relationPhysicalCandidates,
   admitRelationRow,
   retargetRelationProduct,
   type AdjacencyRow,
@@ -50,6 +51,7 @@ import {
 } from "./program-automaton.js";
 import { runtimeProgram } from "./path-composition-seed.js";
 import { composedFacetPathId, extendFacets } from "./path-composition-facet.js";
+import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
 export { tryCompleteHyperedge };
@@ -66,6 +68,8 @@ export type CompiledAdjacencyEffect = Readonly<{
   readonly unresolved_guard?: boolean;
   readonly missing_target_revision?: boolean;
   readonly discovery?: RoutingDiscovery;
+  readonly relation_demand?: Readonly<{ readonly subject: string; readonly predicate: string }>;
+  readonly source_fact_demand?: string;
 }>;
 
 export function programRelationKinds(program: QueryProgram): readonly string[] {
@@ -116,6 +120,9 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
     readonly discoveries?: RetainedRows<RoutingDiscovery>;
+    readonly physicalKinds?: readonly string[];
+    readonly compiledAutomaton?: ProgramAutomaton;
+    readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
   }>;
 
 export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathEffectCursor;
@@ -132,13 +139,35 @@ export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input:
 function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathComputation<void> {
   const runtime = runtimeProgram(input.interpretation.program);
   if (runtime === "empty" || runtime === "epsilon") return;
-  yield { kind: "work", retained_bytes: 1152 + Buffer.byteLength(JSON.stringify(runtime), "utf8") * 8 };
-  const automaton = compileProgramAutomaton(runtime);
+  yield { kind: "work", retained_bytes: 256 };
+  const automaton = input.compiledAutomaton ?? compileProgramAutomaton(runtime);
+  const compiledPremises = input.compiledPremises ?? new Map<QueryProgram, ProgramAutomaton>();
+  const physicalKinds = new Set<string>();
+  for (const kind of input.physicalKinds ?? []) {
+    yield { kind: "work", retained_bytes: 64 + Buffer.byteLength(kind, "utf8") };
+    physicalKinds.add(kind);
+  }
   const statesByEndpoint = new Map<string, ProductStateKey[]>();
   for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
     const endpoint = productEndpointId(from), bucket = statesByEndpoint.get(endpoint);
+    for (const advance of automaton.advances) {
+      yield { kind: "work" };
+      if (advance.from !== from.program_state) continue;
+      for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
+        yield { kind: "work" };
+        if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
+        yield { kind: "effect", effect: { observation_id: `demand:${endpoint}:${predicate}`,
+          relation_demand: { subject: endpoint, predicate } } };
+      }
+    }
+    const claim = claimEvidenceDemandForState(from, input.interpretation.view, input.bindingContexts);
+    if (claim !== undefined) yield { kind: "effect", effect: {
+      observation_id: `claim-demand:${claim.subject}:${claim.predicate}`,
+      relation_demand: claim,
+      source_fact_demand: claim.subject
+    } };
     // The cursor admits index storage before retaining references. Buckets keep
     // the immutable input order, including all hypotheses sharing an endpoint.
     yield { kind: "work", retained_bytes: bucket === undefined ? 128 + 2 * endpoint.length : 16 };
@@ -153,7 +182,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         sourceFacts: input.sourceFacts,
         bindingContexts: input.bindingContexts,
         toProgramStates: advance.to,
-        observedStates: input.liveStates
+        observedStates: input.liveStates,
+        physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }
   }
@@ -181,6 +211,14 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   for (const discovery of input.discoveries ?? []) {
     yield { kind: "work", retained_bytes: 64 };
     origins.add(discovery.subject_id);
+  }
+  if ((input.physicalKinds?.length ?? 0) > 0) for (const origin of origins) {
+    for (const [predicate, routing] of Object.entries(input.overlay)) {
+      yield { kind: "work" };
+      if (!routing.applicable || routing.role !== "routing_only") continue;
+      yield { kind: "effect", effect: { observation_id: `routing-demand:${origin}:${predicate}`,
+        relation_demand: { subject: origin, predicate } } };
+    }
   }
   const emitted = new Set<string>();
   for (let grew = true; grew;) {
@@ -318,7 +356,9 @@ function attachHyperedgeFacet(effect: HyperedgeEffect): CompiledAdjacencyEffect 
       observation_id: effect.observation_id,
       ...(effect.unresolved_guard === true ? { unresolved_guard: true } : {}),
       ...(effect.missing_measurement === true ? { missing_measurement: true } : {}),
-      ...(effect.missing_target_revision === true ? { missing_target_revision: true } : {})
+      ...(effect.missing_target_revision === true ? { missing_target_revision: true } : {}),
+      ...(effect.relation_demand === undefined ? {} : { relation_demand: effect.relation_demand }),
+      ...(effect.source_fact_demand === undefined ? {} : { source_fact_demand: effect.source_fact_demand })
     };
   }
   return {

@@ -19,8 +19,10 @@ const row = (predicate: string, target: string, id: string) => ({ assertionId: i
 
 function setup(program: QueryProgram) {
   const interpretation = query(program);
-  const state = createConditionalField({ interpretation, budget: defaultBudget({ work_units: 10000, memory_bytes: 1000000 }),
-    seeds: seedProgramStates(program).map((program_state) => ({ schema_version: 1, state: productKey("a", "h0", "unbound", program_state), milligrades: 1000 })) });
+  const state: FieldEngineState = { ...createConditionalField({ interpretation, budget: defaultBudget({ work_units: 10000, memory_bytes: 1000000 }),
+    seeds: seedProgramStates(program).map((program_state) => ({ schema_version: 1, state: productKey("a", "h0", "unbound", program_state), milligrades: 1000 })) }),
+    observation_workspace_id: "workspace-1", observation_query_text: "a", observation_as_of: AS_OF,
+    authorized_scopes: null };
   return { interpretation, state };
 }
 
@@ -63,7 +65,10 @@ describe("bounded path effect continuation", () => {
       sourceFacts: new Map([["b", { object_id: "b", source_revision: "rev" }]]) });
     const admitted = cursor.advance(0, 2, 1_000_000);
     expect(visits).toBe(0);
-    const refused = cursor.advance(0, 1, admitted.retained_bytes);
+    let refused = cursor.advance(0, 1, admitted.retained_bytes);
+    for (let turn = 0; turn < 10 && refused.status === "open"; turn += 1) {
+      refused = cursor.advance(0, 1, admitted.retained_bytes);
+    }
     expect(refused.status).toBe("memory_exhausted");
     expect(visits).toBe(1);
     const waiting = cursor.advance(0, 1, admitted.retained_bytes);

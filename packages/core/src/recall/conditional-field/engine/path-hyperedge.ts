@@ -28,13 +28,16 @@ import type { RetainedRows } from "./retained-sequence.js";
 import {
   ACCEPTING_PROGRAM_STATE,
   advancesFor,
-  compileProgramAutomaton
+  compileProgramAutomaton,
+  programAutomatonCost,
+  type ProgramAutomaton
 } from "./program-automaton.js";
 import {
   inactiveResolution,
   retargetRelationProduct,
   observedTargetRevision,
   relationMatches,
+  relationPhysicalCandidates,
   admitRelationRow,
   type AdjacencyRow,
   type NamedKindOverlay
@@ -61,6 +64,8 @@ export type HyperedgeEffect = Readonly<{
   readonly unresolved_guard?: boolean;
   readonly missing_target_revision?: boolean;
   readonly missing_measurement?: boolean;
+  readonly relation_demand?: Readonly<{ readonly subject: string; readonly predicate: string }>;
+  readonly source_fact_demand?: string;
 }>;
 
 type HyperedgeInput = Readonly<{
@@ -71,6 +76,9 @@ type HyperedgeInput = Readonly<{
   readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
   readonly toProgramStates?: readonly string[];
   readonly observedStates?: RetainedRows<ProductStateKey>;
+  readonly physicalKinds?: readonly string[];
+  readonly physicalKindSet?: ReadonlySet<string>;
+  readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
 }>;
 
 type PremiseAssignment = HyperedgePremise & Readonly<{
@@ -117,6 +125,14 @@ export function* hyperedgeEffectSteps(
   program: Extract<QueryProgram, { readonly kind: "hyperedge" }>,
   input: HyperedgeInput
 ): PathComputation<void> {
+  if (input.physicalKindSet === undefined && input.physicalKinds !== undefined) {
+    const index = new Set<string>();
+    for (const kind of input.physicalKinds) {
+      yield { kind: "work", retained_bytes: 64 + Buffer.byteLength(kind, "utf8") };
+      index.add(kind);
+    }
+    input = { ...input, physicalKindSet: index };
+  }
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
   for (const from of input.liveStates) {
     yield { kind: "work" };
@@ -197,6 +213,14 @@ function* relationAssignments(
   input: HyperedgeInput
 ): PathComputation<readonly PremiseAssignment[]> {
   const found: PremiseAssignment[] = [];
+  const physicalKinds = input.physicalKindSet ?? new Set<string>();
+  for (const predicate of relationPhysicalCandidates(relation.relation_kind)) {
+    yield { kind: "work" };
+    if (!physicalKinds.has(predicate) || !relationMatches(relation.relation_kind, predicate)) continue;
+    const subject = productEndpointId(from);
+    yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
+      relation_demand: { subject, predicate } } };
+  }
   for (const row of rows) {
     const assignment = yield* assignmentFromRow(relation, from, row, input);
     if (assignment !== undefined) found.push(assignment);
@@ -218,7 +242,9 @@ function* nestedHyperedgeAssignments(
     overlay: input.overlay,
     sourceFacts: input.sourceFacts,
     bindingContexts: input.bindingContexts,
-    observedStates: input.observedStates ?? input.liveStates
+    observedStates: input.observedStates ?? input.liveStates,
+    physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
+    compiledPremises: input.compiledPremises
   })) {
     if (step.kind === "work") { yield step; continue; }
     const effect = step.effect;
@@ -247,8 +273,14 @@ function* walkCompiledPremise(
   rows: Iterable<AdjacencyRow>,
   input: HyperedgeInput
 ): PathComputation<readonly PremiseAssignment[]> {
-  yield { kind: "work", retained_bytes: 1024 + Buffer.byteLength(JSON.stringify(program), "utf8") * 8 };
-  const automaton = compileProgramAutomaton(program);
+  let automaton = input.compiledPremises?.get(program);
+  if (automaton === undefined) {
+    const cost = programAutomatonCost(program);
+    yield { kind: "work", retained_bytes: cost.retained_bytes };
+    for (let unit = 0; unit < cost.work_units; unit += 1) yield { kind: "work" };
+    automaton = compileProgramAutomaton(program);
+    input.compiledPremises?.set(program, automaton);
+  }
   const starts = automaton.start.map((program_state) => ({ ...from, program_state }));
   const queue: ProductStateKey[] = [...starts];
   const visited = new Map<string, ProductStateKey>();
@@ -289,6 +321,18 @@ function* walkCompiledPremise(
     const env = parseBindingContext(node.binding_context, input.bindingContexts);
     for (const variable of automaton.localVariables.get(node.program_state) ?? []) env.delete(variable);
     const here = { ...node, binding_context: encodeBindingContext(env, input.bindingContexts) };
+    for (const advance of automaton.advances) {
+      yield { kind: "work" };
+      if (advance.from !== node.program_state) continue;
+      const physicalKinds = input.physicalKindSet ?? new Set<string>();
+      for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
+        yield { kind: "work" };
+        if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
+        const subject = productEndpointId(node);
+        yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
+          relation_demand: { subject, predicate } } };
+      }
+    }
     for (const hyperedge of automaton.hyperedgeAdvances) {
       if (hyperedge.from !== node.program_state) continue;
       for (const step of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
@@ -298,7 +342,9 @@ function* walkCompiledPremise(
         sourceFacts: input.sourceFacts,
         bindingContexts: input.bindingContexts,
         toProgramStates: hyperedge.to,
-        observedStates: observed
+        observedStates: observed,
+        physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
+        compiledPremises: input.compiledPremises
       })) {
         if (step.kind === "work") { yield step; continue; }
         const effect = step.effect;
@@ -318,6 +364,17 @@ function* walkCompiledPremise(
       }
     }
   }
+  return yield* groundPremiseAssignments(from, starts, visited, transitions, derivations, roots);
+}
+
+function* groundPremiseAssignments(
+  from: ProductStateKey,
+  starts: readonly ProductStateKey[],
+  visited: ReadonlyMap<string, ProductStateKey>,
+  transitions: readonly Transition[],
+  derivations: ReadonlyMap<string, Derivation>,
+  roots: Readonly<Record<string, string>>
+): PathComputation<readonly PremiseAssignment[]> {
   const groundDerivations: Derivation[] = [];
   for (const row of derivations.values()) { yield { kind: "work", retained_bytes: 8 }; groundDerivations.push(row); }
   const groundInput = { seeds: starts.map((state) => ({ schema_version: 1 as const, state, milligrades: MILLIGRADE_TOP })),

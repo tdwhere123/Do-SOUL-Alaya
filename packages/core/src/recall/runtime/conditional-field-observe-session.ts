@@ -19,7 +19,6 @@ import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
 import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects } from "../conditional-field/engine/observation-frontier.js";
-import { scanAdjacencyPairs } from "../conditional-field/engine/path-routing.js";
 import {
   applyObserverPage,
   proposeFieldWork,
@@ -28,9 +27,10 @@ import {
 } from "../conditional-field/engine/field-engine.js";
 import { programRelationKinds } from "../conditional-field/engine/path-composition-adjacency.js";
 import { seedActivationsForObservation } from "../conditional-field/engine/path-composition-seed.js";
-import { hasOpenPairs, overlayIsRoutingOnly, pairKey } from "../conditional-field/engine/path-routing.js";
+import { overlayIsRoutingOnly, pairKey } from "../conditional-field/engine/path-routing.js";
 import { STORED_RELATION_KIND } from "../conditional-field/query/ordinary-language.js";
-import { ObservedSourceFacts, recordObservedAt, recordSourceRootFacts } from "./observed-source-facts.js";
+import { ObservedSourceFacts, recordObservedAt, recordSourceRootFacts, retainSourceFact } from "./observed-source-facts.js";
+import { sourceFactEligible } from "../conditional-field/observers/observation-admission.js";
 import {
   closeAdjacency,
   closeRegion,
@@ -70,7 +70,14 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
   const { input, interpretation, memoryBox } = session;
   for (let round = 0; round < MAX_OBSERVE_ROUNDS; round += 1) {
     memoryBox.remaining = Math.max(0, session.state.remaining_memory_bytes - memoryBox.cachedBytes);
-    if (refreshPathFrontier(session)) return session.state;
+    const seedFirst = session.state.pending_path_effects === undefined && session.state.pair_demands.size === 0
+      && session.state.residuals.some((region) => region.kind === "seed"
+        && (region.status === "open" || region.status === "interrupted"));
+    if (!seedFirst && refreshPathFrontier(session)) return session.state;
+    if (consumeBoundSourceFact(session)) {
+      if (session.state.last_observer_status === "interrupted" || terminalObserver(session.state.last_observer_status)) return session.state;
+      continue;
+    }
     if (terminalObserver(session.state.last_observer_status)) break;
     const proposal = proposeFieldWork(session.state);
     if (proposal.actions.length === 0) break;
@@ -104,11 +111,13 @@ export function runObservationRounds(session: ObservationSession): FieldEngineSt
   }
   const settled = settleSourceDomainResidual(
     settleDiscoveryResidual(session.state, interpretation, session.cursors,
-      session.subjects, session.predicates, session.pairProgress),
+      session.pairProgress),
     interpretation, session.cursors, sourceDomainSettleCoverage(session));
   return Object.freeze({ ...settled,
     pair_progress: session.pairProgress.snapshot, pair_completed_count: session.pairProgress.completed,
-    pair_revision: session.pairProgress.revision, pair_scan_offset: session.pairIndex, resume_subjects: session.subjects.snapshot });
+    pair_revision: session.pairProgress.revision, pair_progress_bytes: session.pairProgress.bytes,
+    pair_scan_offset: session.pairIndex,
+    pair_demands: session.pairProgress.demanded, resume_subjects: session.subjects.snapshot });
 }
 
 function consumeSeedPage(session: ObservationSession, action: ObservationAction): boolean {
@@ -129,7 +138,8 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   }
   const bindingContexts = forkBindingContexts(session.state);
   let effects: readonly FieldObservationEffect[];
-  try { effects = seedEffects(observed.page.observations, interpretation, input.as_of, bindingContexts); }
+  try { effects = seedEffects(observed.page.observations, interpretation, input.as_of, bindingContexts,
+    session.state.compiled_automaton); }
   catch (error) { return rejectBindingResource(session, error); }
   session.state = applyObserverPage({ ...retainBindingContexts(session.state, bindingContexts), resume_subjects: subjects.snapshot }, { page: observed.page,
     effects, work: observed.work,
@@ -138,7 +148,7 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
   subjects.snapshot = session.state.resume_subjects;
   session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, pairProgress);
   if (session.state.memory_exhausted) return true;
-  if (hasOpenPairs(subjects, session.predicates, pairProgress, [], pairProgress.completed)) {
+  if (pairProgress.hasOpenDemand()) {
     session.state = reopenAdjacency(session.state);
   }
   if (refreshPathFrontier(session)) return true;
@@ -151,22 +161,27 @@ function consumeSeedPage(session: ObservationSession, action: ObservationAction)
 function refreshPathFrontier(session: ObservationSession): boolean {
   const { state, interpretation, input, relationRows, sourceFacts } = session;
   const frontier = state.path_effect_frontier;
-  if (relationRows.length === 0 || frontier !== undefined && frontier.identities === state.seen_identities.length
-    && frontier.facets === state.facets && frontier.discoveries === state.discoveries.length) return false;
+  if (frontier !== undefined && frontier.identities === state.seen_identities.length
+    && frontier.facets === state.facets && frontier.discoveries === state.discoveries.length
+    && frontier.sourceFacts === state.source_facts) return false;
   const region = state.residuals.find((entry) => entry.kind === "adjacency");
   const regionId = region?.region_id ?? "adjacency";
   const cursor = session.cursors.get(regionId) ?? startObserverCursor({ cursor_id: regionId,
     query_id: interpretation.query_id, snapshot_id: interpretation.snapshot_id, region_id: regionId });
+  const beforeWork = state.remaining_exploration;
   session.state = resumePathEffects({ ...state, pending_path_effects: { input: { rows: relationRows, options: {
     interpretation, asOf: input.as_of, liveStates: state.seen_identities,
     liveStateOffset: frontier === undefined || frontier.facets !== state.facets ? 0 : frontier.identities,
     overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries,
-    bindingContexts: state.binding_contexts } },
+    bindingContexts: state.binding_contexts, physicalKinds: session.predicates,
+    compiledAutomaton: state.compiled_automaton } },
     offset: 0, retained_bytes: 0, page: { schema_version: 1, query_id: interpretation.query_id,
       snapshot_id: interpretation.snapshot_id, cursor, observations: [], outcome: { schema_version: 1, status: "open" },
       open_regions: [{ schema_version: 1, region_id: regionId, kind: "adjacency", status: "open" }] } } });
+  input.cost?.add("adjacency", { joins: Math.max(0, beforeWork - session.state.remaining_exploration) });
   session.subjects.snapshot = session.state.resume_subjects;
-  session.unresolvedGuard ||= session.state.observation_gaps?.guards === true;
+  session.pairProgress.demanded = session.state.pair_demands;
+  session.unresolvedGuard = session.state.observation_gaps?.guards === true;
   session.missingMeasurement ||= session.state.observation_gaps?.measurements === true;
   return session.state.pending_path_effects !== undefined || session.state.memory_exhausted;
 }
@@ -201,18 +216,19 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
 }
 
 function consumeAdjacencyPage(session: ObservationSession, action: ObservationAction): boolean {
-  const { input, interpretation, lease, cursors, pairProgress, subjects, predicates, observedAt, sourceFacts } = session;
+  const { input, interpretation, lease, cursors, pairProgress, subjects, observedAt, sourceFacts } = session;
   const minimum = 4 + (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK);
-  const scanned = scanAdjacencyPairs(subjects, predicates, pairProgress, session.pairIndex,
+  const scanned = pairProgress.nextDemand(session.pairIndex,
     Math.max(0, session.state.remaining_exploration - minimum));
-  const pair = scanned.pair;
+  const separator = scanned.key?.indexOf("\0") ?? -1;
+  const pair = separator < 0 ? undefined : { subject: scanned.key!.slice(0, separator), predicate: scanned.key!.slice(separator + 1) };
   session.pairIndex = scanned.next;
   if (scanned.work > 0) session.input.cost?.add("adjacency", { joins: scanned.work });
   session.state = { ...session.state, pair_scan_offset: scanned.next,
     remaining_exploration: session.state.remaining_exploration - scanned.work };
   action = { ...action, work_limit: Math.min(action.work_limit, session.state.remaining_exploration) };
   if (pair === undefined) {
-    if (hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) {
+    if (pairProgress.hasOpenDemand()) {
       session.state = interruptObservedField(session.state); return true;
     }
     session.state = closeAdjacency(session.state, interpretation, action, cursors, session.storedKindsOpen);
@@ -222,11 +238,38 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
   recordObserverWork(session, "adjacency", observed);
   cursors.set(action.region_id, observed.page.cursor);
+  const completedPair = new ObservationPairs(pairProgress.snapshot, pairProgress.completed,
+    pairProgress.revision, pairProgress.demanded, pairProgress.bytes);
+  const key = pairKey(pair.subject, pair.predicate);
+  completedPair.set(key, observed.page.cursor.committed_through);
+  if (observed.page.outcome.status === "exhausted") completedPair.set(`${key}:done`, "1");
   if (captured.length === 0) {
-    session.state = applyObserverPage({ ...session.state, pair_progress: pairProgress.snapshot,
-      pair_completed_count: pairProgress.completed, pair_revision: pairProgress.revision }, {
-      page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)),
-      work: observed.work, resume_cursors: resumeCursors(cursors, pairProgress) });
+    const pairBytes = completedPair.bytes - pairProgress.bytes;
+    if (pairBytes > session.state.remaining_memory_bytes) {
+      session.state = { ...interruptObservedField(session.state), memory_exhausted: true,
+        remaining_exploration: Math.max(0, session.state.remaining_exploration - observed.work.work_units) };
+      return true;
+    }
+    const before = session.state;
+    session.state = applyObserverPage({ ...before, pair_progress: completedPair.snapshot,
+      pair_completed_count: completedPair.completed, pair_revision: completedPair.revision,
+      pair_progress_bytes: completedPair.bytes,
+      remaining_memory_bytes: session.state.remaining_memory_bytes - pairBytes }, {
+      page: maskAdjacencyExhaustion(observed.page, completedPair.hasOpenDemand()),
+      work: observed.work, resume_cursors: resumeCursors(cursors, completedPair) });
+    if (session.state.retention_rejected !== undefined || session.state.memory_exhausted) {
+      const rejected = session.state;
+      session.state = { ...interruptObservedField(before),
+        remaining_exploration: rejected.remaining_exploration,
+        remaining_reserve: rejected.remaining_reserve,
+        memory_exhausted: rejected.memory_exhausted,
+        retention_rejected: rejected.retention_rejected };
+      return true;
+    }
+    pairProgress.snapshot = completedPair.snapshot;
+    pairProgress.completed = completedPair.completed;
+    pairProgress.revision = completedPair.revision;
+    pairProgress.bytes = completedPair.bytes;
     return observed.page.outcome.status === "interrupted";
   }
   for (const row of captured) session.relationRows = session.relationRows.with(row);
@@ -239,18 +282,26 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     pending_path_effects: { input: { rows: session.relationRows, options: {
       interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: RELATION_ROUTING,
       sourceFacts: sourceFacts.snapshot, facets: session.state.facets, discoveries: session.state.discoveries,
+      physicalKinds: session.predicates, compiledAutomaton: session.state.compiled_automaton,
       bindingContexts: session.state.binding_contexts } },
       offset: 0, retained_bytes: 0,
-      page: maskAdjacencyExhaustion(observed.page, hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) },
-    resume_cursors: resumeCursors(cursors, pairProgress) };
-  session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, pairProgress);
+      page: maskAdjacencyExhaustion(observed.page, completedPair.hasOpenDemand()) },
+    resume_cursors: resumeCursors(cursors, completedPair) };
+  session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, completedPair);
   if (session.state.memory_exhausted) return true;
+  pairProgress.snapshot = completedPair.snapshot;
+  pairProgress.completed = completedPair.completed;
+  pairProgress.revision = completedPair.revision;
+  pairProgress.bytes = completedPair.bytes;
+  const beforePathWork = session.state.remaining_exploration;
   session.state = resumePathEffects(session.state);
-  session.unresolvedGuard ||= session.state.observation_gaps?.guards === true;
+  input.cost?.add("adjacency", { joins: Math.max(0, beforePathWork - session.state.remaining_exploration) });
+  pairProgress.demanded = session.state.pair_demands;
+  session.unresolvedGuard = session.state.observation_gaps?.guards === true;
   session.missingMeasurement ||= session.state.observation_gaps?.measurements === true;
   if (session.state.pending_path_effects !== undefined || session.state.memory_exhausted) return true;
   subjects.snapshot = session.state.resume_subjects;
-  if (hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) session.state = reopenAdjacency(session.state);
+  if (pairProgress.hasOpenDemand()) session.state = reopenAdjacency(session.state);
   if (observed.page.outcome.status === "interrupted") {
     if ((before.pair_progress.get(pairKey(pair.subject, pair.predicate)) ?? null) === observed.page.cursor.committed_through) return true;
     session.state = { ...session.state, last_observer_status: "open" };
@@ -276,14 +327,16 @@ function retainObservedContext(
   subjects: ObservationSubjects, pairProgress: ObservationPairs
 ): FieldEngineState {
   const relationBytes = relations.bytes;
-  const bytes = facts.bytes - (before.source_fact_bytes ?? 0) + relationBytes - (before.observed_relation_bytes ?? 0);
+  const bytes = facts.bytes - (before.source_fact_bytes ?? 0) + relationBytes - (before.observed_relation_bytes ?? 0)
+    + pairProgress.bytes - before.pair_progress_bytes;
   if (bytes > state.remaining_memory_bytes) return { ...before,
     remaining_exploration: state.remaining_exploration, memory_exhausted: true, last_observer_status: "interrupted",
     closure: { ...before.closure, observation: "interrupted", requested_index: "open" },
     residuals: before.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
   return { ...state, source_facts: facts.snapshot, source_fact_bytes: facts.bytes,
     observed_relations: relations, observed_relation_bytes: relationBytes, remaining_memory_bytes: state.remaining_memory_bytes - bytes,
-    pair_progress: pairProgress.snapshot, pair_completed_count: pairProgress.completed, pair_revision: pairProgress.revision,
+    pair_progress: pairProgress.snapshot, pair_completed_count: pairProgress.completed,
+    pair_revision: pairProgress.revision, pair_progress_bytes: pairProgress.bytes,
     resume_subjects: subjects.snapshot };
 }
 
@@ -365,8 +418,6 @@ function observeAdjacency(
     as_of: input.as_of,
     ...pinExpectation(input)
   });
-  pairProgress.set(key, observed.page.cursor.committed_through);
-  if (observed.page.outcome.status === "exhausted") pairProgress.set(`${key}:done`, "1");
   const kept = new Set(observed.page.observations.map((row) => row.observation_id));
   const eligible = captured.filter((row) => kept.has(`${action.region_id}:${row.assertionId}`));
   captured.length = 0;
@@ -401,10 +452,11 @@ export function seedEffects(
   observations: readonly TypedObservation[],
   interpretation: QueryInterpretation,
   asOf: string,
-  bindingContexts?: BindingContextStore
+  bindingContexts?: BindingContextStore,
+  compiled?: FieldEngineState["compiled_automaton"]
 ): readonly FieldObservationEffect[] {
   return observations.flatMap((observation) =>
-    seedActivationsForObservation(observation, interpretation, asOf, bindingContexts).map((seed) => ({
+    seedActivationsForObservation(observation, interpretation, asOf, bindingContexts, compiled).map((seed) => ({
       observation_id: `${observation.observation_id}:${seed.state.hypothesis_id}:${seed.state.program_state}`,
       seed,
       admitted_seed: true as const
@@ -536,4 +588,51 @@ export function sourceDomainSettleCoverage(session: ObservationSession): SourceD
       || (seed?.status === "unavailable" && !settled),
     settled
   };
+}
+
+function consumeBoundSourceFact(session: ObservationSession): boolean {
+  const pending = [...session.state.source_fact_demands].find(([, status]) => status === "pending");
+  if (pending === undefined) return false;
+  const [objectId] = pending;
+  const { input, sourceFacts, observedAt } = session;
+  const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
+  if (session.state.remaining_exploration < 2 + pinWork) {
+    session.state = interruptObservedField(session.state);
+    return true;
+  }
+  const pin = input.readers.snapshotPin?.(input.workspace_id);
+  if (pin !== undefined && input.expected_source_revision !== undefined
+    && pin.source_revision !== input.expected_source_revision) {
+    session.state = applyObserverPage(session.state, { page: {
+      schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
+      query_id: session.interpretation.query_id, snapshot_id: session.interpretation.snapshot_id,
+      cursor: cursorOf(session.cursors, session.interpretation, "adjacency"), observations: [],
+      outcome: { schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, status: "invalidated" },
+      open_regions: session.state.residuals.map((region) => ({ ...region, status: "invalidated" as const }))
+    }, effects: [] });
+    return true;
+  }
+  const before = sourceFacts.bytes;
+  const page = input.readers.source?.({ workspaceId: input.workspace_id, objectId });
+  if (page?.row !== null && page?.row !== undefined
+    && sourceFactEligible(page.row, input.authorized_scopes, input.as_of)) {
+    retainSourceFact(sourceFacts, objectId, page.row, input.workspace_id, observedAt);
+  }
+  const retainedBytes = sourceFacts.bytes - before;
+  const work = 2 + pinWork + (page?.rowsRead ?? 0);
+  input.cost?.add("observe", { native_visits: 1 + pinWork + (page?.rowsRead ?? 0),
+    native_rows: page?.rowsRead ?? 0, native_bytes: page?.bytesRead ?? 0 });
+  if (retainedBytes > session.state.remaining_memory_bytes || work > session.state.remaining_exploration) {
+    session.state = { ...interruptObservedField(session.state), memory_exhausted: retainedBytes > session.state.remaining_memory_bytes,
+      remaining_exploration: Math.max(0, session.state.remaining_exploration - work) };
+    return true;
+  }
+  const observed = retainedBytes > 0;
+  session.state = { ...session.state,
+    remaining_exploration: session.state.remaining_exploration - work,
+    remaining_memory_bytes: session.state.remaining_memory_bytes - retainedBytes,
+    source_facts: sourceFacts.snapshot, source_fact_bytes: sourceFacts.bytes,
+    source_fact_demands: session.state.source_fact_demands.with(objectId, "done"),
+    ...(observed ? { path_effect_frontier: undefined } : {}) };
+  return true;
 }

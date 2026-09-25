@@ -23,8 +23,11 @@ import {
   type FieldEngineState
 } from "../conditional-field/engine/field-engine.js";
 import { adjacencyKindsFor } from "../conditional-field/engine/path-composition-adjacency.js";
-import { seedProgramStates } from "../conditional-field/engine/path-composition-seed.js";
-import { hasOpenPairs, routingOverlayKinds } from "../conditional-field/engine/path-routing.js";
+import { runtimeProgram, seedProgramStates } from "../conditional-field/engine/path-composition-seed.js";
+import { compileProgramAutomaton, programAutomatonCost, ProgramAutomatonResourceError } from "../conditional-field/engine/program-automaton.js";
+import { routingOverlayKinds } from "../conditional-field/engine/path-routing.js";
+import { authorizedScopesMismatch } from "../conditional-field/query/compile-query-identity.js";
+import { stableStringify } from "../../shared/stable-stringify.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
 import { ObservedSourceFacts } from "./observed-source-facts.js";
 import {
@@ -84,9 +87,28 @@ function observeWithinMemory(
   initial: FieldEngineState
 ): FieldEngineState {
   let state = initial;
-  const seedUnitCost = 4 + seedProgramStates(interpretation.program).length
-    * Math.max(1, interpretation.hypotheses.length);
   if (input.cancelled === true) return cancelledField(state);
+  const runtime = runtimeProgram(interpretation.program);
+  if (runtime !== "empty" && runtime !== "epsilon" && state.compiled_automaton === undefined) {
+    let compilation;
+    try { compilation = programAutomatonCost(runtime); }
+    catch (error) {
+      if (!(error instanceof ProgramAutomatonResourceError)) throw error;
+      return { ...interruptObservedField(state), memory_exhausted: true };
+    }
+    if (compilation.work_units > state.remaining_exploration
+      || compilation.retained_bytes > state.remaining_memory_bytes) {
+      return { ...interruptObservedField(state),
+        memory_exhausted: compilation.retained_bytes > state.remaining_memory_bytes };
+    }
+    state = { ...state, compiled_automaton: compileProgramAutomaton(runtime),
+      compiled_automaton_bytes: compilation.retained_bytes,
+      remaining_exploration: state.remaining_exploration - compilation.work_units,
+      remaining_memory_bytes: state.remaining_memory_bytes - compilation.retained_bytes };
+    input.cost?.add("observe", { joins: compilation.work_units });
+  }
+  const seedUnitCost = 4 + seedProgramStates(interpretation.program, state.compiled_automaton).length
+    * Math.max(1, interpretation.hypotheses.length);
   let expectedRevision = input.expected_source_revision;
   if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
     if (state.remaining_exploration < SNAPSHOT_PIN_NATIVE_WORK) return interruptObservedField(state);
@@ -96,12 +118,15 @@ function observeWithinMemory(
   }
   const lease = activeLease(interpretation);
   if (state.pending_path_effects !== undefined) {
+    const beforePathWork = state.remaining_exploration;
     state = resumePathEffects(state);
+    input.cost?.add("adjacency", { joins: Math.max(0, beforePathWork - state.remaining_exploration) });
     if (state.pending_path_effects !== undefined || state.memory_exhausted) return state;
     if (state.last_observer_status === "interrupted") state = { ...state, last_observer_status: "open" };
   }
   const cursors = new Map<string, ObserverCursor>();
-  const pairProgress = new ObservationPairs(state.pair_progress, state.pair_completed_count, state.pair_revision);
+  const pairProgress = new ObservationPairs(state.pair_progress, state.pair_completed_count, state.pair_revision,
+    state.pair_demands, state.pair_progress_bytes);
   for (const region of state.residuals) {
     const regionId = region.region_id;
     const position = input.resume_cursors?.[regionId] !== undefined ? input.resume_cursors[regionId] : state.resume_cursors[regionId];
@@ -156,7 +181,7 @@ function observeWithinMemory(
     ),
     ...(interpretation.view.claim_demands ?? []).map((demand) => demand.proposition_kind)
   ])];
-  if (hasOpenPairs(subjects, predicates, pairProgress, [], pairProgress.completed)) state = reopenAdjacency(state);
+  if (pairProgress.hasOpenDemand()) state = reopenAdjacency(state);
   return runObservationRounds({ state, interpretation, input: observedInput, lease, cursors, pairProgress,
     subjects, relationRows, observedAt, sourceFacts, memoryBox, predicates, seedUnitCost,
     storedKindsOpen: storedKinds.open, pairIndex: state.pair_scan_offset, unresolvedGuard, missingMeasurement,
@@ -172,8 +197,12 @@ function startObservedField(
   if (resumed !== undefined
     && resumed.query_id === interpretation.query_id
     && resumed.snapshot_id === interpretation.snapshot_id
-    && (resumed.interpretation.interpretation_clock ?? "")
-      === (interpretation.interpretation_clock ?? "")) {
+    && stableStringify(resumed.interpretation) === stableStringify(interpretation)
+    && !authorizedScopesMismatch(resumed.authorized_scopes, input.authorized_scopes)
+    && resumed.observation_workspace_id === input.workspace_id
+    && resumed.observation_query_text === input.query_text
+    && resumed.observation_as_of === input.as_of
+    && resumed.observation_source_revision === input.expected_source_revision) {
     const exploration = Math.max(0, input.budget.work_units - input.budget.finalization_reserve);
     const restored: FieldEngineState = {
       ...resumed,
@@ -184,7 +213,10 @@ function startObservedField(
       remaining_reserve: input.budget.finalization_reserve,
       remaining_memory_bytes: Math.max(0, input.budget.memory_bytes
         - (resumed.pending_path_effects?.retained_bytes ?? 0) - (resumed.binding_context_bytes ?? 0)
-        - (resumed.solver_retained_bytes ?? 0)),
+        - (resumed.solver_retained_bytes ?? 0) - resumed.pair_demand_bytes - resumed.pair_progress_bytes
+        - resumed.source_fact_demand_bytes - (resumed.source_fact_bytes ?? 0)
+        - (resumed.observed_relation_bytes ?? 0)
+        - (resumed.compiled_automaton_bytes ?? 0)),
       binding_contexts: resumed.binding_contexts?.snapshot(),
       memory_exhausted: false,
       last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
@@ -194,12 +226,14 @@ function startObservedField(
     const { binding, ...pending } = restored;
     return bindEngineState({ ...pending, proven_binding: binding });
   }
-  return createConditionalField({
+  return { ...createConditionalField({
     interpretation,
     budget: input.budget,
     residuals,
     authorized_scopes: input.authorized_scopes
-  });
+  }), observation_workspace_id: input.workspace_id,
+    observation_query_text: input.query_text, observation_as_of: input.as_of,
+    observation_source_revision: input.expected_source_revision };
 }
 
 export function cancelledField(state: FieldEngineState): FieldEngineState {
@@ -251,6 +285,7 @@ function interpretationNeedsGuardWork(interpretation: QueryInterpretation): bool
     (interpretation.interpretation_proposal?.conditions?.length ?? 0) > 0) return true;
   return collectRelations(interpretation.program).some((relation) =>
     relation.guard.kind === "equality"
+    || relation.guard.kind === "authorization"
     || relation.guard.kind === "source_bound_entity"
     || relation.guard.kind === "query_predicate"
     || relation.guard.kind === "interval_relation"

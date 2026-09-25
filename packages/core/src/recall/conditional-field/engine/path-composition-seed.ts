@@ -25,7 +25,8 @@ import {
 } from "./binding-environment.js";
 import {
   ACCEPTING_PROGRAM_STATE,
-  compileProgramAutomaton
+  compileProgramAutomaton,
+  type ProgramAutomaton
 } from "./program-automaton.js";
 
 const DEFAULT_PROGRAM_STATE = ACCEPTING_PROGRAM_STATE;
@@ -136,25 +137,26 @@ export function runtimeProgram(program: QueryProgram): QueryProgram | "empty" | 
   return program;
 }
 
-export function seedProgramStates(program: QueryProgram): readonly string[] {
+export function seedProgramStates(program: QueryProgram, compiled?: ProgramAutomaton): readonly string[] {
   const runtime = runtimeProgram(program);
   if (runtime === "empty") return [];
   if (runtime === "epsilon") return [ACCEPTING_PROGRAM_STATE];
-  return compileProgramAutomaton(runtime).start;
+  return (compiled ?? compileProgramAutomaton(runtime)).start;
 }
 
 export function seedActivationsForObservation(
   observation: TypedObservation,
   interpretation: QueryInterpretation,
   asOf: string,
-  bindingContexts?: BindingContextStore
+  bindingContexts?: BindingContextStore,
+  compiled?: ProgramAutomaton
 ): readonly SeedActivation[] {
   if (observation.applicability.verdict !== "true") return [];
   if (!queryAdmitsGuaranteedSeed(interpretation)) return [];
   const runtime = runtimeProgram(interpretation.program);
   const automaton = runtime === "empty" || runtime === "epsilon"
     ? undefined
-    : compileProgramAutomaton(runtime);
+    : compiled ?? compileProgramAutomaton(runtime);
   const states = runtime === "empty"
     ? []
     : runtime === "epsilon"

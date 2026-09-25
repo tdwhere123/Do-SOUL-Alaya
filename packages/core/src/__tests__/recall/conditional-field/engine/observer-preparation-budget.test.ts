@@ -16,10 +16,12 @@ describe("observer preparation under a small continuation allowance", () => {
         guard: { schema_version: 1, kind: "query_predicate", verdict: "true", time_scope: "none" },
         facet_mode: "same_path", threshold_milligrades: 0 } };
     const programState = seedProgramStates(interpretation.program)[0]!;
-    const field = createConditionalField({ interpretation,
+    const field = { ...createConditionalField({ interpretation,
       budget: defaultBudget({ work_units: 100_000, memory_bytes: 50_000_000 }),
       seeds: Array.from({ length: 1000 }, (_, index) => ({ schema_version: 1 as const,
-        state: productKey(`seed-${index}`, "h0", "unbound", programState), milligrades: 1000 })) });
+        state: productKey(`seed-${index}`, "h0", "unbound", programState), milligrades: 1000 })) }),
+      observation_workspace_id: "workspace-1", observation_query_text: "seed",
+      observation_as_of: "2026-09-10T00:00:00.000Z", authorized_scopes: null };
     expect(field.memory_exhausted).toBe(false);
     expect(field.seen_identities.length).toBe(1000);
     const visits = vi.spyOn(field.seen_identities, "at");
@@ -48,8 +50,10 @@ describe("observer preparation under a small continuation allowance", () => {
       program: { schema_version: 1, kind: "relation", relation_kind: "p", source_variable: "x", target_variable: "y",
         guard: { schema_version: 1, kind: "query_predicate", verdict: "true", time_scope: "none" }, facet_mode: "same_path", threshold_milligrades: 0 } };
     const programState = seedProgramStates(interpretation.program)[0]!;
-    const field = createConditionalField({ interpretation, budget: defaultBudget({ work_units: 100000, memory_bytes: 50000000 }),
-      seeds: Array.from({ length: 1000 }, (_, index) => ({ schema_version: 1, state: productKey(`old-${index}`, "h0", "unbound", programState), milligrades: 1000 })) });
+    const field = { ...createConditionalField({ interpretation, budget: defaultBudget({ work_units: 100000, memory_bytes: 50000000 }),
+      seeds: Array.from({ length: 1000 }, (_, index) => ({ schema_version: 1, state: productKey(`old-${index}`, "h0", "unbound", programState), milligrades: 1000 })) }),
+      observation_workspace_id: "workspace-1", observation_query_text: "fresh",
+      observation_as_of: "2026-09-10T00:00:00.000Z", authorized_scopes: null };
     const priorSeeds = field.seeds;
     const priorIdentities = field.seen_identities;
     const seedVisits = vi.spyOn(priorSeeds, "at");

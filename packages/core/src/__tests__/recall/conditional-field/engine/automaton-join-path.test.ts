@@ -16,7 +16,7 @@ import { SNAPSHOT_ID, defaultBudget, defaultView, facetObligation } from "../ref
 import { adjacencyKindsFor } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import { composedFacetPathId, facetModeAccepts } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import { alternativeMax } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
-import { mergeDiscoveries, nextAdjacencyPair, pairKey, routingOverlayKinds } from "../../../../recall/conditional-field/engine/path-routing.js";
+import { mergeDiscoveries, routingOverlayKinds } from "../../../../recall/conditional-field/engine/path-routing.js";
 import {
   ACCEPTING_PROGRAM_STATE,
   compileProgramAutomaton
@@ -425,37 +425,6 @@ describe("automaton, compatible join, and composed path identity", () => {
     expect(state.residuals.some((region) =>
       region.kind === "discovery" && region.status === "exhausted"
     )).toBe(true);
-  });
-
-  it("nextAdjacencyPair follows absorbed discovery subjects", () => {
-    const progress = new Map<string, string | null>([
-      [`${pairKey("seed", "observed_log")}:done`, "1"],
-      [`${pairKey("seed", "uses_service")}:done`, "1"]
-    ]);
-    expect(nextAdjacencyPair(new Set(["seed"]), ["observed_log", "uses_service"], progress, 0)).toBeUndefined();
-    expect(nextAdjacencyPair(
-      new Set(["seed"]),
-      ["observed_log", "uses_service"],
-      progress,
-      0,
-      [{ source_id: "seed", subject_id: "routed", predicate: "uses_service", assertion_id: "route-1" }]
-    )).toEqual({ subject: "routed", predicate: "observed_log" });
-  });
-
-  it("reuses the merged adjacency subject view when subjects and discoveries are unchanged", () => {
-    const subjects = new ObservationSubjects(new PersistentStringMap<true>().with("seed", true));
-    const discoveries = [{
-      source_id: "seed",
-      subject_id: "routed",
-      predicate: "uses_service",
-      assertion_id: "route-1"
-    }];
-    const first = subjects.includingDiscoveries(discoveries);
-    const second = subjects.includingDiscoveries(discoveries);
-    expect(second).toBe(first);
-    expect(new Set(first)).toEqual(new Set(["seed", "routed"]));
-    subjects.add("later");
-    expect(subjects.includingDiscoveries(discoveries)).not.toBe(first);
   });
 
   it("compiles empty and epsilon programs without inheriting relation start states", () => {

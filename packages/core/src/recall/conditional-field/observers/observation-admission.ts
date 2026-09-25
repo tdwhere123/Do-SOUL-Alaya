@@ -77,12 +77,19 @@ export function sourceRowEligible(
   input: ObserveConditionalFieldInput,
   row: SourceObserverRow | undefined
 ): boolean {
-  const principal = scopePrincipal(input.authorized_scopes);
+  return sourceFactEligible(row, input.authorized_scopes, input.as_of ?? input.query.interpretation_clock);
+}
+
+export function sourceFactEligible(
+  row: SourceObserverRow | undefined,
+  authorizedScopes: readonly string[] | null | undefined,
+  asOf: string | undefined
+): boolean {
+  const principal = scopePrincipal(authorizedScopes);
   if (principal.kind === "denied") return false;
   if (row === undefined) return true;
   if (row.lifecycle_state !== undefined && row.lifecycle_state !== "active") return false;
   if (row.retention_state === "tombstoned") return false;
-  const asOf = input.as_of ?? input.query.interpretation_clock;
   if (!sourceValidityActiveAt(row, asOf)) return false;
   return !namedScopesExclude(principal, row.scope_class);
 }
