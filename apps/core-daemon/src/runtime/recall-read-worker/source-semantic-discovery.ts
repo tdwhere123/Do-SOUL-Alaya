@@ -18,9 +18,11 @@ type VerifiedInterpretation = ReturnType<typeof verifyPublishedSourceSemanticInt
 export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation;
 export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: Readonly<{ evidence_object_id: string }>,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation | null;
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
+  beforeSourceRead?: (bound: ReturnType<typeof SourceSemanticPublishedInterpretationSchema.parse>) => boolean): VerifiedInterpretation | null;
 export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: string | Readonly<{ evidence_object_id: string }>,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation | null {
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
+  beforeSourceRead?: (bound: ReturnType<typeof SourceSemanticPublishedInterpretationSchema.parse>) => boolean): VerifiedInterpretation | null {
   const expected = typeof identity === "string" ? identity : undefined;
   const objectId = typeof identity === "string" ? semanticInterpretationEvidenceId(identity, fieldContractSha256) : identity.evidence_object_id;
   meter.reserve(1, 16);
@@ -47,6 +49,9 @@ export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string
       || semanticInterpretationEvidenceId(bound.interpretation_id, fieldContractSha256) !== objectId) {
     throw new CoreError("VALIDATION", "interpretation identity mismatch");
   }
+  // A bounded initial preview cannot verify source locations by reading hidden bytes.
+  // The caller may defer this candidate; it enters the pool only after full verification.
+  if (beforeSourceRead !== undefined && !beforeSourceRead(bound)) return null;
   const stores = sourceSemanticReadStores(runtime.database, workspace, bound.interpretation.source.source_id, meter, authorized);
   meter.retain(bound, "interpretation verification");
   return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256, meter }, bound, workspace);

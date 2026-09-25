@@ -11,7 +11,7 @@ import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives
 import { SourceAssertionIdSchema, SourceTextSpanSchema } from "../evidence/source-selection.js";
 import { SourceReferenceSchema, sourceReferenceResolver,
   SOURCE_REFERENCE_MAX_ASSERTIONS, type SourceReferenceCatalog } from "../evidence/source-reference.js";
-import { SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
+import { ProductStateKeySchema, SourceEvidenceTargetSchema } from "../recall/conditional-field/product-identity.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema, Sha256HexSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQueryGapSchema, SourceSemanticQueryTargetSchema } from "../recall/conditional-field/semantic-query.js";
@@ -294,6 +294,13 @@ const ComputedSourceSemanticAttentionSchema = z.object({
     alternative: z.number().int().nonnegative(), frame: BoundedIdSchema.nullable(),
     obligation: z.enum(["predicate", "slot", "referent", "source_evidence", "source_act", "context", "sort", "branch"]),
     role: BoundedIdSchema.optional(), variable: BoundedIdSchema.optional(),
+    phase: z.object({ accept_index: z.number().int().nonnegative(),
+      group_frame: BoundedIdSchema.nullable() }).strict().readonly().optional(),
+    scope: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("pair"), subject_id: BoundedIdSchema,
+        product: ProductStateKeySchema }).strict().readonly(),
+      z.object({ kind: z.literal("branch") }).strict().readonly()
+    ]).optional(),
     state: z.enum(["correspondence_missing", "observed_no_match", "unobserved", "unavailable",
       "unknown", "resource_incomplete"]),
     observation: ObserverStatusSchema

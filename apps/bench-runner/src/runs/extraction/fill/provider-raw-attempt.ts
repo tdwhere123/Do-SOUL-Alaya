@@ -1,6 +1,6 @@
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
-import { mkdirSync, opendirSync, readdirSync } from "node:fs";
+import { mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { inspectProviderChatCompletionResponse,
@@ -102,17 +102,20 @@ export function providerRawAttemptPath(root: string, key: string, ordinal: numbe
 
 export function providerRawAttemptInputPaths(root: string, key: string): readonly string[] {
   const directory = join(root, "provider-raw", key.slice(0, 2));
-  try {
-    return [directory, ...matchingRawAttemptNames(directory, key).map(name => join(directory, name))];
-  } catch {
-    // The directory is still a known input when its entries cannot be listed.
-    return [directory];
-  }
+  return [directory, ...matchingRawAttemptNames(directory, key).map(name => join(directory, name))];
 }
 
 function matchingRawAttemptNames(directory: string, key: string): readonly string[] {
   if (!boundedArtifactEntryExists(directory)) return [];
-  return readdirSync(directory).filter(name => name.startsWith(`${key}.`) && name.endsWith(".json"));
+  const names: string[] = [], handle = opendirSync(directory);
+  let visited = 0;
+  try {
+    for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+      if (++visited > 32_768) throw new AlayaError("UNAVAILABLE", "provider raw attempt directory exceeds bounded inventory");
+      if (entry.name.startsWith(`${key}.`) && entry.name.endsWith(".json")) names.push(entry.name);
+    }
+  } finally { handle.closeSync(); }
+  return names;
 }
 
 export function listProviderRawAttempts(root: string, key: string): readonly ProviderRawAttempt[] {
@@ -130,21 +133,13 @@ export function listProviderRawAttempts(root: string, key: string): readonly Pro
 /** Source revisions require one attempt; reject duplicate names before loading any raw body. */
 export function readSingleSourceRawAttempt(root: string, key: string): ProviderRawAttempt | undefined {
   const directory = join(root, "provider-raw", key.slice(0, 2));
-  if (!boundedArtifactEntryExists(directory)) return undefined;
-  const handle = opendirSync(directory);
-  let found: number | undefined, visited = 0;
-  try {
-    for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
-      if (++visited > 32_768) throw new AlayaError("UNAVAILABLE", "source raw attempt directory exceeds bounded inventory");
-      if (!entry.name.startsWith(`${key}.`) || !entry.name.endsWith(".json")) continue;
-      const ordinal = Number(entry.name.slice(key.length + 1, -5));
-      if (!Number.isSafeInteger(ordinal) || ordinal < 1 || found !== undefined) {
-        throw new AlayaError("CONFLICT", "source revision requires exactly one valid physical attempt name");
-      }
-      found = ordinal;
-    }
-  } finally { handle.closeSync(); }
-  return found === undefined ? undefined : readProviderRawAttempt(root, key, found);
+  const names = matchingRawAttemptNames(directory, key);
+  if (names.length === 0) return undefined;
+  const ordinal = Number(names[0]!.slice(key.length + 1, -5));
+  if (names.length !== 1 || !Number.isSafeInteger(ordinal) || ordinal < 1) {
+    throw new AlayaError("CONFLICT", "source revision requires exactly one valid physical attempt name");
+  }
+  return readProviderRawAttempt(root, key, ordinal);
 }
 
 export class ProviderRawAttemptIdentityError extends Error {

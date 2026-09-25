@@ -322,7 +322,8 @@ function unexecutedGroupAttention(admission: Extract<ReturnType<typeof admitSour
     if (entries.length === 64) break;
     meter.charge(1, 256, "unprojected semantic group attention");
     entries.push({ alternative: phase.alternative, frame: null, obligation: "branch",
-      state: "unknown", observation: "unknown" });
+      phase: { accept_index: phase.acceptIndex, group_frame: phase.groupFrame ?? null },
+      state: "unknown", observation: "unknown", scope: { kind: "branch" } });
   }
   const source = admission.interpretation.source;
   return { contract: "source-semantic-attention-v1", kind: "computed",

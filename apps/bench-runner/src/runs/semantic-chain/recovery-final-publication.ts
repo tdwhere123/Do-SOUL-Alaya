@@ -226,6 +226,7 @@ export async function publishFinalRecoverySemantics(input: FinalPublicationInput
 async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChildForPublication>) {
   const { root, window, settled, initialReport, revision, selected, generation,
     preflightPath, physicalPreflightPath, cacheRoot, preflight, physicalPreflight } = admitted;
+  if (revision.child_key === undefined) throw new AlayaError("CONFLICT", "interpreted H child lacks its exact request key");
   const owners = [...initialSourceAssociationOwners(settled.source_owners),
     { cacheRoot, retainedPreparationPath: preflightPath,
       ...(preflightPath === physicalPreflightPath ? {} : { physicalPreparationPath: physicalPreflightPath }) }];
@@ -238,7 +239,10 @@ async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChi
     readChainArtifact(associationsPath) !== undefined);
   const associations = await prepareSourcePublicationAssociations({ name: window.population,
     nativeSnapshotPath: window.native_snapshot_path, model: window.source_model,
-    requestProfile: window.source_request_profile, openSemantics: generation }, owners, associationsPath);
+    requestProfile: window.source_request_profile,
+    openSemantics: parseExtractionOpenSemanticsGeneration(window.open_semantics),
+    activeNativeRevision: { source_id: selected.source_id, source_version: selected.source_version,
+      record_id: selected.record_id, key: revision.child_key, generation } }, owners, associationsPath);
   const frozen = new Map(window.window.map(row => [row.source_id, row]));
   const active = associations.publicationAssociations.filter((row): row is Extract<SourcePublicationAssociation,
     { generation_key: string }> => "generation_key" in row).filter(row => {
@@ -254,6 +258,16 @@ async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChi
   if (!active.some(row => row.source_id === selected.source_id && row.generation_key === revision.child_key) ||
       active.some(row => !frozen.has(row.source_id))) {
     throw new AlayaError("CONFLICT", "H child qualification escaped its exact frozen source tuple");
+  }
+  for (const source of window.window) {
+    const prior = initialReport.sources.find(row => row.source_id === source.source_id &&
+      row.source_version === source.source_version && row.record_id === source.record_id);
+    if (prior?.source_interpretation !== "interpreted") continue;
+    const key = source.source_id === selected.source_id ? revision.child_key : source.initial_key;
+    if (key === null || !active.some(row => row.source_id === source.source_id &&
+        row.source_version === source.source_version && row.generation_key === key)) {
+      throw new AlayaError("CONFLICT", "final source associations dropped an unrevised qualified occurrence");
+    }
   }
   const snapshotPath = join(root, "final-qualified.sqlite");
   reserveRecoveryHostEffect(root, "final-publication", chainIdentity({ associationIdentity, active }),

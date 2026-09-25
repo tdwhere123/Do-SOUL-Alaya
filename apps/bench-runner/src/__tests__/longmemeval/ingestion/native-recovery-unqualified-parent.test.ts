@@ -121,7 +121,7 @@ it("rereads a frozen source after complete abstained H without inventing an init
     usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
     responseBody: syntheticGeminiBody(qRaw, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) }) };
   const qConfig = { providerUrl: "https://generativelanguage.googleapis.com", model: "gemini-3.1-flash-lite",
-    requestProfile: "gemini-3.1-minimal-v1", apiKey: "fixture" };
+    requestProfile: "gemini-3.1-minimal-v1" as const, apiKey: "fixture" };
   const freezePath = join(root, "freeze.json");
   writeFileSync(freezePath, JSON.stringify({ native_snapshot_path: snapshotPath, population: "unqualified-parent",
     source_model: "gemini-3.1-flash-lite", source_request_profile: "gemini-3.1-low-v1",

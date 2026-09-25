@@ -35,6 +35,7 @@ import { freezeRecoveryAllowance, reserveRecoveryAction, reserveRecoveryHostEffe
 import { censusNativeSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { nativeSourceRequestInventory } from "../../../runs/extraction/fill/source-request-workset.js";
 import { providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import type { ExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";
 
 const CLOCK = "2026-09-25T00:00:00.000Z";
 const OBSERVED = "2026-09-20T12:00:00.000Z";
@@ -154,7 +155,7 @@ function correspondenceRaw(prompt: string): string {
 }
 
 async function fillProposal(path: string, cacheRoot: string, raw: (prompt: string) => string,
-  profile: string, onAttempt?: () => void) {
+  profile: ExtractionRequestProfile, onAttempt?: () => void) {
   const workset = parseSemanticProposalWorkset(JSON.parse(readFileSync(path, "utf8")));
   mkdirSync(cacheRoot, { recursive: true });
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 16_384, 1),
@@ -300,10 +301,16 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const staticReplay = await withSemanticChainDaemon(staticConfig, staticRoot, async daemon => {
     let handles: ReadonlyMap<string, string | undefined> = new Map();
     const plan = await prepareSemanticChain(staticConfig, staticRoot, daemon, current => { handles = current; });
-    recordRecoveryNativeWork(staticRoot, "static-S1-prepare", plan.queries[0]!.discovery_trace[0]!.work);
+    const preparedQuery = plan.queries[0];
+    if (preparedQuery?.status === "blocked" || preparedQuery?.discovery_trace[0] === undefined) {
+      throw new Error("static S1 lacks a completed native discovery");
+    }
+    recordRecoveryNativeWork(staticRoot, "static-S1-prepare", preparedQuery.discovery_trace[0].work);
     return deliverLivePreparedSemanticChain(staticRoot, daemon, handles);
   });
-  recordRecoveryNativeWork(staticRoot, "static-S1-recall", staticReplay.result.rows[0]!.response.work);
+  const staticResponse = staticReplay.result.rows[0]?.response;
+  if (staticResponse === undefined) throw new Error("static S1 has no native recall response");
+  recordRecoveryNativeWork(staticRoot, "static-S1-recall", staticResponse.work);
   const staticRows = staticReplay.result.rows as { response?: { operation: string;
     proofs?: { binding_results?: { kind: string }[] }[];
     slot_qualifiers?: { evidence_kind: string; selection_basis?: string }[] } }[];

@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { prepareRetainedSemanticProposalRevision } from "../semantic-proposal/fill.js";
+import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
 import { parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { readSemanticChainProposalResults } from "./inputs.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "./contract.js";
@@ -62,6 +63,8 @@ function currentRecoveryQueryReview(rootInput: string) {
       binding.qualified_snapshot_identity !== settled.publication_identity ||
       binding.workset_identity !== chainIdentity(workset) ||
       binding.child_cache_root !== window.query_review_cache_root) throw new AlayaError("CONFLICT", "Q review workset or physical owner changed");
+  reserveRecoveryRead(root, "admit bounded Q review cache inputs", semanticProposalCacheInputPaths(
+    workset, window.query_review_cache_root, plan.config.max_output_tokens));
   const results = readSemanticChainProposalResults(workset, window.query_review_cache_root, plan.config.max_output_tokens);
   if (results.length !== 1) throw new AlayaError("CONFLICT", "Q review child denominator changed");
   const row = results[0]!;

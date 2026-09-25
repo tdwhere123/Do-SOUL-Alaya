@@ -10,24 +10,31 @@ type Admission = Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, {
 type ComputedAttention = Extract<SourceSemanticAttention, { kind: "computed" }>;
 type Entry = ComputedAttention["entries"][number];
 
-/** A demand is evidence only for its exact live product and physical pair. */
+type Scope = NonNullable<Entry["scope"]>;
+type Emit = (status: Entry["state"], observation: Entry["observation"], scope: Scope) => void;
+
+/** Pair completion is local to a reached product; it cannot close a sibling binding. */
 function obligationState(obligation: SourceSemanticLoweredObligation, state: FieldEngineState,
-  pairs: ObservationPairs, meter: SourceSemanticResourceLedger): Entry["state"] | undefined {
-  if (state.closure.observation === "unavailable") return "unavailable";
-  if (state.closure.observation === "unknown" || state.closure.observation === "invalidated") return "unknown";
+  pairs: ObservationPairs, meter: SourceSemanticResourceLedger, emit: Emit): void {
+  if (state.closure.observation === "unavailable") { emit("unavailable", "unavailable", { kind: "branch" }); return; }
+  if (state.closure.observation === "unknown" || state.closure.observation === "invalidated") {
+    emit("unknown", state.closure.observation, { kind: "branch" }); return;
+  }
   const advances = state.compiled_automaton?.advances ?? [];
   let relation: (typeof advances)[number]["relation"] | undefined;
   for (const advance of advances) {
     meter.charge(1, 0, "semantic attention automaton provenance");
     if (advance.relation.relation_kind === obligation.relation_kind &&
         advance.relation.source_variable === obligation.source_variable) {
-      if (relation !== undefined && relation !== advance.relation) return "unknown";
+      if (relation !== undefined && relation !== advance.relation) {
+        emit("unknown", "unknown", { kind: "branch" }); return;
+      }
       relation = advance.relation;
     }
   }
   // Repeated or renamed relations cannot be assigned to this Q occurrence.
-  if (relation === undefined) return "unobserved";
-  let reached = false, open = false, empty = false, rejected = false, advanced = false;
+  if (relation === undefined) { emit("unobserved", "unknown", { kind: "branch" }); return; }
+  let reached = false;
   for (const live of state.seen_identities) {
     meter.charge(1, 0, "semantic attention live product");
     let advancesHere = false;
@@ -37,15 +44,26 @@ function obligationState(obligation: SourceSemanticLoweredObligation, state: Fie
     }
     if (!advancesHere) continue;
     reached = true;
+    meter.charge(1, 256, "semantic attention pair coordinate");
     const subject = productEndpointId(live);
+    const scope = { kind: "pair" as const, subject_id: subject, product: live };
     const progress = pairs.status(subject, obligation.relation_kind);
-    if (progress !== "complete") { open = true; continue; }
+    if (progress !== "complete") {
+      emit(progress === "open" && (state.memory_exhausted || state.remaining_work.length > 0)
+        ? "resource_incomplete" : "unobserved", progress === "open" ? "open" : "unknown", scope);
+      continue;
+    }
     let observed = false;
     for (const row of state.observed_relations ?? []) {
       meter.charge(1, 0, "semantic attention observed pair");
       if (row.sourceObjectId === subject && row.predicate === obligation.relation_kind) observed = true;
     }
-    if (!observed) { empty = true; continue; }
+    if (!observed) {
+      emit(obligation.obligation === "predicate" || obligation.obligation === "slot" ||
+        obligation.obligation === "referent" ? "correspondence_missing" : "observed_no_match", "exhausted", scope);
+      continue;
+    }
+    meter.charge(1, 512, "semantic attention product identity");
     const fromId = canonicalProductIdentity(live);
     let transitionAccepted = false;
     for (const transition of state.transitions) {
@@ -53,18 +71,10 @@ function obligationState(obligation: SourceSemanticLoweredObligation, state: Fie
       if (transition.relation_kind === obligation.relation_kind &&
           canonicalProductIdentity(transition.from) === fromId) transitionAccepted = true;
     }
-    if (!transitionAccepted) rejected = true;
-    else advanced = true;
+    if (!transitionAccepted) emit("unknown", "exhausted", scope);
     // A successful atom can still fail a later binding or join.
   }
-  if (!reached) return "unobserved";
-  if (rejected) return "unknown";
-  if (open) return state.memory_exhausted || state.remaining_work.length > 0
-    ? "resource_incomplete" : "unobserved";
-  if (empty && advanced) return "unknown";
-  if (empty) return obligation.obligation === "predicate" || obligation.obligation === "slot" ||
-    obligation.obligation === "referent" ? "correspondence_missing" : "observed_no_match";
-  return undefined;
+  if (!reached) emit("unobserved", "unknown", { kind: "branch" });
 }
 
 /** The compiler supplies Q coordinates; the field supplies reached products and exact observation progress. */
@@ -81,23 +91,27 @@ export function sourceSemanticBranchAttention(admission: Admission, execution: S
     // Phase execution pads lower acceptance indices; those placeholders are not executed branches.
     if (branch.plan === undefined && branch.obligations === undefined) continue;
     if (entries.length === 64) { truncated = true; break; }
+    const phase = branch.plan === undefined ? undefined : {
+      accept_index: branch.plan.acceptIndex, group_frame: branch.plan.groupFrame ?? null };
     const beforeBranch = entries.length;
     for (const obligation of branch.obligations ?? []) {
       meter.charge(1, 0, "semantic attention lowered obligation");
-      const status = obligationState(obligation, state, pairs, meter);
-      if (status === undefined) continue;
-      meter.charge(1, 256, "semantic attention entry");
-      entries.push({ alternative: obligation.alternative, frame: obligation.frame,
-        obligation: obligation.obligation, ...(obligation.role === undefined ? {} : { role: obligation.role }),
-        ...(obligation.variable === undefined ? {} : { variable: obligation.variable }),
-        state: status, observation: state.closure.observation });
+      obligationState(obligation, state, pairs, meter, (status, observation, scope) => {
+        if (entries.length === 64) { truncated = true; return; }
+        meter.charge(1, 512, "semantic attention scoped entry");
+        entries.push({ alternative: obligation.alternative, frame: obligation.frame,
+          obligation: obligation.obligation, ...(obligation.role === undefined ? {} : { role: obligation.role }),
+          ...(obligation.variable === undefined ? {} : { variable: obligation.variable }),
+          ...(phase === undefined ? {} : { phase }), state: status, observation, scope });
+      });
       if (entries.length === 64) { truncated = true; break; }
     }
     if (entries.length === beforeBranch && !acceptedBranchIndices.has(branchIndex)) {
       if (entries.length === 64) { truncated = true; break; }
       meter.charge(1, 256, "semantic attention unproved actual branch");
       entries.push({ alternative: branch.alternative, frame: null, obligation: "branch",
-        state: "unknown", observation: state.closure.observation });
+        ...(phase === undefined ? {} : { phase }),
+        state: "unknown", observation: "unknown", scope: { kind: "branch" } });
     }
   }
   if (entries.length === 0) return undefined;

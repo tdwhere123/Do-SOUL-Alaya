@@ -200,7 +200,7 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
         seen.set(row.identity, null);
         try {
           const verified = observeInterpretation(runtime, payload.workspace_id, row, authorized, meter, policy, records, byId, sources, sourceId,
-            sourcePreviewExtents);
+            sourcePreviewExtents, () => { open = true; stops.add("unavailable"); });
           if (verified === null) continue;
           descriptors.set(verified.descriptor.interpretation_id, verified.descriptor); rows.push(verified.observation);
         } catch (error) {
@@ -226,8 +226,18 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
 function observeInterpretation(runtime: RecallReadWorkerRuntime, workspace: string, row: InterpretationHeader,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
   records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>, sourceId?: string,
-  sourcePreviewExtents?: SourceSemanticPreviewExtents) {
-  const checked = loadVerified(runtime, workspace, { evidence_object_id: row.object_id }, authorized, meter);
+  sourcePreviewExtents?: SourceSemanticPreviewExtents, onDeferred?: () => void) {
+  const checked = loadVerified(runtime, workspace, { evidence_object_id: row.object_id }, authorized, meter,
+    sourcePreviewExtents === undefined ? undefined : bound => {
+      let current: SourceRecordIdentity | undefined;
+      for (const record of records) {
+        meter.charge(1, 0, "access preview verification tuple");
+        if (record.source_id === bound.interpretation.source.source_id) { current = record; break; }
+      }
+      if (current !== undefined && sources.get(current.identity)?.complete === true) return true;
+      onDeferred?.();
+      return false;
+    });
   if (checked === null) return null;
   const record = checked.stored.record, interpretation = checked.bound.interpretation;
   if (sourceId !== undefined && record.source_id !== sourceId) return null;

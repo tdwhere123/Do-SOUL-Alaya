@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provider-http.js";
 import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus } from "./census.js";
 import { listRetainedSourceSemanticKeys, parseSourcePublicationAssociations, type SourcePublicationAssociation,
@@ -11,7 +11,7 @@ import { inspectCachedSourceSemantic } from "../../extraction/cache/source-seman
 import { bindProviderRawAttempt, readSingleSourceRawAttempt } from "../../extraction/fill/provider-raw-attempt.js";
 import { readCompletePhysicalSourceResponseForRequest,
   readCompleteRetainedSourceResponse } from "../../extraction/cache/source-interactive-binding.js";
-import { nativeSourceOccurrenceId } from "../../extraction/fill/source-request-workset.js";
+import { nativeSourceRequestInventory } from "../../extraction/fill/source-request-workset.js";
 import { parseSourceSemanticInteractivePreflight } from "../../extraction/fill/source-semantic-interactive-preflight.js";
 import { parseRetainedBatchPreflight } from "../../extraction/fill/batch-preflight.js";
 import { sourceSemanticRequestWireDigest } from "../../extraction/fill/source-semantic-interactive-request.js";
@@ -25,6 +25,8 @@ export type SourceAssociationCacheOwner = Readonly<{ cacheRoot: string; retained
   physicalPreparationPath?: string }>;
 type SourceAssociationPopulation = Omit<SourcePublicationPopulation, "cacheRoots" | "publicationAssociations"> & Readonly<{
   openSemantics?: ExtractionOpenSemanticsGeneration;
+  activeNativeRevision?: Readonly<{ source_id: string; source_version: string; record_id: string;
+    key: string; generation: ExtractionOpenSemanticsGeneration }>;
 }>;
 type RetainedOwner = Readonly<{ cacheRoot: string; digest: string;
   contract: "extraction-batch-preflight-v2" | "source-semantic-interactive-preflight-v3";
@@ -47,6 +49,7 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
   if (owners.length === 0) throw new AlayaError("VALIDATION", "association preparation requires owning cache roots");
   const roots = new Set<string>();
   const owned = new Map<string, Readonly<{ line: SourceRequestLine; cacheRoot: string; wireDigest?: string;
+    generation?: ExtractionOpenSemanticsGeneration;
     preflight?: ReturnType<typeof parseSourceSemanticInteractivePreflight>;
     physicalPreflight?: ReturnType<typeof parseSourceSemanticInteractivePreflight>;
     physicalLine?: SourceRequestLine }>>();
@@ -65,6 +68,7 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
     let preparationContract: RetainedOwner["contract"];
     let selectedRequestCount: number;
     let requests: readonly Readonly<{ line: SourceRequestLine; wireDigest?: string;
+      generation?: ExtractionOpenSemanticsGeneration;
       preflight?: ReturnType<typeof parseSourceSemanticInteractivePreflight>;
       physicalPreflight?: ReturnType<typeof parseSourceSemanticInteractivePreflight>;
       physicalLine?: SourceRequestLine }>[];
@@ -95,6 +99,7 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
         const noAssertions = parseSourceSemanticRequest(JSON.parse(line.userPrompt))
           .source_request.source_assertions.length === 0;
         return { line, preflight: report,
+          generation: parseExtractionOpenSemanticsGeneration(report.config.openSemantics),
           ...(physical === undefined ? {} : { physicalPreflight: physical, physicalLine: physicalLine! }),
           ...(!noAssertions ? { wireDigest: wireByKey.get(line.key) ?? sourceSemanticRequestWireDigest({ ...report.config,
           openSemantics: parseExtractionOpenSemanticsGeneration(report.config.openSemantics) }, line, report.max_output_tokens) } : {}) };
@@ -112,7 +117,7 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
       }
       requests = report.planned_requests.map(line => ({ line }));
     }
-    for (const { line, wireDigest, preflight, physicalPreflight, physicalLine } of requests) {
+    for (const { line, wireDigest, preflight, physicalPreflight, physicalLine, generation: ownerGeneration } of requests) {
       try { parseSourceSemanticRequestLine(line, population); }
       catch (cause) { throw new AlayaError("CONFLICT", "retained source preflight has foreign or duplicate request identity", { cause }); }
       if (owned.has(line.key)) throw new AlayaError("CONFLICT", "retained source preparations repeat an owning request key");
@@ -120,7 +125,8 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
         const keys = unitOwners.get(unit) ?? [];
         keys.push(line.key); unitOwners.set(unit, keys);
       }
-      owned.set(line.key, { line, cacheRoot, ...(wireDigest === undefined ? {} : { wireDigest }),
+      owned.set(line.key, { line, cacheRoot, ...(ownerGeneration === undefined ? {} : { generation: ownerGeneration }),
+        ...(wireDigest === undefined ? {} : { wireDigest }),
         ...(preflight === undefined ? {} : { preflight }),
         ...(physicalPreflight === undefined ? {} : { physicalPreflight, physicalLine }) });
     }
@@ -152,10 +158,19 @@ export function readRetainedSourcePublicationOwners(owners: readonly SourceAssoc
 function currentSourceAssociationExpectations(census: SourceCensus, generation: ExtractionOpenSemanticsGeneration,
   population: SourceAssociationPopulation, owned: ReturnType<typeof readRetainedSourcePublicationOwners>["owned"]) {
   const expected = new Map<string, { requestDigest: string; sources: typeof census.records[number][] }>();
-  const nativeUnits = new Map<string, Set<string>>();
+  const expectedGeneration = new Map<string, ExtractionOpenSemanticsGeneration>();
   const unsupported = new Map<string, Extract<SourcePublicationAssociation, { status: "unsupported_source" }>>();
+  const revision = population.activeNativeRevision;
+  if (revision !== undefined && population.nativeSnapshotPath === undefined) {
+    throw new AlayaError("VALIDATION", "source-local H revision requires a native source population");
+  }
+  let selectedCount = 0;
   for (const source of census.records) {
-    const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
+    const selected = revision !== undefined && source.source_id === revision.source_id &&
+      source.source_version === revision.source_version && source.native_record_id === revision.record_id;
+    if (selected) selectedCount++;
+    const activeGeneration = selected ? revision!.generation : generation;
+    const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", activeGeneration);
     if (preparations.length !== 1) throw new AlayaError("CONFLICT", "complete source association requires exactly one host preparation");
     const prepared = preparations[0]!;
     if (prepared.status === "unsupported_source") {
@@ -165,33 +180,37 @@ function currentSourceAssociationExpectations(census: SourceCensus, generation: 
       continue;
     }
     const line = prepareSourceSemanticRequestLine(prepared.semantic, [], population);
-    if (population.nativeSnapshotPath !== undefined) {
-      const occurrence = nativeSourceOccurrenceId(source);
-      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrence], census.dataset_sha256);
-      const byAssertion = new Map(units.map(unit => [unit.assertionId, unit]));
-      const assigned = nativeUnits.get(line.key) ?? new Set<string>();
-      for (const assertion of prepared.semantic.source_request.source_assertions) {
-        const unit = byAssertion.get(assertion.assertion_id);
-        if (unit === undefined || unit.text !== assertion.text) {
-          throw new AlayaError("CONFLICT", "native source association lost its exact assertion occurrence");
-        }
-        assigned.add(unit.binding.occurrenceIdentity);
-      }
-      nativeUnits.set(line.key, assigned);
-    }
+    if (selected && line.key !== revision!.key) throw new AlayaError("CONFLICT", "selected H child differs from its exact source tuple");
     const match = expected.get(line.key) ?? { requestDigest: line.requestSha256, sources: [] };
     if (match.requestDigest !== line.requestSha256) throw new AlayaError("CONFLICT", "current source requests have ambiguous owning key");
     match.sources.push(source);
     expected.set(line.key, match);
+    expectedGeneration.set(line.key, activeGeneration);
   }
+  if (revision !== undefined && selectedCount !== 1) throw new AlayaError("CONFLICT", "H child must select one current native source tuple");
+  const inventories = new Map<string, ReturnType<typeof nativeSourceRequestInventory>>();
   for (const [key, current] of expected) {
-    const retainedLine = owned.get(key)?.line;
+    const retained = owned.get(key), retainedLine = retained?.line;
     if (retainedLine !== undefined && retainedLine.requestSha256 !== current.requestDigest) {
       throw new AlayaError("CONFLICT", "retained source request conflicts with the current key identity");
     }
-    if (population.nativeSnapshotPath !== undefined && retainedLine !== undefined &&
-        canonicalJson(retainedLine.unitKeys) !== canonicalJson([...nativeUnits.get(key)!].sort())) {
-      throw new AlayaError("CONFLICT", "retained native source request changed its exact occurrence assignments");
+    if (population.nativeSnapshotPath !== undefined && retainedLine !== undefined) {
+      const activeGeneration = expectedGeneration.get(key)!;
+      if (retained?.generation === undefined || canonicalJson(retained.generation) !== canonicalJson(activeGeneration)) {
+        throw new AlayaError("CONFLICT", "retained source request changed its own generation");
+      }
+      const identity = canonicalJson(activeGeneration);
+      let inventory = inventories.get(identity);
+      if (inventory === undefined) {
+        inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
+          model: population.model, requestProfile: population.requestProfile,
+          sourcePacking: "complete-source", openSemantics: activeGeneration });
+        inventories.set(identity, inventory);
+      }
+      const physicalLine = inventory.requests.find(row => row.line.key === key)?.line;
+      if (physicalLine === undefined || canonicalJson(physicalLine) !== canonicalJson(retainedLine)) {
+        throw new AlayaError("CONFLICT", "retained native request changed its exact source occurrence assignments");
+      }
     }
   }
   return { expected, unsupported };

@@ -74,10 +74,10 @@ soul:mcp-types.ts#SoulInterpretationPrepareSourceResponseSchema(attribution_cont
 soul:mcp-types.ts#SoulInterpretationProposeRequestSchema(authorized_scopes,budget,contract_version,disposition,draft,operation,producer_id,producer_version,source_handle)#e07236a
 soul:mcp-types.ts#SoulInterpretationProposeResponseSchema(coverage,evidence_object_id,operation,outcome,provider_attempts,published,semantic_status,source_binding,source_disclosure,work)#1b67279
 soul:mcp-types.ts#SoulInterpretationReasonRequestSchema(accepts_unreviewed_conditional_results,authorized_scopes,budget,operation,original_query,output_byte_limit,query_handle,query_semantics,semantic_correspondence,source_interpretation_id)#a8be70c
-soul:mcp-types.ts#SoulInterpretationReasonResponseSchema(context,coverage,interpretation,operation,outcome,provider_attempts,query,result,semantic_correspondence,source_disclosure,work)#835ddfc
-soul:mcp-types.ts#SoulInterpretationRecallDeliverySchema(coverage,delivery_id,discovery,index,operation,order,outcome,page_purpose,proofs,protocol_version,provider_attempts,query_semantics_status,request_budget,request_identity,results,slot_qualifiers,source_disclosures,total_count,work)#f79883d
+soul:mcp-types.ts#SoulInterpretationReasonResponseSchema(context,coverage,interpretation,operation,outcome,provider_attempts,query,result,semantic_correspondence,source_disclosure,work)#a470360
+soul:mcp-types.ts#SoulInterpretationRecallDeliverySchema(coverage,delivery_id,discovery,index,operation,order,outcome,page_purpose,proofs,protocol_version,provider_attempts,query_semantics_status,request_budget,request_identity,results,slot_qualifiers,source_disclosures,total_count,work)#78e7f40
 soul:mcp-types.ts#SoulInterpretationRequestSchema()#a7760ef
-soul:mcp-types.ts#SoulInterpretationResponseSchema()#b43987e
+soul:mcp-types.ts#SoulInterpretationResponseSchema()#7b88269
 soul:mcp-types.ts#SoulListPendingEdgeProposalsRequestSchema(edge_type,limit,min_confidence,since,trigger_source)#797b0c8
 soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_count)#730ce68
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#766d3d9

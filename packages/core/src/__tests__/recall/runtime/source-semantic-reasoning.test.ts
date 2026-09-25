@@ -366,6 +366,23 @@ describe("source semantic query compilation", () => {
     expect(result.attention.entries.some(row => row.alternative === 0 && row.frame === null)).toBe(false);
   });
 
+  it("keeps exhausted pair attention tied to the reached product while later join obligations stay unobserved", () => {
+    const interpretation = orionInterpretation({ splitVega: true });
+    const semantics = joinQuery();
+    const correspondence = correspondenceOf(interpretation, semantics, JOIN_QUERY, joinCorrespondences());
+    const result = reason(interpretation, semantics, correspondence, JOIN_QUERY);
+    expect(result.binding_results).toHaveLength(0);
+    expect(result.attention?.kind).toBe("computed");
+    if (result.attention?.kind !== "computed") return;
+    const exhausted = result.attention.entries.filter(row => row.observation === "exhausted");
+    expect(exhausted.length).toBeGreaterThan(0);
+    expect(exhausted.every(row => row.scope?.kind === "pair" && row.phase?.accept_index === 0)).toBe(true);
+    expect(new Set(exhausted.map(row => row.scope?.kind === "pair" ? row.scope.product.binding_context : ""))
+      .size).toBeGreaterThan(1);
+    expect(result.attention.entries.some(row => row.frame === "qInspect" && row.scope?.kind === "branch" &&
+      row.state === "unobserved")).toBe(true);
+  });
+
   it("joins a shared-variable AND on the same parcel", () => {
     const interpretation = mixedInterpretation();
     const semantics = sendInspectQuery();

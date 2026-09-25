@@ -10,6 +10,8 @@ import { semanticProposalCacheInputPaths, semanticProposalLookup } from "../../.
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { providerRawAttemptInputPaths, readSingleSourceRawAttempt } from
+  "../../../runs/extraction/fill/provider-raw-attempt.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -109,4 +111,21 @@ it("protects source raw, shard, and ledger aliases despite unavailable sibling e
   expect(filePaths).toContain(rawFile);
   expect(() => admitEvaluatorOutputRoot(fileTarget, filePaths))
     .toThrow(/separate from producer and input roots/u);
+});
+
+it("rejects an oversized physical raw directory before Q and source result reads or input inventory", () => {
+  const root = mkdtempSync(join(tmpdir(), "proposal-raw-inventory-")); roots.push(root);
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3",
+    kind: "query", model: "gemini-3.1-flash-lite", request_profile: "gemini-3.1-minimal-v1",
+    provider_url: "https://generativelanguage.googleapis.com",
+    items: [{ original_query: "Which file format did Mira use for the Atlas export?" }] });
+  const key = materializeSemanticProposalLines(workset, 16_384)[0]!.key;
+  const cacheRoot = join(root, "cache");
+  const directory = join(cacheRoot, "provider-raw", key.slice(0, 2));
+  mkdirSync(directory, { recursive: true });
+  for (let index = 0; index <= 32_768; index++) writeFileSync(join(directory, `other-${index}.txt`), "");
+  expect(() => readSemanticProposalResults(workset, cacheRoot, 16_384)).toThrow(/bounded inventory/u);
+  expect(() => semanticProposalCacheInputPaths(workset, cacheRoot, 16_384)).toThrow(/bounded inventory/u);
+  expect(() => providerRawAttemptInputPaths(cacheRoot, key)).toThrow(/bounded inventory/u);
+  expect(() => readSingleSourceRawAttempt(cacheRoot, key)).toThrow(/bounded inventory/u);
 });

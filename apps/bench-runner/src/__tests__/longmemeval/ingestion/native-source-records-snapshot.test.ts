@@ -379,7 +379,7 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(readChainArtifact(join(recoveryRoot, "source-revision.json"))).toMatchObject({
     source_id: records[0].source_id, parent_key: expect.any(String), child_key: expect.any(String),
     parent_response_sha256: expect.any(String) });
-  const revision = readChainArtifact(join(recoveryRoot, "source-revision.json")) as { child_key: string };
+  const revision = readChainArtifact(join(recoveryRoot, "source-revision.json")) as { child_key: string; parent_key: string };
   const revisedGeneration = parseExtractionOpenSemanticsGeneration(JSON.parse(readFileSync(
     join(recoveryRoot, "source-revision-generation.json"), "utf8")));
   const childCacheRoot = join(root, "source-child-cache"); mkdirSync(childCacheRoot);
@@ -418,8 +418,12 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(childFilled.newlyExtracted).toBe(1);
   const childPreflightPath = join(root, "source-child-preflight.json");
   writeFileSync(childPreflightPath, JSON.stringify(childPreflight));
+  const selectedNative = verified.records.find(row => row.source_id === records[0].source_id)!;
   const mixed = await prepareSourcePublicationAssociations({ name: "native-records", nativeSnapshotPath: snapshotPath,
-    model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", openSemantics: revisedGeneration }, [
+    model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1",
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    activeNativeRevision: { source_id: records[0].source_id, source_version: records[0].source_version,
+      record_id: selectedNative.record.identity, key: revision.child_key, generation: revisedGeneration } }, [
       { cacheRoot, retainedPreparationPath: preflightPath },
       { cacheRoot: childCacheRoot, retainedPreparationPath: childPreflightPath }
     ], join(root, "mixed-associations.json"));
