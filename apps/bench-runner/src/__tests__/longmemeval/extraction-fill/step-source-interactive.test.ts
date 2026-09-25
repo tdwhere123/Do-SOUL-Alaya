@@ -121,16 +121,17 @@ it("rejects a changed current Step wire digest while retained accounting stays u
   if (cached.status !== "hit" || cached.entry.source_semantic?.kind !== "step_chat_completion") {
     throw new Error("expected an admitted Step source artifact");
   }
+  const sourceSemantic = cached.entry.source_semantic;
   expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("hit");
-  expect(inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, true))
+  expect(inspectInteractiveTransportEvidence(sourceSemantic, cached.entry, roots.cacheRoot, true))
     .toMatchObject({ requestBinding: "unbound", admissionState: "admitted" });
   const path = providerRawAttemptPath(roots.cacheRoot, key, 1);
   const raw = JSON.parse(readFileSync(path, "utf8"));
   writeFileSync(path, JSON.stringify({ ...raw, request_digest: "e".repeat(64) }));
   expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("invalid");
-  expect(() => inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, false))
+  expect(() => inspectInteractiveTransportEvidence(sourceSemantic, cached.entry, roots.cacheRoot, false))
     .toThrow();
-  expect(inspectInteractiveTransportEvidence(cached.entry.source_semantic, cached.entry, roots.cacheRoot, true))
+  expect(inspectInteractiveTransportEvidence(sourceSemantic, cached.entry, roots.cacheRoot, true))
     .toMatchObject({ requestBinding: "unbound", admissionState: "admitted" });
   expect(http.calls).toHaveLength(1);
 });
