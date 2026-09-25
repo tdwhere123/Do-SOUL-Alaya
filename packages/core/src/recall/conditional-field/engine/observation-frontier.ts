@@ -58,12 +58,6 @@ export class SourceFactDemands {
   public constructor(public snapshot: PersistentStringMap<"pending" | "done">,
     public pending: number, public offset: number, public bytes: number) {}
   public hasPending(): boolean { return this.pending > 0; }
-  public add(id: string): void {
-    if (this.snapshot.has(id)) return;
-    this.snapshot = this.snapshot.with(id, "pending");
-    this.pending += 1;
-    this.bytes += 96 + Buffer.byteLength(id, "utf8");
-  }
   public complete(id: string): void {
     if (this.snapshot.get(id) !== "pending") return;
     this.snapshot = this.snapshot.with(id, "done");

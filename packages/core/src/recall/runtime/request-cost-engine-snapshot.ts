@@ -1,10 +1,12 @@
 export type EngineCostField = Readonly<{
   readonly solver_completed_work?: number;
   readonly solver_retained_bytes?: number;
+  readonly support_retained_bytes?: number;
   readonly seen_identities: { readonly length: number };
   readonly remaining_memory_bytes: number;
   readonly remaining_work: readonly { readonly units: number }[];
-  readonly pending_path_effects?: { readonly retained_bytes?: number };
+  readonly pending_path_effects?: { readonly retained_bytes?: number;
+    readonly preparation?: { readonly retained_bytes: number } };
   readonly binding_contexts?: { readonly bytes: number };
   readonly binding_context_bytes?: number;
   readonly pair_demand_bytes?: number;
@@ -33,6 +35,18 @@ export type RetainedFieldLevels = Readonly<{
   readonly retained_bytes_current: number;
 }>;
 
+/** The field and request ledger restore the same retained allocation before new work. */
+export function restoredFieldRemainingMemory(field: EngineCostField, memoryBytes: number): number {
+  return Math.max(0, memoryBytes - (field.pending_path_effects?.retained_bytes ?? 0)
+    - (field.pending_path_effects?.preparation?.retained_bytes ?? 0)
+    - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0)
+    - (field.solver_retained_bytes ?? 0) - (field.support_retained_bytes ?? 0)
+    - (field.pair_demand_bytes ?? 0)
+    - (field.pair_progress_bytes ?? 0) - (field.source_fact_demand_bytes ?? 0)
+    - (field.source_fact_bytes ?? 0) - (field.observed_relation_bytes ?? 0)
+    - (field.compiled_automaton_bytes ?? 0));
+}
+
 export function snapshotRestoredEngineWork(
   field: EngineCostField | undefined,
   memoryBytes: number
@@ -44,12 +58,7 @@ export function snapshotRestoredEngineWork(
   return {
     solver_completed_work: field.solver_completed_work ?? 0,
     charged_identities: field.seen_identities.length,
-    remaining_memory_bytes: Math.max(0, memoryBytes - (field.pending_path_effects?.retained_bytes ?? 0)
-      - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0) - (field.solver_retained_bytes ?? 0)
-      - (field.pair_demand_bytes ?? 0) - (field.pair_progress_bytes ?? 0)
-      - (field.source_fact_demand_bytes ?? 0)
-      - (field.source_fact_bytes ?? 0) - (field.observed_relation_bytes ?? 0)
-      - (field.compiled_automaton_bytes ?? 0))
+    remaining_memory_bytes: restoredFieldRemainingMemory(field, memoryBytes)
   };
 }
 

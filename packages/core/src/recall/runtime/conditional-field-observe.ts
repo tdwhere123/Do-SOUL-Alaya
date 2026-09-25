@@ -35,6 +35,7 @@ import {
   type SourceDomainCoverage
 } from "./observe-field-residuals.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
+import { restoredFieldRemainingMemory } from "./request-cost-engine-snapshot.js";
 import {
   RELATION_ROUTING,
   interruptObservedField,
@@ -211,13 +212,7 @@ function startObservedField(
       budget: input.budget,
       remaining_exploration: exploration,
       remaining_reserve: input.budget.finalization_reserve,
-      remaining_memory_bytes: Math.max(0, input.budget.memory_bytes
-        - (resumed.pending_path_effects?.retained_bytes ?? 0)
-        - (resumed.pending_path_effects?.preparation?.retained_bytes ?? 0) - (resumed.binding_context_bytes ?? 0)
-        - (resumed.solver_retained_bytes ?? 0) - resumed.pair_demand_bytes - resumed.pair_progress_bytes
-        - resumed.source_fact_demand_bytes - (resumed.source_fact_bytes ?? 0)
-        - (resumed.observed_relation_bytes ?? 0)
-        - (resumed.compiled_automaton_bytes ?? 0)),
+      remaining_memory_bytes: restoredFieldRemainingMemory(resumed, input.budget.memory_bytes),
       binding_contexts: resumed.binding_contexts?.snapshot(),
       memory_exhausted: false,
       last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
