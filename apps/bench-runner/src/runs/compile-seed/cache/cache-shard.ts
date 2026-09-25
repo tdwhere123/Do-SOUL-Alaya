@@ -53,6 +53,7 @@ export interface CachedExtractionEntry {
   readonly request_completion?: PersistedExtractionRequestCompletion;
   readonly response_metadata?: CachedExtractionResponseMetadata;
   readonly transport_provenance?: ExtractionTransportProvenance;
+  readonly provider_attempt?: Readonly<{ attempt_ordinal: number; authority_lineage_digest: string }>;
   readonly admission_identity?: CachedExtractionAdmissionIdentity;
 }
 
@@ -159,6 +160,12 @@ export function inspectCachedRawExtraction(
   if (cached.entry.source_packet !== undefined) return inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile);
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
+    const attempt = cached.entry.provider_attempt;
+    if (attempt !== undefined && (!Number.isSafeInteger(attempt.attempt_ordinal) ||
+        attempt.attempt_ordinal < 1 || !/^[a-f0-9]{64}$/u.test(attempt.authority_lineage_digest) ||
+        cached.entry.transport_provenance === undefined)) {
+      throw new Error("invalid provider attempt binding");
+    }
     inspectCachedResponseMetadata(
       cached.entry.response_metadata,
       cached.entry.transport_provenance !== undefined
@@ -184,6 +191,10 @@ export function inspectCachedRawExtraction(
       rawJson: cached.entry.raw_json,
       ...(cached.entry.transport_provenance === undefined ? {} : {
         transportProvenance: cached.entry.transport_provenance
+      }),
+      ...(attempt === undefined ? {} : {
+        attemptOrdinal: attempt.attempt_ordinal,
+        authorityLineageDigest: attempt.authority_lineage_digest
       }),
       ...envelope
     };

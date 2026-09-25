@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
@@ -9,7 +10,7 @@ import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } fr
 import * as authorityInspection from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { assertSourceSemanticShardCapacity, inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
-import { inspectCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { cacheFilePath, inspectCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { inspectCachedSourcePacket } from "../../../runs/extraction/cache/source-packet-artifact.js";
 import { readExtractionCacheManifestIdentity } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
 import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-config.js";
@@ -232,6 +233,18 @@ it("preflights without a grant, then prepare-submit-resume-import-reopen stays o
   expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).toBe("invalid");
   writeFileSync(authorityPath, retained);
   expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE)).toMatchObject({ status: "hit" });
+  const shardPath = cacheFilePath(cacheRoot, key);
+  const shard = JSON.parse(readFileSync(shardPath, "utf8"));
+  const request = JSON.parse(shard.source_semantic.result.line.userPrompt);
+  request.schema_version = 5;
+  delete request.source_request.attribution_context;
+  shard.source_semantic.result.line.userPrompt = JSON.stringify(request);
+  shard.source_semantic.result.line.requestSha256 = createHash("sha256")
+    .update(shard.source_semantic.result.line.userPrompt).digest("hex");
+  writeFileSync(shardPath, JSON.stringify(shard));
+  expect(inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE)).toMatchObject({
+    status: "invalid", reason: "retained source semantic request differs from recorded manifest generation"
+  });
 }, 60000);
 
 it("records a lost create as unknown and refuses a second dispatch until exact reconciliation", async () => {

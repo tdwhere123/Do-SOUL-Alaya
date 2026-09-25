@@ -252,7 +252,11 @@ async function importBatchLine(input: BatchFillInput, workset: SourceRequestWork
     userPrompt: result.line.userPrompt, expectedCacheKey: result.line.key, sourceCorpus,
     result: { rawJson: result.rawJson,
       ...(result.provenance.usage === undefined ? {} : { usage: result.provenance.usage }),
-      responseMetadata: { finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" } } });
+      responseMetadata: { finishReason: "STOP", completionContractVersion: 1, completionWitness: "finish_reason" } },
+    ...(result.provenance.attemptOrdinal === undefined ? {} : { providerAttempt: {
+      attemptOrdinal: result.provenance.attemptOrdinal,
+      authorityLineageDigest: authority.receipt.lineage_digest
+    } }) });
   } catch (cause) {
     if (cause instanceof ExtractionResponseAdmissionError || cause instanceof SourcePacketAdmissionError ||
         cause instanceof SourceSemanticAdmissionError) {

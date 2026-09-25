@@ -10,6 +10,7 @@ import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/sou
 import { parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../../../runs/semantic-proposal/workset.js";
 import { materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { prepareSemanticProposal, executeSemanticProposalFill } from "../../../runs/semantic-proposal/fill.js";
+import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
@@ -263,12 +264,14 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
     config.chain.query_cache_root, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   await executeSemanticProposalFill({ workset: config.chain.query_workset, cacheRoot: config.chain.query_cache_root,
     authority: queryAuthority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
-      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => {
+      const rawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
           alternatives: [{ conditions: [{ kind: "statement", key: "complete", predicate: "complete",
-            arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }] }] }], gaps: [] }),
-      responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
-    }) } });
+            arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }] }] }], gaps: [] });
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
+        responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
+    } } });
   const root = join(cacheRoot, "duplicate-stage");
   const boundConfig = await fixture.bind(config.chain, "duplicate");
   const window = await prepareLazyQualificationWindow(boundConfig, root);
@@ -326,16 +329,18 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
     config.chain.correspondence_cache_root, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
   await executeSemanticProposalFill({ workset: selectedItem, cacheRoot: config.chain.correspondence_cache_root,
     authority: correspondenceAuthority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
-      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => ({
-      rawJson: JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+      requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => {
+      const rawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
         outcome: { status: "interpreted" }, semantic_correspondence: {
           contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, source_interpretation_handle: "source1",
           assessments: assessmentForTestPairs(request.catalog, request.original_query, [{ query: predicate.handle, source: frame.handle, query_excerpt: "completed",
             source_semantic_support: support.kind === "explicit" ? [{ kind: "lexical", mentions: support.mentions }] : [] },
           { query: slot.handle, source: sourceSlot.handle, query_excerpt: "What",
-            source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }]) } }),
-      responseMetadata: { finishReason: "STOP" }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }
-    }) } });
+            source_semantic_support: sourceInterpretation.frames[0]!.slots[0]!.support }]) } });
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
+        responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
+    } } });
   const replay = await replayLazyQualifiedFirstExposure(root);
   expect(replay.result.rows[0]).toMatchObject({ status: "replayed", first_exposure: expect.any(Object) });
   const native = SoulInterpretationResponseSchema.parse(replay.result.rows[0]?.response);

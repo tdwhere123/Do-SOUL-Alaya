@@ -1,5 +1,6 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { unlinkSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -290,7 +291,7 @@ export function openExtractionAttemptLedger(input: {
   current = reconcilePending(
     input.cacheRoot, current, path, true, input.publicationTemporaryDirectory, inspectShard
   );
-  assertSuccessfulShards(input.cacheRoot, current, inspectShard, input.inspectProviderShard !== undefined);
+  assertSuccessfulShards(input.cacheRoot, current, inspectShard);
   if (!existed) {
     persistAttemptLedgerRecord(path, current, input.publicationTemporaryDirectory);
   }
@@ -409,8 +410,15 @@ function requireValidShard(
 function shardAttemptBelongsToLedger(
   shard: ExtractionSuccessfulShard, record: ExtractionAttemptLedgerRecord
 ): boolean {
-  if (shard.successKind !== "provider" || shard.attemptOrdinal === undefined) return true;
-  return shard.authorityLineageDigest === record.lineage_digest &&
+  if (shard.successKind !== "provider") return true;
+  // A settled continuation carries predecessor successes with their original
+  // lineage; only an already recorded, unchanged success may use that lineage.
+  const inherited = record.successful_shards.some((saved) => isDeepStrictEqual(saved, shard));
+  return shard.attemptOrdinal !== undefined &&
+    (shard.authorityLineageDigest === record.lineage_digest || inherited) &&
+    !record.unresolved_attempts.some((attempt) => attempt.cache_key === shard.cacheKey) &&
+    !record.transport_failures.some((attempt) => attempt.cache_key === shard.cacheKey &&
+      attempt.attempt_ordinal === shard.attemptOrdinal) &&
     (record.settled_attempts ?? []).some((attempt) =>
       attempt.cache_key === shard.cacheKey && attempt.attempt_ordinal === shard.attemptOrdinal);
 }
@@ -418,21 +426,13 @@ function shardAttemptBelongsToLedger(
 function assertSuccessfulShards(
   cacheRoot: string,
   record: ExtractionAttemptLedgerRecord,
-  inspectShard: ExtractionAttemptShardInspector = readValidLedgerShard,
-  customInspector = false
+  inspectShard: ExtractionAttemptShardInspector = readValidLedgerShard
 ): void {
   for (const shard of record.successful_shards) {
     if (!shardAttemptBelongsToLedger(shard, record)) {
       throw new AlayaError("CONFLICT", `extraction authority successful shard attempt drifted: ${shard.cacheKey}`);
     }
-    if (!customInspector) {
-      assertLedgerSuccessfulShard(cacheRoot, shard, record.cache_identity);
-      continue;
-    }
-    const current = inspectShard(cacheRoot, shard.cacheKey, record.cache_identity);
-    if (current === undefined || current.rawJsonSha256 !== shard.rawJsonSha256) {
-      throw new AlayaError("CONFLICT", `extraction authority successful shard closure drifted: ${shard.cacheKey}`);
-    }
+    assertLedgerSuccessfulShard(cacheRoot, shard, record.cache_identity, inspectShard);
   }
 }
 

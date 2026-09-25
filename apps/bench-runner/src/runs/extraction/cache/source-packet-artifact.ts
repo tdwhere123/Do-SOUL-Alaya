@@ -55,6 +55,7 @@ function inspectSourcePacketEntry(entry: CachedExtractionEntry, cacheRoot: strin
     throw new AlayaError("CONFLICT", "typed packet request key mismatch");
   }
   let admitted: ReturnType<typeof receiveSourceInterpretationPacketBatchLine>;
+  let batchBinding: { attemptOrdinal: number; authorityLineageDigest: string } | undefined;
   if (typed.kind === "deterministic_empty") {
     if (entry.transport_provenance !== undefined || entry.response_metadata !== undefined) throw new AlayaError("CONFLICT", "deterministic packet cannot carry a provider receipt");
     const empty = completeEmptyOfficialApiSourcePacket(parseOfficialApiSourcePacketRequest(JSON.parse(line.userPrompt)),
@@ -77,6 +78,11 @@ function inspectSourcePacketEntry(entry: CachedExtractionEntry, cacheRoot: strin
     admitted = receiveSourceInterpretationPacketBatchLine({ config: { model: entry.model, requestProfile: entry.request_profile },
       line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus, artifactKey: entry.cache_key, producerId: typed.producer_id,
       retained: { plan: retained.plan, provenance: retained.result.provenance } });
+    if (retained.result.provenance.attemptOrdinal === undefined) {
+      throw new AlayaError("CONFLICT", "current source packet Batch artifact lacks its bound provider attempt");
+    }
+    batchBinding = { attemptOrdinal: retained.result.provenance.attemptOrdinal,
+      authorityLineageDigest: authority.lineage_digest };
   }
   const response = inspectCachedResponseMetadata(entry.response_metadata, typed.kind === "gemini_batch");
   const rawJsonSha256 = computeExtractionRawJsonSha256(entry.raw_json);
@@ -85,7 +91,8 @@ function inspectSourcePacketEntry(entry: CachedExtractionEntry, cacheRoot: strin
   return { status: "hit" as const, artifactKind: "source_interpretation" as const, sourceBinding: "unbound" as const, admitted,
     cacheAdmission: entry.admission_identity, deterministicEmpty: typed.kind === "deterministic_empty",
     rawJson: entry.raw_json, rawJsonSha256, rawSignalCount: 0, parsedDraftCount: 0,
-    transportProvenance: entry.transport_provenance, ...response };
+    transportProvenance: entry.transport_provenance, ...response,
+    ...(batchBinding === undefined ? {} : batchBinding) };
 }
 
 export function inspectCachedSourcePacket(cacheRoot: string, cacheKey: string, model: string,

@@ -147,6 +147,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
   const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
   let admitted: SourceSemanticProposalResult;
   let interactiveBinding: ReturnType<typeof inspectInteractiveTransportEvidence> | undefined;
+  let batchBinding: { attemptOrdinal: number; authorityLineageDigest: string } | undefined;
   if (typed.kind === "deterministic_empty") {
     if (entry.transport_provenance !== undefined || entry.response_metadata !== undefined) {
       throw new AlayaError("CONFLICT", "deterministic open semantics cannot carry a provider receipt");
@@ -185,6 +186,11 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       retained: { plan: retained.plan, provenance: retained.result.provenance }
     };
     admitted = receiveSourceSemanticBatchLine(input);
+    if (retained.result.provenance.attemptOrdinal === undefined) {
+      throw new AlayaError("CONFLICT", "current open-semantics Batch artifact lacks its bound provider attempt");
+    }
+    batchBinding = { attemptOrdinal: retained.result.provenance.attemptOrdinal,
+      authorityLineageDigest: authority.lineage_digest };
     const completion = retainableOutcome(admitted);
     if (completion === undefined || completion !== typed.completion) {
       throw new AlayaError("CONFLICT", "typed open-semantics completion mismatch");
@@ -201,7 +207,8 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     cacheAdmission: entry.admission_identity, deterministicEmpty: typed.kind === "deterministic_empty",
     rawJson: entry.raw_json, rawJsonSha256, rawSignalCount: 0, parsedDraftCount: admitted.draft === undefined ? 0 : 1,
     transportProvenance: entry.transport_provenance, ...response,
-    ...(interactiveBinding === undefined ? {} : interactiveBinding) };
+    ...(interactiveBinding === undefined ? {} : interactiveBinding),
+    ...(batchBinding === undefined ? {} : batchBinding) };
   return interactiveBinding?.admissionState === "pending"
     ? { status: "pending" as const, reason: "source semantic transport attempt is pending successful ledger admission", ...inspected }
     : { status: "hit" as const, ...inspected };

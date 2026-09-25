@@ -96,7 +96,7 @@ function createLedgerExecutionAuthority(
       if (receipt.sample_scope !== undefined && !isStepInteractiveSampleReceipt(receipt)) {
         throw new Error("sample requires the exact Batch submission reservation");
       }
-      await reserveAttemptOrdinal(cacheKey, signal);
+      return reserveAttemptOrdinal(cacheKey, signal);
     },
     reserveAttemptOrdinal: receipt.sample_scope === undefined || isStepInteractiveSampleReceipt(receipt)
       ? reserveAttemptOrdinal : undefined,

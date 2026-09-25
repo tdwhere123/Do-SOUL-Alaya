@@ -236,6 +236,8 @@ export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
   Readonly<{ manifestSha256: string; generationSha256: string; systemPromptSha256: string; providerUrl: string;
     extractionModel: string; modelFamily: string; requestProfile: ExtractionRequestProfile;
     sourcePacking: ExtractionSourcePacking; cacheKeyAlgorithm: string;
+    recordedGeneration: Readonly<{ contract: string; cacheContract: string; responseContract: string;
+      envelopeSchemaVersion: number; kVersion: string; normalizerVersion: string }>;
     dataset: string; datasetRevision: string; windowOffset: number; windowLimit: number;
     expectedTurns: number; expectedKeySetSha256: string }> | undefined {
   const filePath = extractionCacheManifestPath(cacheRoot);
@@ -249,6 +251,7 @@ export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
   if (generation === null || typeof generation !== "object" || Array.isArray(generation)) {
     throw new AlayaError("VALIDATION", "retained source semantic generation is absent or malformed");
   }
+  const recordedGeneration = readRecordedSourceSemanticGeneration(generation);
   const checked = validateManifest({ ...value, source_semantic_generation: EXTRACTION_OPEN_SEMANTICS_GENERATION }, filePath);
   if (checked.schema_version !== 4 || checked.window_offset === undefined || checked.window_limit === undefined ||
       checked.expected_turns === undefined || checked.expected_key_set_sha256 === undefined) {
@@ -257,6 +260,7 @@ export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
   const original = { ...checked, source_semantic_generation: generation } as ExtractionCacheManifest;
   return { manifestSha256: createHash("sha256").update(raw.bytes).digest("hex"),
     generationSha256: extractionAdmissionGenerationSha256(original),
+    recordedGeneration,
     systemPromptSha256: checked.system_prompt_sha256, providerUrl: checked.provider_url,
     extractionModel: checked.extraction_model, modelFamily: checked.model_family,
     requestProfile: checked.request_profile, sourcePacking: checked.source_packing,
@@ -264,6 +268,25 @@ export function readRetainedSourceSemanticManifestIdentity(cacheRoot: string):
     datasetRevision: checked.dataset_revision, windowOffset: checked.window_offset,
     windowLimit: checked.window_limit, expectedTurns: checked.expected_turns,
     expectedKeySetSha256: checked.expected_key_set_sha256 };
+}
+
+/** Read only the recorded outer identities needed for retained evidence joins. */
+function readRecordedSourceSemanticGeneration(value: object) {
+  const fields = value as Record<string, unknown>;
+  const version = fields.envelope_schema_version;
+  const text = (field: string): string => {
+    const item = fields[field];
+    if (typeof item !== "string" || item.trim().length === 0 || item.length > 128) {
+      throw new AlayaError("VALIDATION", `retained source semantic generation lacks bounded ${field}`);
+    }
+    return item;
+  };
+  if (!Number.isSafeInteger(version) || Number(version) < 1) {
+    throw new AlayaError("VALIDATION", "retained source semantic generation lacks bounded envelope_schema_version");
+  }
+  return Object.freeze({ contract: text("contract"), cacheContract: text("cache_contract"),
+    responseContract: text("response_contract"), envelopeSchemaVersion: version as number,
+    kVersion: text("k_version"), normalizerVersion: text("normalizer_version") });
 }
 
 export function parseExtractionCacheManifestContents(

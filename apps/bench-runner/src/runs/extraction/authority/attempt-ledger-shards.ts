@@ -78,10 +78,12 @@ export function readValidDeterministicLedgerShard(
 export function assertLedgerSuccessfulShard(
   cacheRoot: string,
   shard: ExtractionSuccessfulShard,
-  identity: ExtractionAttemptLedgerCacheIdentity
+  identity: ExtractionAttemptLedgerCacheIdentity,
+  inspectProviderShard: (cacheRoot: string, cacheKey: string,
+    identity: ExtractionAttemptLedgerCacheIdentity) => ExtractionSuccessfulShard | undefined = readValidLedgerShard
 ): void {
   const current = shard.successKind === "provider"
-    ? readValidLedgerShard(cacheRoot, shard.cacheKey, identity)
+    ? inspectProviderShard(cacheRoot, shard.cacheKey, identity)
     : shard.successKind === "deterministic"
       ? readValidDeterministicLedgerShard(cacheRoot, shard.cacheKey, identity)
       : readLegacyLedgerShard(cacheRoot, shard.cacheKey, identity);

@@ -88,7 +88,8 @@ interface CachingSignalExtractorOptions {
   /** Aggregate exact shards for the single-threaded snapshot seed loop. */
   readonly trackTurnShards?: boolean;
   /** Called before each actual provider HTTP attempt for an uncached shard. */
-  readonly onTransportAttempt?: (cacheKey: string, signal?: AbortSignal) => void | Promise<void>;
+  readonly onTransportAttempt?: (cacheKey: string, signal?: AbortSignal) => number | void | Promise<number | void>;
+  readonly providerAttemptLineageDigest?: string;
   /** Called only after a reserved provider-backed shard is atomically written. */
   readonly onLiveProviderExtractionSucceeded?: (cacheKey: string) => void;
   /** Records an atomically written canonical empty shard without a provider attempt. */
@@ -161,6 +162,7 @@ export function importExtractionResponse(input: {
   readonly expectedCacheKey: string;
   readonly sourceCorpus: string;
   readonly result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>;
+  readonly providerAttempt?: { readonly attemptOrdinal: number; readonly authorityLineageDigest: string };
 }): void {
   const { writeLease: lease, cacheRoot, result } = input;
   lease.assertOwned();
@@ -182,7 +184,7 @@ export function importExtractionResponse(input: {
     if (existing.rawJson !== result.rawJson) throw new ExtractionCacheInvariantError("import conflicts with admitted response");
     return;
   }
-  persistExtraction(options, cacheRoot, key, result, true, extraction.request, completion);
+  persistExtraction(options, cacheRoot, key, result, true, extraction.request, completion, input.providerAttempt);
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
 }
@@ -352,11 +354,13 @@ async function extractLiveWithLease(
   const stats = options.stats;
   markLiveExtractionStarted(stats, cacheKey);
   let providerAttemptAuthorized = options.onTransportAttempt === undefined;
+  let lastAttemptOrdinal: number | undefined;
   const result = await extractLiveDelegate({
     delegate: options.delegate,
     request: withSemanticValidation(
-      withAuthorityAttemptHook(input, options, cacheKey, () => {
+      withAuthorityAttemptHook(input, options, cacheKey, (ordinal) => {
         providerAttemptAuthorized = true;
+        if (ordinal !== undefined) lastAttemptOrdinal = ordinal;
       })
     ),
     stats,
@@ -375,7 +379,10 @@ async function extractLiveWithLease(
     request,
     requireExtractSourceCorpus(input)
   ).status;
-  const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion);
+  const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion,
+    lastAttemptOrdinal === undefined || options.providerAttemptLineageDigest === undefined ? undefined : {
+      attemptOrdinal: lastAttemptOrdinal, authorityLineageDigest: options.providerAttemptLineageDigest
+    });
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
 }
@@ -423,7 +430,8 @@ function persistExtraction(
   result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>,
   providerBacked: boolean,
   request: OfficialApiExtractionRequest,
-  requestCompletion?: ExtractionRequestCompletion
+  requestCompletion?: ExtractionRequestCompletion,
+  providerAttempt?: { readonly attemptOrdinal: number; readonly authorityLineageDigest: string }
 ): {
   readonly inspection: ExtractionRawJsonInspection;
   readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
@@ -458,6 +466,10 @@ function persistExtraction(
       empty_classification: emptyClassification,
       ...(providerBacked ? {
         transport_provenance: buildExtractionTransportProvenance(options.config),
+        ...(providerAttempt === undefined ? {} : { provider_attempt: {
+          attempt_ordinal: providerAttempt.attemptOrdinal,
+          authority_lineage_digest: providerAttempt.authorityLineageDigest
+        } }),
         request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: requestCompletion! }
       } : {}),
       ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked),
@@ -512,14 +524,14 @@ function withAuthorityAttemptHook(
   input: Parameters<BenchSignalExtractor["extract"]>[0],
   options: CachingSignalExtractorOptions,
   cacheKey: string,
-  markProviderAttemptAuthorized: () => void
+  markProviderAttemptAuthorized: (ordinal: number | void) => void
 ): Parameters<BenchSignalExtractor["extract"]>[0] {
   if (options.onTransportAttempt === undefined) return input;
   return {
     ...input,
     onTransportAttempt: async (signal) => {
-      await options.onTransportAttempt?.(cacheKey, signal);
-      markProviderAttemptAuthorized();
+      const ordinal = await options.onTransportAttempt?.(cacheKey, signal);
+      markProviderAttemptAuthorized(ordinal);
       await input.onTransportAttempt?.(signal);
     }
   };

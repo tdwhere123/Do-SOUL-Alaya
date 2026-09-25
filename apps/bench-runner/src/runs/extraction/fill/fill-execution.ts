@@ -63,7 +63,7 @@ export interface CompleteFillManifestSupplement {
 
 export interface ExecutionExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
-  readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<void>;
+  readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<number>;
   readonly reserveSampleBatch?: (keys: readonly string[], signal?: AbortSignal) => Promise<Readonly<Record<string, number>>>;
   readonly reserveAttemptOrdinal?: (cacheKey: string, signal?: AbortSignal) => Promise<number>;
   readonly abandonPendingShard: (cacheKey: string, attemptOrdinal?: number) => void;
@@ -186,6 +186,7 @@ function createFillCachingExtractor(
     requireProviderBackedExtraction: authority?.receipt.catalog_refill !== undefined,
     ...(authority === undefined ? {} : {
       onTransportAttempt: authority.reserveAttempt,
+      providerAttemptLineageDigest: authority.receipt.lineage_digest,
       onLiveProviderExtractionSucceeded: authority.commitSuccessfulShard,
       onDeterministicExtractionSucceeded: authority.commitDeterministicShard,
       onLiveExtractionFailed: authority.abandonPendingShard,

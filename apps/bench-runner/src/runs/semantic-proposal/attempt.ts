@@ -74,6 +74,8 @@ export function readSemanticProposalAttemptState(
   if (shard !== undefined && hasAdmittedProposalOutcome(shard) && status === "settled") {
     const success = ledger?.successfulEntries.find(entry => entry.cacheKey === cacheKey);
     if (success?.successKind !== "provider" || success.rawJsonSha256 !== shard.raw_digest ||
+        success.attemptOrdinal !== shard.attempt_ordinal ||
+        success.authorityLineageDigest !== shard.attempt_lineage_digest ||
         canonicalJson(success.transportProvenance) !== canonicalJson(shard.transport_provenance)) {
       throw new SemanticProposalIdentityError("proposal shard lacks durable successful admission");
     }
@@ -93,7 +95,10 @@ export function assertProposalRawReservation(
 }
 
 function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAttempt): void {
-  if (raw.decoded_text !== shard.raw_json || raw.finish_reason !== shard.finish_reason ||
+  if (raw.kind === "source_semantic" || raw.attempt_ordinal !== shard.attempt_ordinal ||
+      raw.attempt_lineage_digest !== shard.attempt_lineage_digest ||
+      raw.request_digest !== shard.request_digest ||
+      raw.decoded_text !== shard.raw_json || raw.finish_reason !== shard.finish_reason ||
       raw.completion_witness !== shard.completion_witness ||
       canonicalJson(baseReportedUsage(raw.usage) ?? null) !== canonicalJson(shard.usage ?? null) ||
       hasAdmittedProposalOutcome(shard) && (!raw.full_replay_possible || raw.decoded_text_digest !== shard.raw_digest ||
@@ -146,6 +151,9 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
           shard.transport_provenance === undefined || shard.raw_digest === undefined) {
         return undefined;
       }
+      if (canonicalJson(shard.transport_provenance) !== canonicalJson(authority.transport_provenance)) {
+        throw new AlayaError("CONFLICT", "proposal success differs from authorized physical transport");
+      }
       const raw = readProviderRawAttempt(cacheRoot, cacheKey, shard.attempt_ordinal);
       if (raw === undefined) throw new AlayaError("CONFLICT", "proposal success lacks its reserved raw attempt");
       assertProposalRawReservation(raw, inspectExtractionAttemptLedger({ cacheRoot, lineageDigest: lineage,
@@ -156,7 +164,9 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
         cacheKey,
         rawJsonSha256: shard.raw_digest,
         successKind: "provider" as const,
-        transportProvenance: shard.transport_provenance
+        transportProvenance: shard.transport_provenance,
+        attemptOrdinal: shard.attempt_ordinal,
+        authorityLineageDigest: shard.attempt_lineage_digest
       };
     }
   });

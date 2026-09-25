@@ -195,6 +195,57 @@ export function proposalRecoveryCases(input: {
       expect(await f.fill()).toMatchObject({ unknown: 0, incomplete: 1, terminal_failures: 0, unattempted: 0, attempts: 1 });
     });
 
+    it("binds successful reopen to the authorized physical route and exact attempt", async () => {
+      const f = fixture();
+      const ordinal = f.ledger.reserveAttemptOrdinal(f.line.key);
+      f.raw(ordinal, input.body(f.line), { inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+      expect(await f.fill()).toMatchObject({ attempts: 1, newly_admitted: 1 });
+      const ledger = openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+        authority: f.authority, kind: f.workset.kind }).snapshot();
+      expect(ledger).toMatchObject({ attempts: 1, successfulShards: 1,
+        successfulEntries: [{ successKind: "provider", attemptOrdinal: ordinal,
+          authorityLineageDigest: f.authority.attempt_lineage_digest,
+          transportProvenance: f.authority.transport_provenance }] });
+      const path = semanticProposalShardPath(f.cacheRoot, f.line.key);
+      const original = readFileSync(path, "utf8");
+      const bytes = readFileSync(f.ledgerPath, "utf8");
+      for (const damage of ["model", "route", "attempt", "lineage"] as const) {
+        const shard = JSON.parse(original);
+        if (damage === "model") shard.transport_provenance.model = "foreign-physical-model";
+        else if (damage === "route") shard.transport_provenance.provider_url_sha256 = `sha256:${"f".repeat(64)}`;
+        else if (damage === "attempt") shard.attempt_ordinal = ordinal + 1;
+        else shard.attempt_lineage_digest = "f".repeat(64);
+        writeFileSync(path, JSON.stringify(shard));
+        expect(() => openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+          authority: f.authority, kind: f.workset.kind })).toThrow();
+        expect(readFileSync(f.ledgerPath, "utf8")).toBe(bytes);
+      }
+      writeFileSync(path, original);
+      expect(openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+        authority: f.authority, kind: f.workset.kind }).snapshot().successfulShards).toBe(1);
+    });
+
+    it("keeps a staged admitted shard unresolved until its same attempt settles", async () => {
+      const f = fixture();
+      const ordinal = f.ledger.reserveAttemptOrdinal(f.line.key);
+      const reserved = readFileSync(f.ledgerPath, "utf8");
+      f.raw(ordinal, input.body(f.line), { inputTokens: 2, outputTokens: 3, totalTokens: 5 });
+      expect(await f.fill()).toMatchObject({ attempts: 1, newly_admitted: 1 });
+      writeFileSync(f.ledgerPath, reserved);
+      expect(f.read().status).toBe("pending");
+      const reopened = openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+        authority: f.authority, kind: f.workset.kind }).snapshot();
+      expect(reopened).toMatchObject({ attempts: 1, successfulShards: 0,
+        unresolvedAttempts: [{ cacheKey: f.line.key, attemptOrdinal: ordinal }], settledAttempts: [] });
+      expect(readFileSync(f.ledgerPath, "utf8")).toBe(reserved);
+      expect(await f.fill()).toMatchObject({ attempts: 0, cache_hits: 1, newly_admitted: 0 });
+      expect(openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
+        authority: f.authority, kind: f.workset.kind }).snapshot()).toMatchObject({
+          attempts: 1, successfulShards: 1, unresolvedAttempts: [],
+          settledAttempts: [{ cacheKey: f.line.key, attemptOrdinal: ordinal }] });
+      expect(await f.restart()).toMatchObject({ statuses: ["interpreted"] });
+    });
+
     it("does not spend again when a prior settled attempt has lost its named history", async () => {
       const f = fixture();
       f.ledger.reserveAttemptOrdinal(f.line.key);
