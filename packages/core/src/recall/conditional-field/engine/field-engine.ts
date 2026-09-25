@@ -221,6 +221,8 @@ export type FieldEngineState = Readonly<{
   readonly pair_progress_bytes: number;
   readonly source_fact_demands: PersistentStringMap<"pending" | "done">;
   readonly source_fact_demand_bytes: number;
+  readonly source_fact_pending_count: number;
+  readonly source_fact_scan_offset: number;
   readonly pair_completed_count: number;
   readonly pair_revision: number;
   readonly pair_scan_offset: number;
@@ -295,6 +297,7 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     pair_progress: new PersistentStringMap(), pair_demands: new PersistentStringMap(), pair_demand_bytes: 0,
     pair_progress_bytes: 0,
     source_fact_demands: new PersistentStringMap(), source_fact_demand_bytes: 0,
+    source_fact_pending_count: 0, source_fact_scan_offset: 0,
     pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
     resume_subjects: new PersistentStringMap(),
     discoveries: []
@@ -588,6 +591,7 @@ function rejectedField(
     pair_progress: new PersistentStringMap(), pair_demands: new PersistentStringMap(), pair_demand_bytes: 0,
     pair_progress_bytes: 0,
     source_fact_demands: new PersistentStringMap(), source_fact_demand_bytes: 0,
+    source_fact_pending_count: 0, source_fact_scan_offset: 0,
     pair_completed_count: 0, pair_revision: 0, pair_scan_offset: 0,
     resume_subjects: new PersistentStringMap(),
     discoveries: [],

@@ -12,10 +12,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { HyperedgePremise } from "../reference/accepting-projection.js";
 import { collectRelations, type QueryRelation } from "../query/compile-query.js";
-import {
-  STORED_RELATION_KIND,
-  SUPPORTED_RELATION_ALIASES
-} from "../query/ordinary-language.js";
+import { STORED_RELATION_KIND } from "../query/ordinary-language.js";
 import { leafDerivation } from "./path-derivation.js";
 import {
   hyperedgeEffectSteps,
@@ -88,11 +85,7 @@ export function adjacencyKindsFor(
   let openVocabulary = false;
   for (const kind of kinds) {
     if (kind === STORED_RELATION_KIND) openVocabulary = true;
-    const aliases = SUPPORTED_RELATION_ALIASES[kind];
-    if (aliases === undefined || aliases.length === 0) expanded.add(kind);
-    else {
-      for (const alias of aliases) expanded.add(alias);
-    }
+    for (const candidate of relationPhysicalCandidates(kind)) expanded.add(candidate);
   }
   if (openVocabulary) {
     for (const kind of listed) expanded.add(kind);
@@ -138,7 +131,19 @@ export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input:
 
 function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathComputation<void> {
   const runtime = runtimeProgram(input.interpretation.program);
-  if (runtime === "empty" || runtime === "epsilon") return;
+  if (runtime === "empty") return;
+  if (runtime === "epsilon") {
+    for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
+      yield { kind: "work" };
+      const claim = claimEvidenceDemandForState(input.liveStates.at(index)!, input.interpretation.view,
+        input.bindingContexts);
+      if (claim !== undefined) yield { kind: "effect", effect: {
+        observation_id: `claim-demand:${claim.subject}:${claim.predicate}`,
+        relation_demand: claim, source_fact_demand: claim.subject
+      } };
+    }
+    return;
+  }
   yield { kind: "work", retained_bytes: 256 };
   const automaton = input.compiledAutomaton ?? compileProgramAutomaton(runtime);
   const compiledPremises = input.compiledPremises ?? new Map<QueryProgram, ProgramAutomaton>();

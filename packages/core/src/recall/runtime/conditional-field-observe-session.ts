@@ -18,7 +18,7 @@ import { measurementEffectsFor, measurementIsMissing } from "./measurement-effec
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
 import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
-import { ObservationPairs, ObservationSubjects } from "../conditional-field/engine/observation-frontier.js";
+import { ObservationPairs, ObservationSubjects, SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
 import {
   applyObserverPage,
   proposeFieldWork,
@@ -164,14 +164,19 @@ function refreshPathFrontier(session: ObservationSession): boolean {
   if (frontier !== undefined && frontier.identities === state.seen_identities.length
     && frontier.facets === state.facets && frontier.discoveries === state.discoveries.length
     && frontier.sourceFacts === state.source_facts) return false;
+  const factPopulationChanged = frontier !== undefined && frontier.sourceFacts !== state.source_facts;
+  const rechecking = factPopulationChanged ? { ...state, residuals: state.residuals.map((region) =>
+    region.kind === "guard" && (region.status === "unknown" || region.status === "exhausted")
+      ? { ...region, status: "open" as const } : region) } : state;
   const region = state.residuals.find((entry) => entry.kind === "adjacency");
   const regionId = region?.region_id ?? "adjacency";
   const cursor = session.cursors.get(regionId) ?? startObserverCursor({ cursor_id: regionId,
     query_id: interpretation.query_id, snapshot_id: interpretation.snapshot_id, region_id: regionId });
   const beforeWork = state.remaining_exploration;
-  session.state = resumePathEffects({ ...state, pending_path_effects: { input: { rows: relationRows, options: {
+  session.state = resumePathEffects({ ...rechecking, pending_path_effects: { input: { rows: relationRows, options: {
     interpretation, asOf: input.as_of, liveStates: state.seen_identities,
-    liveStateOffset: frontier === undefined || frontier.facets !== state.facets ? 0 : frontier.identities,
+    liveStateOffset: frontier === undefined || frontier.facets !== state.facets
+      || frontier.sourceFacts !== state.source_facts ? 0 : frontier.identities,
     overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries,
     bindingContexts: state.binding_contexts, physicalKinds: session.predicates,
     compiledAutomaton: state.compiled_automaton } },
@@ -591,16 +596,41 @@ export function sourceDomainSettleCoverage(session: ObservationSession): SourceD
 }
 
 function consumeBoundSourceFact(session: ObservationSession): boolean {
-  const pending = [...session.state.source_fact_demands].find(([, status]) => status === "pending");
-  if (pending === undefined) return false;
-  const [objectId] = pending;
-  const { input, sourceFacts, observedAt } = session;
+  const { input } = session;
+  const demands = new SourceFactDemands(session.state.source_fact_demands,
+    session.state.source_fact_pending_count, session.state.source_fact_scan_offset,
+    session.state.source_fact_demand_bytes);
+  if (!demands.hasPending()) return false;
   const pinWork = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
-  if (session.state.remaining_exploration < 2 + pinWork) {
+  // One indexed lookup and the maximum one-row source read must both fit before
+  // invoking the reader. A completed fact can use less, but never more.
+  const readReserve = 3 + pinWork;
+  if (session.state.remaining_exploration < 1 + readReserve) {
     session.state = interruptObservedField(session.state);
     return true;
   }
+  const pending = demands.nextPending(session.state.remaining_exploration - readReserve);
+  input.cost?.add("observe", { joins: pending.work });
+  session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - pending.work,
+    source_fact_scan_offset: pending.index ?? pending.next };
+  if (pending.key === undefined) {
+    session.state = interruptObservedField(session.state);
+    return true;
+  }
+  const objectId = pending.key;
+  if (session.sourceFacts.has(objectId)) {
+    demands.complete(objectId);
+    input.cost?.add("observe", { joins: 1 });
+    session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - 1,
+      source_fact_demands: demands.snapshot, source_fact_pending_count: demands.pending,
+      source_fact_scan_offset: pending.next };
+    return true;
+  }
   const pin = input.readers.snapshotPin?.(input.workspace_id);
+  if (pinWork > 0) {
+    input.cost?.add("observe", { native_visits: pinWork });
+    session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - pinWork };
+  }
   if (pin !== undefined && input.expected_source_revision !== undefined
     && pin.source_revision !== input.expected_source_revision) {
     session.state = applyObserverPage(session.state, { page: {
@@ -612,27 +642,34 @@ function consumeBoundSourceFact(session: ObservationSession): boolean {
     }, effects: [] });
     return true;
   }
-  const before = sourceFacts.bytes;
   const page = input.readers.source?.({ workspaceId: input.workspace_id, objectId });
-  if (page?.row !== null && page?.row !== undefined
-    && sourceFactEligible(page.row, input.authorized_scopes, input.as_of)) {
-    retainSourceFact(sourceFacts, objectId, page.row, input.workspace_id, observedAt);
+  if (page !== undefined && (!Number.isSafeInteger(page.rowsRead) || page.rowsRead < 0 || page.rowsRead > 1)) {
+    throw new Error("source reader must report at most one row for one object");
   }
-  const retainedBytes = sourceFacts.bytes - before;
-  const work = 2 + pinWork + (page?.rowsRead ?? 0);
-  input.cost?.add("observe", { native_visits: 1 + pinWork + (page?.rowsRead ?? 0),
+  const work = 2 + (page?.rowsRead ?? 0);
+  input.cost?.add("observe", { native_visits: (page === undefined ? 0 : 1) + (page?.rowsRead ?? 0),
     native_rows: page?.rowsRead ?? 0, native_bytes: page?.bytesRead ?? 0 });
-  if (retainedBytes > session.state.remaining_memory_bytes || work > session.state.remaining_exploration) {
-    session.state = { ...interruptObservedField(session.state), memory_exhausted: retainedBytes > session.state.remaining_memory_bytes,
-      remaining_exploration: Math.max(0, session.state.remaining_exploration - work) };
+  const charged = { ...session.state, remaining_exploration: session.state.remaining_exploration - work };
+  if (page?.resourceLimited === true) {
+    session.state = interruptObservedField(charged);
     return true;
   }
-  const observed = retainedBytes > 0;
-  session.state = { ...session.state,
-    remaining_exploration: session.state.remaining_exploration - work,
-    remaining_memory_bytes: session.state.remaining_memory_bytes - retainedBytes,
+  const sourceFacts = new ObservedSourceFacts(session.sourceFacts.snapshot, session.sourceFacts.bytes);
+  if (page?.unavailable !== true && page?.row !== null && page?.row !== undefined
+    && sourceFactEligible(page.row, input.authorized_scopes, input.as_of)) {
+    retainSourceFact(sourceFacts, objectId, page.row, input.workspace_id, session.observedAt);
+  }
+  const retainedBytes = sourceFacts.bytes - session.sourceFacts.bytes;
+  if (retainedBytes > charged.remaining_memory_bytes) {
+    session.state = { ...interruptObservedField(charged), memory_exhausted: true };
+    return true;
+  }
+  demands.complete(objectId);
+  session.sourceFacts = sourceFacts;
+  session.state = { ...charged,
+    remaining_memory_bytes: charged.remaining_memory_bytes - retainedBytes,
     source_facts: sourceFacts.snapshot, source_fact_bytes: sourceFacts.bytes,
-    source_fact_demands: session.state.source_fact_demands.with(objectId, "done"),
-    ...(observed ? { path_effect_frontier: undefined } : {}) };
+    source_fact_demands: demands.snapshot, source_fact_pending_count: demands.pending,
+    source_fact_scan_offset: pending.next };
   return true;
 }

@@ -74,14 +74,20 @@ describe("native consumer-directed observation", () => {
         console.info(JSON.stringify({ label: `native-demand-${variant}-${workUnits}`, trace, accepting,
           transitions: state.transitions.length, identities: state.seen_identities.length,
           facets: state.facets.length, pairDemands: state.pair_demands.size,
-          pathPending: state.pending_path_effects?.offset, support: state.support.length,
-          claims: state.claims.size, evidence: state.support.length,
+          pathPending: state.pending_path_effects?.offset,
+          preAssessmentSupportRows: state.support.length, preAssessmentClaims: state.claims.size,
           closure: state.closure, residuals: state.residuals,
           workConsumed: workUnits - (defaultBudget({ work_units: workUnits }).finalization_reserve ?? 0)
             - state.remaining_exploration, retainedBytes: 1_000_000 - state.remaining_memory_bytes,
           nativeVisits: cost.snapshot().native_visits, nativeBytes: cost.snapshot().native_bytes,
           adjacencyJoins: cost.snapshot().phases.adjacency.joins, joinEvents: cost.joins }));
-        if (workUnits === 10_000) expect(accepting).toContain(variant === "a" ? MEM.c : MEM.p);
+        if (workUnits === 10_000) {
+          expect(accepting).toContain(variant === "a" ? MEM.c : MEM.p);
+          expect(state.residuals.find((row) => row.kind === "adjacency")?.status).toBe("exhausted");
+          expect(state.pending_path_effects).toBeUndefined();
+          expect(state.pair_completed_count).toBe(state.pair_demands.size);
+          expect(state.source_fact_pending_count).toBe(0);
+        }
         expect(trace.filter((row) => row.rows > 0)).toHaveLength(2);
         expect(trace.every((row) => ["observed_log", "config_direct", "service_history", "uses_service"].includes(row.predicate))).toBe(true);
         expect(state.remaining_exploration).toBeGreaterThanOrEqual(0);

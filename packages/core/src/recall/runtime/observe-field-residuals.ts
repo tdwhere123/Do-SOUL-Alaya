@@ -77,7 +77,7 @@ export function settleDiscoveryResidual(
   const busy = adjacency?.status === "open"
     || adjacency?.status === "interrupted"
     || pairProgress.hasOpenDemand() || state.pending_path_effects !== undefined
-    || [...state.source_fact_demands.values()].includes("pending");
+    || state.source_fact_pending_count > 0;
   const status = state.memory_exhausted || adjacency?.status === "interrupted" || state.last_observer_status === "interrupted"
     ? "interrupted"
     : busy ? "open" : "exhausted";

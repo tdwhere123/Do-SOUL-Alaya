@@ -232,6 +232,10 @@ facets, discoveries and facts re-run the affected demand producers. A resolved
 guard is replaced only after a complete reevaluation; independent unknown
 guards remain open. A continuation keeps completed keys only within the same
 query, interpretation, scope and semantic population.
+Bound source-fact demands retain a metered scan cursor and pending count. A
+resource-limited read stays pending for continuation; completed absence or
+unavailability settles that demand. The scan, snapshot pin and possible
+one-row read consume work before the demand can be marked done.
 
 Dependency equations retain independent rule instances and shared compatible
 alternatives. Generated derivations declare `provenance_layout: local_leaves.v1`:

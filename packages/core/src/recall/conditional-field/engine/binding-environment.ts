@@ -245,11 +245,17 @@ export function guardSourceFactDependency(
   env: ReadonlyMap<string, string>,
   endpoints?: Readonly<{ readonly sourceId: string; readonly targetId: string }>
 ): string | undefined {
-  if (guard.kind === "equality" || guard.kind === "source_bound_entity") return undefined;
-  if (guard.kind === "query_predicate"
-    && (guard.predicate_name === undefined || classifyQueryPredicate(guard.predicate_name).kind === "unknown")) return undefined;
-  if (guard.kind === "interval_relation" && guard.time_scope === "none" && decodeSourceFilters(guard.predicate_name) === undefined) return undefined;
-  return objectForFilters(guard, env, endpoints);
+  // Generic source filters are evaluated for every guard kind.
+  if (decodeSourceFilters(guard.predicate_name) !== undefined) return objectForFilters(guard, env, endpoints);
+  if (guard.kind === "authorization") return objectForFilters(guard, env, endpoints);
+  if (guard.kind === "interval_relation") return guard.time_scope === "none" || guard.variable === undefined
+    ? undefined : env.get(guard.variable);
+  if (guard.kind === "query_predicate") {
+    const predicate = classifyQueryPredicate(guard.predicate_name);
+    return predicate.kind === "frozen" || predicate.kind === "proposal_lookup"
+      ? objectForFilters(guard, env, endpoints) : undefined;
+  }
+  return undefined;
 }
 
 function evaluateEquality(guard: Guard, env: ReadonlyMap<string, string>): GuardDecision {

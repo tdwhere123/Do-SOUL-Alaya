@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { productSubjectId, type Guard, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
+import { MemoryDimension, productSubjectId, type Guard, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { assessUnknownCause } from "../../../../recall/runtime/semantic-attribution.js";
 import type { FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
+import type { SourceObserverPage } from "../../../../recall/conditional-field/observers/observe.js";
+import { encodeSourceFilters } from "../../../../recall/conditional-field/query/ordinary-language.js";
+import { RequestCostLedger } from "../../../../recall/runtime/request-cost-ledger.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const AS_OF = "2026-09-07T00:00:00.000Z";
@@ -32,6 +36,12 @@ function fixture(program: QueryProgram, rows: readonly ReturnType<typeof edge>[]
   scopes?: readonly string[] | null;
   work?: number;
   memory?: number;
+  reserve?: number;
+  lexicalIds?: readonly string[];
+  sourceReader?: (objectId: string) => SourceObserverPage;
+  snapshotPin?: () => Readonly<{ source_revision: string }>;
+  expectedRevision?: string;
+  cost?: RequestCostLedger;
 }> = {}) {
   const relationCalls: string[] = [];
   const sourceCalls: string[] = [];
@@ -39,11 +49,17 @@ function fixture(program: QueryProgram, rows: readonly ReturnType<typeof edge>[]
   const state = observeField(query(program, options.interpretation), {
     workspace_id: "ws", query_text: "a", as_of: AS_OF, authorized_scopes: options.scopes ?? null,
     ...(options.resume === undefined ? {} : { resume_field: options.resume }),
-    budget: defaultBudget({ work_units: options.work ?? 10_000, memory_bytes: options.memory ?? 1_000_000 }),
+    ...(options.expectedRevision === undefined ? {} : { expected_source_revision: options.expectedRevision }),
+    ...(options.cost === undefined ? {} : { cost: options.cost }),
+    budget: defaultBudget({ work_units: options.work ?? 10_000, memory_bytes: options.memory ?? 1_000_000,
+      ...(options.reserve === undefined ? {} : { finalization_reserve: options.reserve }) }),
     readers: {
-      lexical: () => ({ ids: ["a"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
+      lexical: () => ({ ids: options.lexicalIds ?? ["a"], nativeVisits: 1, nativeBytes: 1,
+        rowsRead: (options.lexicalIds ?? ["a"]).length, bytesRead: 1, truncated: false }),
+      ...(options.snapshotPin === undefined ? {} : { snapshotPin: options.snapshotPin }),
       source: ({ objectId }) => {
         sourceCalls.push(objectId);
+        if (options.sourceReader !== undefined) return options.sourceReader(objectId);
         const specified = sourceRows[objectId];
         if (specified === null) return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
         return { row: { object_id: objectId, sourceRevision: "rev", lifecycle_state: "active",
@@ -69,6 +85,163 @@ function fixture(program: QueryProgram, rows: readonly ReturnType<typeof edge>[]
 }
 
 describe("consumer-directed physical observation", () => {
+  it("reads claim evidence for an accepting epsilon product", () => {
+    const view = { ...defaultView(), claim_demands: [{ variable: "h", proposition_kind: "cause",
+      argument_variables: ["c", "h"], required_claim: "supported" as const }] };
+    const result = fixture({ schema_version: 1, kind: "epsilon" }, [edge("a", "a", "cause")], {
+      interpretation: { view, hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+        bindings: [{ schema_version: 1, variable: "c", value: "a" },
+          { schema_version: 1, variable: "h", value: "a" }] }] }
+    });
+    expect(result.relationCalls).toContain("a\0cause");
+    expect([...assessUnknownCause(result.state, { as_of: AS_OF }).claims.values()]).toContain("supported");
+  });
+
+  it("demands the literal relation kind even when aliases also apply", () => {
+    const result = fixture(relation("failed_deployment", "s", "t"),
+      [edge("a", "b", "failed_deployment")]);
+    expect(result.relationCalls).toContain("a\0failed_deployment");
+    expect(result.accepted).toContain("b");
+  });
+
+  it("hydrates a bound source for an equality guard's attached filter", () => {
+    const guard: Guard = { schema_version: 1, kind: "equality", variable: "c", equals_variable: "d",
+      predicate_name: encodeSourceFilters({ dimension_filter: [MemoryDimension.FACT] }),
+      time_scope: "none", verdict: "unresolved" };
+    const result = fixture(relation("p", "s", "t", guard), [edge("a", "b", "p")], {
+      interpretation: { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+        bindings: [{ schema_version: 1, variable: "c", value: "x" },
+          { schema_version: 1, variable: "d", value: "x" }] }] },
+      sourceReader: (objectId) => ({ row: { object_id: objectId, sourceRevision: "rev",
+        lifecycle_state: "active", scope_class: "project", dimension: MemoryDimension.FACT },
+        rowsRead: 1, bytesRead: 32, unavailable: false })
+    });
+    expect(result.sourceCalls).toContain("x");
+    expect(result.accepted).toContain("b");
+  });
+
+  it("hydrates a bound source for a source-bound-entity guard's attached filter", () => {
+    const guard: Guard = { schema_version: 1, kind: "source_bound_entity", variable: "c", entity_id: "x",
+      predicate_name: encodeSourceFilters({ dimension_filter: [MemoryDimension.FACT] }),
+      time_scope: "none", verdict: "unresolved" };
+    const result = fixture(relation("p", "s", "t", guard), [edge("a", "b", "p")], {
+      interpretation: { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+        bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] },
+      sourceReader: (objectId) => ({ row: { object_id: objectId, sourceRevision: "rev",
+        lifecycle_state: "active", scope_class: "project", dimension: MemoryDimension.FACT },
+        rowsRead: 1, bytesRead: 32, unavailable: false })
+    });
+    expect(result.sourceCalls).toContain("x");
+    expect(result.accepted).toContain("b");
+  });
+
+  it("keeps a resource-limited source fact pending until a later lawful read", () => {
+    const guard: Guard = { schema_version: 1, kind: "authorization", variable: "c",
+      authorization_scope: "project", time_scope: "none", verdict: "unresolved" };
+    const interpretation: Partial<QueryInterpretation> = { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+      bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] };
+    const first = fixture(relation("p", "s", "t", guard), [edge("a", "b", "p")], {
+      interpretation, sourceReader: (objectId) => objectId === "x"
+        ? { row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true }
+        : { row: { object_id: objectId, sourceRevision: "rev", lifecycle_state: "active",
+          scope_class: "project" }, rowsRead: 1, bytesRead: 32, unavailable: false }
+    });
+    expect(first.state.source_fact_demands.get("x")).toBe("pending");
+    expect(first.state.last_observer_status).toBe("interrupted");
+    const next = fixture(relation("p", "s", "t", guard), [edge("a", "b", "p")], {
+      interpretation, resume: first.state, memory: 2_000_000
+    });
+    expect(next.sourceCalls).toContain("x");
+    expect(next.accepted).toContain("b");
+    expect(next.state.source_fact_demands.get("x")).toBe("done");
+  });
+
+  it("replays an old guarded row after later seed hydration and clears its obsolete unknown", () => {
+    const guard: Guard = { schema_version: 1, kind: "authorization", variable: "c",
+      authorization_scope: "project", time_scope: "none", verdict: "unresolved" };
+    const interpretation: Partial<QueryInterpretation> = { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+      bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] };
+    const first = fixture(relation("p", "s", "t", guard), [edge("a", "b", "p")], {
+      interpretation, sourceRows: { x: null }
+    });
+    expect(first.accepted).not.toContain("b");
+    const resumed = { ...first.state, residuals: first.state.residuals.map((row) =>
+      row.kind === "seed" ? { ...row, status: "open" as const } : row),
+      resume_cursors: { ...first.state.resume_cursors, seed: null } };
+    const next = fixture(relation("p", "s", "t", guard), [edge("a", "b", "p")], {
+      interpretation, resume: resumed, lexicalIds: ["x"]
+    });
+    expect(next.state.source_facts?.has("x")).toBe(true);
+    expect(next.accepted).toContain("b");
+    expect(next.state.residuals.find((row) => row.kind === "guard")?.status).toBe("exhausted");
+  });
+
+  it("reserves lookup and one-row work before reading a pending fact", () => {
+    const first = fixture(relation("p", "s", "t"), [edge("a", "b", "p")]);
+    const pending = { ...first.state,
+      source_fact_demands: new PersistentStringMap<"pending" | "done">().with("x", "pending"),
+      source_fact_pending_count: 1, source_fact_scan_offset: 0, source_fact_demand_bytes: 97 };
+    const short = fixture(relation("p", "s", "t"), [], { resume: pending, work: 2, reserve: 0 });
+    expect(short.sourceCalls).not.toContain("x");
+    expect(short.state.source_fact_demands.get("x")).toBe("pending");
+    const enough = fixture(relation("p", "s", "t"), [], { resume: pending, work: 4, reserve: 0 });
+    expect(enough.sourceCalls).toContain("x");
+    expect(enough.state.source_fact_demands.get("x")).toBe("done");
+    expect(enough.state.remaining_exploration).toBeGreaterThanOrEqual(0);
+  });
+
+  it("charges a changed source pin even when it invalidates a pending fact read", () => {
+    const program = relation("p", "s", "t");
+    const first = fixture(program, [edge("a", "b", "p")], { expectedRevision: "rev" });
+    const pending = { ...first.state, source_fact_demands:
+      new PersistentStringMap<"pending" | "done">().with("x", "pending"),
+      source_fact_pending_count: 1, source_fact_scan_offset: 0, source_fact_demand_bytes: 97 };
+    let pins = 0;
+    const cost = new RequestCostLedger();
+    const next = fixture(program, [], { resume: pending, work: 8, reserve: 0, expectedRevision: "rev", cost,
+      snapshotPin: () => { pins += 1; return { source_revision: "changed" }; } });
+    expect(pins).toBe(1);
+    expect(next.sourceCalls).not.toContain("x");
+    expect(next.state.last_observer_status).toBe("invalidated");
+    expect(cost.snapshot().phases.observe.native_visits).toBeGreaterThanOrEqual(1);
+    expect(next.state.remaining_exploration).toBe(4);
+  });
+
+  it("meters mixed completed and pending fact demands across small continuations", () => {
+    const program = relation("p", "s", "t");
+    const first = fixture(program, [edge("a", "b", "p")]);
+    let map = new PersistentStringMap<"pending" | "done">();
+    for (let index = 0; index < 64; index += 1) map = map.with(`done-${String(index).padStart(2, "0")}`, "done");
+    map = map.with("zz-x", "pending");
+    let indexed = 0;
+    const counting = new Proxy(map, { get(target, property) {
+      if (property === "entryAt") return (index: number) => { indexed += 1; return target.entryAt(index); };
+      if (property === Symbol.iterator || property === "values") {
+        return () => { throw new Error("full-map traversal is not admitted"); };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    } });
+    let state: FieldEngineState = { ...first.state, source_fact_demands: counting,
+      source_fact_pending_count: 1, source_fact_scan_offset: 0, source_fact_demand_bytes: 7_000 };
+    let reads = 0;
+    for (let turn = 0; turn < 8 && state.source_fact_pending_count > 0; turn += 1) {
+      const before = indexed;
+      const next = fixture(program, [], { resume: state, work: 16, reserve: 0 });
+      reads += next.sourceCalls.filter((id) => id === "zz-x").length;
+      expect(indexed - before).toBeLessThanOrEqual(16);
+      expect(16 - next.state.remaining_exploration).toBeGreaterThanOrEqual(indexed - before);
+      state = next.state;
+    }
+    expect(indexed).toBeGreaterThanOrEqual(65);
+    expect(reads).toBe(1);
+    expect(state.source_fact_pending_count).toBe(0);
+    expect(state.source_fact_demands.get("zz-x")).toBe("done");
+    const beforeSettled = indexed;
+    fixture(program, [], { resume: state, work: 16, reserve: 0 });
+    expect(indexed).toBe(beforeSettled);
+  });
+
   it("closes a single relation kind with local empty reads", () => {
     const result = fixture(relation("p", "s", "t"), [edge("a", "b", "p")]);
     expect(result.accepted).toContain("b");

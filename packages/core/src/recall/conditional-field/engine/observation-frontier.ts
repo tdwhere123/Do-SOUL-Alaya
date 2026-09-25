@@ -52,3 +52,33 @@ export class ObservationPairs implements ReadonlyMap<string, string | null> {
     for (const [id, value] of this.snapshot) callback(value, id, this);
   }
 }
+
+/** Retained fact demands keep closure O(1) and scan only budgeted index entries. */
+export class SourceFactDemands {
+  public constructor(public snapshot: PersistentStringMap<"pending" | "done">,
+    public pending: number, public offset: number, public bytes: number) {}
+  public hasPending(): boolean { return this.pending > 0; }
+  public add(id: string): void {
+    if (this.snapshot.has(id)) return;
+    this.snapshot = this.snapshot.with(id, "pending");
+    this.pending += 1;
+    this.bytes += 96 + Buffer.byteLength(id, "utf8");
+  }
+  public complete(id: string): void {
+    if (this.snapshot.get(id) !== "pending") return;
+    this.snapshot = this.snapshot.with(id, "done");
+    this.pending -= 1;
+  }
+  public nextPending(allowance: number): Readonly<{ key?: string; index?: number; next: number; work: number }> {
+    const total = this.snapshot.size;
+    if (this.pending === 0 || total === 0) return { next: this.offset, work: 0 };
+    let work = 0;
+    while (work < Math.min(total, allowance)) {
+      const index = (this.offset + work) % total;
+      const entry = this.snapshot.entryAt(index);
+      work += 1;
+      if (entry?.[1] === "pending") return { key: entry[0], index, next: (index + 1) % total, work };
+    }
+    return { next: (this.offset + work) % total, work };
+  }
+}

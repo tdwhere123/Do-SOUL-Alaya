@@ -3,6 +3,7 @@ import { applyObserverPage, type FieldEngineState } from "../conditional-field/e
 import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition-adjacency.js";
 import { pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
+import { SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
 
 export function resumePathEffects(state: FieldEngineState): FieldEngineState {
   while (state.pending_path_effects !== undefined) {
@@ -93,9 +94,10 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
   // A failed retention leaves the prior offset live; the cursor replays these effects.
   if (applied.retention_rejected !== undefined || applied.memory_exhausted) return interrupted(applied, applied.memory_exhausted);
   let pairDemands = state.pair_demands;
-  let sourceFactDemands = state.source_fact_demands;
+  const sourceFactDemands = new SourceFactDemands(state.source_fact_demands,
+    state.source_fact_pending_count, state.source_fact_scan_offset, state.source_fact_demand_bytes);
   for (const key of newPairs) pairDemands = pairDemands.with(key, true);
-  for (const id of newSources) sourceFactDemands = sourceFactDemands.with(id, "pending");
+  for (const id of newSources) sourceFactDemands.add(id);
   let subjects = applied.resume_subjects;
   for (const effect of advanced.effects) {
     const transition = effect.transition ?? effect.hyperedge;
@@ -123,7 +125,8 @@ function advancePathEffects(state: FieldEngineState): FieldEngineState {
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   return { ...applied, resume_subjects: subjects,
     pair_demands: pairDemands, pair_demand_bytes: state.pair_demand_bytes + pairBytes,
-    source_fact_demands: sourceFactDemands, source_fact_demand_bytes: state.source_fact_demand_bytes + sourceFactBytes,
+    source_fact_demands: sourceFactDemands.snapshot, source_fact_demand_bytes: sourceFactDemands.bytes,
+    source_fact_pending_count: sourceFactDemands.pending, source_fact_scan_offset: sourceFactDemands.offset,
     binding_context_bytes: finished ? applied.binding_contexts?.bytes : applied.binding_context_bytes,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
       facets: applied.facets, discoveries: applied.discoveries.length, sourceFacts: applied.source_facts } } : {}),
