@@ -43,6 +43,7 @@ export class PathEffectCursor {
   private computation: PathComputation<void>;
   private replayedEffects = 0;
   private readonly initialBindingBytes: number;
+  public get initialRetainedBytes(): number { return this.initialBytes; }
   public constructor(private readonly rebuild: () => PathComputation<void>, private readonly initialBytes: number,
     public readonly bindingContexts?: BindingContextStore) {
     this.retainedBytes = initialBytes;
@@ -52,10 +53,12 @@ export class PathEffectCursor {
 
   public advance(offset: number, allowance: number, memory: number): Readonly<{
     offset: number; work: number; completed_work: number; progress_position: number; retained_bytes: number; effects: readonly CompiledAdjacencyEffect[];
+    admitted_bytes: number;
     status: "open" | "complete" | "memory_exhausted";
   }> {
     const initialOffset = offset;
     let work = 0;
+    let admittedBytes = 0;
     const effects: CompiledAdjacencyEffect[] = [];
     if (this.resourceFailed) {
       // Throwing closes a generator. Rebuild its immutable input, preserving the
@@ -85,16 +88,20 @@ export class PathEffectCursor {
         try { next = this.computation.next(); }
         catch (error) {
           if (!(error instanceof BindingContextResourceError) && !(error instanceof ProgramAutomatonResourceError)) throw error;
-          this.retainedBytes += (this.bindingContexts?.bytes ?? 0) - previousBytes;
+          const bindingBytes = (this.bindingContexts?.bytes ?? 0) - previousBytes;
+          this.retainedBytes += bindingBytes;
+          admittedBytes += Math.max(0, bindingBytes);
           this.resourceFailed = true;
           return { offset: initialOffset, work, completed_work: this.completedWork, progress_position: this.progressPosition, retained_bytes: this.retainedBytes,
-            effects: [], status: "memory_exhausted" };
+            effects: [], admitted_bytes: admittedBytes, status: "memory_exhausted" };
         }
         // Successful iterator positions survive as a high-water mark. Retrying
         // a failed generator's prefix spends work without inventing progress.
         this.computationPosition += 1;
         this.progressPosition = Math.max(this.progressPosition, this.computationPosition);
-        this.retainedBytes += (this.bindingContexts?.bytes ?? 0) - previousBytes;
+        const bindingBytes = (this.bindingContexts?.bytes ?? 0) - previousBytes;
+        this.retainedBytes += bindingBytes;
+        admittedBytes += Math.max(0, bindingBytes);
         if (next.done) { this.closed = true; break; }
         this.pending = next.value;
         // A producer's payload reservation transfers to the log. Other effects
@@ -106,6 +113,7 @@ export class PathEffectCursor {
       const cost = this.pendingAllocation();
       if (this.retainedBytes + cost > memory) break;
       this.retainedBytes += cost;
+      if (!replayed) admittedBytes += Math.max(0, cost);
       if (this.pending.kind === "work" && this.pending.retention === "effect_payload") this.preparedPayloadBytes += cost;
       if (this.pending.kind === "effect") {
         if (!replayed) { this.effects.push(this.pending.effect); this.loggedPayloadBytes += this.pendingPayloadBytes; }
@@ -117,6 +125,7 @@ export class PathEffectCursor {
     }
     const pendingBytes = this.pendingAllocation();
     return { offset, work, completed_work: this.completedWork, progress_position: this.progressPosition, retained_bytes: this.retainedBytes, effects,
+      admitted_bytes: admittedBytes,
       status: this.retainedBytes + pendingBytes > memory ? "memory_exhausted"
         : this.closed && offset === this.effects.length ? "complete" : "open" };
   }

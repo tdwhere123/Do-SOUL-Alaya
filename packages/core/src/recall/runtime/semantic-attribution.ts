@@ -9,6 +9,7 @@ import { prepareProductEvidence } from "../conditional-field/evidence/product-ev
 import { orderedProjectionValues } from "../conditional-field/engine/field-solve.js";
 import { claimDemandForState } from "../conditional-field/index/claim-obligation.js";
 import type { RelationObserverRow } from "../conditional-field/observers/observe.js";
+import { restoredFieldFootprint, stampRetainedFieldLevel } from "./request-cost-engine-snapshot.js";
 
 export function assessUnknownCause(state: FieldEngineState, input: { readonly as_of: string }): FieldEngineState {
   if ((state.observed_relations?.length ?? 0) === 0 && (state.interpretation.view.claim_demands?.length ?? 0) === 0) {
@@ -35,6 +36,7 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
   let remaining = state.remaining_exploration;
   let memory = state.remaining_memory_bytes + (same ? 0 : state.support_retained_bytes ?? 0);
   let retainedBytes = same ? state.support_retained_bytes ?? 0 : 0;
+  let admittedBytes = 0;
   let offset = same ? state.support_scan_offset ?? 0 : 0;
   const fallback = state.binding.kind === "bound" && state.ordered_identities === undefined ? state.binding.snapshot.values : [];
   const values = orderedProjectionValues(state) ?? { size: fallback.length, at: (index: number) => fallback[index] };
@@ -52,6 +54,7 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     if (prepared.rows.length === 0 && !prepared.complete) {
       progress[key] = { cursor: prepared.progress, complete: false };
       memory -= prepared.retained_bytes; retainedBytes += prepared.retained_bytes;
+      admittedBytes += prepared.retained_bytes;
       break;
     }
     const demand = evidenceDemandForProduct(state, value, input.as_of, prepared.rows, prepared.progress.assertion_ids);
@@ -67,6 +70,7 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
     if (bytes + prepared.retained_bytes > memory) break;
     memory -= bytes + prepared.retained_bytes;
     retainedBytes += bytes + prepared.retained_bytes;
+    admittedBytes += bytes + prepared.retained_bytes;
     for (const record of records) support.set(record.proposition_id, record);
     if (propositions.get(key)?.proposition_id !== proposition.proposition_id) {
       propositions.set(key, proposition); propositionChanged = true;
@@ -81,10 +85,13 @@ export function assessUnknownCause(state: FieldEngineState, input: { readonly as
   const complete = offset === values.size && solverComplete;
   const next = applyEvidenceEffect({ ...state, support: [], remaining_exploration: remaining, remaining_memory_bytes: memory },
     { support: [...support.values()], claims, work_status: complete ? "complete" : "open" });
-  return { ...next, claim_propositions: propositionChanged ? propositions : state.claim_propositions, support_progress: progress,
+  const retained = { ...next, admitted_allocation_bytes: (next.admitted_allocation_bytes ?? 0) + admittedBytes,
+    claim_propositions: propositionChanged ? propositions : state.claim_propositions, support_progress: progress,
     support_scan_offset: offset, support_completed_work: (state.support_completed_work ?? 0) + state.remaining_exploration - remaining,
     support_dependency_revision: dependencyRevision, support_dependency_references: references,
     support_dependencies: dependencies, support_retained_bytes: retainedBytes };
+  return restoredFieldFootprint(retained) > retained.budget.memory_bytes
+    ? retained : stampRetainedFieldLevel(retained, retained.budget.memory_bytes);
 }
 
 function mergeSupportRecord(prior: SupportRecord | undefined, next: SupportRecord): SupportRecord {

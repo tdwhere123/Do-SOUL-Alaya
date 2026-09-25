@@ -154,6 +154,10 @@ export type FieldEngineState = Readonly<{
   readonly solver_completed_work?: number;
   readonly remaining_reserve: number;
   readonly remaining_memory_bytes: number;
+  /** Cumulative admitted logical allocation; releases do not erase a request's charge. */
+  readonly admitted_allocation_bytes: number;
+  /** Full accounted level at a completed phase, including projection-owned retention. */
+  readonly accounted_retained_bytes?: number;
   /** Conservative allocation charges retained across forks and resets in this epoch. */
   readonly solver_retained_bytes?: number;
   readonly memory_exhausted: boolean;
@@ -272,6 +276,7 @@ export function createConditionalField(input: CreateFieldInput): FieldEngineStat
     remaining_exploration: input.budget.work_units - input.budget.finalization_reserve,
     remaining_reserve: input.budget.finalization_reserve,
     remaining_memory_bytes: input.budget.memory_bytes - bindingContexts.bytes,
+    admitted_allocation_bytes: bindingContexts.bytes,
     binding_contexts: bindingContexts.snapshot(),
     binding_context_bytes: bindingContexts.bytes,
     memory_exhausted: false,
@@ -329,6 +334,7 @@ export function applyObserverPage(
   const observedWork = consumption.work?.work_units ?? 0;
   const reserved = { ...state, binding_contexts: bindingContexts,
     binding_context_bytes: (state.binding_context_bytes ?? 0) + bindingBytes,
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + bindingBytes,
     remaining_memory_bytes: state.remaining_memory_bytes - bindingBytes,
     remaining_exploration: Math.max(0, state.remaining_exploration - observedWork) };
   const candidate = bindEngineState(absorbObservations(reserved, { ...consumption, work: { work_units: 0 } }));
@@ -567,6 +573,7 @@ function rejectedField(
     remaining_exploration: 0,
     remaining_reserve: input.budget.finalization_reserve,
     remaining_memory_bytes: input.budget.memory_bytes,
+    admitted_allocation_bytes: 0,
     memory_exhausted: false,
     seen_identities: RetainedSequence.from(identities),
     identity_spool: [],
@@ -626,6 +633,7 @@ function reviseEpoch(
   );
   const revised: FieldEngineState = {
     ...next,
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + (next.admitted_allocation_bytes ?? 0),
     epoch: state.epoch + 1,
     closure: {
       propagation: next.closure.propagation,

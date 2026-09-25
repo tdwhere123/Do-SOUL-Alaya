@@ -15,6 +15,10 @@ export type EngineCostField = Readonly<{
   readonly source_fact_bytes?: number;
   readonly observed_relation_bytes?: number;
   readonly compiled_automaton_bytes?: number;
+  readonly grounding_progress?: { readonly retained_bytes: number };
+  readonly explanation_progress?: { readonly retainedBytes: number };
+  readonly admitted_allocation_bytes: number;
+  readonly accounted_retained_bytes?: number;
 }>;
 
 export type EngineWorkMeters = Readonly<{
@@ -35,16 +39,26 @@ export type RetainedFieldLevels = Readonly<{
   readonly retained_bytes_current: number;
 }>;
 
-/** The field and request ledger restore the same retained allocation before new work. */
+/** One owner for the retained field footprint; the phase stamp also covers delivery progress and payload debits. */
+export function restoredFieldFootprint(field: EngineCostField): number {
+  const owners = (field.pending_path_effects?.retained_bytes ?? 0)
+    + (field.pending_path_effects?.preparation?.retained_bytes ?? 0)
+    + (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0)
+    + (field.solver_retained_bytes ?? 0) + (field.support_retained_bytes ?? 0)
+    + (field.pair_demand_bytes ?? 0) + (field.pair_progress_bytes ?? 0)
+    + (field.source_fact_demand_bytes ?? 0) + (field.source_fact_bytes ?? 0)
+    + (field.observed_relation_bytes ?? 0) + (field.compiled_automaton_bytes ?? 0)
+    + (field.grounding_progress?.retained_bytes ?? 0) + (field.explanation_progress?.retainedBytes ?? 0);
+  return Math.max(owners, field.accounted_retained_bytes ?? 0);
+}
+
+/** Available allowance saturates at zero; retained allocations do not. */
 export function restoredFieldRemainingMemory(field: EngineCostField, memoryBytes: number): number {
-  return Math.max(0, memoryBytes - (field.pending_path_effects?.retained_bytes ?? 0)
-    - (field.pending_path_effects?.preparation?.retained_bytes ?? 0)
-    - (field.binding_context_bytes ?? field.binding_contexts?.bytes ?? 0)
-    - (field.solver_retained_bytes ?? 0) - (field.support_retained_bytes ?? 0)
-    - (field.pair_demand_bytes ?? 0)
-    - (field.pair_progress_bytes ?? 0) - (field.source_fact_demand_bytes ?? 0)
-    - (field.source_fact_bytes ?? 0) - (field.observed_relation_bytes ?? 0)
-    - (field.compiled_automaton_bytes ?? 0));
+  return Math.max(0, memoryBytes - restoredFieldFootprint(field));
+}
+
+export function stampRetainedFieldLevel<T extends EngineCostField>(field: T, memoryBytes: number): T {
+  return { ...field, accounted_retained_bytes: Math.max(0, memoryBytes - field.remaining_memory_bytes) };
 }
 
 export function snapshotRestoredEngineWork(
@@ -80,7 +94,7 @@ export function thisRequestObservedWork(
   return {
     relaxations: Math.max(0, after.solver_completed_work - before.solver_completed_work),
     state_creates: Math.max(0, after.charged_identities - before.charged_identities),
-    charged_retained_bytes: Math.max(0, before.remaining_memory_bytes - after.remaining_memory_bytes),
+    charged_retained_bytes: Math.max(0, field.admitted_allocation_bytes - (restored?.admitted_allocation_bytes ?? 0)),
     // Remaining worklist after observe; not units executed this request.
     pending_work: field.remaining_work.reduce((sum, row) => sum + row.units, 0)
   };
@@ -89,6 +103,7 @@ export function thisRequestObservedWork(
 export function retainedFieldLevels(field: EngineCostField, memoryBytes: number): RetainedFieldLevels {
   return {
     retained_states_current: field.seen_identities.length,
-    retained_bytes_current: Math.max(0, memoryBytes - field.remaining_memory_bytes)
+    retained_bytes_current: Math.max(restoredFieldFootprint(field),
+      Math.max(0, memoryBytes - field.remaining_memory_bytes))
   };
 }

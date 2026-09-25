@@ -20,6 +20,7 @@ import {
 import { BoundedIndexPayload } from "./index-payload.js";
 import type { ConditionalFieldRecallRequest } from "./recall-service-runner-types.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
+import type { RequestCostLedger } from "./request-cost-ledger.js";
 
 const INDEX_PREVIEWS = new WeakMap<InformationIndex, ReadonlyMap<string, string>>();
 const INDEX_SOURCE_METADATA = new WeakMap<InformationIndex, Readonly<Record<string, RecallSourceMetadata>>>();
@@ -157,6 +158,7 @@ export function retainAndIssueIndex(input: Readonly<{
   readonly state: FieldEngineState;
   readonly first_retention: boolean;
   readonly payload: BoundedIndexPayload;
+  readonly cost: RequestCostLedger;
   readonly request: ConditionalFieldRecallRequest;
   readonly queryKey: string;
   readonly requestDigest: string;
@@ -186,6 +188,7 @@ export function retainAndIssueIndex(input: Readonly<{
     index = { ...index, continuation: null };
   } else {
     input.payload.remainingMemoryBytes -= delivery.bytes;
+    input.cost.add("index", { charged_retained_bytes: delivery.bytes });
     retained = { ...retained, projection_progress: delivery.progress };
     if (index.continuation === null && !invalidated && index.entries.some((entry) => entry.target.kind === "source_evidence")) {
       const view = input.state.interpretation.view;

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { QueryInterpretation } from "@do-soul/alaya-protocol";
 import {
   retainedFieldLevels,
+  restoredFieldFootprint,
+  restoredFieldRemainingMemory,
   snapshotRestoredEngineWork,
+  stampRetainedFieldLevel,
   thisRequestObservedWork
 } from "../../../recall/runtime/request-cost-engine-snapshot.js";
 import { observeField } from "../../../recall/runtime/conditional-field-observe.js";
@@ -17,6 +20,7 @@ describe("request-cost engine work snapshot", () => {
       solver_completed_work: 12,
       seen_identities: { length: 8 },
       remaining_memory_bytes: 40,
+      admitted_allocation_bytes: 20,
       remaining_work: remaining(5),
       pending_path_effects: { retained_bytes: 20 }
     };
@@ -35,6 +39,7 @@ describe("request-cost engine work snapshot", () => {
       solver_completed_work: 15,
       seen_identities: { length: 9 },
       remaining_memory_bytes: 900,
+      admitted_allocation_bytes: 100,
       remaining_work: remaining(2)
     }, 1_000);
     expect(progressed.relaxations).toBe(3);
@@ -48,6 +53,7 @@ describe("request-cost engine work snapshot", () => {
       solver_completed_work: 7,
       seen_identities: { length: 4 },
       remaining_memory_bytes: 750,
+      admitted_allocation_bytes: 250,
       remaining_work: remaining(9)
     };
     const delta = thisRequestObservedWork(undefined, field, 1_000);
@@ -67,12 +73,14 @@ describe("request-cost engine work snapshot", () => {
       solver_completed_work: 10,
       seen_identities: { length: 6 },
       remaining_memory_bytes: 500,
+      admitted_allocation_bytes: 10,
       remaining_work: remaining(1)
     };
     const delta = thisRequestObservedWork(restored, {
       solver_completed_work: 8,
       seen_identities: { length: 3 },
       remaining_memory_bytes: 500,
+      admitted_allocation_bytes: 10,
       remaining_work: remaining(1)
     }, 500);
     expect(delta.relaxations).toBe(0);
@@ -83,6 +91,7 @@ describe("request-cost engine work snapshot", () => {
   it("restores pending preparation once and charges only new retention", () => {
     const prepared = {
       solver_completed_work: 3, seen_identities: { length: 2 }, remaining_memory_bytes: 1,
+      admitted_allocation_bytes: 344,
       remaining_work: remaining(0), pending_path_effects: { retained_bytes: 11, preparation: { retained_bytes: 136 } },
       binding_context_bytes: 0, binding_contexts: { bytes: 90 }, solver_retained_bytes: 17,
       support_retained_bytes: 13,
@@ -93,11 +102,26 @@ describe("request-cost engine work snapshot", () => {
     expect(restored.remaining_memory_bytes).toBe(643);
     expect(thisRequestObservedWork(prepared, { ...prepared, remaining_memory_bytes: 643 }, 1_000)
       .charged_retained_bytes).toBe(0);
-    const added = { ...prepared, remaining_memory_bytes: 596 };
+    const added = { ...prepared, remaining_memory_bytes: 596, admitted_allocation_bytes: 391 };
     expect(thisRequestObservedWork(prepared, added, 1_000).charged_retained_bytes).toBe(47);
     expect(retainedFieldLevels(added, 1_000)).toEqual({ retained_states_current: 2, retained_bytes_current: 404 });
     const legacy = { ...prepared, binding_context_bytes: undefined };
     expect(snapshotRestoredEngineWork(legacy, 1_000).remaining_memory_bytes).toBe(553);
+  });
+
+  it("retains projection progress and payload-owned previews without rebilling an idle continuation", () => {
+    const projected = stampRetainedFieldLevel({ seen_identities: { length: 1 }, remaining_work: remaining(0),
+      remaining_memory_bytes: 73, admitted_allocation_bytes: 100, solver_retained_bytes: 100,
+      grounding_progress: { retained_bytes: 13 }, explanation_progress: { retainedBytes: 11 },
+      preview_cache: { entry: "abc", object: "abc" } }, 200);
+    expect(restoredFieldFootprint(projected)).toBe(127);
+    expect(restoredFieldRemainingMemory(projected, 200)).toBe(73);
+    expect(retainedFieldLevels(projected, 200).retained_bytes_current).toBe(127);
+    expect(thisRequestObservedWork(projected, projected, 200).charged_retained_bytes).toBe(0);
+    expect(restoredFieldRemainingMemory(projected, 120)).toBe(0);
+    expect(retainedFieldLevels(projected, 120).retained_bytes_current).toBe(127);
+    const largerOwner = { ...projected, grounding_progress: { retained_bytes: 30 } };
+    expect(retainedFieldLevels(largerOwner, 120).retained_bytes_current).toBe(141);
   });
 
   it("does not rebill retained path preparation on a zero-exploration continuation", () => {
@@ -142,5 +166,24 @@ describe("request-cost engine work snapshot", () => {
       state_creates: 0, charged_retained_bytes: 0 });
     expect(retainedFieldLevels(next, 1_000_000).retained_bytes_current)
       .toBe(1_000_000 - before.remaining_memory_bytes);
+    const committed = observeField(interpretation, { ...request, resume_field: first,
+      budget: defaultBudget({ work_units: 104, memory_bytes: 1_000_000 }) });
+    const pairDemandGrowth = committed.pair_demand_bytes - first.pair_demand_bytes;
+    expect(pairDemandGrowth).toBe(99);
+    expect(committed.pending_path_effects?.preparation).toBeUndefined();
+    expect(thisRequestObservedWork(first, committed, 1_000_000).charged_retained_bytes)
+      .toBeGreaterThanOrEqual(pairDemandGrowth);
+    const solved = observeField(interpretation, { ...request, resume_field: first,
+      budget: defaultBudget({ work_units: 200, memory_bytes: 1_000_000 }) });
+    const solverGrowth = (solved.solver_retained_bytes ?? 0) - (first.solver_retained_bytes ?? 0);
+    expect(solverGrowth).toBeGreaterThan(0);
+    expect(thisRequestObservedWork(first, solved, 1_000_000).charged_retained_bytes)
+      .toBeGreaterThanOrEqual(solverGrowth);
+    const reduced = observeField(interpretation, { ...request, resume_field: first, cancelled: true,
+      budget: defaultBudget({ work_units: 100, memory_bytes: 20_000 }) });
+    expect(reduced.memory_exhausted).toBe(true);
+    expect(retainedFieldLevels(reduced, 20_000).retained_bytes_current)
+      .toBe(retainedFieldLevels(first, 1_000_000).retained_bytes_current);
+    expect(thisRequestObservedWork(first, reduced, 20_000).charged_retained_bytes).toBe(0);
   });
 });

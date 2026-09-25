@@ -260,6 +260,11 @@ Projection charges retained candidate and facet visits through the request
 cost ledger and resumes interrupted facet scans. Native, relaxation and
 projection counters describe their instrumented operations; they do not
 establish a bound on every process allocation or operating-system cost.
+The request charge records newly admitted logical allocations even if a later
+phase releases preparation; retained bytes report the full surviving field and
+projection footprint separately from the request's available allowance. Payload
+delivery charges new previews and metadata once, while cached previews carry
+their retained level without a new charge.
 
 Admitted immutable hard relation instances transfer at identity (1000).
 Relation names do not assign grades. Associative enumeration requires a

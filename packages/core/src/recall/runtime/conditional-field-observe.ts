@@ -35,7 +35,7 @@ import {
   type SourceDomainCoverage
 } from "./observe-field-residuals.js";
 import type { RequestCostLedger } from "./request-cost-ledger.js";
-import { restoredFieldRemainingMemory } from "./request-cost-engine-snapshot.js";
+import { restoredFieldFootprint, restoredFieldRemainingMemory, stampRetainedFieldLevel } from "./request-cost-engine-snapshot.js";
 import {
   RELATION_ROUTING,
   interruptObservedField,
@@ -79,7 +79,9 @@ export function observeField(
   const observed = observeWithinMemory(interpretation, input, {
     ...initial, remaining_memory_bytes: initial.remaining_memory_bytes - finalizationBytes
   });
-  return { ...observed, remaining_memory_bytes: observed.remaining_memory_bytes + finalizationBytes };
+  const completed = { ...observed, remaining_memory_bytes: observed.remaining_memory_bytes + finalizationBytes };
+  return restoredFieldFootprint(completed) > input.budget.memory_bytes
+    ? completed : stampRetainedFieldLevel(completed, input.budget.memory_bytes);
 }
 
 function observeWithinMemory(
@@ -89,6 +91,7 @@ function observeWithinMemory(
 ): FieldEngineState {
   let state = initial;
   if (input.cancelled === true) return cancelledField(state);
+  if (state.memory_exhausted) return interruptObservedField(state);
   const runtime = runtimeProgram(interpretation.program);
   if (runtime !== "empty" && runtime !== "epsilon" && state.compiled_automaton === undefined) {
     let compilation;
@@ -104,6 +107,7 @@ function observeWithinMemory(
     }
     state = { ...state, compiled_automaton: compileProgramAutomaton(runtime),
       compiled_automaton_bytes: compilation.retained_bytes,
+      admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + compilation.retained_bytes,
       remaining_exploration: state.remaining_exploration - compilation.work_units,
       remaining_memory_bytes: state.remaining_memory_bytes - compilation.retained_bytes };
     input.cost?.add("observe", { joins: compilation.work_units });
@@ -218,6 +222,9 @@ function startObservedField(
       last_observer_status: resumed.last_observer_status === "interrupted" ? "open" : resumed.last_observer_status,
       retention_rejected: undefined
     };
+    if (restoredFieldFootprint(resumed) > input.budget.memory_bytes) {
+      return { ...interruptObservedField(restored), memory_exhausted: true };
+    }
     if (restored.binding.kind !== "bound" || restored.binding.solver_complete && restored.identity_spool.length === 0) return restored;
     const { binding, ...pending } = restored;
     return bindEngineState({ ...pending, proven_binding: binding });

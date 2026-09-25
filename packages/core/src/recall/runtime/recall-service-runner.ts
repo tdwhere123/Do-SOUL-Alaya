@@ -44,7 +44,7 @@ import {
 } from "./recall-index-commit.js";
 import type { ConditionalFieldExecutionReceipt } from "./conditional-field-execution-receipt.js";
 import { startRequestCost, type RequestCostLedger } from "./request-cost-ledger.js";
-import { retainedFieldLevels, thisRequestObservedWork } from "./request-cost-engine-snapshot.js";
+import { restoredFieldFootprint, retainedFieldLevels, stampRetainedFieldLevel, thisRequestObservedWork } from "./request-cost-engine-snapshot.js";
 import type {
   ConditionalFieldRecallRequest,
   RecallExecutionContext,
@@ -302,8 +302,14 @@ function runCompiledConditionalFieldRecall(
   }));
   // Max-min bind runs inside observe; lifetime solver_completed_work is not this request's solve work.
   cost.add("observe", thisRequestObservedWork(restored, field, input.budget.memory_bytes));
-  let retained = field;
-  const index = projectFromField(assessUnknownCause(field, input), input, interpretation, (next) => { retained = next; }, cost, restored);
+  const assessed = assessUnknownCause(field, input);
+  cost.add("index", { charged_retained_bytes: Math.max(0,
+    (assessed.admitted_allocation_bytes ?? 0) - (field.admitted_allocation_bytes ?? 0)) });
+  let retained = assessed;
+  const index = projectFromField(assessed, input, interpretation, (next) => { retained = next; }, cost, restored);
+  if (restoredFieldFootprint(retained) <= input.budget.memory_bytes) {
+    retained = stampRetainedFieldLevel(retained, input.budget.memory_bytes);
+  }
   stageIndexSourceValidation(index, () => {
     const latest = input.readers.snapshotPin?.(input.workspace_id);
     if (latest !== undefined) cost.add("index", { native_visits: SNAPSHOT_PIN_NATIVE_WORK });

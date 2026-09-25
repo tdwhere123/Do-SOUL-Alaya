@@ -102,8 +102,8 @@ function projectPayloadPage(context: ProjectionContext): InformationIndex {
     ? sourceEvidenceRootTarget(delivered.entry.target) : delivered.entry.target };
   const finalized = cost.time("payload", () => payload.finalize([entry],
     Math.min(state.remaining_reserve + state.remaining_exploration, input.budget.finalization_reserve)));
-  const work = payload.takeNativeWork();
-  cost.add("payload", { ...work, charged_retained_bytes: work.native_bytes, native_rows: 1 });
+  const work = payload.takeWork();
+  cost.add("payload", { ...work, native_rows: 1 });
   const expanded = payload.applyDeliveredSpans({
     ...delivered.index,
     entries: [entry],
@@ -148,6 +148,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     explanation_progress: state.explanation_progress,
     on_explanation_progress: (progress, retainedBytes, work) => {
       payload.remainingMemoryBytes = Math.max(0, payload.remainingMemoryBytes - retainedBytes);
+      cost.add("index", { charged_retained_bytes: retainedBytes });
       retained = { ...retained, explanation_progress: progress,
         explanation_completed_work: (retained.explanation_completed_work ?? 0) + work,
         remaining_memory_bytes: payload.remainingMemoryBytes };
@@ -180,9 +181,9 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     // Truncated source chunks stay retryable so payload_continuation can fetch the next offset.
     finalize_payload: (entries, allowance) => cost.time("payload", () => {
       const result = payload.finalize(entries, allowance);
-      const work = payload.takeNativeWork();
+      const work = payload.takeWork();
       cost.add("payload", { native_visits: work.native_visits, native_bytes: work.native_bytes,
-        charged_retained_bytes: work.native_bytes, native_rows: entries.length });
+        charged_retained_bytes: work.charged_retained_bytes, native_rows: entries.length });
       return result;
     }),
     prior_continuation: input.continuation == null
@@ -215,6 +216,7 @@ function projectMembershipPage(context: ProjectionContext): InformationIndex {
     state: retained,
     first_retention: state.projection_progress === undefined,
     payload,
+    cost,
     request: input,
     queryKey,
     requestDigest,

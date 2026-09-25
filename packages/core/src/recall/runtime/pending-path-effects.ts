@@ -37,12 +37,14 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, pending.input.options,
     state.remaining_memory_bytes + pending.retained_bytes);
   if (cursor === undefined) return interrupted(state, true);
+  const initialBytes = pending.cursor === undefined ? Math.max(0, cursor.initialRetainedBytes - pending.retained_bytes) : 0;
   const advanced = cursor.advance(pending.offset, Math.max(0, Math.floor(state.remaining_exploration / 2)),
     state.remaining_memory_bytes + pending.retained_bytes);
   const retained = { ...pending, cursor, retained_bytes: advanced.retained_bytes,
     completed_work: advanced.completed_work, progress_position: advanced.progress_position };
   const charged = { ...state, pending_path_effects: retained,
     remaining_exploration: state.remaining_exploration - advanced.work,
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + initialBytes + advanced.admitted_bytes,
     remaining_memory_bytes: state.remaining_memory_bytes - (advanced.retained_bytes - pending.retained_bytes) };
   if (advanced.status === "memory_exhausted") {
     return interrupted(charged, true);
@@ -58,6 +60,7 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
     retained_bytes: scratchBytes
   };
   return { ...charged, pending_path_effects: { ...retained, preparation },
+    admitted_allocation_bytes: charged.admitted_allocation_bytes + scratchBytes,
     remaining_memory_bytes: charged.remaining_memory_bytes - scratchBytes };
 }
 
@@ -125,6 +128,8 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
     pair_bytes: pairBytes, source_demands: sources, source_pending: sourcePending, source_bytes: sourceBytes,
     retained_bytes: preparationBytes(preparation.effects.length) + pairBytes + sourceBytes };
   const charged = { ...state, pending_path_effects: { ...pending, preparation: next },
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0)
+      + (state.remaining_memory_bytes - memory),
     remaining_exploration: work, remaining_memory_bytes: memory };
   return index < preparation.effects.length ? interrupted(charged, memoryBlocked) : charged;
 }

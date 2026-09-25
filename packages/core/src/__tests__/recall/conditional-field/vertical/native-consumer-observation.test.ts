@@ -3,6 +3,7 @@ import { MemoryDimension, productSubjectId, type QueryInterpretation } from "@do
 import { createConditionalFieldObserverReaders } from "../../../../../../../apps/core-daemon/src/runtime/recall-read-worker/observer-operations.js";
 import { observeField, type ObserveFieldInput } from "../../../../recall/runtime/conditional-field-observe.js";
 import { RequestCostLedger, type RequestCostDelta, type RequestCostPhase } from "../../../../recall/runtime/request-cost-ledger.js";
+import { retainedFieldLevels, thisRequestObservedWork } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
 import { defaultBudget, defaultView, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 import { openSourceSlice, MEM, WS } from "./source-slice.js";
 
@@ -79,6 +80,7 @@ describe("native consumer-directed observation", () => {
           closure: state.closure, residuals: state.residuals,
           workConsumed: workUnits - (defaultBudget({ work_units: workUnits }).finalization_reserve ?? 0)
             - state.remaining_exploration, retainedBytes: 1_000_000 - state.remaining_memory_bytes,
+          chargedRetainedBytes: thisRequestObservedWork(undefined, state, 1_000_000).charged_retained_bytes,
           nativeVisits: cost.snapshot().native_visits, nativeBytes: cost.snapshot().native_bytes,
           adjacencyJoins: cost.snapshot().phases.adjacency.joins, joinEvents: cost.joins }));
         if (workUnits === 10_000) {
@@ -94,13 +96,20 @@ describe("native consumer-directed observation", () => {
         if (workUnits === 500) {
           const completed = new Set(trace.map((row) => `${row.subject}\0${row.predicate}`));
           trace.length = 0;
+          const prior = state;
           state = observeField(interpretation, { ...request, resume_field: state });
+          const continuedCost = thisRequestObservedWork(prior, state, 1_000_000);
+          expect(continuedCost.charged_retained_bytes).toBeGreaterThan(0);
+          expect(retainedFieldLevels(state, 1_000_000).retained_bytes_current)
+            .toBe(1_000_000 - state.remaining_memory_bytes);
           expect(trace.every((row) => !completed.has(`${row.subject}\0${row.predicate}`))).toBe(true);
           expect(state.binding.kind === "bound" && state.binding.snapshot.values.some((value) =>
             value.accepting && productSubjectId(value.state) === (variant === "a" ? MEM.c : MEM.p))).toBe(true);
           console.info(JSON.stringify({ label: `native-demand-${variant}-resume`, trace,
             adjacency: state.residuals.find((row) => row.kind === "adjacency")?.status,
-            workConsumed: 400 - state.remaining_exploration }));
+            workConsumed: 400 - state.remaining_exploration,
+            chargedRetainedBytes: continuedCost.charged_retained_bytes,
+            retainedBytes: retainedFieldLevels(state, 1_000_000).retained_bytes_current }));
         }
       }
     } finally { database?.close(); }

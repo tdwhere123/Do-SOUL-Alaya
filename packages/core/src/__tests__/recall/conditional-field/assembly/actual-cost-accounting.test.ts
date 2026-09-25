@@ -56,6 +56,12 @@ describe("conditional-field actual request cost", () => {
     expect(actual.rss.peak_bytes)
       .toBeGreaterThanOrEqual(Math.max(actual.rss.start_bytes, actual.rss.after_projection_bytes));
     expect(actual.retained_states_current).toBe(actual.phases.observe.state_creates);
+    const previews = captureIndexPreviews(executed.index, readersFor(slice), WS);
+    const previewBytes = [...new Set(previews.values())]
+      .reduce((sum, preview) => sum + Buffer.byteLength(preview, "utf8"), 0);
+    expect(previewBytes).toBeGreaterThan(0);
+    expect(actual.retained_bytes_current).toBeGreaterThanOrEqual(previewBytes);
+    expect(actual.phases.payload.charged_retained_bytes).toBeGreaterThan(0);
   });
 
   it.each([0, 1])("rejects an unserviceable %i-unit request without a replayable cursor", (work_units) => {
@@ -227,7 +233,9 @@ describe("conditional-field actual request cost", () => {
     const joinPhases = Object.entries(firstActual.phases)
       .filter(([phase]) => phase !== "adjacency")
       .reduce((sum, [, phase]) => sum + phase.joins, 0);
-    expect(joinPhases).toBe(0);
+    // The fixed relation query compiles with five joins; pending adjacency joins have not run.
+    expect(firstActual.phases.observe.joins).toBe(5);
+    expect(joinPhases).toBe(5);
     if (firstActual.phases.observe.pending_work > 0) {
       expect(firstActual.phases.adjacency.joins).not.toBe(firstActual.phases.observe.pending_work);
     }
@@ -254,6 +262,7 @@ describe("conditional-field actual request cost", () => {
     expect(retryActual.phases.observe.relaxations).toBe(0);
     expect(retryActual.phases.observe.state_creates).toBe(0);
     expect(retryActual.phases.solve.relaxations).toBe(0);
+    expect(retryActual.phases.payload.charged_retained_bytes).toBe(0);
   });
 
   it("keeps a payload expansion page's solver and identity deltas at 0 when resuming", () => {

@@ -9,6 +9,43 @@ import { encodeRecallResult } from "../../../../recall/recall-service.js";
 import { SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 describe("memory payload hydrate revision pin", () => {
+  it("charges a new retained-fact preview once and reuses its cached preview without another charge", () => {
+    const entry = memoryEntry("rev1");
+    const first = new BoundedIndexPayload({
+      sourceFacts: new Map([["memory", { object_id: "memory", source_revision: "rev1", content: "pinned fact body" }]]),
+      readers: {}, workspaceId: "workspace", remainingMemoryBytes: 10_000,
+      manifestationFor: () => "excerpt"
+    });
+    expect(first.finalize([entry], 20).complete).toBe(true);
+    const admitted = first.takeWork();
+    expect(admitted.native_bytes).toBe(0);
+    expect(admitted.charged_retained_bytes).toBeGreaterThan(0);
+    expect(first.takeWork().charged_retained_bytes).toBe(0);
+
+    const cached = new BoundedIndexPayload({
+      previewCache: Object.fromEntries(first.previews),
+      readers: { source: () => { throw new Error("cached preview must not rehydrate"); } },
+      workspaceId: "workspace", remainingMemoryBytes: 10_000,
+      manifestationFor: () => "excerpt"
+    });
+    expect(cached.finalize([entry], 20).complete).toBe(true);
+    expect(cached.takeWork()).toMatchObject({ native_bytes: 0, charged_retained_bytes: 0 });
+  });
+
+  it("reuses a cached reference hint without charging its bytes again", () => {
+    const entry = memoryEntry("rev1");
+    const make = (previewCache?: Readonly<Record<string, string>>) => new BoundedIndexPayload({
+      ...(previewCache === undefined ? {} : { previewCache }), readers: {}, workspaceId: "workspace",
+      remainingMemoryBytes: 10_000, manifestationFor: () => "hint"
+    });
+    const first = make();
+    expect(first.finalize([entry], 20).complete).toBe(true);
+    expect(first.takeWork().charged_retained_bytes).toBe(Buffer.byteLength("[memory ref: memory]", "utf8"));
+    const cached = make(Object.fromEntries(first.previews));
+    expect(cached.finalize([entry], 20).complete).toBe(true);
+    expect(cached.takeWork().charged_retained_bytes).toBe(0);
+  });
+
   it("rejects reader content when IndexEntry revision and source row revision differ", () => {
     const calls: string[] = [];
     const payload = new BoundedIndexPayload({

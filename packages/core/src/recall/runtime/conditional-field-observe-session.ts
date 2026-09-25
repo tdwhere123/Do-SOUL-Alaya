@@ -260,6 +260,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     session.state = applyObserverPage({ ...before, pair_progress: completedPair.snapshot,
       pair_completed_count: completedPair.completed, pair_revision: completedPair.revision,
       pair_progress_bytes: completedPair.bytes,
+      admitted_allocation_bytes: (before.admitted_allocation_bytes ?? 0) + pairBytes,
       remaining_memory_bytes: session.state.remaining_memory_bytes - pairBytes }, {
       page: maskAdjacencyExhaustion(observed.page, completedPair.hasOpenDemand()),
       work: observed.work, resume_cursors: resumeCursors(cursors, completedPair) });
@@ -340,7 +341,9 @@ function retainObservedContext(
     closure: { ...before.closure, observation: "interrupted", requested_index: "open" },
     residuals: before.residuals.map((region) => region.status === "open" ? { ...region, status: "interrupted" } : region) };
   return { ...state, source_facts: facts.snapshot, source_fact_bytes: facts.bytes,
-    observed_relations: relations, observed_relation_bytes: relationBytes, remaining_memory_bytes: state.remaining_memory_bytes - bytes,
+    observed_relations: relations, observed_relation_bytes: relationBytes,
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + Math.max(0, bytes),
+    remaining_memory_bytes: state.remaining_memory_bytes - bytes,
     pair_progress: pairProgress.snapshot, pair_completed_count: pairProgress.completed,
     pair_revision: pairProgress.revision, pair_progress_bytes: pairProgress.bytes,
     resume_subjects: subjects.snapshot };
@@ -475,8 +478,10 @@ function forkBindingContexts(state: FieldEngineState): BindingContextStore {
 }
 
 function retainBindingContexts(state: FieldEngineState, owner: BindingContextStore): FieldEngineState {
+  const added = owner.bytes - (state.binding_contexts?.bytes ?? 0);
   return { ...state, binding_contexts: owner.snapshot(), binding_context_bytes: owner.bytes,
-    remaining_memory_bytes: state.remaining_memory_bytes - owner.bytes + (state.binding_contexts?.bytes ?? 0) };
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + Math.max(0, added),
+    remaining_memory_bytes: state.remaining_memory_bytes - added };
 }
 
 function rejectBindingResource(session: ObservationSession, error: unknown): true {
@@ -669,6 +674,7 @@ function consumeBoundSourceFact(session: ObservationSession): boolean {
   session.sourceFacts = sourceFacts;
   session.state = { ...charged,
     remaining_memory_bytes: charged.remaining_memory_bytes - retainedBytes,
+    admitted_allocation_bytes: (charged.admitted_allocation_bytes ?? 0) + retainedBytes,
     source_facts: sourceFacts.snapshot, source_fact_bytes: sourceFacts.bytes,
     source_fact_demands: demands.snapshot, source_fact_pending_count: demands.pending,
     source_fact_scan_offset: pending.next };

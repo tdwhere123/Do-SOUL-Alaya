@@ -25,6 +25,7 @@ export class BoundedIndexPayload {
   public remainingMemoryBytes: number;
   private nativeVisits = 0;
   private nativeBytes = 0;
+  private admittedBytes = 0;
   private readonly deliveredSpans = new Map<string, SourceDeliveredSpan>();
 
   public constructor(private readonly input: Readonly<{
@@ -57,13 +58,14 @@ export class BoundedIndexPayload {
       }
       if (objectId !== undefined && this.input.manifestationFor(objectId) === "hint") {
         const preview = `[memory ref: ${objectId}]`;
+        if (this.previews.get(cacheKey) === preview) continue;
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) {
           complete = false;
           forgetPreview(this.previews, cacheKey, objectId);
           continue;
         }
-        remaining -= 1; this.remainingMemoryBytes -= bytes;
+        remaining -= 1; this.consumeMemory(bytes);
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
@@ -77,7 +79,7 @@ export class BoundedIndexPayload {
           forgetPreview(this.previews, cacheKey, objectId);
           continue;
         }
-        remaining -= 1; this.remainingMemoryBytes -= bytes;
+        remaining -= 1; this.consumeMemory(bytes);
         rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       }
       const continued = this.payloadContinuationFor(entry.target);
@@ -101,7 +103,7 @@ export class BoundedIndexPayload {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) { complete = false; continue; }
-        remaining -= 1; this.remainingMemoryBytes -= bytes;
+        remaining -= 1; this.consumeMemory(bytes);
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
@@ -115,7 +117,7 @@ export class BoundedIndexPayload {
         const preview = createContentPreview(retainedContent, "excerpt");
         const bytes = Buffer.byteLength(preview, "utf8");
         if (remaining < 1 || bytes > this.remainingMemoryBytes) continue;
-        remaining -= 1; this.remainingMemoryBytes -= bytes;
+        remaining -= 1; this.consumeMemory(bytes);
         rememberPreview(this.previews, cacheKey, objectId, preview);
         continue;
       }
@@ -125,7 +127,7 @@ export class BoundedIndexPayload {
       remaining -= Math.max(1, page.rowsRead) + 2;
       this.nativeVisits += Math.max(1, page.rowsRead);
       this.nativeBytes += page.bytesRead;
-      this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead);
+      this.consumeMemory(page.bytesRead);
       if (page.row?.content === undefined || page.unavailable) { complete = false; continue; }
       // Object-id source lookup is current state, not the pinned product.
       if (!observedMemoryRevisionMatches(entry, page.row.sourceRevision)) {
@@ -136,18 +138,26 @@ export class BoundedIndexPayload {
       const metadata = sourceMetadataFrom(page.row, this.input.asOf);
       const metadataBytes = Buffer.byteLength(JSON.stringify([objectId, metadata]), "utf8");
       if (metadataBytes > this.remainingMemoryBytes) { complete = false; continue; }
-      this.remainingMemoryBytes -= metadataBytes;
+      this.consumeMemory(metadataBytes);
       rememberMetadata(this.sourceMetadata, cacheKey, objectId, metadata);
       rememberPreview(this.previews, cacheKey, objectId, createContentPreview(page.row.content, "excerpt"));
     }
     return { remaining: Math.max(0, remaining), complete, retryable: !complete && retryable };
   }
 
-  public takeNativeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number }> {
-    const work = { native_visits: this.nativeVisits, native_bytes: this.nativeBytes };
+  public takeWork(): Readonly<{ readonly native_visits: number; readonly native_bytes: number;
+    readonly charged_retained_bytes: number }> {
+    const work = { native_visits: this.nativeVisits, native_bytes: this.nativeBytes,
+      charged_retained_bytes: this.admittedBytes };
     this.nativeVisits = 0;
     this.nativeBytes = 0;
+    this.admittedBytes = 0;
     return work;
+  }
+
+  private consumeMemory(bytes: number): void {
+    this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - bytes);
+    this.admittedBytes += bytes;
   }
 
   public applyDeliveredSpans(index: InformationIndex): InformationIndex {
@@ -191,7 +201,7 @@ export class BoundedIndexPayload {
     const nextRemaining = remaining - Math.max(1, page.nativeWork ?? page.rowsRead) - 2;
     this.nativeVisits += Math.max(1, page.nativeWork ?? page.rowsRead);
     this.nativeBytes += page.bytesRead + (page.metadataBytes ?? 0);
-    this.remainingMemoryBytes = Math.max(0, this.remainingMemoryBytes - page.bytesRead - (page.metadataBytes ?? 0));
+    this.consumeMemory(page.bytesRead + (page.metadataBytes ?? 0));
     if (page.row?.content === undefined || page.unavailable) {
       return { ok: false, remaining: nextRemaining, retryable: page.resourceLimited === true };
     }
@@ -203,7 +213,7 @@ export class BoundedIndexPayload {
       forgetPreview(this.previews, cacheKey, undefined);
       return { ok: false, remaining: nextRemaining, retryable: true };
     }
-    this.remainingMemoryBytes -= requiredBytes;
+    this.consumeMemory(requiredBytes);
     this.deliveredSpans.set(sourceEvidenceRootKey(target), deliveredSpanFromHydrate(page.row, offset, !truncated));
     {
       rememberPreview(
