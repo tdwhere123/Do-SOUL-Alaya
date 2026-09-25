@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdtempSync, readFileSync, renameSync,
+  rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -68,6 +69,39 @@ it("keeps the actual unresolved attempt in a bounded retained inventory", () => 
   expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot()).toMatchObject({
     attempts: 1, unresolvedAttempts: [expect.any(Object)]
   });
+});
+
+it("rejects a renamed pending ledger before another proposal attempt or canonical ledger exists", async () => {
+  const { cacheRoot, authority } = fixture();
+  const key = materializeSemanticProposalLines(workset, 128)[0]!.key;
+  openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).reserveAttemptOrdinal(key);
+  const canonical = ledgerPath(cacheRoot, authority.attempt_lineage_digest);
+  const retainedBytes = readFileSync(canonical);
+  const foreign = ledgerPath(cacheRoot, authority.attempt_lineage_digest === "f".repeat(64)
+    ? "e".repeat(64) : "f".repeat(64));
+  renameSync(canonical, foreign);
+  expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/physical filename differs from retained lineage/u);
+  let calls = 0;
+  await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor: {
+    extract: async () => { calls += 1; throw new Error("renamed pending history must not dispatch"); }
+  } })).rejects.toThrow(/physical filename differs from retained lineage/u);
+  expect(calls).toBe(0);
+  expect(existsSync(canonical)).toBe(false);
+  expect(readFileSync(foreign)).toEqual(retainedBytes);
+});
+
+it("rejects duplicate physical files declaring one pending ledger lineage", () => {
+  const { cacheRoot, authority } = fixture();
+  const key = materializeSemanticProposalLines(workset, 128)[0]!.key;
+  openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).reserveAttemptOrdinal(key);
+  const canonical = ledgerPath(cacheRoot, authority.attempt_lineage_digest);
+  const foreign = ledgerPath(cacheRoot, authority.attempt_lineage_digest === "f".repeat(64)
+    ? "e".repeat(64) : "f".repeat(64));
+  copyFileSync(canonical, foreign);
+  expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/physical filename differs from retained lineage/u);
+  expect(() => openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }))
+    .toThrow(/physical filename differs from retained lineage/u);
+  expect(readFileSync(foreign)).toEqual(readFileSync(canonical));
 });
 
 it("bounds a ledger that grows past the remaining inventory allowance before decoding it", () => {

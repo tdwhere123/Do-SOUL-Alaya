@@ -75,6 +75,10 @@ export function listExtractionAttemptLedgerRecords(cacheRoot: string): readonly 
         throw new AlayaError("UNAVAILABLE", "extraction attempt ledger inventory exceeds retained input limit");
       }
       const envelope = readAttemptLedgerRecordEnvelope(join(directory, name), remainingBytes);
+      // One canonical path per declared lineage also excludes duplicate physical owners.
+      if (ledgerPath(directory, envelope.record.lineage_digest) !== join(directory, name)) {
+        throw new AlayaError("CONFLICT", "extraction attempt ledger physical filename differs from retained lineage");
+      }
       retainedBytes += envelope.byteLength;
       records.push(envelope.record);
     }
@@ -306,6 +310,8 @@ export function openExtractionAttemptLedger(input: {
   readonly publicationTemporaryDirectory?: string;
   readonly lineageDigest: string;
   readonly cacheIdentity: ExtractionAttemptLedgerCacheIdentity;
+  /** Proposal roots admit one active lineage per model/profile; source roots may hold several. */
+  readonly requireSingleLineageForCacheIdentity?: boolean;
   readonly startingMissing: number;
   readonly maximumAttempts?: number; readonly successfulShardCeiling?: number;
   readonly maximumAttemptsPerKey?: number;
@@ -320,6 +326,12 @@ export function openExtractionAttemptLedger(input: {
   readonly snapshot: () => ExtractionAttemptLedgerSnapshot;
 } {
   const expected = createExpectedRecord(input);
+  const retained = listExtractionAttemptLedgerRecords(input.cacheRoot);
+  if (input.requireSingleLineageForCacheIdentity && retained.some(record =>
+    record.lineage_digest !== input.lineageDigest &&
+    sameCacheIdentity(record.cache_identity, input.cacheIdentity))) {
+    throw new AlayaError("CONFLICT", "proposal cache contains another execution lineage; explicit settled continuation is required");
+  }
   const path = ledgerPath(input.cacheRoot, input.lineageDigest);
   const existed = boundedArtifactEntryExists(path);
   let current = existed ? readAttemptLedgerRecord(path) : expected;

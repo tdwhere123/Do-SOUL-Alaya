@@ -1,5 +1,4 @@
-import { inspectExtractionAttemptLedger, ledgerPath,
-  listExtractionAttemptLedgerRecords, openExtractionAttemptLedger,
+import { inspectExtractionAttemptLedger, ledgerPath, openExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
@@ -134,16 +133,11 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
     throw new AlayaError("CONFLICT", "semantic proposal authority has no remaining provider attempt capacity");
   }
   const lineage = input.authority.attempt_lineage_digest;
-  const records = listExtractionAttemptLedgerRecords(input.cacheRoot);
-  if (records.some(record => record.lineage_digest !== lineage &&
-      record.cache_identity.model === input.authority.model &&
-      record.cache_identity.requestProfile === input.authority.request_profile)) {
-    throw new AlayaError("CONFLICT", "proposal cache contains another execution lineage; explicit settled continuation is required");
-  }
   return openExtractionAttemptLedger({
     cacheRoot: input.cacheRoot,
     publicationTemporaryDirectory: input.cacheRoot,
     lineageDigest: lineage,
+    requireSingleLineageForCacheIdentity: true,
     cacheIdentity: {
       model: input.authority.model,
       requestProfile: input.authority.request_profile

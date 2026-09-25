@@ -1,5 +1,5 @@
 import {
-  cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
   symlinkSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +17,7 @@ import { acquireExtractionCacheWriteLease } from
   "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import { createExtractionExecutionAuthority } from
   "../../../runs/extraction/fill/execution-authority.js";
+import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
 
 const roots: string[] = [];
 
@@ -24,16 +25,8 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-it("rechecks a selected root before opening an attempt ledger or reserving a provider call", () => {
-  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-execution-"));
-  roots.push(parent);
-  const cacheRoot = join(parent, "cache");
-  const selection = createFreshExtractionTargetSelection({
-    cacheRoot,
-    auditReceipt: rebuildAuditReceipt(),
-    observation: observation()
-  });
-  const authority = createExtractionAuthorityReceipt({
+function selectedReceipt(selection: ReturnType<typeof createFreshExtractionTargetSelection>) {
+  return createExtractionAuthorityReceipt({
     action: "fill",
     observation: observation(),
     outputTokenCap: { field: "max_tokens", value: 512 },
@@ -51,6 +44,18 @@ it("rechecks a selected root before opening an attempt ledger or reserving a pro
     },
     targetSelectionDigest: selection.receipt_digest
   });
+}
+
+it("rechecks a selected root before opening an attempt ledger or reserving a provider call", () => {
+  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-execution-"));
+  roots.push(parent);
+  const cacheRoot = join(parent, "cache");
+  const selection = createFreshExtractionTargetSelection({
+    cacheRoot,
+    auditReceipt: rebuildAuditReceipt(),
+    observation: observation()
+  });
+  const authority = selectedReceipt(selection);
 
   rmSync(cacheRoot, { recursive: true, force: true });
   mkdirSync(cacheRoot);
@@ -58,6 +63,26 @@ it("rechecks a selected root before opening an attempt ledger or reserving a pro
   expect(() => createExtractionExecutionAuthority(authority, cacheRoot, selection))
     .toThrow(/target root changed/u);
   expect(readdirSync(cacheRoot)).toEqual([]);
+});
+
+it("refuses a renamed pending receipt ledger before creating another canonical attempt", async () => {
+  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-pending-lineage-"));
+  roots.push(parent);
+  const cacheRoot = join(parent, "cache");
+  const selection = createFreshExtractionTargetSelection({ cacheRoot,
+    auditReceipt: rebuildAuditReceipt(), observation: observation() });
+  const receipt = selectedReceipt(selection);
+  const key = "a".repeat(64);
+  await createExtractionExecutionAuthority(receipt, cacheRoot, selection).reserveAttempt(key);
+  const canonical = ledgerPath(cacheRoot, receipt.lineage_digest);
+  const pendingBytes = readFileSync(canonical);
+  const foreign = ledgerPath(cacheRoot, receipt.lineage_digest === "f".repeat(64)
+    ? "e".repeat(64) : "f".repeat(64));
+  renameSync(canonical, foreign);
+  expect(() => createExtractionExecutionAuthority(receipt, cacheRoot, selection))
+    .toThrow(/physical filename differs from retained lineage/u);
+  expect(existsSync(canonical)).toBe(false);
+  expect(readFileSync(foreign)).toEqual(pendingBytes);
 });
 
 it("rejects a copied lease and marker after the selected root inode changes", () => {
