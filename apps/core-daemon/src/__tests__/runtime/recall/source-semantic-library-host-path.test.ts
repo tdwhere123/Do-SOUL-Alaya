@@ -682,8 +682,13 @@ it("retains both semantic correspondence witnesses within one occupied source wh
     const semantics = receiveQuerySemantics(ORIGINAL, existentialBody()).query;
     const firstCorrespondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id).semantic_correspondence;
     const rows = useCorrespondences(published.interpretation);
+    const actor = mention(published.interpretation, "Alice");
+    const uses = mention(published.interpretation, "uses");
     const secondCorrespondence = receiveCorrespondence(semantics, published.interpretation, published.interpretation_id, {
-      correspondences: [rows[3]!, rows[0]!, rows[1]!, rows[2]!]
+      correspondences: rows.map((row) => row.query_endpoint.kind === "predicate"
+        ? { ...row, query_support: { kind: "query_text", excerpt: "Alice use" },
+          source_semantic_support: [{ kind: "lexical", mentions: [actor.id, uses.id] }] }
+        : row)
     }).semantic_correspondence;
     const admittedFirst = admitSourceSemanticCorrespondence({
       semantic_correspondence: firstCorrespondence, source_interpretation: published.interpretation, query_semantics: semantics, original_query: ORIGINAL

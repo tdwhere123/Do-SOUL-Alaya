@@ -354,7 +354,7 @@ it("prepares, reasons, and reopens a durable source interpretation through a rea
     const clipped = await call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
-      budget: BUDGET, output_byte_limit: 1024
+      budget: BUDGET, output_byte_limit: 1600
     });
     if (clipped.kind !== "reason") throw new Error("expected clipped");
     expect(clipped.result.outcome.status).toBe("truncated");
@@ -362,8 +362,15 @@ it("prepares, reasons, and reopens a durable source interpretation through a rea
     expect(clipped.interpretation).toBeUndefined();
     expect(clipped.semantic_correspondence).toBeUndefined();
     expect(clipped.result.semantic_status).toBe("unreviewed");
+    expect(clipped.result.conclusion_scope).toBe("conditional_on_interpretation");
     expect(clipped.result.world_claim).toBe("unknown");
-    expect(Buffer.byteLength(JSON.stringify(clipped))).toBeLessThanOrEqual(1024);
+    expect(Buffer.byteLength(JSON.stringify(clipped))).toBeLessThanOrEqual(1600);
+    await expect(call(execute, {
+      kind: "reason", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics,
+      semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
+      budget: BUDGET, output_byte_limit: 1024
+    })).rejects.toThrow("output budget cannot retain interpretation qualifiers");
   });
 }, 30000);
 

@@ -125,17 +125,23 @@ it("expands the remaining bytes of a final source clipped by the real public res
   try {
     const first = await fixture.handler(fixture.request, fixture.context);
     const result = first.results[0]!;
-    expect(result.content_preview).toHaveLength(2000);
     expect(result.target?.kind).toBe("source_evidence");
     if (result.target?.kind !== "source_evidence") throw new Error("source target missing");
-    expect(result.target.span).toMatchObject({ content_start: 0, content_end: 2000, content_complete: false });
+    expect(result.target.span).toMatchObject({ content_start: 0, content_complete: false });
+    const deliveredEnd = result.target.span!.content_end;
+    expect(deliveredEnd).toBe(Buffer.byteLength(result.content_preview));
+    expect(deliveredEnd).toBeGreaterThan(0);
+    expect(deliveredEnd).toBeLessThan(Buffer.byteLength(body));
+    expect(result.source_disclosure).toMatchObject({ material_kind: "original_body", source_binding: "checked_record" });
     expect(first.index?.continuation).not.toBeNull();
     const tail = await fixture.handler({ ...fixture.request, continuation: first.index!.continuation!,
       payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(result.target),
-        start_offset: 2000, byte_budget: 2000 } }, fixture.context);
+        start_offset: deliveredEnd, byte_budget: 2000 } }, fixture.context);
     expect(tail.page_purpose).toBe("payload");
     expect(tail.results).toHaveLength(1);
-    expect(tail.results[0]?.target).toMatchObject({ root_id: result.target.root_id, span: { content_start: 2000, content_end: 3007, content_complete: true } });
+    expect(tail.results[0]?.target).toMatchObject({ root_id: result.target.root_id, span: { content_start: deliveredEnd,
+      content_end: Buffer.byteLength(body), content_complete: true } });
+    expect(tail.results[0]?.source_disclosure).toEqual(result.source_disclosure);
     expect(result.content_preview + tail.results[0]!.content_preview).toBe(body);
   } finally { await fixture.close(); }
 }, 30_000);
@@ -146,10 +152,17 @@ it("expands a source whose entire public payload was omitted after another sourc
   try {
     const request = { ...fixture.request, max_results: 8 };
     const first = await fixture.handler(request, fixture.context);
-    expect(first.results).toHaveLength(2);
-    const omitted = first.results.find((result) => result.content_preview === "[payload omitted]");
-    expect(omitted?.target?.kind).toBe("source_evidence");
-    if (omitted?.target?.kind !== "source_evidence") throw new Error("omitted source target missing");
+    expect(first.results).toHaveLength(1);
+    expect(first.index?.entries).toHaveLength(2);
+    expect(first.index?.completeness.payload).toBe("omitted");
+    const visible = first.results[0]!;
+    if (visible.target.kind !== "source_evidence") throw new Error("visible source target missing");
+    const visibleRootId = visible.target.root_id;
+    const omitted = first.index!.entries.find((entry) => entry.target.kind === "source_evidence"
+      && entry.target.root_id !== visibleRootId);
+    expect(omitted?.target.kind).toBe("source_evidence");
+    if (omitted?.target.kind !== "source_evidence") throw new Error("omitted source target missing from index");
+    expect(omitted.target.span).toBeUndefined();
     expect(first.index?.continuation).not.toBeNull();
     const expanded = await fixture.handler({ ...request, continuation: first.index!.continuation!,
       payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(omitted.target),
@@ -157,6 +170,12 @@ it("expands a source whose entire public payload was omitted after another sourc
     expect(expanded.page_purpose).toBe("payload");
     expect(expanded.results.map((result) => result.content_preview)).toEqual([body.slice(0, 1200)]);
     expect(expanded.results[0]?.target).toMatchObject({ root_id: omitted.target.root_id, span: { content_start: 0, content_end: 1200, content_complete: false } });
+    expect(expanded.results[0]?.source_disclosure).toEqual(visible.source_disclosure);
+    const retry = await fixture.handler({ ...request, continuation: first.index!.continuation!,
+      payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(omitted.target),
+        start_offset: 0, byte_budget: 1200 } }, fixture.context);
+    expect(retry.results).toEqual(expanded.results);
+    expect(retry.delivery_id).toBe(expanded.delivery_id);
   } finally { await fixture.close(); }
 }, 30_000);
 

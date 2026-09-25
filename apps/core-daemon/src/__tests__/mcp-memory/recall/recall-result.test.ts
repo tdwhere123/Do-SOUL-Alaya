@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MemorySearchResultSchema,
   SoulMemorySearchResponseSchema,
+  SourceLookupReasonsSchema,
   indexEntryCacheKey,
   sourceIndexEntry
 } from "@do-soul/alaya-protocol";
@@ -24,6 +25,39 @@ function memoryEntry(objectId = "memory-1") {
 }
 
 describe("conditional-field result encoding", () => {
+  it("keeps original text, disclosure, and later rows ahead of optional lookup diagnostics", () => {
+    const sources = ["first", "second"].map((rootId) => sourceIndexEntry({
+      workspace_id: "ws", root_kind: "source_record", root_id: rootId,
+      source_version: "v1", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null,
+      association_milligrades: 1000, hypothesis_id: "h0", output_binding: "source-evidence",
+      role: "requested", claim: "unknown", explanation_ids: []
+    }));
+    const index = { ...stubRecallIndex([]), as_of: "2026-09-25T00:00:00Z", entries: sources,
+      representation: { ...stubRecallIndex([]).representation, page_budget: 2 } };
+    const disclosure = { material_kind: "original_body" as const, source_binding: "checked_record" as const,
+      evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown" as const, reason: "not_recorded" as const },
+      temporal_state: "unknown" as const, proof_use: { kind: "source_only" as const, qualification: "not_current_proof" as const } };
+    const previews = new Map(sources.map((source, offset) => [indexEntryCacheKey(source),
+      `Exact ${offset === 0 ? "first" : "second"} original bytes.`]));
+    const reason = (predicate_key: string) => SourceLookupReasonsSchema.parse([{
+      kind: "proposal", predicate_key, arguments: [], qualifiers: [], candidate_id: "candidate",
+      context_id: "context", source_target: sources[0]!.target
+    }]);
+    const firstKey = indexEntryCacheKey(sources[0]!);
+    const secondKey = indexEntryCacheKey(sources[1]!);
+    const metadata = { [firstKey]: { source_disclosure: disclosure, source_lookup_reasons: reason("p".repeat(1300)) },
+      [secondKey]: { source_disclosure: disclosure } };
+    const results = encodeIndexResults(index, previews, 2_000, metadata);
+    expect(results).toHaveLength(2);
+    expect(results.map((row) => row.content_preview)).toEqual([...previews.values()]);
+    expect(results.map((row) => row.source_disclosure)).toEqual([disclosure, disclosure]);
+    expect(results[0]?.source_lookup_reasons).toBeUndefined();
+    expect(results[1]?.target).toEqual(sources[1]?.target);
+    expect(encodeIndexResults(index, previews, 2_000, {
+      ...metadata, [firstKey]: { source_disclosure: disclosure, source_lookup_reasons: reason("use") }
+    })[0]?.source_lookup_reasons).toEqual(reason("use"));
+  });
+
   it("binds a clipped source span to final UTF-8 exposure", () => {
     const root = sourceIndexEntry({ workspace_id: "ws", root_kind: "source_record", root_id: "root",
       source_version: "v1", content_digest: `sha256:${"a".repeat(64)}`, evidence_object_id: null,

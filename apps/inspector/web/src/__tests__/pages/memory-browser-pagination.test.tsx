@@ -24,6 +24,12 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
     setWorkspaceId(null);
   });
 
+  const gistDisclosure = {
+    material_kind: "retained_gist", source_binding: "unbound", evaluated_as_of: "2026-09-18T12:00:00.000Z",
+    validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
+    proof_use: { kind: "source_only", qualification: "not_current_proof" }
+  };
+
   it("clears an already-open evidence pointer when refresh replaces the selected row data in place", async () => {
     let offsetZeroCalls = 0;
     fetchMock.mockImplementation(async (input: FetchInput) => {
@@ -34,7 +40,8 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
           data: {
             object_id: "ev-old",
             object_kind: "evidence_capsule",
-            gist: "old gist"
+            gist: "old gist",
+            text_disclosures: { gist: gistDisclosure }
           }
         });
       }
@@ -150,7 +157,8 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
         data: {
           object_id: "ev-old",
           object_kind: "evidence_capsule",
-          gist: "stale gist from old request"
+          gist: "stale gist from old request",
+          text_disclosures: { gist: gistDisclosure }
         }
       })
     );

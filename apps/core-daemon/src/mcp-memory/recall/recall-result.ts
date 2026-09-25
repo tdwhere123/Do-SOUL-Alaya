@@ -33,11 +33,7 @@ export function encodeIndexResults(
   if (index.entries.some((entry) => entry.interpretation_node !== undefined)) {
     throw new AlayaError("CONFLICT", "conditional interpretation results require the qualified interpretation result capability");
   }
-  const encoded: MemorySearchResult[] = [];
-  let usedTokens = 0;
-  for (const [offset, entry] of index.entries.entries()) {
-    if (offset >= index.representation.page_budget) break;
-    const score = entry.association_milligrades / MILLIGRADE_TOP;
+  const rows = index.entries.slice(0, index.representation.page_budget).map((entry) => {
     const cacheKey = indexEntryCacheKey(entry);
     const objectId = indexMemoryObjectId(entry);
     const retainedPreview = previews.get(cacheKey) ?? (objectId === undefined ? undefined : previews.get(objectId));
@@ -57,15 +53,31 @@ export function encodeIndexResults(
         evaluated_as_of: sourceClock(index)
       }) : undefined;
     const disclosureBytes = disclosure === undefined ? 0 : Buffer.byteLength(JSON.stringify({ source_disclosure: disclosure }), "utf8");
-    const withReasonBytes = Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: reasons }), "utf8");
-    // This surface budgets one token per UTF-8 byte. Keep a preview byte too;
-    // bounded optional diagnostics may be omitted when the wire budget is tight.
-    const retainedReasons = withReasonBytes < maxTotalTokens - usedTokens ? reasons : undefined;
-    const metadataBytes = disclosureBytes + (evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0 && retainedReasons === undefined
-      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: retainedReasons }), "utf8"));
+    const essentialBytes = disclosureBytes + (evidencePointers.length === 0 && (stagedWarnings?.length ?? 0) === 0
+      ? 0 : Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings }), "utf8"));
+    const reasonedBytes = reasons === undefined ? essentialBytes : disclosureBytes
+      + Buffer.byteLength(JSON.stringify({ evidencePointers, stagedWarnings, source_lookup_reasons: reasons }), "utf8");
+    return { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure,
+      essentialBytes, reasonedBytes };
+  });
+  // Optional diagnostics spend only bytes left after all selected rows can carry
+  // their full previews and required metadata. They cannot evict a later row.
+  let optionalAllowance = Math.max(0, maxTotalTokens - rows.reduce((sum, row) =>
+    sum + Math.max(1, Buffer.byteLength(row.preview, "utf8") + row.essentialBytes), 0));
+  const encoded: MemorySearchResult[] = [];
+  let usedTokens = 0;
+  for (const row of rows) {
+    const { entry, objectId, retainedPreview, preview, evidencePointers, stagedWarnings, reasons, disclosure,
+      essentialBytes, reasonedBytes } = row;
+    const score = entry.association_milligrades / MILLIGRADE_TOP;
+    const optionalBytes = reasonedBytes - essentialBytes;
+    const retainedReasons = reasons !== undefined && optionalBytes <= optionalAllowance
+      && reasonedBytes < maxTotalTokens - usedTokens ? reasons : undefined;
+    const metadataBytes = retainedReasons === undefined ? essentialBytes : reasonedBytes;
+    if (retainedReasons !== undefined) optionalAllowance -= optionalBytes;
     // A source row is indivisible from its required disclosure. The framed index
     // reports an omitted payload when this suffix cannot be carried.
-    if (disclosure !== undefined && metadataBytes > maxTotalTokens - usedTokens) break;
+    if (metadataBytes > maxTotalTokens - usedTokens) break;
     const fitted = fitEncodedPreview(preview, metadataBytes, maxTotalTokens - usedTokens);
     const omitted = fitted === null;
     const content = omitted ? "[payload omitted]" : fitted.preview;
