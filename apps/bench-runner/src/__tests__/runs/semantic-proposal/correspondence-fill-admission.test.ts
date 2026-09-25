@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -21,6 +21,8 @@ import {
   buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest
 } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
+import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
+import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
 import {
   inspectSemanticProposalShard, hasAdmittedProposalOutcome
 } from "../../../runs/semantic-proposal/artifact.js";
@@ -393,6 +395,30 @@ async function fillCorrespondence(inventedSupport = false) {
   });
   return { cacheRoot, prepared, authority, first, result, key: authority.keys[0]!, received, core };
 }
+
+it.each(["uppercase digest", "malformed digest"] as const)(
+  "rejects a pending C ledger named with %s before fill", async form => {
+    const cacheRoot = join(tempRoot(), "namespace-cache");
+    const prepared = correspondenceWorkset();
+    const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
+      inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+    const key = materializeSemanticProposalLines(prepared, 128)[0]!.key;
+    openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "semantic_correspondence" })
+      .reserveAttemptOrdinal(key);
+    const canonical = ledgerPath(cacheRoot, authority.attempt_lineage_digest);
+    const pendingBytes = readFileSync(canonical);
+    const renamed = join(cacheRoot, `extraction-attempt-ledger.${form === "uppercase digest"
+      ? authority.attempt_lineage_digest.toUpperCase() : "malformed"}.json`);
+    expect(renamed).not.toBe(canonical);
+    renameSync(canonical, renamed);
+    const attempted = extractor(["must-not-enter"]);
+    await expect(executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
+      config: config(), extractor: attempted })).rejects.toThrow(/noncanonical filename/u);
+    expect(attempted.calls).toHaveLength(0);
+    expect(existsSync(canonical)).toBe(false);
+    expect(readFileSync(renamed)).toEqual(pendingBytes);
+  }
+);
 
 it("binds a C child to its settled physical parent and current request attention", async () => {
   const { cacheRoot: parentRoot, prepared } = await fillCorrespondence();

@@ -65,25 +65,30 @@ it("rechecks a selected root before opening an attempt ledger or reserving a pro
   expect(readdirSync(cacheRoot)).toEqual([]);
 });
 
-it("refuses a renamed pending receipt ledger before creating another canonical attempt", async () => {
-  const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-pending-lineage-"));
-  roots.push(parent);
-  const cacheRoot = join(parent, "cache");
-  const selection = createFreshExtractionTargetSelection({ cacheRoot,
-    auditReceipt: rebuildAuditReceipt(), observation: observation() });
-  const receipt = selectedReceipt(selection);
-  const key = "a".repeat(64);
-  await createExtractionExecutionAuthority(receipt, cacheRoot, selection).reserveAttempt(key);
-  const canonical = ledgerPath(cacheRoot, receipt.lineage_digest);
-  const pendingBytes = readFileSync(canonical);
-  const foreign = ledgerPath(cacheRoot, receipt.lineage_digest === "f".repeat(64)
-    ? "e".repeat(64) : "f".repeat(64));
-  renameSync(canonical, foreign);
-  expect(() => createExtractionExecutionAuthority(receipt, cacheRoot, selection))
-    .toThrow(/physical filename differs from retained lineage/u);
-  expect(existsSync(canonical)).toBe(false);
-  expect(readFileSync(foreign)).toEqual(pendingBytes);
-});
+it.each(["foreign canonical", "uppercase digest", "malformed digest"] as const)(
+  "refuses a pending receipt ledger named with %s before another canonical attempt", async form => {
+    const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-pending-lineage-"));
+    roots.push(parent);
+    const cacheRoot = join(parent, "cache");
+    const selection = createFreshExtractionTargetSelection({ cacheRoot,
+      auditReceipt: rebuildAuditReceipt(), observation: observation() });
+    const receipt = selectedReceipt(selection);
+    const key = "a".repeat(64);
+    await createExtractionExecutionAuthority(receipt, cacheRoot, selection).reserveAttempt(key);
+    const canonical = ledgerPath(cacheRoot, receipt.lineage_digest);
+    const pendingBytes = readFileSync(canonical);
+    const foreign = form === "foreign canonical"
+      ? ledgerPath(cacheRoot, receipt.lineage_digest === "f".repeat(64) ? "e".repeat(64) : "f".repeat(64))
+      : join(cacheRoot, `extraction-attempt-ledger.${form === "uppercase digest"
+        ? receipt.lineage_digest.toUpperCase() : "malformed"}.json`);
+    expect(foreign).not.toBe(canonical);
+    renameSync(canonical, foreign);
+    expect(() => createExtractionExecutionAuthority(receipt, cacheRoot, selection))
+      .toThrow(form === "foreign canonical" ? /physical filename differs from retained lineage/u : /noncanonical filename/u);
+    expect(existsSync(canonical)).toBe(false);
+    expect(readFileSync(foreign)).toEqual(pendingBytes);
+  }
+);
 
 it("rejects a copied lease and marker after the selected root inode changes", () => {
   const parent = mkdtempSync(join(tmpdir(), "alaya-target-selection-leased-root-"));

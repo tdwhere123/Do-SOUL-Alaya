@@ -43,7 +43,7 @@ describe("extraction attempt ledger persistence", () => {
     expect(readLedger(lineageDigest)).toMatchObject({ successfulShards: 0,
       pendingKeys: [cacheKey] });
     expect(inspectCachedRawExtraction(cacheRoot, cacheKey,
-      cacheIdentity.model, cacheIdentity.requestProfile).status).toBe("invalid");
+      cacheIdentity.model, cacheIdentity.requestProfile).status).toBe("quarantined");
     await writeShard(cacheKey, JSON.stringify(shard));
     expect(readLedger(lineageDigest)).toMatchObject({ successfulShards: 1,
       successfulKeys: [cacheKey], pendingKeys: [] });

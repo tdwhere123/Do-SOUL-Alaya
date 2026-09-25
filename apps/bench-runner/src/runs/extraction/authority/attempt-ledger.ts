@@ -45,6 +45,20 @@ export { ExtractionAttemptLimitError } from "./attempt-ledger/outcome.js";
 export const computeExtractionAttemptCeiling = computeExtractionFillAttemptCeiling;
 const MAX_ATTEMPT_LEDGER_INVENTORY_ENTRIES = 32_768;
 const MAX_ATTEMPT_LEDGER_INVENTORY_BYTES = 100_000_000;
+const LEDGER_FILENAME_PREFIX = "extraction-attempt-ledger.";
+
+function retainedLedgerPath(directory: string, name: string): string | undefined {
+  if (!name.toLowerCase().startsWith(LEDGER_FILENAME_PREFIX)) return undefined;
+  if (name.startsWith(LEDGER_FILENAME_PREFIX) && name.endsWith(".json")) {
+    const digest = name.slice(LEDGER_FILENAME_PREFIX.length, -".json".length);
+    try {
+      const canonical = ledgerPath(directory, digest);
+      if (canonical === join(directory, name)) return canonical;
+    } catch { /* The namespace remains owned even when its digest is malformed. */ }
+  }
+  throw new AlayaError("CONFLICT", "extraction attempt ledger namespace has a noncanonical filename");
+}
+
 /** Read-only inventory; a new execution must not hide older reservation history. */
 export function listExtractionAttemptLedgerRecords(cacheRoot: string): readonly ExtractionAttemptLedgerRecord[] {
   if (!boundedArtifactEntryExists(cacheRoot)) return [];
@@ -58,8 +72,9 @@ export function listExtractionAttemptLedgerRecords(cacheRoot: string): readonly 
         if (++visited > MAX_ATTEMPT_LEDGER_INVENTORY_ENTRIES) {
           throw new AlayaError("UNAVAILABLE", "extraction attempt ledger directory exceeds bounded inventory");
         }
-        if (!/^extraction-attempt-ledger\.[0-9a-f]{64}\.json$/u.test(entry.name)) continue;
-        const stats = lstatSync(join(directory, entry.name));
+        const path = retainedLedgerPath(directory, entry.name);
+        if (path === undefined) continue;
+        const stats = lstatSync(path);
         if (!stats.isFile() || stats.size > MAX_ATTEMPT_LEDGER_BYTES ||
             (announcedBytes += stats.size) > MAX_ATTEMPT_LEDGER_INVENTORY_BYTES) {
           throw new AlayaError("UNAVAILABLE", "extraction attempt ledger inventory exceeds retained input limit");
@@ -519,7 +534,7 @@ function assertBoundRecord(
 
 export function ledgerPath(cacheRoot: string, lineageDigest: string): string {
   assertDigest(lineageDigest);
-  return join(cacheRoot, `extraction-attempt-ledger.${lineageDigest}.json`);
+  return join(cacheRoot, `${LEDGER_FILENAME_PREFIX}${lineageDigest}.json`);
 }
 
 function toSnapshot(

@@ -90,6 +90,32 @@ it("rejects a renamed pending ledger before another proposal attempt or canonica
   expect(readFileSync(foreign)).toEqual(retainedBytes);
 });
 
+it.each(["uppercase digest", "malformed digest", "uppercase prefix", "non-JSON suffix"] as const)(
+  "rejects a pending ledger named with %s before proposal dispatch", async form => {
+    const { cacheRoot, authority } = fixture();
+    const key = materializeSemanticProposalLines(workset, 128)[0]!.key;
+    openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).reserveAttemptOrdinal(key);
+    const canonical = ledgerPath(cacheRoot, authority.attempt_lineage_digest);
+    const retainedBytes = readFileSync(canonical);
+    const renamed = form === "uppercase prefix"
+      ? join(cacheRoot, `EXTRACTION-ATTEMPT-LEDGER.${authority.attempt_lineage_digest}.json`)
+      : form === "non-JSON suffix"
+        ? `${canonical}.backup`
+        : join(cacheRoot, `extraction-attempt-ledger.${form === "uppercase digest"
+          ? authority.attempt_lineage_digest.toUpperCase() : "malformed"}.json`);
+    expect(renamed).not.toBe(canonical);
+    renameSync(canonical, renamed);
+    expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/noncanonical filename/u);
+    let calls = 0;
+    await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config, extractor: {
+      extract: async () => { calls += 1; throw new Error("noncanonical pending history must not dispatch"); }
+    } })).rejects.toThrow(/noncanonical filename/u);
+    expect(calls).toBe(0);
+    expect(existsSync(canonical)).toBe(false);
+    expect(readFileSync(renamed)).toEqual(retainedBytes);
+  }
+);
+
 it("rejects duplicate physical files declaring one pending ledger lineage", () => {
   const { cacheRoot, authority } = fixture();
   const key = materializeSemanticProposalLines(workset, 128)[0]!.key;
@@ -102,6 +128,25 @@ it("rejects duplicate physical files declaring one pending ledger lineage", () =
   expect(() => openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }))
     .toThrow(/physical filename differs from retained lineage/u);
   expect(readFileSync(foreign)).toEqual(readFileSync(canonical));
+});
+
+it("rejects a duplicate malformed ledger namespace entry but ignores unrelated and publication temporary files", () => {
+  const { cacheRoot, authority } = fixture();
+  const key = materializeSemanticProposalLines(workset, 128)[0]!.key;
+  openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).reserveAttemptOrdinal(key);
+  const canonical = ledgerPath(cacheRoot, authority.attempt_lineage_digest);
+  writeFileSync(join(cacheRoot, "unrelated-retained-file.json"), "{");
+  writeFileSync(join(cacheRoot, "extraction-attempt-ledger-notes.json"), "{");
+  writeFileSync(join(cacheRoot, `.alaya-exclusive-publication-${"f".repeat(64)}.tmp`), "{");
+  expect(listExtractionAttemptLedgerRecords(cacheRoot)).toHaveLength(1);
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().unresolvedAttempts)
+    .toHaveLength(1);
+  const duplicate = join(cacheRoot, "extraction-attempt-ledger.malformed.json");
+  copyFileSync(canonical, duplicate);
+  expect(() => listExtractionAttemptLedgerRecords(cacheRoot)).toThrow(/noncanonical filename/u);
+  expect(() => openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }))
+    .toThrow(/noncanonical filename/u);
+  expect(readFileSync(duplicate)).toEqual(readFileSync(canonical));
 });
 
 it("bounds a ledger that grows past the remaining inventory allowance before decoding it", () => {
