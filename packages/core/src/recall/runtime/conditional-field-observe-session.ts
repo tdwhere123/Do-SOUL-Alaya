@@ -19,7 +19,8 @@ import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
 import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects } from "../conditional-field/engine/observation-frontier.js";
-import { scanAdjacencyPairs } from "../conditional-field/engine/path-routing.js";
+import { nextStateDemandedPair, scanAdjacencyPairs } from "../conditional-field/engine/path-routing.js";
+import type { ProgramAutomaton } from "../conditional-field/engine/program-automaton.js";
 import {
   applyObserverPage,
   proposeFieldWork,
@@ -63,7 +64,7 @@ export type ObservationSession = {
   relationRows: ObservedRelations; observedAt: Record<string, string>; sourceFacts: ObservedSourceFacts;
   memoryBox: { remaining: number; cachedBytes: number }; predicates: readonly string[]; seedUnitCost: number;
   storedKindsOpen: boolean; pairIndex: number; unresolvedGuard: boolean; missingMeasurement: boolean;
-  sourceFamilyUnavailable: boolean;
+  sourceFamilyUnavailable: boolean; demandAutomaton?: ProgramAutomaton;
 };
 
 export function runObservationRounds(session: ObservationSession): FieldEngineState {
@@ -203,8 +204,22 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
 function consumeAdjacencyPage(session: ObservationSession, action: ObservationAction): boolean {
   const { input, interpretation, lease, cursors, pairProgress, subjects, predicates, observedAt, sourceFacts } = session;
   const minimum = 4 + (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK);
-  const scanned = scanAdjacencyPairs(subjects, predicates, pairProgress, session.pairIndex,
-    Math.max(0, session.state.remaining_exploration - minimum));
+  let demanded: ReturnType<typeof nextStateDemandedPair> | undefined;
+  const automaton = session.demandAutomaton;
+  if (automaton !== undefined) {
+    const maximumWork = session.state.seen_identities.length
+      * (1 + automaton.advances.length * (2 + predicates.length));
+    if (maximumWork <= session.state.remaining_exploration - minimum) {
+      demanded = nextStateDemandedPair(session.state.seen_identities, automaton, subjects, predicates, pairProgress);
+      session.input.cost?.add("adjacency", { joins: demanded.work });
+      session.state = { ...session.state,
+        remaining_exploration: session.state.remaining_exploration - demanded.work };
+    }
+  }
+  const scanned = demanded?.pair === undefined
+    ? scanAdjacencyPairs(subjects, predicates, pairProgress, session.pairIndex,
+      Math.max(0, session.state.remaining_exploration - minimum))
+    : { pair: demanded.pair, next: session.pairIndex, work: 0 };
   const pair = scanned.pair;
   session.pairIndex = scanned.next;
   if (scanned.work > 0) session.input.cost?.add("adjacency", { joins: scanned.work });
@@ -217,6 +232,9 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     }
     session.state = closeAdjacency(session.state, interpretation, action, cursors, session.storedKindsOpen);
     return false;
+  }
+  if (action.work_limit < minimum) {
+    session.state = interruptObservedField(session.state); return true;
   }
   const captured: RelationObserverRow[] = [];
   const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
