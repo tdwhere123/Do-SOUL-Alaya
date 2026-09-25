@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { vi } from "vitest";
+import { createGardenHttpExtractor } from "../../../../runs/compile-seed/compile-seed-http.js";
+import type { BenchSignalExtractor, CompileSeedExtractionConfig } from
+  "../../../../runs/compile-seed/compile-seed-types.js";
 import type { LongMemEvalQuestion } from
   "../../../../datasets/longmemeval/ingestion/dataset.js";
 import {
@@ -11,7 +15,33 @@ import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
 } from "../../../../runs/extraction/authority/receipt.js";
-import { EXTRACTION_FILL_VARIANT } from "../fixture.js";
+import { buildGroundedInterpretationResponse, EXTRACTION_FILL_VARIANT,
+  setExtractionCredentialFixture } from "../fixture.js";
+
+/** The fixture answer is delivered through the real chat transport and Response decoder. */
+export function authorizedHttpExtractor(input: {
+  readonly response?: (userPrompt: string) => string;
+  readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+} = {}) {
+  const extract = vi.fn<BenchSignalExtractor["extract"]>();
+  const factory = (config: CompileSeedExtractionConfig): BenchSignalExtractor => {
+    const transport = createGardenHttpExtractor(config, { fetch: vi.fn<typeof fetch>(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: readonly { content: string }[] };
+      const prompt = body.messages.at(-1)?.content;
+      if (typeof prompt !== "string") throw new Error("fixture transport lost the request prompt");
+      return Response.json({ choices: [{ message: {
+        content: (input.response ?? buildGroundedInterpretationResponse)(prompt)
+      }, finish_reason: "stop" }],
+      ...(input.usage === undefined ? {} : { usage: {
+        prompt_tokens: input.usage.inputTokens, completion_tokens: input.usage.outputTokens,
+        total_tokens: input.usage.inputTokens + input.usage.outputTokens
+      } }) });
+    }), sleep: async () => undefined, random: () => 0 });
+    extract.mockImplementation((request) => transport.extract(request));
+    return { extract };
+  };
+  return { extract, factory };
+}
 
 interface AuthorityRoots {
   readonly cacheRoot: string;
@@ -25,6 +55,7 @@ export async function writeAuthorityReceipt(
     readonly limit?: number;
     readonly action?: "probe" | "fill";
     readonly variant?: typeof EXTRACTION_FILL_VARIANT | "longmemeval_s";
+    readonly targetSelectionDigest?: string;
   }
 ): Promise<string> {
   const action = input.action ?? "fill";
@@ -52,11 +83,21 @@ export async function writeAuthorityReceipt(
       credentialStatus: inspection.credentialStatus,
       modelReadiness: inspection.modelReadiness
     },
-    ...(action === "probe" ? { probeKey: inspection.missingKeys[0] } : {})
+    ...(action === "probe" ? { probeKey: inspection.missingKeys[0] } : {}),
+    ...(input.targetSelectionDigest === undefined ? {} : {
+      targetSelectionDigest: input.targetSelectionDigest
+    })
   });
   const path = join(roots.cacheRoot, `authority-receipt-${action}.json`);
   writeExtractionAuthorityReceipt(path, receipt);
   return path;
+}
+
+/** Authorize a fixture provider request through the same receipt and ledger owners. */
+export async function writeAuthorizedFixtureReceipt(roots: AuthorityRoots,
+  input: { readonly limit?: number } = {}): Promise<string> {
+  setExtractionCredentialFixture();
+  return writeAuthorityReceipt(roots, input);
 }
 
 export async function writeCanonicalSFixtureDataset(

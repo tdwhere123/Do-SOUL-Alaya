@@ -57,6 +57,8 @@ export {
   type ExtractionRawJsonInspection
 } from "../extraction/content-closure.js";
 import type {
+  BenchProviderUsage,
+  BenchTransportResponseWitness,
   BenchSignalExtractor,
   CompileSeedExtractionConfig,
   CompileSeedExtractionStats
@@ -64,6 +66,7 @@ import type {
 import { computeCacheKey } from "./cache/cache-key.js";
 import { buildExtractionTransportProvenance } from
   "../extraction/transport-route.js";
+import type { GeminiBatchInvocation } from "../extraction/fill/batch/contract.js";
 export {
   computeCacheKey,
   computeOfficialApiRequestCacheKey,
@@ -99,7 +102,8 @@ interface CachingSignalExtractorOptions {
   /** Records the exact provider-reported usage, or an explicit unavailable outcome. */
   readonly onLiveExtractionOutcome?: (
     cacheKey: string,
-    outcome: ExtractionLiveTransportOutcome
+    outcome: ExtractionLiveTransportOutcome,
+    attemptOrdinal?: number
   ) => void;
   /** Advances a no-progress watchdog after a cache hit or durable write. */
   readonly onExtractionProgress?: () => void;
@@ -163,6 +167,8 @@ export function importExtractionResponse(input: {
   readonly sourceCorpus: string;
   readonly result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>;
   readonly providerAttempt?: { readonly attemptOrdinal: number; readonly authorityLineageDigest: string };
+  readonly retainedBatch?: { readonly planIdentity: string; readonly authorityReceiptDigest: string;
+    readonly result: Parameters<GeminiBatchInvocation["importLine"]>[0] };
 }): void {
   const { writeLease: lease, cacheRoot, result } = input;
   lease.assertOwned();
@@ -184,7 +190,8 @@ export function importExtractionResponse(input: {
     if (existing.rawJson !== result.rawJson) throw new ExtractionCacheInvariantError("import conflicts with admitted response");
     return;
   }
-  persistExtraction(options, cacheRoot, key, result, true, extraction.request, completion, input.providerAttempt);
+  persistExtraction(options, cacheRoot, key, result, true, extraction.request, completion,
+    input.providerAttempt, input.retainedBatch);
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
 }
@@ -355,20 +362,49 @@ async function extractLiveWithLease(
   markLiveExtractionStarted(stats, cacheKey);
   let providerAttemptAuthorized = options.onTransportAttempt === undefined;
   let lastAttemptOrdinal: number | undefined;
+  let lastAttemptUsage: BenchProviderUsage | null | undefined;
+  const attemptOrdinals: number[] = [];
+  let retainedResponses: readonly { attempt_ordinal: number; witness: BenchTransportResponseWitness;
+    usage: BenchProviderUsage | null }[] | undefined;
   const result = await extractLiveDelegate({
     delegate: options.delegate,
-    request: withSemanticValidation(
+    request: { ...withSemanticValidation(
       withAuthorityAttemptHook(input, options, cacheKey, (ordinal) => {
         providerAttemptAuthorized = true;
-        if (ordinal !== undefined) lastAttemptOrdinal = ordinal;
+        if (ordinal !== undefined) {
+          lastAttemptOrdinal = ordinal;
+          attemptOrdinals.push(ordinal);
+        }
       })
-    ),
+    ), retainHttpResponseEvidence: true },
     stats,
     onFailure: () => options.onLiveExtractionFailed?.(cacheKey),
     onOutcome: (outcome) => {
       if (!providerAttemptAuthorized) return;
       providerAttemptAuthorized = options.onTransportAttempt === undefined;
-      options.onLiveExtractionOutcome?.(cacheKey, outcome);
+      if (outcome.attemptUsages !== undefined) lastAttemptUsage = outcome.attemptUsages.at(-1);
+      if (options.onTransportAttempt !== undefined && outcome.attemptResponses !== undefined) {
+        if (outcome.attemptResponses.length !== attemptOrdinals.length) {
+          throw new ExtractionCacheInvariantError("physical response witness count differs from reserved attempts");
+        }
+        retainedResponses = outcome.attemptResponses.flatMap((witness, index) => witness === null ? [] : [{
+          attempt_ordinal: attemptOrdinals[index]!, witness,
+          usage: outcome.attemptUsages?.[index] ??
+            (outcome.attemptResponses!.length === 1 ? outcome.usage ?? null : null)
+        }]);
+      }
+      if (options.onTransportAttempt !== undefined &&
+          outcome.terminalRetryClassification === undefined && outcome.postComposeFailure !== true &&
+          (retainedResponses?.length !== (outcome.successfulRequestCount ?? 1) ||
+           retainedResponses.some((response) => response.witness.httpResponse === undefined ||
+             !response.witness.httpResponse.bodyComplete || response.witness.httpResponse.bodyTruncated))) {
+        throw new ExtractionCacheInvariantError(
+          "successful provider requests lack retained physical responses"
+        );
+      }
+      options.onLiveExtractionOutcome?.(cacheKey, outcome,
+        outcome.attemptUsages === undefined && outcome.retryCount === 0 && outcome.successfulRequestCount === 1 &&
+        outcome.unknownRequestCount === undefined ? lastAttemptOrdinal : undefined);
     }
   });
   lease.assertOwned();
@@ -381,8 +417,9 @@ async function extractLiveWithLease(
   ).status;
   const persisted = persistExtraction(options, cacheRoot, cacheKey, result, true, request, completion,
     lastAttemptOrdinal === undefined || options.providerAttemptLineageDigest === undefined ? undefined : {
-      attemptOrdinal: lastAttemptOrdinal, authorityLineageDigest: options.providerAttemptLineageDigest
-    });
+      attemptOrdinal: lastAttemptOrdinal, authorityLineageDigest: options.providerAttemptLineageDigest,
+      ...(lastAttemptUsage === undefined ? {} : { lastUsage: lastAttemptUsage })
+    }, undefined, { systemPrompt: input.systemPrompt, userPrompt: input.userPrompt }, retainedResponses);
   recordLiveExtractionSuccess(options, cacheKey, stats, persisted);
   return result;
 }
@@ -431,7 +468,13 @@ function persistExtraction(
   providerBacked: boolean,
   request: OfficialApiExtractionRequest,
   requestCompletion?: ExtractionRequestCompletion,
-  providerAttempt?: { readonly attemptOrdinal: number; readonly authorityLineageDigest: string }
+  providerAttempt?: { readonly attemptOrdinal: number; readonly authorityLineageDigest: string;
+    readonly lastUsage?: BenchProviderUsage | null },
+  retainedBatch?: { readonly planIdentity: string; readonly authorityReceiptDigest: string;
+    readonly result: Parameters<GeminiBatchInvocation["importLine"]>[0] },
+  requestIdentity?: { readonly systemPrompt: string; readonly userPrompt: string },
+  providerResponses?: readonly { readonly attempt_ordinal: number;
+    readonly witness: BenchTransportResponseWitness; readonly usage: BenchProviderUsage | null }[]
 ): {
   readonly inspection: ExtractionRawJsonInspection;
   readonly emptyClassification: ReturnType<typeof classifyExtractionEnvelope>;
@@ -468,8 +511,20 @@ function persistExtraction(
         transport_provenance: buildExtractionTransportProvenance(options.config),
         ...(providerAttempt === undefined ? {} : { provider_attempt: {
           attempt_ordinal: providerAttempt.attemptOrdinal,
-          authority_lineage_digest: providerAttempt.authorityLineageDigest
+          authority_lineage_digest: providerAttempt.authorityLineageDigest,
+          kind: retainedBatch === undefined ? "interactive" as const : "gemini_batch" as const,
+          ...(providerAttempt.lastUsage === undefined ? {} : { last_usage: providerAttempt.lastUsage })
         } }),
+        ...(retainedBatch === undefined ? {} : { provider_batch: {
+          plan_identity: retainedBatch.planIdentity,
+          authority_receipt_digest: retainedBatch.authorityReceiptDigest,
+          result: retainedBatch.result
+        } }),
+        ...(requestIdentity === undefined ? {} : { request_identity: {
+          system_prompt: requestIdentity.systemPrompt,
+          user_prompt: requestIdentity.userPrompt
+        } }),
+        ...(providerResponses === undefined ? {} : { provider_responses: providerResponses }),
         request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION, status: requestCompletion! }
       } : {}),
       ...persistedResponseMetadata(result.responseMetadata, result.usage, providerBacked),

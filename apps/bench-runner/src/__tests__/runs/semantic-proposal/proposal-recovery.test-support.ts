@@ -461,7 +461,7 @@ export function proposalRecoveryCases(input: {
       expect(() => f.read()).toThrow(/exact settled usage witness/u);
       expect(f.chain()).toMatchObject({ status: "cache_invalid", received: undefined });
       expect(() => openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot,
-        authority: f.authority, kind: f.workset.kind })).toThrow(/exact settled usage witness/u);
+        authority: f.authority, kind: f.workset.kind })).toThrow(/successful shard closure drifted/u);
       await expect(f.fill()).rejects.toThrow(/exact settled usage witness/u);
       expect(readFileSync(f.ledgerPath, "utf8")).toBe(retained);
     });

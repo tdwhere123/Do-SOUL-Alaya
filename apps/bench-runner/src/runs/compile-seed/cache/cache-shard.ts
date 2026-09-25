@@ -1,4 +1,5 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
+import { canonicalJson } from "@do-soul/alaya-protocol";
 import { inspectCachedSourcePacket, type CachedSourcePacket } from "../../extraction/cache/source-packet-artifact.js";
 import { inspectCachedSourceSemantic, type CachedSourceSemantic } from "../../extraction/cache/source-semantic-artifact.js";
 import type { ExtractionTypedArtifactMode } from "../../extraction/request-artifact.js";
@@ -35,6 +36,18 @@ import {
   boundedArtifactEntryExists, readBoundedCanonicalUtf8Artifact
 } from
   "../../extraction/cache-audit/bounded-artifact-reader.js";
+import { inspectSettledProviderAttempt } from
+  "../../extraction/authority/attempt-ledger/admission.js";
+import { settledAttemptUsageDigest } from
+  "../../extraction/authority/attempt-ledger/outcome.js";
+import { transportResponseDigest } from
+  "../../extraction/authority/attempt-ledger/outcome.js";
+import type { GeminiBatchInvocation } from "../../extraction/fill/batch/contract.js";
+import { readRetainedBatchLine } from "../../extraction/fill/batch/retained-line.js";
+import { readRetainedBatchAuthority } from "../../extraction/fill/batch/retained-authority.js";
+import { buildExtractionTransportProvenance } from "../../extraction/transport-route.js";
+import { inspectRetainedInteractiveResponses,
+  type CachedProviderResponseWitness } from "./provider-response-witness.js";
 
 export const MAX_EXTRACTION_CACHE_SHARD_BYTES = 32 * 1024 * 1024;
 
@@ -53,7 +66,12 @@ export interface CachedExtractionEntry {
   readonly request_completion?: PersistedExtractionRequestCompletion;
   readonly response_metadata?: CachedExtractionResponseMetadata;
   readonly transport_provenance?: ExtractionTransportProvenance;
-  readonly provider_attempt?: Readonly<{ attempt_ordinal: number; authority_lineage_digest: string }>;
+  readonly provider_attempt?: Readonly<{ attempt_ordinal: number; authority_lineage_digest: string;
+    kind?: "gemini_batch" | "interactive"; last_usage?: BenchProviderUsage | null }>;
+  readonly provider_batch?: Readonly<{ plan_identity: string; authority_receipt_digest: string;
+    result: Parameters<GeminiBatchInvocation["importLine"]>[0] }>;
+  readonly request_identity?: Readonly<{ system_prompt: string; user_prompt: string }>;
+  readonly provider_responses?: readonly CachedProviderResponseWitness[];
   readonly admission_identity?: CachedExtractionAdmissionIdentity;
 }
 
@@ -71,7 +89,9 @@ export type CachedExtractionInspection =
   | { readonly status: "pending"; readonly reason: string; readonly rawJson?: string;
       readonly rawJsonSha256?: string; readonly rawSignalCount?: number;
       readonly transportProvenance?: ExtractionTransportProvenance;
-      readonly attemptOrdinal?: number; readonly authorityLineageDigest?: string }
+      readonly attemptOrdinal?: number; readonly authorityLineageDigest?: string;
+      readonly usageSha256?: string; readonly responseSha256?: string;
+      readonly aggregateUsageSha256?: string }
   | { readonly status: "retired"; readonly eligibility: "retained_only"; readonly reason: string; readonly rawJsonSha256?: undefined }
   | {
     readonly status: "invalid";
@@ -95,12 +115,17 @@ export type CachedRawExtractionInspection =
       readonly transportProvenance?: ExtractionTransportProvenance;
       readonly attemptOrdinal?: number;
       readonly authorityLineageDigest?: string;
+      readonly usageSha256?: string;
+      readonly responseSha256?: string;
+      readonly aggregateUsageSha256?: string;
     }
   | { readonly status: "missing"; readonly reason?: undefined }
   | { readonly status: "pending"; readonly reason: string; readonly rawJson?: string;
       readonly rawJsonSha256?: string; readonly rawSignalCount?: number;
       readonly transportProvenance?: ExtractionTransportProvenance;
-      readonly attemptOrdinal?: number; readonly authorityLineageDigest?: string }
+      readonly attemptOrdinal?: number; readonly authorityLineageDigest?: string;
+      readonly usageSha256?: string; readonly responseSha256?: string;
+      readonly aggregateUsageSha256?: string }
   | { readonly status: "invalid"; readonly reason: string; readonly rawJsonSha256?: string }
   | {
       readonly status: "quarantined";
@@ -131,6 +156,8 @@ export function inspectCachedExtraction(
   if (cached.entry.source_packet !== undefined || cached.entry.source_semantic !== undefined) {
     return { status: "invalid", reason: "typed source interpretation is not a signal cache shard" };
   }
+  const raw = inspectCachedRawExtraction(cacheRoot, cacheKey, model, requestProfile);
+  if (raw.status !== "hit") return raw;
   return inspectCachedExtractionContent(cached.entry);
 }
 
@@ -148,28 +175,77 @@ export function inspectCachedRawExtraction(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"]
 ): CachedRawExtractionInspection {
+  return inspectRawExtraction(cacheRoot, cacheKey, model, requestProfile, true);
+}
+
+/** Ledger reconciliation inspects staged bytes before the ledger can admit them. */
+export function inspectUnadmittedRawExtraction(
+  cacheRoot: string, cacheKey: string, model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+): CachedRawExtractionInspection {
+  return inspectRawExtraction(cacheRoot, cacheKey, model, requestProfile, false);
+}
+
+function inspectRawExtraction(
+  cacheRoot: string, cacheKey: string, model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"], requireAdmission: boolean
+): CachedRawExtractionInspection {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
   if (cached.entry.source_semantic !== undefined) {
-    const inspected = inspectCachedSourceSemantic(cacheRoot, cacheKey, model, requestProfile);
+    const inspected = inspectCachedSourceSemantic(cacheRoot, cacheKey, model, requestProfile, requireAdmission);
     if (inspected.status === "retired") return { status: "quarantined", reason: inspected.reason,
       rawJson: cached.entry.raw_json, rawJsonSha256: computeExtractionRawJsonSha256(cached.entry.raw_json),
       rawSignalCount: 0 };
-    return inspected;
+    return (inspected.status === "hit" || inspected.status === "pending") && inspected.transportProvenance !== undefined
+      ? { ...inspected, usageSha256: settledAttemptUsageDigest(inspected.usage) } : inspected;
   }
-  if (cached.entry.source_packet !== undefined) return inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile);
+  if (cached.entry.source_packet !== undefined) {
+    const inspected = inspectCachedSourcePacket(cacheRoot, cacheKey, model, requestProfile, requireAdmission);
+    return (inspected.status === "hit" || inspected.status === "pending") && inspected.transportProvenance !== undefined
+      ? { ...inspected, usageSha256: settledAttemptUsageDigest(inspected.usage) } : inspected;
+  }
   const rawJsonSha256 = computeExtractionRawJsonSha256(cached.entry.raw_json);
   try {
     const attempt = cached.entry.provider_attempt;
     if (attempt !== undefined && (!Number.isSafeInteger(attempt.attempt_ordinal) ||
         attempt.attempt_ordinal < 1 || !/^[a-f0-9]{64}$/u.test(attempt.authority_lineage_digest) ||
-        cached.entry.transport_provenance === undefined)) {
+        cached.entry.transport_provenance === undefined ||
+        attempt.kind !== undefined && attempt.kind !== "gemini_batch" && attempt.kind !== "interactive")) {
       throw new Error("invalid provider attempt binding");
+    }
+    if (cached.entry.transport_provenance !== undefined &&
+        (attempt?.kind === undefined ||
+         (attempt.kind === "gemini_batch") !== (cached.entry.provider_batch !== undefined))) {
+      throw new Error("provider attempt transport mode is unbound");
     }
     inspectCachedResponseMetadata(
       cached.entry.response_metadata,
       cached.entry.transport_provenance !== undefined
     );
+    if (cached.entry.provider_batch !== undefined) {
+      const batch = cached.entry.provider_batch;
+      const retained = readRetainedBatchLine(cacheRoot, batch.plan_identity, cacheKey);
+      const authority = readRetainedBatchAuthority(cacheRoot, batch.plan_identity, batch.authority_receipt_digest);
+      const transport = authority.observation.transport!;
+      if (canonicalJson(batch.result) !== canonicalJson(retained.result) ||
+          batch.result.rawJson !== cached.entry.raw_json ||
+          batch.result.provenance.attemptOrdinal !== attempt?.attempt_ordinal ||
+          authority.lineage_digest !== attempt?.authority_lineage_digest ||
+          retained.plan.model !== model || retained.plan.requestProfile !== requestProfile ||
+          retained.plan.lines.find((line) => line.key === cacheKey) === undefined ||
+          canonicalJson(cached.entry.transport_provenance) !== canonicalJson(
+            buildExtractionTransportProvenance(transport)) ||
+          settledAttemptUsageDigest(batch.result.provenance.usage) !==
+            settledAttemptUsageDigest(inspectCachedResponseMetadata(cached.entry.response_metadata, true).usage)) {
+        throw new Error("ordinary Batch retained request/response transport binding mismatch");
+      }
+    } else if (attempt?.kind === "interactive") {
+      inspectRetainedInteractiveResponses({ cacheKey, model, requestProfile,
+        rawJson: cached.entry.raw_json, attemptOrdinal: attempt.attempt_ordinal,
+        requestIdentity: cached.entry.request_identity,
+        responses: cached.entry.provider_responses });
+    }
     const envelope = inspectExtractionRawEnvelope(cached.entry.raw_json);
     const classification = resolveStoredEmptyClassification(
       envelope.rawSignalCount,
@@ -186,6 +262,25 @@ export function inspectCachedRawExtraction(
         rawSignalCount: envelope.rawSignalCount
       };
     }
+    if (requireAdmission && cached.entry.transport_provenance !== undefined) {
+      if (attempt === undefined) return { status: "invalid", reason: "provider attempt binding is missing", rawJsonSha256 };
+      const response = inspectCachedResponseMetadata(cached.entry.response_metadata, true);
+      const admission = inspectSettledProviderAttempt({ cacheRoot, cacheKey, model, requestProfile,
+        rawJsonSha256, transportProvenance: cached.entry.transport_provenance,
+        attemptOrdinal: attempt.attempt_ordinal,
+        authorityLineageDigest: attempt.authority_lineage_digest,
+        ...(attempt.kind === "interactive" ? { responses: cached.entry.provider_responses } : {}),
+        ...(attempt.kind === "interactive" ? { aggregateUsage: response.usage } : {}),
+        ...((attempt.last_usage ?? undefined) === undefined ?
+          (attempt.last_usage === null ? {} : response.usage === undefined ? {} : { usage: response.usage }) :
+          { usage: attempt.last_usage! }) });
+      if (admission.status === "pending") return { status: "pending", reason: admission.reason!,
+        rawJson: cached.entry.raw_json, rawJsonSha256, rawSignalCount: envelope.rawSignalCount,
+        transportProvenance: cached.entry.transport_provenance,
+        attemptOrdinal: attempt.attempt_ordinal,
+        authorityLineageDigest: attempt.authority_lineage_digest };
+      if (admission.status === "invalid") return { status: "invalid", reason: admission.reason!, rawJsonSha256 };
+    }
     return {
       status: "hit",
       rawJson: cached.entry.raw_json,
@@ -194,7 +289,13 @@ export function inspectCachedRawExtraction(
       }),
       ...(attempt === undefined ? {} : {
         attemptOrdinal: attempt.attempt_ordinal,
-        authorityLineageDigest: attempt.authority_lineage_digest
+        authorityLineageDigest: attempt.authority_lineage_digest,
+        usageSha256: settledAttemptUsageDigest(attempt.last_usage === undefined ?
+          inspectCachedResponseMetadata(cached.entry.response_metadata, true).usage : attempt.last_usage),
+        ...(attempt.kind === "interactive" && cached.entry.provider_responses?.at(-1) !== undefined ?
+          { responseSha256: transportResponseDigest(cached.entry.provider_responses.at(-1)!.witness),
+            aggregateUsageSha256: settledAttemptUsageDigest(
+              inspectCachedResponseMetadata(cached.entry.response_metadata, true).usage) } : {})
       }),
       ...envelope
     };

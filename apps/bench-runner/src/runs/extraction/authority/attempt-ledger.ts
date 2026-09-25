@@ -66,7 +66,8 @@ export interface ExtractionAttemptLedgerSnapshot {
     readonly cacheKey: string;
   }>[];
   readonly settledAttempts: readonly Readonly<{
-    attemptOrdinal: number; cacheKey: string; usageSha256?: string
+    attemptOrdinal: number; cacheKey: string; usageSha256?: string; responseSha256?: string;
+    aggregateUsageSha256?: string
   }>[];
   readonly transportFailures: readonly Readonly<{
     readonly attemptOrdinal: number;
@@ -420,7 +421,12 @@ function shardAttemptBelongsToLedger(
     !record.transport_failures.some((attempt) => attempt.cache_key === shard.cacheKey &&
       attempt.attempt_ordinal === shard.attemptOrdinal) &&
     (record.settled_attempts ?? []).some((attempt) =>
-      attempt.cache_key === shard.cacheKey && attempt.attempt_ordinal === shard.attemptOrdinal);
+      attempt.cache_key === shard.cacheKey && attempt.attempt_ordinal === shard.attemptOrdinal &&
+      attempt.usage_sha256 !== undefined && attempt.usage_sha256 === shard.usageSha256 &&
+      (shard.responseSha256 === undefined ? attempt.response_sha256 === undefined :
+        attempt.response_sha256 === shard.responseSha256) &&
+      (shard.aggregateUsageSha256 === undefined ? attempt.aggregate_usage_sha256 === undefined :
+        attempt.aggregate_usage_sha256 === shard.aggregateUsageSha256));
 }
 
 function assertSuccessfulShards(
@@ -430,7 +436,7 @@ function assertSuccessfulShards(
 ): void {
   for (const shard of record.successful_shards) {
     if (!shardAttemptBelongsToLedger(shard, record)) {
-      throw new AlayaError("CONFLICT", `extraction authority successful shard attempt drifted: ${shard.cacheKey}`);
+      throw new AlayaError("CONFLICT", `extraction authority successful shard closure drifted: ${shard.cacheKey}`);
     }
     assertLedgerSuccessfulShard(cacheRoot, shard, record.cache_identity, inspectShard);
   }
@@ -493,7 +499,11 @@ function toSnapshot(
     }))),
     settledAttempts: Object.freeze((record.settled_attempts ?? []).map(attempt => Object.freeze({
       attemptOrdinal: attempt.attempt_ordinal, cacheKey: attempt.cache_key,
-      ...(attempt.usage_sha256 === undefined ? {} : { usageSha256: attempt.usage_sha256 })
+      ...(attempt.usage_sha256 === undefined ? {} : { usageSha256: attempt.usage_sha256 }),
+      ...(attempt.response_sha256 === undefined ? {} : { responseSha256: attempt.response_sha256 }),
+      ...(attempt.aggregate_usage_sha256 === undefined ? {} : {
+        aggregateUsageSha256: attempt.aggregate_usage_sha256
+      })
     }))),
     transportFailures: Object.freeze(record.transport_failures.map((failure) => Object.freeze({
       attemptOrdinal: failure.attempt_ordinal,
@@ -548,7 +558,11 @@ function canonicalLedgerRecord(record: ExtractionAttemptLedgerRecord) {
     })),
     ...(record.settled_attempts === undefined ? {} : { settled_attempts: record.settled_attempts.map(attempt => ({
       attempt_ordinal: attempt.attempt_ordinal, cache_key: attempt.cache_key,
-      ...(attempt.usage_sha256 === undefined ? {} : { usage_sha256: attempt.usage_sha256 })
+      ...(attempt.usage_sha256 === undefined ? {} : { usage_sha256: attempt.usage_sha256 }),
+      ...(attempt.response_sha256 === undefined ? {} : { response_sha256: attempt.response_sha256 }),
+      ...(attempt.aggregate_usage_sha256 === undefined ? {} : {
+        aggregate_usage_sha256: attempt.aggregate_usage_sha256
+      })
     })) }),
     transport_failures: record.transport_failures.map((failure) => ({
       attempt_ordinal: failure.attempt_ordinal,

@@ -34,17 +34,17 @@ import {
   computeExtractionKeySetSha256,
   computeExtractionRawJsonSha256
 } from "../../../../runs/extraction/content-closure.js";
-import { buildExtractionTransportProvenance } from
-  "../../../../runs/extraction/transport-route.js";
-import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
-  "../extraction-cache-test-fixture.js";
+import { providerFixtureKey, providerShardFixture } from "./provider-shard-fixture.js";
 
 export const model = "gpt-5.4-mini";
 export const requestProfile = "provider-default-v1" as const;
-export const firstKey = "1".repeat(64);
-export const secondKey = "2".repeat(64);
+export const firstKey = providerFixtureKey("1");
+export const secondKey = providerFixtureKey("2");
 const rawJson = '{"signals":[{}]}';
 const roots: string[] = [];
+const predecessorShardTemplate = await providerShardFixture({
+  label: "1", lineageDigest: "0".repeat(64), attemptOrdinal: 1
+});
 
 export function cleanupContinuationRoots(): void {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
@@ -307,9 +307,10 @@ function seedSuccessfulPredecessor(cacheRoot: string, lineageDigest: string): vo
     maximumAttempts: computeExtractionFillAttemptCeiling(2),
     successfulShardCeiling: 2
   });
-  ledger.reserveAttempt(firstKey);
-  ledger.recordTransportOutcome(firstKey, { retryCount: 0, rateLimitRetries: 0 });
-  writeShard(cacheRoot, firstKey);
+  const ordinal = ledger.reserveAttemptOrdinal(firstKey);
+  writeShard(cacheRoot, firstKey, lineageDigest, ordinal);
+  ledger.recordTransportOutcome(firstKey, { retryCount: 0, rateLimitRetries: 0,
+    attemptResponses: [predecessorShardTemplate.provider_responses[0]!.witness] }, ordinal);
   ledger.commitSuccessfulShard(firstKey);
 }
 
@@ -469,17 +470,14 @@ function writeManifest(cacheRoot: string): void {
   });
 }
 
-function writeShard(cacheRoot: string, cacheKey: string): void {
+function writeShard(cacheRoot: string, cacheKey: string, lineageDigest: string, attemptOrdinal: number): void {
   const directory = join(cacheRoot, cacheKey.slice(0, 2));
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, `${cacheKey}.json`), JSON.stringify({
-    model,
-    request_profile: requestProfile,
-    cache_key: cacheKey,
-    raw_json: rawJson,
-    transport_provenance: buildExtractionTransportProvenance({
-      providerUrl: "https://example.test/v1", model
-    }),
-    response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
+    ...predecessorShardTemplate,
+    provider_attempt: { ...predecessorShardTemplate.provider_attempt,
+      attempt_ordinal: attemptOrdinal, authority_lineage_digest: lineageDigest },
+    provider_responses: [{ ...predecessorShardTemplate.provider_responses[0],
+      attempt_ordinal: attemptOrdinal }]
   }), "utf8");
 }

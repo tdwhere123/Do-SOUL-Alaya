@@ -33,6 +33,8 @@ import {
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
   providerBackedExtractionResult,
+  providerBackedResponseResult,
+  fixtureAttemptAuthority,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
@@ -54,7 +56,7 @@ describe("createCachingSignalExtractor provider execution", () => {
       matched: "I have a dog."
     }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedExtractionResult(rawJson))
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, rawJson))
     };
     const stats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -159,7 +161,7 @@ describe("createCachingSignalExtractor replay", () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const rawJson = interpretationsEnvelope([{ matched: "I have a dog." }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedExtractionResult(rawJson))
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, rawJson))
     };
     const firstStats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -187,6 +189,7 @@ describe("createCachingSignalExtractor replay", () => {
         requestProfile: "provider-default-v1"
       },
       cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" }),
       stats: firstStats
     });
     await firstRun.extract({ systemPrompt: "sys", userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", []) });

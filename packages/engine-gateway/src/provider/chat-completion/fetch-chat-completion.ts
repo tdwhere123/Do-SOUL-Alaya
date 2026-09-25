@@ -84,6 +84,10 @@ async function runProviderChatRequest(
     return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
   }
   await throwIfHttpError(response);
+  if (request.retainHttpResponseEvidence === true) {
+    const { bodyText, evidence } = await readProviderResponseWithEvidence(response, observeResponse);
+    return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
+  }
   const bodyText = await readBody(response);
   return inspectBody(request, bodyText, response.headers.get("content-type"), response.status);
 }

@@ -31,6 +31,8 @@ import { BENCH_DAEMON_DB_FILENAME } from "../../../runs/snapshot/materialize.js"
 import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 import {
   providerBackedExtractionResult,
+  providerBackedResponseResult,
+  fixtureAttemptAuthority,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
@@ -214,7 +216,7 @@ describe("materialization fuel inventory integration", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "seed-fuel-cache-"));
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate = {
-      extract: vi.fn(async () => providerBackedExtractionResult(interpretationsEnvelope([
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, interpretationsEnvelope([
           { matched: "moved to Berlin" }
         ])))
     };
@@ -227,6 +229,7 @@ describe("materialization fuel inventory integration", () => {
         requestProfile: "provider-default-v1"
       },
       cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" }),
       stats: warmStats
     });
     const userPrompt = stringifyOfficialApiExtractionRequest(

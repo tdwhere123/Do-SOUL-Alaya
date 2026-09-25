@@ -4,6 +4,7 @@ import { baseReportedUsage } from "../step-quote.js";
 import {
   BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES,
   type BenchProviderUsage,
+  type BenchTransportResponseWitness,
   type BenchTerminalRetryClassification,
   type BenchTransportFailureAttempt,
   type BenchTransportFailureKind,
@@ -26,6 +27,9 @@ export interface ExtractionTransportOutcome {
   readonly terminalRetryClassification?: BenchTerminalRetryClassification;
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
   readonly usage?: BenchProviderUsage;
+  /** Undefined is an unresolved historical outcome; null is an observed unavailable usage. */
+  readonly attemptUsages?: readonly (BenchProviderUsage | null | undefined)[];
+  readonly attemptResponses?: readonly (BenchTransportResponseWitness | null)[];
 }
 
 export class ExtractionAttemptLimitError extends Error {
@@ -128,7 +132,7 @@ export function settleTransportOutcome(
   }
   const currentReservations = unresolved.slice(-currentReservationCount);
   const mappedFailures = mapTransportFailures(currentReservations, failures);
-  const settled = applySettledOutcome(current, input, unresolved, mappedFailures,
+  const settled = applySettledOutcome(current, input, currentReservations, mappedFailures,
     attemptOrdinal !== undefined);
   // A bound terminal attempt releases its shard slot in this same durable
   // transition. A newer outstanding attempt retains ownership of that slot.
@@ -184,11 +188,20 @@ function applySettledOutcome(
   const usage = input.usage;
   return {
     ...current,
-    settled_attempts: [...(current.settled_attempts ?? []), ...unresolved.map(reservation => ({
+    settled_attempts: [...(current.settled_attempts ?? []), ...unresolved.map((reservation, index) => ({
       ...reservation,
-      ...(exactAttempt && unresolved.length === 1 ? {
+      ...(input.attemptUsages !== undefined && input.attemptUsages[index] !== undefined ? {
+        usage_sha256: settledAttemptUsageDigest(input.attemptUsages[index])
+      } : exactAttempt && unresolved.length === 1 ? {
         usage_sha256: settledAttemptUsageDigest(input.usage)
-      } : {})
+      } : {}),
+      ...(input.attemptResponses?.[index] === undefined || input.attemptResponses[index] === null ? {} : {
+        response_sha256: transportResponseDigest(input.attemptResponses[index])
+      }),
+      ...(input.attemptResponses?.some((response) => response !== null) &&
+        index === unresolved.length - 1 ? {
+          aggregate_usage_sha256: settledAttemptUsageDigest(input.usage)
+        } : {})
     }))]
       .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal),
     unresolved_attempts: current.unresolved_attempts.filter((reservation) =>
@@ -216,6 +229,15 @@ export function settledAttemptUsageDigest(usage: BenchProviderUsage | null | und
     .update(canonicalJson(baseReportedUsage(usage) ?? null), "utf8").digest("hex");
 }
 
+export function transportResponseDigest(witness: BenchTransportResponseWitness): string {
+  if (witness.httpResponse === undefined ||
+      !witness.httpResponse.bodyComplete || witness.httpResponse.bodyTruncated ||
+      !isDigest(witness.httpResponse.bodySha256)) {
+    throw new ExtractionAttemptLimitError("physical provider response is incomplete");
+  }
+  return witness.httpResponse.bodySha256;
+}
+
 function assertFailureCount(
   input: ExtractionTransportOutcome,
   failureCount: number,
@@ -238,6 +260,14 @@ function assertOutcome(input: ExtractionTransportOutcome): void {
   const successfulRequestCount = input.successfulRequestCount ?? (terminal ? 0 : 1);
   const usageRequestCount = input.usageRequestCount ?? (input.usage === undefined ? 0 : 1);
   const unknownRequestCount = input.unknownRequestCount ?? 0;
+  const reportedUsages = input.attemptUsages?.filter((usage): usage is BenchProviderUsage =>
+    usage !== null && usage !== undefined);
+  const aggregateUsage = reportedUsages === undefined || reportedUsages.length === 0 ? undefined :
+    reportedUsages.reduce((total, usage) => ({
+      inputTokens: total.inputTokens + usage.inputTokens,
+      outputTokens: total.outputTokens + usage.outputTokens,
+      totalTokens: total.totalTokens + usage.totalTokens
+    }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   if (!isNonNegativeSafeInteger(input.retryCount) ||
       !isNonNegativeSafeInteger(input.rateLimitRetries) ||
       !isNonNegativeSafeInteger(successfulRequestCount) ||
@@ -248,7 +278,26 @@ function assertOutcome(input: ExtractionTransportOutcome): void {
       !isNonNegativeSafeInteger(usageRequestCount) ||
       usageRequestCount > successfulRequestCount + input.retryCount + (terminal ? 1 : 0) ||
       (input.usage === undefined && usageRequestCount !== 0) ||
+      (reportedUsages !== undefined && (usageRequestCount !== reportedUsages.length ||
+        canonicalJson(baseReportedUsage(input.usage) ?? null) !==
+          canonicalJson(baseReportedUsage(aggregateUsage) ?? null))) ||
       (input.transportFailures !== undefined && !Array.isArray(input.transportFailures)) ||
+      (input.attemptUsages !== undefined && (!Array.isArray(input.attemptUsages) ||
+        input.attemptUsages.length !== successfulRequestCount + input.retryCount +
+          (terminal ? 1 : 0) + unknownRequestCount ||
+        input.attemptUsages.some((usage) => usage !== null && usage !== undefined &&
+          (!isNonNegativeSafeInteger(usage.inputTokens) ||
+           !isNonNegativeSafeInteger(usage.outputTokens) ||
+           !isNonNegativeSafeInteger(usage.totalTokens))))) ||
+      (input.attemptResponses !== undefined && (!Array.isArray(input.attemptResponses) ||
+        input.attemptResponses.length !== successfulRequestCount + input.retryCount +
+          (terminal ? 1 : 0) + unknownRequestCount ||
+        input.attemptResponses.some((witness) => witness !== null &&
+          (typeof witness.userPrompt !== "string" ||
+           createHash("sha256").update(witness.userPrompt, "utf8").digest("hex") !== witness.requestSha256 ||
+           typeof witness.rawJson !== "string" ||
+           witness.httpResponse === undefined || !witness.httpResponse.bodyComplete ||
+           witness.httpResponse.bodyTruncated || !isDigest(witness.httpResponse.bodySha256))))) ||
       (input.usage !== undefined && (!isNonNegativeSafeInteger(input.usage.inputTokens) ||
         !isNonNegativeSafeInteger(input.usage.outputTokens) ||
         !isNonNegativeSafeInteger(input.usage.totalTokens)))) {

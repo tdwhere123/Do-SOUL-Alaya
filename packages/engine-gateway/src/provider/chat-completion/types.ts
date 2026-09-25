@@ -50,6 +50,8 @@ export type ProviderChatCompletionRequest = Readonly<{
   readonly outputTokenField?: ProviderOutputTokenField;
   /** Versioned compatibility authority for providers documented to omit SSE sentinels. */
   readonly sseCompletionPolicy?: ProviderSseCompletionPolicy;
+  /** Retain physical response bytes for callers that settle per-request evidence. */
+  readonly retainHttpResponseEvidence?: true;
   readonly fetchImpl?: typeof fetch;
   /** Process env bind for private-provider URL opt-in; omit treats private hosts as blocked. */
   readonly env?: EnvLookup;

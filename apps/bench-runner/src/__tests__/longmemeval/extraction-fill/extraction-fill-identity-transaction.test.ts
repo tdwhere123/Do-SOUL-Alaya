@@ -17,6 +17,7 @@ import {
   groundedExtractionResult,
   providerBackedExtractionResult
 } from "./fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -46,7 +47,7 @@ afterEach(async () => {
 describe("extraction-fill identity transaction", () => {
   it("rejects manifest replacement during dataset preparation on an all-hit run", async () => {
     await writeDataset([question()]);
-    await fillSuccessfully();
+    await fillSuccessfully(await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }));
     const rerun = fillSuccessfully();
     writeIdentityManifest("https://provider-b.invalid/v1", "family-b", "replacement");
     await expect(rerun).rejects.toThrow(/changed during authority preparation/u);
@@ -139,12 +140,13 @@ describe("extraction-fill identity transaction", () => {
   });
 });
 
-async function fillSuccessfully() {
+function fillSuccessfully(authorityReceiptPath?: string) {
   return runExtractionFill({
     variant: VARIANT,
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
+    ...(authorityReceiptPath === undefined ? {} : { authorityReceiptPath }),
     concurrency: 1,
     extractorFactory: () => ({
       extract: async (input) => groundedExtractionResult(input)

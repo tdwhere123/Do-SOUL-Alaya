@@ -14,6 +14,7 @@ import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReserv
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import { dirname } from "node:path";
+import { settledAttemptUsageDigest } from "../extraction/authority/attempt-ledger/outcome.js";
 
 export function semanticProposalLookup(
   workset: SemanticProposalWorkset, line: SemanticProposalLine, maxOutputTokens: number
@@ -166,7 +167,8 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
         successKind: "provider" as const,
         transportProvenance: shard.transport_provenance,
         attemptOrdinal: shard.attempt_ordinal,
-        authorityLineageDigest: shard.attempt_lineage_digest
+        authorityLineageDigest: shard.attempt_lineage_digest,
+        usageSha256: settledAttemptUsageDigest(baseReportedUsage(raw.usage))
       };
     }
   });

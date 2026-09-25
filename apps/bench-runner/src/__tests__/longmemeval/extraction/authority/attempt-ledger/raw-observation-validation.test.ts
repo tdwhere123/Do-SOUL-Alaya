@@ -6,10 +6,9 @@ import { inspectCachedExtraction, writeCachedExtraction } from
   "../../../../../runs/compile-seed/cache/cache-shard.js";
 import { readValidLedgerShard } from
   "../../../../../runs/extraction/authority/attempt-ledger-shards.js";
-import { buildExtractionTransportProvenance } from
-  "../../../../../runs/extraction/transport-route.js";
-import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
-  "../../extraction-cache-test-fixture.js";
+import { openExtractionAttemptLedger } from
+  "../../../../../runs/extraction/authority/attempt-ledger.js";
+import { providerFixtureKey, providerShardFixture } from "../provider-shard-fixture.js";
 
 describe("attempt ledger raw observation validation", () => {
   let root: string | undefined;
@@ -20,30 +19,27 @@ describe("attempt ledger raw observation validation", () => {
 
   it("separates raw envelope closure from semantic projection parsing", async () => {
     root = await mkdtemp(join(tmpdir(), "alaya-ledger-raw-"));
-    const cacheKey = "a".repeat(64);
-    writeCachedExtraction(root, cacheKey, {
-      model: "model",
-      request_profile: "deepseek-v4-nonthinking-v1",
-      cache_key: cacheKey,
-      raw_json: JSON.stringify({ signals: [{
-        signal_kind: "potential_possession",
-        object_kind: "physical_item",
-        confidence: 2,
-        matched_text: "I own Atlas."
-      }] }),
-      extracted_at: new Date(0).toISOString(),
-      transport_provenance: buildExtractionTransportProvenance({
-        providerUrl: "https://example.test/v1", model: "model"
-      }),
-      response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
+    const cacheKey = providerFixtureKey("raw-observation");
+    const lineageDigest = "b".repeat(64);
+    const identity = { model: "gpt-5.4-mini", requestProfile: "provider-default-v1" } as const;
+    const ledger = openExtractionAttemptLedger({
+      cacheRoot: root, lineageDigest, cacheIdentity: identity, startingMissing: 1
     });
+    ledger.reserveAttempt(cacheKey);
+    const shard = await providerShardFixture({ label: "raw-observation", lineageDigest,
+      attemptOrdinal: 1 });
+    ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0,
+      attemptResponses: [shard.provider_responses[0]!.witness] }, 1);
+    writeCachedExtraction(root, cacheKey, {
+      ...shard, request_profile: identity.requestProfile,
+      extracted_at: new Date(0).toISOString()
+    });
+    ledger.commitSuccessfulShard(cacheKey);
 
     expect(inspectCachedExtraction(
-      root, cacheKey, "model", "deepseek-v4-nonthinking-v1"
+      root, cacheKey, identity.model, identity.requestProfile
     ).status).toBe("invalid");
-    expect(readValidLedgerShard(root, cacheKey, {
-      model: "model",
-      requestProfile: "deepseek-v4-nonthinking-v1"
-    })).toMatchObject({ cacheKey, rawJsonSha256: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+    expect(readValidLedgerShard(root, cacheKey, identity))
+      .toMatchObject({ cacheKey, rawJsonSha256: expect.stringMatching(/^[a-f0-9]{64}$/u) });
   });
 });

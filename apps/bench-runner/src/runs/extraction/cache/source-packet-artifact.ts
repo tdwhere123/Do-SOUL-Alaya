@@ -16,6 +16,7 @@ import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
+import { inspectSettledProviderAttempt } from "../authority/attempt-ledger/admission.js";
 
 export class SourcePacketAdmissionError extends Error {}
 
@@ -96,7 +97,7 @@ function inspectSourcePacketEntry(entry: CachedExtractionEntry, cacheRoot: strin
 }
 
 export function inspectCachedSourcePacket(cacheRoot: string, cacheKey: string, model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"]) {
+  requestProfile: CompileSeedExtractionConfig["requestProfile"], requireAdmission = true) {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
   try {
@@ -107,6 +108,19 @@ export function inspectCachedSourcePacket(cacheRoot: string, cacheKey: string, m
         canonicalJson(request.profile) !== canonicalJson(manifest.source_interpretation_profile) ||
         extractionAdmissionGenerationSha256(manifest) !== cached.entry.admission_identity!.generation_sha256) {
       throw new AlayaError("CONFLICT", "typed packet generation binding mismatch");
+    }
+    if (requireAdmission && inspected.transportProvenance !== undefined) {
+      if (inspected.attemptOrdinal === undefined || inspected.authorityLineageDigest === undefined) {
+        return { status: "invalid" as const, reason: "typed packet provider attempt binding is missing" };
+      }
+      const admission = inspectSettledProviderAttempt({ cacheRoot, cacheKey, model, requestProfile,
+        rawJsonSha256: inspected.rawJsonSha256, transportProvenance: inspected.transportProvenance,
+        attemptOrdinal: inspected.attemptOrdinal,
+        authorityLineageDigest: inspected.authorityLineageDigest,
+        ...(inspected.usage === undefined ? {} : { usage: inspected.usage }) });
+      if (admission.status !== "admitted") return { ...(admission.status === "pending" ? inspected : {}),
+        status: admission.status === "pending" ? "pending" as const : "invalid" as const,
+        reason: admission.reason! };
     }
     return inspected;
   } catch (cause) {

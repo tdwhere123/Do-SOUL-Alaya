@@ -13,7 +13,7 @@ import { runExtractionFillForTests } from
   "../../../test-support/catalog-refill-failpoint.js";
 import type { LongMemEvalQuestion } from
   "../../../../../datasets/longmemeval/ingestion/dataset.js";
-import { providerBackedExtractionResult } from "../../fixture.js";
+import { providerBackedResponseResult } from "../../../extraction/extraction-cache-test-fixture.js";
 
 const CRASH_CHILD_ENV = "ALAYA_TEST_CATALOG_REFILL_CRASH_CHILD";
 const FAILPOINT_ENV = "ALAYA_TEST_CATALOG_REFILL_SIGKILL_AFTER";
@@ -49,10 +49,9 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     const authority = await fixture.writeAuthority(fixture.remainingKeys(questions));
     let calls = 0;
     const interruptedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
       calls += 1;
-      if (calls === 2) throw fixture.providerTimeoutFailure();
-      return providerBackedExtractionResult(fixture.groundedResponse(input.userPrompt));
+      if (calls === 2) { await input.onTransportAttempt?.(); throw fixture.providerTimeoutFailure(); }
+      return providerBackedResponseResult(input, fixture.groundedResponse(input.userPrompt));
     });
     const roots = fixture.roots();
     await expect(runExtractionFill({
@@ -64,8 +63,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     const resumeName = fixture.controlArtifacts(".catalog-refill-resume.")[0]!;
     const staleResumeBytes = readFileSync(join(roots.cacheRoot, resumeName));
     const fillExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(fixture.groundedResponse(input.userPrompt));
+      return providerBackedResponseResult(input, fixture.groundedResponse(input.userPrompt));
     });
     const completed = await runExtractionFill({
       variant: fixture.variant, ...roots,
@@ -117,8 +115,7 @@ export function registerCatalogRefillRecoveryCases(fixture: RecoveryFixture): vo
     expect(existsSync(staleLock)).toBe(true);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       expect(fixture.controlArtifacts(".catalog-refill-resume.")).toHaveLength(1);
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(fixture.groundedResponse(input.userPrompt));
+      return providerBackedResponseResult(input, fixture.groundedResponse(input.userPrompt));
     });
 
     const result = await runExtractionFill({
@@ -153,10 +150,12 @@ export function registerCatalogRefillCrashChild(
     const input = JSON.parse(process.env[CRASH_CHILD_ENV]!) as CrashChildInput;
     let calls = 0;
     const extract: BenchSignalExtractor["extract"] = async (request) => {
-      await request.onTransportAttempt?.();
       calls += 1;
-      if (input.mode === "provider-failure" && calls === 2) throw providerTimeoutFailure();
-      return providerBackedExtractionResult(groundedResponse(request.userPrompt));
+      if (input.mode === "provider-failure" && calls === 2) {
+        await request.onTransportAttempt?.();
+        throw providerTimeoutFailure();
+      }
+      return providerBackedResponseResult(request, groundedResponse(request.userPrompt));
     };
     await runExtractionFillForTests({
       variant, concurrency: 1, cacheRoot: input.cacheRoot, dataDir: input.dataDir,

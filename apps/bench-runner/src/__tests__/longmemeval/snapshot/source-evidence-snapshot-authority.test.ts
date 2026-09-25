@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT, parseOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiSourceCorpus,
+  collectOfficialApiExtractionCoverage, parseOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import {
   buildGardenSourceTurnFallbackReceiptPreimage,
@@ -16,7 +18,7 @@ import {
   startBenchDaemon,
   type BenchDaemonHandle
 } from "../../../harness/daemon.js";
-import { createCompileSeedRunner } from
+import { createCachingSignalExtractor, createCompileSeedRunner } from
   "../../../runs/compile-seed.js";
 import {
   computeExtractionContentClosureSha256,
@@ -51,7 +53,7 @@ import {
   interpretationsEnvelope
 } from "../compile-seed/compile-seed-fixture.js";
 import {
-  providerBackedExtractionResult,
+  fixtureAttemptAuthority, providerBackedResponseResult,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
 import {
@@ -382,6 +384,30 @@ async function seedFixture(
 ): Promise<SeededAuthorityFixture> {
   const question = sourceEvidenceQuestion();
   const keySpace = inspectTurnContentKeySpace([question]);
+  const extract = async (input: { userPrompt: string; onTransportAttempt?: () => void | Promise<void> }) => {
+    const request = parseOfficialApiExtractionRequest(JSON.parse(input.userPrompt));
+    const assertion = request.source_assertions.find((item) => item.text.includes("I check the platform near the main entrance."));
+    return providerBackedResponseResult(input, interpretationsEnvelope(assertion === undefined ? [] : [{
+      matched: "I check the platform near the main entrance.",
+      assertionId: assertion.assertion_id
+    }]));
+  };
+  if (allowLiveExtraction) {
+    const prewarm = createCachingSignalExtractor({
+      delegate: { extract }, config: CREDENTIALLED_CONFIG, cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: CREDENTIALLED_CONFIG.model,
+        requestProfile: CREDENTIALLED_CONFIG.requestProfile,
+        startingMissing: keySpace.distinctExtractionRequestCount })
+    });
+    for (const turn of keySpace.distinctExtractionTurns) {
+      for (const request of collectOfficialApiExtractionCoverage(
+        turn.turnContent, turn.turnMessages).requests) {
+        await prewarm.extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+          userPrompt: stringifyOfficialApiExtractionRequest(request),
+          sourceCorpus: buildOfficialApiSourceCorpus(turn.turnContent, turn.turnMessages) });
+      }
+    }
+  }
   const runner = createCompileSeedRunner({
     config: CREDENTIALLED_CONFIG,
     cacheRoot,
@@ -389,16 +415,7 @@ async function seedFixture(
     requiredTurnContents: keySpace.distinctTurnContents,
     requiredExtractionTurns: keySpace.distinctExtractionTurns,
     requiredQuestionWindow: { offset: 0, limit: 1 },
-    extractorFactory: () => ({
-      extract: async ({ userPrompt }) => {
-        const request = parseOfficialApiExtractionRequest(JSON.parse(userPrompt));
-        const assertion = request.source_assertions.find((item) => item.text.includes("I check the platform near the main entrance."));
-        return providerBackedExtractionResult(interpretationsEnvelope(assertion === undefined ? [] : [{
-          matched: "I check the platform near the main entrance.",
-          assertionId: assertion.assertion_id
-        }]));
-      }
-    })
+    extractorFactory: () => ({ extract })
   });
   const workspace = { ...daemon, detach: async () => undefined };
   const state = await seedLongMemEvalQuestion({

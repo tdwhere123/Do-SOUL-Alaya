@@ -36,7 +36,8 @@ import {
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
-  writeExtractionCacheTestManifest
+  writeExtractionCacheTestManifest, providerBackedResponseResult,
+  fixtureAttemptAuthority
 } from "../extraction/extraction-cache-test-fixture.js";
 import { computeExtractionRawJsonSha256 } from "../../../runs/compile-seed/compile-seed-cache.js";
 
@@ -63,7 +64,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
       matched: "I moved to Berlin.",
       }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedResult(rawJson))
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, rawJson))
     };
     const firstStats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -90,6 +91,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
         requestProfile: "provider-default-v1"
       },
       cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" }),
       stats: firstStats
     });
     await firstRun.extract({

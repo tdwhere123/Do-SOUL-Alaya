@@ -5,6 +5,10 @@ import {
   writeExtractionCacheManifest,
   type ExtractionRequestProfile
 } from "../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { openExtractionAttemptLedger } from
+  "../../../runs/extraction/authority/attempt-ledger.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../runs/extraction/authority/receipt-limits.js";
 
 const TEST_EXTRACTION_PROVIDER_URL = "https://provider.invalid/v1";
 
@@ -31,6 +35,59 @@ export function providerBackedExtractionResult<Extras extends object = Record<ne
     ...extras,
     rawJson,
     responseMetadata: { ...responseMetadata, ...TEST_PROVIDER_COMPLETION_METADATA }
+  };
+}
+
+/** A custom delegate fixture backed by the bytes of an actual chat-completion Response. */
+export async function providerBackedResponseResult<Extras extends object = Record<never, never>>(
+  input: { readonly userPrompt: string; readonly onTransportAttempt?: () => void | Promise<void> },
+  rawJson: string, extras?: Extras
+) {
+  await input.onTransportAttempt?.();
+  const result = providerBackedExtractionResult(rawJson, extras);
+  const usage = (result as { readonly usage?: {
+    readonly inputTokens: number; readonly outputTokens: number; readonly totalTokens: number
+  } }).usage;
+  const response = Response.json({
+    choices: [{ message: { content: rawJson }, finish_reason: "stop" }],
+    ...(usage === undefined ? {} : { usage: {
+      prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens,
+      total_tokens: usage.totalTokens
+    } })
+  });
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return { ...result, httpResponse: {
+    contentType: response.headers.get("content-type"),
+    bodyBase64: bytes.toString("base64"), bodyByteLength: bytes.length,
+    bodySha256: createHash("sha256").update(bytes).digest("hex"),
+    bodyTruncated: false, bodyComplete: true
+  } };
+}
+
+/** A bounded local attempt ledger for tests that exercise the cache port directly. */
+export function fixtureAttemptAuthority(input: {
+  readonly cacheRoot: string;
+  readonly model: string;
+  readonly requestProfile: ExtractionRequestProfile;
+  readonly startingMissing?: number;
+}) {
+  const startingMissing = input.startingMissing ?? 1;
+  const lineageDigest = createHash("sha256")
+    .update(`fixture-attempt-authority:${input.cacheRoot}`).digest("hex");
+  const ledger = openExtractionAttemptLedger({
+    cacheRoot: input.cacheRoot, lineageDigest,
+    cacheIdentity: { model: input.model, requestProfile: input.requestProfile },
+    startingMissing,
+    maximumAttempts: computeExtractionFillAttemptCeiling(startingMissing),
+    successfulShardCeiling: startingMissing
+  });
+  return {
+    onTransportAttempt: ledger.reserveAttemptOrdinal,
+    providerAttemptLineageDigest: lineageDigest,
+    onLiveExtractionOutcome: ledger.recordTransportOutcome,
+    onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+    onDeterministicExtractionSucceeded: ledger.commitDeterministicShard,
+    onLiveExtractionFailed: ledger.abandonPendingShard
   };
 }
 
@@ -67,3 +124,4 @@ export function writeExtractionCacheTestManifest(input: {
 }
 
 export { TEST_EXTRACTION_PROVIDER_URL };
+import { createHash } from "node:crypto";

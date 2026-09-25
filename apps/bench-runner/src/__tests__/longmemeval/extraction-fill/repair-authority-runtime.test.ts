@@ -22,9 +22,10 @@ import {
   buildAuthorityQuestion as buildExtractionFillQuestion,
   EXTRACTION_FILL_VARIANT,
   groundedExtractionResult,
-  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
+import { providerBackedResponseResult } from "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 let cacheRoot: string;
 let dataDir: string;
@@ -43,6 +44,7 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -53,8 +55,7 @@ describe("strict JSON repair authority runtime", () => {
     const preservedBefore = readFileSync(preservedPath!, "utf8");
     const receiptPath = await writeRepairReceipt();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(
+      return providerBackedResponseResult(input,
         buildGroundedInterpretationResponse(input.userPrompt),
         { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
       );
@@ -91,6 +92,7 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -101,8 +103,7 @@ describe("strict JSON repair authority runtime", () => {
     const untouchedBefore = readFileSync(untouchedPath!, "utf8");
     const receiptPath = await writeRepairReceipt();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(
+      return providerBackedResponseResult(input,
         buildGroundedInterpretationResponse(input.userPrompt),
         { responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 } }
       );
@@ -159,6 +160,7 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -193,6 +195,7 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -236,6 +239,7 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -275,6 +279,7 @@ describe("strict JSON repair authority runtime", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),

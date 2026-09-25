@@ -16,8 +16,10 @@ import type {
 import type {
   LongMemEvalQuestion
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
-import { providerBackedExtractionResult, TEST_EXTRACTION_PROVIDER_URL } from
+import { providerBackedExtractionResult, providerBackedResponseResult,
+  TEST_EXTRACTION_PROVIDER_URL } from
   "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 import { groundedExtractionResult } from "./fixture.js";
 import { interpretationsEnvelope } from "../compile-seed/compile-seed-fixture.js";
 
@@ -45,6 +47,7 @@ afterEach(async () => {
 });
 
 it("aborts in-flight extraction, releases the lease, and resumes saved shards", async () => {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
   const controller = new AbortController();
   const interrupted = new Error("operator interrupted extraction-fill");
   const secondStarted = deferred();
@@ -52,7 +55,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   let calls = 0;
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
     calls += 1;
-    if (calls === 1) return providerBackedExtractionResult(interpretationsEnvelope([{
+    if (calls === 1) return providerBackedResponseResult(input, interpretationsEnvelope([{
       matched: "I saved alpha."
     }]));
     secondStarted.resolve();
@@ -63,6 +66,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
+    authorityReceiptPath,
     concurrency: 1,
     signal: controller.signal,
     extractorFactory: () => ({ extract }),
@@ -88,6 +92,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
+    authorityReceiptPath,
     concurrency: 1,
     extractorFactory: () => ({
       extract: async (input) => groundedExtractionResult(input)
@@ -193,6 +198,7 @@ it("stops without caching a semantically invalid extraction payload", async () =
 });
 
 it("does not finalize coverage when interruption follows the last response", async () => {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
   const controller = new AbortController();
   const interrupted = new Error("operator interrupted before finalization");
   const running = runExtractionFill({
@@ -200,6 +206,7 @@ it("does not finalize coverage when interruption follows the last response", asy
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
+    authorityReceiptPath,
     concurrency: 1,
     signal: controller.signal,
     extractorFactory: () => ({

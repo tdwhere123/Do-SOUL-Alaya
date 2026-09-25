@@ -155,15 +155,12 @@ describe("extraction cache inventory", () => {
     expect(inspected.descriptors).toEqual([]);
   });
 
-  it.each(["deterministic_empty", "completed_empty", "legacy_nonempty"] as const)(
+  it.each(["deterministic_empty", "legacy_nonempty"] as const)(
     "preserves the exact audited inventory shape for a qualified %s shard", (kind) => {
       const root = cacheRoot();
       const key = "a".repeat(64);
-      const provider = kind === "completed_empty";
       writeShard(root, key, kind === "legacy_nonempty" ? legacyNonempty : '{"signals":[]}',
-        provider ? TEST_CACHED_PROVIDER_COMPLETION_METADATA : undefined, provider,
-        kind === "legacy_nonempty" ? {} : { empty_classification: kind,
-          ...(provider ? { request_completion: { version: 1, status: "completed_empty" } } : {}) });
+        undefined, false, kind === "legacy_nonempty" ? {} : { empty_classification: kind });
       const audited = inspectExtractionCacheInventory({ cacheRoot: root, cacheKeys: [key], model, requestProfile });
       const bounded = inspectBoundedMaterializationInventory({ sourceRoot: root, audited,
         model, requestProfile, maxShardBytes: 32_768 });
@@ -174,6 +171,17 @@ describe("extraction cache inventory", () => {
         "cacheKey", "parsedDraftCount", "rawJsonSha256", "rawSignalCount", "status"
       ]);
     });
+
+  it("rejects a completed-empty provider shard without its physical attempt", () => {
+    const root = cacheRoot();
+    const key = "a".repeat(64);
+    writeShard(root, key, '{"signals":[]}', TEST_CACHED_PROVIDER_COMPLETION_METADATA, true,
+      { empty_classification: "completed_empty",
+        request_completion: { version: 1, status: "completed_empty" } });
+    const inventory = inspectExtractionCacheInventory({ cacheRoot: root, cacheKeys: [key], model, requestProfile });
+    expect(inventory.counts).toMatchObject({ hit: 0, invalid: 1 });
+    expect(inventory.shards[0]?.reason).toMatch(/provider attempt/u);
+  });
 
   it("rejects a symlinked cache root rather than following it", () => {
     const root = cacheRoot();

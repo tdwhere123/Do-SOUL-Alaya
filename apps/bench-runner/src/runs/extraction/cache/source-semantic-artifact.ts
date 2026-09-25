@@ -25,6 +25,7 @@ import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../c
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
+import { inspectSettledProviderAttempt } from "../authority/attempt-ledger/admission.js";
 import {
   SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
 } from "../request-artifact.js";
@@ -215,7 +216,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
 }
 
 export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string, model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"]) {
+  requestProfile: CompileSeedExtractionConfig["requestProfile"], requireAdmission = true) {
   const cached = readCachedEntry(cacheRoot, cacheKey, model, requestProfile);
   if (cached.status !== "hit") return cached;
   try {
@@ -234,6 +235,22 @@ export function inspectCachedSourceSemantic(cacheRoot: string, cacheKey: string,
     if (manifest?.source_semantic_generation === undefined ||
         extractionAdmissionGenerationSha256(manifest) !== cached.entry.admission_identity?.generation_sha256) {
       throw new AlayaError("CONFLICT", "typed open-semantics generation binding mismatch");
+    }
+    if (inspected.requestBinding === "unbound") {
+      return { status: "invalid" as const, reason: "current source semantic request is unbound" };
+    }
+    if (requireAdmission && inspected.transportProvenance !== undefined && inspected.status === "hit") {
+      if (inspected.attemptOrdinal === undefined || inspected.authorityLineageDigest === undefined) {
+        return { status: "invalid" as const, reason: "source semantic provider attempt binding is missing" };
+      }
+      const admission = inspectSettledProviderAttempt({ cacheRoot, cacheKey, model, requestProfile,
+        rawJsonSha256: inspected.rawJsonSha256, transportProvenance: inspected.transportProvenance,
+        attemptOrdinal: inspected.attemptOrdinal,
+        authorityLineageDigest: inspected.authorityLineageDigest,
+        ...(inspected.usage === undefined ? {} : { usage: inspected.usage }) });
+      if (admission.status !== "admitted") return { ...(admission.status === "pending" ? inspected : {}),
+        status: admission.status === "pending" ? "pending" as const : "invalid" as const,
+        reason: admission.reason! };
     }
     return inspected;
   } catch (cause) {

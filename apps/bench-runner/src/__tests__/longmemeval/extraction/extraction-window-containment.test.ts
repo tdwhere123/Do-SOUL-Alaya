@@ -30,6 +30,7 @@ import { inspectTurnContentKeySpace } from
 import { buildLongMemEvalFixtureQuestion } from "../longmemeval-fixture.js";
 import { providerBackedExtractionResult } from "./extraction-cache-test-fixture.js";
 import { groundedExtractionResult } from "../extraction-fill/fixture.js";
+import { writeAuthorizedFixtureReceipt } from "../extraction-fill/authority-runtime/fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
 // @anchor extraction-window-containment: the cache coverage gate must
@@ -183,12 +184,14 @@ describe("extraction window-containment preflight", () => {
 
       // Fill the cache against the narrow window A (--limit 1). extraction-fill
       // writes coverage=1.0: 100% of THAT window's distinct turns are cached.
+      vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", CONFIG.providerUrl);
       const fill = await runExtractionFill({
         variant: "longmemeval_oracle",
         limit: 1,
         cacheRoot,
         dataDir,
         pinnedMetaRoot,
+        authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, { limit: 1 }),
         extractorFactory: offlineExtractorFactory,
         log: () => {}
       });

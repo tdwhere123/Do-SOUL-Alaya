@@ -1,9 +1,11 @@
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
+import { createHash } from "node:crypto";
 import type {
   BenchSignalExtractor,
   BenchTransportFailureAttempt,
   BenchProviderUsage,
   BenchProviderResponseMetadata,
+  BenchTransportResponseWitness,
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
 import {
@@ -77,6 +79,7 @@ type GardenHttpAttemptResponse = {
   readonly rawJson: string;
   readonly usage?: BenchProviderUsage;
   readonly responseMetadata: BenchProviderResponseMetadata;
+  readonly witness: BenchTransportResponseWitness;
 };
 
 type GardenHttpExtractorDeps = { readonly sleep: (ms: number) => Promise<void>; readonly random: () => number; readonly fetch: typeof fetch };
@@ -221,13 +224,19 @@ function acceptGardenHttpResult(
   state: GardenHttpAttemptState,
   result: ProviderChatCompletionResult
 ): void {
-  state.acceptedResponse = buildGardenHttpAttemptResponse({
+  const accepted = buildGardenHttpAttemptResponse({
     content: result.text,
     finishReason: result.finishReason,
     ...(result.usage === undefined ? {} : { usage: result.usage })
   }, input.maxOutputTokens, input.validateRawJson === undefined
     ? "default_envelope"
     : "caller_owned", result.completion);
+  state.acceptedResponse = { ...accepted, witness: {
+    userPrompt: input.userPrompt,
+    requestSha256: createHash("sha256").update(input.userPrompt, "utf8").digest("hex"),
+    rawJson: accepted.rawJson,
+    ...(result.httpResponse === undefined ? {} : { httpResponse: result.httpResponse })
+  } };
   validateGardenHttpRawJson(
     input, state.acceptedResponse.rawJson, state.acceptedResponse.usage
   );
@@ -338,6 +347,7 @@ function buildGardenHttpRequest(
     mode: "sse",
     jsonObject: true,
     profile: config.requestProfile as ProviderRequestProfile,
+    ...(input.retainHttpResponseEvidence === true ? { retainHttpResponseEvidence: true as const } : {}),
     abortSignal: input.abortSignal,
     fetchImpl: deps.fetch,
     timeoutMs: resolveAttemptIdleTimeoutMs(input),
@@ -367,7 +377,9 @@ function buildGardenHttpSuccess(
       rateLimitRetries,
       successfulRequestCount: 1,
       usageRequestCount: aggregate.usageRequestCount,
-      transportFailures
+      transportFailures,
+      attemptUsages: [...transportFailures.map((failure) => failure.usage ?? null), response.usage ?? null],
+      attemptResponses: [...transportFailures.map(() => null), response.witness]
     }
   };
 }

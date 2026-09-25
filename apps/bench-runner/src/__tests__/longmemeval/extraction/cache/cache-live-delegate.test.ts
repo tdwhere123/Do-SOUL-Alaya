@@ -14,6 +14,10 @@ import { extractLiveDelegate } from
   "../../../../runs/extraction/cache/cache-live-delegate.js";
 import { openExtractionAttemptLedger } from
   "../../../../runs/extraction/authority/attempt-ledger.js";
+import { inspectCachedRawExtraction } from
+  "../../../../runs/compile-seed/cache/cache-shard.js";
+import { computeCacheKey } from
+  "../../../../runs/compile-seed/cache/cache-key.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
@@ -24,6 +28,7 @@ import {
 import {
   createHttpExtractor,
   extractionConfig,
+  jsonChatCompletionResponse,
   MODEL,
   readShard,
   REQUEST_PROFILE,
@@ -52,20 +57,33 @@ describe("extraction live delegate atomic persistence", () => {
 
   it("persists a completed empty result once and reuses it without a paid recheck", async () => {
     const usage = { inputTokens: 10, outputTokens: 1, totalTokens: 11 };
-    const delegate = { extract: vi.fn(async () => ({ ...providerBackedResult('{"interpretations":[]}'), usage })) };
+    const lineageDigest = "8".repeat(64);
+    const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonChatCompletionResponse('{"interpretations":[]}', usage));
+    const delegate = createHttpExtractor(fetchMock);
     const onLiveExtractionOutcome = vi.fn();
-    const options = { delegate, config: extractionConfig(), cacheRoot, onLiveExtractionOutcome };
+    const options = { delegate, config: extractionConfig(), cacheRoot,
+      onTransportAttempt: ledger.reserveAttemptOrdinal, providerAttemptLineageDigest: lineageDigest,
+      onLiveExtractionOutcome: (key: string, outcome: Parameters<typeof ledger.recordTransportOutcome>[1], ordinal?: number) => {
+        onLiveExtractionOutcome();
+        ledger.recordTransportOutcome(key, outcome, ordinal);
+      },
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard };
     const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(), userPrompt: userPromptWithAssertions() };
     const result = await createCachingSignalExtractor(options).extract(request);
     expect(result).toMatchObject({ rawJson: '{"interpretations":[]}', usage });
-    expect(delegate.extract).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(onLiveExtractionOutcome).toHaveBeenCalledOnce();
     expect(readShard(cacheRoot)).toMatchObject({ raw_json: '{"interpretations":[]}', response_metadata: {
       usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11 }
     } });
     const replay = await createCachingSignalExtractor({ ...options, allowLiveExtraction: false }).extract(request);
     expect(replay).toMatchObject({ rawJson: '{"interpretations":[]}' });
-    expect(delegate.extract).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("settles a completed empty transport exactly once across a ledger reload", async () => {
@@ -79,15 +97,12 @@ describe("extraction live delegate atomic persistence", () => {
     } as const;
     const ledger = openExtractionAttemptLedger(ledgerInput);
     const extractor = createCachingSignalExtractor({
-      delegate: {
-        extract: vi.fn(async (input) => {
-          await input.onTransportAttempt?.(input.abortSignal);
-          return providerBackedResult('{"interpretations":[]}');
-        })
-      },
+      delegate: createHttpExtractor(vi.fn<typeof fetch>().mockResolvedValue(
+        jsonChatCompletionResponse('{"interpretations":[]}'))),
       config: extractionConfig(),
       cacheRoot,
-      onTransportAttempt: ledger.reserveAttempt,
+      onTransportAttempt: ledger.reserveAttemptOrdinal,
+      providerAttemptLineageDigest: ledgerInput.lineageDigest,
       onLiveExtractionOutcome: ledger.recordTransportOutcome,
       onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
       onLiveExtractionFailed: ledger.abandonPendingShard
@@ -108,6 +123,30 @@ describe("extraction live delegate atomic persistence", () => {
     };
     expect(ledger.snapshot()).toMatchObject(expected);
     expect(openExtractionAttemptLedger(ledgerInput).snapshot()).toMatchObject(expected);
+  });
+
+  it("keeps a successful response without physical bytes unresolved for recovery", async () => {
+    const lineageDigest = "a".repeat(64);
+    const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+      cacheIdentity: { model: MODEL, requestProfile: REQUEST_PROFILE },
+      startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
+    const delegate: BenchSignalExtractor = { extract: vi.fn(async (input) => {
+      await input.onTransportAttempt?.(input.abortSignal);
+      return providerBackedResult('{"interpretations":[]}');
+    }) };
+    const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(),
+      userPrompt: userPromptWithAssertions() };
+    const cacheKey = computeCacheKey(MODEL, REQUEST_PROFILE, request.systemPrompt, request.userPrompt);
+    const extractor = createCachingSignalExtractor({ delegate, config: extractionConfig(), cacheRoot,
+      onTransportAttempt: ledger.reserveAttemptOrdinal, providerAttemptLineageDigest: lineageDigest,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard });
+
+    await expect(extractor.extract(request)).rejects.toThrow(/physical responses/u);
+    expect(ledger.snapshot()).toMatchObject({ attempts: 1, successfulShards: 0,
+      unresolvedAttempts: [{ attemptOrdinal: 1, cacheKey }] });
+    expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status).toBe("missing");
   });
 
   it("does not count a deterministic empty request as a provider attempt", async () => {
@@ -220,7 +259,8 @@ describe("extraction live delegate atomic persistence", () => {
       delegate: createHttpExtractor(fetchMock),
       config: extractionConfig(),
       cacheRoot,
-      onTransportAttempt: ledger.reserveAttempt,
+      onTransportAttempt: ledger.reserveAttemptOrdinal,
+      providerAttemptLineageDigest: "e".repeat(64),
       onLiveExtractionOutcome: ledger.recordTransportOutcome,
       onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
       onLiveExtractionFailed: ledger.abandonPendingShard

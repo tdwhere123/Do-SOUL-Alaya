@@ -62,13 +62,17 @@ describe("500Q expansion receipt binding", () => {
     vi.clearAllMocks();
     mocks.prepareExpansion.mockResolvedValue(expansionFixture());
     mocks.readReceipt.mockReturnValue(receiptFixture());
-    mocks.inspectAuthority.mockResolvedValue({
-      observation: {},
+    mocks.inspectAuthority.mockImplementation(async () => ({
+      observation: mocks.readReceipt()?.observation ?? receiptFixture().observation,
+      pendingShards: [],
+      invalidShards: [],
+      preservedValidClosure: { shard_count: 0 },
+      missingKeys: [],
       writerLock: "absent",
       disk: { status: "available", freeBytes: 1 },
       credentialStatus: "present",
       modelReadiness: "not_probed"
-    });
+    }));
     mocks.readLedger.mockReturnValue(undefined);
     mocks.readTargetSelection.mockReturnValue({ receipt_digest: "b".repeat(64) });
     mocks.assertTargetSelection.mockReturnValue(undefined);

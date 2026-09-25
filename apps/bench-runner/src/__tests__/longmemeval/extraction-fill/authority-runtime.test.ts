@@ -7,14 +7,12 @@ import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildAuthorityQuestion as question,
   buildExtractionFillQuestion,
-  buildGroundedInterpretationResponse as signalResponse,
   EXTRACTION_FILL_VARIANT,
-  groundedExtractionResult,
-  providerBackedExtractionResult,
   registerExtractionFillHooks,
   setExtractionCredentialFixture as setCredentialFixture
 } from "./fixture.js";
 import {
+  authorizedHttpExtractor,
   batchedFact,
   mutateFirstRawShard as mutateFirstRawShardAt,
   singleSessionBatchedQuestion,
@@ -83,11 +81,8 @@ describe("extraction authority runtime", () => {
       "q001", "I completed alpha.", "Hello."
     )]);
     const receiptPath = await writeAuthorityReceipt({});
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(signalResponse(input.userPrompt), {
-        usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 }
-      });
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor({
+      usage: { inputTokens: 3, outputTokens: 2 }
     });
 
     const result = await runExtractionFill({
@@ -96,7 +91,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: receiptPath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
@@ -118,7 +113,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: receiptPath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
@@ -137,10 +132,7 @@ describe("extraction authority runtime", () => {
       question("q002", "beta", "distraction")
     ]);
     const receiptPath = await writeAuthorityReceipt({});
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(signalResponse(input.userPrompt));
-    });
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor();
 
     const batch = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -149,7 +141,7 @@ describe("extraction authority runtime", () => {
       pinnedMetaRoot,
       authorityReceiptPath: receiptPath,
       questionBatchLimit: 1,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
@@ -172,7 +164,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: receiptPath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
@@ -184,10 +176,7 @@ describe("extraction authority runtime", () => {
     setCredentialFixture();
     await writeFixtureDataset([singleSessionBatchedQuestion("q001")]);
     const probePath = await writeAuthorityReceipt({ action: "probe" });
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(signalResponse(input.userPrompt));
-    });
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor();
 
     const probe = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -195,7 +184,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: probePath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
@@ -211,10 +200,7 @@ describe("extraction authority runtime", () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
     const probePath = await writeAuthorityReceipt({ action: "probe" });
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(signalResponse(input.userPrompt));
-    });
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor();
 
     const probe = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -222,7 +208,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: probePath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
     const fillPath = await writeAuthorityReceipt({ action: "fill" });
@@ -232,7 +218,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: fillPath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
@@ -254,15 +240,8 @@ describe("extraction authority runtime", () => {
       "q001", "I moved to Berlin last spring.", "I stayed home last spring."
     )]);
     const probePath = await writeAuthorityReceipt({ action: "probe" });
-    const observedRequests: { retryMode: string | undefined; assertionCount: number }[] = [];
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      const prompt = JSON.parse(input.userPrompt) as { source_assertions?: readonly unknown[] };
-      observedRequests.push({
-        retryMode: input.retryMode,
-        assertionCount: prompt.source_assertions?.length ?? 0
-      });
-      return providerBackedExtractionResult('{"interpretations":[]}');
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor({
+      response: () => '{"interpretations":[]}'
     });
 
     const probe = await runExtractionFill({
@@ -271,12 +250,15 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: probePath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
 
     expect(extract).toHaveBeenCalledOnce();
-    expect(observedRequests).toEqual([{ retryMode: "disabled", assertionCount: 1 }]);
+    expect(extract.mock.calls.map(([input]) => ({ retryMode: input.retryMode,
+      assertionCount: (JSON.parse(input.userPrompt) as { source_assertions?: readonly unknown[] })
+        .source_assertions?.length ?? 0 })))
+      .toEqual([{ retryMode: "disabled", assertionCount: 1 }]);
     expect(probe).toMatchObject({ requestedTurns: 1, newlyExtracted: 1 });
     expect(probe.coverage).toBeLessThan(1);
   });
@@ -305,17 +287,14 @@ describe("extraction authority runtime", () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
     const receiptPath = await writeAuthorityReceipt({});
-    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(signalResponse(input.userPrompt));
-    });
+    const { extract, factory: extractorFactory } = authorizedHttpExtractor();
     await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: receiptPath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     });
     mutateFirstRawShard();
@@ -326,7 +305,7 @@ describe("extraction authority runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath: receiptPath,
-      extractorFactory: () => ({ extract }),
+      extractorFactory,
       log: () => undefined
     })).rejects.toThrow(/successful shard closure drifted/u);
 
@@ -385,17 +364,17 @@ describe("extraction authority runtime", () => {
   it("restores the exact pinned manifest when post-pin authority revalidation drifts", async () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
+    const receiptPath = await writeAuthorityReceipt({});
+    const { factory: initialExtractorFactory } = authorizedHttpExtractor();
     await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({
-        extract: async (input) => groundedExtractionResult(input)
-      }),
+      authorityReceiptPath: receiptPath,
+      extractorFactory: initialExtractorFactory,
       log: () => undefined
     });
-    const receiptPath = await writeAuthorityReceipt({});
     const beforeManifest = readFileSync(join(cacheRoot, "manifest.json"), "utf8");
     const extract = vi.fn<BenchSignalExtractor["extract"]>();
 
@@ -423,15 +402,16 @@ describe("extraction authority runtime", () => {
   it("rejects a mutated preexisting raw shard before it can reach the delegate", async () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
+    const receiptPath = await writeAuthorityReceipt({});
+    const { factory: initialExtractorFactory } = authorizedHttpExtractor();
     let interrupted = false;
     await expect(runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
-      extractorFactory: () => ({
-        extract: async (input) => groundedExtractionResult(input)
-      }),
+      authorityReceiptPath: receiptPath,
+      extractorFactory: initialExtractorFactory,
       log: (message) => {
         if (!interrupted && message.includes("1/2")) {
           interrupted = true;
@@ -439,7 +419,6 @@ describe("extraction authority runtime", () => {
         }
       }
     })).rejects.toThrow("stop after one shard");
-    const receiptPath = await writeAuthorityReceipt({});
     mutateFirstRawShard();
     const extract = vi.fn<BenchSignalExtractor["extract"]>();
 
@@ -451,7 +430,7 @@ describe("extraction authority runtime", () => {
       authorityReceiptPath: receiptPath,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/raw cache closure drifted|cannot authorize invalid or orphan shards/u);
+    })).rejects.toThrow(/successful shard closure drifted|raw cache closure drifted|cannot authorize invalid or orphan shards/u);
 
     expect(extract).not.toHaveBeenCalled();
   });

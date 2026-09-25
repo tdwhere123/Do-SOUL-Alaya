@@ -10,7 +10,9 @@ import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { providerBackedExtractionResult } from
   "../extraction/extraction-cache-test-fixture.js";
-export { providerBackedExtractionResult };
+import { providerBackedResponseResult } from
+  "../extraction/extraction-cache-test-fixture.js";
+export { providerBackedExtractionResult, providerBackedResponseResult };
 
 export const EXTRACTION_FILL_VARIANT = "longmemeval_oracle";
 
@@ -95,13 +97,16 @@ export function buildAuthorityQuestion(
   );
 }
 
-export function groundedExtractionResult(input: { readonly userPrompt: string }) {
-  return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
+export function groundedExtractionResult(input: {
+  readonly userPrompt: string; readonly onTransportAttempt?: () => void | Promise<void>
+}) {
+  return providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt));
 }
 
 export function groundedExtractor() {
   return {
-    extract: async (input: { readonly userPrompt: string }) => groundedExtractionResult(input)
+    extract: async (input: { readonly userPrompt: string;
+      readonly onTransportAttempt?: () => void | Promise<void> }) => groundedExtractionResult(input)
   };
 }
 

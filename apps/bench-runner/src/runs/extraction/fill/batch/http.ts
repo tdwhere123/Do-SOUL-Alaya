@@ -80,6 +80,12 @@ export function createGeminiBatchHttp(input: {
 }
 
 export async function readBoundedResponse(response: Response, maxBytes: number): Promise<string> {
+  return (await readBoundedResponseEvidence(response, maxBytes)).text;
+}
+
+/** Decode for callers while retaining the actual bounded wire bytes for physical witnesses. */
+export async function readBoundedResponseEvidence(response: Response, maxBytes: number):
+  Promise<Readonly<{ text: string; bytes: Buffer }>> {
   const declared = response.headers.get("content-length");
   if (declared !== null && Number(declared) > maxBytes) {
     await response.body?.cancel();
@@ -97,9 +103,16 @@ export async function readBoundedResponse(response: Response, maxBytes: number):
       if (bytes > maxBytes) throw new Error("Gemini response exceeds byte cap");
       chunks.push(next.value);
     }
-    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    const bodyBytes = Buffer.concat(chunks);
+    return { text: decodeBoundedResponseBytes(bodyBytes),
+      bytes: bodyBytes };
   } finally {
     await reader.cancel();
     reader.releaseLock();
   }
+}
+
+/** The same UTF-8/BOM interpretation is used at live receipt and retained replay. */
+export function decodeBoundedResponseBytes(bytes: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }

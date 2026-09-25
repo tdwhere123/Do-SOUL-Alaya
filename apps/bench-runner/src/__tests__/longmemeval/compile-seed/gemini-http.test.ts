@@ -1,4 +1,8 @@
 import { createGeminiBatchHttp } from "../../../runs/extraction/fill/batch/http.js";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +16,14 @@ import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch
 import { createGeminiHttpExtractor } from "../../../runs/compile-seed/http/gemini-http.js";
 import { OpenSemanticFactorGraphProposalSchema } from "@do-soul/alaya-protocol";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
+import { writeCachedExtraction, inspectUnadmittedRawExtraction } from
+  "../../../runs/compile-seed/cache/cache-shard.js";
+import { persistedResponseMetadata } from
+  "../../../runs/compile-seed/cache/cached-response-metadata.js";
+import { buildExtractionTransportProvenance } from
+  "../../../runs/extraction/transport-route.js";
+import { EXTRACTION_REQUEST_COMPLETION_VERSION } from
+  "../../../runs/extraction/empty-classification.js";
 
 const config: CompileSeedExtractionConfig = {
   model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1",
@@ -47,6 +59,51 @@ async function withServer(
 }
 
 describe("native Gemini interactive extraction", () => {
+  it("retains the exact physical response bytes when a JSON body has a UTF-8 BOM", async () => {
+    const bodyBytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(await response().arrayBuffer())]);
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(new Uint8Array(bodyBytes), {
+      headers: { "content-type": "application/json" }
+    }));
+
+    const result = await createGeminiHttpExtractor(config, fetchImpl).extract({
+      ...input, retainHttpResponseEvidence: true
+    });
+
+    expect(result.rawJson).toBe('{"signals":[]}');
+    expect(result.httpResponse).toMatchObject({
+      bodyBase64: bodyBytes.toString("base64"), bodyByteLength: bodyBytes.length,
+      bodySha256: createHash("sha256").update(bodyBytes).digest("hex"),
+      bodyComplete: true, bodyTruncated: false
+    });
+    const cacheRoot = await mkdtemp(join(tmpdir(), "gemini-bom-response-"));
+    try {
+      const cacheKey = computeCacheKey(config.model, config.requestProfile,
+        input.systemPrompt, input.userPrompt);
+      const requestSha256 = createHash("sha256").update(input.userPrompt).digest("hex");
+      writeCachedExtraction(cacheRoot, cacheKey, {
+        model: config.model, request_profile: config.requestProfile, cache_key: cacheKey,
+        raw_json: result.rawJson, extracted_at: new Date(0).toISOString(),
+        transport_provenance: buildExtractionTransportProvenance(config),
+        provider_attempt: { kind: "interactive", attempt_ordinal: 1,
+          authority_lineage_digest: "a".repeat(64), last_usage: result.usage ?? null },
+        request_identity: { system_prompt: input.systemPrompt, user_prompt: input.userPrompt },
+        provider_responses: [{ attempt_ordinal: 1, usage: result.usage ?? null,
+          witness: { userPrompt: input.userPrompt, requestSha256,
+            rawJson: result.rawJson, httpResponse: result.httpResponse } }],
+        empty_classification: "completed_empty",
+        request_completion: { version: EXTRACTION_REQUEST_COMPLETION_VERSION,
+          status: "completed_empty" },
+        ...persistedResponseMetadata(result.responseMetadata, result.usage, true)
+      });
+      const reopened = inspectUnadmittedRawExtraction(cacheRoot, cacheKey,
+        config.model, config.requestProfile);
+      expect(reopened.status, JSON.stringify(reopened)).toBe("hit");
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true });
+    }
+  });
+
   it("binds the actual shared response shape into raw cache identity", () => {
     const request = stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest("I enjoy coffee.", []));
     const original = computeCacheKey(config.model, config.requestProfile, input.systemPrompt, request);

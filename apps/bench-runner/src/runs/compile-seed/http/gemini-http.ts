@@ -1,4 +1,5 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
+import { createHash } from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import { Readable } from "node:stream";
@@ -19,7 +20,8 @@ import {
   parseGeminiGenerateContentBody,
   record
 } from "../../extraction/fill/batch/native-codec.js";
-import { readBoundedResponse } from "../../extraction/fill/batch/http.js";
+import { readBoundedResponse, readBoundedResponseEvidence } from
+  "../../extraction/fill/batch/http.js";
 import { assertRequiredRequestProfile, resolveExtractionTransportRoute } from
   "../../extraction/transport-route.js";
 import { markGardenHttpFailure, toBenchTransportFailureAttempt } from
@@ -78,7 +80,11 @@ async function extractGeminiOnce(
     return { ...decoded, extractorMeta: {
       recoveryKind: "none", retryCount: 0, retryClassification: "success_first_try",
       rateLimitRetries: 0, successfulRequestCount: 1,
-      usageRequestCount: decoded.usage === undefined ? 0 : 1, transportFailures: []
+      usageRequestCount: decoded.usage === undefined ? 0 : 1, transportFailures: [],
+      attemptUsages: [decoded.usage ?? null],
+      attemptResponses: [{ userPrompt: input.userPrompt,
+        requestSha256: createHash("sha256").update(input.userPrompt, "utf8").digest("hex"),
+        rawJson: decoded.rawJson, httpResponse: decoded.httpResponse }]
     } };
   } catch (cause) {
     if (cause instanceof GeminiProviderEnvelopeError) {
@@ -177,7 +183,8 @@ interface GeminiAttempt {
 async function decodeGeminiResponse(response: Response, input: ExtractInput, attempt: GeminiAttempt) {
   attempt.phase = "response_body";
   attempt.kind = "body_read_error";
-  const raw = await readBoundedResponse(response, MAX_GEMINI_RESPONSE_BYTES);
+  const { text: raw, bytes: bodyBytes } = await readBoundedResponseEvidence(
+    response, MAX_GEMINI_RESPONSE_BYTES);
   attempt.rawBody = raw;
   attempt.phase = "response_parse";
   attempt.kind = "response_parse_error";
@@ -200,7 +207,13 @@ async function decodeGeminiResponse(response: Response, input: ExtractInput, att
     }, validation);
   }
   input.validateRawJson?.(decoded.rawJson);
-  return { ...decoded, responseBody: raw, responseMetadata: {
+  const httpResponse = input.retainHttpResponseEvidence === true ? (() => {
+    return { contentType: response.headers.get("content-type"),
+      bodyBase64: bodyBytes.toString("base64"), bodyByteLength: bodyBytes.length,
+      bodySha256: createHash("sha256").update(bodyBytes).digest("hex"),
+      bodyTruncated: false, bodyComplete: true };
+  })() : undefined;
+  return { ...decoded, responseBody: raw, ...(httpResponse === undefined ? {} : { httpResponse }), responseMetadata: {
     ...decoded.responseMetadata, maxOutputTokens: input.maxOutputTokens
   } };
 }

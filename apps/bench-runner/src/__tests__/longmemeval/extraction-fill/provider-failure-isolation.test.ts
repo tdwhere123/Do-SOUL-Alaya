@@ -27,7 +27,7 @@ import {
   buildGroundedInterpretationResponse,
   buildAuthorityQuestion,
   EXTRACTION_FILL_VARIANT,
-  providerBackedExtractionResult,
+  providerBackedResponseResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 
@@ -118,10 +118,12 @@ describe("authority-bound provider failure isolation", () => {
     await writeCanonicalDataset(questions);
     const authority = await writeTargetBoundAuthority();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
       const turn = readTurnContent(input.userPrompt);
-      if (turn.includes("provider-failure")) throw nonRetryable4xx();
-      return providerBackedExtractionResult(
+      if (turn.includes("provider-failure")) {
+        await input.onTransportAttempt?.();
+        throw nonRetryable4xx();
+      }
+      return providerBackedResponseResult(input,
         buildGroundedInterpretationResponse(input.userPrompt)
       );
     });

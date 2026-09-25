@@ -34,9 +34,10 @@ import {
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
   groundedExtractionResult,
-  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
+import { providerBackedResponseResult } from "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 const MIMO = requireProviderBinding("mimo-v2.5");
 const MIMO_FAMILY_PROBE = `${MIMO.id}-family`;
@@ -198,13 +199,14 @@ describe("runExtractionFill", () => {
       buildAuthorityQuestion("q002", "shared fact", "decoy two")
     ]);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
+      providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt))
     );
     const result = await runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({ extract }),
       log: () => undefined
     });

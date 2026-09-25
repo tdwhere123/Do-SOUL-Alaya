@@ -12,7 +12,8 @@ import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval-fixture.js";
-import { groundedExtractionResult, providerBackedExtractionResult } from "./fixture.js";
+import { groundedExtractionResult } from "./fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -104,9 +105,11 @@ async function writeQuestions(count: number): Promise<void> {
   });
 }
 
-function fill(limit: number) {
+async function fill(limit: number) {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, { limit });
   return runExtractionFill({
     variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, limit,
+    authorityReceiptPath,
     extractorFactory: () => extractor(), log: () => undefined
   });
 }

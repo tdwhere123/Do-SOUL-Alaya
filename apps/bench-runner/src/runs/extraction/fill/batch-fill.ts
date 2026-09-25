@@ -3,8 +3,7 @@ import { readCurrentExtractionAuthorityRevision } from "../authority/inspection.
 import { buildOfficialApiSourceCorpus } from "@do-soul/alaya-soul";
 import { SourcePacketAdmissionError, writeDeterministicSourcePacketArtifact, importSourcePacketArtifact } from "../cache/source-packet-artifact.js";
 import { SourceSemanticAdmissionError, writeDeterministicSourceSemanticArtifact, importSourceSemanticArtifact } from "../cache/source-semantic-artifact.js";
-import { extractionTypedArtifactMode } from "../request-artifact.js";
-import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
+import { inspectUnadmittedRawExtraction } from "../../compile-seed/cache/cache-shard.js";
 import { assertSampleExecutionOptions, assertSampleKeys } from "../authority/sample-scope.js";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
@@ -80,7 +79,7 @@ export async function executeExtractionBatchFill(input: BatchFillInput): Promise
   const workset = prepareSourceRequestWorkset({ prepared: input.prepared, cacheRoot: input.cacheRoot,
     ...(selected === undefined ? {} : { executionCacheKeys: selected }) });
   const plan = bindBatchPlan(input, workset, route.model, profile);
-  if (extractionTypedArtifactMode(input.prepared.config) !== undefined) retainBatchAuthority(input.writeLease, plan.identity, authority.receipt);
+  retainBatchAuthority(input.writeLease, plan.identity, authority.receipt);
   for (const line of plan.lines) {
     assertAttemptInputWithinReceiptLimit(
       attemptInputByteUpperBound(JSON.stringify(encodeGeminiGenerateContent(line, {
@@ -256,7 +255,8 @@ async function importBatchLine(input: BatchFillInput, workset: SourceRequestWork
     ...(result.provenance.attemptOrdinal === undefined ? {} : { providerAttempt: {
       attemptOrdinal: result.provenance.attemptOrdinal,
       authorityLineageDigest: authority.receipt.lineage_digest
-    } }) });
+    } }), retainedBatch: { planIdentity: plan.identity,
+      authorityReceiptDigest: authority.receipt.receipt_digest, result } });
   } catch (cause) {
     if (cause instanceof ExtractionResponseAdmissionError || cause instanceof SourcePacketAdmissionError ||
         cause instanceof SourceSemanticAdmissionError) {
@@ -269,10 +269,8 @@ async function importBatchLine(input: BatchFillInput, workset: SourceRequestWork
     }
     throw cause;
   }
-  const inspected = inspectCachedExtractionArtifact(
-    input.cacheRoot, result.line.key,
-    input.prepared.config.model, input.prepared.config.requestProfile, extractionTypedArtifactMode(input.prepared.config)
-  );
+  const inspected = inspectUnadmittedRawExtraction(input.cacheRoot, result.line.key,
+    input.prepared.config.model, input.prepared.config.requestProfile);
   if (inspected.status !== "hit") {
     authority.abandonPendingShard(result.line.key, result.provenance.attemptOrdinal);
     return { status: "quarantined" as const, reason: inspected.reason ?? inspected.status };

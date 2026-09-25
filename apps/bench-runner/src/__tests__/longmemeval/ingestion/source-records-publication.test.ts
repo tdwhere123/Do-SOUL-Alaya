@@ -27,6 +27,7 @@ import { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { chainIdentity, SemanticChainPlanSchema, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
@@ -106,10 +107,14 @@ describe("complete-source census and publication", () => {
       inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
     const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
       config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-      extractor: { extract: async () => ({ rawJson: interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
+      extractor: { extract: async () => {
+        const rawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
           kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
-        }] }], gaps: [] }), responseMetadata: { finishReason: "STOP" },
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }) } });
+        }] }], gaps: [] });
+        const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+        return { rawJson, responseBody: syntheticGeminiBody(rawJson, "STOP", usage),
+          responseMetadata: { finishReason: "STOP" }, usage };
+      } } });
     expect(filled.newly_admitted).toBe(2);
     const prepared = await prepareLongMemEvalSemanticRun(root);
     expect(prepared.result.rows).toEqual(frozen.selected.map(({ question_id }) => ({ question_id, status: "prepared",

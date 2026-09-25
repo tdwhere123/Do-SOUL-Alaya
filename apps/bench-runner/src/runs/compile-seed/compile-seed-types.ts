@@ -47,6 +47,8 @@ export interface BenchSignalExtractor extends SignalExtractor {
     readonly outputTokenField?: ExtractionOutputTokenField;
     /** Caller-owned response schema; omit to keep source-extraction schema selection. */
     readonly responseJsonSchema?: object;
+    /** Ordinary cache settlement retains physical HTTP bytes per request. */
+    readonly retainHttpResponseEvidence?: true;
   }): Promise<Awaited<ReturnType<SignalExtractor["extract"]>> & {
     readonly rawJson: string;
     readonly extractionSkip?: "plan_skipped";
@@ -73,6 +75,14 @@ export interface BenchProviderResponseMetadata {
 }
 
 export type BenchProviderUsage = ProviderUsage;
+
+/** A successful physical request retained by the extractor port before composition. */
+export interface BenchTransportResponseWitness {
+  readonly userPrompt: string;
+  readonly requestSha256: string;
+  readonly rawJson: string;
+  readonly httpResponse?: ProviderHttpResponseEvidence;
+}
 
 export const BENCH_TRANSPORT_FAILURE_KINDS = [
   "network_error", "http_error", "body_read_error", "response_parse_error",
@@ -168,6 +178,9 @@ export interface BenchSignalExtractorMeta {
   readonly usageRequestCount?: number;
   /** Ordered failures preceding the successful response; live HTTP always supplies this. */
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
+  /** Provider-reported usage for each physical request in transport order; null means unavailable. */
+  readonly attemptUsages?: readonly (BenchProviderUsage | null)[];
+  readonly attemptResponses?: readonly (BenchTransportResponseWitness | null)[];
 }
 
 export interface CompileSeedExtractionConfig {

@@ -31,7 +31,9 @@ import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval-fixture.js";
-import { buildGroundedInterpretationResponse, providerBackedExtractionResult } from "./fixture.js";
+import { buildGroundedInterpretationResponse } from "./fixture.js";
+import { providerBackedResponseResult } from "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -77,10 +79,11 @@ it("scopes an expanded fill before workers and refreshes honest partial progress
     dataDir,
     pinnedMetaRoot,
     limit: 1,
+    authorityReceiptPath: await authorize(1),
     extractorFactory: () => ({
       extract: async (input) => {
         firstWorkerManifest ??= readExtractionCacheManifest(cacheRoot);
-        return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
+        return providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt));
       }
     }),
     log: () => undefined
@@ -120,6 +123,7 @@ it("scopes an expanded fill before workers and refreshes honest partial progress
     dataDir,
     pinnedMetaRoot,
     limit: 2,
+    authorityReceiptPath: await authorize(2),
     concurrency: 1,
     extractorFactory: () => ({
       extract: async () => {
@@ -157,6 +161,7 @@ it("refuses completion when an expected shard is replaced by an orphan", async (
     dataDir,
     pinnedMetaRoot,
     limit: 1,
+    authorityReceiptPath: await authorize(1),
     concurrency: 1,
     extractorFactory: emptyExtractor,
     log: (message) => {
@@ -187,6 +192,7 @@ it("refuses completion when an expected shard becomes invalid", async () => {
     dataDir,
     pinnedMetaRoot,
     limit: 1,
+    authorityReceiptPath: await authorize(1),
     concurrency: 1,
     extractorFactory: emptyExtractor,
     log: (message) => {
@@ -212,6 +218,7 @@ it("exposes a reusable read-only exact-set completion inspection", async () => {
     dataDir,
     pinnedMetaRoot,
     limit: 1,
+    authorityReceiptPath: await authorize(1),
     extractorFactory: emptyExtractor,
     log: () => undefined
   });
@@ -240,6 +247,7 @@ it("uses no partial closure when ledger exclusions leave no valid raw entries", 
     dataDir,
     pinnedMetaRoot,
     limit: 1,
+    authorityReceiptPath: await authorize(1),
     extractorFactory: emptyExtractor,
     log: () => undefined
   });
@@ -267,6 +275,7 @@ it("rejects a valid shard whose raw JSON changed after finalization", async () =
     dataDir,
     pinnedMetaRoot,
     limit: 1,
+    authorityReceiptPath: await authorize(1),
     extractorFactory: emptyExtractor,
     log: () => undefined
   });
@@ -298,6 +307,7 @@ it("rejects a narrower window on a superset root before creating a delegate", as
     dataDir,
     pinnedMetaRoot,
     limit: 2,
+    authorityReceiptPath: await authorize(2),
     extractorFactory: emptyExtractor,
     log: () => undefined
   });
@@ -319,9 +329,14 @@ it("rejects a narrower window on a superset root before creating a delegate", as
 
 function emptyExtractor() {
   return {
-    extract: async (input: { readonly userPrompt: string }) =>
-      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
+    extract: async (input: { readonly userPrompt: string;
+      readonly onTransportAttempt?: () => void | Promise<void> }) =>
+      providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt))
   };
+}
+
+function authorize(limit: number): Promise<string> {
+  return writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, { limit });
 }
 
 function firstShardPath(): string {

@@ -34,6 +34,7 @@ import {
   providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 // @anchor extraction-fill-contract: Layer 1 daemon-free cache fill. Drives a
 // stub extractor (no live network) over a tiny fixture dataset and asserts
@@ -126,6 +127,7 @@ describe("runExtractionFill writer lease", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       concurrency: 1,
       extractorFactory: () => ({
         extract: async (input) => {
@@ -162,6 +164,7 @@ describe("runExtractionFill writer lease", () => {
       cacheRoot: relative(process.cwd(), cacheRoot),
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       concurrency: 1,
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
@@ -199,6 +202,7 @@ describe("runExtractionFill live-write identity", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -251,6 +255,7 @@ describe("runExtractionFill delegate mutation", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),

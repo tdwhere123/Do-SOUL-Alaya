@@ -14,6 +14,7 @@ import {
   computeCacheKey,
   inspectCachedExtraction
 } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { createGardenHttpExtractor } from "../../../runs/compile-seed/compile-seed-http.js";
 import { cacheFilePath, inspectCachedRawExtraction, writeCachedExtraction } from
   "../../../runs/compile-seed/cache/cache-shard.js";
 import { inspectExtractionFillCompletion } from
@@ -36,7 +37,6 @@ import { openExtractionAttemptLedger } from
 import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
-  TEST_PROVIDER_COMPLETION_METADATA,
   TEST_CACHED_PROVIDER_COMPLETION_METADATA,
   testExtractionTransportProvenance,
   writeExtractionCacheTestManifest
@@ -142,8 +142,15 @@ describe("extraction empty envelope classification", () => {
       [{ role: "user", content: "I moved to Berlin." }]
     )[0]!;
     const stats = newFillStats();
+    const lineageDigest = "b".repeat(64);
+    const ledger = openExtractionAttemptLedger({ cacheRoot, lineageDigest,
+      cacheIdentity: { model: "test-model", requestProfile: "provider-default-v1" },
+      startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1 });
     const extractor = createCachingSignalExtractor({
-      delegate: { extract: async () => ({ rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA }) },
+      delegate: createGardenHttpExtractor({ model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "fixture" },
+      { fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ choices: [{ message: {
+        content: EMPTY_INTERPRETATIONS_ENVELOPE }, finish_reason: "stop" }] })) }),
       config: {
         model: "test-model",
         modelFamily: "test-model",
@@ -151,7 +158,12 @@ describe("extraction empty envelope classification", () => {
         requestProfile: "provider-default-v1"
       },
       cacheRoot,
-      stats
+      stats,
+      onTransportAttempt: ledger.reserveAttemptOrdinal,
+      providerAttemptLineageDigest: lineageDigest,
+      onLiveExtractionOutcome: ledger.recordTransportOutcome,
+      onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
+      onLiveExtractionFailed: ledger.abandonPendingShard
     });
     await extractor.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -239,12 +251,10 @@ describe("extraction empty envelope classification", () => {
       successfulShardCeiling: 1
     });
     const extractor = createCachingSignalExtractor({
-      delegate: {
-        extract: async (input) => {
-          await input.onTransportAttempt?.(input.abortSignal);
-          return { rawJson: EMPTY_INTERPRETATIONS_ENVELOPE, responseMetadata: TEST_PROVIDER_COMPLETION_METADATA };
-        }
-      },
+      delegate: createGardenHttpExtractor({ model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "fixture" },
+      { fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ choices: [{ message: {
+        content: EMPTY_INTERPRETATIONS_ENVELOPE }, finish_reason: "stop" }] })) }),
       config: {
         model: "test-model",
         modelFamily: "test-model",
@@ -252,7 +262,8 @@ describe("extraction empty envelope classification", () => {
         requestProfile: "provider-default-v1"
       },
       cacheRoot,
-      onTransportAttempt: ledger.reserveAttempt,
+      onTransportAttempt: ledger.reserveAttemptOrdinal,
+      providerAttemptLineageDigest: "a".repeat(64),
       onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
       onLiveExtractionFailed: ledger.abandonPendingShard,
       onLiveExtractionOutcome: ledger.recordTransportOutcome

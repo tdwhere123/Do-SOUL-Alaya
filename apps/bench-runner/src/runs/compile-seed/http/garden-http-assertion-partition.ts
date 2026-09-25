@@ -8,6 +8,7 @@ import {
   isBenchTerminalRetryClassification,
   type BenchProviderUsage,
   type BenchSignalExtractor,
+  type BenchTransportResponseWitness,
   type BenchTerminalRetryClassification,
   type BenchTransportFailureAttempt
 } from "../compile-seed-types.js";
@@ -25,6 +26,8 @@ interface TransportSummary {
   readonly usageRequestCount: number;
   readonly rateLimitRetries: number;
   readonly usage?: BenchProviderUsage;
+  readonly attemptUsages: readonly (BenchProviderUsage | null)[];
+  readonly attemptResponses: readonly (BenchTransportResponseWitness | null)[];
 }
 
 interface FailureSummary extends TransportSummary {
@@ -130,7 +133,7 @@ function buildPartitionSuccess(
   ]);
   let rawJson: string;
   try {
-    rawJson = JSON.stringify({ interpretations: orderedPartitionInterpretations(request, results) });
+    rawJson = composePartitionedExtraction(request, results);
     input.validateRawJson?.(rawJson);
   } catch (cause) {
     throw buildPostComposeFailure(aggregate, cause);
@@ -146,7 +149,9 @@ function buildPartitionSuccess(
       rateLimitRetries: aggregate.rateLimitRetries,
       successfulRequestCount: aggregate.successfulRequestCount,
       usageRequestCount: aggregate.usageRequestCount,
-      transportFailures: aggregate.failures
+      transportFailures: aggregate.failures,
+      attemptUsages: aggregate.attemptUsages,
+      attemptResponses: aggregate.attemptResponses
     }
   };
 }
@@ -193,6 +198,8 @@ function buildPartitionFailure(
     successfulRequestCount: aggregate.successfulRequestCount,
     usageRequestCount: aggregate.usageRequestCount,
     transportFailures: aggregate.failures,
+    attemptUsages: aggregate.attemptUsages,
+    attemptResponses: aggregate.attemptResponses,
     ...(aggregate.usage === undefined ? {} : { usage: aggregate.usage })
   };
   return isOutputTokenTruncation(childFailure)
@@ -209,6 +216,10 @@ function readSuccessSummary(result: ExtractResult): TransportSummary {
     usageRequestCount: result.extractorMeta?.usageRequestCount ??
       (result.usage === undefined ? 0 : 1),
     rateLimitRetries: result.extractorMeta?.rateLimitRetries ?? 0,
+    attemptUsages: result.extractorMeta?.attemptUsages ??
+      [...failures.map((failure) => failure.usage ?? null), result.usage ?? null],
+    attemptResponses: result.extractorMeta?.attemptResponses ??
+      [...failures.map(() => null), null],
     ...(result.usage === undefined ? {} : { usage: result.usage })
   };
 }
@@ -228,6 +239,8 @@ function readFailureSummary(cause: unknown): FailureSummary {
     successfulRequestCount: value.successfulRequestCount ?? 0,
     usageRequestCount: value.usageRequestCount ?? (value.usage === undefined ? 0 : 1),
     rateLimitRetries: value.rateLimitRetries,
+    attemptUsages: value.attemptUsages ?? value.transportFailures.map((failure) => failure.usage ?? null),
+    attemptResponses: value.attemptResponses ?? value.transportFailures.map(() => null),
     ...(value.retryClassification === undefined
       ? {}
       : { classification: value.retryClassification }),
@@ -247,6 +260,8 @@ function buildPostComposeFailure(aggregate: TransportSummary, cause: unknown): E
     successfulRequestCount: aggregate.successfulRequestCount,
     usageRequestCount: aggregate.usageRequestCount,
     transportFailures: aggregate.failures,
+    attemptUsages: aggregate.attemptUsages,
+    attemptResponses: aggregate.attemptResponses,
     postComposeFailure: true,
     ...(aggregate.usage === undefined ? {} : { usage: aggregate.usage })
   };
@@ -260,6 +275,8 @@ function aggregateTransport(summaries: readonly TransportSummary[]): TransportSu
   let usageRequestCount = 0;
   let rateLimitRetries = 0;
   let usage: BenchProviderUsage | undefined;
+  const attemptUsages: (BenchProviderUsage | null)[] = [];
+  const attemptResponses: (BenchTransportResponseWitness | null)[] = [];
   for (const summary of summaries) {
     failures.push(...summary.failures.map((failure) => ({
       ...failure,
@@ -270,11 +287,15 @@ function aggregateTransport(summaries: readonly TransportSummary[]): TransportSu
     usageRequestCount += summary.usageRequestCount;
     rateLimitRetries += summary.rateLimitRetries;
     usage = addUsage(usage, summary.usage);
+    attemptUsages.push(...summary.attemptUsages);
+    attemptResponses.push(...summary.attemptResponses);
   }
   return {
     failures: Object.freeze(failures),
     successfulRequestCount,
     usageRequestCount,
+    attemptUsages: Object.freeze(attemptUsages),
+    attemptResponses: Object.freeze(attemptResponses),
     rateLimitRetries,
     ...(usage === undefined ? {} : { usage })
   };
@@ -284,9 +305,45 @@ function readInterpretations(rawJson: string) {
   return SourceInterpretationResponseEnvelopeSchema.parse(JSON.parse(rawJson)).interpretations;
 }
 
+/** Replays the same assertion-order composition for live output and retained readers. */
+export function composePartitionedExtraction(
+  request: OfficialApiExtractionRequest,
+  results: readonly Readonly<{ rawJson: string }>[]
+): string {
+  return JSON.stringify({ interpretations: orderedPartitionInterpretations(request, results) });
+}
+
+/** Verify the successful leaves against the same recursive midpoint split used for live requests. */
+export function assertRetainedPartitionedRequests(
+  request: OfficialApiExtractionRequest,
+  results: readonly Readonly<{ userPrompt: string; rawJson: string }>[]
+): void {
+  if (request.source_assertions.length < 2 || results.length < 2) {
+    throw new Error("retained assertion partition is incomplete");
+  }
+  let index = 0;
+  const visit = (partition: OfficialApiExtractionRequest): void => {
+    const next = results[index];
+    if (next?.userPrompt === stringifyOfficialApiExtractionRequest(partition)) {
+      assertPartitionLocators(next.rawJson,
+        new Set(partition.source_assertions.map(({ assertion_id }) => assertion_id)));
+      index += 1;
+      return;
+    }
+    if (partition.source_assertions.length < 2) {
+      throw new Error("retained provider request differs from its assertion partition");
+    }
+    for (const child of splitRequest(partition)) visit(child);
+  };
+  for (const child of splitRequest(request)) visit(child);
+  if (index !== results.length) {
+    throw new Error("retained assertion partition response count changed");
+  }
+}
+
 function orderedPartitionInterpretations(
   request: OfficialApiExtractionRequest,
-  results: readonly ExtractResult[]
+  results: readonly Readonly<{ rawJson: string }>[]
 ) {
   const order = new Map(request.source_assertions.map(
     ({ assertion_id }, index) => [assertion_id, index] as const
@@ -327,6 +384,8 @@ function isFailureMeta(value: unknown): value is {
   readonly successfulRequestCount?: number;
   readonly usageRequestCount?: number;
   readonly usage?: BenchProviderUsage;
+  readonly attemptUsages?: readonly (BenchProviderUsage | null)[];
+  readonly attemptResponses?: readonly (BenchTransportResponseWitness | null)[];
 } {
   if (typeof value !== "object" || value === null) return false;
   const meta = value as {
@@ -334,10 +393,13 @@ function isFailureMeta(value: unknown): value is {
     readonly rateLimitRetries?: unknown;
     readonly transportFailures?: unknown;
     readonly postComposeFailure?: unknown;
+    readonly attemptUsages?: unknown;
+    readonly attemptResponses?: unknown;
   };
   const terminal = isBenchTerminalRetryClassification(meta.retryClassification);
   const postCompose = meta.postComposeFailure === true;
   return terminal !== postCompose &&
     Number.isSafeInteger(meta.rateLimitRetries) && Number(meta.rateLimitRetries) >= 0 &&
-    Array.isArray(meta.transportFailures);
+    Array.isArray(meta.transportFailures) &&
+    (meta.attemptResponses === undefined || Array.isArray(meta.attemptResponses));
 }

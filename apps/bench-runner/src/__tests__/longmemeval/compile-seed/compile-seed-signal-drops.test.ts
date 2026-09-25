@@ -40,6 +40,8 @@ import {
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
+  fixtureAttemptAuthority,
+  providerBackedResponseResult,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
 
@@ -261,8 +263,7 @@ describe("extraction cache write is atomic", () => {
         arguments: [{ role: "agent", phrase: { text: "Atomic turn" } }], qualifiers: []
       })) }] });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({
-        rawJson: bigRawJson,
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, bigRawJson, {
         responseMetadata: {
           finishReason: "stop",
           maxOutputTokens: 2048,
@@ -279,7 +280,9 @@ describe("extraction cache write is atomic", () => {
         providerUrl: TEST_EXTRACTION_PROVIDER_URL,
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model",
+        requestProfile: "provider-default-v1" })
     });
     const userPrompt = stringifyOfficialApiExtractionRequest(
       buildOfficialApiExtractionRequest("Atomic turn persists a complete shard.", [])
@@ -314,7 +317,8 @@ describe("extraction cache write is atomic", () => {
     });
     const second = await reread.extract({
       systemPrompt: "sys",
-      userPrompt
+      userPrompt,
+      sourceCorpus: buildOfficialApiSourceCorpus("Atomic turn persists a complete shard.", [])
     });
     expect(second.rawJson).toBe(bigRawJson);
     expect(delegate.extract).toHaveBeenCalledTimes(1);

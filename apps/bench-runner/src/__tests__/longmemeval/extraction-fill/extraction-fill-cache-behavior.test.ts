@@ -16,6 +16,9 @@ import {
   type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
 import { cacheFilePath, computeSourceTurnCacheKey } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { providerBackedResponseResult } from
+  "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 import {
   buildExtractionFillQuestion as buildQuestion,
@@ -46,8 +49,9 @@ describe("runExtractionFill", () => {
     await writeFixtureDataset([
       buildQuestion("q001", "I moved to Berlin.", "I prefer TypeScript.")
     ]);
+    const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
+      providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt))
     );
     const factory = (): BenchSignalExtractor => ({ extract });
 
@@ -56,6 +60,7 @@ describe("runExtractionFill", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath,
       extractorFactory: factory,
       log: () => undefined
     });
@@ -67,6 +72,7 @@ describe("runExtractionFill", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath,
       extractorFactory: factory,
       log: () => undefined
     });
@@ -155,8 +161,9 @@ describe("runExtractionFill", () => {
       buildQuestion("q002", "I remember two.", "I prefer decoy two."),
       buildQuestion("q003", "I remember three.", "I prefer decoy three.")
     ]);
+    const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, { limit: 1 });
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-      providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
+      providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt))
     );
     const result = await runExtractionFill({
       variant: VARIANT,
@@ -164,6 +171,7 @@ describe("runExtractionFill", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath,
       extractorFactory: () => ({ extract }),
       log: () => undefined
     });

@@ -35,6 +35,8 @@ export interface ExtractionAttemptReservationRecord {
 export interface ExtractionAttemptSettlementRecord extends ExtractionAttemptReservationRecord {
   /** Present only when one explicit reservation owns the reported usage; absent in retained history. */
   readonly usage_sha256?: string;
+  readonly response_sha256?: string;
+  readonly aggregate_usage_sha256?: string;
 }
 
 export interface ExtractionTransportFailureRecord {
@@ -177,6 +179,7 @@ export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerR
       !hasUniqueOrderedOrdinals(settled) || hasOrdinalBeyondAttempts(settled, record.attempts) ||
       hasOrdinalOverlap(reservations, settled) || settled.length + reservations.length > record.attempts ||
       settled.some(attempt => attempt.usage_sha256 !== undefined && !isDigest(attempt.usage_sha256)) ||
+      settled.some(attempt => attempt.response_sha256 !== undefined && !isDigest(attempt.response_sha256)) ||
       failures.some(failure => settled.some(attempt => attempt.attempt_ordinal === failure.attempt_ordinal &&
         attempt.cache_key !== failure.cache_key))) {
     throw new Error("extraction attempt ledger exceeds its recorded authority");
@@ -325,9 +328,13 @@ function isReservations(value: unknown): value is readonly ExtractionAttemptRese
 
 function isSettlements(value: unknown): value is readonly ExtractionAttemptSettlementRecord[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "object" && entry !== null && hasExactKeys(entry,
-    ["attempt_ordinal", "cache_key", ...(Object.hasOwn(entry, "usage_sha256") ? ["usage_sha256"] : [])]
+    ["attempt_ordinal", "cache_key", ...(Object.hasOwn(entry, "usage_sha256") ? ["usage_sha256"] : []),
+      ...(Object.hasOwn(entry, "response_sha256") ? ["response_sha256"] : []),
+      ...(Object.hasOwn(entry, "aggregate_usage_sha256") ? ["aggregate_usage_sha256"] : [])]
   ) && isPositiveSafeInteger(entry.attempt_ordinal) && isDigest(entry.cache_key) &&
-    (entry.usage_sha256 === undefined || isDigest(entry.usage_sha256)));
+    (entry.usage_sha256 === undefined || isDigest(entry.usage_sha256)) &&
+    (entry.response_sha256 === undefined || isDigest(entry.response_sha256)) &&
+    (entry.aggregate_usage_sha256 === undefined || isDigest(entry.aggregate_usage_sha256)));
 }
 
 function isFailures(value: unknown): value is readonly ExtractionTransportFailureRecord[] {
@@ -399,10 +406,16 @@ function isShards(value: unknown): value is readonly ExtractionSuccessfulShard[]
       const bound = "attemptOrdinal" in shard || "authorityLineageDigest" in shard;
       return hasExactKeys(shard, [
         "cacheKey", "rawJsonSha256", "successKind", "transportProvenance",
-        ...(bound ? ["attemptOrdinal", "authorityLineageDigest"] : [])
+        ...(bound ? ["attemptOrdinal", "authorityLineageDigest"] : []),
+        ...("usageSha256" in shard ? ["usageSha256"] : []),
+        ...("responseSha256" in shard ? ["responseSha256"] : []),
+        ...("aggregateUsageSha256" in shard ? ["aggregateUsageSha256"] : [])
       ]) && isTransportProvenance(shard.transportProvenance) && (!bound ||
         typeof shard.attemptOrdinal === "number" && Number.isSafeInteger(shard.attemptOrdinal) && shard.attemptOrdinal > 0 &&
-        isDigest(shard.authorityLineageDigest));
+        isDigest(shard.authorityLineageDigest)) &&
+        (!("usageSha256" in shard) || isDigest(shard.usageSha256)) &&
+        (!("responseSha256" in shard) || isDigest(shard.responseSha256)) &&
+        (!("aggregateUsageSha256" in shard) || isDigest(shard.aggregateUsageSha256));
     }
     return (shard.successKind === "deterministic" ||
       shard.successKind === "legacy-unclassified") && hasExactKeys(

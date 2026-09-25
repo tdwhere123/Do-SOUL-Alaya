@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequest,
+  buildOfficialApiSourceCorpus, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import { startBenchDaemon } from "../../../harness/daemon.js";
-import { createCompileSeedRunner } from "../../../runs/compile-seed.js";
-import { CREDENTIALLED_CONFIG, providerBackedResult } from "./compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
+import { createCachingSignalExtractor, createCompileSeedRunner } from "../../../runs/compile-seed.js";
+import { CREDENTIALLED_CONFIG } from "./compile-seed-fixture.js";
+import { writeExtractionCacheTestManifest, fixtureAttemptAuthority,
+  providerBackedResponseResult } from "../extraction/extraction-cache-test-fixture.js";
 
 it("reuses raw interpretations while deriving inclusive memory dates from each retained source clock", async () => {
   const root = await mkdtemp(join(tmpdir(), "compile-seed-observed-"));
@@ -19,11 +21,21 @@ it("reuses raw interpretations while deriving inclusive memory dates from each r
     const cacheRoot = join(root, "cache");
     writeExtractionCacheTestManifest({ cacheRoot, model: CREDENTIALLED_CONFIG.model,
       providerUrl: CREDENTIALLED_CONFIG.providerUrl, systemPrompt: OFFICIAL_API_SYSTEM_PROMPT });
-    const extract = vi.fn(async () => providerBackedResult(JSON.stringify({ interpretations: [{
+    const rawJson = JSON.stringify({ interpretations: [{
       assertion_id: 1, relations: [{ predicate: { text: "completed" },
         arguments: [{ role: "object", phrase: { text: "the review" } }],
         qualifiers: [{ role: "time", phrase: { text: "today" } }] }]
-    }] })));
+    }] });
+    const extract = vi.fn(async (input) => providerBackedResponseResult(input, rawJson));
+    const source = "I completed the review today.";
+    const messages = [{ role: "user" as const, content: source }];
+    await createCachingSignalExtractor({
+      delegate: { extract }, config: CREDENTIALLED_CONFIG, cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: CREDENTIALLED_CONFIG.model,
+        requestProfile: CREDENTIALLED_CONFIG.requestProfile })
+    }).extract({ systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(source, messages)),
+      sourceCorpus: buildOfficialApiSourceCorpus(source, messages) });
     const runner = createCompileSeedRunner({ config: CREDENTIALLED_CONFIG, cacheRoot,
       extractorFactory: () => ({ extract }), allowLiveExtraction: true, skipPreflight: true });
     daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"), workspaceId: "observed-source", runId: "observed-source-run" });
@@ -39,7 +51,7 @@ it("reuses raw interpretations while deriving inclusive memory dates from each r
       memoryIds.push(memoryId);
     }
     expect(extract).toHaveBeenCalledTimes(1);
-    expect(runner.stats.cacheHits).toBe(1);
+    expect(runner.stats.cacheHits).toBe(2);
     db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
     const rows = memoryIds.map((id) => db!.connection.prepare(
       "SELECT content, event_time_start, event_time_end, time_precision, time_source FROM memory_entries WHERE object_id = ?"

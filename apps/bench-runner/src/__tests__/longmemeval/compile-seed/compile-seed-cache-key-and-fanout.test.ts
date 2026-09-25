@@ -27,7 +27,8 @@ import {
 } from "./compile-seed-fixture.js";
 import {
   TEST_EXTRACTION_PROVIDER_URL,
-  writeExtractionCacheTestManifest
+  writeExtractionCacheTestManifest, providerBackedResponseResult,
+  fixtureAttemptAuthority
 } from "../extraction/extraction-cache-test-fixture.js";
 import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
 import {
@@ -175,7 +176,7 @@ describe("canonical extraction request cache identity", () => {
     // change a cache identity.
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async (input) =>
-        providerBackedResult(buildGroundedInterpretationResponse(input.userPrompt)))
+        providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt)))
     };
     const cachingExtractor = createCachingSignalExtractor({
       delegate,
@@ -184,7 +185,8 @@ describe("canonical extraction request cache identity", () => {
         providerUrl: TEST_EXTRACTION_PROVIDER_URL,
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" })
     });
     const provider = new OfficialApiGardenProvider({
       apiKey: "test-key",

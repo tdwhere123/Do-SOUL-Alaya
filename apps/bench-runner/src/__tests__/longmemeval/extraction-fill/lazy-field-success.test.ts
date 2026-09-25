@@ -18,9 +18,10 @@ import {
   buildExtractionFillQuestion as buildQuestion,
   buildGroundedInterpretationResponse,
   EXTRACTION_FILL_VARIANT as VARIANT,
-  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
+import { providerBackedResponseResult } from "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 import type { SemanticFillTask } from "../../../runs/extraction/fill/semantic-fill-executor.js";
 import { createOfflineSemanticReplay } from
   "../../../runs/extraction/fill/semantic-fill-envelope.js";
@@ -119,8 +120,9 @@ describe("runExtractionFill lazy_field success", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: (): BenchSignalExtractor => ({
-        extract: async (input) => providerBackedExtractionResult(
+        extract: async (input) => providerBackedResponseResult(input,
           buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
@@ -171,8 +173,9 @@ describe("runExtractionFill lazy_field success", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: (): BenchSignalExtractor => ({
-        extract: async (input) => providerBackedExtractionResult(
+        extract: async (input) => providerBackedResponseResult(input,
           buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
@@ -211,8 +214,9 @@ describe("runExtractionFill lazy_field success", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: (): BenchSignalExtractor => ({
-        extract: async (input) => providerBackedExtractionResult(
+        extract: async (input) => providerBackedResponseResult(input,
           buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
@@ -257,8 +261,9 @@ describe("runExtractionFill lazy_field success", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: (): BenchSignalExtractor => ({
-        extract: async (input) => providerBackedExtractionResult(
+        extract: async (input) => providerBackedResponseResult(input,
           buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),
@@ -288,8 +293,9 @@ describe("runExtractionFill lazy_field success", () => {
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: (): BenchSignalExtractor => ({
-        extract: async (input) => providerBackedExtractionResult(
+        extract: async (input) => providerBackedResponseResult(input,
           buildGroundedInterpretationResponse(input.userPrompt)
         )
       }),

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,7 +11,7 @@ import { readExtractionCacheManifest } from "../../../runs/extraction/cache/extr
 import {
   cacheFilePath,
   computeCacheKey,
-  inspectCachedExtraction, inspectExtractionRawJson
+  inspectExtractionRawJson
 } from "../../../runs/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
@@ -99,22 +99,17 @@ describe("extraction-fill cache validity", () => {
 
   });
 
-  it("replaces a semantically invalid existing shard during live fill", async () => {
+  it("refuses completion for provider responses without an authorized attempt", async () => {
     await writeDataset();
-    await fill(async (input) => groundedExtractionResult(input));
-    const shardPath = firstShardPath();
-    const shard = JSON.parse(readFileSync(shardPath, "utf8")) as Record<string, unknown>;
-    writeFileSync(shardPath, JSON.stringify({ ...shard, raw_json: '{"signals":[42]}' }));
     const delegate = vi.fn<BenchSignalExtractor["extract"]>(
       async (input) => groundedExtractionResult(input)
     );
 
-    const result = await fill(delegate);
-
-    expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
-    expect(delegate).toHaveBeenCalledTimes(1);
-    expect(delegate.mock.calls[0]?.[0]).not.toMatchObject({ retryMode: "disabled" });
-    expect(JSON.parse(readFileSync(shardPath, "utf8")).raw_json).not.toBe('{"signals":[42]}');
+    await expect(fill(delegate)).rejects.toThrow(/completion refused.*invalid=2/u);
+    expect(delegate).toHaveBeenCalledTimes(2);
+    expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
+      fill_status: "in_progress", cached_turns: 0, coverage: 0
+    });
   });
 
   it("does not finalize the manifest after a shard persistence failure", async () => {
@@ -230,14 +225,6 @@ async function fill(extract: BenchSignalExtractor["extract"]) {
     extractorFactory: () => ({ extract }),
     log: () => undefined
   });
-}
-
-function firstShardPath(): string {
-  const prefix = readdirSync(cacheRoot).find((entry) => /^[0-9a-f]{2}$/u.test(entry));
-  if (prefix === undefined) throw new Error("expected extraction shard prefix");
-  const file = readdirSync(join(cacheRoot, prefix))[0];
-  if (file === undefined) throw new Error("expected extraction shard");
-  return join(cacheRoot, prefix, file);
 }
 
 async function writeDataset(): Promise<void> {

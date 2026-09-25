@@ -40,6 +40,9 @@ import {
   providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
+import { providerBackedResponseResult } from
+  "../extraction/extraction-cache-test-fixture.js";
+import { writeAuthorityReceipt } from "./authority-runtime/fixture.js";
 import {
   registerCatalogRefillCrashChild,
   registerCatalogRefillRecoveryCases
@@ -75,8 +78,7 @@ parentDescribe("cache-key allowlist runtime completion", () => {
     const retryModes: Array<string | undefined> = [];
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       retryModes.push(input.retryMode);
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
+      return providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt));
     });
     const logs: string[] = [];
 
@@ -151,8 +153,7 @@ parentDescribe("cache-key allowlist runtime authority", () => {
     const remainingKeys = [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)].sort();
     const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
+      return providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt));
     });
     const logs: string[] = [];
     const options = {
@@ -189,7 +190,8 @@ parentDescribe("cache-key allowlist runtime resume", () => {
       await input.onTransportAttempt?.();
       calls += 1;
       if (calls === 1) {
-        return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
+        return providerBackedResponseResult({ ...input, onTransportAttempt: undefined },
+          buildGroundedInterpretationResponse(input.userPrompt));
       }
       throw providerTimeoutFailure();
     });
@@ -226,8 +228,7 @@ parentDescribe("cache-key allowlist runtime resume", () => {
     writeFileSync(manifestPath, partialManifest, "utf8");
 
     const resumedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      await input.onTransportAttempt?.();
-      return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt));
+      return providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt));
     });
     const result = await runExtractionFill({
       variant: EXTRACTION_FILL_VARIANT,
@@ -322,13 +323,18 @@ registerCatalogRefillCrashChild(
 async function prefillFirstQuestion(): Promise<void> {
   await createInitialTargetSelection();
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) =>
-    providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt))
+    providerBackedResponseResult(input, buildGroundedInterpretationResponse(input.userPrompt))
   );
+  const authorityReceiptPath = await writeAuthorityReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, {
+    limit: 1
+  });
   await runExtractionFill({
     variant: EXTRACTION_FILL_VARIANT,
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
+    limit: 1,
+    authorityReceiptPath,
     questionBatchLimit: 1,
     extractorFactory: () => ({ extract }),
     log: () => undefined

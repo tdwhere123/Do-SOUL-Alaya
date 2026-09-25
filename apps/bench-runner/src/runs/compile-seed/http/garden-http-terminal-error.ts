@@ -25,6 +25,8 @@ export function wrapGardenHttpTransportError(
     retryClassification: classification,
     rateLimitRetries,
     transportFailures: Object.freeze([...transportFailures]),
+    attemptUsages: transportFailures.map((failure) => failure.usage ?? null),
+    attemptResponses: transportFailures.map(() => null),
     successfulRequestCount: 0,
     usageRequestCount: aggregate.usageRequestCount,
     ...(aggregate.usage === undefined ? {} : { usage: aggregate.usage })

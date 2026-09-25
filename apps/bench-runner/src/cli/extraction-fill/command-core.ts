@@ -201,7 +201,7 @@ function handleExtractionFillError(error: unknown): number {
   if (error instanceof ExtractionFillInterruptedError) return error.exitCode;
   if (error instanceof ExtractionFillTaskError) {
     process.stderr.write(
-      `alaya-bench-runner extraction-fill: ${describeError(error)}${taskCauseSummary(error.cause)}\n`
+      `alaya-bench-runner extraction-fill: ${error.message}${taskCauseSummary(error.cause)}\n`
     );
     return error.exitCode;
   }

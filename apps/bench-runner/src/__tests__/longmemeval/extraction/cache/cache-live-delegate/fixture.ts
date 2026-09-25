@@ -115,3 +115,12 @@ export function sseResponse(content: string, finishReason: string): Response {
     { status: 200, headers: { "content-type": "text/event-stream" } }
   );
 }
+
+export function jsonChatCompletionResponse(content: string,
+  usage?: { readonly inputTokens: number; readonly outputTokens: number }): Response {
+  return Response.json({ choices: [{ message: { content }, finish_reason: "stop" }],
+    ...(usage === undefined ? {} : { usage: {
+      prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens,
+      total_tokens: usage.inputTokens + usage.outputTokens
+    } }) });
+}

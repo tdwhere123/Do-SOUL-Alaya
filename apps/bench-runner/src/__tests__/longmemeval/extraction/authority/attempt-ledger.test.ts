@@ -8,10 +8,12 @@ import {
   readExtractionAttemptLedger,
   openExtractionAttemptLedger
 } from "../../../../runs/extraction/authority/attempt-ledger.js";
-import { TEST_CACHED_PROVIDER_COMPLETION_METADATA } from
-  "../extraction-cache-test-fixture.js";
+import { inspectCachedRawExtraction } from
+  "../../../../runs/compile-seed/cache/cache-shard.js";
+import { providerFixtureKey, providerPartitionShardFixture,
+  providerShardFixture } from "./provider-shard-fixture.js";
 
-const key = (digit: string): string => digit.repeat(64);
+const key = providerFixtureKey;
 const cacheIdentity = { model: "gpt-5.4-mini", requestProfile: "provider-default-v1" } as const;
 let cacheRoot = "";
 
@@ -20,6 +22,64 @@ afterEach(async () => {
 });
 
 describe("extraction attempt ledger persistence", () => {
+  it("refuses staged ordinary bytes until transport mode and physical response survive reopen", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineageDigest = "c".repeat(64);
+    const cacheKey = key("8");
+    const ledger = openLedger(lineageDigest, 1);
+    ledger.reserveAttempt(cacheKey);
+    const shard = await providerShardFixture({ label: "8", lineageDigest, attemptOrdinal: 1 });
+    ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0,
+      attemptResponses: [shard.provider_responses[0].witness] }, 1);
+    await writeShard(cacheKey, JSON.stringify({ ...shard,
+      provider_attempt: { ...shard.provider_attempt, kind: undefined } }));
+    expect(() => ledger.commitSuccessfulShard(cacheKey)).toThrow(/identity validation/u);
+    expect(readLedger(lineageDigest)).toMatchObject({ successfulShards: 0,
+      pendingKeys: [cacheKey] });
+    await writeShard(cacheKey, JSON.stringify({ ...shard,
+      provider_responses: [{ ...shard.provider_responses[0],
+        witness: { ...shard.provider_responses[0].witness, httpResponse: undefined } }] }));
+    expect(() => ledger.commitSuccessfulShard(cacheKey)).toThrow(/identity validation/u);
+    expect(readLedger(lineageDigest)).toMatchObject({ successfulShards: 0,
+      pendingKeys: [cacheKey] });
+    expect(inspectCachedRawExtraction(cacheRoot, cacheKey,
+      cacheIdentity.model, cacheIdentity.requestProfile).status).toBe("invalid");
+    await writeShard(cacheKey, JSON.stringify(shard));
+    expect(readLedger(lineageDigest)).toMatchObject({ successfulShards: 1,
+      successfulKeys: [cacheKey], pendingKeys: [] });
+    expect(inspectCachedRawExtraction(cacheRoot, cacheKey,
+      cacheIdentity.model, cacheIdentity.requestProfile).status).toBe("pending");
+    expect(openLedger(lineageDigest, 1).snapshot()).toMatchObject({ successfulShards: 1,
+      successfulKeys: [cacheKey], pendingKeys: [] });
+    expect(inspectCachedRawExtraction(cacheRoot, cacheKey,
+      cacheIdentity.model, cacheIdentity.requestProfile).status).toBe("hit");
+  });
+
+  it("keeps an older unknown reservation when a later physical response settles", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineageDigest = "b".repeat(64);
+    const cacheKey = key("9");
+    openLedger(lineageDigest, 2).reserveAttempt(cacheKey);
+    const resumed = openLedger(lineageDigest, 2);
+    resumed.reserveAttempt(cacheKey);
+    const shard = await writeValidShard(cacheKey, lineageDigest, 2,
+      { inputTokens: 5, outputTokens: 2, totalTokens: 7 });
+    resumed.recordTransportOutcome(cacheKey, {
+      retryCount: 0, rateLimitRetries: 0,
+      usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+      attemptUsages: [{ inputTokens: 5, outputTokens: 2, totalTokens: 7 }],
+      attemptResponses: [shard.provider_responses[0].witness]
+    }, 2);
+
+    expect(readLedger(lineageDigest)).toMatchObject({
+      attempts: 2, successfulShards: 0,
+      unresolvedAttempts: [{ attemptOrdinal: 1, cacheKey }],
+      settledAttempts: [expect.objectContaining({ attemptOrdinal: 2 })],
+      telemetry: { unresolvedTransportAttempts: 1, usageUnknownAttempts: 1 }
+    });
+    expect(() => resumed.commitSuccessfulShard(cacheKey)).toThrow(/settled provider attempt/u);
+  });
+
   it("persists cumulative attempts and marks a pre-callback crash as usage-unknown", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
     const lineageDigest = "a".repeat(64);
@@ -34,13 +94,17 @@ describe("extraction attempt ledger persistence", () => {
     const resumed = openLedger(lineageDigest, 3);
     resumed.reserveAttempt(key("1"));
     resumed.reserveAttempt(key("1"));
+    const successful = await writeValidShard(key("1"), lineageDigest, 3,
+      { inputTokens: 10, outputTokens: 4, totalTokens: 14 });
     resumed.recordTransportOutcome(key("1"), {
       retryCount: 1,
       rateLimitRetries: 1,
-      transportFailures: [failureAttempt(1, "f")],
+      unknownRequestCount: 1,
+      transportFailures: [failureAttempt(2, "f")],
+      attemptUsages: [undefined, null, { inputTokens: 10, outputTokens: 4, totalTokens: 14 }],
+      attemptResponses: [null, null, successful.provider_responses[0].witness],
       usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 }
     });
-    await writeValidShard(key("1"));
     resumed.commitSuccessfulShard(key("1"));
 
     expect(resumed.snapshot()).toMatchObject({
@@ -195,13 +259,16 @@ describe("extraction attempt ledger transport mapping", () => {
     const ledger = openLedger(lineageDigest, 4, 4, 2);
     ledger.reserveAttempt(successfulKey);
     ledger.reserveAttempt(successfulKey);
+    const successful = await writeValidShard(successfulKey, lineageDigest, 2,
+      { inputTokens: 10, outputTokens: 2, totalTokens: 12 });
     ledger.recordTransportOutcome(successfulKey, {
       retryCount: 1,
       rateLimitRetries: 0,
       transportFailures: [failureAttempt(1, "a")],
+      attemptUsages: [null, { inputTokens: 10, outputTokens: 2, totalTokens: 12 }],
+      attemptResponses: [null, successful.provider_responses[0].witness],
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }
     });
-    await writeValidShard(successfulKey);
     ledger.commitSuccessfulShard(successfulKey);
 
     ledger.reserveAttempt(terminalKey);
@@ -251,16 +318,22 @@ describe("extraction attempt ledger transport mapping", () => {
     const cacheKey = key("7");
     const ledger = openLedger(lineageDigest, 4, 4, 1);
     for (let index = 0; index < 4; index += 1) ledger.reserveAttempt(cacheKey);
+    const shard = await providerPartitionShardFixture({ lineageDigest,
+      attemptOrdinals: [2, 4], usage: { inputTokens: 20, outputTokens: 6, totalTokens: 26 } });
+    await writeShard(cacheKey, JSON.stringify(shard));
 
     ledger.recordTransportOutcome(cacheKey, {
       retryCount: 2,
       rateLimitRetries: 0,
       successfulRequestCount: 2,
       usageRequestCount: 2,
+      attemptUsages: [null, { inputTokens: 20, outputTokens: 6, totalTokens: 26 },
+        null, { inputTokens: 20, outputTokens: 6, totalTokens: 26 }],
+      attemptResponses: [null, shard.provider_responses[0].witness,
+        null, shard.provider_responses[1].witness],
       transportFailures: [failureAttempt(1, "d"), failureAttempt(3, "e")],
       usage: { inputTokens: 40, outputTokens: 12, totalTokens: 52 }
     });
-    await writeValidShard(cacheKey);
     ledger.commitSuccessfulShard(cacheKey);
 
     expect(ledger.snapshot()).toMatchObject({
@@ -291,6 +364,12 @@ describe("extraction attempt ledger transport validation", () => {
     ledger.reserveAttempt(cacheKey);
     ledger.reserveAttempt(cacheKey);
 
+    expect(() => ledger.recordTransportOutcome(cacheKey, {
+      retryCount: 1, rateLimitRetries: 0,
+      transportFailures: [failureAttempt(1, "d")],
+      attemptUsages: [null, { inputTokens: 3, outputTokens: 1, totalTokens: 4 }],
+      usage: { inputTokens: 99, outputTokens: 1, totalTokens: 100 }
+    })).toThrow(/telemetry is invalid/u);
     expect(() => ledger.recordTransportOutcome(cacheKey, {
       retryCount: 1,
       rateLimitRetries: 0,
@@ -385,8 +464,9 @@ describe("extraction attempt ledger shard limits", () => {
     const cacheKey = key("5");
     const ledger = openLedger(lineageDigest, 1);
     ledger.reserveAttempt(cacheKey);
-    ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0 });
-    await writeValidShard(cacheKey);
+    const shard = await writeValidShard(cacheKey, lineageDigest, 1);
+    ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0,
+      attemptResponses: [shard.provider_responses[0].witness] }, 1);
 
     expect(readLedger(lineageDigest)).toMatchObject({
       attempts: 1,
@@ -423,23 +503,21 @@ async function settleAndCommit(
   cacheKey: string
 ): Promise<void> {
   ledger.reserveAttempt(cacheKey);
-  ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0 });
-  await writeValidShard(cacheKey);
+  const snapshot = ledger.snapshot();
+  const shard = await writeValidShard(cacheKey, snapshot.lineageDigest, snapshot.attempts);
+  ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0,
+    attemptResponses: [shard.provider_responses[0].witness] }, snapshot.attempts);
   ledger.commitSuccessfulShard(cacheKey);
 }
 
-async function writeValidShard(cacheKey: string): Promise<void> {
-  await writeShard(cacheKey, JSON.stringify({
-    model: cacheIdentity.model,
-    request_profile: cacheIdentity.requestProfile,
-    cache_key: cacheKey,
-    raw_json: '{"signals":[{}]}',
-    transport_provenance: {
-      provider_url_sha256: `sha256:${key("a")}`,
-      model: cacheIdentity.model
-    },
-    response_metadata: TEST_CACHED_PROVIDER_COMPLETION_METADATA
-  }));
+async function writeValidShard(cacheKey: string, lineageDigest: string, attemptOrdinal: number,
+  lastUsage?: { inputTokens: number; outputTokens: number; totalTokens: number }) {
+  const label = [..."0123456789abcdef"].find((digit) => key(digit) === cacheKey);
+  if (label === undefined) throw new Error("provider fixture key is unknown");
+  const shard = await providerShardFixture({ label, lineageDigest, attemptOrdinal,
+    ...(lastUsage === undefined ? {} : { usage: lastUsage }) });
+  await writeShard(cacheKey, JSON.stringify(shard));
+  return shard;
 }
 
 async function writeDeterministicShard(cacheKey: string): Promise<void> {
