@@ -16,3 +16,6 @@ export interface RecallReadWorkerRuntime {
   readonly recallPathReadPorts: ReturnType<typeof createBoundRecallPathReadPorts>;
   closed: boolean;
 }
+
+/** Source-semantic read owners need only the pinned SQLite population. */
+export type SourceSemanticReadRuntime = Pick<RecallReadWorkerRuntime, "database">;

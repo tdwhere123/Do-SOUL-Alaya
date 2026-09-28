@@ -4,7 +4,7 @@ import {
 import { CoreError, fieldContractSha256, semanticInterpretationEvidenceId,
   verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { SqliteSourceHintReader } from "@do-soul/alaya-storage";
-import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { SourceSemanticReadRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 
@@ -15,12 +15,12 @@ export const IDLE: SourceSemanticCoverage = {
 };
 
 type VerifiedInterpretation = ReturnType<typeof verifyPublishedSourceSemanticInterpretation>;
-export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: string,
+export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation;
-export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: Readonly<{ evidence_object_id: string }>,
+export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: Readonly<{ evidence_object_id: string }>,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   beforeSourceRead?: (bound: ReturnType<typeof SourceSemanticPublishedInterpretationSchema.parse>) => boolean): VerifiedInterpretation | null;
-export function loadVerified(runtime: RecallReadWorkerRuntime, workspace: string, identity: string | Readonly<{ evidence_object_id: string }>,
+export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: string | Readonly<{ evidence_object_id: string }>,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   beforeSourceRead?: (bound: ReturnType<typeof SourceSemanticPublishedInterpretationSchema.parse>) => boolean): VerifiedInterpretation | null {
   const expected = typeof identity === "string" ? identity : undefined;

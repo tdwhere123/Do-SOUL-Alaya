@@ -9,13 +9,14 @@ import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, so
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { admissionOf, loadVerified, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
-import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
 import { sourceSemanticRevision } from "./source-semantic-leases.js";
 import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { reserveEmptyInterpretationCompletion } from "./source-semantic-empty-population-budget.js";
 import { sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
 
 type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number];
+export type ResearchSourceObservation = SourceObservation & Pick<SourceRecordIdentity, "source_version" | "content_digest">;
 type InterpretationObservation = SourceSemanticAccessReceipt["interpretation_candidates"][number];
 type Policy = ReturnType<typeof createSourceSemanticAccessPolicy>;
 type Stop = SourceSemanticAccessReceipt["stopping_reasons"][number];
@@ -37,6 +38,62 @@ export function accessInputIdentity(original: string, query: SourceSemanticQuery
   return sourceSemanticAccessInputIdentity({ original_query: original, query_semantics: query,
     source_id: sourceId, budget, policy,
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }) });
+}
+
+function bindAccessPoolIdentity<Receipt extends Omit<SourceSemanticAccessReceipt, "trace" | "pool_id">>(
+  runtime: SourceSemanticReadRuntime, workspace: string, authorized: readonly string[] | null, receipt: Receipt
+): Receipt & { pool_id: string } {
+  return { ...receipt, pool_id: `sha256:${fieldContractSha256(canonicalJson({ receipt,
+    workspace, authorized, revision: sourceSemanticRevision(runtime) }))}` };
+}
+
+/** Bind a research-only fixed window to current records and verified interpretations.
+ * The derived pool is for the existing package/fit owner; it is never a native observation receipt. */
+export function bindResearchFixedSourcePool(runtime: SourceSemanticReadRuntime, workspace: string,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
+  original: string, query: SourceSemanticQuery, budget: RequestBudget,
+  rows: readonly ResearchSourceObservation[], descriptors: readonly SourceSemanticHandleDescriptor[]): SourceSemanticAccessPool {
+  if (rows.length !== 10 || new Set(rows.map(row => row.record_id)).size !== rows.length ||
+      rows.some(row => !row.complete || row.body_bytes === null || row.read_bytes !== row.body_bytes)) {
+    throw new CoreError("VALIDATION", "research window requires ten fully read distinct raw roots");
+  }
+  const records = rows.map(row => {
+    const record = sourceSemanticReadStores(runtime.database, workspace, row.source_id, meter, authorized)
+      .getCurrentRecord(workspace, row.source_id);
+    if (record === null || record.identity !== row.record_id ||
+        record.source_version !== row.source_version || record.content_digest !== row.content_digest) {
+      throw new CoreError("CONFLICT", "research raw root is not current in the source publication");
+    }
+    return record;
+  });
+  const positions = new Map(records.map((record, index) => [record.source_id, index]));
+  const verified = descriptors.map(descriptor => {
+    const checked = loadVerified(runtime, workspace, descriptor.interpretation_id, authorized, meter);
+    const record = checked.stored.record;
+    const position = positions.get(record.source_id);
+    if (position === undefined || record.identity !== rows[position]!.record_id ||
+        record.source_version !== descriptor.source_version || record.content_digest !== descriptor.content_digest ||
+        record.source_id !== descriptor.source_id ||
+        checked.bound.interpretation_id !== descriptor.interpretation_id) {
+      throw new CoreError("CONFLICT", "research interpretation escapes its frozen source tuple");
+    }
+    return { descriptor, position, record_id: record.identity };
+  }).sort((a, b) => a.position - b.position || a.descriptor.interpretation_id.localeCompare(b.descriptor.interpretation_id));
+  if (new Set(verified.map(row => row.descriptor.interpretation_id)).size !== verified.length) {
+    throw new CoreError("CONFLICT", "research interpretation repeats a descriptor");
+  }
+  const interpretationRows: InterpretationObservation[] = verified.map(row => ({
+    interpretation_id: row.descriptor.interpretation_id, record_id: row.record_id,
+    signal: { source_text_score: null, interpretation_reading_score: 0 }
+  }));
+  const inputId = accessInputIdentity(original, query, budget, "query-conditioned-v1");
+  const observations = rows.map(({ source_version: _version, content_digest: _digest, ...row }) => row);
+  const receipt = sourceSemanticAccessReceiptValue("query-conditioned-v1", inputId,
+    observations, interpretationRows, false, false, []);
+  const access = bindAccessPoolIdentity(runtime, workspace, authorized, receipt);
+  meter.retain(access, "research fixed-pool identity");
+  return { sources: records, descriptors: verified.map(row => row.descriptor), access,
+    sourcePages: 1, interpretationPages: verified.length === 0 ? 0 : 1 };
 }
 
 function previewExtent(record: SourceRecordIdentity, extents: SourceSemanticPreviewExtents): number {
@@ -98,8 +155,7 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
     sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops],
     sourcePreviewExtents);
   meter.retain(receipt, "access receipt identity");
-  const access = { ...receipt, pool_id: `sha256:${fieldContractSha256(canonicalJson({ receipt,
-    workspace: payload.workspace_id, authorized, revision: sourceSemanticRevision(runtime) }))}` };
+  const access = bindAccessPoolIdentity(runtime, payload.workspace_id, authorized, receipt);
   return { sources: orderedSources.map((row) => byId.get(row.record_id)!),
     descriptors: orderedInterpretations.map((row) => interpretations.descriptors.get(row.interpretation_id)!),
     access, ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),

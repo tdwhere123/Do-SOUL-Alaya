@@ -11,6 +11,32 @@ import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } 
 import { admitInitialQualified, initialSourcePhysicalOwner } from "./recovery-publication.js";
 import { reserveRecoveryRead, reserveRecoveryHostEffect } from "./recovery-allowance.js";
 
+/** The complete current catalog and immediate physical H parent own one source-local revision. */
+export function prepareRecoverySourceRevisionGeneration(input: Readonly<{
+  parent: ReturnType<typeof parseSourceSemanticRequest>;
+  completeParentResponse: string;
+  currentCatalog: NonNullable<Extract<ReturnType<typeof SoulInterpretationResponseSchema.parse>,
+    { operation: "prepare_source" }>["catalog"]>;
+  baseGeneration: ReturnType<typeof parseExtractionOpenSemanticsGeneration>;
+}>) {
+  const catalogRows = input.currentCatalog.assertions.map(row => ({ assertion_id: row.assertion_id,
+    text: row.segments.map(part => part.text).join("") }));
+  if (input.currentCatalog.source_digest !== input.parent.source_digest ||
+      canonicalJson(catalogRows) !== canonicalJson(input.parent.source_request.source_assertions.map(row => ({
+        assertion_id: row.assertion_id, text: row.text })))) {
+    throw new AlayaError("CONFLICT", "fresh native source catalog differs from unchanged H request");
+  }
+  const review = [] as { assertion_ids: number[]; comment: string }[];
+  for (let offset = 0; offset < catalogRows.length; offset += 8) review.push({
+    assertion_ids: catalogRows.slice(offset, offset + 8).map(row => row.assertion_id),
+    comment: "Verify all source assertions and their local relation roles against the unchanged complete source; include supported content omitted by the prior response."
+  });
+  const revision = prepareSourceSemanticRevision(input.parent, input.completeParentResponse,
+    review, { responseCompletion: "complete" });
+  const generation = parseExtractionOpenSemanticsGeneration({ ...input.baseGeneration, revisions: [revision] });
+  return { revision, generation };
+}
+
 /** The unchanged complete source and its physical parent define exactly one child H request. */
 export function prepareRecoverySourceRevision(rootInput: string) {
   const root = resolve(rootInput);
@@ -36,23 +62,11 @@ export function prepareRecoverySourceRevision(rootInput: string) {
   const parentLine = preflight.ready_requests.find(line => line.key === source.initial_key);
   if (parentLine === undefined) throw new AlayaError("CONFLICT", "H revision lacks selected physical parent key");
   const parent = parseSourceSemanticRequest(JSON.parse(parentLine.userPrompt));
-  const catalogRows = prepared.catalog.assertions.map(row => ({ assertion_id: row.assertion_id,
-    text: row.segments.map(part => part.text).join("") }));
-  if (prepared.catalog.source_digest !== parent.source_digest ||
-      canonicalJson(catalogRows) !== canonicalJson(parent.source_request.source_assertions.map(row => ({
-        assertion_id: row.assertion_id, text: row.text })))) {
-    throw new AlayaError("CONFLICT", "fresh native source catalog differs from unchanged H request");
-  }
   const physical = readCompleteRetainedSourceResponse({ cacheRoot: physicalOwner.cacheRoot,
     preflight, line: parentLine });
-  const review = [] as { assertion_ids: number[]; comment: string }[];
-  for (let offset = 0; offset < catalogRows.length; offset += 8) review.push({
-    assertion_ids: catalogRows.slice(offset, offset + 8).map(row => row.assertion_id),
-    comment: "Verify all source assertions and their local relation roles against the unchanged complete source; include supported content omitted by the prior response."
-  });
-  const revision = prepareSourceSemanticRevision(parent, physical, review, { responseCompletion: "complete" });
-  const generation = parseExtractionOpenSemanticsGeneration({ ...parseExtractionOpenSemanticsGeneration(window.open_semantics),
-    revisions: [revision] });
+  const { revision, generation } = prepareRecoverySourceRevisionGeneration({ parent,
+    completeParentResponse: physical, currentCatalog: prepared.catalog,
+    baseGeneration: parseExtractionOpenSemanticsGeneration(window.open_semantics) });
   const census = censusNativeSourceRecords({ population: window.population, snapshotPath: window.native_snapshot_path });
   const occurrence = census.records.find(row => row.source_id === source.source_id &&
     row.source_version === source.source_version && row.native_record_id === source.record_id);

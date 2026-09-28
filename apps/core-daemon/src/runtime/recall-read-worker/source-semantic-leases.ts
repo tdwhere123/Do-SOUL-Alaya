@@ -47,7 +47,7 @@ export function sourceSemanticLifetimeNow(clock: Clock): string {
   return clock.lifetime_now ?? clock.as_of;
 }
 
-export function sourceSemanticRevision(runtime: RecallReadWorkerRuntime): string {
+export function sourceSemanticRevision(runtime: Pick<RecallReadWorkerRuntime, "database">): string {
   return `${String(runtime.database.connection.pragma("data_version", { simple: true }))}:${String(
     (runtime.database.connection.prepare("SELECT total_changes() AS n").get() as { n: number }).n)}`;
 }

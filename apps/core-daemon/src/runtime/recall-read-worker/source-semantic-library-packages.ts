@@ -4,7 +4,7 @@ import { CoreError, authorizeSemanticScope, hydrateUtf8Chunk, sourceSemanticSupp
   sourceGoldRootIdentity, fieldContractSha256, projectSourceDisclosure, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION } from "@do-soul/alaya-storage";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { admissionOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 
 const DISPLAY_BYTES = 4096;
@@ -15,7 +15,7 @@ export type LibraryExecutedSupport = Readonly<{
 }>;
 
 /** Hydration consumes actual execution origins and current authorized source bytes. */
-export function prepareLibraryPackages(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   sources: readonly IndexEntry[], executed: readonly LibraryExecutedSupport[]) {
   const packages: SourceSemanticLibraryPackage[] = [];
@@ -78,7 +78,7 @@ function hydrate(meter: SourceSemanticReadBudget, source: string, offset: number
   meter.charge(source.length * 3, Buffer.byteLength(source) * 3 + bytes * 2, "library source window encoding");
   return hydrateUtf8Chunk(source, { offset, byteLimit: bytes });
 }
-function readSource(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+function readSource(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, entry: IndexEntry): { text: string; bytes: number;
     record: { valid_from: string | null; valid_to: string | null } } | undefined {
   if (entry.target.kind !== "source_evidence") return undefined;

@@ -15,10 +15,15 @@ import { readCompleteRetainedSourceResponse } from "../extraction/cache/source-i
 import { reserveRecoveryRead, reserveRecoveryAction, reserveRecoveryHostEffect,
   recordRecoveryNativeWork } from "./recovery-allowance.js";
 
-function recoveryNomination(root: string, reason: { identity?: string; qualified_snapshot_identity?: string;
-  results?: { source_interpretation_id?: string; status?: string; response?: { result?: unknown } }[] }) {
-  const { window, settled } = admitInitialQualified(root);
-  if (reason.qualified_snapshot_identity !== settled.publication_identity || !Array.isArray(reason.results)) {
+type RecoveryReasonRound = { identity?: string; qualified_snapshot_identity?: string;
+  results?: { source_interpretation_id?: string; status?: string; response?: { result?: unknown } }[] };
+type RecoveryWindowSource = ReturnType<typeof admitInitialQualified>["window"]["window"][number];
+
+/** Attention first, then eligible frozen order; physical-parent eligibility is supplied by the caller. */
+export function selectRecoveryNomination(window: readonly RecoveryWindowSource[],
+  qualifiedSnapshotIdentity: string, reason: RecoveryReasonRound,
+  eligible: readonly RecoveryWindowSource[]) {
+  if (!Array.isArray(reason.results)) {
     throw new AlayaError("CONFLICT", "source nomination lacks the settled initial reasoning round");
   }
   const candidates = reason.results.flatMap(row => {
@@ -30,11 +35,30 @@ function recoveryNomination(root: string, reason: { identity?: string; qualified
         attention.conditional_computation_id !== result.conditional_computation_id ||
         attention.query_semantics_id !== result.query_semantics_id ||
         attention.semantic_correspondence_id !== result.semantic_correspondence_id) return [];
-    const source = window.window.find(source => source.source_id === attention.source_id &&
+    const source = window.find(source => source.source_id === attention.source_id &&
       source.source_version === attention.source_version && source.content_digest === attention.content_digest);
     return source === undefined ? [] : [{ source, attention }];
   });
   const nominated = candidates.find(row => !row.source.complete) ?? candidates[0];
+  const chosen = nominated ?? (() => {
+    const source = eligible.find(row => !row.complete) ?? eligible[0];
+    return source === undefined ? undefined : { source, attention: null };
+  })();
+  if (chosen === undefined) throw new AlayaError("CONFLICT", "no frozen source has a qualified H or complete physical H parent");
+  return { contract: "source-semantic-recovery-nomination-v1", reason_identity: reason.identity,
+    qualified_snapshot_identity: qualifiedSnapshotIdentity,
+    source_id: chosen.source.source_id, source_version: chosen.source.source_version,
+    record_id: chosen.source.record_id, content_digest: chosen.source.content_digest,
+    initial_read_bytes: chosen.source.read_bytes, initial_body_bytes: chosen.source.body_bytes,
+    attention: chosen.attention,
+    nomination: nominated === undefined ? "frozen_window_after_unbound_reason" : "initial_reason_attention" };
+}
+
+function recoveryNomination(root: string, reason: RecoveryReasonRound) {
+  const { window, settled } = admitInitialQualified(root);
+  if (reason.qualified_snapshot_identity !== settled.publication_identity || !Array.isArray(reason.results)) {
+    throw new AlayaError("CONFLICT", "source nomination lacks the settled initial reasoning round");
+  }
   const eligible = window.window.filter(source => {
     if (settled.descriptor_export.some(row => row.source_id === source.source_id &&
         row.source_version === source.source_version && row.record_id === source.record_id)) return true;
@@ -49,18 +73,7 @@ function recoveryNomination(root: string, reason: { identity?: string; qualified
       return true;
     } catch { return false; }
   });
-  const chosen = nominated ?? (() => {
-    const source = eligible.find(row => !row.complete) ?? eligible[0];
-    return source === undefined ? undefined : { source, attention: null };
-  })();
-  if (chosen === undefined) throw new AlayaError("CONFLICT", "no frozen source has a qualified H or complete physical H parent");
-  return { contract: "source-semantic-recovery-nomination-v1", reason_identity: reason.identity,
-    qualified_snapshot_identity: settled.publication_identity,
-    source_id: chosen.source.source_id, source_version: chosen.source.source_version,
-    record_id: chosen.source.record_id, content_digest: chosen.source.content_digest,
-    initial_read_bytes: chosen.source.read_bytes, initial_body_bytes: chosen.source.body_bytes,
-    attention: chosen.attention,
-    nomination: nominated === undefined ? "frozen_window_after_unbound_reason" : "initial_reason_attention" };
+  return selectRecoveryNomination(window.window, settled.publication_identity, reason, eligible);
 }
 
 export function admitRecoveryNomination(rootInput: string) {

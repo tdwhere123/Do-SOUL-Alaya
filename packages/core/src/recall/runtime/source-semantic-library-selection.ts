@@ -23,6 +23,7 @@ export function selectSourceSemanticLibraryPage(input: Readonly<{
   candidates: readonly SourceSemanticLibraryPackage[];
   fits: (page: readonly SourceSemanticLibraryPackage[]) => boolean;
   meter: SourceSemanticResourceLedger;
+  order?: "field" | "source_access";
 }>): readonly SourceSemanticLibraryPackage[] {
   const selected: SourceSemanticLibraryPackage[] = [];
   const covered = new Set<string>();
@@ -39,6 +40,7 @@ export function selectSourceSemanticLibraryPage(input: Readonly<{
     while (selected.length < SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET && remaining.size > 0) {
       input.meter.charge(remaining.size, remaining.size * 16, "evidence selection candidates");
       const ranked = [...remaining].sort((left, right) => {
+        if (input.order === "source_access") return left.access_position - right.access_position;
         const a = supports.get(left.entry), b = supports.get(right.entry);
         const answer = answered ? 0 : Number(b?.answer === "supported") - Number(a?.answer === "supported");
         const gain = demands(b).filter(id => !covered.has(id)).length - demands(a).filter(id => !covered.has(id)).length;
@@ -63,7 +65,7 @@ export function selectSourceSemanticLibraryPage(input: Readonly<{
       }
       if (!accepted) break;
     }
-    improveCoverage(selected, input, supports);
+    if (input.order !== "source_access") improveCoverage(selected, input, supports);
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     // A later candidate or continuation cannot revoke an already reserved page.

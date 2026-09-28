@@ -25,8 +25,10 @@ export type SourceAssociationCacheOwner = Readonly<{ cacheRoot: string; retained
   physicalPreparationPath?: string }>;
 type SourceAssociationPopulation = Omit<SourcePublicationPopulation, "cacheRoots" | "publicationAssociations"> & Readonly<{
   openSemantics?: ExtractionOpenSemanticsGeneration;
-  activeNativeRevision?: Readonly<{ source_id: string; source_version: string; record_id: string;
-    key: string; generation: ExtractionOpenSemanticsGeneration }>;
+  activeRevision?: Readonly<{ source_id: string; source_version: string;
+    key: string; generation: ExtractionOpenSemanticsGeneration }> & (
+      Readonly<{ kind: "native"; record_id: string }> |
+      Readonly<{ kind: "natural"; content_digest: string }>);
 }>;
 type RetainedOwner = Readonly<{ cacheRoot: string; digest: string;
   contract: "extraction-batch-preflight-v2" | "source-semantic-interactive-preflight-v3";
@@ -160,14 +162,15 @@ function currentSourceAssociationExpectations(census: SourceCensus, generation: 
   const expected = new Map<string, { requestDigest: string; sources: typeof census.records[number][] }>();
   const expectedGeneration = new Map<string, ExtractionOpenSemanticsGeneration>();
   const unsupported = new Map<string, Extract<SourcePublicationAssociation, { status: "unsupported_source" }>>();
-  const revision = population.activeNativeRevision;
-  if (revision !== undefined && population.nativeSnapshotPath === undefined) {
-    throw new AlayaError("VALIDATION", "source-local H revision requires a native source population");
+  const revision = population.activeRevision;
+  if (revision !== undefined && (revision.kind === "native") !== (population.nativeSnapshotPath !== undefined)) {
+    throw new AlayaError("VALIDATION", "source-local H revision population differs from its source tuple");
   }
   let selectedCount = 0;
   for (const source of census.records) {
     const selected = revision !== undefined && source.source_id === revision.source_id &&
-      source.source_version === revision.source_version && source.native_record_id === revision.record_id;
+      source.source_version === revision.source_version && (revision.kind === "native"
+        ? source.native_record_id === revision.record_id : source.content_digest === revision.content_digest);
     if (selected) selectedCount++;
     const activeGeneration = selected ? revision!.generation : generation;
     const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", activeGeneration);
@@ -187,7 +190,7 @@ function currentSourceAssociationExpectations(census: SourceCensus, generation: 
     expected.set(line.key, match);
     expectedGeneration.set(line.key, activeGeneration);
   }
-  if (revision !== undefined && selectedCount !== 1) throw new AlayaError("CONFLICT", "H child must select one current native source tuple");
+  if (revision !== undefined && selectedCount !== 1) throw new AlayaError("CONFLICT", "H child must select one current source tuple");
   const inventories = new Map<string, ReturnType<typeof nativeSourceRequestInventory>>();
   for (const [key, current] of expected) {
     const retained = owned.get(key), retainedLine = retained?.line;

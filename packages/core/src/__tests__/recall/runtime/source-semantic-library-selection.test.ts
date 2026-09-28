@@ -94,6 +94,16 @@ it("prefers an actually executed complete answer and fills remaining slots from 
   expect(selected[1]!.entry.target).toEqual(pool[1]!.entry.target);
 });
 
+it("keeps the same qualified packages and fit envelope in frozen source order", () => {
+  const candidates = [raw("first", 0), raw("second", 1), witnessed("late-answer", query())];
+  const fits = (rows: readonly SourceSemanticLibraryPackage[]) => rows.length <= 2;
+  const field = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits });
+  const access = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits, order: "source_access" });
+  expect(field.map(root)).toEqual([root(candidates[2]!), root(candidates[0]!)]);
+  expect(access.map(root)).toEqual([root(candidates[0]!), root(candidates[1]!)]);
+  expect(access.every(row => row.selection_basis === "source_access")).toBe(true);
+});
+
 it("compares the same immutable candidates in native canonical and selected index orders", () => {
   const candidates = [raw("a0"), raw("a1"), raw("a2"), raw("a3"), raw("a4"), raw("a5"), witnessed("z-answer", query())];
   const expectedAnswer = root(candidates[6]!);

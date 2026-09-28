@@ -44,22 +44,32 @@ function terminalChildInterpreted(window: RecoveryWindow, source: RecoveryWindow
   line: SourceRequestLine, cacheRoot: string): boolean {
   const raw = readCompletePhysicalSourceResponseForRequest({ cacheRoot, currentPreflight: preflight,
     physicalPreflight, currentLine: line });
-  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
   const occurrence = censusNativeSourceRecords({ population: window.population,
     snapshotPath: window.native_snapshot_path }).records.find(row => row.source_id === source.source_id &&
       row.source_version === source.source_version && row.native_record_id === source.record_id &&
       row.content_digest === source.content_digest);
   if (occurrence === undefined) throw new AlayaError("CONFLICT", "H child source occurrence changed");
-  const parsed = receiveSourceSemanticBatchLine({ config: { model: window.source_model,
-    requestProfile: window.source_request_profile }, line, rawJson: raw,
-    sourceCorpus: occurrence.content_bytes, proposal: { sourceCorpus: occurrence.content_bytes,
+  return interpretCompleteRecoverySourceChild({ model: window.source_model,
+    requestProfile: window.source_request_profile, cacheRoot, line, raw,
+    sourceCorpus: occurrence.content_bytes });
+}
+
+/** Physical receiver outcome, checked against the admitted cache, owns H-child settlement. */
+export function interpretCompleteRecoverySourceChild(input: Readonly<{
+  model: string; requestProfile: RecoveryWindow["source_request_profile"]; cacheRoot: string; line: SourceRequestLine;
+  raw: string; sourceCorpus: string;
+}>): boolean {
+  const { model, requestProfile, cacheRoot, line, raw, sourceCorpus } = input;
+  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+  const parsed = receiveSourceSemanticBatchLine({ config: { model,
+    requestProfile }, line, rawJson: raw,
+    sourceCorpus, proposal: { sourceCorpus,
       assertionIds: request.source_request.source_assertions.map(row => row.assertion_id),
       source_id: "unbound", source_version: "unbound", producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
       producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION,
       ...(request.source_request.attribution_context === undefined ? {} : {
         attribution_context: request.source_request.attribution_context }) } });
-  const cached = inspectCachedSourceSemantic(cacheRoot, line.key, window.source_model,
-    window.source_request_profile);
+  const cached = inspectCachedSourceSemantic(cacheRoot, line.key, model, requestProfile);
   if (cached.status === "pending" || cached.status === "hit" &&
       cached.admitted.outcome.status !== parsed.outcome.status ||
       parsed.outcome.status === "interpreted" && cached.status !== "hit") {
@@ -241,7 +251,7 @@ async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChi
     nativeSnapshotPath: window.native_snapshot_path, model: window.source_model,
     requestProfile: window.source_request_profile,
     openSemantics: parseExtractionOpenSemanticsGeneration(window.open_semantics),
-    activeNativeRevision: { source_id: selected.source_id, source_version: selected.source_version,
+    activeRevision: { kind: "native", source_id: selected.source_id, source_version: selected.source_version,
       record_id: selected.record_id, key: revision.child_key, generation } }, owners, associationsPath);
   const frozen = new Map(window.window.map(row => [row.source_id, row]));
   const active = associations.publicationAssociations.filter((row): row is Extract<SourcePublicationAssociation,
