@@ -174,6 +174,23 @@ it("associates unique and repeated occurrences with only the independently confi
   expect(f.fetchMock).toHaveBeenCalledTimes(2);
 }, 60000);
 
+it("selects one natural source revision by its exact current content tuple", async () => {
+  const f = await fixture(true);
+  const census = await censusCompleteSourceRecords({ population: f.population.name, dataDir, pinnedMetaRoot });
+  const unique = census.records.find(row => row.question_id === "unique")!;
+  const child = f.preflight.planned_requests.find(line => line.userPrompt.includes("beta"))!;
+  const selected = { kind: "natural" as const, source_id: unique.source_id,
+    source_version: unique.source_version, content_digest: unique.content_digest,
+    key: child.key, generation: f.generation };
+  const owners = [{ cacheRoot, retainedPreparationPath: f.preflightPath }];
+  const actual = await prepareSourcePublicationAssociations({ ...f.population,
+    activeRevision: selected }, owners, join(cacheRoot, "natural-revision.json"));
+  expect(actual.publicationAssociations.map(row => row.source_id)).toEqual([unique.source_id]);
+  await expect(prepareSourcePublicationAssociations({ ...f.population,
+    activeRevision: { ...selected, content_digest: "sha256:changed" } }, owners,
+  join(cacheRoot, "foreign-natural-revision.json"))).rejects.toThrow(/one current source tuple/u);
+}, 60000);
+
 it("keeps invalid artifacts, missing artifacts, and missing retained request proof explicitly unassociated", async () => {
   const f = await fixture();
   const warmPreflight = await preflightExtractionBatch(f.preflightOptions);

@@ -87,7 +87,9 @@ export function bindResearchFixedSourcePool(runtime: SourceSemanticReadRuntime, 
     signal: { source_text_score: null, interpretation_reading_score: 0 }
   }));
   const inputId = accessInputIdentity(original, query, budget, "query-conditioned-v1");
-  const observations = rows.map(({ source_version: _version, content_digest: _digest, ...row }) => row);
+  const observations: SourceObservation[] = rows.map(row => ({ source_id: row.source_id,
+    record_id: row.record_id, read_bytes: row.read_bytes, body_bytes: row.body_bytes,
+    complete: row.complete, signal: row.signal }));
   const receipt = sourceSemanticAccessReceiptValue("query-conditioned-v1", inputId,
     observations, interpretationRows, false, false, []);
   const access = bindAccessPoolIdentity(runtime, workspace, authorized, receipt);
