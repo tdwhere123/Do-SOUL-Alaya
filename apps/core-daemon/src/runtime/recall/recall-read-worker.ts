@@ -1,17 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
-import {
-  openReadOnlyDatabase,
-  SqliteClaimFormRepo,
-  SqliteEvidenceCapsuleRepo,
-  SqliteMemoryEntryRepo,
-  SqliteSynthesisCapsuleRepo
-} from "@do-soul/alaya-storage";
-import { verifyOfficialApiSourceLocatorBinding } from "@do-soul/alaya-soul";
+import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import type { RecallReadWorkerResponse } from "../recall-read-worker/protocol.js";
-import {
-  createBoundRecallPathReadPorts,
-  type RecallPathReadBind
-} from "./recall-path-read-bind.js";
+import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import {
   isRecallReadWorkerRequest,
   readNumericMessageId,
@@ -27,7 +17,7 @@ import {
 import { readRecallTierWindowQuery } from "../recall-read-worker/memory-window.js";
 import { postRecallTierWindowChunks } from "../recall-read-worker/tier-window-stream.js";
 import { runOperation } from "../recall-read-worker/dispatch.js";
-import type { RecallReadWorkerRuntime } from "../recall-read-worker/runtime.js";
+import { createRecallReadWorkerRuntime } from "../recall-read-worker/runtime.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
@@ -35,21 +25,7 @@ if (parentPort === null) {
 
 const databaseFilename = readDatabaseFilename(workerData);
 const database = openReadOnlyDatabase(databaseFilename);
-const runtime: RecallReadWorkerRuntime = {
-  database,
-  memoryEntryRepo: new SqliteMemoryEntryRepo(database),
-  evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(
-    database,
-    verifyOfficialApiSourceLocatorBinding
-  ),
-  synthesisCapsuleRepo: new SqliteSynthesisCapsuleRepo(database),
-  claimFormRepo: new SqliteClaimFormRepo(database),
-  recallPathReadPorts: createBoundRecallPathReadPorts({
-    database,
-    pathReadBind: readPathReadBind(workerData)
-  }),
-  closed: false
-};
+const runtime = createRecallReadWorkerRuntime(database, readPathReadBind(workerData));
 
 attachRecallReadRequestListener(parentPort, handleRequest, enqueueRecallReadRequest);
 

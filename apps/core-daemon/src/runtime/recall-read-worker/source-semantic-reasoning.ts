@@ -6,7 +6,7 @@ import {
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
   fieldContractSha256, reasonSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
-import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
@@ -29,6 +29,36 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
     if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter);
     return reasonSemantics(runtime, payload, authorized, meter);
   };
+  return withSourceSemanticTransaction(runtime, payload, meter, run);
+}
+
+/** Bench-only source nomination; preserve the ordinary prepare-query lease and budget path. */
+export function runResearchNominatedSourcePreparation(runtime: SourceSemanticReadRuntime, payload: Payload,
+  preferredSourceIds: readonly string[]): SourceSemanticWorkerResult {
+  if (payload.request.kind !== "prepare_query") {
+    throw new CoreError("VALIDATION", "research source nomination requires raw prepare-query access");
+  }
+  const request = payload.request;
+  if (request.query_semantics !== undefined || request.source_handle !== undefined ||
+      request.source_preview_extents !== undefined ||
+      request.continuation_handle !== undefined && preferredSourceIds.length > 0) {
+    throw new CoreError("VALIDATION", "research source nomination requires raw prepare-query access");
+  }
+  const meter = new SourceSemanticReadBudget(request.budget);
+  const run = () => {
+    if (request.continuation_handle === undefined) meter.read(1 + preferredSourceIds.length,
+      preferredSourceIds.reduce((bytes, id) => bytes + Buffer.byteLength(id, "utf8"), 0),
+      "research source index query output");
+    const scopes = authorizedScopesFromAdmission(payload.authorized_scopes).authorized_scopes;
+    if (scopes === undefined) throw new CoreError("VALIDATION", "source semantics requires explicit scope admission");
+    const authorized = scopes === null ? null : [...scopes].sort();
+    return prepareQuery(runtime, payload, authorized, meter, preferredSourceIds);
+  };
+  return withSourceSemanticTransaction(runtime, payload, meter, run);
+}
+
+function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
+  meter: SourceSemanticReadBudget, run: () => SourceSemanticWorkerResult): SourceSemanticWorkerResult {
   try { return runtime.database.connection.inTransaction ? run() : runtime.database.connection.transaction(run)(); }
   catch (error) {
     if (payload.request.kind === "prepare_query" && (error instanceof SourceSemanticResourceExhausted
@@ -48,7 +78,7 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
   }
 }
 
-function leaseBase(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null) {
+function leaseBase(runtime: SourceSemanticReadRuntime, payload: Payload, authorized: readonly string[] | null) {
   return { workspace_id: payload.workspace_id, principal: payload.principal ?? "", as_of: payload.as_of,
     lifetime_now: sourceSemanticLifetimeNow(payload),
     authorized, expires_at: semanticLeaseExpiry(sourceSemanticLifetimeNow(payload), payload.expires_at), revision: sourceSemanticRevision(runtime) };
@@ -93,8 +123,8 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
     coverage: { ...IDLE, discovery: "complete" }, work: workOf(meter) });
 }
 
-function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
-  meter: SourceSemanticReadBudget): SourceSemanticWorkerResult {
+function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget, preferredSourceIds?: readonly string[]): SourceSemanticWorkerResult {
   const request = payload.request;
   if (request.kind !== "prepare_query") throw new CoreError("VALIDATION", "query preparation kind mismatch");
   const source = request.source_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.source_handle, authorized, "source");
@@ -130,8 +160,8 @@ function prepareQuery(runtime: RecallReadWorkerRuntime, payload: Payload, author
     query_semantics_status: queryStatus, query_semantics: query };
   const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
-    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
-    request.source_preview_extents);
+    { runtime, leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
+    request.source_preview_extents, preferredSourceIds);
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;

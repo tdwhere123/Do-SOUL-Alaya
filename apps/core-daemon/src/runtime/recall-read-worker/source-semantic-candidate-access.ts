@@ -9,7 +9,7 @@ import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, so
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { admissionOf, loadVerified, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
-import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
+import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { sourceSemanticRevision } from "./source-semantic-leases.js";
 import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { reserveEmptyInterpretationCompletion } from "./source-semantic-empty-population-budget.js";
@@ -31,7 +31,8 @@ export type SourceSemanticAccessPool = Readonly<{
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
   sourcePages: number; interpretationPages: number;
 }>;
-type EmptyCompletion = Readonly<{ leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
+type EmptyCompletion = Readonly<{ runtime: SourceSemanticReadRuntime;
+  leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
   policy: SourceSemanticAccessPolicy, sourceId?: string, sourcePreviewExtents?: SourceSemanticPreviewExtents): string {
@@ -107,14 +108,18 @@ function previewExtent(record: SourceRecordIdentity, extents: SourceSemanticPrev
 }
 
 /** Observe once, score once, then order the whole observed pool before any descriptor or correspondence page. */
-export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
-  sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents): SourceSemanticAccessPool {
+  sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents,
+  preferredSourceIds?: readonly string[]): SourceSemanticAccessPool {
+  if (sourceId !== undefined && preferredSourceIds !== undefined) {
+    throw new CoreError("VALIDATION", "source-scoped access cannot use source nomination");
+  }
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
-  const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, observation, authorized)
+  const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, observation, authorized, preferredSourceIds)
     : restrictedSource(runtime, payload.workspace_id, sourceId, authorized, observation);
   const records = sources.sources;
   if (sourcePreviewExtents !== undefined) {
@@ -132,7 +137,7 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
   try {
     interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, byId, sourceRows, stops,
       sourceId, completion === undefined ? undefined : () => reserveEmptyInterpretationCompletion({
-        runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
+        runtime: completion.runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
         policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
         suppliedQuerySemantics: completion.suppliedQuerySemantics
       }), sourcePreviewExtents);
@@ -164,14 +169,14 @@ export function observeSourceSemanticAccess(runtime: RecallReadWorkerRuntime, pa
     sourcePages: sources.pages, interpretationPages: interpretations.pages };
 }
 
-function restrictedSource(runtime: RecallReadWorkerRuntime, workspace: string, sourceId: string,
+function restrictedSource(runtime: SourceSemanticReadRuntime, workspace: string, sourceId: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget) {
   const record = sourceSemanticReadStores(runtime.database, workspace, sourceId, meter, authorized).getCurrentRecord(workspace, sourceId);
   if (record !== null) authorizeSemanticScope(record.scope_class, authorized);
   return { sources: record === null ? [] : [record], pages: 1, open: false, truncated: false, stopping_reasons: [] };
 }
 
-function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordIdentity, policy: Policy,
+function readSourceText(runtime: SourceSemanticReadRuntime, record: SourceRecordIdentity, policy: Policy,
   meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number): Pick<SourceObservation, "read_bytes" | "body_bytes" | "complete" | "signal"> {
   const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
   let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false;
@@ -206,7 +211,7 @@ function readSourceText(runtime: RecallReadWorkerRuntime, record: SourceRecordId
   return { read_bytes: offset, body_bytes: bodyBytes, complete, signal };
 }
 
-function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+function observeInterpretations(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
   records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>,
   stops: Set<Stop>, sourceId?: string, onConclusiveEmpty?: () => void, sourcePreviewExtents?: SourceSemanticPreviewExtents) {
@@ -281,7 +286,7 @@ function observeInterpretations(runtime: RecallReadWorkerRuntime, payload: Sourc
   return { descriptors, rows, pages, open: open || !headersDone || pending.length > 0 };
 }
 
-function observeInterpretation(runtime: RecallReadWorkerRuntime, workspace: string, row: InterpretationHeader,
+function observeInterpretation(runtime: SourceSemanticReadRuntime, workspace: string, row: InterpretationHeader,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, policy: Policy,
   records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>, sourceId?: string,
   sourcePreviewExtents?: SourceSemanticPreviewExtents, onDeferred?: () => void) {
@@ -340,7 +345,7 @@ function appendInterpretationHeaders(pending: InterpretationHeader[], rows: read
   }
 }
 
-function readInterpretationNavigation(runtime: RecallReadWorkerRuntime, workspace: string,
+function readInterpretationNavigation(runtime: SourceSemanticReadRuntime, workspace: string,
   meter: SourceSemanticReadBudget, policy: Policy) {
   const query = policy.navigationQuery(meter);
   if (query === null) return { rows: [], unavailable: false, resourceLimited: false };
@@ -360,7 +365,7 @@ function readInterpretationNavigation(runtime: RecallReadWorkerRuntime, workspac
   return { rows, unavailable: page.unavailable, resourceLimited: page.resourceLimited };
 }
 
-function readInterpretationHeaderPage(runtime: RecallReadWorkerRuntime, workspace: string,
+function readInterpretationHeaderPage(runtime: SourceSemanticReadRuntime, workspace: string,
   meter: SourceSemanticReadBudget, after: string | null) {
   const reader = new SqliteSourceHintReader(runtime.database.connection);
   meter.reserve(1, 784, "interpretation access header page");
@@ -379,7 +384,7 @@ function readInterpretationHeaderPage(runtime: RecallReadWorkerRuntime, workspac
   return { ...page, rows, rawEmpty };
 }
 
-export function accessDescriptorPage(runtime: RecallReadWorkerRuntime, workspace: string, asOf: string, authorized: readonly string[] | null,
+export function accessDescriptorPage(runtime: SourceSemanticReadRuntime, workspace: string, asOf: string, authorized: readonly string[] | null,
   meter: SourceSemanticReadBudget, pool: SourceSemanticAccessPool, offset: number) {
   const delivery = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const candidates: SourceSemanticHandleDescriptor[] = [];

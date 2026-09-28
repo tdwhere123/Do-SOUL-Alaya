@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { canonicalJson, type SourceSemanticQuery, type SourceSemanticQueryStatus, type Continuation, type UtteranceAttribution } from "@do-soul/alaya-protocol";
 import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
-import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { SourceSemanticReadRuntime } from "./runtime.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import type { LibraryDeliveryPlan } from "./source-semantic-library-delivery.js";
@@ -24,7 +24,7 @@ export type SourceSemanticLease = Readonly<{
 type Clock = Readonly<{ as_of: string; lifetime_now?: string }>;
 type Caller = Clock & Readonly<{ workspace_id: string; principal?: string }>;
 type LeaseRow<Lease = SourceSemanticLease> = { lease: Lease; bytes: number };
-const LEASES = new WeakMap<RecallReadWorkerRuntime, Map<string, LeaseRow>>();
+const LEASES = new WeakMap<SourceSemanticReadRuntime, Map<string, LeaseRow>>();
 const MAX_LEASES = 32;
 const MAX_BYTES = 8_000_000;
 export type QueryPreparationLeaseBase = Omit<SourceSemanticLease,
@@ -47,12 +47,12 @@ export function sourceSemanticLifetimeNow(clock: Clock): string {
   return clock.lifetime_now ?? clock.as_of;
 }
 
-export function sourceSemanticRevision(runtime: Pick<RecallReadWorkerRuntime, "database">): string {
+export function sourceSemanticRevision(runtime: SourceSemanticReadRuntime): string {
   return `${String(runtime.database.connection.pragma("data_version", { simple: true }))}:${String(
     (runtime.database.connection.prepare("SELECT total_changes() AS n").get() as { n: number }).n)}`;
 }
 
-export function issueSemanticLease(runtime: RecallReadWorkerRuntime, lease: SourceSemanticLease, meter: SourceSemanticReadBudget, issuedId?: string): string {
+export function issueSemanticLease(runtime: SourceSemanticReadRuntime, lease: SourceSemanticLease, meter: SourceSemanticReadBudget, issuedId?: string): string {
   return issueSemanticLeaseGroup(runtime, [{ lease, issuedId }], meter)[0]!;
 }
 
@@ -63,13 +63,13 @@ export function semanticLeaseGroupAccountingCost(count: number, retainedCount = 
 
 /** Capacity only: template leases are never installed or turned into capability identities. */
 export function preflightSemanticLeaseGroup<Lease extends Clock & { expires_at: string }>(
-  runtime: RecallReadWorkerRuntime, leases: readonly Lease[]): void {
+  runtime: SourceSemanticReadRuntime, leases: readonly Lease[]): void {
   if (leases.length === 0) return;
   admittedRows(runtime, leases.map((lease) => ({ id: Symbol(), lease })), sourceSemanticLifetimeNow(leases[0]!));
 }
 
 /** Publish all handles in one response together; older leases remain evictable. */
-export function issueSemanticLeaseGroup(runtime: RecallReadWorkerRuntime,
+export function issueSemanticLeaseGroup(runtime: SourceSemanticReadRuntime,
   issues: readonly Readonly<{ lease: SourceSemanticLease; issuedId?: string }>[], meter: SourceSemanticReadBudget): string[] {
   if (issues.length === 0) return [];
   const retained = LEASES.get(runtime);
@@ -88,7 +88,7 @@ export function issueSemanticLeaseGroup(runtime: RecallReadWorkerRuntime,
   return ids;
 }
 
-function admittedRows<K extends string | symbol, Lease extends { expires_at: string }>(runtime: RecallReadWorkerRuntime,
+function admittedRows<K extends string | symbol, Lease extends { expires_at: string }>(runtime: SourceSemanticReadRuntime,
   issues: readonly Readonly<{ id: K; lease: Lease }>[], now: string): Map<string | K, LeaseRow<SourceSemanticLease | Lease>> {
   const rows = new Map<string | K, LeaseRow<SourceSemanticLease | Lease>>(LEASES.get(runtime));
   for (const [id, row] of rows) if (row.lease.expires_at <= now) rows.delete(id);
@@ -106,7 +106,7 @@ function admittedRows<K extends string | symbol, Lease extends { expires_at: str
   return rows;
 }
 
-export function readSemanticLease(runtime: RecallReadWorkerRuntime, caller: Caller, id: string,
+export function readSemanticLease(runtime: SourceSemanticReadRuntime, caller: Caller, id: string,
   authorized: readonly string[] | null, kind: SourceSemanticLease["kind"]): SourceSemanticLease {
   const rows = LEASES.get(runtime), lease = rows?.get(id)?.lease;
   if (lease === undefined || lease.expires_at <= sourceSemanticLifetimeNow(caller)) {

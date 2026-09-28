@@ -847,6 +847,12 @@ it("retains a current prefix without resurrecting excluded, erased or unavailabl
     expect(excluded).toMatchObject({ open: true, truncated: true, pages: 512 });
     expect(excluded.sources).toHaveLength(511);
     expect(excluded.sources.some((row) => row.source_id === "source-0")).toBe(false);
+    const nominated = listEligibleSemanticSources(database, WS,
+      new SourceSemanticReadBudget(BUDGET), ["project"], ["source-511", "source-0"]);
+    expect(nominated.sources[0]?.source_id).toBe("source-511");
+    expect(nominated.sources[1]?.source_id).toBe("source-1");
+    expect(nominated.sources.filter((row) => row.source_id === "source-511")).toHaveLength(1);
+    expect(nominated.sources.some((row) => row.source_id === "source-0")).toBe(false);
     database.connection.prepare("UPDATE source_records SET source_body = NULL WHERE source_version = '2'").run();
     expect(read().sources).toEqual(excluded.sources);
     // Unavailable current data keeps the census open without hiding a separately verified source.

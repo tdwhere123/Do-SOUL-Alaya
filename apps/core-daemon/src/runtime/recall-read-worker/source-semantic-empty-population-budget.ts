@@ -2,7 +2,7 @@ import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, SOURCE_S
   type RequestBudget, type SourceRecordIdentity, type SourceSemanticAccessPolicy, type SourceSemanticQuery,
   type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { preflightSemanticLeaseGroup, queryPreparationLease, semanticLeaseGroupAccountingCost,
   type QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { preparationAccessReceiptValue, sourceSemanticAccessReceiptValue } from "./source-semantic-access-receipts.js";
@@ -13,7 +13,7 @@ const DIGEST = `sha256:${"0".repeat(64)}`;
 const ALL_STOPS = ["budget", "source_limit", "interpretation_limit", "unavailable", "source_tail"] as const;
 
 type Completion = Readonly<{
-  runtime: RecallReadWorkerRuntime; parent: SourceSemanticReadBudget; child: SourceSemanticReadBudget;
+  runtime: SourceSemanticReadRuntime; parent: SourceSemanticReadBudget; child: SourceSemanticReadBudget;
   records: readonly SourceRecordIdentity[]; sourcePages: number;
   policy: SourceSemanticAccessPolicy; budget: RequestBudget;
   orderCost: (count: number) => SourceSemanticResourceBudget;

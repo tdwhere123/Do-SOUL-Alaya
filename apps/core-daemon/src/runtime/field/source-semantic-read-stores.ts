@@ -5,8 +5,8 @@ import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRe
 export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
   public nativeWork = 0;
   public nativeBytes = 0;
-  read(work: number, bytes: number): void {
-    this.charge(work, bytes, "native source read"); this.nativeWork += work; this.nativeBytes += bytes;
+  read(work: number, bytes: number, reason = "native source read"): void {
+    this.charge(work, bytes, reason); this.nativeWork += work; this.nativeBytes += bytes;
   }
   absorb(child: SourceSemanticReadBudget): void {
     this.charge(child.spentWork, child.spentBytes, "bounded read phase");
@@ -58,15 +58,49 @@ export function sourceSemanticReadStores(database: StorageDatabase, workspace: s
 /** Current authorized source identities. Query text is not a membership predicate. */
 export function listEligibleSemanticSources(
   database: StorageDatabase, workspace: string, meter: SourceSemanticReadBudget,
-  authorized: readonly string[] | null
+  authorized: readonly string[] | null, preferredSourceIds: readonly string[] = []
 ): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number;
   stopping_reasons: readonly ("budget" | "source_limit" | "unavailable")[] } {
+  if (preferredSourceIds.length > 16 || new Set(preferredSourceIds).size !== preferredSourceIds.length ||
+      preferredSourceIds.some((id) => id.length === 0)) {
+    throw new CoreError("VALIDATION", "invalid bounded source nomination");
+  }
   const repo = new SqliteFieldSourceRecordRepo(database, fieldContractSha256);
   const sources: SourceRecordIdentity[] = [];
+  const accepted = new Set<string>();
   const stoppingReasons = new Set<"budget" | "source_limit" | "unavailable">();
   let afterSourceId: string | null = null, pages = 0, truncated = true, open = false;
+  const append = (page: NonNullable<ReturnType<typeof repo.findCurrentBounded>>) => {
+    if (page.record === null) { open = true; stoppingReasons.add("unavailable"); return "unavailable" as const; }
+    const record = sourceRecordFromRow(page.record);
+    if (page.record.source_body === null || page.invalidOffset) {
+      if (page.bodyBytes > 0 || page.invalidOffset) { open = true; stoppingReasons.add("unavailable"); }
+      return "skipped" as const;
+    }
+    try { authorizeSemanticScope(record.scope_class, authorized); } catch { return "skipped" as const; }
+    if (accepted.has(record.source_id)) return "skipped" as const;
+    try { meter.retain(record, "current source catalog"); }
+    catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      open = true; stoppingReasons.add("budget"); return "budget" as const;
+    }
+    accepted.add(record.source_id); sources.push(record);
+    return "accepted" as const;
+  };
+  let exhausted = false;
+  for (const sourceId of preferredSourceIds) {
+    try { meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION); }
+    catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      open = true; stoppingReasons.add("budget"); exhausted = true; break;
+    }
+    const page = repo.findCurrentBounded(workspace, sourceId, 1);
+    meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+    pages += 1;
+    if (page !== null && append(page) === "budget") { exhausted = true; break; }
+  }
   // Every seek skips the preceding source's entire history. The remaining sources stay unvisited.
-  while (pages < 512) {
+  while (!exhausted && pages < 512) {
     try { meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION); }
     catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -77,19 +111,8 @@ export function listEligibleSemanticSources(
     pages += 1;
     if (page === null) { truncated = false; break; }
     if (page.record === null) { open = true; stoppingReasons.add("unavailable"); break; }
-    const record = sourceRecordFromRow(page.record);
-    afterSourceId = record.source_id;
-    if (page.record.source_body === null || page.invalidOffset) {
-      if (page.bodyBytes > 0 || page.invalidOffset) { open = true; stoppingReasons.add("unavailable"); }
-      continue;
-    }
-    try { authorizeSemanticScope(record.scope_class, authorized); } catch { continue; }
-    try { meter.retain(record, "current source catalog"); }
-    catch (error) {
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      open = true; stoppingReasons.add("budget"); break;
-    }
-    sources.push(record);
+    afterSourceId = page.record.source_id;
+    if (append(page) === "budget") break;
   }
   if (truncated) open = true;
   if (truncated && pages >= 512) stoppingReasons.add("source_limit");
