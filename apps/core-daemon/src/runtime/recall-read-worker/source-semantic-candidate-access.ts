@@ -31,7 +31,7 @@ export type SourceSemanticAccessPool = Readonly<{
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
   sourcePages: number; interpretationPages: number;
 }>;
-type EmptyCompletion = Readonly<{ runtime: SourceSemanticReadRuntime;
+type EmptyCompletion = Readonly<{
   leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
@@ -137,7 +137,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   try {
     interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, byId, sourceRows, stops,
       sourceId, completion === undefined ? undefined : () => reserveEmptyInterpretationCompletion({
-        runtime: completion.runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
+        runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
         policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
         suppliedQuerySemantics: completion.suppliedQuerySemantics
       }), sourcePreviewExtents);

@@ -160,7 +160,7 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
     query_semantics_status: queryStatus, query_semantics: query };
   const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
-    { runtime, leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
+    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
     request.source_preview_extents, preferredSourceIds);
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
