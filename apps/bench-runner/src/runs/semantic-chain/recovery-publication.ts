@@ -137,10 +137,11 @@ export const QualifiedSchema = z.object({ contract: z.literal("source-semantic-i
   }).strict()).max(10)
 }).strict();
 
-export function admitInitialQualified(rootInput: string) {
+export function admitInitialQualified(rootInput: string, readAllowanceRootInput = rootInput) {
   const root = resolve(rootInput);
-  reserveRecoveryRead(root, "admit initial qualified publication");
-  const window = admitRecoveryWindow(root);
+  const readAllowanceRoot = resolve(readAllowanceRootInput);
+  reserveRecoveryRead(readAllowanceRoot, "admit initial qualified publication");
+  const window = admitRecoveryWindow(root, readAllowanceRoot);
   const settled = QualifiedSchema.parse(readChainArtifact(join(root, "initial-qualified.json")));
   const defaultPath = resolve(settled.source_preflight_path);
   const defaultRoot = resolve(settled.source_cache_root);

@@ -64,7 +64,9 @@ export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v6" as c
 export const SemanticChainPlanSchema = z.object({
   contract: z.literal(SEMANTIC_CHAIN_PLAN_CONTRACT), input_identity: Digest,
   config: SemanticChainConfigSchema, queries: z.array(SemanticChainQuerySchema),
-  correspondence_workset: SemanticProposalWorksetSchema.nullable()
+  correspondence_workset: SemanticProposalWorksetSchema.nullable(),
+  settled_input: z.object({ selection: z.literal("observed_subset"),
+    full_workset_identity: Digest.nullable() }).strict().optional()
 }).strict();
 export type SemanticChainPlan = z.infer<typeof SemanticChainPlanSchema>;
 export const chainIdentity = (value: unknown): string => fieldContractSha256(canonicalJson(value));

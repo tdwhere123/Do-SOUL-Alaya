@@ -5,7 +5,7 @@ import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "@do-soul/al
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
-import { readSemanticChainProposalResults, semanticChainProposalStates, semanticChainQueryAvailability,
+import { readSemanticChainProposalResults, semanticChainPreparationIdentity, semanticChainQueryAvailability,
   verifySemanticChainQueries } from "./inputs.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract,
   type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
@@ -15,12 +15,19 @@ import { SemanticChainConfigSchema, SemanticChainPlanSchema, SEMANTIC_CHAIN_PLAN
 
 export async function prepareSemanticChain(value: unknown, root: string,
   liveDaemon?: BenchDaemonHandle, onLiveHandles?: (handles: ReadonlyMap<string, string | undefined>) => void,
-  settledCorrespondenceWorkset?: SemanticProposalWorkset | null
+  settledCorrespondenceWorkset?: SemanticProposalWorkset | null,
+  settledSelection: "strict" | "observed_subset" = "strict"
 ): Promise<SemanticChainPlan> {
   const config = SemanticChainConfigSchema.parse(value);
   assertChainSnapshot(config);
+  if (settledSelection === "observed_subset" && settledCorrespondenceWorkset === undefined) {
+    throw new AlayaError("CONFLICT", "observed C subset requires an explicit settled input");
+  }
   const results = readSemanticChainProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
-  const inputIdentity = chainIdentity({ config, queries: semanticChainProposalStates(results) });
+  const settledInput = settledSelection === "observed_subset" ? { selection: settledSelection,
+    full_workset_identity: settledCorrespondenceWorkset === null ? null :
+      chainIdentity(settledCorrespondenceWorkset) } : undefined;
+  const inputIdentity = semanticChainPreparationIdentity(config, results, settledInput);
   const path = join(root, "prepare.json");
   return withSnapshotPublishLock(path, async () => {
     const existing = readChainArtifact(path);
@@ -81,7 +88,14 @@ export async function prepareSemanticChain(value: unknown, root: string,
       contract: semanticProposalWorksetContract(cGeneration.request_profile), kind: "semantic_correspondence", model: cGeneration.model,
       request_profile: cGeneration.request_profile, provider_url: cGeneration.provider_url, items
     });
-    const workset = settledCorrespondenceWorkset === undefined ? generated : settledCorrespondenceWorkset;
+    let workset = settledCorrespondenceWorkset === undefined ? generated : settledCorrespondenceWorkset;
+    if (settledSelection === "observed_subset") {
+      if (queries.length !== 1 || queries[0]?.status !== "ready") {
+        throw new AlayaError("CONFLICT", "observed C subset requires one settled native query");
+      }
+      workset = selectObservedSettledCorrespondence(workset, queries[0], config.correspondence_pair_cap,
+        config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens).workset;
+    }
     if (settledCorrespondenceWorkset !== undefined && workset !== null) {
       if (queries.length !== 1 || queries[0]?.status !== "ready" ||
           workset.kind !== "semantic_correspondence" ||
@@ -109,12 +123,45 @@ export async function prepareSemanticChain(value: unknown, root: string,
       }
     }
     const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
-      config, queries, correspondence_workset: workset });
+      config, queries, correspondence_workset: workset,
+      ...(settledInput === undefined ? {} : { settled_input: settledInput }) });
     writeChainArtifact(path, plan);
     materializeCorrespondenceWorkset(plan, root);
     onLiveHandles?.(liveHandles);
     return plan;
   });
+}
+
+/** Native preparation owns the observed subset; publication may contain H beyond preview extents. */
+export function selectObservedSettledCorrespondence(full: SemanticProposalWorkset | null,
+  query: SemanticChainPlan["queries"][number], pairCap: number, outputCap: number) {
+  if (query.status !== "ready") throw new AlayaError("CONFLICT", "observed C subset requires an admitted query");
+  const observed = new Map(query.descriptors.filter(row => row.interpretation !== undefined)
+    .map(row => [row.interpretation_id, row]));
+  if (full === null) return { workset: null, unobserved_ids: [] as string[] };
+  if (full.items.length > pairCap) throw new AlayaError("CONFLICT", "settled C exceeds the frozen correspondence cap");
+  const lines = materializeSemanticProposalLines(full, outputCap);
+  const unobserved: string[] = [];
+  const items = full.items.filter((_item, index) => {
+    const request = lines[index]?.request as SourceSemanticCorrespondenceRequest | undefined;
+    const descriptor = request?.source_interpretation_descriptors[0];
+    if (request?.original_query !== query.original_query ||
+        canonicalJson(request?.admitted_query_semantics) !== canonicalJson(query.query_semantics) ||
+        descriptor === undefined) {
+      throw new AlayaError("CONFLICT", "settled C changed the admitted native Q");
+    }
+    const native = observed.get(descriptor.source_interpretation_id);
+    if (native === undefined) {
+      unobserved.push(descriptor.source_interpretation_id);
+      return false;
+    }
+    if (canonicalJson(descriptor.interpretation) !== canonicalJson(native.interpretation)) {
+      throw new AlayaError("CONFLICT", "settled C changed the observed native H");
+    }
+    return true;
+  });
+  return { workset: items.length === 0 ? null : parseSemanticProposalWorkset({ ...full, items }),
+    unobserved_ids: unobserved };
 }
 
 function materializeCorrespondenceWorkset(plan: SemanticChainPlan, root: string): void {

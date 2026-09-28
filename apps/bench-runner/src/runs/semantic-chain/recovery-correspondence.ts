@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { AlayaError, SourceSemanticReasoningResultSchema } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceSemanticReasoningResultSchema, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset,
   semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
@@ -12,11 +12,8 @@ import { prepareRetainedSemanticProposalRevision } from "../semantic-proposal/fi
 import { readSemanticChainProposalResults } from "./inputs.js";
 import { admitRecoveryNomination } from "./recovery-reason.js";
 
-/** Materialize only the frozen Q and physically published H descriptors for separately funded C. */
-export function prepareInitialRecoveryCorrespondence(rootInput: string) {
-  const root = resolve(rootInput);
-  reserveRecoveryRead(root, "prepare initial C inputs");
-  const { window, settled } = admitInitialQualified(root);
+function initialCorrespondenceInputs(root: string, readAllowanceRoot: string) {
+  const { window, settled } = admitInitialQualified(root, readAllowanceRoot);
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(window.initial_chain_root, "prepare.json")));
   const query = plan.queries[0];
   if (query?.status !== "ready" || plan.queries.length !== 1 || query.query_key !== window.query_key) {
@@ -32,6 +29,14 @@ export function prepareInitialRecoveryCorrespondence(rootInput: string) {
       admitted_query_semantics: query.query_semantics,
       source_interpretation_descriptors: [row.descriptor] }))
   });
+  return { settled, query, selected, workset };
+}
+
+/** Materialize only the frozen Q and physically published H descriptors for separately funded C. */
+export function prepareInitialRecoveryCorrespondence(rootInput: string) {
+  const root = resolve(rootInput);
+  reserveRecoveryRead(root, "prepare initial C inputs");
+  const { settled, query, selected, workset } = initialCorrespondenceInputs(root, root);
   const path = join(root, "initial-correspondence-workset.json");
   reserveRecoveryHostEffect(root, "initial-C-workset", chainIdentity({ workset, qualified: settled.publication_identity }),
     readChainArtifact(join(root, "initial-correspondence-binding.json")) !== undefined);
@@ -44,6 +49,29 @@ export function prepareInitialRecoveryCorrespondence(rootInput: string) {
   return { workset_path: workset === null ? null : path,
     workset_identity: workset === null ? null : chainIdentity(workset), selected_source_count: selected.length,
     qualified_snapshot_identity: settled.publication_identity };
+}
+
+/** Re-admit the original C owner while charging a comparison arm for its own reads. */
+export function admitInitialRecoveryCorrespondence(rootInput: string, readAllowanceRootInput: string) {
+  const root = resolve(rootInput), readAllowanceRoot = resolve(readAllowanceRootInput);
+  reserveRecoveryRead(readAllowanceRoot, "admit original initial C inputs");
+  const { settled, query, selected, workset } = initialCorrespondenceInputs(root, readAllowanceRoot);
+  const path = join(root, "initial-correspondence-workset.json");
+  const identity = workset === null ? null : chainIdentity(workset);
+  const binding = readChainArtifact(join(root, "initial-correspondence-binding.json")) as {
+    workset_identity?: string | null; query_key?: string; qualified_snapshot_identity?: string;
+    source_interpretation_ids?: string[] } | undefined;
+  if (binding?.workset_identity !== identity || binding.query_key !== query.query_key ||
+      binding.qualified_snapshot_identity !== settled.publication_identity ||
+      canonicalJson(binding.source_interpretation_ids) !==
+        canonicalJson(selected.map(row => row.descriptor.source_interpretation_id)) ||
+      (workset !== null && chainIdentity(parseSemanticProposalWorkset(JSON.parse(
+        readBoundedCanonicalUtf8Artifact({ path, maxBytes: 32 * 1024 * 1024,
+          label: "original initial C workset" })))) !== identity)) {
+    throw new AlayaError("CONFLICT", "original initial C workset changed after settlement");
+  }
+  return { workset_path: workset === null ? null : path, workset_identity: identity,
+    selected_source_count: selected.length, qualified_snapshot_identity: settled.publication_identity };
 }
 
 /** Rebuild exact current C inputs from the final native H export and the admitted Q review. */

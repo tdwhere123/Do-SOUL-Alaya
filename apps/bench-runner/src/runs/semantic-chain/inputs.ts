@@ -3,7 +3,7 @@ import { AlayaError, canonicalJson, type SourceSemanticCorrespondence,
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
 import { chainIdentity, readChainArtifactPayloadForInventory, retainedArtifactField,
-  retainedArtifactPathField, type SemanticChainPlan } from "./contract.js";
+  retainedArtifactPathField, type SemanticChainConfig, type SemanticChainPlan } from "./contract.js";
 import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
 import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
@@ -80,6 +80,12 @@ export function semanticChainProposalStates(results: ReturnType<typeof readSeman
     status: row.status, cache_identity: row.cache_identity }));
 }
 
+export function semanticChainPreparationIdentity(config: SemanticChainConfig,
+  results: ReturnType<typeof readSemanticChainProposalResults>, settledInput?: SemanticChainPlan["settled_input"]): string {
+  return chainIdentity({ config, queries: semanticChainProposalStates(results),
+    ...(settledInput === undefined ? {} : { settled_input: settledInput }) });
+}
+
 /** Cache/ledger status is retained separately from what can be declared to native recall. */
 export function semanticChainQueryAvailability(row: ReturnType<typeof readSemanticChainProposalResults>[number]) {
   const query = row.received !== undefined && "query" in row.received ? row.received.query : undefined;
@@ -99,7 +105,7 @@ export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   const recorded = plan.queries.map((row) => row.query_key).sort();
   if (new Set(expected).size !== expected.length || new Set(recorded).size !== recorded.length
     || canonicalJson(expected) !== canonicalJson(recorded)) throw new AlayaError("CONFLICT", "prepared query-semantics denominator changed");
-  const currentIdentity = chainIdentity({ config, queries: semanticChainProposalStates(queries) });
+  const currentIdentity = semanticChainPreparationIdentity(config, queries, plan.settled_input);
   if (currentIdentity !== plan.input_identity) throw new AlayaError("CONFLICT", "prepared query-semantics state changed before native replay");
   for (const row of plan.queries) {
     const current = queries.find((query) => query.line.key === row.query_key);

@@ -266,9 +266,9 @@ export async function freezeNativeRecoveryWindow(value: unknown, rootInput: stri
 }
 
 /** Stages consume the immutable raw observation and re-admit its physical source and Q owners. */
-export function admitRecoveryWindow(rootInput: string): RecoveryWindow {
+export function admitRecoveryWindow(rootInput: string, readAllowanceRootInput = rootInput): RecoveryWindow {
   const root = resolve(rootInput);
-  reserveRecoveryRead(root, "admit frozen window");
+  reserveRecoveryRead(resolve(readAllowanceRootInput), "admit frozen window");
   const window = RecoveryWindowSchema.parse(readChainArtifact(join(root, "recovery-window.json")));
   const native = readVerifiedNativeSourceSnapshot(window.native_snapshot_path);
   const census = censusNativeSourceRecords({ population: window.population,

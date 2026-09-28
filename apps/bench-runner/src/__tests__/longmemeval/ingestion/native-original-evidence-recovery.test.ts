@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renam
   statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
@@ -206,14 +208,21 @@ async function fillSource(root: string, snapshotPath: string, cacheRoot: string,
 for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", cOnly: true }] as const)
   it(`delivers the frozen ${world.name} distinction through the connected native recovery`, async () => {
   const cOnly = "cOnly" in world && world.cOnly;
-  const root = mkdtempSync(join(tmpdir(), "native-original-recovery-")); roots.push(root);
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "native-original-recovery-")); roots.push(evidenceRoot);
+  const externalStaticCaller = world.name === "format positive" ? process.env.STATIC_CALLER_PATH : undefined;
+  const worldId = externalStaticCaller === undefined ? "originals" : "2e86d7ae-6153-43ea-8c52-bb8f38f4e415";
+  const producerCommit = externalStaticCaller === undefined ? "0".repeat(40)
+    : "36a838082fe1f6861370395823aa4b8e23f5510a";
+  const root = join(evidenceRoot, "runs", worldId);
+  mkdirSync(root, { recursive: true });
   const snapshotPath = join(root, "original.sqlite"), recoveryRoot = join(root, "recovery"),
     staticRoot = join(root, "static-initial-arm");
   const question = world.date ? DATE_QUESTION : FORMAT_QUESTION;
   const context = world.date ? DATE_CONTEXT : FORMAT_CONTEXT;
   const sourceIds = ["source-7df0", "source-b326"] as const;
   await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
-    workspaceId: "originals", runId: "originals", producerCommit: "0".repeat(40),
+    workspaceId: worldId, runId: worldId,
+    producerCommit,
     sources: world.bodies.map((body, index) => ({ source_id: sourceIds[index]!, source_version: "1",
       title: world.titles[index]!, content_bytes: body, source_observed_at: OBSERVED,
       recorded_at: INGESTED[index]! })) });
@@ -229,9 +238,9 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const freezePath = join(root, "freeze.json");
   writeFileSync(freezePath, JSON.stringify({ native_snapshot_path: snapshotPath, population: "originals",
     source_model: MODEL, source_request_profile: H_PROFILE, source_cache_root: join(root, "h-cache"),
-    recorded_at: CLOCK, producer_commit: "0".repeat(40), allowance: ALLOWANCE, chain: {
+    recorded_at: CLOCK, producer_commit: producerCommit, allowance: ALLOWANCE, chain: {
       implementation_revision: readCurrentExtractionAuthorityRevision(), interpretation_clock: CLOCK,
-      workspace_id: "originals", run_id: "originals",
+      workspace_id: worldId, run_id: worldId,
       query_workset: JSON.parse(readFileSync(qWorksetPath, "utf8")), query_cache_root: qCache,
       correspondence_cache_root: join(root, "c-cache"), max_output_tokens: 16_384,
       correspondence_generation: { model: MODEL, request_profile: H_PROFILE, provider_url: URL,
@@ -289,6 +298,47 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     ? () => JSON.stringify({ contract: "source-semantic-correspondence-response-v4", outcome: { status: "abstained" } })
     : correspondenceRaw, H_PROFILE);
   if (cOnly) expect(initialCResult).toMatchObject({ requested: 2, abstained: 2 });
+  if (externalStaticCaller !== undefined) {
+    const staticCaller = await import(pathToFileURL(externalStaticCaller).href) as {
+      runStaticInitialNative: (evidenceRoot: string, worldId: string) => Promise<{
+        published_h_ids: string[]; observed_h_ids: string[]; unobserved_h_ids: string[];
+        consumed_c_keys: string[]; first_exposure_digest: string | null;
+        replay_identity: string }>
+    };
+    const connectedAllowance = join(recoveryRoot, "recovery-allowance.sqlite");
+    const cycle = () => {
+      const db = new DatabaseSync(connectedAllowance, { readOnly: true });
+      try { return db.prepare("SELECT work_reserved, memory_reserved, read_count FROM cycle").get(); }
+      finally { db.close(); }
+    };
+    const before = cycle();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    const first = await staticCaller.runStaticInitialNative(evidenceRoot, worldId);
+    expect(cycle()).toEqual(before);
+    expect(first.published_h_ids).toHaveLength(2);
+    expect(first.observed_h_ids).toHaveLength(1);
+    expect(first.unobserved_h_ids).toHaveLength(1);
+    expect(first.consumed_c_keys).toHaveLength(1);
+    const originalC = readChainArtifact(join(root, "static-initial-native", "static-inputs.json")) as {
+      initial_c_keys: string[] };
+    expect(originalC.initial_c_keys).toHaveLength(2);
+    expect(originalC.initial_c_keys).toContain(first.consumed_c_keys[0]);
+    expect(first.first_exposure_digest).not.toBeNull();
+    const s1Root = join(root, "static-initial-native", "s1");
+    const retainedPlan = readFileSync(join(s1Root, "prepare.json"));
+    const retainedS1 = readChainArtifact(join(s1Root, "prepare.json")) as { config: unknown };
+    await expect(prepareSemanticChain(retainedS1.config, s1Root, undefined, undefined, undefined,
+      "observed_subset")).rejects.toThrow("explicit settled input");
+    const second = await staticCaller.runStaticInitialNative(evidenceRoot, worldId);
+    expect(cycle()).toEqual(before);
+    expect(second.replay_identity).toBe(first.replay_identity);
+    expect(readFileSync(join(s1Root, "prepare.json"))).toEqual(retainedPlan);
+    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", H_PROFILE);
+    vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", URL);
+    setExtractionCredentialFixture();
+  }
   const initialQualified = readChainArtifact(join(recoveryRoot, "initial-qualified.json")) as {
     snapshot_path: string; snapshot_sha256: string };
   const staticConfig = { ...JSON.parse(readFileSync(freezePath, "utf8")).chain,
