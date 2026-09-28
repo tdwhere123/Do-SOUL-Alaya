@@ -130,8 +130,23 @@ function reserveTotal(cycle: CycleRow, allowance: RecoveryAllowance, work: numbe
 }
 
 export function recoveryAllowanceIdentity(root: string): string {
-  return withCycle(root, (_db, cycle) => chainIdentity({ cycle: cycle.identity,
-    allowance: JSON.parse(cycle.allowance_json), snapshot_path: cycle.snapshot_path }));
+  let db: DatabaseSync;
+  try { db = new DatabaseSync(join(resolve(root), "recovery-allowance.sqlite"), { readOnly: true }); }
+  catch (cause) { throw new AlayaError("CONFLICT", "recovery total allowance owner is unavailable", { cause }); }
+  try {
+    const rows = db.prepare("SELECT identity, allowance_json, snapshot_path FROM cycle LIMIT 2").all() as
+      Pick<CycleRow, "identity" | "allowance_json" | "snapshot_path">[];
+    if (rows.length !== 1 || typeof rows[0]?.identity !== "string" ||
+        typeof rows[0].allowance_json !== "string" || typeof rows[0].snapshot_path !== "string") {
+      throw new AlayaError("CONFLICT", "recovery total allowance was not frozen before work");
+    }
+    const allowance = RecoveryAllowanceSchema.parse(JSON.parse(rows[0].allowance_json));
+    return chainIdentity({ cycle: rows[0].identity,
+      allowance, snapshot_path: rows[0].snapshot_path });
+  } catch (cause) {
+    if (cause instanceof AlayaError) throw cause;
+    throw new AlayaError("CONFLICT", "recovery total allowance owner is malformed", { cause });
+  } finally { db.close(); }
 }
 
 /** Actual worker meters are retained independently of the no-refund reservation. */

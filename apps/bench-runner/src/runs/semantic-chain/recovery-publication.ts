@@ -48,26 +48,52 @@ function readSourcePreflight(path: string) {
     path, maxBytes: 32 * 1024 * 1024, label: "current source preflight" })));
 }
 
+function assertCurrentSourceOwnerGroup(current: ReturnType<typeof readSourcePreflight>,
+  window: RecoveryWindow, keys: readonly string[], physicalKeys: readonly string[], maxOutputTokens?: number): void {
+  const ready = current.ready_requests.map(row => row.key).sort();
+  const planned = new Set(current.planned_requests.map(row => row.key));
+  if (current.dataset_revision !== window.source_census_identity ||
+      current.config.model !== window.source_model ||
+      current.config.requestProfile !== window.source_request_profile ||
+      (maxOutputTokens !== undefined && current.max_output_tokens !== maxOutputTokens) ||
+      current.maximum_attempts_per_key !== 1 ||
+      canonicalJson(ready) !== canonicalJson([...keys].sort()) ||
+      current.cached_requests !== physicalKeys.length ||
+      current.selected_requests + current.deterministic_requests !== keys.length - physicalKeys.length ||
+      physicalKeys.some(key => planned.has(key)) ||
+      canonicalJson(parseExtractionOpenSemanticsGeneration(current.config.openSemantics)) !==
+        canonicalJson(parseExtractionOpenSemanticsGeneration(window.open_semantics))) {
+    throw new AlayaError("CONFLICT", "H preflight differs from its exact new or retained current keys");
+  }
+}
+
 function admittedInitialSourceOwners(window: RecoveryWindow, defaultPath: string, defaultRoot: string,
   sharedPath?: string): { owners: SourceOwner[]; defaultPreflight: ReturnType<typeof readSourcePreflight> } {
   const defaultPreflight = readSourcePreflight(defaultPath);
-  if (defaultRoot !== window.source_cache_root || defaultPreflight.config.model !== window.source_model ||
-      defaultPreflight.config.requestProfile !== window.source_request_profile ||
-      defaultPreflight.dataset_revision !== window.source_census_identity ||
-      canonicalJson(parseExtractionOpenSemanticsGeneration(defaultPreflight.config.openSemantics)) !==
-        canonicalJson(parseExtractionOpenSemanticsGeneration(window.open_semantics)) ||
-      defaultPreflight.ready_requests.some(line => !window.selected_missing_keys.includes(line.key)) ||
-      defaultPreflight.maximum_attempts_per_key !== 1) {
+  if (defaultRoot !== window.source_cache_root) {
     throw new AlayaError("CONFLICT", "initial H preparation differs from the frozen selected source window");
   }
+  const physicalByKey = new Map(window.initial_h_physical_owners.map(row => [row.key, row]));
+  const defaultPhysical = defaultPreflight.ready_requests.flatMap(line => {
+    const physical = physicalByKey.get(line.key);
+    return physical !== undefined && physical.cache_root === defaultRoot ? [line.key] : [];
+  });
+  if (defaultPreflight.ready_requests.some(line => !window.selected_missing_keys.includes(line.key) &&
+      !defaultPhysical.includes(line.key))) {
+    throw new AlayaError("CONFLICT", "initial H preparation differs from the frozen selected source window");
+  }
+  assertCurrentSourceOwnerGroup(defaultPreflight, window,
+    defaultPreflight.ready_requests.map(line => line.key), defaultPhysical);
   const owners: SourceOwner[] = defaultPreflight.ready_requests.map(line => ({
-    key: line.key, cache_root: defaultRoot, current_preflight_path: defaultPath }));
+    key: line.key, cache_root: defaultRoot, current_preflight_path: defaultPath,
+    ...(defaultPhysical.includes(line.key) ? {
+      physical_preflight_path: physicalByKey.get(line.key)!.physical_preflight_path } : {}) }));
   const shared = sharedPath === undefined ? [] : SourceOwnersSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
     path: sharedPath, maxBytes: 64 * 1024, label: "shared source physical owners" })));
-  const physicalByKey = new Map(window.initial_h_physical_owners.map(row => [row.key, row]));
   if (new Set(shared.map(row => row.key)).size !== shared.length) {
     throw new AlayaError("CONFLICT", "H owner input repeats an exact key");
   }
+  const sharedByRoot = new Map<string, SourceOwner[]>();
   for (const row of shared) {
     const physical = physicalByKey.get(row.key);
     const currentPath = resolve(row.current_preflight_path), cacheRoot = resolve(row.cache_root);
@@ -77,28 +103,29 @@ function admittedInitialSourceOwners(window: RecoveryWindow, defaultPath: string
           resolve(row.physical_preflight_path ?? "") !== physical.physical_preflight_path) {
       throw new AlayaError("CONFLICT", "H current owner differs from its frozen selected key or physical ownership");
     }
-    const current = readSourcePreflight(currentPath);
-    if (current.dataset_revision !== window.source_census_identity ||
-        current.config.model !== window.source_model ||
-        current.config.requestProfile !== window.source_request_profile ||
-        current.max_output_tokens !== defaultPreflight.max_output_tokens ||
-        current.maximum_attempts_per_key !== 1 || current.ready_requests.length !== 1 ||
-        current.ready_requests[0]?.key !== row.key ||
-        current.selected_requests !== (physical === undefined ? 1 : 0) ||
-        current.cached_requests !== (physical === undefined ? 0 : 1) ||
-        canonicalJson(parseExtractionOpenSemanticsGeneration(current.config.openSemantics)) !==
-          canonicalJson(parseExtractionOpenSemanticsGeneration(window.open_semantics))) {
-      throw new AlayaError("CONFLICT", "H preflight differs from its exact new or retained current key");
+    const owner = { key: row.key, cache_root: cacheRoot, current_preflight_path: currentPath,
+      ...(physical === undefined ? {} : { physical_preflight_path: physical.physical_preflight_path }) };
+    owners.push(owner);
+    sharedByRoot.set(cacheRoot, [...sharedByRoot.get(cacheRoot) ?? [], owner]);
+  }
+  for (const group of sharedByRoot.values()) {
+    const currentPath = group[0]!.current_preflight_path;
+    if (group.some(row => row.current_preflight_path !== currentPath) ||
+        (group.length > 1 && group.some(row => row.physical_preflight_path === undefined))) {
+      throw new AlayaError("CONFLICT", "one source cache root has conflicting current preflight owners");
     }
-    owners.push({ key: row.key, cache_root: cacheRoot, current_preflight_path: currentPath,
-      ...(physical === undefined ? {} : { physical_preflight_path: physical.physical_preflight_path }) });
+    assertCurrentSourceOwnerGroup(readSourcePreflight(currentPath), window,
+      group.map(row => row.key), group.filter(row => row.physical_preflight_path !== undefined).map(row => row.key),
+      defaultPreflight.max_output_tokens);
   }
   const expected = [...window.selected_missing_keys, ...physicalByKey.keys()].sort();
   if (sharedPath !== undefined &&
       canonicalJson(owners.map(row => row.key).sort()) !== canonicalJson(expected)) {
     throw new AlayaError("CONFLICT", "H owners omit or repeat a frozen selected request key");
   }
-  return { owners: SourceOwnersSchema.parse(owners), defaultPreflight };
+  const parsed = SourceOwnersSchema.parse(owners);
+  initialSourceAssociationOwners(parsed);
+  return { owners: parsed, defaultPreflight };
 }
 
 function admitInitialSourceAssociations(window: RecoveryWindow, owners: readonly SourceOwner[],

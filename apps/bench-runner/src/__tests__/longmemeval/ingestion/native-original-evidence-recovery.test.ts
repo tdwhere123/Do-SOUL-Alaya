@@ -14,13 +14,16 @@ import { correspondenceAssessmentJson } from "../../../../../core-daemon/src/__t
 import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 import { prepareNativeSourceRecordsSnapshot, readVerifiedNativeSourceSnapshot } from
   "../../../runs/snapshot/source-records/native.js";
-import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from
+  "../../../runs/semantic-proposal/workset.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
 import { preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
+import { readCompletePhysicalSourceResponseForRequest } from
+  "../../../runs/extraction/cache/source-interactive-binding.js";
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
   "../../../runs/extraction/authority/receipt.js";
@@ -34,6 +37,7 @@ import { deliverLivePreparedSemanticChain } from "../../../runs/semantic-chain/r
 import { chainIdentity, readChainArtifact, withSemanticChainDaemon } from "../../../runs/semantic-chain/contract.js";
 import { freezeRecoveryAllowance, reserveRecoveryAction, reserveRecoveryHostEffect,
   reserveRecoveryRead, recordRecoveryNativeWork } from "../../../runs/semantic-chain/recovery-allowance.js";
+import { admitInitialQualified } from "../../../runs/semantic-chain/recovery-publication.js";
 import { censusNativeSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { nativeSourceRequestInventory } from "../../../runs/extraction/fill/source-request-workset.js";
 import { providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
@@ -298,6 +302,16 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     ? () => JSON.stringify({ contract: "source-semantic-correspondence-response-v4", outcome: { status: "abstained" } })
     : correspondenceRaw, H_PROFILE);
   if (cOnly) expect(initialCResult).toMatchObject({ requested: 2, abstained: 2 });
+  if (world.name === "date positive") {
+    const originalAllowance = join(recoveryRoot, "recovery-allowance.sqlite");
+    const retainedAllowance = `${originalAllowance}.temporarily-absent`;
+    renameSync(originalAllowance, retainedAllowance);
+    try {
+      expect(() => admitInitialQualified(recoveryRoot, staticRoot)).toThrow("unavailable");
+      expect(existsSync(originalAllowance)).toBe(false);
+    } finally { renameSync(retainedAllowance, originalAllowance); }
+    expect(admitInitialQualified(recoveryRoot, staticRoot).settled.published_selected_count).toBe(2);
+  }
   if (externalStaticCaller !== undefined) {
     const staticCaller = await import(pathToFileURL(externalStaticCaller).href) as {
       runStaticInitialNative: (evidenceRoot: string, worldId: string) => Promise<{
@@ -695,4 +709,169 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
   expect(publishedB[0]).not.toBe(publishedB[1]);
   expect(qChildKeys[0]).toBe(qChildKeys[1]);
   expect(attempts).toEqual({ originalQ: 1, reviewQ: 1, newA: 2, sharedB: 1, revisedB: 1 });
+}, 120_000);
+
+it("publishes two current H occurrences from one retained physical preflight", async () => {
+  const root = mkdtempSync(join(tmpdir(), "native-grouped-h-owner-")); roots.push(root);
+  const world = WORLDS[1], snapshotPath = join(root, "original.sqlite");
+  const physicalRoot = join(root, "physical-h"), qCache = join(root, "original-q");
+  const sourceIds = ["source-a", "source-b"] as const;
+  await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
+    workspaceId: "grouped-h", runId: "grouped-h", producerCommit: "0".repeat(40),
+    sources: world.bodies.map((body, index) => ({ source_id: sourceIds[index]!, source_version: "1",
+      title: world.titles[index]!, content_bytes: body, source_observed_at: OBSERVED,
+      recorded_at: INGESTED[index]! })) });
+  const native = readVerifiedNativeSourceSnapshot(snapshotPath);
+  const census = censusNativeSourceRecords({ population: "originals", snapshotPath });
+  const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
+    model: MODEL, requestProfile: H_PROFILE, sourcePacking: "complete-source",
+    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION });
+  const expectedDescriptors = native.records.map(row => [row.source_id, row.record.identity,
+    inventory.requests.find(item => item.sourceCorpus === row.content_bytes)?.line.key]);
+  const qWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3",
+    kind: "query", model: MODEL, request_profile: Q_PROFILE, provider_url: URL,
+    items: [{ original_query: DATE_QUESTION, approved_fixed_context: DATE_CONTEXT }] });
+  const qPath = join(root, "initial-q.json");
+  writeFileSync(qPath, JSON.stringify(qWorkset));
+  vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", H_PROFILE);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", URL);
+  setExtractionCredentialFixture();
+  let hAttempts = 0;
+  const keys: string[] = [];
+  let physicalPreflight = "";
+  let originalCKeys: string[] = [];
+  for (const current of [false, true]) {
+    const cycleRoot = join(root, current ? "current-cycle" : "physical-cycle");
+    const recoveryRoot = join(cycleRoot, "recovery"), freezePath = join(cycleRoot, "freeze.json");
+    const freeze = { native_snapshot_path: snapshotPath, population: "originals",
+      source_model: MODEL, source_request_profile: H_PROFILE, source_cache_root: physicalRoot,
+      ...(current ? { initial_h_physical_owners: keys.map(key => ({ key, cache_root: physicalRoot,
+        physical_preflight_path: physicalPreflight })) } : {}),
+      recorded_at: CLOCK, producer_commit: "0".repeat(40), allowance: ALLOWANCE,
+      chain: { implementation_revision: readCurrentExtractionAuthorityRevision(), interpretation_clock: CLOCK,
+        workspace_id: "grouped-h", run_id: "grouped-h", query_workset: qWorkset,
+        query_cache_root: qCache, correspondence_cache_root: join(cycleRoot, "c-cache"),
+        max_output_tokens: 16_384,
+        correspondence_generation: { model: MODEL, request_profile: H_PROFILE, provider_url: URL,
+          max_output_tokens: 16_384 }, discovery_page_cap: 1,
+        source_preview_extents: native.records.map(row => ({ source_id: row.source_id,
+          source_version: row.source_version, record_id: row.record.identity,
+          byte_extent: Buffer.byteLength(row.content_bytes) })),
+        correspondence_pair_cap: 2, access_policy: "query-conditioned-v1", budget: BUDGET,
+        authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 1_000_000 } };
+    mkdirSync(cycleRoot);
+    writeFileSync(freezePath, JSON.stringify(freeze));
+    expect(await runSemanticChainLauncher(["recover-declare-initial-q", "--config", freezePath,
+      "--root", recoveryRoot])).toBe(0);
+    if (!current) await fillProposal(qPath, qCache, () => queryRaw(true, false), Q_PROFILE);
+    expect(await runSemanticChainLauncher(["recover-freeze", "--config", freezePath,
+      "--root", recoveryRoot])).toBe(0);
+    const window = readChainArtifact(join(recoveryRoot, "recovery-window.json")) as {
+      selected_missing_keys: string[]; initial_h_physical_owners: { key: string }[] };
+    if (!current) {
+      keys.push(...window.selected_missing_keys);
+      expect(keys).toHaveLength(2);
+      physicalPreflight = await fillSource(cycleRoot, snapshotPath, physicalRoot,
+        EXTRACTION_OPEN_SEMANTICS_GENERATION, keys, "physical-h", sourceRaw,
+        () => { hAttempts++; });
+    } else {
+      expect(window.selected_missing_keys).toEqual([]);
+      expect(window.initial_h_physical_owners.map(row => row.key).sort()).toEqual([...keys].sort());
+    }
+    const currentPreflight = current ? join(cycleRoot, "current-h-preflight.json") : physicalPreflight;
+    if (current) {
+      const options = { variant: "native_source_snapshot" as const,
+        nativeSourcePopulation: { name: "originals", snapshotPath }, cacheRoot: physicalRoot,
+        sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+        preflightKeys: keys, preflightOutputTokenCap: 16_384,
+        geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } };
+      const preflight = await preflightSourceSemanticInteractive(options);
+      expect(preflight).toMatchObject({ selected_requests: 0, cached_requests: 2 });
+      expect(preflight.ready_requests.map(row => row.key).sort()).toEqual([...keys].sort());
+      writeFileSync(currentPreflight, JSON.stringify(preflight));
+      const incomplete = join(cycleRoot, "incomplete-h-preflight.json");
+      writeFileSync(incomplete, JSON.stringify(await preflightSourceSemanticInteractive({
+        ...options, preflightKeys: [keys[0]!] })));
+      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+        "--source-preflight", incomplete, "--source-cache-root", physicalRoot])).toBe(2);
+      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+        "--source-preflight", physicalPreflight, "--source-cache-root", physicalRoot])).toBe(2);
+      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+        "--source-preflight", currentPreflight, "--source-cache-root", join(root, "wrong-h-root")])).toBe(2);
+      const ownersPath = join(cycleRoot, "invalid-source-owners.json");
+      const owner = { key: keys[0], cache_root: physicalRoot,
+        current_preflight_path: currentPreflight, physical_preflight_path: physicalPreflight };
+      writeFileSync(ownersPath, JSON.stringify([owner, owner]));
+      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+        "--source-preflight", currentPreflight, "--source-cache-root", physicalRoot,
+        "--source-owners", ownersPath])).toBe(2);
+      writeFileSync(ownersPath, JSON.stringify([{ ...owner, key: "f".repeat(64) }]));
+      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+        "--source-preflight", currentPreflight, "--source-cache-root", physicalRoot,
+        "--source-owners", ownersPath])).toBe(2);
+      const changedWire = await preflightSourceSemanticInteractive({ ...options,
+        preflightOutputTokenCap: 8192 });
+      expect(() => readCompletePhysicalSourceResponseForRequest({ cacheRoot: physicalRoot,
+        physicalPreflight: JSON.parse(readFileSync(physicalPreflight, "utf8")),
+        currentPreflight: changedWire, currentLine: changedWire.ready_requests[0]! }))
+        .toThrow("wire differs");
+    }
+    expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+      "--source-preflight", currentPreflight, "--source-cache-root", physicalRoot])).toBe(0);
+    const qualified = readChainArtifact(join(recoveryRoot, "initial-qualified.json")) as {
+      source_owners: { key: string; cache_root: string; current_preflight_path: string;
+        physical_preflight_path?: string }[];
+      descriptor_export: { source_id: string; record_id: string; generation_key: string }[] };
+    expect(qualified.descriptor_export.map(row => [row.source_id, row.record_id, row.generation_key]).sort())
+      .toEqual(expectedDescriptors.sort());
+    if (current) expect(qualified.source_owners).toEqual(keys.map(key => ({ key,
+      cache_root: physicalRoot, current_preflight_path: currentPreflight,
+      physical_preflight_path: physicalPreflight })));
+    expect(await runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot])).toBe(0);
+    const workset = parseSemanticProposalWorkset(JSON.parse(readFileSync(
+      join(recoveryRoot, "initial-correspondence-workset.json"), "utf8")));
+    const cKeys = materializeSemanticProposalLines(workset, 16_384).map(row => row.key).sort();
+    if (current) expect(cKeys).toEqual(originalCKeys);
+    else originalCKeys = cKeys;
+    if (current) {
+      const failedRoot = join(root, "failed-cycle"), failedRecovery = join(failedRoot, "recovery");
+      const failedCache = join(root, "failed-h"), failedFreezePath = join(failedRoot, "freeze.json");
+      mkdirSync(failedRoot);
+      mkdirSync(failedCache);
+      writeFileSync(failedFreezePath, JSON.stringify({ ...freeze, source_cache_root: failedCache,
+        initial_h_physical_owners: [], chain: { ...freeze.chain,
+          correspondence_cache_root: join(failedRoot, "c-cache") } }));
+      expect(await runSemanticChainLauncher(["recover-declare-initial-q", "--config", failedFreezePath,
+        "--root", failedRecovery])).toBe(0);
+      expect(await runSemanticChainLauncher(["recover-freeze", "--config", failedFreezePath,
+        "--root", failedRecovery])).toBe(0);
+      const failedWindow = readChainArtifact(join(failedRecovery, "recovery-window.json")) as {
+        selected_missing_keys: string[] };
+      expect(failedWindow.selected_missing_keys).toEqual([...keys].sort());
+      const failedOptions = { variant: "native_source_snapshot" as const,
+        nativeSourcePopulation: { name: "originals", snapshotPath }, cacheRoot: failedCache,
+        sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+        preflightKeys: keys, preflightOutputTokenCap: 16_384,
+        geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } };
+      const failedPreflight = join(failedRoot, "initial-h-preflight.json");
+      writeFileSync(failedPreflight, JSON.stringify(await preflightSourceSemanticInteractive(failedOptions)));
+      let failedAttempts = 0;
+      await expect(fillSource(failedRoot, snapshotPath, failedCache, EXTRACTION_OPEN_SEMANTICS_GENERATION,
+        [keys[0]!], "failed-h", () => JSON.stringify({ contract: "source-semantic-proposal-v8",
+          outcome: { status: "interpreted" } }), () => { failedAttempts++; })).rejects.toThrow("quarantined");
+      expect(failedAttempts).toBe(1);
+      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", failedRecovery,
+        "--source-preflight", failedPreflight, "--source-cache-root", failedCache])).toBe(0);
+      expect(readChainArtifact(join(failedRecovery, "initial-qualified.json"))).toMatchObject({
+        published_selected_count: 0, descriptor_export: [],
+        source_owners: keys.map(key => ({ key, cache_root: failedCache,
+          current_preflight_path: failedPreflight })) });
+      expect(await runSemanticChainLauncher(["recover-prepare-initial-c", "--root", failedRecovery])).toBe(0);
+      expect(readChainArtifact(join(failedRecovery, "initial-correspondence-binding.json")))
+        .toMatchObject({ workset_identity: null, source_interpretation_ids: [] });
+    }
+  }
+  expect(hAttempts).toBe(2);
 }, 120_000);
