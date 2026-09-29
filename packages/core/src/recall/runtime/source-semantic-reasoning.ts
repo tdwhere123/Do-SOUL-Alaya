@@ -3,7 +3,7 @@ import {
   SourceSemanticInterpretationSchema, SourceSemanticPublishedInterpretationSchema, SOURCE_SEMANTIC_K_VERSION,
   SourceSemanticReasoningRequestSchema, SourceSemanticReasoningResultSchema,
   type InformationIndex, type SourceEvidenceTarget, type SourceSemanticReasoningRequest,
-  type SourceSemanticReasoningResult, type SourceSemanticAttention
+  type SourceSemanticReasoningResult
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -18,6 +18,11 @@ import { planSourceSemanticBranches } from "./source-semantic-branch-plan.js";
 import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 import { sourceSemanticProofDependencies } from "./source-semantic-delivery.js";
+import { unexecutedGroupAttention } from "./source-semantic-attention.js";
+import {
+  attachOptionalAttention, groupedOptionalAttention, runOptionalAttention, singleOptionalAttention,
+  type OptionalAttentionCompute
+} from "./source-semantic-optional-attention.js";
 
 export const SOURCE_SEMANTIC_REASONING_BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
@@ -33,7 +38,10 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
   /** Offline causal diagnostics only; never enabled by normal recall. */
   withdrawal_trial_limit?: number;
 }>;
-type Prepared = Readonly<{ body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace }>;
+type Prepared = Readonly<{
+  body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace;
+  finalizeOptional?: OptionalAttentionCompute;
+}>;
 export type SourceSemanticInterpretationExecution = Readonly<{
   result: SourceSemanticReasoningResult; index: InformationIndex | null;
   /** Source coordinates from actual selected binding closures, for native support hydration only. */
@@ -71,6 +79,10 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
       body = prepared.body; index = prepared.index;
       withdrawalTrace = prepared.withdrawal_trace;
       if ((body.binding_results?.length ?? 0) > 0) sourceDependencies = sourceSemanticProofDependencies(body, meter);
+      if (prepared.finalizeOptional !== undefined) {
+        const attention = runOptionalAttention(meter, budget, prepared.finalizeOptional);
+        if (attention !== undefined) body = { ...body, attention };
+      }
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -140,22 +152,31 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   const prefixWork = meter.spentWork, prefixBytes = meter.spentBytes;
   const projection = { remaining, query, snapshot, admission, population, execution, sourceTarget, qualified };
   const baseline = projectSourceSemanticState({ ...projection, state, meter });
-  if (input.withdrawal_trial_limit === undefined) return baseline;
+  const actualBudget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET;
+  const finalizeOptional = baseline.acceptedBranchIndices === undefined ? undefined
+    : singleOptionalAttention(admission, execution, state, baseline.acceptedBranchIndices);
+  if (input.withdrawal_trial_limit === undefined) return { ...baseline, finalizeOptional };
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
     baseline: finish(baseline.body), limit: input.withdrawal_trial_limit, project: (withdrawn, _leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET);
+      const trialMeter = new SourceSemanticResourceLedger(actualBudget);
       let trial: ResultBody;
       try {
         trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
-        trial = projectSourceSemanticState({ ...projection, state: withdrawn, meter: trialMeter }).body;
+        const projected = projectSourceSemanticState({ ...projection, state: withdrawn, meter: trialMeter });
+        trial = projected.body;
+        if ((trial.binding_results?.length ?? 0) > 0) sourceSemanticProofDependencies(trial, trialMeter);
+        if (projected.acceptedBranchIndices !== undefined) {
+          trial = attachOptionalAttention(trial, trialMeter, actualBudget,
+            singleOptionalAttention(admission, execution, withdrawn, projected.acceptedBranchIndices));
+        }
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
         trial = { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
       }
       return finish({ ...trial, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
     } });
-  return { ...baseline, withdrawal_trace };
+  return { ...baseline, finalizeOptional, withdrawal_trace };
 }
 
 function observeCorrespondenceGroups(input: Readonly<{
@@ -199,9 +220,10 @@ function observeCorrespondenceGroups(input: Readonly<{
     meter.charge(1, 0, "semantic group execution disposition");
     if (!projectedPhases.has(phase)) { meter.charge(0, 8, "unprojected semantic group reference"); unprojected.push(phase); }
   }
-  const unprojectedAttention = unexecutedGroupAttention(admission, unprojected, meter);
-  if (runs.length === 0) return { body: { ...qualified, outcome: { status: "resource_exhausted" },
-    consumed_leaves: [], ...(unprojectedAttention === undefined ? {} : { attention: unprojectedAttention }) }, index: null };
+  if (runs.length === 0) return {
+    body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] }, index: null,
+    finalizeOptional: (child) => unexecutedGroupAttention(admission, unprojected, child)
+  };
   const prefixWork = meter.spentWork, prefixBytes = meter.spentBytes;
   const projected = runs.map((run, index) => {
     const result = projectSourceSemanticState({
@@ -209,29 +231,45 @@ function observeCorrespondenceGroups(input: Readonly<{
       execution: run.execution, sourceTarget, qualified
     });
     const prefix = `g${index}:`;
-    return { ...result, body: prefixGroupBody(result.body, prefix), index: prefixGroupIndex(result.index, prefix) };
+    return {
+      ...result, body: prefixGroupBody(result.body, prefix), index: prefixGroupIndex(result.index, prefix),
+      state: run.state, execution: run.execution,
+      acceptedBranchIndices: result.acceptedBranchIndices ?? new Set<number>()
+    };
   });
   const incomplete = runs.length !== input.phases.length || projected.some(row => row.body.outcome.status !== "interpreted");
+  const finalizeOptional = groupedOptionalAttention(admission, projected, unprojected, incomplete);
   const baseline = {
-    body: mergeGroupBodies(qualified, projected.map((row) => row.body), meter, incomplete, unprojectedAttention),
-    index: mergeGroupIndexes(projected.map((row) => row.index).filter((row): row is NonNullable<typeof row> => row !== null), incomplete)
+    body: mergeGroupBodies(qualified, projected.map((row) => row.body), incomplete),
+    index: mergeGroupIndexes(projected.map((row) => row.index).filter((row): row is NonNullable<typeof row> => row !== null), incomplete),
+    finalizeOptional
   };
   if (input.input.withdrawal_trial_limit === undefined) return baseline;
+  const actualBudget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET;
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state: runs[0]!.state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
     baseline: finish(baseline.body), limit: input.input.withdrawal_trial_limit, project: (_withdrawn, leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET);
+      const trialMeter = new SourceSemanticResourceLedger(actualBudget);
       try {
         trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
         const trials = runs.map((run, index) => {
           const state = leafId === undefined ? run.state : withdrawDerivationLeaves(run.state, leafId);
-          return prefixGroupBody(projectSourceSemanticState({
+          const result = projectSourceSemanticState({
             state, meter: trialMeter, remaining: run.remaining, query: run.query, snapshot, admission, population,
             execution: run.execution, sourceTarget, qualified
-          }).body, `g${index}:`);
+          });
+          return {
+            body: prefixGroupBody(result.body, `g${index}:`),
+            state, execution: run.execution, acceptedBranchIndices: result.acceptedBranchIndices
+          };
         });
-        return finish({ ...mergeGroupBodies(qualified, trials, trialMeter, incomplete, unprojectedAttention),
-          resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
+        let merged = mergeGroupBodies(qualified, trials.map((row) => row.body), incomplete);
+        if ((merged.binding_results?.length ?? 0) > 0) sourceSemanticProofDependencies(merged, trialMeter);
+        merged = attachOptionalAttention(merged, trialMeter, actualBudget,
+          groupedOptionalAttention(admission, trials.flatMap((row) => row.acceptedBranchIndices === undefined
+            ? [] : [{ state: row.state, execution: row.execution, acceptedBranchIndices: row.acceptedBranchIndices }]),
+            unprojected, incomplete));
+        return finish({ ...merged, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
         return finish({ ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [],
@@ -274,32 +312,11 @@ function prefixGroupIndex(index: InformationIndex | null, prefix: string): Infor
 }
 
 function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<SourceSemanticReasoningResult, "conditional_computation_id" | "source_interpretation_id" | "query_semantics_id" | "semantic_correspondence_id" | "source_target" | "query_gaps">,
-  bodies: readonly ResultBody[], meter: SourceSemanticResourceLedger, incomplete = false,
-  unprojected?: Extract<SourceSemanticAttention, { kind: "computed" }>): ResultBody {
+  bodies: readonly ResultBody[], incomplete = false): ResultBody {
   const first = bodies[0]!;
   const open = incomplete || bodies.some(row => row.outcome.status !== "interpreted");
-  let attentionTemplate: Extract<SourceSemanticAttention, { kind: "computed" }> | undefined;
-  const attentionEntries: Extract<SourceSemanticAttention, { kind: "computed" }>["entries"][number][] = [];
-  let attentionTruncated = incomplete;
-  const mergeAttention = (current: SourceSemanticAttention | undefined): void => {
-    meter.charge(1, 0, "merged semantic attention body");
-    if (current?.kind !== "computed") return;
-    attentionTemplate ??= current;
-    if (current.truncated) attentionTruncated = true;
-    for (const entry of current.entries) {
-      meter.charge(1, 0, "merged semantic attention entry inspection");
-      if (attentionEntries.length === 64) { attentionTruncated = true; break; }
-      meter.charge(1, 8, "merged semantic attention retention");
-      attentionEntries.push(entry);
-    }
-  };
-  for (const body of bodies) mergeAttention(body.attention);
-  if (unprojected !== undefined) mergeAttention(unprojected);
-  const attention = attentionTemplate === undefined ? undefined : { ...attentionTemplate,
-    entries: attentionEntries, truncated: attentionTruncated };
   return {
     ...qualified, ...first,
-    ...(attention === undefined ? {} : { attention }),
     binding_results: bodies.flatMap((row) => row.binding_results ?? []),
     derivations: bodies.flatMap((row) => row.derivations ?? []),
     evidence_leaves: bodies.flatMap((row) => row.evidence_leaves ?? []),
@@ -310,27 +327,6 @@ function mergeGroupBodies(qualified: ResultBody extends never ? never : Pick<Sou
     outcome: open ? { status: "resource_exhausted" }
       : { status: "interpreted", gaps: first.outcome.status === "interpreted" ? first.outcome.gaps : [] }
   };
-}
-
-function unexecutedGroupAttention(admission: Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, { kind: "admitted" }>,
-  phases: readonly SourceSemanticGroupPhase[], meter: SourceSemanticResourceLedger):
-  Extract<SourceSemanticAttention, { kind: "computed" }> | undefined {
-  if (phases.length === 0) return undefined;
-  const entries: Extract<SourceSemanticAttention, { kind: "computed" }>["entries"][number][] = [];
-  for (const phase of phases) {
-    meter.charge(1, 0, "unprojected semantic group inspection");
-    if (entries.length === 64) break;
-    meter.charge(1, 256, "unprojected semantic group attention");
-    entries.push({ alternative: phase.alternative, frame: null, obligation: "branch",
-      phase: { accept_index: phase.acceptIndex, group_frame: phase.groupFrame ?? null },
-      state: "unknown", observation: "unknown", scope: { kind: "branch" } });
-  }
-  const source = admission.interpretation.source;
-  return { contract: "source-semantic-attention-v1", kind: "computed",
-    conditional_computation_id: admission.context_id, source_interpretation_id: admission.interpretation_id,
-    query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
-    source_id: source.source_id, source_version: source.source_version, content_digest: source.content_digest,
-    entries, truncated: phases.length > entries.length };
 }
 
 function mergeGroupIndexes(indexes: InformationIndex[], incomplete = false): InformationIndex | null {
@@ -355,6 +351,10 @@ function finish(result: ResultBody, outputLimit = 1_000_000): SourceSemanticReas
   }
   const checked = parsed.data;
   if (Buffer.byteLength(JSON.stringify(checked)) <= outputLimit) return checked;
+  if (checked.attention !== undefined) {
+    const { attention, ...required } = checked;
+    if (attention !== undefined && Buffer.byteLength(JSON.stringify(required)) <= outputLimit) return required;
+  }
   const limited = SourceSemanticReasoningResultSchema.parse({ contract: checked.contract,
     semantic_status: checked.semantic_status, conclusion_scope: checked.conclusion_scope, world_claim: checked.world_claim,
     conditional_computation_id: checked.conditional_computation_id, source_interpretation_id: checked.source_interpretation_id, query_semantics_id: checked.query_semantics_id, semantic_correspondence_id: checked.semantic_correspondence_id,

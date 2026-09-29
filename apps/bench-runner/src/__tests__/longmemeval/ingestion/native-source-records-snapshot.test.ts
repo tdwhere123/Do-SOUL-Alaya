@@ -422,7 +422,7 @@ it("preserves both source clocks, revisions and every document newline through n
   const mixed = await prepareSourcePublicationAssociations({ name: "native-records", nativeSnapshotPath: snapshotPath,
     model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1",
     openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
-    activeNativeRevision: { source_id: records[0].source_id, source_version: records[0].source_version,
+    activeRevision: { kind: "native", source_id: records[0].source_id, source_version: records[0].source_version,
       record_id: selectedNative.record.identity, key: revision.child_key, generation: revisedGeneration } }, [
       { cacheRoot, retainedPreparationPath: preflightPath },
       { cacheRoot: childCacheRoot, retainedPreparationPath: childPreflightPath }

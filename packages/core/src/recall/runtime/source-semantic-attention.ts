@@ -3,7 +3,7 @@ import { canonicalProductIdentity, productEndpointId, type SourceSemanticAttenti
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { ObservationPairs } from "../conditional-field/engine/observation-frontier.js";
 import type { admitSourceSemanticCorrespondence } from "../conditional-field/query/source-semantic-correspondence-admission.js";
-import type { SourceSemanticExecutionPlan } from "../conditional-field/query/compile-source-semantic-finite.js";
+import type { SourceSemanticExecutionPlan, SourceSemanticGroupPhase } from "../conditional-field/query/compile-source-semantic-finite.js";
 import type { SourceSemanticLoweredObligation } from "../conditional-field/query/compile-source-semantic-query.js";
 
 type Admission = Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, { kind: "admitted" }>;
@@ -121,4 +121,45 @@ export function sourceSemanticBranchAttention(admission: Admission, execution: S
     semantic_correspondence_id: admission.semantic_correspondence_id,
     source_id: target.source_id, source_version: target.source_version, content_digest: target.content_digest,
     entries, truncated };
+}
+
+export function unexecutedGroupAttention(admission: Admission, phases: readonly SourceSemanticGroupPhase[],
+  meter: SourceSemanticResourceLedger): ComputedAttention | undefined {
+  if (phases.length === 0) return undefined;
+  const entries: Entry[] = [];
+  for (const phase of phases) {
+    meter.charge(1, 0, "unprojected semantic group inspection");
+    if (entries.length === 64) break;
+    meter.charge(1, 256, "unprojected semantic group attention");
+    entries.push({ alternative: phase.alternative, frame: null, obligation: "branch",
+      phase: { accept_index: phase.acceptIndex, group_frame: phase.groupFrame ?? null },
+      state: "unknown", observation: "unknown", scope: { kind: "branch" } });
+  }
+  const source = admission.interpretation.source;
+  return { contract: "source-semantic-attention-v1", kind: "computed",
+    conditional_computation_id: admission.context_id, source_interpretation_id: admission.interpretation_id,
+    query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
+    source_id: source.source_id, source_version: source.source_version, content_digest: source.content_digest,
+    entries, truncated: phases.length > entries.length };
+}
+
+export function mergeComputedAttention(parts: readonly (SourceSemanticAttention | undefined)[],
+  meter: SourceSemanticResourceLedger, incomplete = false): ComputedAttention | undefined {
+  let attentionTemplate: ComputedAttention | undefined;
+  const attentionEntries: Entry[] = [];
+  let attentionTruncated = incomplete;
+  for (const current of parts) {
+    meter.charge(1, 0, "merged semantic attention body");
+    if (current?.kind !== "computed") continue;
+    attentionTemplate ??= current;
+    if (current.truncated) attentionTruncated = true;
+    for (const entry of current.entries) {
+      meter.charge(1, 0, "merged semantic attention entry inspection");
+      if (attentionEntries.length === 64) { attentionTruncated = true; break; }
+      meter.charge(1, 8, "merged semantic attention retention");
+      attentionEntries.push(entry);
+    }
+  }
+  return attentionTemplate === undefined ? undefined : { ...attentionTemplate,
+    entries: attentionEntries, truncated: attentionTruncated };
 }

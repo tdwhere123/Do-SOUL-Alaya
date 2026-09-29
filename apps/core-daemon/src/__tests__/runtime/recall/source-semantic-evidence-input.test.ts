@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { deliveredSourceSemanticLibraryProof, projectSourceSemanticQuerySupport,
-  executeSourceSemanticInterpretation, assembleSourceSemanticLibraryIndex, fieldContractSha256, slotQualifiersFor } from "@do-soul/alaya-core";
+  executeSourceSemanticInterpretation, assembleSourceSemanticLibraryIndex, fieldContractSha256, slotQualifiersFor,
+  admitSourceSemanticCorrespondence } from "@do-soul/alaya-core";
 import { sourceSemanticQueryBranchViews } from "@do-soul/alaya-protocol";
 import { correspondenceFor, deliveredProofFixture, query as simpleQuery, source as simpleSource,
   BUDGET as BASE_BUDGET } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
@@ -69,9 +70,18 @@ it("keeps invited AND actually spoke on one person and event without counting lo
   expect(views[1]!.alternative.frames.map(frame => frame.id)).toEqual(["invited", "spoke"]);
   const withoutInvitation = { ...proof.semantic_correspondence, correspondences: proof.semantic_correspondence.correspondences.filter(row =>
     row.query_endpoint.kind === "referent" || row.query_endpoint.frame !== "invited") };
+  const admitted = admitSourceSemanticCorrespondence({
+    source_interpretation: proof.interpretation, query_semantics: proof.query,
+    semantic_correspondence: withoutInvitation, original_query: COUNT });
+  expect(admitted.kind).toBe("admitted");
+  if (admitted.kind !== "admitted") throw new Error("withoutInvitation correspondence must be admitted");
   expect(executeSourceSemanticInterpretation({ source_interpretation: proof.interpretation, query_semantics: proof.query,
     semantic_correspondence: withoutInvitation, original_query: COUNT, workspaceId: "ws", scope: "project", authorizedScopes: ["project"],
-    asOf: index.as_of! }).result.binding_results).toEqual([]);
+    asOf: index.as_of!,
+    request: { contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id,
+      semantic_correspondence_id: admitted.semantic_correspondence_id, original_query: COUNT,
+      budget: BUDGET, output_byte_limit: 1_000_000 } }).result.binding_results).toEqual([]);
 }, 90_000);
 
 it("retains two dates as individually supported inputs with unknown cross-source compatibility and no subtraction", () => {

@@ -242,6 +242,7 @@ function mixedIndex(entries: InformationIndex["entries"] = [memoryEntry(), sourc
     query_id: "issued-commit",
     snapshot_id: SNAPSHOT,
     result_version: "v1",
+    as_of: NOW,
     entries,
     completeness: {
       schema_version: 1,
