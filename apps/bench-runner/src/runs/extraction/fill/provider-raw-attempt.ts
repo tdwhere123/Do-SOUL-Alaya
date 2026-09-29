@@ -22,6 +22,8 @@ export const PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v2" as const;
 const PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v1" as const;
 const STEP_PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v3" as const;
 const STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v2" as const;
+const EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT = "source-evidence-selection-raw-attempt-v1" as const;
+const STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT = "source-evidence-selection-raw-attempt-v2" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
 const MAX_RETAINED_RESPONSE_BODY_BYTES = MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES;
 // JSON can expand each retained byte to six ASCII bytes. A split UTF-8 code point
@@ -91,6 +93,14 @@ const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
   z.object({ ...RawAttemptFields, contract: z.literal(STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT),
     kind: z.enum(["query", "semantic_correspondence"]),
     attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT),
+    kind: z.literal("source_evidence_selection"),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT),
+    kind: z.literal("source_evidence_selection"),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
   }).strict()
 ]);
 
@@ -149,10 +159,27 @@ export class ProviderRawAttemptIdentityError extends Error {
   }
 }
 
-type RawAttemptOwner =
+export type RawAttemptOwner =
   | { kind: "source_semantic"; attemptLineageDigest?: never;
     authorityReceiptDigest?: string; authorityLineageDigest?: string; sourceRequestSha256?: string }
-  | { kind: "query" | "semantic_correspondence"; attemptLineageDigest: string };
+  | { kind: "query" | "semantic_correspondence" | "source_evidence_selection"; attemptLineageDigest: string };
+
+function isStepRawAttemptContract(contract: string): boolean {
+  return contract === STEP_PROVIDER_RAW_ATTEMPT_CONTRACT ||
+    contract === STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT ||
+    contract === STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT;
+}
+
+function providerRawAttemptContract(kind: RawAttemptOwner["kind"], requestProfile: string): string {
+  const step = requestProfile === "step-3.5-2603-low-json-schema-v1";
+  if (kind === "source_semantic") {
+    return step ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : PROVIDER_RAW_ATTEMPT_CONTRACT;
+  }
+  if (kind === "source_evidence_selection") {
+    return step ? STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT : EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT;
+  }
+  return step ? STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT;
+}
 
 export function bindProviderRawAttempt(
   raw: ProviderRawAttempt,
@@ -165,8 +192,7 @@ export function bindProviderRawAttempt(
 ): ProviderRawAttempt {
   assertProviderRawIntegrity(raw);
   const step = expected.requestProfile === "step-3.5-2603-low-json-schema-v1";
-  if (step !== (raw.contract === STEP_PROVIDER_RAW_ATTEMPT_CONTRACT ||
-      raw.contract === STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT)) {
+  if (step !== isStepRawAttemptContract(raw.contract)) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt contract/profile mismatch: ${expected.cacheKey}`);
   }
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
@@ -275,7 +301,7 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
         !http.bodyTruncated && (httpBytes.length !== http.bodyByteLength ||
           createHash("sha256").update(httpBytes).digest("hex") !== http.bodySha256)) ||
       raw.request_profile === "step-3.5-2603-low-json-schema-v1" &&
-        (raw.contract !== STEP_PROVIDER_RAW_ATTEMPT_CONTRACT && raw.contract !== STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT ||
+        (!isStepRawAttemptContract(raw.contract) ||
          body !== undefined || raw.transport_failure === undefined &&
            (http === undefined || !http.bodyComplete)) ||
       raw.request_profile !== "step-3.5-2603-low-json-schema-v1" && http !== undefined) {
@@ -336,9 +362,7 @@ export function writeProviderRawAttempt(input: Readonly<{
   const truncated = original.byteLength > MAX_RETAINED_RAW_BYTES;
   const retained = truncated ? original.subarray(0, MAX_RETAINED_RAW_BYTES).toString("utf8") : input.decodedText;
   const record = ProviderRawAttemptSchema.parse({
-    contract: input.requestProfile === "step-3.5-2603-low-json-schema-v1"
-      ? input.kind === "source_semantic" ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT
-      : input.kind === "source_semantic" ? PROVIDER_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT,
+    contract: providerRawAttemptContract(input.kind, input.requestProfile),
     ...(input.kind === "source_semantic" ? {} : { attempt_lineage_digest: input.attemptLineageDigest }),
     ...(input.kind !== "source_semantic" || input.authorityReceiptDigest === undefined ? {} : {
       authority_receipt_digest: input.authorityReceiptDigest

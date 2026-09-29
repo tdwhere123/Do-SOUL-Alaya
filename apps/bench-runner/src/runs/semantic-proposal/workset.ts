@@ -1,6 +1,5 @@
 import { AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
   UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
@@ -12,11 +11,13 @@ import {
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
   SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
-import { prepareSemanticProviderRequest, STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
+import { STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import { normalizeGeminiEndpoint } from "../provider/gemini-endpoint.js";
-import { buildExtractionTransportProvenance, resolveExtractionTransportRoute, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
+import type { ExtractionTransportProvenance } from "../extraction/transport-route.js";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
-import { attemptInputByteUpperBound } from "../extraction/authority/receipt-limits.js";
+import {
+  bindSemanticProviderRequest, semanticProviderRequestCacheKey, SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME
+} from "../provider-request/request-binding.js";
 
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
 export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
@@ -151,17 +152,7 @@ export function semanticProposalRequestBinding(
   config: CompileSeedExtractionConfig,
   request: { systemPrompt: string; userPrompt: string; maxOutputTokens: number; responseJsonSchema: object }
 ) {
-  const encoded = prepareSemanticProviderRequest(config, { ...request, retryMode: "disabled",
-    outputTokenField: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens",
-    validateRawJson: () => undefined }, "source_semantic_proposal");
-  const route = resolveExtractionTransportRoute(config);
-  return {
-    inputByteUpper: attemptInputByteUpperBound(encoded.body),
-    requestDigest: createHash("sha256").update(JSON.stringify([encoded.url.href, encoded.body])).digest("hex"),
-    transportProvenance: buildExtractionTransportProvenance({ ...config,
-      transportProviderUrl: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
-        ? route.providerUrl : normalizeGeminiEndpoint(route.providerUrl).origin })
-  };
+  return bindSemanticProviderRequest(config, request, SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME);
 }
 
 export function proposalCacheKey(
@@ -171,19 +162,9 @@ export function proposalCacheKey(
   if (!isNativeGeminiRequestProfile(requestProfile) && requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
     throw new AlayaError("VALIDATION", "semantic proposal requires a native semantic profile");
   }
-  const wire = prepareSemanticProviderRequest({ model, requestProfile, providerUrl, apiKey: null }, {
-    systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema: schema,
-    outputTokenField: requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens",
-    retryMode: "disabled", validateRawJson: () => undefined
-  }, "source_semantic_proposal");
-  return createHash("sha256")
-    .update(semanticProposalWorksetContract(requestProfile), "utf8").update("\u0000", "utf8")
-    .update(model, "utf8").update("\u0000", "utf8")
-    .update(requestProfile, "utf8").update("\u0000", "utf8")
-    .update(systemPrompt, "utf8").update("\u0000", "utf8")
-    .update(userPrompt, "utf8").update("\u0000", "utf8")
-    .update(wire.url.href, "utf8").update("\u0000", "utf8")
-    .update(wire.body, "utf8").update("\u0000", "utf8")
-    .update(String(maxOutputTokens), "utf8")
-    .digest("hex");
+  return semanticProviderRequestCacheKey({
+    identityPrefix: semanticProposalWorksetContract(requestProfile),
+    model, requestProfile, systemPrompt, userPrompt, schema, maxOutputTokens, providerUrl,
+    schemaName: SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME
+  });
 }

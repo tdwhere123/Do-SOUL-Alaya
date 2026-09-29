@@ -12,11 +12,11 @@ import {
   initializeExtractionTargetRoot, inspectExtractionTargetRoot
 } from "../extraction/authority/target-root-binding.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
+import { estimatedSemanticProviderUpperUsd } from "../provider-request/request-binding.js";
 
 export const SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v5" as const;
 export const STEP_SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT = "source-semantic-proposal-authority-v6" as const;
 export const DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY = 2;
-const MILLION = 1_000_000;
 const AttemptsPerKeySchema = z.number().int().min(1).max(DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
 const executionRootMarker = Object.freeze({ filename: ".semantic-proposal-execution-root.json",
   kind: "semantic-proposal-execution-root-v1" });
@@ -205,11 +205,7 @@ export function estimatedUpperUsd(
   preflight: Pick<SemanticProposalPreflight, "maximum_attempts" | "max_output_tokens" | "maximum_input_tokens_per_attempt">,
   inputUsdPerMillion: number, outputUsdPerMillion: number
 ): number {
-  const perAttempt = (
-    preflight.maximum_input_tokens_per_attempt * inputUsdPerMillion +
-    preflight.max_output_tokens * outputUsdPerMillion
-  ) / MILLION;
-  return perAttempt * preflight.maximum_attempts;
+  return estimatedSemanticProviderUpperUsd(preflight, inputUsdPerMillion, outputUsdPerMillion);
 }
 
 export function verifySemanticProposalAuthority(authority: SemanticProposalAuthority): SemanticProposalAuthority {
