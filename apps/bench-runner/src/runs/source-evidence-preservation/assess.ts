@@ -4,7 +4,8 @@ import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider
 import type { ProviderRequestAttemptClass } from "../provider-request/execution.js";
 import type { SourceEvidencePreservationLine } from "./input.js";
 import {
-  sourceEvidencePreservationIdentity, sourceEvidencePreservationQuoteOccurrences,
+  sourceEvidencePreservationIdentitiesEqual, sourceEvidencePreservationIdentity,
+  sourceEvidencePreservationQuoteOccurrences,
   type SourceEvidencePreservationIdentity, type SourceEvidencePreservationOriginal
 } from "./original.js";
 
@@ -92,7 +93,8 @@ export type SourceEvidencePreservationDeliveryReason =
   | "invalid"
   | "unavailable"
   | "abstained"
-  | "incomplete";
+  | "incomplete"
+  | "semantic_substitution_unverified";
 
 export type SourceEvidencePreservationDelivery = Readonly<{
   delivery: "candidate" | "baseline";
@@ -175,42 +177,82 @@ export function interpretSourceEvidencePreservationDecoded(
   };
 }
 
-/** Host fallback. Does not judge semantic truth; invalid or unavailable keep the captured baseline. */
+/**
+ * Host fallback. Captures the caller originals once, then only confirms that a
+ * retained reference still names the same original. This private guard does not
+ * certify semantic equivalence, irrelevance, or `not_relevant` correctness.
+ * Invalid or unavailable keep the captured baseline.
+ */
 export function settleSourceEvidencePreservationDelivery(input: Readonly<{
   references: readonly SourceEvidencePreservationOriginal[];
   candidates: readonly SourceEvidencePreservationOriginal[];
   outcome: SourceEvidencePreservationOutcome;
 }>): SourceEvidencePreservationDelivery {
-  const baseline = Object.freeze(structuredClone(input.references));
-  const candidate_originals = Object.freeze(structuredClone(input.candidates));
-  if (input.outcome.status === "preserved") {
+  const captured = structuredClone({ 
+    references: input.references, candidates: input.candidates, outcome: input.outcome 
+  });
+  const baseline = Object.freeze(captured.references);
+  const candidate_originals = Object.freeze(captured.candidates);
+  const outcome = captured.outcome;
+  if (outcome.status === "preserved") {
+    if (!retainedOriginalStillPresent(outcome.records, baseline, candidate_originals)) {
+      return {
+        delivery: "baseline", reason: "semantic_substitution_unverified", allows_checked_candidate: false,
+        baseline, candidate_originals, assessment: outcome
+      };
+    }
     return {
       delivery: "candidate", reason: "preserved", allows_checked_candidate: true,
-      baseline, candidate_originals, assessment: input.outcome
+      baseline, candidate_originals, assessment: outcome
     };
   }
-  if (input.outcome.status === "lost" || input.outcome.status === "unresolved") {
+  if (outcome.status === "lost" || outcome.status === "unresolved") {
     return {
       delivery: "baseline",
-      reason: input.outcome.status === "lost" ? "loss" : "unresolved",
+      reason: outcome.status === "lost" ? "loss" : "unresolved",
       allows_checked_candidate: false,
-      baseline, candidate_originals, assessment: input.outcome
+      baseline, candidate_originals, assessment: outcome
     };
   }
-  if (input.outcome.status === "abstained") {
+  if (outcome.status === "abstained") {
     return { delivery: "baseline", reason: "abstained", allows_checked_candidate: false, baseline, candidate_originals };
   }
-  if (input.outcome.status === "incomplete") {
+  if (outcome.status === "incomplete") {
     return { delivery: "baseline", reason: "incomplete", allows_checked_candidate: false, baseline, candidate_originals };
   }
-  if (input.outcome.status === "transport_failure") {
+  if (outcome.status === "transport_failure") {
     return { delivery: "baseline", reason: "unavailable", allows_checked_candidate: false, baseline, candidate_originals };
   }
   return {
     delivery: "baseline", reason: "invalid", allows_checked_candidate: false,
     baseline, candidate_originals,
-    ...(input.outcome.status === "invalid" ? { invalid_reason: input.outcome.reason } : {})
+    ...(outcome.status === "invalid" ? { invalid_reason: outcome.reason } : {})
   };
+}
+
+function retainedOriginalStillPresent(
+  records: readonly SourceEvidencePreservationBoundRecord[],
+  references: readonly SourceEvidencePreservationOriginal[],
+  candidates: readonly SourceEvidencePreservationOriginal[]
+): boolean {
+  const referenceByRoot = new Map(references.map((original) => [original.root_id, original]));
+  const candidateByRoot = new Map(candidates.map((original) => [original.root_id, original]));
+  for (const record of records) {
+    if (record.disposition !== "retained") continue;
+    const reference = referenceByRoot.get(record.root_id);
+    if (reference === undefined) return false;
+    const needed = sourceEvidencePreservationIdentity(reference);
+    if (!sourceEvidencePreservationIdentitiesEqual(record.identity, needed)) return false;
+    const citedSame = record.candidate_citations.some((citation) => {
+      const candidate = candidateByRoot.get(citation.root_id);
+      if (candidate === undefined) return false;
+      const actual = sourceEvidencePreservationIdentity(candidate);
+      return sourceEvidencePreservationIdentitiesEqual(citation.identity, actual) &&
+        sourceEvidencePreservationIdentitiesEqual(actual, needed);
+    });
+    if (!citedSame) return false;
+  }
+  return true;
 }
 
 function bindReferenceRecords(

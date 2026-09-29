@@ -11,7 +11,8 @@ import {
 } from "../provider-request/request-binding.js";
 import { sourceEvidencePreservationResponseJsonSchema } from "./assess.js";
 import {
-  assertSourceEvidencePreservationOriginal, sourceEvidencePreservationIdentity,
+  assertSourceEvidencePreservationOriginal, sourceEvidencePreservationIdentitiesEqual,
+  sourceEvidencePreservationIdentity,
   SourceEvidencePreservationOriginalSchema,
   type SourceEvidencePreservationIdentity, type SourceEvidencePreservationOriginal
 } from "./original.js";
@@ -289,8 +290,10 @@ function assertPreservationItem(item: SourceEvidencePreservationItem): void {
   for (const [rootId, candidate] of candidates) {
     const reference = references.get(rootId);
     if (reference === undefined) continue;
-    if (canonicalJson(sourceEvidencePreservationIdentity(reference)) !==
-        canonicalJson(sourceEvidencePreservationIdentity(candidate))) {
+    if (!sourceEvidencePreservationIdentitiesEqual(
+      sourceEvidencePreservationIdentity(reference),
+      sourceEvidencePreservationIdentity(candidate)
+    )) {
       throw new AlayaError("VALIDATION", `preservation original identity disagrees for root_id: ${rootId}`);
     }
   }

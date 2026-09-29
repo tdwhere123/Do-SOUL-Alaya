@@ -45,6 +45,7 @@ const DIGEST_KEEP = `sha256:${"a".repeat(64)}`;
 const DIGEST_LOST = `sha256:${"b".repeat(64)}`;
 const DIGEST_MAYBE = `sha256:${"c".repeat(64)}`;
 const DIGEST_ADVICE = `sha256:${"d".repeat(64)}`;
+const DIGEST_ALT = `sha256:${"e".repeat(64)}`;
 const roots: string[] = [];
 
 afterEach(() => {
@@ -155,6 +156,94 @@ it("admits a preserved claim over loopback HTTP and replays reserved raw without
     .toBe(18);
   server.closeAllConnections();
   await closeServer(server);
+});
+
+it("admits preserved HTTP raw while delivering baseline for unverified substitution without a second dispatch", async () => {
+  const captured: { hits: number } = { hits: 0 };
+  const server = await listen((_req, res) => {
+    captured.hits += 1;
+    succeed(res, {
+      status: "preserved",
+      records: [
+        {
+          root_id: "src-keep", disposition: "retained",
+          reference_quotes: [KEEP_QUOTE],
+          candidate_citations: [{ root_id: "src-alt", quotes: [KEEP_QUOTE] }]
+        },
+        { root_id: "src-advice", disposition: "not_relevant", reason: "Advice." }
+      ],
+      answer_uncertainties: ["Speaker identity is unknown."]
+    }, "STOP", usage());
+  });
+  try {
+    const origin = originOf(server);
+    const cacheRoot = join(tempRoot(), "cache");
+    const prepared = parseSourceEvidencePreservationWorkset({
+      contract: "source-evidence-preservation-workset-v1",
+      model: MODEL, provider_url: origin, request_profile: PROFILE,
+      items: [{
+        question: "Who left after the sample arrived?",
+        unknown: { query_as_of: { status: "unknown" } },
+        baseline: { items: [
+          original("src-keep", DIGEST_KEEP, KEEP, { kind: "known", at: "2024-05-01T12:00:00.000Z" }),
+          original("src-advice", DIGEST_ADVICE, ADVICE, { kind: "known", at: "2024-05-02T12:00:00.000Z" })
+        ] },
+        candidate: { items: [original("src-alt", DIGEST_ALT, KEEP, { kind: "known", at: "2024-05-01T12:00:00.000Z" })] }
+      }]
+    });
+    const config = configOf(origin);
+    const authority = pinSourceEvidencePreservationAuthority({
+      preflight: prepareSourceEvidencePreservation(prepared, cacheRoot, 128),
+      inputUsdPerMillion: 4, outputUsdPerMillion: 18
+    });
+    const first = await executeSourceEvidencePreservationFill({
+      workset: prepared, cacheRoot, authority, config,
+      extractor: createSemanticProviderHttpExtractor(config, SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME)
+    });
+    expect(first).toMatchObject({
+      attempts: 1, newly_admitted: 1, preserved: 1, cache_hits: 0,
+      candidate_deliveries: 0, baseline_fallbacks: 1
+    });
+    const bound = readSourceEvidencePreservationResults(prepared, cacheRoot, 128)[0];
+    expect(bound).toMatchObject({
+      status: "preserved",
+      assessment: { status: "preserved" },
+      delivery: {
+        delivery: "baseline", reason: "semantic_substitution_unverified", allows_checked_candidate: false
+      }
+    });
+    expect(inspectSourceEvidencePreservationShard(cacheRoot, authority.keys[0]!, {
+      model: MODEL, request_profile: PROFILE
+    })?.admitted).toBe(true);
+    expect(openSourceEvidencePreservationAttemptLedger({ cacheRoot, authority }).snapshot().telemetry.totalTokens)
+      .toBe(18);
+
+    const settledReplay = await executeSourceEvidencePreservationFill({
+      workset: prepared, cacheRoot, authority, config: { ...config, apiKey: null }
+    });
+    expect(settledReplay).toMatchObject({
+      cache_hits: 1, newly_admitted: 0, preserved: 1, attempts: 0,
+      candidate_deliveries: 0, baseline_fallbacks: 1
+    });
+    expect(captured.hits).toBe(1);
+
+    const recovered = await executeSourceEvidencePreservationFill({
+      workset: prepared, cacheRoot, authority, mode: "recover", config: { ...config, apiKey: null }
+    });
+    expect(recovered).toMatchObject({
+      attempts: 0, newly_admitted: 0, preserved: 1, candidate_deliveries: 0, baseline_fallbacks: 1
+    });
+    expect(readSourceEvidencePreservationResults(prepared, cacheRoot, 128)[0]).toMatchObject({
+      status: "preserved",
+      delivery: { delivery: "baseline", reason: "semantic_substitution_unverified" }
+    });
+    expect(captured.hits).toBe(1);
+    expect(openSourceEvidencePreservationAttemptLedger({ cacheRoot, authority }).snapshot().telemetry.totalTokens)
+      .toBe(18);
+  } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
 });
 
 it("recovers retained raw without dispatching unknown or never-called keys in a partial window", async () => {
@@ -506,6 +595,24 @@ it("binds joint retention across explicit candidate roots and keeps fallback unc
       { root_id: "src-extra", identity: { content_digest: DIGEST_LOST } }
     ]
   });
+  expect(settleSourceEvidencePreservationDelivery({
+    references: line.reference_originals, candidates: line.candidate_originals, outcome: interpreted.outcome
+  })).toMatchObject({ delivery: "candidate", reason: "preserved", allows_checked_candidate: true });
+  const crossOnly = interpret(line, {
+    status: "preserved",
+    records: [{
+      root_id: "src-keep", disposition: "retained",
+      reference_quotes: [KEEP_QUOTE],
+      candidate_citations: [{ root_id: "src-extra", quotes: [KEEP_QUOTE] }]
+    }],
+    answer_uncertainties: ["Speaker identity is unknown."]
+  });
+  expect(crossOnly).toMatchObject({ classified: "interpreted", admitted: true, outcome: { status: "preserved" } });
+  expect(settleSourceEvidencePreservationDelivery({
+    references: line.reference_originals, candidates: line.candidate_originals, outcome: crossOnly.outcome
+  })).toMatchObject({
+    delivery: "baseline", reason: "semantic_substitution_unverified", allows_checked_candidate: false
+  });
   const invalid = settleSourceEvidencePreservationDelivery({
     references: line.reference_originals, candidates: line.candidate_originals,
     outcome: { status: "invalid", reason: "invalid_shape" }
@@ -520,6 +627,121 @@ it("binds joint retention across explicit candidate roots and keeps fallback unc
   expect(canonicalJson(unavailable.baseline)).toBe(before);
   expect(invalid).toMatchObject({ delivery: "baseline", reason: "invalid", allows_checked_candidate: false });
   expect(unavailable).toMatchObject({ delivery: "baseline", reason: "unavailable", allows_checked_candidate: false });
+});
+
+it("does not permit candidate delivery when a retained reference cites a different original with the same quote", () => {
+  const prepared = parseSourceEvidencePreservationWorkset({
+    contract: "source-evidence-preservation-workset-v1",
+    model: MODEL, provider_url: "http://127.0.0.1:9", request_profile: PROFILE,
+    items: [{
+      question: "Who left after the sample arrived?",
+      unknown: { query_as_of: { status: "unknown" } },
+      baseline: { items: [original("src-keep", DIGEST_KEEP, KEEP, { kind: "known", at: "2024-05-01T12:00:00.000Z" })] },
+      candidate: { items: [original("src-alt", DIGEST_ALT, KEEP, { kind: "known", at: "2024-05-01T12:00:00.000Z" })] }
+    }]
+  });
+  const line = materializeSourceEvidencePreservationLines(prepared, 128)[0]!;
+  const interpreted = interpret(line, {
+    status: "preserved",
+    records: [{
+      root_id: "src-keep", disposition: "retained",
+      reference_quotes: [KEEP_QUOTE],
+      candidate_citations: [{ root_id: "src-alt", quotes: [KEEP_QUOTE] }]
+    }],
+    answer_uncertainties: ["Speaker identity is unknown."]
+  });
+  expect(interpreted).toMatchObject({ classified: "interpreted", admitted: true, outcome: { status: "preserved" } });
+  const delivery = settleSourceEvidencePreservationDelivery({
+    references: line.reference_originals, candidates: line.candidate_originals, outcome: interpreted.outcome
+  });
+  expect(delivery).toMatchObject({
+    delivery: "baseline", reason: "semantic_substitution_unverified", allows_checked_candidate: false
+  });
+  expect(delivery.assessment?.status).toBe("preserved");
+  expect(canonicalJson(delivery.baseline)).toBe(canonicalJson(line.reference_originals));
+});
+
+it("does not permit candidate delivery when preview, disclosure, or version identity differs", () => {
+  const prepared = workset("http://127.0.0.1:9");
+  const line = materializeSourceEvidencePreservationLines(prepared, 128)[0]!;
+  const interpreted = interpret(line, preservedBody());
+  expect(interpreted.outcome.status).toBe("preserved");
+  expect(settleSourceEvidencePreservationDelivery({
+    references: line.reference_originals, candidates: line.candidate_originals, outcome: interpreted.outcome
+  })).toMatchObject({ delivery: "candidate", reason: "preserved", allows_checked_candidate: true });
+  if (interpreted.outcome.status !== "preserved") throw new Error("expected preserved");
+  const keep = line.candidate_originals.find((row) => row.root_id === "src-keep");
+  if (keep === undefined) throw new Error("expected keep candidate");
+  const mutated = [
+    { ...keep, source_version: "v2" },
+    { ...keep, preview_sha256: "f".repeat(64) },
+    {
+      ...keep,
+      source_disclosure: {
+        ...keep.source_disclosure,
+        source_time: { kind: "unknown" as const, reason: "not_recorded" as const }
+      }
+    }
+  ] as const;
+  for (const [label, candidate] of [
+    ["version", mutated[0]], ["preview", mutated[1]], ["disclosure", mutated[2]]
+  ] as const) {
+    const delivery = settleSourceEvidencePreservationDelivery({
+      references: line.reference_originals,
+      candidates: line.candidate_originals.map((row) => row.root_id === "src-keep" ? candidate : row),
+      outcome: interpreted.outcome
+    });
+    expect(delivery, label).toMatchObject({
+      delivery: "baseline", reason: "semantic_substitution_unverified", allows_checked_candidate: false
+    });
+    expect(delivery.assessment?.status).toBe("preserved");
+  }
+});
+
+it("keeps loss and unresolved delivery reasons when a retained citation would not pass the original guard", () => {
+  const prepared = parseSourceEvidencePreservationWorkset({
+    contract: "source-evidence-preservation-workset-v1",
+    model: MODEL, provider_url: "http://127.0.0.1:9", request_profile: PROFILE,
+    items: [{
+      question: "Who left after the sample arrived?",
+      unknown: { query_as_of: { status: "unknown" } },
+      baseline: { items: [
+        original("src-keep", DIGEST_KEEP, KEEP, { kind: "known", at: "2024-05-01T12:00:00.000Z" }),
+        original("src-advice", DIGEST_ADVICE, ADVICE, { kind: "known", at: "2024-05-02T12:00:00.000Z" })
+      ] },
+      candidate: { items: [original("src-alt", DIGEST_ALT, KEEP, { kind: "known", at: "2024-05-01T12:00:00.000Z" })] }
+    }]
+  });
+  const line = materializeSourceEvidencePreservationLines(prepared, 128)[0]!;
+  const substitutedKeep = {
+    root_id: "src-keep", disposition: "retained" as const,
+    reference_quotes: [KEEP_QUOTE],
+    candidate_citations: [{ root_id: "src-alt", quotes: [KEEP_QUOTE] }]
+  };
+  const lost = interpret(line, {
+    status: "lost",
+    records: [
+      substitutedKeep,
+      { root_id: "src-advice", disposition: "loss", reason: "Advice is absent from the candidates." }
+    ],
+    answer_uncertainties: []
+  });
+  expect(lost.outcome.status).toBe("lost");
+  expect(settleSourceEvidencePreservationDelivery({
+    references: line.reference_originals, candidates: line.candidate_originals, outcome: lost.outcome
+  })).toMatchObject({ delivery: "baseline", reason: "loss", allows_checked_candidate: false });
+  const unresolved = interpret(line, {
+    status: "unresolved",
+    records: [
+      substitutedKeep,
+      { root_id: "src-advice", disposition: "material_comparison_unknown", reason: "Advice cannot be compared." }
+    ],
+    answer_uncertainties: ["Advice comparison is unknown."]
+  });
+  expect(unresolved.outcome.status).toBe("unresolved");
+  expect(settleSourceEvidencePreservationDelivery({
+    references: line.reference_originals, candidates: line.candidate_originals, outcome: unresolved.outcome
+  })).toMatchObject({ delivery: "baseline", reason: "unresolved", allows_checked_candidate: false });
 });
 
 it("keeps historical selection request keys unchanged beside the preservation schema", () => {

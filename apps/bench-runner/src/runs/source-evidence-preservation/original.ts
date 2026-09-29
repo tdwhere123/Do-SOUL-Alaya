@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  AlayaError, FieldContractDigestSchema, SourceDeliveredSpanSchema, SourceDisclosureSchema,
+  AlayaError, canonicalJson, FieldContractDigestSchema, SourceDeliveredSpanSchema, SourceDisclosureSchema,
   type SourceDeliveredSpan, type SourceDisclosure
 } from "@do-soul/alaya-protocol";
 
@@ -51,6 +51,13 @@ export function sourceEvidencePreservationIdentity(
     span: original.span,
     source_disclosure: original.source_disclosure
   };
+}
+
+export function sourceEvidencePreservationIdentitiesEqual(
+  left: SourceEvidencePreservationIdentity,
+  right: SourceEvidencePreservationIdentity
+): boolean {
+  return canonicalJson(left) === canonicalJson(right);
 }
 
 export function assertSourceEvidencePreservationOriginal(
