@@ -24,6 +24,8 @@ const STEP_PROVIDER_RAW_ATTEMPT_CONTRACT = "provider-raw-attempt-v3" as const;
 const STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT = "semantic-proposal-raw-attempt-v2" as const;
 const EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT = "source-evidence-selection-raw-attempt-v1" as const;
 const STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT = "source-evidence-selection-raw-attempt-v2" as const;
+const EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT = "source-evidence-preservation-raw-attempt-v1" as const;
+const STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT = "source-evidence-preservation-raw-attempt-v2" as const;
 const MAX_RETAINED_RAW_BYTES = 1024 * 1024;
 const MAX_RETAINED_RESPONSE_BODY_BYTES = MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES;
 // JSON can expand each retained byte to six ASCII bytes. A split UTF-8 code point
@@ -101,6 +103,14 @@ const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
   z.object({ ...RawAttemptFields, contract: z.literal(STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT),
     kind: z.literal("source_evidence_selection"),
     attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT),
+    kind: z.literal("source_evidence_preservation"),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
+  }).strict(),
+  z.object({ ...RawAttemptFields, contract: z.literal(STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT),
+    kind: z.literal("source_evidence_preservation"),
+    attempt_lineage_digest: z.string().regex(/^[0-9a-f]{64}$/u)
   }).strict()
 ]);
 
@@ -162,12 +172,13 @@ export class ProviderRawAttemptIdentityError extends Error {
 export type RawAttemptOwner =
   | { kind: "source_semantic"; attemptLineageDigest?: never;
     authorityReceiptDigest?: string; authorityLineageDigest?: string; sourceRequestSha256?: string }
-  | { kind: "query" | "semantic_correspondence" | "source_evidence_selection"; attemptLineageDigest: string };
+  | { kind: "query" | "semantic_correspondence" | "source_evidence_selection" | "source_evidence_preservation"; attemptLineageDigest: string };
 
 function isStepRawAttemptContract(contract: string): boolean {
   return contract === STEP_PROVIDER_RAW_ATTEMPT_CONTRACT ||
     contract === STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT ||
-    contract === STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT;
+    contract === STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT ||
+    contract === STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT;
 }
 
 function providerRawAttemptContract(kind: RawAttemptOwner["kind"], requestProfile: string): string {
@@ -177,6 +188,9 @@ function providerRawAttemptContract(kind: RawAttemptOwner["kind"], requestProfil
   }
   if (kind === "source_evidence_selection") {
     return step ? STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT : EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT;
+  }
+  if (kind === "source_evidence_preservation") {
+    return step ? STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT : EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT;
   }
   return step ? STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT;
 }
