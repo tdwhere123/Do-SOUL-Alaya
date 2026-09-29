@@ -17,6 +17,9 @@ disclosures under invariant §25 (minor: additive field). Current projections
 distinguish a checked time, a checked source with no time, unavailable metadata,
 and unbound material. Existing payloads remain parseable and library identity
 versions stay unchanged; source time does not assert when a described event occurred.
+Native library delivery includes this optional field only after reserving
+complete source support. An absent field means undisclosed, not absent source
+metadata.
 
 Protocol 13.3.0 adds optional bounded, current-source zero-binding computation
 control to the `soul.interpretation` library delivery under invariant §25

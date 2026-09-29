@@ -765,6 +765,10 @@ metadata, independently of its validity interval and the read clock. Known,
 not-recorded, metadata-unavailable and unbound remain distinct; this metadata
 does not establish when a described event occurred. Historical disclosures
 without the field remain parseable, and existing library identities stay v6/7.
+In native library delivery, the complete source facts and text reserve the
+first-page envelope before optional source time is included. An absent
+`source_time` means time was not disclosed, including when the byte or work
+budget omits it; it does not mean the original record lacked source time.
 
 ## Opt-in open source semantics
 

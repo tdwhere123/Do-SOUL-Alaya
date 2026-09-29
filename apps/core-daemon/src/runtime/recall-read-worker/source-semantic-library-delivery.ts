@@ -86,12 +86,40 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
       authorized: plan.authorized, expires_at: plan.expires_at, revision: sourceSemanticRevision(runtime),
       continuation, request_identity: plan.request_identity, library_plan: plan }, meter, continuation.continuation_id);
   }
-  meter.retain(encodeSourceSemanticLibraryResponse(result), "library public serialization");
-  const final = { ...result, work: workOf(meter) };
-  if (Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(final))) > request.output_byte_limit) {
+  const baseEncoded = encodeSourceSemanticLibraryResponse(result);
+  meter.retain(baseEncoded, "library public serialization");
+  // The reserved work receipt is an upper bound on the eventual metered receipt.
+  let reservedBytes = Buffer.byteLength(JSON.stringify(baseEncoded))
+    + Buffer.byteLength(JSON.stringify(reservedWork(request))) - Buffer.byteLength(JSON.stringify(result.work));
+  if (reservedBytes > request.output_byte_limit) {
     throw new CoreError("VALIDATION", "output budget cannot retain reserved source support");
   }
-  return final;
+  let final: Recall = result;
+  // Source time occurs once in the disclosure map and once in the public result.
+  // Charge each bounded formatting attempt before measuring it, even when it
+  // cannot fit. Previously reserved roots, previews and proofs remain intact.
+  for (const row of page) {
+    const source_time = row.source_disclosure.source_time;
+    if (source_time === undefined) continue;
+    // ISO times are bounded to 64 ASCII characters by the disclosure schema;
+    // this covers escaped JSON, both public copies and transient formatting.
+    const timeSizeBound = source_time.kind === "known" ? source_time.at.length * 6 + 96 : 128;
+    try { meter.charge(1, timeSizeBound * 4, "optional source time packing"); }
+    catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      break;
+    }
+    const addedBytes = 2 * Buffer.byteLength(`,"source_time":${JSON.stringify(source_time)}`);
+    if (reservedBytes + addedBytes > request.output_byte_limit) continue;
+    const key = indexEntryCacheKey(row.entry);
+    const disclosure = final.source_disclosures[key];
+    if (disclosure === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selected library source lacks disclosure");
+    final = { ...final, source_disclosures: {
+      ...final.source_disclosures, [key]: { ...disclosure, source_time }
+    } };
+    reservedBytes += addedBytes;
+  }
+  return { ...final, work: workOf(meter) };
 }
 
 function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean,
@@ -110,15 +138,17 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
   const unproved = base.unproved_computations.filter(row => deliveredSources.has(
     `${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`));
   const previews = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), row.preview]));
-  const source_disclosures = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), {
-    ...row.source_disclosure,
-    proof_use: row.proofs.length > 0
-      ? { kind: "conditional_support" as const, qualification: "not_world_claim" as const }
-      : { kind: "source_only" as const, qualification: "not_current_proof" as const }
-  }]));
+  const source_disclosures = Object.fromEntries(page.map(row => {
+    const { source_time: _source_time, ...disclosure } = row.source_disclosure;
+    return [indexEntryCacheKey(row.entry), {
+      ...disclosure,
+      proof_use: row.proofs.length > 0
+        ? { kind: "conditional_support" as const, qualification: "not_world_claim" as const }
+        : { kind: "source_only" as const, qualification: "not_current_proof" as const }
+    }];
+  }));
   const discovery = { ...base.discovery, access };
-  const work = reserveWork ? { native_work: request.budget.work_units, logical_work: request.budget.work_units,
-    native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes, rss_bytes: Number.MAX_SAFE_INTEGER } : workOf(meter);
+  const work = reserveWork ? reservedWork(request) : workOf(meter);
   const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget,
     request_identity: base.public_request_identity,
     query_semantics_status: base.query_semantics_status,
@@ -135,6 +165,11 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
   });
   if (result.kind !== "recall") throw new CoreError("OBLIGATION_VIOLATION", "library delivery result kind changed");
   return result;
+}
+function reservedWork(request: Request) {
+  return { native_work: request.budget.work_units, logical_work: request.budget.work_units,
+    native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,
+    rss_bytes: Number.MAX_SAFE_INTEGER };
 }
 function root(row: SourceSemanticLibraryPackage): string {
   if (row.entry.target.kind !== "source_evidence") throw new CoreError("OBLIGATION_VIOLATION", "library package has no source root");
