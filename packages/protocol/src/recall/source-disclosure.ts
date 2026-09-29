@@ -6,6 +6,11 @@ export const SourceDisclosureSchema = z.object({
   material_kind: z.enum(["original_body", "retained_excerpt", "retained_gist", "interpretation"]),
   source_binding: z.enum(["checked_record", "unbound"]),
   evaluated_as_of: IsoDatetimeStringSchema,
+  /** Stored source observation/event time; it does not assert when a described event occurred. */
+  source_time: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("known"), at: IsoDatetimeStringSchema }).strict(),
+    z.object({ kind: z.literal("unknown"), reason: z.enum(["not_recorded", "unbound", "metadata_unavailable"]) }).strict()
+  ]).optional(),
   validity: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("bounded"), from: IsoDatetimeStringSchema,
       to_exclusive: IsoDatetimeStringSchema }).strict(),
@@ -18,6 +23,17 @@ export const SourceDisclosureSchema = z.object({
     z.object({ kind: z.literal("conditional_support"), qualification: z.literal("not_world_claim") }).strict()
   ])
 }).strict().superRefine((value, context) => {
+  if (value.source_time?.kind === "known" && value.source_binding !== "checked_record") {
+    context.addIssue({ code: "custom", path: ["source_time"], message: "source time requires a checked record" });
+  }
+  if (value.source_time?.kind === "unknown" && value.source_binding === "unbound"
+    && value.source_time.reason !== "unbound") {
+    context.addIssue({ code: "custom", path: ["source_time"], message: "unbound source time must remain unbound" });
+  }
+  if (value.source_time?.kind === "unknown" && value.source_binding === "checked_record"
+    && value.source_time.reason === "unbound") {
+    context.addIssue({ code: "custom", path: ["source_time"], message: "checked source time cannot be unbound" });
+  }
   if (value.source_binding === "unbound" && (value.validity.kind !== "unknown" || value.validity.reason !== "unbound")) {
     context.addIssue({ code: "custom", path: ["validity"], message: "unbound material cannot claim original validity" });
   }

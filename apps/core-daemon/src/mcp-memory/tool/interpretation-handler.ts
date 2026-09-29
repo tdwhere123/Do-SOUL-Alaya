@@ -92,7 +92,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome, semantic_status: "unreviewed",
         source_disclosure: projectSourceDisclosure({ material_kind: "interpretation",
           evaluated_as_of: prepared.source_disclosure.evaluated_as_of,
-          source: validityFromDisclosure(prepared.source_disclosure) }),
+          source: checkedSourceFromDisclosure(prepared.source_disclosure) }),
         source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest,
           attribution_context: prepared.attribution_context },
         coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes }, provider_attempts: 0 });
@@ -110,7 +110,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
     return SoulInterpretationResponseSchema.parse({ operation: "propose",
       outcome: { status: "interpreted", gaps: published.bound.interpretation.gaps }, published: published.bound,
       source_disclosure: projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: input.interpretationClock ?? input.now(),
-        ...(published.source_record === undefined ? { source: validityFromDisclosure(prepared.source_disclosure) }
+        ...(published.source_record === undefined ? { source: checkedSourceFromDisclosure(prepared.source_disclosure) }
           : { source: published.source_record }) }),
       evidence_object_id: published.evidence.object_id, coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" },
       work: { ...prepared.work, native_work: prepared.work.native_work + (published.resource_usage?.native_work ?? 0),
@@ -143,12 +143,16 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
   }
 }
 
-function validityFromDisclosure(disclosure: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
-  { valid_from?: string | null; valid_to?: string | null } {
+function checkedSourceFromDisclosure(disclosure: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
+  { event_time?: string | null; valid_from?: string | null; valid_to?: string | null } | undefined {
+  if (disclosure.source_binding === "unbound") return undefined;
+  const sourceTime = disclosure.source_time;
+  const event_time = sourceTime?.kind === "known" ? { event_time: sourceTime.at }
+    : sourceTime?.reason === "not_recorded" ? { event_time: null } : {};
   const validity = disclosure.validity;
-  if (validity.kind === "bounded") return { valid_from: validity.from, valid_to: validity.to_exclusive };
-  if (validity.kind === "open") return { valid_from: validity.from, valid_to: null };
-  return validity.reason === "not_recorded" ? { valid_from: null, valid_to: null } : {};
+  if (validity.kind === "bounded") return { ...event_time, valid_from: validity.from, valid_to: validity.to_exclusive };
+  if (validity.kind === "open") return { ...event_time, valid_from: validity.from, valid_to: null };
+  return validity.reason === "not_recorded" ? { ...event_time, valid_from: null, valid_to: null } : event_time;
 }
 
 async function executeWorker(input: Dependencies, context: McpMemoryToolCallContext, request: SourceSemanticWorkerRequest,

@@ -6,6 +6,7 @@ import { SourceSemanticAccessReceiptSchema } from "../../garden/source-semantic-
 import { InformationIndexSchema, sourceIndexEntry, indexEntryCacheKey } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
+import { SourceDisclosureSchema } from "../../recall/source-disclosure.js";
 import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema,
@@ -26,6 +27,20 @@ const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_byt
 const disclosure = { material_kind: "interpretation", source_binding: "unbound",
   evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "unbound" },
   temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } };
+
+it("accepts historical disclosure bytes while binding disclosed source time to a checked record", () => {
+  expect(SourceDisclosureSchema.safeParse(disclosure).success).toBe(true);
+  expect(SourceDisclosureSchema.safeParse({ ...disclosure,
+    source_time: { kind: "unknown", reason: "unbound" } }).success).toBe(true);
+  expect(SourceDisclosureSchema.safeParse({ ...disclosure,
+    source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }).success).toBe(false);
+  const checked = { ...disclosure, source_binding: "checked_record",
+    validity: { kind: "unknown", reason: "not_recorded" } };
+  expect(SourceDisclosureSchema.safeParse({ ...checked,
+    source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }).success).toBe(true);
+  expect(SourceDisclosureSchema.safeParse({ ...checked,
+    source_time: { kind: "unknown", reason: "unbound" } }).success).toBe(false);
+});
 const validQuery = SourceSemanticQuerySchema.parse({
   contract: "source-semantic-query-v4", original_query_digest: digest,
   approved_fixed_context: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,

@@ -759,6 +759,13 @@ The required public fields are a Protocol 13.0.0 major cutover under invariant
 old response bytes and continuations are not relabeled. Source-record and
 interpretation identity algorithms remain unchanged.
 
+Protocol 13.4.0 adds optional `source_time` to this view. Current projections
+disclose the checked source record's `event_time` as source observation/event
+metadata, independently of its validity interval and the read clock. Known,
+not-recorded, metadata-unavailable and unbound remain distinct; this metadata
+does not establish when a described event occurred. Historical disclosures
+without the field remain parseable, and existing library identities stay v6/7.
+
 ## Opt-in open source semantics
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent

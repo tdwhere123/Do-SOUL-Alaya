@@ -1,12 +1,12 @@
 import { compareUtcInstants, SourceDisclosureSchema, type SourceDisclosure } from "@do-soul/alaya-protocol";
 
-type SourceTime = Readonly<{ valid_from?: string | null; valid_to?: string | null }>;
+type CheckedSource = Readonly<{ event_time?: string | null; valid_from?: string | null; valid_to?: string | null }>;
 
 /** Checked source metadata is optional for reductions; absence remains explicit. */
 export function projectSourceDisclosure(input: Readonly<{
   material_kind: SourceDisclosure["material_kind"];
   evaluated_as_of: string;
-  source?: SourceTime;
+  source?: CheckedSource;
   proof_use?: SourceDisclosure["proof_use"]["kind"];
 }>): SourceDisclosure {
   const from = input.source?.valid_from;
@@ -31,6 +31,13 @@ export function projectSourceDisclosure(input: Readonly<{
     material_kind: input.material_kind,
     source_binding: input.source === undefined ? "unbound" : "checked_record",
     evaluated_as_of: input.evaluated_as_of,
+    source_time: input.source === undefined
+      ? { kind: "unknown", reason: "unbound" }
+      : input.source.event_time === undefined
+        ? { kind: "unknown", reason: "metadata_unavailable" }
+        : input.source.event_time === null
+          ? { kind: "unknown", reason: "not_recorded" }
+          : { kind: "known", at: input.source.event_time },
     validity,
     temporal_state,
     proof_use: input.proof_use === "conditional_support"

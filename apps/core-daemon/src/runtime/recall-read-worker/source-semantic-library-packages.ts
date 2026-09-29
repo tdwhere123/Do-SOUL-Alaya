@@ -80,7 +80,7 @@ function hydrate(meter: SourceSemanticReadBudget, source: string, offset: number
 }
 function readSource(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, entry: IndexEntry): { text: string; bytes: number;
-    record: { valid_from: string | null; valid_to: string | null } } | undefined {
+    record: { event_time: string | null; valid_from: string | null; valid_to: string | null } } | undefined {
   if (entry.target.kind !== "source_evidence") return undefined;
   meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "library raw prefix");
   const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
@@ -91,5 +91,5 @@ function readSource(runtime: SourceSemanticReadRuntime, payload: SourceSemanticW
     || record.source_version !== entry.target.source_version || record.content_digest !== entry.target.content_digest) return undefined;
   authorizeSemanticScope(record.scope_class, authorized);
   return { text: record.source_body, bytes: stored.bodyBytes,
-    record: { valid_from: record.valid_from, valid_to: record.valid_to } };
+    record: { event_time: record.event_time, valid_from: record.valid_from, valid_to: record.valid_to } };
 }

@@ -33,12 +33,27 @@ describe("source disclosure", () => {
       source: {} })).toMatchObject({ validity: { kind: "unknown", reason: "metadata_unavailable" } });
   });
 
+  it("preserves checked source observation time independently of validity and read time", () => {
+    const evaluated_as_of = "2026-09-25T10:00:00Z";
+    const known = projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of,
+      source: { ...source, event_time: "2024-01-02T03:04:05.0000007Z" } });
+    expect(known.source_time).toEqual({ kind: "known", at: "2024-01-02T03:04:05.0000007Z" });
+    expect(known.validity).toEqual({ kind: "bounded", from: source.valid_from, to_exclusive: source.valid_to });
+    expect(projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of,
+      source: { ...source, event_time: null } }).source_time).toEqual({ kind: "unknown", reason: "not_recorded" });
+    expect(projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of,
+      source }).source_time).toEqual({ kind: "unknown", reason: "metadata_unavailable" });
+    expect(projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of }).source_time)
+      .toEqual({ kind: "unknown", reason: "unbound" });
+  });
+
   it("labels independently retained evidence text without claiming original validity", () => {
     const projected = projectEvidenceRead({ gist: "interpretation", excerpt: "joined mention" }, "2026-09-25T10:00:00Z");
     expect(projected.gist).toBe("interpretation");
     expect(projected.excerpt).toBe("joined mention");
     expect(projected.text_disclosures.gist).toMatchObject({ material_kind: "retained_gist",
-      validity: { kind: "unknown", reason: "unbound" }, proof_use: { kind: "source_only", qualification: "not_current_proof" } });
+      validity: { kind: "unknown", reason: "unbound" }, source_time: { kind: "unknown", reason: "unbound" },
+      proof_use: { kind: "source_only", qualification: "not_current_proof" } });
     expect(projected.text_disclosures.excerpt).toMatchObject({ material_kind: "retained_excerpt" });
     expect(projected.text_disclosures.content).toEqual(projected.text_disclosures.excerpt);
   });

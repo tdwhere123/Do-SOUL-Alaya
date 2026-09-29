@@ -55,6 +55,7 @@ const SOURCE_DISCLOSURE = {
   material_kind: "original_body",
   source_binding: "checked_record",
   evaluated_as_of: "2026-09-18T00:00:00.000Z",
+  source_time: { kind: "known", at: "2024-02-03T04:05:06Z" },
   validity: { kind: "unknown", reason: "not_recorded" },
   temporal_state: "unknown",
   proof_use: { kind: "source_only", qualification: "not_current_proof" }
@@ -393,7 +394,8 @@ it("accepts a located no-proposition disposition without publishing a fictitious
         source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] },
     producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET });
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "no_executable_proposition" },
-    semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" }, provider_attempts: 0 } });
+    semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" },
+    source_disclosure: { source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }, provider_attempts: 0 } });
   expect(publish).not.toHaveBeenCalled();
 });
 

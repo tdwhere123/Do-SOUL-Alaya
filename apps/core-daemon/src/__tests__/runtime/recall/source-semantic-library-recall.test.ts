@@ -147,7 +147,8 @@ async function withLibrary(body: (input: {
   allIds: readonly string[]; execute: Execute; filename: string;
   sourceTarget: SourceEvidenceTarget;
 }) => Promise<void>, count: number, obsoleteVersions = 0, retiredFirst = false,
-  validity: { valid_from: string | null; valid_to: string | null } = { valid_from: null, valid_to: null }) {
+  validity: { valid_from: string | null; valid_to: string | null } = { valid_from: null, valid_to: null },
+  eventTime: string | null = null) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -167,7 +168,7 @@ async function withLibrary(body: (input: {
   }
   await admission.admit({
     workspace_id: WS, source_id: "artifact-1", source_version: "1", content_bytes: SOURCE,
-    evidence_object_id: null, recorded_at: CLOCK, event_time: null, ...validity,
+    evidence_object_id: null, recorded_at: CLOCK, event_time: eventTime, ...validity,
     speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
   }, { workspaceId: WS });
   await admission.admit({
@@ -254,6 +255,29 @@ it("discloses the original interval through reopened worker and public delivery 
     });
     expect(ended.worker.proofs ?? []).toHaveLength(0);
   }, 1, 0, false, { valid_from: from, valid_to: to });
+}, 60000);
+
+it("delivers checked source observation time from SQLite and keeps missing or unbound time explicit", async () => {
+  const observed = "2024-02-03T04:05:06.0000007Z";
+  await withLibrary(async ({ execute }) => {
+    const worker = await call(execute, recallRequest([]));
+    if (worker.kind !== "recall") throw new Error("library recall expected");
+    const publicResult = encodeSourceSemanticLibraryResponse(worker);
+    if (publicResult.operation !== "recall") throw new Error("public recall expected");
+    const known = publicResult.results?.find(row => row.content_preview.includes(ASSERTION));
+    const absent = publicResult.results?.find(row => row.content_preview.includes(FAILED_SOURCE));
+    expect(known?.source_disclosure).toMatchObject({ source_binding: "checked_record",
+      source_time: { kind: "known", at: observed }, proof_use: { kind: "source_only" } });
+    expect(absent?.source_disclosure).toMatchObject({ source_binding: "checked_record",
+      source_time: { kind: "unknown", reason: "not_recorded" }, proof_use: { kind: "source_only" } });
+    expect(known?.source_disclosure?.source_time).not.toEqual({ kind: "known", at: CLOCK });
+    expect(Object.values(worker.source_disclosures).map(row => row.source_time)).toContainEqual({ kind: "known", at: observed });
+    const withoutCheckedMetadata = Core.encodeSourceSemanticLibraryResults(worker.index,
+      new Map(Object.entries(worker.previews ?? {})));
+    expect(withoutCheckedMetadata).toHaveLength(publicResult.results?.length ?? 0);
+    expect(withoutCheckedMetadata.every(row => row.source_disclosure?.source_time?.kind === "unknown"
+      && row.source_disclosure.source_time.reason === "unbound")).toBe(true);
+  }, 1, 0, false, { valid_from: null, valid_to: null }, observed);
 }, 60000);
 
 async function call<K extends SourceSemanticWorkerRequest["kind"]>(execute: Execute, request: Extract<SourceSemanticWorkerRequest, { kind: K }>) {
