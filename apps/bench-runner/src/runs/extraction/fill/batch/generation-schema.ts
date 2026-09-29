@@ -22,9 +22,13 @@ const SOURCE_SCHEMA_INSTRUCTION =
 /** Provider decoding guidance is weaker than local admission, which keeps every required field. */
 export function projectGeminiGenerationSchema(schema: object): { schema?: object; recursive: boolean; instruction?: string } {
   const root = schema as Schema, recursiveReferences = new Map<string, boolean>();
-  const contract = record(record(root.properties)?.contract);
+  const properties = record(root.properties);
+  const contract = record(properties?.contract);
   const values = Array.isArray(contract?.enum) ? contract.enum : [contract?.const];
-  const envelope = values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
+  // Request-specific correspondence versions come from Soul's schema owner.
+  const correspondenceEnvelope = record(properties?.semantic_correspondence) !== undefined
+    && record(properties?.outcome) !== undefined;
+  const envelope = correspondenceEnvelope || values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
     || value === SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT);
   const instruction = envelope ? ENVELOPE_SCHEMA_INSTRUCTION : SOURCE_SCHEMA_INSTRUCTION;
   const cycle = (value: unknown, visiting = new Set<string>()): boolean => {

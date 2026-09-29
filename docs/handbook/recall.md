@@ -825,12 +825,23 @@ handles. It selects no equivalence and gives no new proof authority. Mention spa
 units remain tagged separately from source UTF-8 assertion and attribution spans;
 the source interpretation identity does not bind mention spans. Recorded v5 and v6 C
 request bytes and cache identities remain historical and cannot enter current
-generation; there is no retained historical C semantic replay entry. The current C
-response v4 carries `source-semantic-correspondence-assessment-v1`: each advertised
-query endpoint has exactly one supported or unresolved assessment. Supported
+generation; there is no retained historical C semantic replay entry. Current C
+response v5 derives its request-specific generation schema from
+`source-semantic-correspondence-assessment-v1`; retained v4 responses keep their
+original decoder. Each advertised query endpoint has exactly one supported or
+unresolved assessment. Supported
 assessments propose explicit source equivalents; unresolved assessments propose
-none, while supported endpoints may still form a partial canonical C. Only
-supported pairs lower to the existing canonical C; grounding and unresolved
+none, while supported endpoints may still form a partial canonical C. In v5,
+only a referent or slot with one unique, stored, verbatim original-query excerpt
+may omit `query_excerpt`. SOUL uses one eligibility resolver for generation and
+reception, meters prospective UTF-8 expansion before copying,
+and fills only absent properties before unchanged assessment and Core admission.
+Predicate quotes, ambiguous or context-only support, and supplied invalid quotes
+are never repaired. Pair choice, source support, context and unresolved meaning
+remain producer responsibilities. This mechanical completion does not certify
+semantic correspondence. Benchmark request identities include the new schema
+and prompt; retained raw v4 responses and Q/H-keyed library caches are not upgraded.
+Only supported pairs lower to the existing canonical C; grounding and unresolved
 explanations remain inspectable metadata, not executable proof. Protocol counts
 projected JSON bytes incrementally before expanding each endpoint and repeated
 use. SOUL uses the same meter to bound descriptor aggregation and reserve
@@ -838,7 +849,9 @@ the other request fields before projection; the projection spends only the
 remaining 1 MB request allowance. SOUL retains the final full-request
 serialization cap as a backstop.
 The Protocol endpoint-evidence projection exports are additive minor API under
-invariant §25; the v7 C request and v4 response have current wire identities.
+invariant §25; the v7 C request and request-aware v5 response have current wire
+identities. The existing no-argument Schema API still describes retained v4;
+new generation passes its request to the same API. Canonical C is unchanged.
 Role-only inputs explicitly
 carry `unknown`; they do not manufacture a speaker or conversation identity.
 Captured attribution is scoped to its issuer and conversation, and exact UTF-8

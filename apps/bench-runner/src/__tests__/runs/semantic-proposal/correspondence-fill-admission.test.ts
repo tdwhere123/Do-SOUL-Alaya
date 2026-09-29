@@ -18,7 +18,8 @@ import {
   UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import {
-  buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest
+  buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, sourceSemanticCorrespondenceResponseJsonSchema
 } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
@@ -30,7 +31,7 @@ import {
   executeSemanticProposalFill, prepareRetainedSemanticProposalRevision, prepareSemanticProposal, readSemanticProposalResults
 } from "../../../runs/semantic-proposal/fill.js";
 import {
-  materializeSemanticProposalLines, parseSemanticProposalWorkset
+  materializeSemanticProposalLines, parseSemanticProposalWorkset, proposalCacheKey
 } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
@@ -42,6 +43,7 @@ import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js"
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
 const ORIGINAL = "which parcel was sent and inspected?";
+const CORRESPONDENCE_GENERATION_RESPONSE_V5 = "source-semantic-correspondence-response-v5";
 const roots: string[] = [];
 
 proposalRecoveryCases({ workset: correspondenceWorkset,
@@ -195,6 +197,30 @@ function assessmentBody(request: SourceSemanticCorrespondenceRequest, inventedSu
         query: predicate.handle, source: frame.handle, query_excerpt: "sent",
         source_semantic_support: [{ kind: "lexical", mentions: [inventedSupport ? "mInvented" : "mSent"] }]
       }])
+    }
+  });
+}
+
+function generationBody(request: SourceSemanticCorrespondenceRequest): string {
+  const predicate = request.catalog.query_endpoints.find((row) => row.kind === "predicate");
+  const slot = request.catalog.query_endpoints.find((row) => row.kind === "slot");
+  const frame = request.catalog.source_endpoints.find((row) => row.kind === "frame");
+  if (predicate === undefined || slot === undefined || frame === undefined) {
+    throw new Error("semantic_correspondence catalog missing predicate, slot, or frame");
+  }
+  return JSON.stringify({
+    contract: CORRESPONDENCE_GENERATION_RESPONSE_V5,
+    outcome: { status: "interpreted" },
+    semantic_correspondence: {
+      contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+      assessments: request.catalog.query_endpoints.map((endpoint) => endpoint.handle === predicate.handle
+        ? { query: endpoint.handle, status: "supported", equivalents: [{
+          source: frame.handle, query_excerpt: "sent",
+          source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }],
+          grounding: "The cited source support grounds this local relation."
+        }] }
+        : { query: endpoint.handle, status: "unresolved",
+          explanation: "No equivalent source endpoint is proposed in this fixture." })
     }
   });
 }
@@ -441,6 +467,36 @@ it("binds a C child to its settled physical parent and current request attention
     authority, config: config(), extractor: extractor([assessmentBody(childLine.request as SourceSemanticCorrespondenceRequest)]) });
   expect(result.interpreted).toBe(1);
   expect(readSemanticProposalResults(child, childRoot, 128)[0]?.status).toBe("interpreted");
+});
+
+it("binds correspondence generation schema per request and completes omitted eligible quotes", async () => {
+  const prepared = correspondenceWorkset();
+  const line = materializeSemanticProposalLines(prepared, 128)[0]!;
+  const request = line.request as SourceSemanticCorrespondenceRequest;
+  expect(JSON.stringify(line.responseJsonSchema)).toContain(CORRESPONDENCE_GENERATION_RESPONSE_V5);
+  expect(JSON.stringify(line.responseJsonSchema)).not.toContain("source-semantic-correspondence-response-v4");
+  expect(line.key).not.toBe(proposalCacheKey(MODEL, PROFILE, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
+    line.userPrompt, sourceSemanticCorrespondenceResponseJsonSchema(), 128, "http://127.0.0.1:9"));
+  const body = generationBody(request);
+  const received = proposeCorrespondenceSemantics({
+    original_query: request.original_query, admitted_query_semantics: request.admitted_query_semantics,
+    source_interpretation_descriptors: request.source_interpretation_descriptors,
+    producer_id: request.producer_capability.producer_id, producer_version: request.producer_capability.producer_version
+  }, { rawJson: body });
+  expect(received.outcome.status).toBe("interpreted");
+  expect(received.assessment?.assessments.some((row) => row.status === "unresolved" && row.query_excerpt === "parcel")).toBe(true);
+  expect(JSON.parse(body).semantic_correspondence.assessments.some((row: { query_excerpt?: string }) => row.query_excerpt === undefined)).toBe(true);
+  const cacheRoot = join(tempRoot(), "generation-cache");
+  const authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2
+  });
+  const result = await executeSemanticProposalFill({
+    workset: prepared, cacheRoot, authority, config: config(), extractor: extractor([body])
+  });
+  expect(result.interpreted).toBe(1);
+  expect(result.newly_admitted).toBe(1);
+  expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status).toBe("interpreted");
 });
 
 it("admits an semantic_correspondence shard only after Core admission", async () => {

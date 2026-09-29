@@ -107,7 +107,6 @@ export function materializeSemanticProposalLines(
   }
   const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID;
   const producer_version = workset.producer_version ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION;
-  const schema = sourceSemanticCorrespondenceResponseJsonSchema();
   return workset.items.map((item) => {
     const parsed = CorrespondenceItemSchema.parse(item);
     const request = buildSourceSemanticCorrespondenceRequest({
@@ -117,8 +116,8 @@ export function materializeSemanticProposalLines(
       producer_id, producer_version,
       ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
     });
-    return bindLine(workset, "semantic_correspondence", SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, request, schema,
-      parsed.original_query, maxOutputTokens);
+    return bindLine(workset, "semantic_correspondence", SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, request,
+      sourceSemanticCorrespondenceResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
   });
 }
 

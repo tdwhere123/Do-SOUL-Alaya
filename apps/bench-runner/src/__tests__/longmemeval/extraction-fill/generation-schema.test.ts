@@ -19,7 +19,8 @@ const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor mi
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 
 describe("Gemini complete generation schema guidance", () => {
-  it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT])(
+  it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+    "source-semantic-correspondence-response-v5"])(
     "keeps compact but exponentially expanded %s envelopes in JSON mode", (contract) => {
     const definitions: Record<string, object> = { leaf: { type: "string" } };
     let reference = "#/$defs/leaf";
@@ -29,8 +30,10 @@ describe("Gemini complete generation schema guidance", () => {
       } };
       reference = `#/$defs/level${depth}`;
     }
+    const bodyProperty = contract === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
+      ? "query_meaning" : "semantic_correspondence";
     const schema = { type: "object", properties: {
-      contract: { enum: [contract] }, body: { $ref: reference }
+      contract: { enum: [contract] }, outcome: { type: "object" }, [bodyProperty]: { $ref: reference }
     }, $defs: definitions };
     expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThan(4096);
     const projected = projectGeminiGenerationSchema(schema);
@@ -40,7 +43,7 @@ describe("Gemini complete generation schema guidance", () => {
     expect(projected.instruction).toContain("complete response envelope including its contract, outcome and body");
     expect(JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema))).instruction).toBe(projected.instruction);
     expect(projectGeminiGenerationSchema({ ...schema, properties: {
-      contract: { enum: [contract] }, body: { type: "string" }
+      contract: { enum: [contract] }, outcome: { type: "object" }, [bodyProperty]: { type: "string" }
     } }).schema).toBeDefined();
   });
   it("keeps correspondence decoding structured until its actual schema exceeds the byte budget", () => {

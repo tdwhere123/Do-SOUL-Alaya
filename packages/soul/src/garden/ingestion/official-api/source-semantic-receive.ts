@@ -27,6 +27,11 @@ import {
   type SourceInterpretationDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
 } from "./source-semantic-request.js";
+import {
+  SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT,
+  completeSourceSemanticCorrespondenceGenerationAssessment,
+  resolveSourceSemanticQueryProvenance
+} from "./source-semantic-query-provenance.js";
 
 export const MAX_SOURCE_SEMANTIC_RESPONSE_BYTES = 1024 * 1024;
 const HOST_ONLY_OUTCOMES = new Set(["no_eligible_source", "unavailable", "unexercised", "preparation_required"]);
@@ -223,22 +228,58 @@ function receiveCorrespondenceSemantics(
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
+  if (responseContract(parsed.value) === SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT) {
+    return receiveCorrespondenceGeneration(parsed.value, request, attempt);
+  }
   const envelope = CorrespondenceAssessmentResponseSchema.safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
-  if (HOST_ONLY_OUTCOMES.has(envelope.data.outcome.status)) {
+  return finishCorrespondenceEnvelope(envelope.data, request, attempt, envelope.data.semantic_correspondence);
+}
+
+function receiveCorrespondenceGeneration(
+  value: unknown, request: SourceSemanticCorrespondenceRequest, attempt: Attempt<SourceSemanticCorrespondenceRequest>
+): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
+  const envelope = CorrespondenceGenerationResponseSchema.safeParse(value);
+  if (!envelope.success) {
+    return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
+  }
+  let body = envelope.data.semantic_correspondence;
+  if (envelope.data.outcome.status === "interpreted" && body !== undefined) {
+    try {
+      body = completeSourceSemanticCorrespondenceGenerationAssessment(
+        body, resolveSourceSemanticQueryProvenance(
+          request.admitted_query_semantics, request.catalog, request.original_query
+        )
+      );
+    } catch (error) {
+      return { ...attempt, outcome: invalidProposalOutcome(error) };
+    }
+  }
+  return finishCorrespondenceEnvelope(envelope.data, request, attempt, body);
+}
+
+function finishCorrespondenceEnvelope(
+  envelope: Readonly<{ outcome: { status: string; gaps?: unknown }; semantic_correspondence?: unknown }>,
+  request: SourceSemanticCorrespondenceRequest,
+  attempt: Attempt<SourceSemanticCorrespondenceRequest>,
+  body: unknown
+): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
+  if (HOST_ONLY_OUTCOMES.has(envelope.outcome.status)) {
     return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
   }
-  if (envelope.data.outcome.status !== "interpreted") return { ...attempt, outcome: envelope.data.outcome };
-  if (envelope.data.semantic_correspondence === undefined) {
+  if (envelope.outcome.status !== "interpreted") {
+    return { ...attempt, outcome: envelope.outcome as SourceSemanticOutcome };
+  }
+  if (body === undefined) {
     return { ...attempt, outcome: { status: "invalid", reason: "interpreted_correspondence_required" } };
   }
   try {
-    const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse(materializeCorrespondence(envelope.data.semantic_correspondence, request));
-    const assessment = SourceSemanticCorrespondenceAssessmentSchema.parse(envelope.data.semantic_correspondence);
+    const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse(materializeCorrespondence(body, request));
+    const assessment = SourceSemanticCorrespondenceAssessmentSchema.parse(body);
     SourceSemanticOutcomeGapBindingSchema.parse({
-      outcome: { status: "interpreted", gaps: envelope.data.outcome.gaps ?? [] }, gaps: []
+      outcome: { status: "interpreted", gaps: envelope.outcome.gaps ?? [] }, gaps: []
     });
     if (semantic_correspondence.query_semantics_id !== sourceSemanticQueryIdentity(request.admitted_query_semantics, semanticSha256)) {
       return { ...attempt, outcome: { status: "invalid", reason: "correspondence_query_semantics_mismatch" } };
@@ -250,6 +291,11 @@ function receiveCorrespondenceSemantics(
   } catch (error) {
     return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
+}
+
+function responseContract(value: unknown): unknown {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as { contract?: unknown }).contract : undefined;
 }
 
 /** Parses proposed query semantics. Core `admitSourceSemanticQuery` is the admission owner. */
@@ -407,6 +453,11 @@ const QueryMeaningResponseSchema = z.object({
 }).strict().readonly();
 const CorrespondenceAssessmentResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
+  outcome: ProducerResponseOutcomeSchema,
+  semantic_correspondence: z.unknown().optional()
+}).strict().readonly();
+const CorrespondenceGenerationResponseSchema = z.object({
+  contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT),
   outcome: ProducerResponseOutcomeSchema,
   semantic_correspondence: z.unknown().optional()
 }).strict().readonly();
