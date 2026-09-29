@@ -209,6 +209,17 @@ describe("Gemini complete generation schema guidance", () => {
         systemInstruction: { parts: [{ text: line.systemPrompt }] } });
       expect(wires[0]?.body).toEqual(encodeGeminiGenerateContent(line, { ...config, maxOutputTokens: 4096,
         includeThoughts: true, responseJsonSchema: schema }));
+      const sent = (wires[0]?.body as { generationConfig: { responseJsonSchema: {
+        properties?: { outcome?: { oneOf?: { properties?: { gaps?: unknown } }[] }; query?: { anyOf?: unknown } }
+      } } }).generationConfig.responseJsonSchema;
+      expect(sent).toEqual(projectGeminiGenerationSchema(schema).schema);
+      const interpreted = sent.properties?.outcome?.oneOf?.find((branch) =>
+        JSON.stringify(branch.properties ?? {}).includes("interpreted"));
+      expect(interpreted?.properties).not.toHaveProperty("gaps");
+      expect(sent.properties?.query?.anyOf).toEqual([
+        { $ref: "#/$defs/queryRequiresRequestedOperation" },
+        { $ref: "#/$defs/queryOmitsEvidenceInputs" }
+      ]);
     } finally {
       server.closeAllConnections();
       await new Promise<void>(resolve => server.close(() => resolve()));

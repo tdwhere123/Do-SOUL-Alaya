@@ -11,6 +11,10 @@ import { admitSourceSemanticQuery } from "../../../../recall/conditional-field/q
 import { SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
 import { planSourceSemanticBranches } from "../../../../recall/runtime/source-semantic-branch-plan.js";
 import { projectSourceSemanticQuerySupport } from "../../../../recall/runtime/source-semantic-query-support.js";
+import {
+  CLASS_SOURCE, NONCLASS_SOURCE, admitNominalClassCorrespondence, actionFrameIds, classSourceTexts,
+  lastQuarterGaps, receiveNominalClassInterpretation, reasonNominalClass
+} from "./source-semantic-nominal-class-support-fixture.js";
 
 const ORIGINAL = "How many widgets did I buy or sell last quarter?";
 const PRODUCER = { original_query: ORIGINAL, producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID, producer_version: "1" };
@@ -164,5 +168,140 @@ describe("independent action inputs through query receive and branch planning", 
     expect(joined.evidence_inputs).toBeUndefined();
     expect(sourceSemanticQueryBranchViews(joined).map(view => view.alternative.frames.map(frame => frame.id)))
       .toEqual([["buy", "sell"]]);
+  });
+});
+
+function admittedIndependentQuery(meaning = independentMeaning()) {
+  const received = receive(encodeSourceSemanticQueryCarrier(meaning));
+  expect(received.outcome.status).toBe("interpreted");
+  const admission = admitSourceSemanticQuery(received.query, ORIGINAL);
+  expect(admission.kind).toBe("admitted");
+  if (admission.kind !== "admitted") throw new Error("independent query must admit");
+  return admission.query;
+}
+
+function evidenceBindings(result: ReturnType<typeof reasonNominalClass>) {
+  return (result.binding_results ?? []).filter(row => row.kind === "evidence");
+}
+
+describe("independent action class evidence through native Q/H/C and Field", () => {
+  it("binds each action branch when implicit class H has same-object C and retains class source support", () => {
+    const query = admittedIndependentQuery();
+    expect(query.variables.find(row => row.id === "speaker")?.reference?.excerpt).toBe("I");
+    expect(query.variables.find(row => row.id === "object")?.reference).toBeUndefined();
+    const interpretation = receiveNominalClassInterpretation({ source: CLASS_SOURCE });
+    const classFrames = interpretation.frames.filter(row => row.predicate_support.reading === "is a widget");
+    expect(classFrames).toHaveLength(2);
+    expect(classFrames.every(row => row.predicate_support.kind === "implicit")).toBe(true);
+    expect(JSON.stringify(interpretation.frames.map(row => row.predicate_support))).not.toMatch(/this is a (?:tool|widget)/u);
+    const timeGaps = lastQuarterGaps(interpretation);
+    expect(timeGaps).toHaveLength(1);
+    expect(timeGaps[0]!.affected_ids).toEqual(expect.arrayContaining([...actionFrameIds(interpretation)]));
+    expect(timeGaps[0]!.affected_ids).toEqual(expect.not.arrayContaining(classFrames.map(row => row.id)));
+
+    const { correspondence, admission } = admitNominalClassCorrespondence({
+      interpretation, semantics: query, originalQuery: ORIGINAL
+    });
+    expect(admission.kind).toBe("admitted");
+    const result = reasonNominalClass(interpretation, query, correspondence, ORIGINAL);
+    expect(result.outcome.status).toBe("interpreted");
+    const evidence = evidenceBindings(result);
+    expect(evidence.map(row => row.input).sort()).toEqual([0, 1]);
+    for (const binding of evidence) {
+      const classVariable = binding.input === 0 ? "buy_kind" : "sell_kind";
+      expect(classSourceTexts(interpretation, binding.bindings[classVariable]?.node_id)).toEqual(["widgets"]);
+      expect(binding.returned.object?.node_id).toBeDefined();
+      expect(binding.query_complete).toBe(false);
+    }
+    const support = projectSourceSemanticQuerySupport(query, result.binding_results ?? []);
+    expect(support.operation).toBe("not_executed");
+    expect(support.evidence_inputs).toEqual([
+      { alternative: 0, input: 0, status: "supported" },
+      { alternative: 0, input: 1, status: "supported" }
+    ]);
+    expect(query.gaps.map(gap => gap.kind)).toEqual(["unsupported_meaning", "aggregate"]);
+    // Located H time gaps do not block evidence-input supported; that is not original-question proof.
+    expect(timeGaps).not.toEqual([]);
+  });
+
+  it("does not qualify a binding when class correspondence is omitted", () => {
+    const query = admittedIndependentQuery();
+    const interpretation = receiveNominalClassInterpretation();
+    const { correspondence, admission } = admitNominalClassCorrespondence({
+      interpretation, semantics: query, originalQuery: ORIGINAL, includeClass: false
+    });
+    expect(admission.kind).toBe("admitted");
+    const result = reasonNominalClass(interpretation, query, correspondence, ORIGINAL);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(evidenceBindings(result)).toEqual([]);
+    expect(projectSourceSemanticQuerySupport(query, result.binding_results ?? [])).toMatchObject({
+      operation: "not_executed",
+      evidence_inputs: [
+        { alternative: 0, input: 0, status: "open" },
+        { alternative: 0, input: 1, status: "open" }
+      ]
+    });
+  });
+
+  it("does not qualify a binding when class H is attached to a different object", () => {
+    const query = admittedIndependentQuery();
+    const interpretation = receiveNominalClassInterpretation({ classOnSameObject: false });
+    const { correspondence, admission } = admitNominalClassCorrespondence({
+      interpretation, semantics: query, originalQuery: ORIGINAL, classOnSameObject: false
+    });
+    expect(admission.kind).toBe("admitted");
+    const result = reasonNominalClass(interpretation, query, correspondence, ORIGINAL);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(evidenceBindings(result)).toEqual([]);
+  });
+
+  it("does not treat hammer and mallet mentions as widget-class evidence", () => {
+    const query = admittedIndependentQuery();
+    const interpretation = receiveNominalClassInterpretation({ source: NONCLASS_SOURCE, includeClass: false });
+    expect(interpretation.frames.some(row => row.predicate_support.reading === "is a widget")).toBe(false);
+    expect(interpretation.mentions.some(row => row.text === "hammer" || row.text === "mallet")).toBe(true);
+    expect(interpretation.mentions.some(row => row.text === "widgets")).toBe(false);
+    expect(lastQuarterGaps(interpretation)[0]!.affected_ids).toEqual(expect.arrayContaining([...actionFrameIds(interpretation)]));
+    const { correspondence, admission } = admitNominalClassCorrespondence({
+      interpretation, semantics: query, originalQuery: ORIGINAL, includeClass: false
+    });
+    expect(admission.kind).toBe("admitted");
+    const result = reasonNominalClass(interpretation, query, correspondence, ORIGINAL);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(evidenceBindings(result)).toEqual([]);
+  });
+
+  it("leaves directional entailment correspondence unusable instead of forging a taxonomy", () => {
+    const query = admittedIndependentQuery();
+    const interpretation = receiveNominalClassInterpretation();
+    const { correspondence } = admitNominalClassCorrespondence({
+      interpretation, semantics: query, originalQuery: ORIGINAL
+    });
+    const { admission } = admitNominalClassCorrespondence({
+      interpretation, semantics: query, originalQuery: ORIGINAL,
+      correspondence: {
+        ...correspondence,
+        correspondences: correspondence.correspondences.map(row => ({ ...row, relation: "entailment" }))
+      } as unknown as SourceSemanticCorrespondence
+    });
+    expect(admission.kind).toBe("invalid");
+  });
+
+  it("does not treat a free-variable key or excerpt as a class restriction", () => {
+    const query = admittedIndependentQuery({
+      ...independentMeaning(),
+      alternatives: [{ conditions: [], evidence_inputs: [
+        { conditions: [action("buy", "buy")] },
+        { conditions: [action("sell", "sell")] }
+      ] }]
+    });
+    expect(query.alternatives[0]!.frames.some(frame => frame.predicate_reading === "is a widget")).toBe(false);
+    expect(query.alternatives[0]!.frames.find(frame => frame.id === "buy")?.role_requirements)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ role_reading: "theme", target_variable: "object", support: { kind: "query_text", excerpt: "widgets" } })
+      ]));
+    expect(query.variables.find(row => row.id === "speaker")?.reference?.excerpt).toBe("I");
+    expect(query.variables.find(row => row.id === "object")?.reference).toBeUndefined();
+    expect(query.gaps.map(gap => gap.kind)).toEqual(["unsupported_meaning", "aggregate"]);
   });
 });

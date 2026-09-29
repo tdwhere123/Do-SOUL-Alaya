@@ -286,7 +286,57 @@ describe("query meaning receive and semantic_correspondence assessment", () => {
     expect(existential.variables.find(row => row.id === "person")?.reference).toBeUndefined();
     expect(existential.return_variables).toEqual(["tool"]);
     expect(existential.gaps).toMatchObject([{ kind: "unsupported_meaning", affected_ids: ["use_event"] }]);
-    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("A named target preserves a referentially constrained expression");
+    for (const query of [constrained, unresolved, existential]) {
+      const answer = query.alternatives[0]!;
+      const used = answer.frames.find(frame => frame.id === "use_event")
+        ?.role_requirements.find(role => role.role_reading === "theme")?.target_variable;
+      const klass = answer.frames.find(frame => frame.predicate_reading === "is a tool");
+      expect(used).toBeDefined();
+      expect(klass?.role_requirements.map(role => role.target_variable)).toEqual([used]);
+      expect(query.variables.find(row => row.id === used)?.reference).toBeUndefined();
+      expect(answer.frames.some(frame => frame.id === used || frame.predicate_reading === used)).toBe(false);
+    }
+  });
+
+  it("keeps a free tool class as a connected predicate and leaves an unexecuted tool count as inputs", () => {
+    const counted = proposeQuerySemantics({
+      original_query: sourceSemanticQueryExamples[11]!.original_query,
+      producer_id: "query-producer", producer_version: "1"
+    }, { rawJson: JSON.stringify(sourceSemanticQueryExamples[11]!.response) }).query!;
+    const alternative = counted.alternatives[0]!;
+    expect(counted.requested_operation).toEqual(sourceSemanticQueryExamples[11]!.response.query.requested_operation);
+    expect(counted.return_variables).toEqual([]);
+    expect(counted.evaluation).toBeUndefined();
+    expect(alternative.answer_frames).toEqual([]);
+    expect(alternative.evidence_inputs).toEqual([
+      { frames: ["borrow", "borrow_kind"] }, { frames: ["return", "return_kind"] }
+    ]);
+    expect(counted.variables.find(row => row.id === "clerk")?.reference).toEqual({
+      kind: "query_text", excerpt: "the clerk"
+    });
+    expect(counted.variables.find(row => row.id === "tool")?.reference).toBeUndefined();
+    expect(alternative.frames.filter(frame => frame.predicate_reading === "is a tool").map(frame => [
+      frame.id, frame.role_requirements.map(role => role.target_variable)
+    ])).toEqual([["borrow_kind", ["tool"]], ["return_kind", ["tool"]]]);
+    expect(alternative.frames.find(frame => frame.id === "borrow")?.role_requirements.map(role => [
+      role.role_reading, role.target_variable
+    ])).toEqual([["agent", "clerk"], ["theme", "tool"]]);
+    expect(alternative.frames.find(frame => frame.id === "return")?.role_requirements.map(role => [
+      role.role_reading, role.target_variable
+    ])).toEqual([["agent", "clerk"], ["theme", "tool"]]);
+    expect(sourceSemanticQueryBranchViews(alternative).map(view => [
+      view.target, view.alternative.frames.map(frame => frame.id)
+    ])).toEqual([
+      [{ kind: "answer" }, []],
+      [{ kind: "evidence", input: 0 }, ["borrow", "borrow_kind"]],
+      [{ kind: "evidence", input: 1 }, ["return", "return_kind"]]
+    ]);
+    expect(counted.gaps).toMatchObject([
+      { kind: "unsupported_meaning", affected_ids: ["borrow", "return"] },
+      { kind: "aggregate", affected_ids: [] }
+    ]);
+    expect(alternative.frames.some(frame => /count/iu.test(frame.predicate_reading))).toBe(false);
+    expect(counted.variables.some(row => /count/iu.test(row.id))).toBe(false);
   });
 
   it("keeps the two qualified event inputs distinct from the requested elapsed-hours answer", () => {
@@ -331,7 +381,8 @@ describe("query meaning receive and semantic_correspondence assessment", () => {
       [5, "question asked whether the lens was polished", "polish"],
       [6, "directive required polishing", "polish"],
       [7, "did the workshop steward use", "use_event"],
-      [8, "did that technician use", "use_event"], [9, "did someone use", "use_event"]
+      [8, "did that technician use", "use_event"], [9, "did someone use", "use_event"],
+      [11, "did the clerk borrow or return", "borrow"]
     ] as const;
     for (const [index, phrase, affected] of past) {
       const example = sourceSemanticQueryExamples[index]!;

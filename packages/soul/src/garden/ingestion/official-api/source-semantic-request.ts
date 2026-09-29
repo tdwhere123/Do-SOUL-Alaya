@@ -7,9 +7,6 @@ import {
   sourceSemanticTableJsonSchema,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SourceSemanticQueryGapSchema,
-
-
   SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceAssessmentSchema,
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog,
   buildSourceSemanticCorrespondenceEndpointEvidence, countSourceSemanticCorrespondenceJsonBytes,
@@ -359,10 +356,7 @@ export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest
 }
 
 const QueryCorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
-  z.object({
-    status: z.literal("interpreted"),
-    gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional()
-  }).strict().readonly(),
+  z.object({ status: z.literal("interpreted") }).strict().readonly(),
   z.object({ status: z.literal("abstained") }).strict().readonly()
 ]);
 
@@ -381,13 +375,79 @@ function producerResponseJsonSchema(schema: z.ZodType, reused?: "ref"): object {
   });
 }
 
+function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function derefJsonSchema(root: Record<string, unknown>, node: Record<string, unknown>): Record<string, unknown> {
+  if (typeof node.$ref !== "string") return node;
+  const pointer = node.$ref;
+  if (!pointer.startsWith("#/")) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
+  let current: unknown = root;
+  for (const part of pointer.slice(2).split("/")) {
+    current = isJsonSchemaObject(current) ? current[part.replace(/~1/gu, "/").replace(/~0/gu, "~")] : undefined;
+    if (!isJsonSchemaObject(current)) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
+  }
+  if (!isJsonSchemaObject(current)) throw new AlayaError("VALIDATION", `unresolved generation schema pointer ${pointer}`);
+  return derefJsonSchema(root, current);
+}
+
+/** Derive evidence_inputs => requested_operation from the carrier body owner; do not copy its grammar. */
+function constrainQueryGenerationSchema(envelope: object): object {
+  const schema = structuredClone(envelope) as Record<string, unknown>;
+  const properties = isJsonSchemaObject(schema.properties) ? schema.properties : undefined;
+  if (!isJsonSchemaObject(properties?.query)) {
+    throw new AlayaError("VALIDATION", "query generation schema is missing properties.query");
+  }
+  const body = structuredClone(derefJsonSchema(schema, properties.query));
+  const bodyProperties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
+  if (body.anyOf !== undefined || body.oneOf !== undefined || bodyProperties?.requested_operation === undefined
+    || !isJsonSchemaObject(bodyProperties.alternatives) || bodyProperties.alternatives.items === undefined) {
+    throw new AlayaError("VALIDATION", "query carrier body cannot encode the operation/input generation union");
+  }
+  const itemNode = isJsonSchemaObject(bodyProperties.alternatives.items)
+    ? bodyProperties.alternatives.items : { $ref: bodyProperties.alternatives.items };
+  const items = structuredClone(derefJsonSchema(schema, itemNode));
+  if (!isJsonSchemaObject(items.properties) || items.properties.evidence_inputs === undefined) {
+    throw new AlayaError("VALIDATION", "query alternative schema is missing evidence_inputs");
+  }
+  const withOperation = structuredClone(body);
+  const required = Array.isArray(withOperation.required) ? [...withOperation.required as string[]] : [];
+  if (!required.includes("requested_operation")) required.push("requested_operation");
+  withOperation.required = required;
+  const withoutInputs = structuredClone(body);
+  const residualItems = structuredClone(items);
+  delete (residualItems.properties as Record<string, unknown>).evidence_inputs;
+  if (Array.isArray(residualItems.required)) {
+    residualItems.required = (residualItems.required as string[]).filter((key) => key !== "evidence_inputs");
+  }
+  (withoutInputs.properties as Record<string, unknown>).alternatives = {
+    ...structuredClone(bodyProperties.alternatives), items: residualItems
+  };
+  const defsKey = schema.$defs !== undefined ? "$defs" : schema.definitions !== undefined ? "definitions" : "$defs";
+  const defs = isJsonSchemaObject(schema[defsKey]) ? schema[defsKey] as Record<string, unknown> : {};
+  for (const name of ["queryRequiresRequestedOperation", "queryOmitsEvidenceInputs"]) {
+    if (defs[name] !== undefined) throw new AlayaError("VALIDATION", `generation schema already defines ${defsKey}.${name}`);
+  }
+  schema[defsKey] = {
+    ...defs,
+    queryRequiresRequestedOperation: withOperation,
+    queryOmitsEvidenceInputs: withoutInputs
+  };
+  properties.query = {
+    ...(properties.query.readOnly === undefined ? {} : { readOnly: properties.query.readOnly }),
+    anyOf: [{ $ref: `#/${defsKey}/queryRequiresRequestedOperation` }, { $ref: `#/${defsKey}/queryOmitsEvidenceInputs` }]
+  };
+  return schema;
+}
+
 /** Generation envelope for query semantics. Syntax follows the request contract; never inferred from body fields. */
 export function sourceSemanticQueryResponseJsonSchema(): object {
-  return producerResponseJsonSchema(z.object({
+  return constrainQueryGenerationSchema(producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
     outcome: QueryCorrespondenceGenerationOutcomeSchema,
     query: SourceSemanticQueryCarrierBodySchema.optional()
-  }).strict().readonly(), "ref");
+  }).strict().readonly(), "ref"));
 }
 
 /** Current endpoint-assessment generation envelope for semantic correspondence. */
@@ -411,7 +471,7 @@ export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   "Serialize each expression occurrence once in query.nodes with its own node token. alternatives.conditions and evidence_inputs[].conditions are arrays of node tokens. A statement/operator content, antecedent, consequent or operands field contains node tokens, never an embedded expression. Tokens are serialization references, separate from semantic local keys. Every token must resolve once; declare no unreachable nodes or cycles. An occurrence node uses its semantic key to refer to a declared event and still has its own serialization token.",
   "Decide the answer branch before adding inputs. Put the requested relation, its participants and every stated qualification in conditions; conditions are one conjunction, so do not require operand facts merely because they could help derive an answer. A Boolean question returns no fabricated result entity. A source can state the requested relation directly without supplying operands. For a requested calculation or other operation, also retain requested_operation:{reading,support:{kind:query_text,excerpt}} and independently useful evidence_inputs:[{conditions:[...]}]. Listed alternative operand actions belong in separate evidence_inputs, not extra conjuncts of that operation; requiring every listed action together changes or into and. Each input branch carries its own event, participant, time and other qualifications. Input facts never execute the operation or prove the answer. If no faithful answer relation is expressible, conditions:[] may accompany the operation and inputs; do not turn the inputs into a claimed answer.",
   `A nesting path may contain at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes. Deeper meaning must remain a located gap; never silently truncate its scope.`,
-  'An unknown answer or lawful witness is free; a named person or definite participant is named even when source identity is unknown. Shared incidence does not replace the named participant’s referent obligation. A named target preserves a referentially constrained expression in the original query, including a speaker, addressee, name or definite description; give it one exact query excerpt. A free target binds a value without an additional referent constraint; its excerpt supports a role, not a person. If authorized query context leaves the intended named referent genuinely unresolved, retain named and locate an unresolved_referent gap on it, or abstain when no faithful usable query can be proposed. Unknown source correspondence alone requires no gap. Local keys are arbitrary identifiers, never text evidence or identity. Declare named/free entities inline or in the optional entities table, not both; reuse them with {kind:"reference",key}. Free targets, including a free reported.reporter or evidence-input value, need exact support on target or role. Reporter targets remain entities.',
+  'An unknown answer or lawful witness is free; a named person or definite participant is named even when source identity is unknown. Shared incidence does not replace the named participant’s referent obligation. A named target preserves a referentially constrained expression in the original query, including a speaker, addressee, name or definite description; give it one exact query excerpt. A free target binds a value without an additional referent constraint; its excerpt supports a role, not a person. A free target leaves its value unknown without removing its stated nominal restrictions. A local key or support excerpt is not a class predicate. Express a stated class restriction as an ordinary predicate connected to the same variable in each independently sought branch, or keep unrepresentable meaning as a located gap. Named referent constraints and universal population or domain obligations remain distinct. If authorized query context leaves the intended named referent genuinely unresolved, retain named and locate an unresolved_referent gap on it, or abstain when no faithful usable query can be proposed. Unknown source correspondence alone requires no gap. Local keys are arbitrary identifiers, never text evidence or identity. Declare named/free entities inline or in the optional entities table, not both; reuse them with {kind:"reference",key}. Free targets, including a free reported.reporter or evidence-input value, need exact support on target or role. Reporter targets remain entities.',
   'Use statement:{predicate,arguments,content?} and operators with explicit operands. A role reference to a declared event points to that occurrence; it does not embed the event, import its qualifications into another branch, or change its truth obligation. Give every statement/operator role reference its own exact original-query excerpt. Reuse a keyed event as a full condition with {kind:"occurrence",key} when that branch needs its qualifications. Use content when one event is within what another event says, asks or requires; retain the inner participants under that governing scope, without an independent asserted_at_source root. An entity reference may inherit its declaration’s unambiguous exact support. Resolve every reference by its declaration, never by its key. possible, not, reported and conditional preserve their scope; a report or hypothetical does not assert its embedded event.',
   "required_evidence_act:{act,excerpt} constrains the speech act of sought evidence. Omit it for ordinary factual questions; select act question/directive only when the original query explicitly seeks that source act, with an exact excerpt supporting the constraint. A source act belongs to an independently sought source root, not its embedded content. Factual questions seek source assertions or entailments, not unconditional world truth. Mark each requested entity, statement or operator with return:true on its declaration; the host derives the return list and IDs. Do not mark containing events or operation inputs as returns. A question word can locate a free answer target; it does not make other constrained participants free.",
   'Optional domains are {key,excerpt}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample".',

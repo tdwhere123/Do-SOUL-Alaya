@@ -155,10 +155,15 @@ const nestedSourceSemanticQueryExamples = [
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["use_event"],
           support: [{ kind: "query_text", excerpt: "did the workshop steward use" }],
           description: "The use event's past tense is not encoded by the retained predicate." }],
-        alternatives: [{ conditions: [{ kind: "statement", key: "use_event", predicate: "use", arguments: [
-          { role: "agent", target: { kind: "named", key: "steward", excerpt: "the workshop steward" } },
-          { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
-        ] }] }]
+        alternatives: [{ conditions: [
+          { kind: "statement", key: "use_event", predicate: "use", arguments: [
+            { role: "agent", target: { kind: "named", key: "steward", excerpt: "the workshop steward" } },
+            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+          ] },
+          { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
+            { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
+          ] }
+        ] }]
       }
     }
   },
@@ -168,10 +173,15 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-        alternatives: [{ conditions: [{ kind: "statement", key: "use_event", predicate: "use", arguments: [
-          { role: "agent", target: { kind: "named", key: "technician", excerpt: "that technician" } },
-          { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
-        ] }] }],
+        alternatives: [{ conditions: [
+          { kind: "statement", key: "use_event", predicate: "use", arguments: [
+            { role: "agent", target: { kind: "named", key: "technician", excerpt: "that technician" } },
+            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+          ] },
+          { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
+            { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
+          ] }
+        ] }],
         gaps: [
           { kind: "unresolved_referent", affected_ids: ["technician"],
             support: [{ kind: "query_text", excerpt: "that technician" }],
@@ -192,10 +202,15 @@ const nestedSourceSemanticQueryExamples = [
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["use_event"],
           support: [{ kind: "query_text", excerpt: "did someone use" }],
           description: "The use event's past tense is not encoded by the retained predicate." }],
-        alternatives: [{ conditions: [{ kind: "statement", key: "use_event", predicate: "use", arguments: [
-          { role: "agent", target: { kind: "free", key: "person", excerpt: "someone" } },
-          { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
-        ] }] }]
+        alternatives: [{ conditions: [
+          { kind: "statement", key: "use_event", predicate: "use", arguments: [
+            { role: "agent", target: { kind: "free", key: "person", excerpt: "someone" } },
+            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+          ] },
+          { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
+            { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
+          ] }
+        ] }]
       }
     }
   },
@@ -252,6 +267,52 @@ const nestedSourceSemanticQueryExamples = [
             ] }
           ]
         }]
+      }
+    }
+  },
+  {
+    original_query: "How many tools did the clerk borrow or return?",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        requested_operation: { reading: "Count tools across independently contributed borrow or return events.",
+          support: { kind: "query_text", excerpt: "How many" } },
+        entities: [
+          { kind: "named", key: "clerk", excerpt: "the clerk" },
+          { kind: "free", key: "tool", excerpt: "tools" }
+        ],
+        alternatives: [{
+          conditions: [],
+          evidence_inputs: [
+            { conditions: [
+              { kind: "statement", key: "borrow", predicate: "borrow", arguments: [
+                { role: "agent", target: { kind: "reference", key: "clerk" } },
+                { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tools" }
+              ] },
+              { kind: "statement", key: "borrow_kind", predicate: "is a tool", arguments: [
+                { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tools" }
+              ] }
+            ] },
+            { conditions: [
+              { kind: "statement", key: "return", predicate: "return", arguments: [
+                { role: "agent", target: { kind: "reference", key: "clerk" } },
+                { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tools" }
+              ] },
+              { kind: "statement", key: "return_kind", predicate: "is a tool", arguments: [
+                { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tools" }
+              ] }
+            ] }
+          ]
+        }],
+        gaps: [
+          { kind: "unsupported_meaning", affected_ids: ["borrow", "return"],
+            support: [{ kind: "query_text", excerpt: "did the clerk borrow or return" }],
+            description: "The borrow and return events' past tense is not encoded by the retained predicates." },
+          { kind: "aggregate", affected_ids: [],
+            support: [{ kind: "query_text", excerpt: "How many" }],
+            description: "The requested count remains an unexecuted operation." }
+        ]
       }
     }
   }

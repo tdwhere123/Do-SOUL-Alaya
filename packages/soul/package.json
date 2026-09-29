@@ -26,5 +26,8 @@
     "@do-soul/alaya-graph-algorithms": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0"
   }
 }
