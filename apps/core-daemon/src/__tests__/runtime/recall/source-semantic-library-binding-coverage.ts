@@ -1,8 +1,8 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, UNKNOWN_UTTERANCE_ATTRIBUTION, indexEntryCacheKey,
-  sourceReferenceResolver, type SourceReferenceCatalog, type SourceSemanticCorrespondence,
-  type SourceSemanticLibraryProof, type SourceSemanticQuery, type SourceSemanticWorkerRequest,
-  type SourceSemanticWorkerResult
+  sourceReferenceResolver, type SoulInterpretationResponse, type SourceReferenceCatalog,
+  type SourceSemanticCorrespondence, type SourceSemanticLibraryProof, type SourceSemanticQuery,
+  type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
 import {
   admitSourceSemanticQuery, encodeSourceSemanticLibraryResponse, fieldContractSha256,
@@ -39,6 +39,8 @@ export const FIXTURE_NOTES = [
 ] as const;
 
 export type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
+export type EncodedRecall = Extract<SoulInterpretationResponse, { operation: "recall" }>;
+type RecallRequest = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 
 export function sentenceFor(label: string): string {
   return `Alice uses ${label}.`;
@@ -151,13 +153,15 @@ export function correspondenceOf(sourceInterpretationId: string, querySemantics:
   };
 }
 
-export function recallRequest(ids: ReadonlyMap<string, readonly string[]>, workUnits = ACCESS_BUDGET.work_units): Extract<SourceSemanticWorkerRequest, { kind: "recall" }> {
+export function recallRequest(ids: ReadonlyMap<string, readonly string[]>, workUnits = ACCESS_BUDGET.work_units,
+  outputByteLimit: RecallRequest["output_byte_limit"] = OUTPUT_BYTE_LIMITS.schema_max): RecallRequest {
   const query = queryOf();
   return {
     kind: "recall", accepts_unreviewed_conditional_results: true, original_query: ORIGINAL, query_semantics: query,
     semantic_correspondences: [...ids.values()].flatMap((interpretationIds) =>
       interpretationIds.map((interpretationId) => correspondenceOf(interpretationId, query))),
-    budget: { ...ACCESS_BUDGET, work_units: workUnits }, output_byte_limit: OUTPUT_BYTE_LIMITS.schema_max
+    budget: { ...ACCESS_BUDGET, work_units: workUnits }, output_byte_limit: outputByteLimit,
+    access_policy: "query-conditioned-v1"
   };
 }
 
@@ -197,8 +201,8 @@ export async function sqliteSources(filename: string) {
   const { database } = await createRecallRealStorage(() => undefined, filename);
   try {
     return database.connection.prepare(
-      "SELECT source_id, record_id, source_body, content_digest FROM source_records ORDER BY source_id"
-    ).all() as { source_id: string; record_id: string; source_body: string | null; content_digest: string }[];
+      "SELECT source_id, record_id, source_version, source_body, content_digest FROM source_records ORDER BY source_id"
+    ).all() as { source_id: string; record_id: string; source_version: string; source_body: string | null; content_digest: string }[];
   } finally {
     database.close();
     closeCachedDatabase(filename);
@@ -218,10 +222,64 @@ export async function publishedInterpretation(filename: string, interpretationId
   }
 }
 
-export function encodedPage(recall: Recall) {
-  const encoded = encodeSourceSemanticLibraryResponse(recall);
+export function encodedRecall(encoded: SoulInterpretationResponse): EncodedRecall {
   if (encoded.operation !== "recall") throw new Error("encoded recall expected");
   return encoded;
 }
 
-export { ACCESS_BUDGET, CLOCK, WS, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, indexEntryCacheKey };
+export function encodedPage(recall: Recall): EncodedRecall {
+  return encodedRecall(encodeSourceSemanticLibraryResponse(recall));
+}
+
+export async function researchFixedInputs(filename: string, ids: ReadonlyMap<string, readonly string[]>) {
+  const { database } = await createRecallRealStorage(() => undefined, filename);
+  try {
+    const records = database.connection.prepare(
+      "SELECT source_id, record_id, source_version, content_digest, source_body FROM source_records"
+    ).all() as { source_id: string; record_id: string; source_version: string; content_digest: string; source_body: string | null }[];
+    const capsules = database.connection.prepare("SELECT gist FROM evidence_capsules").all() as { gist: string }[];
+    const published = capsules.map((row) => JSON.parse(row.gist) as {
+      interpretation_id: string;
+      interpretation: {
+        source: { source_id: string; source_version: string; content_digest: string };
+        producer_id: string; producer_version: string; contract_version: string;
+      };
+    });
+    const bySource = new Map(records.map((row) => [row.source_id, row]));
+    const byInterpretation = new Map(published.map((row) => [row.interpretation_id, row]));
+    const rawRows = [];
+    const descriptors = [];
+    for (const [sourceId, interpretationIds] of ids) {
+      const record = bySource.get(sourceId);
+      if (record === undefined || record.source_body === null) {
+        throw new Error(`missing current source ${sourceId}`);
+      }
+      const bodyBytes = Buffer.byteLength(record.source_body);
+      rawRows.push({
+        source_id: record.source_id, record_id: record.record_id,
+        source_version: record.source_version, content_digest: record.content_digest,
+        read_bytes: bodyBytes, body_bytes: bodyBytes, complete: true as const,
+        signal: { source_text_score: null, interpretation_reading_score: 0 }
+      });
+      for (const interpretationId of interpretationIds) {
+        const bound = byInterpretation.get(interpretationId);
+        if (bound === undefined) throw new Error(`missing interpretation ${interpretationId}`);
+        descriptors.push({
+          interpretation_id: bound.interpretation_id,
+          source_id: bound.interpretation.source.source_id,
+          source_version: bound.interpretation.source.source_version,
+          content_digest: bound.interpretation.source.content_digest,
+          producer_id: bound.interpretation.producer_id,
+          producer_version: bound.interpretation.producer_version,
+          contract_version: bound.interpretation.contract_version
+        });
+      }
+    }
+    return { rawRows, descriptors, records };
+  } finally {
+    database.close();
+    closeCachedDatabase(filename);
+  }
+}
+
+export { ACCESS_BUDGET, CLOCK, WS, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, indexEntryCacheKey, UNKNOWN_UTTERANCE_ATTRIBUTION };

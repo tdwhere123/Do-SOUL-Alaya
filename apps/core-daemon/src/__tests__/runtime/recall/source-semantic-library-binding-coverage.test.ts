@@ -1,35 +1,21 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { beforeEach, expect, it, vi } from "vitest";
-import { encodeSourceSemanticLibraryResponse, proofForLibraryEntry, sourceGoldRootIdentity } from "@do-soul/alaya-core";
+import { expect, it } from "vitest";
+import { proofForLibraryEntry, selectSourceSemanticLibraryPage, sourceGoldRootIdentity } from "@do-soul/alaya-core";
 import { closeCachedDatabase, openReadOnlyDatabase } from "@do-soul/alaya-storage";
+import { selectSourceSemanticLibraryPageWithReturnedTupleNovelty } from
+  "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
-import { runSourceSemanticLibraryRecall } from "../../../runtime/recall-read-worker/source-semantic-library-recall.js";
+import { deliverResearchFixedSourceLibrary, runSourceSemanticLibraryRecall } from
+  "../../../runtime/recall-read-worker/source-semantic-library-recall.js";
 import { ACCESS_BUDGET, CLOCK, WS, accessCall, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import {
-  EXISTING_TEST_WORK_UNITS, FIXTURE_NOTES, OUTPUT_BYTE_LIMITS, PAYLOAD_TOKENS, REQUIRED_LABELS, bodyLabelFromSource,
-  encodedPage, encodeBytes, fixtureSources, indexEntryCacheKey, namedLimitFits, pageLabels, pageRoots,
-  proofTools, publishedInterpretation, recallRequest, sqliteSources, type Recall
+  EXISTING_TEST_WORK_UNITS, FIXTURE_NOTES, OUTPUT_BYTE_LIMITS, PAYLOAD_TOKENS, REQUIRED_LABELS,
+  UNKNOWN_UTTERANCE_ATTRIBUTION, bodyLabelFromSource, encodedPage, encodedRecall, encodeBytes, fixtureSources, indexEntryCacheKey,
+  namedLimitFits, pageLabels, pageRoots, proofTools, publishedInterpretation, queryOf, recallRequest,
+  researchFixedInputs, sqliteSources, type Recall
 } from "./source-semantic-library-binding-coverage.js";
-
-const selectorState = vi.hoisted(() => ({ useNovelty: false }));
-
-vi.mock("@do-soul/alaya-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@do-soul/alaya-core")>();
-  const selection = await import("../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js");
-  return {
-    ...actual,
-    selectSourceSemanticLibraryPage: (input: Parameters<typeof actual.selectSourceSemanticLibraryPage>[0]) =>
-      selectorState.useNovelty
-        ? selection.selectSourceSemanticLibraryPageWithReturnedTupleNovelty(input)
-        : actual.selectSourceSemanticLibraryPage(input)
-  };
-});
-
-beforeEach(() => {
-  selectorState.useNovelty = false;
-});
 
 async function writeReceipt(name: string, body: unknown) {
   const path = process.env.BINDING_COVERAGE_RECEIPT;
@@ -98,13 +84,14 @@ function bodyLabelsForRows(
 }
 
 function assertOriginals(
-  persisted: readonly { record_id: string; source_body: string | null }[],
+  persisted: readonly { record_id: string; source_version?: string; source_body: string | null; content_digest: string }[],
   recall: Recall,
   rows: ReturnType<typeof publicRows>,
   encoded: ReturnType<typeof encodedPage>
 ) {
   expect(rows).toHaveLength(recall.index.entries.length);
   expect(recall.slot_qualifiers).toHaveLength(recall.index.entries.length);
+  expect(encoded.results).toHaveLength(recall.index.entries.length);
   for (const [index, row] of rows.entries()) {
     const entry = recall.index.entries[index]!;
     const qualifier = recall.slot_qualifiers[index];
@@ -124,9 +111,15 @@ function assertOriginals(
     expect(row.preview).toBe(stored!.source_body);
     expect(row.public_preview).toBe(stored!.source_body);
     expect(row.preview).toBe(row.public_preview);
+    if (entry.target.kind === "source_evidence") {
+      expect(entry.target.content_digest).toBe(stored!.content_digest);
+      if (stored!.source_version !== undefined) expect(entry.target.source_version).toBe(stored!.source_version);
+    }
     const proof = proofForLibraryEntry(entry, recall.proofs ?? []);
     expect(proof).toBeDefined();
     expect(proofTools(proof)).toEqual([bodyLabelFromSource(stored!.source_body)]);
+    expect(row.proof_use).toBeDefined();
+    expect(encoded.results![index]!.selection_reason).toMatch(/unknown/i);
   }
 }
 
@@ -147,23 +140,24 @@ function assertCrowdedOmission(
   return labels;
 }
 
-function inProcessRecall(filename: string, ids: ReadonlyMap<string, readonly string[]>) {
+function researchPayload(ids: ReadonlyMap<string, readonly string[]>, outputByteLimit: number = OUTPUT_BYTE_LIMITS.schema_max) {
+  return {
+    workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named" as const, scopes: ["project"] },
+    request: recallRequest(ids, ACCESS_BUDGET.work_units, outputByteLimit)
+  };
+}
+
+function deliverResearch(filename: string, ids: ReadonlyMap<string, readonly string[]>,
+  rawRows: Parameters<typeof deliverResearchFixedSourceLibrary>[2],
+  descriptors: Parameters<typeof deliverResearchFixedSourceLibrary>[3],
+  selectPage?: Parameters<typeof deliverResearchFixedSourceLibrary>[4],
+  outputByteLimit: number = OUTPUT_BYTE_LIMITS.schema_max) {
   const database = openReadOnlyDatabase(filename);
-  const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
   try {
-    const recalled = runSourceSemanticLibraryRecall(
-      createRecallReadWorkerRuntime(database),
-      { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
-        request: recallRequest(ids) },
-      ["project"],
-      meter
-    );
-    if (recalled.kind !== "recall") throw new Error("in-process recall expected");
-    return { recalled, meter, database };
-  } catch (error) {
+    return deliverResearchFixedSourceLibrary(database, researchPayload(ids, outputByteLimit), rawRows, descriptors, selectPage);
+  } finally {
     database.close();
     closeCachedDatabase(filename);
-    throw error;
   }
 }
 
@@ -207,57 +201,99 @@ it("compiled worker baseline omits Pixel and ThinkPad on the ten-source fixture"
   });
 }, 120000);
 
-it("in-process novelty selector delivers all five names through the library delivery owner", async () => {
+it("research fixed-pool entry delivers default three names and novelty five without module substitution", async () => {
   await withAccessLibrary(fixtureSources(), async ({ execute, filename, ids }) => {
     const persisted = await sqliteSources(filename);
+    expect(persisted).toHaveLength(10);
+    const pool = await researchFixedInputs(filename, ids);
+    expect(pool.rawRows).toHaveLength(10);
+    expect(new Set(pool.rawRows.map((row) => row.record_id)).size).toBe(10);
+    expect(pool.rawRows.every((row) => row.complete && row.body_bytes !== null && row.read_bytes === row.body_bytes)).toBe(true);
+    expect(pool.descriptors).toHaveLength(10);
     const worker = await accessCall(execute, recallRequest(ids));
     expect(worker.kind).toBe("recall");
-    const workerRows = publicRows(worker);
-    assertOriginals(persisted, worker, workerRows, encodedPage(worker));
-    assertCrowdedOmission(persisted, worker, workerRows);
-    selectorState.useNovelty = false;
-    const inDefault = inProcessRecall(filename, ids);
-    try {
-      expect(pageIdentity(inDefault.recalled)).toEqual(pageIdentity(worker));
-      const defaultRows = publicRows(inDefault.recalled);
-      assertOriginals(persisted, inDefault.recalled, defaultRows, encodedPage(inDefault.recalled));
-      assertCrowdedOmission(persisted, inDefault.recalled, defaultRows);
-      selectorState.useNovelty = true;
-      const candidate = inProcessRecall(filename, ids);
+    expect(worker.request_budget).toEqual(ACCESS_BUDGET);
+    const before = persisted.map((row) => ({
+      source_id: row.source_id, record_id: row.record_id, source_version: row.source_version,
+      content_digest: row.content_digest, source_body: row.source_body
+    }));
+    const omitted = deliverResearch(filename, ids, pool.rawRows, pool.descriptors);
+    const injected = deliverResearch(filename, ids, pool.rawRows, pool.descriptors, selectSourceSemanticLibraryPage);
+    const omittedEncoded = encodedRecall(omitted.encoded);
+    const injectedEncoded = encodedRecall(injected.encoded);
+    expect(omitted.provenance).toBe("research_fixed_pool");
+    expect(injected.provenance).toBe("research_fixed_pool");
+    expect(omitted.result.request_budget).toEqual(ACCESS_BUDGET);
+    expect(injected.result.request_budget).toEqual(omitted.result.request_budget);
+    expect(omitted.result.request_budget).toEqual(worker.request_budget);
+    expect(pageIdentity(injected.result)).toEqual(pageIdentity(omitted.result));
+    expect(injectedEncoded.results).toEqual(omittedEncoded.results);
+    expect(injected.result.request_identity).toEqual(omitted.result.request_identity);
+    expect(injected.result.delivery_id).toEqual(omitted.result.delivery_id);
+    expect(queryOf().gaps).toEqual([]);
+    expect(queryOf().attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+    const defaultRows = publicRows(omitted.result);
+    assertOriginals(persisted, omitted.result, defaultRows, omittedEncoded);
+    const defaultLabels = assertCrowdedOmission(persisted, omitted.result, defaultRows);
+    expect(pageLabels(omitted.result)).toEqual(pageLabels(worker));
+    expect(encodeBytes(omittedEncoded)).toBeLessThanOrEqual(OUTPUT_BYTE_LIMITS.schema_max);
+    expect((omittedEncoded.results ?? []).every((row) => row.budget_state.within_budget)).toBe(true);
+    const candidate = deliverResearch(filename, ids, pool.rawRows, pool.descriptors,
+      selectSourceSemanticLibraryPageWithReturnedTupleNovelty);
+    const candidateEncoded = encodedRecall(candidate.encoded);
+    expect(candidate.provenance).toBe("research_fixed_pool");
+    expect(candidate.result.request_budget).toEqual(ACCESS_BUDGET);
+    expect(encodeBytes(candidateEncoded)).toBeLessThanOrEqual(OUTPUT_BYTE_LIMITS.schema_max);
+    expect((candidateEncoded.results ?? []).every((row) => row.budget_state.within_budget)).toBe(true);
+    expect(pageLabels(candidate.result)).toEqual([...REQUIRED_LABELS].sort());
+    const candidateRows = publicRows(candidate.result);
+    expect(candidateRows).toHaveLength(5);
+    assertOriginals(persisted, candidate.result, candidateRows, candidateEncoded);
+    expect(new Set(pageRoots(candidate.result)).size).toBe(5);
+    const bodyLabels = bodyLabelsForRows(persisted, candidateRows);
+    expect([...new Set(bodyLabels)].sort()).toEqual([...REQUIRED_LABELS].sort());
+    expect(bodyLabels).toHaveLength(5);
+    for (const label of REQUIRED_LABELS) expect(bodyLabels.filter((item) => item === label)).toHaveLength(1);
+    const limited = deliverResearch(filename, ids, pool.rawRows, pool.descriptors,
+      selectSourceSemanticLibraryPageWithReturnedTupleNovelty, 200_000);
+    const limitedEncoded = encodedRecall(limited.encoded);
+    assertOriginals(persisted, limited.result, publicRows(limited.result), limitedEncoded);
+    expect(limited.result.index.entries.length).toBeGreaterThan(0);
+    expect(limited.result.index.entries.length).toBeLessThan(5);
+    expect(limited.result.index.continuation).not.toBeNull();
+    expect(encodeBytes(limitedEncoded)).toBeLessThanOrEqual(200_000);
+    expect((limitedEncoded.results ?? []).every(row => row.budget_state.within_budget)).toBe(true);
+    expect(() => deliverResearch(filename, ids, pool.rawRows, pool.descriptors, selectSourceSemanticLibraryPage,
+      OUTPUT_BYTE_LIMITS.test_capped)).toThrow(/output budget cannot retain reserved source support/u);
+    const continuation = omitted.result.index.continuation;
+    expect(continuation).not.toBeNull();
+    if (continuation === null) throw new Error("default page must carry a research continuation");
+    {
+      const ordinary = openReadOnlyDatabase(filename);
       try {
-        const encoded = encodeSourceSemanticLibraryResponse(candidate.recalled);
-        if (encoded.operation !== "recall") throw new Error("encoded recall expected");
-        const bytes = encodeBytes(encoded);
-        expect(bytes).toBeLessThanOrEqual(OUTPUT_BYTE_LIMITS.schema_max);
-        expect((encoded.results ?? []).every((row) => row.budget_state.within_budget)).toBe(true);
-        expect(pageLabels(candidate.recalled)).toEqual([...REQUIRED_LABELS].sort());
-        const rows = publicRows(candidate.recalled);
-        expect(rows).toHaveLength(5);
-        assertOriginals(persisted, candidate.recalled, rows, encoded);
-        expect(new Set(pageRoots(candidate.recalled)).size).toBe(5);
-        const bodyLabels = bodyLabelsForRows(persisted, rows);
-        expect([...new Set(bodyLabels)].sort()).toEqual([...REQUIRED_LABELS].sort());
-        expect(bodyLabels).toHaveLength(5);
-        for (const label of REQUIRED_LABELS) expect(bodyLabels.filter((item) => item === label)).toHaveLength(1);
-        await writeReceipt("candidate.json", {
-          arm: "in_process_novelty_mock", claim: "not compiled worker",
-          same_fixture_default_matches_compiled_worker: true,
-          labels: pageLabels(candidate.recalled), body_labels: bodyLabels,
-          distinct_roots: new Set(pageRoots(candidate.recalled)).size, encode_bytes: bytes,
-          payload_tokens: PAYLOAD_TOKENS,
-          named_limit_fit_arithmetic_not_native_rerun: namedLimitFits(bytes),
-          within_budget: (encoded.results ?? []).map((row) => row.budget_state.within_budget),
-          rows, observed_meter_this_run_not_final: {
-            spentWork: candidate.meter.spentWork, spentBytes: candidate.meter.spentBytes
-          }, work: candidate.recalled.work
-        });
+        expect(() => runSourceSemanticLibraryRecall(
+          createRecallReadWorkerRuntime(ordinary),
+          { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
+            request: { ...recallRequest(ids), continuation } },
+          ["project"],
+          new SourceSemanticReadBudget(ACCESS_BUDGET)
+        )).toThrow(/expired|handle|continuation/i);
       } finally {
-        candidate.database.close();
+        ordinary.close();
         closeCachedDatabase(filename);
       }
-    } finally {
-      inDefault.database.close();
-      closeCachedDatabase(filename);
     }
+    expect(() => deliverResearch(filename, ids, pool.rawRows.slice(0, 6), pool.descriptors))
+      .toThrow(/research window requires ten fully read distinct raw roots/);
+    const after = await sqliteSources(filename);
+    expect(after).toEqual(before);
+    await writeReceipt("candidate.json", {
+      arm: "research_fixed_pool_novelty", claim: "not compiled worker",
+      same_fixture_default_matches_compiled_worker_labels: pageLabels(omitted.result).join(",") === pageLabels(worker).join(","),
+      labels: pageLabels(candidate.result), body_labels: bodyLabels, default_labels: defaultLabels,
+      distinct_roots: new Set(pageRoots(candidate.result)).size, encode_bytes: encodeBytes(candidateEncoded),
+      payload_tokens: PAYLOAD_TOKENS, within_budget: (candidateEncoded.results ?? []).map((row) => row.budget_state.within_budget),
+      rows: candidateRows, work: candidate.result.work
+    });
   });
-}, 120000);
+}, 180000);

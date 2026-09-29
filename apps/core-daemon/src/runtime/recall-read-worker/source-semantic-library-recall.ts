@@ -7,12 +7,12 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus,
-  continuationCapabilityMatches, executeSourceSemanticInterpretation,
-  fieldContractSha256, proofEntriesFromBranch,
+  continuationCapabilityMatches, encodeSourceSemanticLibraryResponse, executeSourceSemanticInterpretation,
+  fieldContractSha256, proofEntriesFromBranch, selectSourceSemanticLibraryPage,
   sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity,
   scopeSourceSemanticLibraryBranch, sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
-import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
+import { createRecallReadWorkerRuntime, type RecallReadWorkerRuntime, type SourceSemanticReadRuntime } from "./runtime.js";
 import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import { admissionOf, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessInputIdentity, bindResearchFixedSourcePool, observeSourceSemanticAccess,
@@ -24,7 +24,7 @@ import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticQueryInputI
   sourceSemanticRevision } from "./source-semantic-leases.js";
 
 import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
-import { prepareLibraryDelivery, deliverFrozenLibraryPage } from "./source-semantic-library-delivery.js";
+import { prepareLibraryDelivery, deliverFrozenLibraryPage, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { authorizedScopesFromAdmission } from "@do-soul/alaya-core";
 
@@ -119,6 +119,46 @@ export function runSourceSemanticLibraryRecall(
 export function selectResearchFixedSourceLibrary(database: StorageDatabase,
   payload: SourceSemanticWorkerPayload, rawRows: readonly ResearchSourceObservation[],
   descriptors: readonly SourceSemanticHandleDescriptor[]) {
+  const prepared = prepareResearchFixedSourceLibrary({ database }, payload, rawRows, descriptors, true);
+  const selected = prepared.plan.pages[0]!.map(row => {
+    const target = row.entry.target;
+    if (target.kind !== "source_evidence") throw new CoreError("CONFLICT", "research selection lost source target");
+    const source = rawRows.find(item => item.record_id === target.root_id);
+    if (source === undefined) throw new CoreError("CONFLICT", "research selection escaped fixed ten");
+    return { source_id: source.source_id, record_id: source.record_id,
+      source_version: source.source_version, content_digest: source.content_digest,
+      access_rank: rawRows.indexOf(source) + 1, selection_basis: row.selection_basis,
+      payload_support: row.payload_support, preview: row.preview,
+      source_disclosure: row.source_disclosure, proofs: row.proofs,
+      span: target.span ?? null };
+  });
+  const rawOrder = prepared.plan.research_raw_order?.map(row => {
+    const target = row.entry.target;
+    if (target.kind !== "source_evidence") throw new CoreError("CONFLICT", "raw-order control lost source target");
+    return { record_id: target.root_id, selection_basis: row.selection_basis,
+      payload_support: row.payload_support, proofs: row.proofs };
+  }) ?? null;
+  return { provenance: "research_fixed_pool" as const, selected, raw_order_control: rawOrder,
+    raw_order_control_work: prepared.plan.research_raw_order_work,
+    coverage: prepared.plan.coverage, discovery: { ...prepared.plan.discovery, access: undefined },
+    examined_source_interpretation_ids: prepared.branches.examined, unproved_computations: prepared.branches.unproved,
+    conditional_proofs: prepared.branches.proofs, work: workOf(prepared.meter) };
+}
+
+/** Daemon-internal research delivery: same frozen-pool owner, actual page fit, native encoder. */
+export function deliverResearchFixedSourceLibrary(database: StorageDatabase,
+  payload: SourceSemanticWorkerPayload, rawRows: readonly ResearchSourceObservation[],
+  descriptors: readonly SourceSemanticHandleDescriptor[],
+  selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage) {
+  const runtime = createRecallReadWorkerRuntime(database);
+  const prepared = prepareResearchFixedSourceLibrary(runtime, payload, rawRows, descriptors, false, selectPage);
+  const result = deliverFrozenLibraryPage(runtime, payload, prepared.meter, prepared.request, prepared.plan, 0);
+  return { provenance: "research_fixed_pool" as const, result, encoded: encodeSourceSemanticLibraryResponse(result) };
+}
+
+function prepareResearchFixedSourceLibrary(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
+  rawRows: readonly ResearchSourceObservation[], descriptors: readonly SourceSemanticHandleDescriptor[],
+  researchRawOrder = false, selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage) {
   const request = payload.request;
   if (request.kind !== "recall" || request.query_handle !== undefined || request.continuation !== undefined ||
       request.original_query === undefined || request.query_semantics === undefined ||
@@ -129,7 +169,6 @@ export function selectResearchFixedSourceLibrary(database: StorageDatabase,
   if (authorized === undefined) throw new CoreError("VALIDATION", "research fixed window requires admitted scopes");
   const admission = admitSourceSemanticQuery(request.query_semantics, request.original_query);
   if (admission.kind !== "admitted") throw new CoreError("VALIDATION", "research fixed window requires admitted Q");
-  const runtime: SourceSemanticReadRuntime = { database };
   const meter = new SourceSemanticReadBudget(request.budget);
   meter.retain(request, "research fixed-window request admission");
   const pool = bindResearchFixedSourcePool(runtime, payload.workspace_id, authorized, meter,
@@ -148,30 +187,8 @@ export function selectResearchFixedSourceLibrary(database: StorageDatabase,
   });
   const plan = prepareLibraryPlan(runtime, payload, authorized, meter, request, queryStatus,
     admission.query, { sources: [...pool.sources], pages: pool.sourcePages, open: false, truncated: false },
-    discovered, branches, request.original_query, requestIdentity, publicRequestIdentity, true);
-  const selected = plan.pages[0]!.map(row => {
-    const target = row.entry.target;
-    if (target.kind !== "source_evidence") throw new CoreError("CONFLICT", "research selection lost source target");
-    const source = rawRows.find(item => item.record_id === target.root_id);
-    if (source === undefined) throw new CoreError("CONFLICT", "research selection escaped fixed ten");
-    return { source_id: source.source_id, record_id: source.record_id,
-      source_version: source.source_version, content_digest: source.content_digest,
-      access_rank: rawRows.indexOf(source) + 1, selection_basis: row.selection_basis,
-      payload_support: row.payload_support, preview: row.preview,
-      source_disclosure: row.source_disclosure, proofs: row.proofs,
-      span: target.span ?? null };
-  });
-  const rawOrder = plan.research_raw_order?.map(row => {
-    const target = row.entry.target;
-    if (target.kind !== "source_evidence") throw new CoreError("CONFLICT", "raw-order control lost source target");
-    return { record_id: target.root_id, selection_basis: row.selection_basis,
-      payload_support: row.payload_support, proofs: row.proofs };
-  }) ?? null;
-  return { provenance: "research_fixed_pool" as const, selected, raw_order_control: rawOrder,
-    raw_order_control_work: plan.research_raw_order_work,
-    coverage: plan.coverage, discovery: { ...plan.discovery, access: undefined },
-    examined_source_interpretation_ids: branches.examined, unproved_computations: branches.unproved,
-    conditional_proofs: branches.proofs, work: workOf(meter) };
+    discovered, branches, request.original_query, requestIdentity, publicRequestIdentity, researchRawOrder, selectPage);
+  return { request, meter, plan, branches };
 }
 
 function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
@@ -282,7 +299,8 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   query: SourceSemanticQuery | undefined,
   sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
   branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
-  publicRequestIdentity: string, researchRawOrder = false) {
+  publicRequestIdentity: string, researchRawOrder = false,
+  selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage) {
   const { descriptors, interpretationPages, interpretationOpen } = discovered;
   const { proofGroups, examined, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
@@ -341,7 +359,7 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
       open_residuals: openResiduals || prepared.incomplete, truncated: openResiduals || prepared.incomplete
     }
   };
-  const plan = prepareLibraryDelivery(base, prepared.packages, request, selection);
+  const plan = prepareLibraryDelivery(base, prepared.packages, request, selection, "field", selectPage);
   const rawOrderSelection = researchRawOrder ? new SourceSemanticReadBudget({
     work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }) : null;
   const rawOrder = rawOrderSelection === null ? null : prepareLibraryDelivery(base,

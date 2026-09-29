@@ -25,17 +25,19 @@ export type LibraryDeliveryPlan = Readonly<{
   page_access: readonly SourceSemanticAccessReceipt[];
 }>;
 type PlanBase = Omit<LibraryDeliveryPlan, "pages" | "page_access"> & Readonly<{ pool: SourceSemanticAccessPool }>;
+export type LibraryPageSelector = typeof selectSourceSemanticLibraryPage;
 
 /** Freeze membership, witness packages and support reservations before exposing any page. */
 export function prepareLibraryDelivery(base: PlanBase, candidates: readonly SourceSemanticLibraryPackage[],
-  request: Request, meter: SourceSemanticReadBudget, order: "field" | "source_access" = "field"): LibraryDeliveryPlan {
+  request: Request, meter: SourceSemanticReadBudget, order: "field" | "source_access" = "field",
+  selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage): LibraryDeliveryPlan {
   const pages: SourceSemanticLibraryPackage[][] = [];
   const pageAccess: SourceSemanticAccessReceipt[] = [];
   let remaining = [...candidates], offset = 0, incomplete = false;
   while (remaining.length > 0) {
     try {
       const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
-      const selected = selectSourceSemanticLibraryPage({ candidates: remaining, meter, order, fits: page => {
+      const selected = selectPage({ candidates: remaining, meter, order, fits: page => {
         const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
           page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
         const result = pageResult(base, page, offset, true, request, meter, true, access);
