@@ -13,7 +13,7 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import * as soul from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
-import { createGeminiHttpExtractor } from "../../../runs/compile-seed/http/gemini-http.js";
+import { createGeminiHttpExtractor, prepareGeminiRequest } from "../../../runs/compile-seed/http/gemini-http.js";
 import { OpenSemanticFactorGraphProposalSchema } from "@do-soul/alaya-protocol";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 import { writeCachedExtraction, inspectUnadmittedRawExtraction } from
@@ -299,6 +299,30 @@ describe("native Gemini interactive extraction", () => {
     await expect(probeProviderProtocol({ providerUrl: nativeConfig.providerUrl, model: nativeConfig.model,
       apiKey: nativeConfig.apiKey!, fetchImpl, framing: "sse" })).rejects.toThrow("JSON framing");
     expect(fetchImpl).toHaveBeenCalledTimes(count);
+  });
+
+  it("prepares native Pro-preview low and rejects Pro-preview minimal without changing Flash-Lite", () => {
+    const proConfig = { ...config, model: "gemini-3.1-pro-preview",
+      requestProfile: "gemini-3.1-low-v1" as const };
+    const prepared = prepareGeminiRequest(proConfig, input);
+    expect(`${prepared.url.pathname}${prepared.url.search}`)
+      .toBe("/v1beta/models/gemini-3.1-pro-preview:streamGenerateContent?alt=sse");
+    expect(JSON.parse(prepared.body).generationConfig.thinkingConfig).toEqual({
+      thinkingLevel: "low", includeThoughts: true
+    });
+    expect(() => prepareGeminiRequest({ ...proConfig, requestProfile: "gemini-3.1-minimal-v1" }, input))
+      .toThrow(/requires request profile gemini-3.1-low-v1/u);
+    expect(() => encodeGeminiGenerateContent(input, {
+      model: "gemini-3.1-pro-preview", requestProfile: "gemini-3.1-low-v1", maxOutputTokens: 1024
+    })).not.toThrow();
+    expect(() => encodeGeminiGenerateContent(input, {
+      model: "gemini-3.1-pro-preview", requestProfile: "gemini-3.1-minimal-v1", maxOutputTokens: 1024
+    })).toThrow("unsupported Gemini model/request profile/output settings");
+    for (const requestProfile of ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const) {
+      expect(() => encodeGeminiGenerateContent(input, {
+        model: "gemini-3.1-flash-lite", requestProfile, maxOutputTokens: 1024
+      })).not.toThrow();
+    }
   });
 
   it("accepts the exact native output field in the expense authorization CLI", () => {

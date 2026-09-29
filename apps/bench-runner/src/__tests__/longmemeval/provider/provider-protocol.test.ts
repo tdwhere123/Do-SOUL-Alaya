@@ -19,6 +19,25 @@ describe("provider catalog", () => {
       expect(() => assertRequiredRequestProfile({ model: "gemini-2.5-flash-lite", requestProfile })).toThrow();
     }
   });
+  it("binds Pro-preview 3.1 to low only and rejects minimal without changing Flash-Lite", () => {
+    expect(requireProviderBinding("gemini-3.1-pro-preview")).toMatchObject({
+      id: "gemini-3.1-pro-preview",
+      aliases: [],
+      requestProfile: "gemini-3.1-low-v1",
+      supportedRequestProfiles: ["gemini-3.1-low-v1"],
+      probeCallCeiling: 2
+    });
+    expect(() => assertRequiredRequestProfile({
+      model: "gemini-3.1-pro-preview", requestProfile: "gemini-3.1-low-v1"
+    })).not.toThrow();
+    expect(() => assertRequiredRequestProfile({
+      model: "gemini-3.1-pro-preview", requestProfile: "gemini-3.1-minimal-v1"
+    })).toThrow(/requires request profile gemini-3.1-low-v1/u);
+    expect(requireProviderBinding("gemini-3.1-flash-lite")).toMatchObject({
+      requestProfile: "gemini-3.1-minimal-v1",
+      supportedRequestProfiles: ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"]
+    });
+  });
   it("remaps vendor aliases through the binding table", () => {
     expect(resolveVendorModel("Mimo-V2.5")).toBe(MIMO.id);
     expect(resolveVendorModel("mimo-v2-flash")).toBe(MIMO.id);

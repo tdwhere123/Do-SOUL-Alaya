@@ -29,6 +29,13 @@ export const PROVIDER_BINDINGS: readonly ProviderBinding[] = [
     probeCallCeiling: 2
   },
   {
+    id: "gemini-3.1-pro-preview",
+    aliases: [],
+    requestProfile: "gemini-3.1-low-v1",
+    supportedRequestProfiles: ["gemini-3.1-low-v1"],
+    probeCallCeiling: 2
+  },
+  {
     id: "gemini-2.5-flash-lite",
     aliases: [],
     requestProfile: "gemini-2.5-nonthinking-v1",
