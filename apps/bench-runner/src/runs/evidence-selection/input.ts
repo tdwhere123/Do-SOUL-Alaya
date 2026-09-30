@@ -18,6 +18,8 @@ export const EVIDENCE_SELECTION_WORKSET_CONTRACT = "source-evidence-selection-wo
 export const EVIDENCE_SELECTION_KIND = "source_evidence_selection" as const;
 export const EVIDENCE_SELECTION_MAX_SELECTED = 5;
 export const EVIDENCE_SELECTION_OUTPUT_TOKEN_DEFAULT = 4096;
+/** Private benchmark opt-in. Omitted worksets keep the historical prompt. */
+export const EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY = "partial-evidence-v1" as const;
 
 /** Bound request instruction. Generated explanations are not evidence. */
 export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
@@ -65,6 +67,22 @@ export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
   "the source corpus. State that limited meaning in `unresolved`."
 ].join("\n");
 
+/** Appended only for partial-evidence-v1. Not a copied baseline prompt. */
+const PARTIAL_EVIDENCE_V1_CLARIFICATION = [
+  "Useful partial evidence uses `proposal`. Missing completion operands, uncertain",
+  "identity, or uncertain time do not by themselves require `cannot_propose`.",
+  "",
+  "`cannot_propose` is only for an unusable-input condition. It requires empty",
+  "`selected` and nonempty `unresolved`. When the supplied pool is usable but",
+  "contains no useful evidence, return a `proposal` with empty `selected` and",
+  "explain that bounded absence in `unresolved`.",
+  "",
+  "Pair each selected root with literal quotations from that same root's own",
+  "preview. Do not borrow another root's words, normalize punctuation, paraphrase,",
+  "or insert ellipsis. Missing information belongs in `unresolved`, not invented",
+  "text. Keep potentially useful qualifying evidence and keep uncertainty explicit."
+].join("\n");
+
 const SourceSpanSchema = z.object({
   start: z.number().int().nonnegative(),
   end: z.number().int().nonnegative()
@@ -90,6 +108,7 @@ export const EvidenceSelectionWorksetSchema = z.object({
   model: z.string().min(1),
   provider_url: z.string().min(1),
   request_profile: z.string().min(1),
+  request_policy: z.string().min(1).optional(),
   items: z.array(WorksetItemSchema).min(1)
 }).strict();
 
@@ -189,6 +208,7 @@ export function evidenceSelectionResponseJsonSchema(): object {
 export function parseEvidenceSelectionWorkset(value: unknown): EvidenceSelectionWorkset {
   const workset = EvidenceSelectionWorksetSchema.parse(value);
   selectionRequestProfile(workset.request_profile);
+  selectionRequestPolicy(workset.request_policy);
   return {
     ...workset,
     provider_url: workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
@@ -356,6 +376,7 @@ function bindLine(
     }))
   });
   const requestProfile = selectionRequestProfile(workset.request_profile);
+  const systemPrompt = evidenceSelectionSystemPrompt(workset.request_policy);
   const config = {
     model: workset.model,
     providerUrl: workset.provider_url,
@@ -363,7 +384,7 @@ function bindLine(
     apiKey: null
   };
   const binding = evidenceSelectionRequestBinding(config, {
-    systemPrompt: SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT,
+    systemPrompt,
     userPrompt,
     maxOutputTokens,
     responseJsonSchema
@@ -372,14 +393,14 @@ function bindLine(
     key: evidenceSelectionCacheKey({
       model: workset.model,
       requestProfile: workset.request_profile,
-      systemPrompt: SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT,
+      systemPrompt,
       userPrompt,
       schema: responseJsonSchema,
       maxOutputTokens,
       providerUrl: workset.provider_url
     }),
     kind: EVIDENCE_SELECTION_KIND,
-    systemPrompt: SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT,
+    systemPrompt,
     userPrompt,
     responseJsonSchema,
     original_question: item.original_question,
@@ -396,4 +417,19 @@ function selectionRequestProfile(
     return requestProfile;
   }
   throw new AlayaError("VALIDATION", "evidence selection requires a native semantic request profile");
+}
+
+function selectionRequestPolicy(
+  requestPolicy: string | undefined
+): typeof EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY | undefined {
+  if (requestPolicy === undefined) return undefined;
+  if (requestPolicy === EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY) return requestPolicy;
+  throw new AlayaError("VALIDATION", "evidence selection request_policy is unsupported");
+}
+
+function evidenceSelectionSystemPrompt(requestPolicy: string | undefined): string {
+  if (selectionRequestPolicy(requestPolicy) === undefined) {
+    return SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT;
+  }
+  return `${SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT}\n\n${PARTIAL_EVIDENCE_V1_CLARIFICATION}`;
 }
