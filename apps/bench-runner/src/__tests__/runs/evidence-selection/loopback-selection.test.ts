@@ -9,7 +9,7 @@ import {
   inspectProviderChatCompletionResponse,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
 } from "@do-soul/alaya-engine-gateway";
-import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
+import { inspectExtractionAttemptLedger, listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
@@ -19,6 +19,7 @@ import { executeEvidenceSelectionFill, prepareEvidenceSelection, readEvidenceSel
 import { materializeEvidenceSelectionLines, parseEvidenceSelectionWorkset } from "../../../runs/evidence-selection/input.js";
 import { openEvidenceSelectionAttemptLedger } from "../../../runs/evidence-selection/attempt.js";
 import { pinEvidenceSelectionAuthority, quoteEvidenceSelection } from "../../../runs/evidence-selection/authority.js";
+import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 
 const MODEL = "gemini-3.1-flash-lite";
@@ -347,8 +348,172 @@ it("rejects mutated route before HTTP and mutated cache on read", async () => {
   }
 });
 
+it("stops later keys after the first settled selection without a second request or reservation", async () => {
+  const captured = { hits: 0 };
+  const server = await listen((_req, res) => {
+    captured.hits += 1;
+    succeed(res, proposalBody([{
+      root_id: "src-alpha",
+      quotes: ["Lee left the lab on Tuesday"],
+      contribution: "Names the departure day."
+    }]), "STOP", usage());
+  });
+  try {
+    const origin = originOf(server);
+    const cacheRoot = join(tempRoot(), "cache");
+    const prepared = workset(origin, QUESTIONS);
+    const authority = pinEvidenceSelectionAuthority({
+      preflight: prepareEvidenceSelection(prepared, cacheRoot, 128),
+      inputUsdPerMillion: 4, outputUsdPerMillion: 18
+    });
+    expect(authority.keys).toHaveLength(3);
+    const config = configOf(origin);
+    const firstKey = authority.keys[0]!;
+    const result = await executeEvidenceSelectionFill({
+      workset: prepared, cacheRoot, authority, config,
+      extractor: createSemanticProviderHttpExtractor(config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME),
+      continueAfterResult: (key) => {
+        expect(key).toBe(firstKey);
+        expect(captured.hits).toBe(1);
+        expect(readEvidenceSelectionResults(prepared, cacheRoot, 128)).toMatchObject([
+          { status: "interpreted", selection: { selected: [{ root_id: "src-alpha", quotes: ["Lee left the lab on Tuesday"] }] } },
+          { status: "unattempted" },
+          { status: "unattempted" }
+        ]);
+        expect(inspectLedger(cacheRoot, authority)).toMatchObject({
+          attempts: 1, successfulKeys: [firstKey], pendingKeys: [], unresolvedAttempts: []
+        });
+        expect(inspectLedger(cacheRoot, authority)?.settledAttempts.map((item) => item.cacheKey)).toEqual([firstKey]);
+        return false;
+      }
+    });
+    expect(captured.hits).toBe(1);
+    expect(result).toMatchObject({
+      attempts: 1, newly_admitted: 1, interpreted: 1, unattempted: 2, cache_hits: 0
+    });
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128).map((row) => row.status))
+      .toEqual(["interpreted", "unattempted", "unattempted"]);
+    const snapshot = inspectLedger(cacheRoot, authority);
+    expect(snapshot).toMatchObject({ attempts: 1, successfulKeys: [firstKey], pendingKeys: [] });
+    for (const key of authority.keys.slice(1)) {
+      expect(readProviderRawAttempt(cacheRoot, key, 1)).toBeUndefined();
+      expect(snapshot?.pendingKeys).not.toContain(key);
+      expect(snapshot?.unresolvedAttempts.some((item) => item.cacheKey === key)).toBe(false);
+      expect(snapshot?.settledAttempts.some((item) => item.cacheKey === key)).toBe(false);
+    }
+  } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
+});
+
+it("continues to the next key after a settled invalid grounding", async () => {
+  const captured = { hits: 0 };
+  const server = await listen((_req, res) => {
+    captured.hits += 1;
+    succeed(res, captured.hits === 1
+      ? proposalBody([{ root_id: "missing-root", quotes: ["Lee left"], contribution: "Not in the pool." }])
+      : proposalBody([{ root_id: "src-alpha", quotes: ["Lee left the lab on Tuesday"], contribution: "Names the departure day." }]),
+    "STOP", usage());
+  });
+  try {
+    const origin = originOf(server);
+    const cacheRoot = join(tempRoot(), "cache");
+    const prepared = workset(origin, QUESTIONS.slice(0, 2));
+    const authority = pinEvidenceSelectionAuthority({
+      preflight: prepareEvidenceSelection(prepared, cacheRoot, 128),
+      inputUsdPerMillion: 4, outputUsdPerMillion: 18
+    });
+    const config = configOf(origin);
+    const seen: string[] = [];
+    const result = await executeEvidenceSelectionFill({
+      workset: prepared, cacheRoot, authority, config,
+      extractor: createSemanticProviderHttpExtractor(config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME),
+      continueAfterResult: (key) => {
+        seen.push(key);
+        if (seen.length === 1) {
+          expect(key).toBe(authority.keys[0]);
+          expect(captured.hits).toBe(1);
+          expect(readEvidenceSelectionResults(prepared, cacheRoot, 128).map((row) => row.status))
+            .toEqual(["invalid", "unattempted"]);
+          expect(readEvidenceSelectionResults(prepared, cacheRoot, 128)[0]).toMatchObject({
+            shard: { admitted: false, outcome: { reason: "unknown_root" } }
+          });
+          expect(inspectLedger(cacheRoot, authority)).toMatchObject({
+            attempts: 1, successfulKeys: [], pendingKeys: [], unresolvedAttempts: []
+          });
+          expect(inspectLedger(cacheRoot, authority)?.settledAttempts.map((item) => item.cacheKey))
+            .toEqual([authority.keys[0]]);
+        }
+        return true;
+      }
+    });
+    expect(seen).toEqual(authority.keys);
+    expect(captured.hits).toBe(2);
+    expect(result).toMatchObject({
+      attempts: 2, newly_admitted: 1, interpreted: 1, rejected: 1, unattempted: 0
+    });
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128).map((row) => row.status))
+      .toEqual(["invalid", "interpreted"]);
+    expect(inspectLedger(cacheRoot, authority)?.successfulKeys).toEqual([authority.keys[1]]);
+  } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
+});
+
+it("releases the writer lease when continuation throws after a settled selection", async () => {
+  const captured = { hits: 0 };
+  const server = await listen((_req, res) => {
+    captured.hits += 1;
+    succeed(res, proposalBody([{
+      root_id: "src-alpha",
+      quotes: ["Lee left the lab on Tuesday"],
+      contribution: "Names the departure day."
+    }]), "STOP", usage());
+  });
+  try {
+    const origin = originOf(server);
+    const cacheRoot = join(tempRoot(), "cache");
+    const prepared = workset(origin, QUESTIONS.slice(0, 2));
+    const authority = pinEvidenceSelectionAuthority({
+      preflight: prepareEvidenceSelection(prepared, cacheRoot, 128),
+      inputUsdPerMillion: 4, outputUsdPerMillion: 18
+    });
+    const config = configOf(origin);
+    const firstKey = authority.keys[0]!;
+    await expect(executeEvidenceSelectionFill({
+      workset: prepared, cacheRoot, authority, config,
+      extractor: createSemanticProviderHttpExtractor(config, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME),
+      continueAfterResult: (key) => {
+        expect(key).toBe(firstKey);
+        expect(readEvidenceSelectionResults(prepared, cacheRoot, 128)[0]?.status).toBe("interpreted");
+        expect(inspectLedger(cacheRoot, authority)?.successfulKeys).toEqual([firstKey]);
+        throw new Error("continueAfterResult rejected further selection");
+      }
+    })).rejects.toThrow(/continueAfterResult rejected further selection/u);
+    expect(captured.hits).toBe(1);
+    const lease = acquireExtractionCacheWriteLease(cacheRoot);
+    lease.release();
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128).map((row) => row.status))
+      .toEqual(["interpreted", "unattempted"]);
+    const snapshot = inspectLedger(cacheRoot, authority);
+    expect(snapshot).toMatchObject({ attempts: 1, successfulKeys: [firstKey], pendingKeys: [] });
+    expect(readProviderRawAttempt(cacheRoot, authority.keys[1]!, 1)).toBeUndefined();
+    expect(snapshot?.settledAttempts.map((item) => item.cacheKey)).toEqual([firstKey]);
+  } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
+});
+
 const DIGEST_ALPHA = `sha256:${"a".repeat(64)}`;
 const DIGEST_BETA = `sha256:${"b".repeat(64)}`;
+const QUESTIONS = [
+  "Who left after the sample arrived?",
+  "When did Lee leave?",
+  "What arrived?"
+] as const;
 
 function tempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "evidence-selection-"));
@@ -356,33 +521,42 @@ function tempRoot(): string {
   return root;
 }
 
-function workset(providerUrl: string) {
+function workset(providerUrl: string, questions: readonly string[] = [QUESTIONS[0]]) {
+  const sources = [
+    {
+      root_id: "src-alpha",
+      version: "v1",
+      digest: DIGEST_ALPHA,
+      span: { start: 10, end: 64 },
+      preview: PREVIEW,
+      metadata: null
+    },
+    {
+      root_id: "src-beta",
+      version: "v1",
+      digest: DIGEST_BETA,
+      span: { start: 0, end: OTHER.length },
+      preview: OTHER
+    }
+  ];
   return parseEvidenceSelectionWorkset({
     contract: "source-evidence-selection-workset-v1",
     model: MODEL,
     provider_url: providerUrl,
     request_profile: PROFILE,
-    items: [{
-      original_question: "Who left after the sample arrived?",
+    items: questions.map((original_question) => ({
+      original_question,
       metadata: null,
-      sources: [
-        {
-          root_id: "src-alpha",
-          version: "v1",
-          digest: DIGEST_ALPHA,
-          span: { start: 10, end: 64 },
-          preview: PREVIEW,
-          metadata: null
-        },
-        {
-          root_id: "src-beta",
-          version: "v1",
-          digest: DIGEST_BETA,
-          span: { start: 0, end: OTHER.length },
-          preview: OTHER
-        }
-      ]
-    }]
+      sources
+    }))
+  });
+}
+
+function inspectLedger(cacheRoot: string, authority: ReturnType<typeof pinEvidenceSelectionAuthority>) {
+  return inspectExtractionAttemptLedger({
+    cacheRoot,
+    lineageDigest: authority.attempt_lineage_digest,
+    cacheIdentity: { model: MODEL, requestProfile: PROFILE }
   });
 }
 

@@ -80,6 +80,8 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
   authority: EvidenceSelectionAuthority;
   config: CompileSeedExtractionConfig;
   extractor?: ReturnType<typeof createSemanticProviderHttpExtractor>;
+  /** Called after a key's execution returns, before reserving any following key. */
+  continueAfterResult?: (key: string) => boolean;
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifyEvidenceSelectionAuthority(input.authority);
@@ -140,6 +142,7 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
       );
       attempts += filled.attempts;
       if (filled.admitted) newlyAdmitted += 1;
+      if (input.continueAfterResult !== undefined && !input.continueAfterResult(line.key)) break;
     }
     return summarize(input, cacheHits, newlyAdmitted, attempts);
   } finally {
