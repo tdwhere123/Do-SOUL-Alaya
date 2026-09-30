@@ -7,10 +7,12 @@ import { afterEach, expect, it } from "vitest";
 import {
   bindSemanticProviderRequest, estimatedSemanticProviderUpperUsd,
   semanticProviderRequestCacheKey, SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME,
-  SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME, SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME
+  SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME, SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME,
+  PAGE_SUPPORT_COMPARISON_SCHEMA_NAME
 } from "../../../runs/provider-request/request-binding.js";
 import { EVIDENCE_SELECTION_WORKSET_CONTRACT } from "../../../runs/evidence-selection/input.js";
 import { SOURCE_EVIDENCE_PRESERVATION_WORKSET_CONTRACT } from "../../../runs/source-evidence-preservation/input.js";
+import { PAGE_SUPPORT_COMPARISON_WORKSET_CONTRACT } from "../../../runs/page-support-comparison/input.js";
 import { estimatedUpperUsd, pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
   executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults
@@ -67,7 +69,14 @@ it("keeps Q/C wire identity and quote on the shared request-binding owner", () =
     systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, schema: line.responseJsonSchema,
     maxOutputTokens: 128, providerUrl: prepared.provider_url, schemaName: SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME
   })).not.toBe(line.key);
+  expect(semanticProviderRequestCacheKey({
+    identityPrefix: PAGE_SUPPORT_COMPARISON_WORKSET_CONTRACT, model: MODEL, requestProfile: PROFILE,
+    systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, schema: line.responseJsonSchema,
+    maxOutputTokens: 128, providerUrl: prepared.provider_url, schemaName: PAGE_SUPPORT_COMPARISON_SCHEMA_NAME
+  })).not.toBe(line.key);
   expect(SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME).not.toBe(SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME);
+  expect(PAGE_SUPPORT_COMPARISON_SCHEMA_NAME).not.toBe(SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME);
+  expect(PAGE_SUPPORT_COMPARISON_SCHEMA_NAME).not.toBe(SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME);
   const quote = { maximum_attempts: 2, max_output_tokens: 128, maximum_input_tokens_per_attempt: 4096 };
   expect(estimatedSemanticProviderUpperUsd(quote, 1, 2)).toBe(estimatedUpperUsd(quote, 1, 2));
   expect(estimatedSemanticProviderUpperUsd(quote, 1, 2)).toBe((4096 * 1 + 128 * 2) / 1_000_000 * 2);
