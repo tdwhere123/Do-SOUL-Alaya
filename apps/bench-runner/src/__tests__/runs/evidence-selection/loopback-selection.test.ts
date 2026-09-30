@@ -4,8 +4,13 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import {
+  inspectProviderChatCompletionResponse,
+  MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
+} from "@do-soul/alaya-engine-gateway";
 import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
+import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME } from "../../../runs/provider-request/request-binding.js";
@@ -14,6 +19,7 @@ import { executeEvidenceSelectionFill, prepareEvidenceSelection, readEvidenceSel
 import { materializeEvidenceSelectionLines, parseEvidenceSelectionWorkset } from "../../../runs/evidence-selection/input.js";
 import { openEvidenceSelectionAttemptLedger } from "../../../runs/evidence-selection/attempt.js";
 import { pinEvidenceSelectionAuthority, quoteEvidenceSelection } from "../../../runs/evidence-selection/authority.js";
+import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
@@ -166,6 +172,91 @@ it.each([
   }
 });
 
+it("requests full Step HTTP evidence over 64KiB through the default extractor and resumes from the written raw", async () => {
+  const content = JSON.stringify(proposalBody([{
+    root_id: "src-alpha",
+    quotes: ["Lee left the lab on Tuesday"],
+    contribution: "Names the departure day."
+  }]));
+  const wire =
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "r".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) } }] })}\n\n` +
+    `data: ${JSON.stringify({
+      choices: [{ delta: { content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }
+    })}\n\ndata: [DONE]\n\n`;
+  const original = Buffer.from(wire);
+  expect(original.length).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+  let ledgerPath = "";
+  const captured: { hits: number; reservedLedger?: string; urls: string[] } = { hits: 0, urls: [] };
+  const server = await listen((req, res) => {
+    captured.hits += 1;
+    captured.urls.push(req.url ?? "");
+    captured.reservedLedger = readFileSync(ledgerPath, "utf8");
+    res.statusCode = 200;
+    res.setHeader("content-type", "text/event-stream");
+    res.end(wire);
+  });
+  const origin = originOf(server);
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = ((url, init) => {
+    const selected = new URL(String(url));
+    expect(selected.origin).toBe("https://api.stepfun.com");
+    return nativeFetch(new URL(selected.pathname + selected.search, origin), init);
+  }) as typeof fetch;
+  try {
+    // The fetch seam below routes the exact Step host to the real loopback server.
+    vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "true");
+    const cacheRoot = join(tempRoot(), "cache");
+    const prepared = stepWorkset();
+    const preflight = prepareEvidenceSelection(prepared, cacheRoot, 128);
+    const authority = pinEvidenceSelectionAuthority({
+      preflight,
+      inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
+      outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+    });
+    ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
+    const config = stepConfig();
+    const first = await executeEvidenceSelectionFill({
+      workset: prepared, cacheRoot, authority, config
+    });
+    const key = authority.keys[0]!;
+    expect(first).toMatchObject({ attempts: 1, newly_admitted: 1, interpreted: 1, cache_hits: 0 });
+    expect(captured.hits).toBe(1);
+    expect(captured.urls[0]).toBe("/step_plan/v1/chat/completions");
+    const raw = readProviderRawAttempt(cacheRoot, key, 1)!;
+    expect(raw.http_response).toMatchObject({
+      bodyByteLength: original.length, bodyComplete: true, bodyTruncated: false,
+      bodySha256: createHash("sha256").update(original).digest("hex")
+    });
+    expect(Buffer.from(raw.http_response!.bodyBase64, "base64").equals(original)).toBe(true);
+    expect(inspectProviderChatCompletionResponse(
+      Buffer.from(raw.http_response!.bodyBase64, "base64"), raw.http_response!.contentType, 200,
+      { sseCompletionPolicy: "require_witness" }
+    )).toMatchObject({ text: content, finishReason: "stop",
+      usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 } });
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128)[0]?.status).toBe("interpreted");
+    const settledReplay = await executeEvidenceSelectionFill({
+      workset: prepared, cacheRoot, authority, config: { ...config, apiKey: null }
+    });
+    expect(settledReplay).toMatchObject({ cache_hits: 1, newly_admitted: 0, interpreted: 1, attempts: 0 });
+    expect(captured.hits).toBe(1);
+    unlinkSync(evidenceSelectionShardPath(cacheRoot, key));
+    writeFileSync(ledgerPath, captured.reservedLedger!);
+    const rawReplay = await executeEvidenceSelectionFill({
+      workset: prepared, cacheRoot, authority, config: { ...config, apiKey: null }
+    });
+    expect(rawReplay).toMatchObject({ newly_admitted: 1, interpreted: 1, attempts: 1 });
+    expect(captured.hits).toBe(1);
+    expect(openEvidenceSelectionAttemptLedger({ cacheRoot, authority }).snapshot().telemetry.totalTokens).toBe(18);
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128)[0]?.status).toBe("interpreted");
+  } finally {
+    globalThis.fetch = nativeFetch;
+    vi.unstubAllEnvs();
+    server.closeAllConnections();
+    await closeServer(server);
+  }
+});
+
 it("keeps incomplete MAX_TOKENS output distinct from invalid and from abstain", async () => {
   const captured = { hits: 0 };
   const server = await listen((_req, res) => {
@@ -297,6 +388,24 @@ function workset(providerUrl: string) {
 
 function configOf(origin: string): CompileSeedExtractionConfig {
   return { providerUrl: origin, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+}
+
+function stepWorkset() {
+  return parseEvidenceSelectionWorkset({
+    ...workset(new URL(STEP_PLAN_QUOTE_BASIS.selected_provider_url).origin),
+    model: STEP_PLAN_QUOTE_BASIS.selected_model,
+    provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
+    request_profile: "step-3.5-2603-low-json-schema-v1"
+  });
+}
+
+function stepConfig(): CompileSeedExtractionConfig {
+  return {
+    providerUrl: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
+    model: STEP_PLAN_QUOTE_BASIS.selected_model,
+    requestProfile: "step-3.5-2603-low-json-schema-v1",
+    apiKey: "loopback-only"
+  };
 }
 
 function usage() {

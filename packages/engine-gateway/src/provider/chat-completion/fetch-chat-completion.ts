@@ -67,7 +67,11 @@ async function runProviderChatRequest(
     let bodyText: string;
     let evidence: ProviderHttpResponseEvidence;
     try {
-      ({ bodyText, evidence } = await readProviderResponseWithEvidence(response, observeResponse));
+      ({ bodyText, evidence } = await readProviderResponseWithEvidence(
+        response, observeResponse,
+        request.retainHttpResponseEvidence === true
+          ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined
+      ));
     } catch (cause) {
       if (response.ok) throw cause;
       throw new ProviderChatCompletionError(

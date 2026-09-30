@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildProviderChatRequestBody,
   executeProviderChatCompletion,
+  inspectProviderChatCompletionResponse,
+  MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
   ProviderChatCompletionError,
   providerChatCompletionsUrl,
@@ -200,6 +202,71 @@ describe("Step Chat Completions over local HTTP", () => {
       expect(failure.httpResponse?.bodySha256).toBe(createHash("sha256").update(raw).digest("hex"));
       expect(Object.hasOwn(failure, "httpResponse")).toBe(false);
       expect(JSON.stringify(failure)).not.toContain("bodyBase64");
+    });
+  });
+
+  it("retains complete SSE bytes past 64KiB only when full HTTP evidence is requested", async () => {
+    const content = '{"value":"tail-marker"}';
+    const wire =
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "r".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) } }] })}\n\n` +
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }
+      })}\n\ndata: [DONE]\n\n`;
+    const original = Buffer.from(wire);
+    expect(original.length).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+    await withServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(wire);
+    }, async (providerUrl) => {
+      const retained = await executeProviderChatCompletion(
+        { ...stepRequest(providerUrl, "sse"), retainHttpResponseEvidence: true },
+        { maxRetries: 0, retryDelaysMs: [] }
+      );
+      const defaulted = await executeProviderChatCompletion(stepRequest(providerUrl, "sse"), {
+        maxRetries: 0, retryDelaysMs: []
+      });
+      expect(retained.result).toMatchObject({
+        text: content, finishReason: "stop",
+        usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 }
+      });
+      expect(retained.result.httpResponse).toMatchObject({
+        bodyByteLength: original.length, bodyComplete: true, bodyTruncated: false,
+        bodySha256: createHash("sha256").update(original).digest("hex")
+      });
+      const retainedBytes = Buffer.from(retained.result.httpResponse!.bodyBase64, "base64");
+      expect(retainedBytes.equals(original)).toBe(true);
+      expect(inspectProviderChatCompletionResponse(
+        retainedBytes, retained.result.httpResponse!.contentType, 200, { sseCompletionPolicy: "require_witness" }
+      )).toMatchObject({ text: content, finishReason: "stop" });
+      expect(defaulted.result.text).toBe(content);
+      expect(defaulted.result.httpResponse).toMatchObject({
+        bodyByteLength: original.length, bodyComplete: true, bodyTruncated: true
+      });
+      expect(Buffer.from(defaulted.result.httpResponse!.bodyBase64, "base64").byteLength).toBe(
+        MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
+      );
+    });
+  });
+
+  it("still truncates genuinely oversized Step evidence when full retention is requested", async () => {
+    const raw = "x".repeat(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES + 5);
+    await withServer((_request, response) => {
+      response.writeHead(429, { "content-type": "text/plain" });
+      response.end(raw);
+    }, async (providerUrl) => {
+      const error = await executeProviderChatCompletion(
+        { ...stepRequest(providerUrl), retainHttpResponseEvidence: true },
+        { maxRetries: 0, retryDelaysMs: [] }
+      ).then(() => { throw new Error("expected HTTP failure"); }, (cause: unknown) => cause);
+      expect(error).toBeInstanceOf(ProviderChatCompletionError);
+      const failure = error as ProviderChatCompletionError;
+      expect(failure.httpResponse).toMatchObject({
+        bodyByteLength: raw.length, bodyTruncated: true, bodyComplete: true
+      });
+      expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64").byteLength).toBe(
+        MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
+      );
     });
   });
 

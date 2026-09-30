@@ -4,6 +4,7 @@ import { mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { inspectProviderChatCompletionResponse,
+  MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
   type ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
 import { decodeGeminiGenerateContent, isGeminiGenerateContentProfile,
@@ -34,6 +35,13 @@ const MAX_RETAINED_RESPONSE_BODY_BYTES = MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYT
 const MAX_RECORD_ENVELOPE_BYTES = 64 * 1024;
 const MAX_RECORD_BYTES = 6 * (MAX_RETAINED_RAW_BYTES + 2 + MAX_RETAINED_RESPONSE_BODY_BYTES + 2)
   + MAX_RECORD_ENVELOPE_BYTES;
+// Step keeps the physical bytes in base64, alongside the JSON-escaped decoded text.
+const MAX_STEP_RECORD_BYTES = 6 * (MAX_RETAINED_RAW_BYTES + 2)
+  + 4 * Math.ceil(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES / 3) + MAX_RECORD_ENVELOPE_BYTES;
+
+function maxRawRecordBytes(raw: ProviderRawAttempt): number {
+  return isStepRawAttemptContract(raw.contract) ? MAX_STEP_RECORD_BYTES : MAX_RECORD_BYTES;
+}
 
 const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
@@ -280,10 +288,14 @@ export function readProviderRawAttempt(
 ): ProviderRawAttempt | undefined {
   const path = providerRawAttemptPath(root, key, ordinal);
   if (!boundedArtifactEntryExists(path)) return undefined;
-  const text = readBoundedCanonicalUtf8Artifact({ path, maxBytes: MAX_RECORD_BYTES, label: "provider raw attempt" });
+  const text = readBoundedCanonicalUtf8Artifact({ path,
+    maxBytes: Math.max(MAX_RECORD_BYTES, MAX_STEP_RECORD_BYTES), label: "provider raw attempt" });
   let record: ProviderRawAttempt;
   try { record = ProviderRawAttemptSchema.parse(JSON.parse(text)); }
   catch { throw new ProviderRawAttemptIdentityError(`provider raw attempt is malformed: ${key}`); }
+  if (Buffer.byteLength(text, "utf8") > maxRawRecordBytes(record)) {
+    throw new ProviderRawAttemptIdentityError("provider raw attempt exceeds its size limit");
+  }
   if (record.cache_key !== key || record.attempt_ordinal !== ordinal) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt identity mismatch: ${key}`);
   }
@@ -310,8 +322,8 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
           Buffer.byteLength(body.text, "utf8") > MAX_RETAINED_RESPONSE_BODY_BYTES + 2)) ||
       http !== undefined && (httpBytes === undefined ||
         httpBytes.toString("base64") !== http.bodyBase64 ||
-        httpBytes.length > MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES ||
-        http.bodyTruncated !== (http.bodyByteLength > MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) ||
+        httpBytes.length > MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES ||
+        http.bodyTruncated !== (httpBytes.length < http.bodyByteLength) ||
         !http.bodyTruncated && (httpBytes.length !== http.bodyByteLength ||
           createHash("sha256").update(httpBytes).digest("hex") !== http.bodySha256)) ||
       raw.request_profile === "step-3.5-2603-low-json-schema-v1" &&
@@ -412,7 +424,7 @@ export function writeProviderRawAttempt(input: Readonly<{
   });
   assertProviderRawIntegrity(record);
   const bytes = Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8");
-  if (bytes.byteLength > MAX_RECORD_BYTES) {
+  if (bytes.byteLength > maxRawRecordBytes(record)) {
     throw new ProviderRawAttemptIdentityError("provider raw attempt exceeds its size limit");
   }
   const path = providerRawAttemptPath(input.root, input.cacheKey, input.attemptOrdinal);

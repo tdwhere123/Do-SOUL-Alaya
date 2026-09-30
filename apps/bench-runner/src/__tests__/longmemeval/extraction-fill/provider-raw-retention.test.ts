@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
+import {
+  inspectProviderChatCompletionResponse,
+  MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
+  MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
+} from "@do-soul/alaya-engine-gateway";
 import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRawAttempt,
   writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 
@@ -111,6 +116,103 @@ it("requires a Step HTTP witness for completed output but keeps a witness-free f
   expect(providerRawSuccessEvidenceState(raw)).toBe("failed");
 });
 
+it("reopens complete Step HTTP evidence larger than the default 64KiB prefix", () => {
+  const input = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1", finishReason: "stop" };
+  const content = "{\"value\":\"tail-marker\"}";
+  const wire =
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "r".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) } }] })}\n\n` +
+    `data: ${JSON.stringify({
+      choices: [{ delta: { content }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 }
+    })}\n\ndata: [DONE]\n\n`;
+  const bytes = Buffer.from(wire);
+  expect(bytes.length).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+  expect(bytes.length).toBeLessThanOrEqual(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
+  const usage = { inputTokens: 2, outputTokens: 3, totalTokens: 5 };
+  const httpResponse = {
+    contentType: "text/event-stream", bodyBase64: bytes.toString("base64"),
+    bodyByteLength: bytes.length, bodySha256: digest(wire), bodyTruncated: false, bodyComplete: true
+  };
+  writeProviderRawAttempt({ ...input, decodedText: content, usage, httpResponse });
+  const raw = readProviderRawAttempt(input.root, input.cacheKey, 1)!;
+  expect(providerRawSuccessEvidenceState(raw)).toBe("bound");
+  expect(raw.http_response).toMatchObject({
+    bodyByteLength: bytes.length, bodyTruncated: false, bodyComplete: true
+  });
+  expect(Buffer.from(raw.http_response!.bodyBase64, "base64").equals(bytes)).toBe(true);
+  expect(inspectProviderChatCompletionResponse(
+    Buffer.from(raw.http_response!.bodyBase64, "base64"), raw.http_response!.contentType, 200,
+    { sseCompletionPolicy: "require_witness" }
+  )).toMatchObject({ text: content, finishReason: "stop", usage });
+});
+
+it("reopens a complete near-8MiB Step HTTP body whose serialized record exceeds the previous 6_750_232-byte cap", () => {
+  const input = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1", finishReason: "stop" };
+  const content = "{\"value\":\"tail-marker\"}";
+  const tail = `data: ${JSON.stringify({
+    choices: [{ delta: { content }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 }
+  })}\n\ndata: [DONE]\n\n`;
+  const headOpen = `data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"`;
+  const headClose = `\"}}]}\n\n`;
+  const reasoningBytes = MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
+    - Buffer.byteLength(headOpen) - Buffer.byteLength(headClose) - Buffer.byteLength(tail);
+  const wire = `${headOpen}${"r".repeat(reasoningBytes)}${headClose}${tail}`;
+  const bytes = Buffer.from(wire);
+  expect(bytes.length).toBe(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
+  const usage = { inputTokens: 2, outputTokens: 3, totalTokens: 5 };
+  writeProviderRawAttempt({
+    ...input, decodedText: content, usage,
+    httpResponse: {
+      contentType: "text/event-stream", bodyBase64: bytes.toString("base64"),
+      bodyByteLength: bytes.length, bodySha256: createHash("sha256").update(bytes).digest("hex"),
+      bodyTruncated: false, bodyComplete: true
+    }
+  });
+  const path = providerRawAttemptPath(input.root, input.cacheKey, 1);
+  const serialized = readFileSync(path);
+  expect(serialized.byteLength).toBeGreaterThan(6_750_232);
+  const raw = readProviderRawAttempt(input.root, input.cacheKey, 1)!;
+  expect(providerRawSuccessEvidenceState(raw)).toBe("bound");
+  expect(raw).toMatchObject({
+    decoded_text: content, finish_reason: "stop", usage,
+    original_byte_length: Buffer.byteLength(content),
+    http_response: { bodyByteLength: bytes.length, bodyTruncated: false, bodyComplete: true }
+  });
+  expect(Buffer.from(raw.http_response!.bodyBase64, "base64").equals(bytes)).toBe(true);
+  expect(inspectProviderChatCompletionResponse(
+    Buffer.from(raw.http_response!.bodyBase64, "base64"), raw.http_response!.contentType, 200,
+    { sseCompletionPolicy: "require_witness" }
+  )).toMatchObject({ text: content, finishReason: "stop", usage });
+  expect(readProviderRawAttempt(input.root, input.cacheKey, 1)).toEqual(raw);
+  expect(readFileSync(path).equals(serialized)).toBe(true);
+});
+
+it("still treats default 64KiB Step HTTP prefixes as truncated and rejects forged complete oversized evidence", () => {
+  const input = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1", finishReason: "stop" };
+  const content = "{}";
+  const full = "y".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES + 8);
+  const prefix = full.slice(0, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+  writeProviderRawAttempt({
+    ...input, decodedText: content,
+    httpResponse: {
+      contentType: "text/plain", bodyBase64: Buffer.from(prefix).toString("base64"),
+      bodyByteLength: full.length, bodySha256: digest(full), bodyTruncated: true, bodyComplete: true
+    }
+  });
+  expect(providerRawSuccessEvidenceState(readProviderRawAttempt(input.root, input.cacheKey, 1)!)).toBe("truncated");
+  const oversized = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1", finishReason: "stop" };
+  const tooLarge = Buffer.alloc(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES + 1, 0x61);
+  expect(() => writeProviderRawAttempt({
+    ...oversized, decodedText: content,
+    httpResponse: {
+      contentType: "text/plain", bodyBase64: tooLarge.toString("base64"),
+      bodyByteLength: tooLarge.length, bodySha256: createHash("sha256").update(tooLarge).digest("hex"),
+      bodyTruncated: false, bodyComplete: true
+    }
+  })).toThrow(/integrity mismatch/u);
+});
+
 it("rejects a digest-consistent complete response body above its retention limit", () => {
   const input = fixture();
   const raw = writeProviderRawAttempt({ ...input, decodedText: "{}", responseBody: "body" });
@@ -127,7 +229,7 @@ it("rejects an over-budget metadata envelope before creating raw directories or 
   const path = providerRawAttemptPath(input.root, input.cacheKey, 1);
   expect(existsSync(dirname(path))).toBe(false);
   expect(existsSync(path)).toBe(false);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ model }));
+  const raw = writeProviderRawAttempt({ ...input, decodedText: "{}" });
+  writeFileSync(path, JSON.stringify({ ...raw, model }));
   expect(() => readProviderRawAttempt(input.root, input.cacheKey, 1)).toThrow(/size limit/u);
 });

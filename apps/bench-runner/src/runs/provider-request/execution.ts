@@ -115,7 +115,9 @@ export async function executeProviderRequestLine(
         maxOutputTokens: context.maxOutputTokens,
         outputTokenField: context.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
           ? "max_tokens" : "maxOutputTokens",
-        validateRawJson: () => undefined, responseJsonSchema: line.responseJsonSchema
+        validateRawJson: () => undefined, responseJsonSchema: line.responseJsonSchema,
+        ...(context.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+          ? { retainHttpResponseEvidence: true as const } : {})
       });
     } catch (cause) {
       if (isLocalPersistenceFailure(cause)) throw cause;

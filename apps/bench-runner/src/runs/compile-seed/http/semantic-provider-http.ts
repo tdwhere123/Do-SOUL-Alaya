@@ -48,6 +48,7 @@ export function prepareSemanticProviderRequest(
     maxOutputTokens: input.maxOutputTokens, outputTokenField: "max_tokens",
     mode: "sse", sseCompletionPolicy: "require_witness", timeoutMs,
     ...(input.abortSignal === undefined ? {} : { abortSignal: input.abortSignal }),
+    ...(input.retainHttpResponseEvidence === true ? { retainHttpResponseEvidence: true as const } : {}),
     env: process.env
   };
   const url = new URL(providerChatCompletionsUrl(route.providerUrl, process.env));
