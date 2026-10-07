@@ -12,6 +12,7 @@ import { evidenceSelectionShardPath } from "../../../runs/evidence-selection/art
 import { executeEvidenceSelectionFill, prepareEvidenceSelection, readEvidenceSelectionResults } from "../../../runs/evidence-selection/execute.js";
 import {
   EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY,
+  EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY,
   evidenceSelectionCacheKey,
   evidenceSelectionResponseJsonSchema,
   interpretEvidenceSelectionDecoded,
@@ -22,6 +23,8 @@ import {
 import { openEvidenceSelectionAttemptLedger } from "../../../runs/evidence-selection/attempt.js";
 import { pinEvidenceSelectionAuthority } from "../../../runs/evidence-selection/authority.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { STEP_OPENAPI_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
+import { decodeEvidenceSelectionSourceBlocks } from "../../../runs/evidence-selection/source-input-blocks.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
@@ -129,6 +132,62 @@ it("rejects an unknown request_policy before materialization", () => {
   const parsed = workset(ORIGIN);
   expect(() => materializeEvidenceSelectionLines({ ...parsed, request_policy: "partial-evidence-v2" }, MAX_OUTPUT))
     .toThrow(/request_policy is unsupported/u);
+});
+
+it("pairs exactly one item with unchanged partial instructions, sources and native controls", () => {
+  const partial = workset(ORIGIN, EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY);
+  const paired = workset(ORIGIN, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY);
+  const [json, blocks] = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
+  expect(json).toStrictEqual(materializeEvidenceSelectionLines(partial, MAX_OUTPUT)[0]);
+  expect(JSON.parse(json!.userPrompt)).toStrictEqual(paired.items[0]);
+  expect(decodeEvidenceSelectionSourceBlocks(blocks!.userPrompt)).toStrictEqual(paired.items[0]);
+  expect(blocks).toMatchObject({ systemPrompt: json!.systemPrompt, sourcesDigest: json!.sourcesDigest,
+    responseJsonSchema: json!.responseJsonSchema, transportProvenance: json!.transportProvenance });
+  expect(blocks!.sources).toBe(paired.items[0]!.sources);
+  expect(json!.sources).toBe(blocks!.sources);
+  expect(blocks!.key).not.toBe(json!.key);
+  expect(blocks!.requestDigest).not.toBe(json!.requestDigest);
+  const multiple = { ...paired, items: [paired.items[0]!, paired.items[0]!] };
+  expect(() => parseEvidenceSelectionWorkset(multiple)).toThrow(/exactly one item/u);
+  expect(() => materializeEvidenceSelectionLines(multiple, MAX_OUTPUT)).toThrow(/exactly one item/u);
+  expect(() => materializeEvidenceSelectionLines({ ...paired, items: [] }, MAX_OUTPUT)).toThrow(/exactly one item/u);
+});
+
+it("preserves historical JSON property order and omitted metadata for both existing policies", () => {
+  const expected = `{"original_question":"${QUESTION}","metadata":null,"sources":[{"root_id":"src-alpha","version":"v1","digest":"${DIGEST_ALPHA}","span":{"start":10,"end":64},"preview":"${PREVIEW}","metadata":null},{"root_id":"src-beta","version":"v1","digest":"${DIGEST_BETA}","span":{"start":0,"end":${OTHER.length}},"preview":"${OTHER}"}]}`;
+  for (const policy of [undefined, EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY]) {
+    expect(materializeEvidenceSelectionLines(workset(ORIGIN, policy), MAX_OUTPUT)[0]!.userPrompt).toBe(expected);
+  }
+});
+
+it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
+  "refuses lossy header metadata before request binding", (metadata) => {
+    const paired = workset(ORIGIN, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY);
+    expect(() => materializeEvidenceSelectionLines({
+      ...paired, items: [{ ...paired.items[0]!, metadata }]
+    }, MAX_OUTPUT)).toThrow(/not lossless/u);
+  }
+);
+
+it("binds the paired Step messages to the existing low schema profile, cap and ordinary quote owner", () => {
+  const basis = STEP_OPENAPI_QUOTE_BASIS;
+  const paired = parseEvidenceSelectionWorkset({
+    ...worksetBody(basis.selected_provider_url, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY),
+    model: basis.selected_model, request_profile: "step-3.5-2603-low-json-schema-v1"
+  });
+  const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
+  const preflight = prepareEvidenceSelection(paired, tempRoot(), MAX_OUTPUT);
+  expect(preflight).toMatchObject({ maximum_attempts: 2, maximum_attempts_per_key: 1,
+    max_output_tokens: MAX_OUTPUT, quote_basis: basis, keys: lines.map((line) => line.key) });
+  for (const line of lines) {
+    const body = JSON.parse(prepareSemanticProviderRequest({ model: basis.selected_model,
+      providerUrl: basis.selected_provider_url, requestProfile: "step-3.5-2603-low-json-schema-v1", apiKey: null
+    }, { systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, responseJsonSchema: line.responseJsonSchema,
+      maxOutputTokens: MAX_OUTPUT, outputTokenField: "max_tokens", retryMode: "disabled", validateRawJson: () => undefined
+    }, SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME).body);
+    expect(body).toMatchObject({ model: basis.selected_model, max_tokens: MAX_OUTPUT, reasoning_effort: "low",
+      response_format: { type: "json_schema", json_schema: { name: SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME, strict: true } } });
+  }
 });
 
 it.each([
@@ -264,6 +323,63 @@ it.each([
   expect(interpretEvidenceSelectionDecoded(opted, {
     rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
   }, PROFILE).outcome).toEqual(interpreted.outcome);
+  for (const paired of materializeEvidenceSelectionLines(
+    workset(ORIGIN, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY), MAX_OUTPUT
+  )) {
+    expect(interpretEvidenceSelectionDecoded(paired, {
+      rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
+    }, PROFILE).outcome).toEqual(interpreted.outcome);
+  }
+});
+
+it("dispatches both native representations once and reopens their shared budget without additional HTTP", async () => {
+  const bodies: string[] = [];
+  const server = await listen((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk as Buffer));
+    req.on("end", () => {
+      bodies.push(Buffer.concat(chunks).toString("utf8"));
+      succeed(res, proposal([{ root_id: "src-alpha", quotes: ["Lee left the lab on Tuesday"],
+        contribution: "Names the departure day." }]));
+    });
+  });
+  try {
+    const origin = originOf(server);
+    const paired = workset(origin, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY);
+    const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
+    const cacheRoot = join(tempRoot(), "cache");
+    const preflight = prepareEvidenceSelection(paired, cacheRoot, MAX_OUTPUT);
+    expect(preflight).toMatchObject({ missing: 2, maximum_attempts: 2, maximum_attempts_per_key: 1,
+      provider_calls: 0, keys: lines.map((line) => line.key) });
+    const authority = pinEvidenceSelectionAuthority({ preflight, inputUsdPerMillion: 4, outputUsdPerMillion: 18 });
+    expect(authority.limits).toMatchObject({ max_concurrency: 1, maximum_attempts: 2, maximum_attempts_per_key: 1 });
+    const config = configOf(origin);
+    const first = await executeEvidenceSelectionFill({ workset: paired, cacheRoot, authority, config });
+    expect(first).toMatchObject({ attempts: 2, newly_admitted: 2, interpreted: 2, cache_hits: 0 });
+    expect(bodies).toEqual(lines.map((line) => wireBody(line.systemPrompt, line.userPrompt, paired)));
+    const rows = readEvidenceSelectionResults(paired, cacheRoot, MAX_OUTPUT);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.status)).toEqual(["interpreted", "interpreted"]);
+    for (const [index, line] of lines.entries()) {
+      const ordinal = index + 1;
+      expect(rows[index]!.shard).toMatchObject({ cache_key: line.key, user_prompt: line.userPrompt,
+        sources_digest: line.sourcesDigest, request_digest: line.requestDigest, attempt_ordinal: ordinal, admitted: true });
+      expect(readProviderRawAttempt(cacheRoot, line.key, ordinal)).toMatchObject({ cache_key: line.key,
+        request_digest: line.requestDigest, attempt_ordinal: ordinal, attempt_lineage_digest: authority.attempt_lineage_digest });
+      expect(readProviderRawAttempt(cacheRoot, line.key, 3)).toBeUndefined();
+    }
+    const reopened = openEvidenceSelectionAttemptLedger({ cacheRoot, authority }).snapshot();
+    expect(reopened).toMatchObject({ attempts: 2, maximumAttempts: 2, successfulKeys: authority.keys });
+    expect(reopened.settledAttempts.map((attempt) => [attempt.cacheKey, attempt.attemptOrdinal]))
+      .toEqual(lines.map((line, index) => [line.key, index + 1]));
+    const replay = await executeEvidenceSelectionFill({ workset: paired, cacheRoot, authority, config: { ...config, apiKey: null } });
+    expect(replay).toMatchObject({ attempts: 0, newly_admitted: 0, interpreted: 2, cache_hits: 2 });
+    expect(bodies).toHaveLength(2);
+    expect(prepareEvidenceSelection(paired, cacheRoot, MAX_OUTPUT)).toMatchObject({ missing: 0, maximum_attempts: 0, keys: [] });
+  } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
 });
 
 it("settles partial-evidence-v1 over loopback HTTP and rejects identity drift through the native owner", async () => {

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { AlayaError, canonicalJson, FieldContractDigestSchema } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
@@ -13,6 +14,10 @@ import {
 } from "../provider-request/request-binding.js";
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import type { ProviderRequestAttemptClass } from "../provider-request/execution.js";
+import {
+  decodeEvidenceSelectionSourceBlocks, encodeEvidenceSelectionSourceBlocks,
+  serializeEvidenceSelectionJsonInput
+} from "./source-input-blocks.js";
 
 export const EVIDENCE_SELECTION_WORKSET_CONTRACT = "source-evidence-selection-workset-v1" as const;
 export const EVIDENCE_SELECTION_KIND = "source_evidence_selection" as const;
@@ -20,6 +25,7 @@ export const EVIDENCE_SELECTION_MAX_SELECTED = 5;
 export const EVIDENCE_SELECTION_OUTPUT_TOKEN_DEFAULT = 4096;
 /** Private benchmark opt-in. Omitted worksets keep the historical prompt. */
 export const EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY = "partial-evidence-v1" as const;
+export const EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY = "source-input-representation-pair-v1" as const;
 
 /** Bound request instruction. Generated explanations are not evidence. */
 export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
@@ -208,7 +214,7 @@ export function evidenceSelectionResponseJsonSchema(): object {
 export function parseEvidenceSelectionWorkset(value: unknown): EvidenceSelectionWorkset {
   const workset = EvidenceSelectionWorksetSchema.parse(value);
   selectionRequestProfile(workset.request_profile);
-  selectionRequestPolicy(workset.request_policy);
+  selectionRequestPolicy(workset);
   return {
     ...workset,
     provider_url: workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
@@ -221,7 +227,19 @@ export function materializeEvidenceSelectionLines(
   workset: EvidenceSelectionWorkset, maxOutputTokens: number
 ): readonly EvidenceSelectionLine[] {
   selectionRequestProfile(workset.request_profile);
+  const policy = selectionRequestPolicy(workset);
   const schema = evidenceSelectionResponseJsonSchema();
+  if (policy === EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY) {
+    const item = workset.items[0]!;
+    WorksetItemSchema.parse(item);
+    const sourceBlocks = encodeEvidenceSelectionSourceBlocks(item);
+    const restored = WorksetItemSchema.parse(decodeEvidenceSelectionSourceBlocks(sourceBlocks));
+    if (!isDeepStrictEqual(restored, item)) {
+      throw new AlayaError("VALIDATION", "evidence selection source input representation is not lossless");
+    }
+    return [bindLine(workset, item, schema, maxOutputTokens),
+      bindLine(workset, item, schema, maxOutputTokens, sourceBlocks)];
+  }
   return workset.items.map((item) => bindLine(workset, item, schema, maxOutputTokens));
 }
 
@@ -354,7 +372,8 @@ function bindLine(
   workset: EvidenceSelectionWorkset,
   item: EvidenceSelectionItem,
   responseJsonSchema: object,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  representedInput?: string
 ): EvidenceSelectionLine {
   const roots = new Set<string>();
   for (const source of item.sources) {
@@ -363,20 +382,9 @@ function bindLine(
     }
     roots.add(source.root_id);
   }
-  const userPrompt = JSON.stringify({
-    original_question: item.original_question,
-    ...(item.metadata === undefined ? {} : { metadata: item.metadata }),
-    sources: item.sources.map((source) => ({
-      root_id: source.root_id,
-      version: source.version,
-      digest: source.digest,
-      span: source.span,
-      preview: source.preview,
-      ...(source.metadata === undefined ? {} : { metadata: source.metadata })
-    }))
-  });
+  const userPrompt = representedInput ?? serializeEvidenceSelectionJsonInput(item);
   const requestProfile = selectionRequestProfile(workset.request_profile);
-  const systemPrompt = evidenceSelectionSystemPrompt(workset.request_policy);
+  const systemPrompt = evidenceSelectionSystemPrompt(workset);
   const config = {
     model: workset.model,
     providerUrl: workset.provider_url,
@@ -420,15 +428,22 @@ function selectionRequestProfile(
 }
 
 function selectionRequestPolicy(
-  requestPolicy: string | undefined
-): typeof EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY | undefined {
+  workset: Pick<EvidenceSelectionWorkset, "request_policy" | "items">
+): typeof EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY | typeof EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY | undefined {
+  const requestPolicy = workset.request_policy;
   if (requestPolicy === undefined) return undefined;
   if (requestPolicy === EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY) return requestPolicy;
+  if (requestPolicy === EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY) {
+    if (workset.items.length !== 1) {
+      throw new AlayaError("VALIDATION", "evidence selection input representation pair requires exactly one item");
+    }
+    return requestPolicy;
+  }
   throw new AlayaError("VALIDATION", "evidence selection request_policy is unsupported");
 }
 
-function evidenceSelectionSystemPrompt(requestPolicy: string | undefined): string {
-  if (selectionRequestPolicy(requestPolicy) === undefined) {
+function evidenceSelectionSystemPrompt(workset: EvidenceSelectionWorkset): string {
+  if (selectionRequestPolicy(workset) === undefined) {
     return SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT;
   }
   return `${SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT}\n\n${PARTIAL_EVIDENCE_V1_CLARIFICATION}`;
