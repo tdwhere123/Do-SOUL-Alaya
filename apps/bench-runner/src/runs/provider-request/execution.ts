@@ -52,6 +52,9 @@ export type ProviderRequestPhysicalContext = Readonly<{
   attemptLineageDigest: string;
   maxOutputTokens: number;
   maximumAttemptsPerKey: number;
+  /** Verified settled ancestry is retained separately from this child lineage's raw namespace. */
+  settledPredecessorAttemptOrdinals?: ReadonlySet<number>;
+  continuationLineageDigest?: string;
   ledger: ProviderRequestLedger;
   assertReservation: (raw: ProviderRawAttempt) => void;
   interpretDecoded: (line: ProviderRequestLine, decoded: ProviderRequestDecoded) => {
@@ -152,11 +155,12 @@ export function replayExistingProviderRequestRaws(
   const processed = new Set<number>();
   const snapshot = context.ledger.snapshot();
   const used = reservedProviderRequestOrdinals(snapshot, line.key).size;
-  const raws = listProviderRawAttempts(context.cacheRoot, line.key);
+  const raws = listProviderRawAttempts(context.cacheRoot, line.key, context.continuationLineageDigest);
   const rawOrdinals = new Set(raws.map((item) => item.attempt_ordinal));
   const unresolved = snapshot.unresolvedAttempts.filter((item) => item.cacheKey === line.key);
   const missingSettled = [...snapshot.settledAttempts, ...snapshot.transportFailures]
-    .some(attempt => attempt.cacheKey === line.key && !rawOrdinals.has(attempt.attemptOrdinal));
+    .some(attempt => attempt.cacheKey === line.key && !rawOrdinals.has(attempt.attemptOrdinal) &&
+      !context.settledPredecessorAttemptOrdinals?.has(attempt.attemptOrdinal));
   if (missingSettled) {
     return { done: true, classified: "incomplete", admitted: false, attempts: used };
   }
@@ -165,7 +169,8 @@ export function replayExistingProviderRequestRaws(
     return { done: true, classified: "pending", admitted: false, attempts: 0 };
   }
   for (const pending of unresolved) {
-    const raw = readProviderRawAttempt(context.cacheRoot, line.key, pending.attemptOrdinal);
+    const raw = readProviderRawAttempt(context.cacheRoot, line.key, pending.attemptOrdinal,
+      context.continuationLineageDigest);
     processed.add(pending.attemptOrdinal);
     if (raw === undefined) return { done: true, classified: "unknown", admitted: false, attempts: used };
     const lastAttempt = isFinalReservedProviderRequestAttempt(context.ledger, line.key, raw.attempt_ordinal, attemptLimit);
@@ -308,6 +313,8 @@ function retainProviderRequestRaw(
     root: context.cacheRoot, cacheKey: line.key, attemptOrdinal: ordinal, kind: line.kind,
     model: context.model, requestProfile: context.requestProfile,
     requestDigest: line.requestDigest, attemptLineageDigest: context.attemptLineageDigest,
+    ...(context.continuationLineageDigest === undefined ? {} : {
+      continuationLineageDigest: context.continuationLineageDigest }),
     ...fields
   });
 }

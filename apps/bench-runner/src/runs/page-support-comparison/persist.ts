@@ -6,7 +6,8 @@ import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import { ExtractionTransportProvenanceSchema, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
-import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
+import { readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile,
+  decodeCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import {
   inspectExtractionAttemptLedger, openExtractionAttemptLedger
 } from "../extraction/authority/attempt-ledger.js";
@@ -14,6 +15,7 @@ import { settledAttemptUsageDigest } from "../extraction/authority/attempt-ledge
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
+import type { ProviderRequestPhysicalContext } from "../provider-request/execution.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts,
   providerRawSuccessEvidenceState, readProviderRawAttempt, verifyProviderRawReservation,
@@ -71,6 +73,25 @@ const ShardSchema = z.object({
 
 export type PageSupportComparisonShard = z.infer<typeof ShardSchema>;
 
+export function buildPageSupportComparisonShard(input: {
+  line: PageSupportComparisonLine; model: string; requestProfile: string;
+  maxOutputTokens: number; attemptLineageDigest: string;
+  published: Parameters<ProviderRequestPhysicalContext["publishArtifact"]>[0];
+}): PageSupportComparisonShard {
+  const { line, published } = input;
+  return { contract: PAGE_SUPPORT_COMPARISON_CACHE_CONTRACT, kind: PAGE_SUPPORT_COMPARISON_KIND,
+    cache_key: line.key, model: input.model, request_profile: input.requestProfile, question: line.question,
+    system_prompt: line.systemPrompt, user_prompt: line.userPrompt, raw_json: published.rawJson,
+    outcome: published.outcome, admitted: published.admitted, attempt_ordinal: published.attemptOrdinal,
+    extracted_at: new Date().toISOString(), finish_reason: published.finishReason,
+    completion_witness: published.finishReason === null ? null : "finish_reason",
+    raw_digest: createHash("sha256").update(published.rawJson, "utf8").digest("hex"),
+    max_output_tokens: input.maxOutputTokens, transport_provenance: line.transportProvenance,
+    request_digest: line.requestDigest, material_digest: line.materialDigest,
+    attempt_lineage_digest: input.attemptLineageDigest,
+    ...(published.usage === undefined ? {} : { usage: published.usage }) };
+}
+
 export type PageSupportComparisonLookup = Readonly<{
   model: string;
   request_profile: string;
@@ -102,13 +123,38 @@ export function readPageSupportComparisonShard(
 export function inspectPageSupportComparisonShard(
   cacheRoot: string, key: string, expected: PageSupportComparisonLookup
 ): PageSupportComparisonShard | undefined {
-  const path = pageSupportComparisonShardPath(cacheRoot, key);
+  return inspectPageSupportComparisonShardWitness(cacheRoot, key, expected)?.shard;
+}
+
+export function pageSupportComparisonContinuationResultPath(cacheRoot: string, key: string, lineage: string): string {
+  return join(cacheRoot, "comparison-continuations", z.string().regex(/^[0-9a-f]{64}$/u).parse(lineage),
+    `${z.string().regex(/^[0-9a-f]{64}$/u).parse(key)}.json`);
+}
+
+export function inspectPageSupportComparisonContinuationShard(
+  cacheRoot: string, key: string, expected: PageSupportComparisonLookup & { attempt_lineage_digest: string }
+): PageSupportComparisonShard | undefined {
+  return inspectComparisonShardFile(pageSupportComparisonContinuationResultPath(
+    cacheRoot, key, expected.attempt_lineage_digest), key, expected)?.shard;
+}
+
+export function inspectPageSupportComparisonShardWitness(
+  cacheRoot: string, key: string, expected: PageSupportComparisonLookup
+): Readonly<{ shard: PageSupportComparisonShard; fileSha256: string }> | undefined {
+  return inspectComparisonShardFile(pageSupportComparisonShardPath(cacheRoot, key), key, expected);
+}
+
+function inspectComparisonShardFile(path: string, key: string, expected: PageSupportComparisonLookup)
+  : Readonly<{ shard: PageSupportComparisonShard; fileSha256: string }> | undefined {
   if (!existsSync(path)) return undefined;
   let parsed: unknown;
+  let fileSha256: string;
   try {
-    parsed = JSON.parse(readBoundedCanonicalUtf8Artifact({
+    const file = readBoundedStableRegularFile({
       path, maxBytes: PAGE_SUPPORT_COMPARISON_SHARD_MAX_BYTES, label: "page-support comparison shard"
-    }));
+    });
+    fileSha256 = file.identity.sha256;
+    parsed = JSON.parse(decodeCanonicalUtf8Artifact(file.bytes, "page-support comparison shard"));
   } catch {
     throw new PageSupportComparisonIdentityError(`page-support comparison cache is malformed: ${key}`);
   }
@@ -148,7 +194,7 @@ export function inspectPageSupportComparisonShard(
       throw new PageSupportComparisonIdentityError(`page-support comparison cache identity mismatch: ${key}`);
     }
   }
-  return shard.data;
+  return { shard: shard.data, fileSha256 };
 }
 
 export function writePageSupportComparisonShard(
@@ -156,8 +202,21 @@ export function writePageSupportComparisonShard(
 ): void {
   const parsed = ShardSchema.parse(shard);
   const path = pageSupportComparisonShardPath(cacheRoot, parsed.cache_key);
+  writeComparisonShardFile(path, parsed);
+}
+
+export function writePageSupportComparisonContinuationShard(cacheRoot: string, shard: PageSupportComparisonShard): void {
+  const parsed = ShardSchema.parse(shard);
+  writeComparisonShardFile(pageSupportComparisonContinuationResultPath(
+    cacheRoot, parsed.cache_key, parsed.attempt_lineage_digest), parsed);
+}
+
+function writeComparisonShardFile(path: string, parsed: PageSupportComparisonShard): void {
   mkdirSync(dirname(path), { recursive: true });
-  const existing = readPageSupportComparisonShard(cacheRoot, parsed.cache_key);
+  const readExisting = () => existsSync(path) ? ShardSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({
+    path, maxBytes: PAGE_SUPPORT_COMPARISON_SHARD_MAX_BYTES, label: "page-support comparison shard"
+  }))) : undefined;
+  const existing = readExisting();
   if (existing !== undefined) {
     if (canonicalJson({ ...existing, extracted_at: "" }) !== canonicalJson({ ...parsed, extracted_at: "" })) {
       throw new PageSupportComparisonIdentityError(`immutable page-support comparison conflict: ${parsed.cache_key}`);
@@ -179,7 +238,7 @@ export function writePageSupportComparisonShard(
     });
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-    const winner = readPageSupportComparisonShard(cacheRoot, parsed.cache_key);
+    const winner = readExisting();
     if (winner === undefined || canonicalJson({ ...winner, extracted_at: "" }) !==
         canonicalJson({ ...parsed, extracted_at: "" })) {
       throw new PageSupportComparisonIdentityError(`immutable page-support comparison conflict: ${parsed.cache_key}`);
@@ -362,7 +421,7 @@ export function openPageSupportComparisonAttemptLedger(input: Readonly<{
   });
 }
 
-function assertComparisonShardRaw(
+export function assertComparisonShardRaw(
   shard: PageSupportComparisonShard, raw: ProviderRawAttempt
 ): void {
   if (raw.kind !== PAGE_SUPPORT_COMPARISON_KIND || raw.attempt_ordinal !== shard.attempt_ordinal ||

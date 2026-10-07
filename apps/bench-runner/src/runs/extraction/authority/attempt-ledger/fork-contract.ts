@@ -1,9 +1,11 @@
 import type { ExtractionAttemptLedgerSnapshot } from "../attempt-ledger.js";
+import { canonicalJson } from "@do-soul/alaya-protocol";
 
 export function assertMonotonicExtractionAttemptLedgerFork(input: {
   readonly predecessor: ExtractionAttemptLedgerSnapshot;
   readonly successor: ExtractionAttemptLedgerSnapshot;
   readonly successorLineageDigest: string;
+  readonly allowInFlightSuccessor?: boolean;
 }): void {
   const { predecessor, successor } = input;
   if (successor.lineageDigest !== input.successorLineageDigest ||
@@ -11,9 +13,12 @@ export function assertMonotonicExtractionAttemptLedgerFork(input: {
       successor.maximumAttempts < predecessor.maximumAttempts ||
       successor.successfulShardCeiling !== predecessor.successfulShardCeiling ||
       successor.attempts < predecessor.attempts ||
-      successor.pendingKeys.length !== 0 || successor.unresolvedAttempts.length !== 0 ||
+      !input.allowInFlightSuccessor &&
+        (successor.pendingKeys.length !== 0 || successor.unresolvedAttempts.length !== 0) ||
       !containsSuccessfulEntries(successor, predecessor) ||
       !containsTransportFailures(successor, predecessor) ||
+      !predecessor.settledAttempts.every(inherited => successor.settledAttempts.some(current =>
+        canonicalJson(current) === canonicalJson(inherited))) ||
       !hasMonotonicTelemetry(successor, predecessor)) {
     throw new Error("successor extraction ledger is not a monotonic predecessor fork");
   }

@@ -11,7 +11,7 @@ import { decodeGeminiGenerateContent, isGeminiGenerateContentProfile,
   parseGeminiGenerateContentBody } from "./batch/native-codec.js";
 import {
   boundedArtifactEntryExists,
-  readBoundedCanonicalUtf8Artifact
+  readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile, decodeCanonicalUtf8Artifact
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
 import { assertExtractionAttemptReservation, type ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
@@ -134,8 +134,15 @@ const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
 
 export type ProviderRawAttempt = z.infer<typeof ProviderRawAttemptSchema>;
 
-export function providerRawAttemptPath(root: string, key: string, ordinal: number): string {
-  return join(root, "provider-raw", key.slice(0, 2), `${key}.${ordinal}.json`);
+export function providerRawAttemptPath(root: string, key: string, ordinal: number,
+  continuationLineageDigest?: string): string {
+  return join(rawAttemptDirectory(root, key, continuationLineageDigest), `${key}.${ordinal}.json`);
+}
+
+function rawAttemptDirectory(root: string, key: string, continuationLineageDigest?: string): string {
+  if (continuationLineageDigest === undefined) return join(root, "provider-raw", key.slice(0, 2));
+  const lineage = z.string().regex(/^[0-9a-f]{64}$/u).parse(continuationLineageDigest);
+  return join(root, "provider-raw-continuations", lineage, key.slice(0, 2));
 }
 
 export function providerRawAttemptInputPaths(root: string, key: string): readonly string[] {
@@ -156,12 +163,13 @@ function matchingRawAttemptNames(directory: string, key: string): readonly strin
   return names;
 }
 
-export function listProviderRawAttempts(root: string, key: string): readonly ProviderRawAttempt[] {
-  const directory = join(root, "provider-raw", key.slice(0, 2));
+export function listProviderRawAttempts(root: string, key: string,
+  continuationLineageDigest?: string): readonly ProviderRawAttempt[] {
+  const directory = rawAttemptDirectory(root, key, continuationLineageDigest);
   return matchingRawAttemptNames(directory, key)
     .map((name) => {
       const ordinal = Number(name.slice(key.length + 1, -5));
-      const record = readProviderRawAttempt(root, key, ordinal);
+      const record = readProviderRawAttempt(root, key, ordinal, continuationLineageDigest);
       if (record === undefined) throw new AlayaError("CONFLICT", `provider raw attempt missing after listing: ${name}`);
       return record;
     })
@@ -298,12 +306,19 @@ export function providerRawSuccessEvidenceState(
 }
 
 export function readProviderRawAttempt(
-  root: string, key: string, ordinal: number
+  root: string, key: string, ordinal: number, continuationLineageDigest?: string
 ): ProviderRawAttempt | undefined {
-  const path = providerRawAttemptPath(root, key, ordinal);
+  return readProviderRawAttemptWithFileWitness(root, key, ordinal, continuationLineageDigest)?.raw;
+}
+
+export function readProviderRawAttemptWithFileWitness(
+  root: string, key: string, ordinal: number, continuationLineageDigest?: string
+): Readonly<{ raw: ProviderRawAttempt; fileSha256: string }> | undefined {
+  const path = providerRawAttemptPath(root, key, ordinal, continuationLineageDigest);
   if (!boundedArtifactEntryExists(path)) return undefined;
-  const text = readBoundedCanonicalUtf8Artifact({ path,
+  const file = readBoundedStableRegularFile({ path,
     maxBytes: Math.max(MAX_RECORD_BYTES, MAX_STEP_RECORD_BYTES), label: "provider raw attempt" });
+  const text = decodeCanonicalUtf8Artifact(file.bytes, "provider raw attempt");
   let record: ProviderRawAttempt;
   try { record = ProviderRawAttemptSchema.parse(JSON.parse(text)); }
   catch { throw new ProviderRawAttemptIdentityError(`provider raw attempt is malformed: ${key}`); }
@@ -314,7 +329,7 @@ export function readProviderRawAttempt(
     throw new ProviderRawAttemptIdentityError(`provider raw attempt identity mismatch: ${key}`);
   }
   assertProviderRawIntegrity(record);
-  return record;
+  return { raw: record, fileSha256: file.identity.sha256 };
 }
 
 function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
@@ -383,6 +398,7 @@ function assertCompletePhysicalResponse(raw: ProviderRawAttempt, httpBytes: Buff
 
 export function writeProviderRawAttempt(input: Readonly<{
   root: string;
+  continuationLineageDigest?: string;
   cacheKey: string;
   attemptOrdinal: number;
   model: string;
@@ -398,6 +414,11 @@ export function writeProviderRawAttempt(input: Readonly<{
   responseBody?: string;
   httpResponse?: ProviderHttpResponseEvidence;
 } & RawAttemptOwner>): ProviderRawAttempt {
+  if (input.continuationLineageDigest !== undefined &&
+      (input.kind !== "page_support_comparison" ||
+       input.attemptLineageDigest !== input.continuationLineageDigest)) {
+    throw new ProviderRawAttemptIdentityError("continuation raw storage requires its comparison lineage");
+  }
   const original = Buffer.from(input.decodedText, "utf8");
   const truncated = original.byteLength > MAX_RETAINED_RAW_BYTES;
   const retained = truncated ? original.subarray(0, MAX_RETAINED_RAW_BYTES).toString("utf8") : input.decodedText;
@@ -441,7 +462,8 @@ export function writeProviderRawAttempt(input: Readonly<{
   if (bytes.byteLength > maxRawRecordBytes(record)) {
     throw new ProviderRawAttemptIdentityError("provider raw attempt exceeds its size limit");
   }
-  const path = providerRawAttemptPath(input.root, input.cacheKey, input.attemptOrdinal);
+  const path = providerRawAttemptPath(input.root, input.cacheKey, input.attemptOrdinal,
+    input.continuationLineageDigest);
   mkdirSync(dirname(path), { recursive: true });
   writeBytesExclusiveDurable(path, bytes);
   return record;

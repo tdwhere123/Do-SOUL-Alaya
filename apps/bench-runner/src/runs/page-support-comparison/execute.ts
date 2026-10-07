@@ -33,6 +33,7 @@ import {
 } from "./input.js";
 import {
   PageSupportComparisonIdentityError,
+  buildPageSupportComparisonShard,
   assertComparisonRawReservation,
   comparisonOutcomeStatus,
   hasAdmittedComparisonOutcome,
@@ -180,28 +181,34 @@ export function readPageSupportComparisonResults(
     const shard = state.shard;
     if (state.status !== "settled") return { line, shard, status: state.status };
     if (shard === undefined) return { line, status: "unattempted" as const };
-    replayCachedComparisonShard(line, shard, workset.request_profile);
-    if (!hasAdmittedComparisonOutcome(shard)) {
-      const outcome = comparisonOutcomeStatus(shard);
-      const status = outcome === "transport_failure" ? outcome
-        : !hasVerifiedComparisonCompletion(shard) ||
-          typeof shard.outcome === "object" && shard.outcome !== null &&
-          "reason" in shard.outcome && ["truncated_raw", "missing_response_body", "truncated_response_body",
-            "unsupported_response_body", "noncomplete"].includes(String(shard.outcome.reason))
-          ? "incomplete"
-          : outcome === "abstained" ? "abstained"
-          : outcome !== "assessed" ? outcome
-          : "invalid";
-      return { line, shard, status };
-    }
-    const interpreted = interpretPageSupportComparisonDecoded(line, {
-      rawJson: shard.raw_json, finishReason: shard.finish_reason ?? null
-    }, workset.request_profile);
-    if (!interpreted.admitted || interpreted.outcome.status !== "assessed") {
-      throw new PageSupportComparisonIdentityError("cached page-support comparison no longer admits");
-    }
-    return { line, shard, status: "assessed", assessment: interpreted.outcome };
+    return pageSupportComparisonResultFromShard(line, shard, workset.request_profile);
   });
+}
+
+export function pageSupportComparisonResultFromShard(
+  line: PageSupportComparisonLine, shard: PageSupportComparisonShard, requestProfile: string
+): PageSupportComparisonResultRow {
+  replayCachedComparisonShard(line, shard, requestProfile);
+  if (!hasAdmittedComparisonOutcome(shard)) {
+    const outcome = comparisonOutcomeStatus(shard);
+    const status = outcome === "transport_failure" ? outcome
+      : !hasVerifiedComparisonCompletion(shard) ||
+        typeof shard.outcome === "object" && shard.outcome !== null &&
+        "reason" in shard.outcome && ["truncated_raw", "missing_response_body", "truncated_response_body",
+          "unsupported_response_body", "noncomplete"].includes(String(shard.outcome.reason))
+        ? "incomplete"
+        : outcome === "abstained" ? "abstained"
+        : outcome !== "assessed" ? outcome
+        : "invalid";
+    return { line, shard, status };
+  }
+  const interpreted = interpretPageSupportComparisonDecoded(line, {
+    rawJson: shard.raw_json, finishReason: shard.finish_reason ?? null
+  }, requestProfile);
+  if (!interpreted.admitted || interpreted.outcome.status !== "assessed") {
+    throw new PageSupportComparisonIdentityError("cached page-support comparison no longer admits");
+  }
+  return { line, shard, status: "assessed", assessment: interpreted.outcome };
 }
 
 function summarize(
@@ -230,8 +237,8 @@ function summarize(
   };
 }
 
-function assertAuthorizedComparisonRequest(
-  input: Parameters<typeof executePageSupportComparisonFill>[0],
+export function assertAuthorizedComparisonRequest(
+  input: Pick<Parameters<typeof executePageSupportComparisonFill>[0], "config" | "workset" | "authority">,
   lines: readonly PageSupportComparisonLine[],
   maxOutputTokens: number
 ): void {
@@ -259,7 +266,7 @@ function assertAuthorizedComparisonRequest(
   }
 }
 
-function toProviderLine(line: PageSupportComparisonLine): ProviderRequestLine {
+export function toProviderLine(line: PageSupportComparisonLine): ProviderRequestLine {
   return {
     key: line.key,
     kind: PAGE_SUPPORT_COMPARISON_KIND,
@@ -315,30 +322,10 @@ function physicalContext(
           `page-support comparison publish key is not in the workset: ${published.line.key}`
         );
       }
-      writePageSupportComparisonShard(input.cacheRoot, {
-        contract: "page-support-comparison-cache-v1" as const,
-        kind: PAGE_SUPPORT_COMPARISON_KIND,
-        cache_key: line.key,
-        model: input.workset.model,
-        request_profile: input.workset.request_profile,
-        question: line.question,
-        system_prompt: line.systemPrompt,
-        user_prompt: line.userPrompt,
-        raw_json: published.rawJson,
-        outcome: published.outcome,
-        admitted: published.admitted,
-        attempt_ordinal: published.attemptOrdinal,
-        extracted_at: new Date().toISOString(),
-        finish_reason: published.finishReason,
-        completion_witness: published.finishReason === null ? null : "finish_reason",
-        raw_digest: createHash("sha256").update(published.rawJson, "utf8").digest("hex"),
-        max_output_tokens: input.authority.limits.max_output_tokens,
-        transport_provenance: line.transportProvenance,
-        request_digest: line.requestDigest,
-        material_digest: line.materialDigest,
-        attempt_lineage_digest: input.authority.attempt_lineage_digest,
-        ...(published.usage === undefined ? {} : { usage: published.usage })
-      });
+      writePageSupportComparisonShard(input.cacheRoot, buildPageSupportComparisonShard({ line, published,
+        model: input.workset.model, requestProfile: input.workset.request_profile,
+        maxOutputTokens: input.authority.limits.max_output_tokens,
+        attemptLineageDigest: input.authority.attempt_lineage_digest }));
     }
   };
 }

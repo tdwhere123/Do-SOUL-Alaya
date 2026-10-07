@@ -98,9 +98,20 @@ export function claimExtractionContinuationChild(input: {
   readonly claim: ExtractionContinuationChildClaim;
 }): ExtractionContinuationChildClaim {
   assertExtractionContinuationChildClaim(input.claim);
-  const path = continuationChildClaimPath(
-    input.cacheRoot, input.claim.predecessor.lineage_digest
-  );
+  return claimAttemptLedgerContinuationChild({ ...input,
+    predecessorLineageDigest: input.claim.predecessor.lineage_digest,
+    readExisting: readExtractionContinuationChildClaim });
+}
+
+/** One durable child owns a settled ledger, independently of the caller's receipt schema. */
+export function claimAttemptLedgerContinuationChild<T extends { readonly claim_digest: string }>(input: {
+  readonly cacheRoot: string;
+  readonly predecessorLineageDigest: string;
+  readonly claim: T;
+  readonly readExisting: (path: string) => T;
+}): T {
+  requireDigest(input.claim.claim_digest, "continuation child claim digest");
+  const path = continuationChildClaimPath(input.cacheRoot, input.predecessorLineageDigest);
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
@@ -112,7 +123,7 @@ export function claimExtractionContinuationChild(input: {
       return input.claim;
     } catch (cause) {
       if (!isAlreadyExistsError(cause)) throw cause;
-      const existing = readExtractionContinuationChildClaim(path);
+      const existing = input.readExisting(path);
       if (existing.claim_digest !== input.claim.claim_digest) {
         throw new Error("predecessor extraction authority already claimed by a sibling child");
       }

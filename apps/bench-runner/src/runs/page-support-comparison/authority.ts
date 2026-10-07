@@ -27,7 +27,7 @@ const ExecutionScopeSchema = z.object({
   implementation_revision: z.string().min(1)
 }).strict();
 
-const AuthoritySchema = z.object({
+export const PageSupportComparisonAuthoritySchema = z.object({
   contract: z.literal(PAGE_SUPPORT_COMPARISON_AUTHORITY_CONTRACT),
   action: z.literal("fill"),
   kind: z.literal(PAGE_SUPPORT_COMPARISON_KIND),
@@ -58,7 +58,7 @@ const AuthoritySchema = z.object({
   keys: z.array(z.string().regex(/^[0-9a-f]{64}$/u)).readonly()
 }).strict();
 
-export type PageSupportComparisonAuthority = z.infer<typeof AuthoritySchema>;
+export type PageSupportComparisonAuthority = z.infer<typeof PageSupportComparisonAuthoritySchema>;
 
 const PreflightSchema = z.object({
   contract: z.literal(PAGE_SUPPORT_COMPARISON_PREFLIGHT_CONTRACT),
@@ -101,6 +101,14 @@ export function assertPageSupportComparisonExecutionScope(
   if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "page-support comparison executable revision changed");
   }
+  assertPageSupportComparisonExecutionRoot(scope, cacheRoot, writeLease);
+}
+
+/** Historical ancestry keeps its root binding without regaining executable authority. */
+export function assertPageSupportComparisonExecutionRoot(
+  scope: PageSupportComparisonAuthority["execution_scope"], cacheRoot: string,
+  writeLease?: ExtractionCacheWriteLease
+): void {
   writeLease?.assertRoot(cacheRoot);
   const namedRoot = writeLease?.cacheRoot ?? cacheRoot;
   if (canonicalExtractionTargetRoot(namedRoot) !== scope.execution_root_path) {
@@ -225,13 +233,13 @@ export function pinPageSupportComparisonAuthority(input: Readonly<{
     keys: preflight.keys
   };
   const identity_digest = createHash("sha256").update(canonicalJson(body)).digest("hex");
-  return AuthoritySchema.parse({ ...body, identity_digest });
+  return PageSupportComparisonAuthoritySchema.parse({ ...body, identity_digest });
 }
 
 export function verifyPageSupportComparisonAuthority(
   authority: PageSupportComparisonAuthority
 ): PageSupportComparisonAuthority {
-  authority = AuthoritySchema.parse(authority);
+  authority = PageSupportComparisonAuthoritySchema.parse(authority);
   assertComparisonQuote(authority);
   assertStepQuoteRates(
     authority.request_profile,

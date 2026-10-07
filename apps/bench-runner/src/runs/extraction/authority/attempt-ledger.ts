@@ -243,6 +243,7 @@ export function forkSettledExtractionAttemptLedger(input: {
 
 export function ensureForkedExtractionAttemptLedger(input: {
   readonly cacheRoot: string;
+  readonly publicationTemporaryDirectory?: string;
   readonly predecessorLineageDigest: string;
   readonly predecessorLedgerSha256: string;
   readonly predecessorRawLedgerSha256: string;
@@ -270,7 +271,7 @@ export function ensureForkedExtractionAttemptLedger(input: {
   );
   const successorPath = ledgerPath(input.cacheRoot, input.successorLineageDigest);
   try {
-    persistAttemptLedgerRecordExclusive(successorPath, successor);
+    persistAttemptLedgerRecordExclusive(successorPath, successor, input.publicationTemporaryDirectory);
   } catch (cause) {
     if (!isAlreadyExistsError(cause)) throw cause;
     const existing = readAttemptLedgerRecordEnvelope(successorPath).record;
