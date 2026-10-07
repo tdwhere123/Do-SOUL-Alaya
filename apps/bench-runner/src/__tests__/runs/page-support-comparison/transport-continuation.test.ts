@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import * as ledgerOwner from "../../../runs/extraction/authority/attempt-ledger.js";
 import * as revisionOwner from "../../../runs/extraction/authority/inspection.js";
+import { continuationChildClaimPath } from "../../../runs/extraction/authority/continuation/child-claim.js";
 import * as rawOwner from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import * as resultOwner from "../../../runs/page-support-comparison/persist.js";
 import { STEP_OPENAPI_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { PageSupportComparisonAuthoritySchema, pinPageSupportComparisonAuthority } from "../../../runs/page-support-comparison/authority.js";
@@ -157,6 +159,56 @@ it("serializes concurrent same-child execution through the existing physical-roo
   expect(fixture.bodies).toHaveLength(2);
 });
 
+it.each(["ledger", "raw", "result", "all"] as const)(
+  "preserves unclaimed %s evidence and rejects execute/recover despite receipt timestamp or executable revision changes", async artifact => {
+    const fixture = await failedFixture();
+    const predecessor = predecessorBytes(fixture);
+    const preflight = prepare(fixture);
+    const authority = pin(preflight);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const sibling = pin(preflight);
+    vi.useRealTimers();
+    const revision = vi.spyOn(revisionOwner, "readCurrentExtractionAuthorityRevision").mockReturnValue("prospective-executable-revision");
+    const successor = pin(prepare(fixture));
+    revision.mockRestore();
+    expect(successor.attempt_lineage_digest).not.toBe(authority.attempt_lineage_digest);
+    await execute(fixture, authority);
+    const key = authority.keys[0];
+    const files = {
+      ledger: join(fixture.cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`),
+      raw: rawOwner.providerRawAttemptPath(fixture.cacheRoot, key, 2, authority.attempt_lineage_digest),
+      result: resultOwner.pageSupportComparisonContinuationResultPath(fixture.cacheRoot, key, authority.attempt_lineage_digest)
+    };
+    const retained = Object.entries(files).filter(([kind]) => artifact === "all" || kind === artifact)
+      .map(([, path]) => ({ path, bytes: readFileSync(path, "utf8") }));
+    for (const [kind, path] of Object.entries(files)) if (artifact !== "all" && kind !== artifact) unlinkSync(path);
+    const claimPath = continuationChildClaimPath(fixture.cacheRoot, fixture.authority.attempt_lineage_digest);
+    unlinkSync(claimPath);
+    const lease = acquireExtractionCacheWriteLease(fixture.cacheRoot);
+    try {
+      expect(() => readPageSupportComparisonTransportContinuationResults({ ...fixture, authority,
+        cacheRoot: lease.stableRootPath, writeLease: lease })).toThrow(/evidence exists without its child claim/u);
+    } finally { lease.release(); }
+    for (const receipt of [authority, sibling]) {
+      expect(() => readNew(fixture, receipt)).toThrow(/evidence exists without its child claim/u);
+      for (const mode of ["execute", "recover"] as const) {
+        await expect(execute(fixture, receipt, mode)).rejects.toThrow(/evidence exists without its child claim/u);
+      }
+    }
+    expect(() => prepare(fixture)).toThrow(/evidence exists without its child claim/u);
+    vi.spyOn(revisionOwner, "readCurrentExtractionAuthorityRevision").mockReturnValue("prospective-executable-revision");
+    for (const mode of ["execute", "recover"] as const) {
+      await expect(execute(fixture, successor, mode)).rejects.toThrow(/evidence exists without its child claim/u);
+    }
+    expect(() => prepare(fixture)).toThrow(/evidence exists without its child claim/u);
+    expect(existsSync(claimPath)).toBe(false);
+    for (const file of retained) expect(readFileSync(file.path, "utf8")).toBe(file.bytes);
+    expect(predecessorBytes(fixture)).toEqual(predecessor);
+    expect(fixture.bodies).toHaveLength(2);
+  }
+);
+
 it("reopens a claimed child interrupted before fork publication without losing its single opportunity", async () => {
   const fixture = await failedFixture();
   const authority = pin(prepare(fixture));
@@ -169,19 +221,20 @@ it("reopens a claimed child interrupted before fork publication without losing i
   expect(fixture.bodies).toHaveLength(2);
 });
 
-it("recovers raw and published result after interruption before ledger settlement without a third HTTP request", async () => {
+it.each(["before", "after"] as const)("counts a new durable admission when recovering interruption %s result publication without a third HTTP request", async phase => {
   const fixture = await failedFixture();
   const retained = predecessorBytes(fixture);
   const authority = pin(prepare(fixture));
   const publish = resultOwner.writePageSupportComparisonContinuationShard;
   const interrupted = vi.spyOn(resultOwner, "writePageSupportComparisonContinuationShard").mockImplementationOnce((root, shard) => {
-    publish(root, shard);
+    if (phase === "after") publish(root, shard);
     throw diskFailure();
   });
   await expect(execute(fixture, authority)).rejects.toThrow(/fixture disk interruption/u);
   expect(readNew(fixture, authority)[0]?.status).toBe("pending");
   interrupted.mockRestore();
-  expect(await execute(fixture, authority, "recover")).toMatchObject({ attempts: 0, cumulative_attempts: 2, status: "assessed" });
+  expect(await execute(fixture, authority, "recover")).toMatchObject({ attempts: 0, cumulative_attempts: 2, newly_admitted: 1, status: "assessed" });
+  expect(await execute(fixture, authority, "recover")).toMatchObject({ attempts: 0, cumulative_attempts: 2, newly_admitted: 0, status: "assessed" });
   expect(predecessorBytes(fixture)).toEqual(retained);
   expect(fixture.bodies).toHaveLength(2);
 });

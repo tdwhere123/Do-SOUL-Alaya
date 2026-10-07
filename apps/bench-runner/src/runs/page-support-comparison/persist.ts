@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import { ExtractionTransportProvenanceSchema, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
-import { readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile,
-  decodeCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
+import { boundedArtifactEntryExists, readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile,
+  decodeCanonicalUtf8Artifact, withRootBoundDirectory } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import {
   inspectExtractionAttemptLedger, openExtractionAttemptLedger
 } from "../extraction/authority/attempt-ledger.js";
@@ -32,6 +32,7 @@ import {
 
 export const PAGE_SUPPORT_COMPARISON_CACHE_CONTRACT = "page-support-comparison-cache-v1" as const;
 export const PAGE_SUPPORT_COMPARISON_SHARD_MAX_BYTES = 32 * 1024 * 1024;
+const COMPARISON_CONTINUATIONS_DIRECTORY = "comparison-continuations";
 
 export class PageSupportComparisonIdentityError extends Error {
   constructor(message: string) {
@@ -127,8 +128,31 @@ export function inspectPageSupportComparisonShard(
 }
 
 export function pageSupportComparisonContinuationResultPath(cacheRoot: string, key: string, lineage: string): string {
-  return join(cacheRoot, "comparison-continuations", z.string().regex(/^[0-9a-f]{64}$/u).parse(lineage),
+  return continuationResultPath(join(cacheRoot, COMPARISON_CONTINUATIONS_DIRECTORY), key, lineage);
+}
+
+function continuationResultPath(namespaceRoot: string, key: string, lineage: string): string {
+  return join(namespaceRoot, z.string().regex(/^[0-9a-f]{64}$/u).parse(lineage),
     `${z.string().regex(/^[0-9a-f]{64}$/u).parse(key)}.json`);
+}
+
+export function hasPageSupportComparisonContinuationResults(cacheRoot: string, key: string): boolean {
+  const path = join(cacheRoot, COMPARISON_CONTINUATIONS_DIRECTORY);
+  if (!boundedArtifactEntryExists(path)) return false;
+  return withRootBoundDirectory({ root: cacheRoot, segments: [COMPARISON_CONTINUATIONS_DIRECTORY], label: "comparison continuation result inventory" }, directory => {
+    const handle = opendirSync(directory);
+    let visited = 0;
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (++visited > 32_768) throw new AlayaError("UNAVAILABLE", "comparison continuation inventory exceeds its bound");
+        if (!entry.isDirectory() || !/^[0-9a-f]{64}$/u.test(entry.name)) {
+          throw new PageSupportComparisonIdentityError("comparison continuation namespace is malformed");
+        }
+        if (boundedArtifactEntryExists(continuationResultPath(directory, key, entry.name))) return true;
+      }
+      return false;
+    } finally { handle.closeSync(); }
+  });
 }
 
 export function inspectPageSupportComparisonContinuationShard(

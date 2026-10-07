@@ -4,9 +4,10 @@ import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { boundedArtifactEntryExists } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { continuationChildClaimPath } from "../extraction/authority/continuation/child-claim.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
+import { listExtractionAttemptLedgerRecords } from "../extraction/authority/attempt-ledger.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { StepQuoteBasisSchema, assertStepQuoteRates } from "../extraction/authority/step-quote.js";
-import { listProviderRawAttempts, readProviderRawAttemptWithFileWitness } from "../extraction/fill/provider-raw-attempt.js";
+import { hasProviderRawContinuationAttempts, listProviderRawAttempts, readProviderRawAttemptWithFileWitness } from "../extraction/fill/provider-raw-attempt.js";
 import { assertAuthorizedComparisonRequest } from "./execute.js";
 import { materializePageSupportComparisonLines, PageSupportComparisonWorksetSchema,
   PAGE_SUPPORT_COMPARISON_KIND, type PageSupportComparisonWorkset } from "./input.js";
@@ -15,7 +16,7 @@ import { PageSupportComparisonAuthoritySchema, assertPageSupportComparisonExecut
   quotePageSupportComparison, verifyPageSupportComparisonAuthority,
   type PageSupportComparisonAuthority } from "./authority.js";
 import { comparisonOutcomeStatus, inspectPageSupportComparisonShardWitness,
-  pageSupportComparisonLookup, readPageSupportComparisonAttemptState } from "./persist.js";
+  hasPageSupportComparisonContinuationResults, pageSupportComparisonLookup, readPageSupportComparisonAttemptState } from "./persist.js";
 
 const Digest = z.string().regex(/^[0-9a-f]{64}$/u);
 const PREFLIGHT_CONTRACT = "page-support-comparison-transport-continuation-preflight-v1";
@@ -107,6 +108,14 @@ export function readComparisonTransportPredecessor(input: {
   }
   if (authority.price.maximum_input_tokens_per_attempt !== line.inputByteUpper) {
     throw new AlayaError("CONFLICT", "transport continuation predecessor input bound differs from the same request");
+  }
+  if (!boundedArtifactEntryExists(continuationChildClaimPath(input.cacheRoot, authority.attempt_lineage_digest)) &&
+      (listExtractionAttemptLedgerRecords(input.cacheRoot).some(record =>
+        record.cache_identity.model === authority.model && record.cache_identity.requestProfile === authority.request_profile &&
+        record.lineage_digest !== authority.attempt_lineage_digest) ||
+       hasProviderRawContinuationAttempts(input.cacheRoot, line.key) ||
+       hasPageSupportComparisonContinuationResults(input.cacheRoot, line.key))) {
+    throw new AlayaError("CONFLICT", "comparison continuation evidence exists without its child claim");
   }
   return { authority, line, ledger, raw: physical.raw, shard: shard.shard,
     binding: { authority, ledger_sha256: ledger.ledgerSha256, ledger_raw_sha256: ledger.rawLedgerSha256,

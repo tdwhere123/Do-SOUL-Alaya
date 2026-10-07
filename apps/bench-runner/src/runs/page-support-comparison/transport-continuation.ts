@@ -72,7 +72,7 @@ export async function executePageSupportComparisonTransportContinuationFill(inpu
       cacheIdentity: ledgerIdentity(authority), startingMissing: 1, maximumAttempts: 2,
       maximumAttemptsPerKey: 2, successfulShardCeiling: 1, publicationTemporaryDirectory: cacheRoot,
       inspectProviderShard: () => inspectChildSuccess(authority, input.workset, cacheRoot, lease) });
-    const before = ledger.snapshot().attempts;
+    const before = snapshot;
     const context = physicalContext(authority, retained.line, input.workset, cacheRoot, ledger);
     if (input.mode === "recover") replayExistingProviderRequestRaws(context, toProviderLine(retained.line));
     else await executeProviderRequestLine({ ...context, writeLease: lease, config: input.config,
@@ -84,9 +84,10 @@ export async function executePageSupportComparisonTransportContinuationFill(inpu
         assertClaim(authority, cacheRoot);
       } }, toProviderLine(retained.line));
     const row = readPageSupportComparisonTransportContinuationResults({ workset: input.workset, cacheRoot, authority, writeLease: lease })[0]!;
-    return { requested: 1, attempts: ledger.snapshot().attempts - before,
-      cumulative_attempts: ledger.snapshot().attempts, assessed: row.status === "assessed" ? 1 : 0,
-      newly_admitted: row.status === "assessed" && before < 2 ? 1 : 0,
+    const after = ledger.snapshot();
+    return { requested: 1, attempts: after.attempts - before.attempts,
+      cumulative_attempts: after.attempts, assessed: row.status === "assessed" ? 1 : 0,
+      newly_admitted: after.successfulShards - before.successfulShards,
       terminal_failures: row.status === "transport_failure" ? 1 : 0,
       status: row.status, row };
   } finally { lease.release(); }

@@ -11,7 +11,7 @@ import { decodeGeminiGenerateContent, isGeminiGenerateContentProfile,
   parseGeminiGenerateContentBody } from "./batch/native-codec.js";
 import {
   boundedArtifactEntryExists,
-  readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile, decodeCanonicalUtf8Artifact
+  readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile, decodeCanonicalUtf8Artifact, withRootBoundDirectory
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
 import { assertExtractionAttemptReservation, type ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
@@ -133,6 +133,7 @@ const ProviderRawAttemptSchema = z.discriminatedUnion("contract", [
 ]);
 
 export type ProviderRawAttempt = z.infer<typeof ProviderRawAttemptSchema>;
+const RAW_CONTINUATIONS_DIRECTORY = "provider-raw-continuations";
 
 export function providerRawAttemptPath(root: string, key: string, ordinal: number,
   continuationLineageDigest?: string): string {
@@ -142,7 +143,29 @@ export function providerRawAttemptPath(root: string, key: string, ordinal: numbe
 function rawAttemptDirectory(root: string, key: string, continuationLineageDigest?: string): string {
   if (continuationLineageDigest === undefined) return join(root, "provider-raw", key.slice(0, 2));
   const lineage = z.string().regex(/^[0-9a-f]{64}$/u).parse(continuationLineageDigest);
-  return join(root, "provider-raw-continuations", lineage, key.slice(0, 2));
+  return join(root, RAW_CONTINUATIONS_DIRECTORY, lineage, key.slice(0, 2));
+}
+
+/** A new receipt cannot conceal an older same-key raw namespace without its child claim. */
+export function hasProviderRawContinuationAttempts(root: string, key: string): boolean {
+  const path = join(root, RAW_CONTINUATIONS_DIRECTORY);
+  if (!boundedArtifactEntryExists(path)) return false;
+  return withRootBoundDirectory({ root, segments: [RAW_CONTINUATIONS_DIRECTORY], label: "provider raw continuation inventory" }, directory => {
+    const handle = opendirSync(directory);
+    let visited = 0;
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (++visited > 32_768) throw new AlayaError("UNAVAILABLE", "provider raw continuation inventory exceeds its bound");
+        if (!entry.isDirectory() || !/^[0-9a-f]{64}$/u.test(entry.name)) {
+          throw new ProviderRawAttemptIdentityError("provider raw continuation namespace is malformed");
+        }
+        const attempts = join(directory, entry.name, key.slice(0, 2));
+        if (boundedArtifactEntryExists(attempts) && withRootBoundDirectory({ root: directory, segments: [entry.name, key.slice(0, 2)],
+          label: "provider raw continuation attempts" }, bound => matchingRawAttemptNames(bound, key).length !== 0)) return true;
+      }
+      return false;
+    } finally { handle.closeSync(); }
+  });
 }
 
 export function providerRawAttemptInputPaths(root: string, key: string): readonly string[] {
