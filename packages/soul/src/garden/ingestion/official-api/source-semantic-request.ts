@@ -24,6 +24,7 @@ export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semant
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 import { assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
+import { sourceSemanticCorrespondenceGenerationResponseJsonSchema } from "./source-semantic-query-provenance.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
@@ -450,8 +451,11 @@ export function sourceSemanticQueryResponseJsonSchema(): object {
   }).strict().readonly(), "ref"));
 }
 
-/** Current endpoint-assessment generation envelope for semantic correspondence. */
-export function sourceSemanticCorrespondenceResponseJsonSchema(): object {
+/** Historical v4 assessment envelope; a request selects the request-aware generation envelope. */
+export function sourceSemanticCorrespondenceResponseJsonSchema(
+  request?: SourceSemanticCorrespondenceRequest
+): object {
+  if (request !== undefined) return sourceSemanticCorrespondenceGenerationResponseJsonSchema(request);
   return producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
     outcome: CorrespondenceGenerationOutcomeSchema,
@@ -488,7 +492,7 @@ export const SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT = [
   "Use contextual equivalence only. Semantic correspondence cannot rank or answer. Do not emit answers, ranking, seeds, programs, verdicts, or chosen results.",
   "Do not invent source-interpretation structure or rewrite query semantics. Do not copy host hashes or assemble internal query-semantics or source-interpretation endpoint objects.",
   "Name the target interpretation with request-local handle source1, source2, ... in descriptor order. Assess every advertised qeN exactly once for that interpretation, even when no equivalence is supported. Do not assess source endpoints as query endpoints.",
-  "For each query endpoint, use status supported with a nonempty equivalents array containing every proposed contextual equivalent seN, or status unresolved with an exact query_excerpt and explanation of the unestablished obligation. Never leave an endpoint out or put an unsupported pair in an unresolved record. Keep all supported many-to-many pairs; do not pick a preferred pair or enumerate every possible query/source pair.",
+  "For each query endpoint, use status supported with a nonempty equivalents array containing every proposed contextual equivalent seN, or status unresolved with an exact query_excerpt and explanation of the unestablished obligation. Never leave an endpoint out or put an unsupported pair in an unresolved record. Keep all supported many-to-many pairs; do not pick a preferred pair or enumerate every possible query/source pair. Only request-schema-eligible referent and slot handles may omit query_excerpt; predicate handles and source words still require an exact original-query excerpt.",
   "Each supported equivalent retains exact query_excerpt and source_semantic_support and adds bounded grounding. For a reference, explain its full denotation using the admitted reference, source mention and use, and relevant scope or context evidence; matching a word or entity type alone is insufficient. For predicates and slots, explain the local relation. Grounding and unresolved explanations are inspectable proposals, not certificates and not answers.",
   "A set-valued query may have multiple asserted source frames. Preserve each supported predicate and returned-variable slot relation on its actual frame; do not collapse frames onto the first hit. If a slot is unsupported, assess it unresolved rather than fabricate a binding. Partial supported assessments remain available for native composition.",
   "An endpoint pair must express the same contextual meaning, not merely related topics or similar entity types. A named query target keeps its actual meaning. A free answer variable is not the requester or a named source participant merely because both denote people. If no supported pair exists, submit explicit unresolved assessments; abstain only if you cannot provide the assessment. Partial overlap must not invent missing equivalences.",
