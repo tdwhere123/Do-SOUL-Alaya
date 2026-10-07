@@ -26,6 +26,7 @@ export const EVIDENCE_SELECTION_OUTPUT_TOKEN_DEFAULT = 4096;
 /** Private benchmark opt-in. Omitted worksets keep the historical prompt. */
 export const EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY = "partial-evidence-v1" as const;
 export const EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY = "source-input-representation-pair-v1" as const;
+export const EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY = "source-proposal-assembly-pair-v1" as const;
 
 /** Bound request instruction. Generated explanations are not evidence. */
 export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
@@ -73,7 +74,7 @@ export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
   "the source corpus. State that limited meaning in `unresolved`."
 ].join("\n");
 
-/** Partial-evidence clarification shared by partial and paired representation worksets. */
+/** Partial-evidence clarification shared by private opt-in worksets. */
 const PARTIAL_EVIDENCE_V1_CLARIFICATION = [
   "Useful partial evidence uses `proposal`. Missing completion operands, uncertain",
   "identity, or uncertain time do not by themselves require `cannot_propose`.",
@@ -87,6 +88,24 @@ const PARTIAL_EVIDENCE_V1_CLARIFICATION = [
   "preview. Do not borrow another root's words, normalize punctuation, paraphrase,",
   "or insert ellipsis. Missing information belongs in `unresolved`, not invented",
   "text. Keep potentially useful qualifying evidence and keep uncertainty explicit."
+].join("\n");
+
+const SOURCE_PROPOSAL_ASSEMBLY_V1_PROCEDURE = [
+  "Before emitting the proposal, assemble it in this order:",
+  "1. Group all chosen witnesses for one root in one selected entry. Use up to",
+  "three separate exact contiguous quotations; do not join text across omissions.",
+  "2. Describe statements with their literal transcript role when present. Keep",
+  "authenticated identity unknown when it is not supplied. Assistant statements,",
+  "advice and hypothetical wording are not independent evidence of a User's",
+  "action or timing; retain those qualifications in the contribution.",
+  "3. Distinguish source-relative time from a justified question-relative anchor.",
+  "Keep unknown query time, uncertain links between statements and events, and",
+  "partial or unknown source completeness explicit in `unresolved` when they limit the",
+  "proposal. A missing calendar date is not the only temporal uncertainty.",
+  "4. Check that every selected root occurs once and every quotation is copied",
+  "exactly from that root's preview. Emit only the existing JSON proposal shape.",
+  "Useful qualified partial evidence remains permitted; do not produce a final",
+  "answer or completed count, or abstain merely because information is missing."
 ].join("\n");
 
 const SourceSpanSchema = z.object({
@@ -229,6 +248,16 @@ export function materializeEvidenceSelectionLines(
   selectionRequestProfile(workset.request_profile);
   const policy = selectionRequestPolicy(workset);
   const schema = evidenceSelectionResponseJsonSchema();
+  if (policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY) {
+    const item = workset.items[0]!;
+    const jsonInput = serializeEvidenceSelectionJsonInput(item);
+    const restored = WorksetItemSchema.parse(JSON.parse(jsonInput));
+    if (!isDeepStrictEqual(restored, item)) {
+      throw new AlayaError("VALIDATION", "evidence selection source proposal assembly input is not lossless");
+    }
+    return [bindLine({ ...workset, request_policy: EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY }, item, schema, maxOutputTokens, jsonInput),
+      bindLine(workset, item, schema, maxOutputTokens, jsonInput)];
+  }
   if (policy === EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY) {
     const item = workset.items[0]!;
     WorksetItemSchema.parse(item);
@@ -429,13 +458,20 @@ function selectionRequestProfile(
 
 function selectionRequestPolicy(
   workset: Pick<EvidenceSelectionWorkset, "request_policy" | "items">
-): typeof EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY | typeof EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY | undefined {
+): typeof EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY | typeof EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY
+  | typeof EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY | undefined {
   const requestPolicy = workset.request_policy;
   if (requestPolicy === undefined) return undefined;
   if (requestPolicy === EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY) return requestPolicy;
   if (requestPolicy === EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY) {
     if (workset.items.length !== 1) {
       throw new AlayaError("VALIDATION", "evidence selection input representation pair requires exactly one item");
+    }
+    return requestPolicy;
+  }
+  if (requestPolicy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY) {
+    if (workset.items.length !== 1) {
+      throw new AlayaError("VALIDATION", "evidence selection source proposal assembly pair requires exactly one item");
     }
     return requestPolicy;
   }
@@ -446,5 +482,7 @@ function evidenceSelectionSystemPrompt(workset: EvidenceSelectionWorkset): strin
   if (selectionRequestPolicy(workset) === undefined) {
     return SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT;
   }
-  return `${SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT}\n\n${PARTIAL_EVIDENCE_V1_CLARIFICATION}`;
+  const partial = `${SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT}\n\n${PARTIAL_EVIDENCE_V1_CLARIFICATION}`;
+  return workset.request_policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY
+    ? `${partial}\n\n${SOURCE_PROPOSAL_ASSEMBLY_V1_PROCEDURE}` : partial;
 }

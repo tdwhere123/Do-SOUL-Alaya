@@ -13,6 +13,7 @@ import { executeEvidenceSelectionFill, prepareEvidenceSelection, readEvidenceSel
 import {
   EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY,
   EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY,
+  EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
   evidenceSelectionCacheKey,
   evidenceSelectionResponseJsonSchema,
   interpretEvidenceSelectionDecoded,
@@ -81,6 +82,20 @@ const CAPTURED_BASELINE_SYSTEM_PROMPT = [
   "source in this supplied preview pool, not that no relevant evidence exists in",
   "the source corpus. State that limited meaning in `unresolved`."
 ].join("\n");
+const CAPTURED_PARTIAL_CLARIFICATION = [
+  "Useful partial evidence uses `proposal`. Missing completion operands, uncertain",
+  "identity, or uncertain time do not by themselves require `cannot_propose`.",
+  "",
+  "`cannot_propose` is only for an unusable-input condition. It requires empty",
+  "`selected` and nonempty `unresolved`. When the supplied pool is usable but",
+  "contains no useful evidence, return a `proposal` with empty `selected` and",
+  "explain that bounded absence in `unresolved`.",
+  "",
+  "Pair each selected root with literal quotations from that same root's own",
+  "preview. Do not borrow another root's words, normalize punctuation, paraphrase,",
+  "or insert ellipsis. Missing information belongs in `unresolved`, not invented",
+  "text. Keep potentially useful qualifying evidence and keep uncertainty explicit."
+].join("\n");
 
 const roots: string[] = [];
 afterEach(() => {
@@ -106,6 +121,7 @@ it("binds partial-evidence-v1 through one materializer with a distinct body and 
   const prepared = workset(ORIGIN, EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY);
   expect(prepared.request_policy).toBe(EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY);
   const line = materializeEvidenceSelectionLines(prepared, MAX_OUTPUT)[0]!;
+  expect(line.systemPrompt).toBe(`${CAPTURED_BASELINE_SYSTEM_PROMPT}\n\n${CAPTURED_PARTIAL_CLARIFICATION}`);
   expect(line.systemPrompt.startsWith(`${CAPTURED_BASELINE_SYSTEM_PROMPT}\n\n`)).toBe(true);
   expect(line.systemPrompt).toContain("Useful partial evidence uses `proposal`");
   expect(line.systemPrompt).toContain("Pair each selected root with literal quotations");
@@ -160,19 +176,58 @@ it("preserves historical JSON property order and omitted metadata for both exist
   }
 });
 
+it("pairs one compact original DTO with byte-identical partial control and instruction-only assembly treatment", () => {
+  const paired = parseEvidenceSelectionWorkset({
+    ...worksetBody(ORIGIN, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY),
+    items: [{ original_question: QUESTION,
+      metadata: { query_as_of: null, nested: { note: "😀\n<source>" } },
+      sources: sources().map((source) => ({ ...source, metadata: { speaker: null, roles: ["User", "Assistant"] } })) }]
+  });
+  const partial = { ...paired, request_policy: EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY };
+  const [control, treatment] = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
+  expect(control).toStrictEqual(materializeEvidenceSelectionLines(partial, MAX_OUTPUT)[0]);
+  expect(JSON.parse(control!.userPrompt)).toStrictEqual(paired.items[0]);
+  expect(treatment).toMatchObject({ userPrompt: control!.userPrompt, sourcesDigest: control!.sourcesDigest,
+    original_question: QUESTION, responseJsonSchema: control!.responseJsonSchema,
+    transportProvenance: control!.transportProvenance });
+  expect(treatment!.sources).toBe(control!.sources);
+  expect(treatment!.systemPrompt.startsWith(`${control!.systemPrompt}\n\n`)).toBe(true);
+  expect(treatment!.systemPrompt).toContain("Group all chosen witnesses for one root in one selected entry");
+  expect(treatment!.systemPrompt).toContain("authenticated identity unknown");
+  expect(treatment!.systemPrompt).toContain("question-relative anchor");
+  expect(treatment!.systemPrompt).not.toContain(QUESTION);
+  expect(treatment!.systemPrompt).not.toContain(PREVIEW);
+  expect(treatment!.key).not.toBe(control!.key);
+  expect(treatment!.requestDigest).not.toBe(control!.requestDigest);
+  expect(treatment!.key).toBe(cacheKey(treatment!.systemPrompt, treatment!.userPrompt, paired));
+  expect(wireBody(control!.systemPrompt, control!.userPrompt, paired))
+    .toBe(wireBody(control!.systemPrompt, control!.userPrompt, partial));
+  expect(() => parseEvidenceSelectionWorkset({ ...paired, items: [paired.items[0]!, paired.items[0]!] }))
+    .toThrow(/exactly one item/u);
+  expect(() => materializeEvidenceSelectionLines({ ...paired, items: [paired.items[0]!, paired.items[0]!] }, MAX_OUTPUT))
+    .toThrow(/exactly one item/u);
+  expect(() => materializeEvidenceSelectionLines({ ...paired, items: [] }, MAX_OUTPUT)).toThrow(/exactly one item/u);
+});
+
 it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
   "refuses lossy header metadata before request binding", (metadata) => {
-    const paired = workset(ORIGIN, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY);
-    expect(() => materializeEvidenceSelectionLines({
-      ...paired, items: [{ ...paired.items[0]!, metadata }]
-    }, MAX_OUTPUT)).toThrow(/not lossless/u);
+    for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY]) {
+      const paired = workset(ORIGIN, policy);
+      expect(() => materializeEvidenceSelectionLines({
+        ...paired, items: [{ ...paired.items[0]!, metadata }]
+      }, MAX_OUTPUT)).toThrow(/not lossless/u);
+      expect(() => materializeEvidenceSelectionLines({ ...paired,
+        items: [{ ...paired.items[0]!, sources: [{ ...paired.items[0]!.sources[0]!, metadata }] }]
+      }, MAX_OUTPUT)).toThrow(/not lossless/u);
+    }
   }
 );
 
-it("binds the paired Step messages to the existing low schema profile, cap and ordinary quote owner", () => {
+it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY])(
+  "binds %s Step messages to the existing low schema profile, cap and ordinary quote owner", (policy) => {
   const basis = STEP_OPENAPI_QUOTE_BASIS;
   const paired = parseEvidenceSelectionWorkset({
-    ...worksetBody(basis.selected_provider_url, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY),
+    ...worksetBody(basis.selected_provider_url, policy),
     model: basis.selected_model, request_profile: "step-3.5-2603-low-json-schema-v1"
   });
   const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
@@ -323,16 +378,17 @@ it.each([
   expect(interpretEvidenceSelectionDecoded(opted, {
     rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
   }, PROFILE).outcome).toEqual(interpreted.outcome);
-  for (const paired of materializeEvidenceSelectionLines(
-    workset(ORIGIN, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY), MAX_OUTPUT
-  )) {
-    expect(interpretEvidenceSelectionDecoded(paired, {
-      rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
-    }, PROFILE).outcome).toEqual(interpreted.outcome);
+  for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY]) {
+    for (const paired of materializeEvidenceSelectionLines(workset(ORIGIN, policy), MAX_OUTPUT)) {
+      expect(interpretEvidenceSelectionDecoded(paired, {
+        rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
+      }, PROFILE).outcome).toEqual(interpreted.outcome);
+    }
   }
 });
 
-it("dispatches both native representations once and reopens their shared budget without additional HTTP", async () => {
+it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY])(
+  "dispatches %s once and reopens its shared budget without additional HTTP", async (policy) => {
   const bodies: string[] = [];
   const server = await listen((req, res) => {
     const chunks: Buffer[] = [];
@@ -345,7 +401,7 @@ it("dispatches both native representations once and reopens their shared budget 
   });
   try {
     const origin = originOf(server);
-    const paired = workset(origin, EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY);
+    const paired = workset(origin, policy);
     const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
     const cacheRoot = join(tempRoot(), "cache");
     const preflight = prepareEvidenceSelection(paired, cacheRoot, MAX_OUTPUT);
@@ -369,7 +425,8 @@ it("dispatches both native representations once and reopens their shared budget 
       expect(readProviderRawAttempt(cacheRoot, line.key, 3)).toBeUndefined();
     }
     const reopened = openEvidenceSelectionAttemptLedger({ cacheRoot, authority }).snapshot();
-    expect(reopened).toMatchObject({ attempts: 2, maximumAttempts: 2, successfulKeys: authority.keys });
+    expect(reopened).toMatchObject({ attempts: 2, maximumAttempts: 2 });
+    expect([...reopened.successfulKeys].sort()).toEqual([...authority.keys].sort());
     expect(reopened.settledAttempts.map((attempt) => [attempt.cacheKey, attempt.attemptOrdinal]))
       .toEqual(lines.map((line, index) => [line.key, index + 1]));
     const replay = await executeEvidenceSelectionFill({ workset: paired, cacheRoot, authority, config: { ...config, apiKey: null } });
@@ -454,6 +511,56 @@ it("settles partial-evidence-v1 over loopback HTTP and rejects identity drift th
       ...shard, system_prompt: CAPTURED_BASELINE_SYSTEM_PROMPT
     }, null, 2)}\n`);
     expect(() => readEvidenceSelectionResults(prepared, cacheRoot, MAX_OUTPUT)).toThrow(/identity mismatch/u);
+  } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
+});
+
+it("retains both invalid paired proposals over HTTP and reopens terminal evidence without repair or retry", async () => {
+  const replies = [
+    proposal([{ root_id: "src-alpha", quotes: ["Lee left the lab...after the sample arrived."],
+      contribution: "Joined text." }]),
+    proposal([
+      { root_id: "src-alpha", quotes: ["Lee left the lab"], contribution: "First witness." },
+      { root_id: "src-alpha", quotes: ["sample arrived"], contribution: "Second witness." }
+    ])
+  ];
+  const bodies: string[] = [];
+  const server = await listen((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk) => chunks.push(chunk as Buffer));
+    req.on("end", () => {
+      bodies.push(Buffer.concat(chunks).toString("utf8"));
+      succeed(res, replies[bodies.length - 1]);
+    });
+  });
+  try {
+    const origin = originOf(server);
+    const paired = workset(origin, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY);
+    const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
+    const cacheRoot = join(tempRoot(), "cache");
+    const authority = pinEvidenceSelectionAuthority({
+      preflight: prepareEvidenceSelection(paired, cacheRoot, MAX_OUTPUT), inputUsdPerMillion: 4, outputUsdPerMillion: 18
+    });
+    const first = await executeEvidenceSelectionFill({ workset: paired, cacheRoot, authority, config: configOf(origin) });
+    expect(first).toMatchObject({ attempts: 2, newly_admitted: 0 });
+    expect(bodies).toEqual(lines.map((line) => wireBody(line.systemPrompt, line.userPrompt, paired)));
+    const rows = readEvidenceSelectionResults(paired, cacheRoot, MAX_OUTPUT);
+    expect(rows.map((row) => row.status)).toEqual(["invalid", "invalid"]);
+    expect(rows[0]).toMatchObject({ shard: { admitted: false, outcome: { reason: "quote_mismatch" } } });
+    expect(rows[1]).toMatchObject({ shard: { admitted: false, outcome: { reason: "duplicate_root" } } });
+    const retainedRaws = lines.map((line, index) => readProviderRawAttempt(cacheRoot, line.key, index + 1));
+    expect(retainedRaws.map((raw) => raw?.decoded_text)).toEqual(replies.map((reply) => JSON.stringify(reply)));
+    expect(openEvidenceSelectionAttemptLedger({ cacheRoot, authority }).snapshot())
+      .toMatchObject({ attempts: 2, maximumAttempts: 2, successfulKeys: [] });
+    const replay = await executeEvidenceSelectionFill({ workset: paired, cacheRoot, authority,
+      config: { ...configOf(origin), apiKey: null } });
+    expect(replay).toMatchObject({ attempts: 0, newly_admitted: 0, cache_hits: 2 });
+    expect(bodies).toHaveLength(2);
+    expect(lines.map((line, index) => readProviderRawAttempt(cacheRoot, line.key, index + 1))).toEqual(retainedRaws);
+    expect(readEvidenceSelectionResults(paired, cacheRoot, MAX_OUTPUT)).toEqual(rows);
+    expect(prepareEvidenceSelection(paired, cacheRoot, MAX_OUTPUT)).toMatchObject({ missing: 0, maximum_attempts: 0, keys: [] });
   } finally {
     server.closeAllConnections();
     await closeServer(server);
