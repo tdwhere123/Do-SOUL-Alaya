@@ -14,6 +14,7 @@ import {
   EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY,
   EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY,
   EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
+  EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY,
   evidenceSelectionCacheKey,
   evidenceSelectionResponseJsonSchema,
   interpretEvidenceSelectionDecoded,
@@ -209,9 +210,36 @@ it("pairs one compact original DTO with byte-identical partial control and instr
   expect(() => materializeEvidenceSelectionLines({ ...paired, items: [] }, MAX_OUTPUT)).toThrow(/exactly one item/u);
 });
 
+it("materializes ordered full DTOs as one assembly treatment each with exact paired-treatment bytes and keys", () => {
+  const first = worksetBody(ORIGIN).items[0]!;
+  const prepared = parseEvidenceSelectionWorkset({
+    ...worksetBody(ORIGIN, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY),
+    items: [
+      { ...first, metadata: { query_as_of: null, nested: { note: "😀\n<source>" } } },
+      { ...first, original_question: "What arrived before Lee left?", metadata: [null, { incomplete: true }],
+        sources: [...sources()].reverse().map((source) => ({ ...source, metadata: { speaker: null, roles: ["User", "Assistant"] } })) }
+    ]
+  });
+  const lines = materializeEvidenceSelectionLines(prepared, MAX_OUTPUT);
+  expect(lines).toHaveLength(2);
+  expect(new Set(lines.map((line) => line.key)).size).toBe(2);
+  expect(lines.map((line) => line.original_question)).toEqual(prepared.items.map((item) => item.original_question));
+  for (const [index, item] of prepared.items.entries()) {
+    const paired = { ...prepared, request_policy: EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY, items: [item] };
+    const treatment = materializeEvidenceSelectionLines(paired, MAX_OUTPUT)[1]!;
+    expect(lines[index]).toStrictEqual(treatment);
+    expect(JSON.parse(lines[index]!.userPrompt)).toStrictEqual(item);
+    expect(lines[index]!.sources).toBe(item.sources);
+    expect(wireBody(lines[index]!.systemPrompt, lines[index]!.userPrompt, prepared))
+      .toBe(wireBody(treatment.systemPrompt, treatment.userPrompt, paired));
+  }
+  expect(() => parseEvidenceSelectionWorkset({ ...prepared, items: [] })).toThrow();
+});
+
 it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
   "refuses lossy header metadata before request binding", (metadata) => {
-    for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY]) {
+    for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
+      EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY]) {
       const paired = workset(ORIGIN, policy);
       expect(() => materializeEvidenceSelectionLines({
         ...paired, items: [{ ...paired.items[0]!, metadata }]
@@ -219,16 +247,28 @@ it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
       expect(() => materializeEvidenceSelectionLines({ ...paired,
         items: [{ ...paired.items[0]!, sources: [{ ...paired.items[0]!.sources[0]!, metadata }] }]
       }, MAX_OUTPUT)).toThrow(/not lossless/u);
+      if (policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY) {
+        expect(() => materializeEvidenceSelectionLines({ ...paired,
+          items: [paired.items[0]!, { ...paired.items[0]!, metadata }]
+        }, MAX_OUTPUT)).toThrow(/not lossless/u);
+        expect(() => materializeEvidenceSelectionLines({ ...paired,
+          items: [paired.items[0]!, { ...paired.items[0]!, sources: [{ ...paired.items[0]!.sources[0]!, metadata }] }]
+        }, MAX_OUTPUT)).toThrow(/not lossless/u);
+      }
     }
   }
 );
 
-it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY])(
+it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
+  EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY])(
   "binds %s Step messages to the existing low schema profile, cap and ordinary quote owner", (policy) => {
   const basis = STEP_OPENAPI_QUOTE_BASIS;
   const paired = parseEvidenceSelectionWorkset({
     ...worksetBody(basis.selected_provider_url, policy),
-    model: basis.selected_model, request_profile: "step-3.5-2603-low-json-schema-v1"
+    model: basis.selected_model, request_profile: "step-3.5-2603-low-json-schema-v1",
+    ...(policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY ? {
+      items: [worksetBody(ORIGIN).items[0]!, { ...worksetBody(ORIGIN).items[0]!, original_question: "What arrived before Lee left?" }]
+    } : {})
   });
   const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
   const preflight = prepareEvidenceSelection(paired, tempRoot(), MAX_OUTPUT);
@@ -378,7 +418,8 @@ it.each([
   expect(interpretEvidenceSelectionDecoded(opted, {
     rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
   }, PROFILE).outcome).toEqual(interpreted.outcome);
-  for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY]) {
+  for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
+    EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY]) {
     for (const paired of materializeEvidenceSelectionLines(workset(ORIGIN, policy), MAX_OUTPUT)) {
       expect(interpretEvidenceSelectionDecoded(paired, {
         rawJson: JSON.stringify(fixture.body), finishReason: "STOP"
@@ -387,7 +428,8 @@ it.each([
   }
 });
 
-it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY])(
+it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
+  EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY])(
   "dispatches %s once and reopens its shared budget without additional HTTP", async (policy) => {
   const bodies: string[] = [];
   const server = await listen((req, res) => {
@@ -401,7 +443,10 @@ it.each([EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION
   });
   try {
     const origin = originOf(server);
-    const paired = workset(origin, policy);
+    const paired = parseEvidenceSelectionWorkset({ ...worksetBody(origin, policy),
+      ...(policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY ? {
+        items: [worksetBody(origin).items[0]!, { ...worksetBody(origin).items[0]!, original_question: "What arrived before Lee left?" }]
+      } : {}) });
     const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
     const cacheRoot = join(tempRoot(), "cache");
     const preflight = prepareEvidenceSelection(paired, cacheRoot, MAX_OUTPUT);
@@ -517,7 +562,8 @@ it("settles partial-evidence-v1 over loopback HTTP and rejects identity drift th
   }
 });
 
-it("retains both invalid paired proposals over HTTP and reopens terminal evidence without repair or retry", async () => {
+it.each([EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY])(
+  "retains invalid %s proposals over HTTP and reopens terminal evidence without repair or retry", async (policy) => {
   const replies = [
     proposal([{ root_id: "src-alpha", quotes: ["Lee left the lab...after the sample arrived."],
       contribution: "Joined text." }]),
@@ -537,7 +583,10 @@ it("retains both invalid paired proposals over HTTP and reopens terminal evidenc
   });
   try {
     const origin = originOf(server);
-    const paired = workset(origin, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY);
+    const paired = parseEvidenceSelectionWorkset({ ...worksetBody(origin, policy),
+      ...(policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY ? {
+        items: [worksetBody(origin).items[0]!, { ...worksetBody(origin).items[0]!, original_question: "What arrived before Lee left?" }]
+      } : {}) });
     const lines = materializeEvidenceSelectionLines(paired, MAX_OUTPUT);
     const cacheRoot = join(tempRoot(), "cache");
     const authority = pinEvidenceSelectionAuthority({

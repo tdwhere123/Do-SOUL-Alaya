@@ -27,6 +27,7 @@ export const EVIDENCE_SELECTION_OUTPUT_TOKEN_DEFAULT = 4096;
 export const EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY = "partial-evidence-v1" as const;
 export const EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY = "source-input-representation-pair-v1" as const;
 export const EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY = "source-proposal-assembly-pair-v1" as const;
+export const EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY = "source-proposal-assembly-v1" as const;
 
 /** Bound request instruction. Generated explanations are not evidence. */
 export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
@@ -248,15 +249,19 @@ export function materializeEvidenceSelectionLines(
   selectionRequestProfile(workset.request_profile);
   const policy = selectionRequestPolicy(workset);
   const schema = evidenceSelectionResponseJsonSchema();
-  if (policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY) {
-    const item = workset.items[0]!;
-    const jsonInput = serializeEvidenceSelectionJsonInput(item);
-    const restored = WorksetItemSchema.parse(JSON.parse(jsonInput));
-    if (!isDeepStrictEqual(restored, item)) {
-      throw new AlayaError("VALIDATION", "evidence selection source proposal assembly input is not lossless");
-    }
-    return [bindLine({ ...workset, request_policy: EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY }, item, schema, maxOutputTokens, jsonInput),
-      bindLine(workset, item, schema, maxOutputTokens, jsonInput)];
+  if (policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY ||
+      policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY) {
+    return workset.items.flatMap((item) => {
+      const jsonInput = serializeEvidenceSelectionJsonInput(item);
+      const restored = WorksetItemSchema.parse(JSON.parse(jsonInput));
+      if (!isDeepStrictEqual(restored, item)) {
+        throw new AlayaError("VALIDATION", "evidence selection source proposal assembly input is not lossless");
+      }
+      const treatment = bindLine(workset, item, schema, maxOutputTokens, jsonInput);
+      return policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY
+        ? [bindLine({ ...workset, request_policy: EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY }, item, schema, maxOutputTokens, jsonInput), treatment]
+        : [treatment];
+    });
   }
   if (policy === EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY) {
     const item = workset.items[0]!;
@@ -459,10 +464,11 @@ function selectionRequestProfile(
 function selectionRequestPolicy(
   workset: Pick<EvidenceSelectionWorkset, "request_policy" | "items">
 ): typeof EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY | typeof EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY
-  | typeof EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY | undefined {
+  | typeof EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY | typeof EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY | undefined {
   const requestPolicy = workset.request_policy;
   if (requestPolicy === undefined) return undefined;
   if (requestPolicy === EVIDENCE_SELECTION_PARTIAL_EVIDENCE_POLICY) return requestPolicy;
+  if (requestPolicy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY) return requestPolicy;
   if (requestPolicy === EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY) {
     if (workset.items.length !== 1) {
       throw new AlayaError("VALIDATION", "evidence selection input representation pair requires exactly one item");
@@ -483,6 +489,7 @@ function evidenceSelectionSystemPrompt(workset: EvidenceSelectionWorkset): strin
     return SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT;
   }
   const partial = `${SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT}\n\n${PARTIAL_EVIDENCE_V1_CLARIFICATION}`;
-  return workset.request_policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY
+  return workset.request_policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY ||
+    workset.request_policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY
     ? `${partial}\n\n${SOURCE_PROPOSAL_ASSEMBLY_V1_PROCEDURE}` : partial;
 }
