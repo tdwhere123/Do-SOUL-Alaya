@@ -73,7 +73,7 @@ export const SOURCE_EVIDENCE_SELECTION_SYSTEM_PROMPT = [
   "the source corpus. State that limited meaning in `unresolved`."
 ].join("\n");
 
-/** Appended only for partial-evidence-v1. Not a copied baseline prompt. */
+/** Partial-evidence clarification shared by partial and paired representation worksets. */
 const PARTIAL_EVIDENCE_V1_CLARIFICATION = [
   "Useful partial evidence uses `proposal`. Missing completion operands, uncertain",
   "identity, or uncertain time do not by themselves require `cannot_propose`.",
