@@ -11,11 +11,11 @@ import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
-import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
+import { assertExtractionAuthorityReceipt, createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
   "../../../runs/extraction/authority/receipt.js";
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
 import { assertInteractiveSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
-import { STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
+import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
 import { inspectCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { inspectInteractiveTransportEvidence } from "../../../runs/extraction/cache/source-interactive-binding.js";
@@ -51,12 +51,13 @@ function responseFor(userPrompt: string): string {
   return JSON.stringify(tableCompletedResponse(assertion.assertion_id, theme));
 }
 
-async function scenario(selectedCount: number, outputTokenCap?: number, logicalModel = MODEL) {
+async function scenario(selectedCount: number, outputTokenCap?: number, logicalModel = MODEL,
+  quoteBasis: typeof STEP_PLAN_QUOTE_BASIS | typeof STEP_OPENAPI_QUOTE_BASIS = STEP_PLAN_QUOTE_BASIS) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", logicalModel);
   if (logicalModel !== MODEL) vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
-  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", quoteBasis.selected_provider_url);
   await writeDataset(Array.from({ length: 3 }, (_, i) => buildExtractionFillQuestion(
     `step-q${i}`, `I completed alpha. The record is ${i}.`,
     `I completed decoy. The record is ${i}.`
@@ -74,7 +75,7 @@ async function scenario(selectedCount: number, outputTokenCap?: number, logicalM
   expect(preflight).toMatchObject({
     contract: "source-semantic-interactive-preflight-v3", provider_calls: 0,
     selected_requests: selectedCount, maximum_attempts_per_key: 1, max_output_tokens: outputTokenCap ?? 4096,
-    output_token_field: "max_tokens", quote_basis: STEP_PLAN_QUOTE_BASIS
+    output_token_field: "max_tokens", quote_basis: quoteBasis
   });
   expect(preflight.planned_requests.map(row => row.key).sort()).toEqual([...selected].sort());
   expect(parseSourceSemanticInteractivePreflight(JSON.parse(JSON.stringify(preflight)))).toEqual(preflight);
@@ -83,8 +84,8 @@ async function scenario(selectedCount: number, outputTokenCap?: number, logicalM
     observation: inspection.observation, inspection, maxConcurrency: 1,
     sourcePreflight: preflight,
     outputTokenCap: { field: "max_tokens", value: outputTokenCap ?? 4096 }, diskFloorBytes: 0,
-    priceEstimate: { inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
-      outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million,
+    priceEstimate: { inputUsdPerMillion: quoteBasis.input_usd_equivalent_per_million,
+      outputUsdPerMillion: quoteBasis.output_usd_equivalent_per_million,
       maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } } as const;
   const receipt = createExtractionAuthorityReceipt(receiptInput);
   expect(receipt.limits.maximum_attempts).toBe(selectedCount);
@@ -274,13 +275,17 @@ it("binds a four-key Step sample to exact HTTP bytes and stops after its first i
   expect(http.calls).toHaveLength(1);
 });
 
-it("binds an explicit source cap to encoded HTTP, retained bounds, receipt price, and the reopened attempt", async () => {
-  const fixture = await scenario(1, 16384);
+it.each([
+  { basis: STEP_PLAN_QUOTE_BASIS, path: "/step_plan/v1/chat/completions" },
+  { basis: STEP_OPENAPI_QUOTE_BASIS, path: "/v1/chat/completions" }
+])("binds an explicit source cap to $path, retained bounds, receipt price, and the reopened attempt", async ({ basis, path }) => {
+  const fixture = await scenario(1, 16384, MODEL, basis);
   const http = await listen(body => ({
     text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop"
   }));
   await runExtractionFill(fixture.options);
   expect(http.calls).toHaveLength(1);
+  expect(http.calls[0]!.path).toBe(path);
   expect(http.calls[0]!.body.max_tokens).toBe(16384);
   const line = fixture.preflight.planned_requests[0]!;
   const encodedInputUpper = Buffer.byteLength(JSON.stringify(http.calls[0]!.body), "utf8") + 256;
@@ -288,8 +293,7 @@ it("binds an explicit source cap to encoded HTTP, retained bounds, receipt price
   expect(fixture.preflight.maximum_input_tokens_per_attempt).toBe(encodedInputUpper);
   expect(fixture.preflight.input_token_bound).toBe(encodedInputUpper);
   expect(fixture.preflight.cost_bound_usd).toBe((
-    encodedInputUpper * STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million +
-    16384 * STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+    encodedInputUpper * 0.14 + 16384 * 0.42
   ) / 1_000_000);
   expect(fixture.receipt.limits.max_output_tokens).toBe(16384);
   expect(fixture.receipt.source_preflight_digest).toMatch(/^[a-f0-9]{64}$/u);
@@ -297,6 +301,9 @@ it("binds an explicit source cap to encoded HTTP, retained bounds, receipt price
   expect(() => assertInteractiveSourcePreflightReceipt({ ...fixture.preflight,
     max_output_tokens: 4096 }, fixture.receipt)).toThrow();
   expect(fixture.receipt.price.estimated_upper_usd).toBe(fixture.preflight.cost_bound_usd);
+  expect(() => assertExtractionAuthorityReceipt({ ...fixture.receipt,
+    price: { ...fixture.receipt.price, input_usd_per_million: 0.13 } },
+  fixture.receipt.observation)).toThrow(/frozen route-specific/u);
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
   expect(raw.request_digest).toBe(line.request_digest);
   expect(raw.finish_reason).toBe("stop");
@@ -336,7 +343,7 @@ it("rejects altered retained Step preflight wire, route, and selected-key proof"
     .toThrow(/encoded wire/u);
   expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,
     config: { ...preflight.config, transportProviderUrl: "https://api.stepfun.com/v1" } }))
-    .toThrow(/selected subscription endpoint/u);
+    .toThrow(/quote differs from its model or transport route/u);
   expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,
     selected_keys: ["f".repeat(64)] })).toThrow(/foreign ready key/u);
   expect(() => parseSourceSemanticInteractivePreflight({ ...preflight,

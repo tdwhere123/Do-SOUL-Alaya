@@ -84,7 +84,7 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   const route = resolveExtractionTransportRoute(config);
   if (config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE) {
     assertStepQuoteBasis(config.requestProfile, route.model, route.providerUrl, report.quote_basis);
-    if (report.output_token_field !== "max_tokens" || report.quote_basis.contract !== "step-plan-policy-quote-v1" ||
+    if (report.output_token_field !== "max_tokens" ||
         report.wire_digest_contract !== undefined) {
       throw new AlayaError("CONFLICT", "retained Step preflight profile and quote differ");
     }

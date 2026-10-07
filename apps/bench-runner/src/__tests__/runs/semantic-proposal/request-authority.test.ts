@@ -16,7 +16,7 @@ import { readProviderRawAttempt, writeProviderRawAttempt } from "../../../runs/e
 import { inspectSemanticProposalShard, semanticProposalShardPath, writeSemanticProposalShard,
   SEMANTIC_PROPOSAL_CACHE_CONTRACT } from "../../../runs/semantic-proposal/artifact.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
-import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
+import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
 const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v8", outcome: { status: "abstained" } });
@@ -60,7 +60,7 @@ it("keeps an opaque retired query shard inspectable without current workset repl
     { kind: "query", model, request_profile: requestProfile })).toEqual(historical);
 });
 
-it("requires Step workset version and selected Plan route before authority", () => {
+it("requires Step workset version and an exact supported quote route before authority", () => {
   const body = { contract: "source-semantic-proposal-workset-v4", kind: "query",
     model: STEP_PLAN_QUOTE_BASIS.selected_model,
     request_profile: "step-3.5-2603-low-json-schema-v1",
@@ -71,9 +71,12 @@ it("requires Step workset version and selected Plan route before authority", () 
   const prepared = parseSemanticProposalWorkset(body);
   expect(() => materializeSemanticProposalLines({ ...prepared,
     contract: "source-semantic-proposal-workset-v3" }, 4096)).toThrow(/contract\/profile mismatch/u);
-  const otherRoute = parseSemanticProposalWorkset({ ...body,
+  const standard = parseSemanticProposalWorkset({ ...body,
     provider_url: "https://api.stepfun.com/v1" });
-  expect(() => prepareSemanticProposal(otherRoute, root(), 4096, 1)).toThrow(/selected subscription endpoint/u);
+  expect(prepareSemanticProposal(standard, root(), 4096, 1).quote_basis).toMatchObject(STEP_OPENAPI_QUOTE_BASIS);
+  const otherRoute = parseSemanticProposalWorkset({ ...body,
+    provider_url: "https://api.stepfun.com/alternate/v1" });
+  expect(() => prepareSemanticProposal(otherRoute, root(), 4096, 1)).toThrow(/exact supported transport route/u);
   expect(() => prepareSemanticProposal(prepared, root(), 4096, 2)).toThrow(/one attempt per key/u);
 });
 

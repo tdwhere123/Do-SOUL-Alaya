@@ -11,7 +11,7 @@ import {
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
 } from "@do-soul/alaya-engine-gateway";
 import { inspectExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
-import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
+import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { PAGE_SUPPORT_COMPARISON_SCHEMA_NAME } from "../../../runs/provider-request/request-binding.js";
@@ -203,7 +203,10 @@ it("admits exact quotes over loopback HTTP and replays reserved raw and settled 
   await closeServer(server);
 });
 
-it("requests full Step HTTP evidence over 64KiB through the default extractor and resumes from the written raw", async () => {
+it.each([
+  { basis: STEP_PLAN_QUOTE_BASIS, path: "/step_plan/v1/chat/completions" },
+  { basis: STEP_OPENAPI_QUOTE_BASIS, path: "/v1/chat/completions" }
+])("requests full Step HTTP evidence over 64KiB on $path and resumes from the written raw", async ({ basis, path }) => {
   const content = JSON.stringify(assessedBody());
   const wire =
     `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "r".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) } }] })}\n\n` +
@@ -233,22 +236,23 @@ it("requests full Step HTTP evidence over 64KiB through the default extractor an
   try {
     vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "true");
     const cacheRoot = join(tempRoot(), "cache");
-    const prepared = stepWorkset();
+    const prepared = stepWorkset(basis);
     const preflight = preparePageSupportComparison(prepared, cacheRoot, 128);
+    expect(preflight.quote_basis).toMatchObject(basis);
     const authority = pinPageSupportComparisonAuthority({
       preflight,
-      inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
-      outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+      inputUsdPerMillion: 0.14,
+      outputUsdPerMillion: 0.42
     });
     ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
-    const config = stepConfig();
+    const config = stepConfig(basis);
     const first = await executePageSupportComparisonFill({
       workset: prepared, cacheRoot, authority, config
     });
     const key = authority.keys[0]!;
     expect(first).toMatchObject({ attempts: 1, newly_admitted: 1, assessed: 1, cache_hits: 0 });
     expect(captured.hits).toBe(1);
-    expect(captured.urls[0]).toBe("/step_plan/v1/chat/completions");
+    expect(captured.urls[0]).toBe(path);
     const raw = readProviderRawAttempt(cacheRoot, key, 1)!;
     expect(raw.kind).toBe("page_support_comparison");
     expect(raw.http_response).toMatchObject({
@@ -787,19 +791,19 @@ function configOf(origin: string): CompileSeedExtractionConfig {
   return { providerUrl: origin, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
 }
 
-function stepWorkset() {
+function stepWorkset(basis: typeof STEP_PLAN_QUOTE_BASIS | typeof STEP_OPENAPI_QUOTE_BASIS = STEP_PLAN_QUOTE_BASIS) {
   return parsePageSupportComparisonWorkset({
-    ...workset(new URL(STEP_PLAN_QUOTE_BASIS.selected_provider_url).origin),
-    model: STEP_PLAN_QUOTE_BASIS.selected_model,
-    provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
+    ...workset(new URL(basis.selected_provider_url).origin),
+    model: basis.selected_model,
+    provider_url: basis.selected_provider_url,
     request_profile: "step-3.5-2603-low-json-schema-v1"
   });
 }
 
-function stepConfig(): CompileSeedExtractionConfig {
+function stepConfig(basis: typeof STEP_PLAN_QUOTE_BASIS | typeof STEP_OPENAPI_QUOTE_BASIS = STEP_PLAN_QUOTE_BASIS): CompileSeedExtractionConfig {
   return {
-    providerUrl: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
-    model: STEP_PLAN_QUOTE_BASIS.selected_model,
+    providerUrl: basis.selected_provider_url,
+    model: basis.selected_model,
     requestProfile: "step-3.5-2603-low-json-schema-v1",
     apiKey: "loopback-only"
   };

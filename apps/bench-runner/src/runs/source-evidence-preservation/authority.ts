@@ -176,7 +176,8 @@ export function pinSourceEvidencePreservationAuthority(input: Readonly<{
 }>): SourceEvidencePreservationAuthority {
   const preflight = PreflightSchema.parse(input.preflight);
   assertPreservationQuote(preflight);
-  assertStepQuoteRates(preflight.request_profile, input.inputUsdPerMillion, input.outputUsdPerMillion);
+  assertStepQuoteRates(preflight.request_profile, input.inputUsdPerMillion, input.outputUsdPerMillion,
+    preflight.quote_basis);
   if (preflight.execution_scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "evidence preservation executable revision changed since preflight");
   }
@@ -235,7 +236,8 @@ export function verifySourceEvidencePreservationAuthority(
   assertStepQuoteRates(
     authority.request_profile,
     authority.price.input_usd_per_million,
-    authority.price.output_usd_per_million
+    authority.price.output_usd_per_million,
+    authority.price.quote_basis
   );
   const { identity_digest, ...body } = authority;
   const digest = createHash("sha256").update(canonicalJson(body)).digest("hex");

@@ -237,12 +237,13 @@ function buildUnsignedReceipt(
   const transport = input.observation.transport ?? {
     model: input.observation.extraction.model, providerUrl: input.observation.extraction.providerUrl
   };
+  const quoteBasis = input.observation.extraction.requestProfile === "step-3.5-2603-low-json-schema-v1"
+    ? stepQuoteBasis(transport.model, transport.providerUrl) : undefined;
   assertStepQuoteRates(input.observation.extraction.requestProfile,
-    input.priceEstimate.inputUsdPerMillion, input.priceEstimate.outputUsdPerMillion);
+    input.priceEstimate.inputUsdPerMillion, input.priceEstimate.outputUsdPerMillion, quoteBasis);
   const basePrice = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
-  const price: ExtractionAuthorityReceiptPrice = input.observation.extraction.requestProfile ===
-    "step-3.5-2603-low-json-schema-v1" ? { ...basePrice,
-      quote_basis: stepQuoteBasis(transport.model, transport.providerUrl) } : basePrice;
+  const price: ExtractionAuthorityReceiptPrice = quoteBasis === undefined ? basePrice
+    : { ...basePrice, quote_basis: quoteBasis };
   const probeKey = input.action === "probe" ? requireProbeKey(input.probeKey) : undefined;
   return {
     schema_version: CURRENT_RECEIPT_VERSION,
@@ -431,7 +432,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
     providerUrl: verified.observation.extraction.providerUrl
   };
   assertStepQuoteRates(verified.observation.extraction.requestProfile,
-    verified.price.input_usd_per_million, verified.price.output_usd_per_million);
+    verified.price.input_usd_per_million, verified.price.output_usd_per_million, verified.price.quote_basis);
   assertStepQuoteBasis(verified.observation.extraction.requestProfile,
     transport.model, transport.providerUrl, verified.price.quote_basis);
   assertExtractionAuthorityReceiptScope(verified);
