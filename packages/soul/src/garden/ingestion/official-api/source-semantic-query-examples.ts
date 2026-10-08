@@ -74,20 +74,20 @@ const nestedSourceSemanticQueryExamples = [
         ],
         alternatives: [{
           conditions: [{ kind: "statement", predicate: "contain more than", arguments: [
-            { role: "greater population", target: { kind: "reference", key: "amber" } },
-            { role: "lesser population", target: { kind: "reference", key: "blue" } },
-            { role: "container", target: { kind: "reference", key: "tray" } },
+            { role: "greater population", target: { kind: "reference", key: "amber" }, excerpt: "amber beads" },
+            { role: "lesser population", target: { kind: "reference", key: "blue" }, excerpt: "blue beads" },
+            { role: "container", target: { kind: "reference", key: "tray" }, excerpt: "tray T" },
           ] }],
           evidence_inputs: [
             { conditions: [{ kind: "statement", predicate: "count", arguments: [
-              { role: "population", target: { kind: "reference", key: "amber" } },
-              { role: "container", target: { kind: "reference", key: "tray" } },
-              { role: "value", target: { kind: "free", key: "amber_count", excerpt: "amber beads" } }
+              { role: "population", target: { kind: "reference", key: "amber" }, excerpt: "amber beads" },
+              { role: "container", target: { kind: "reference", key: "tray" }, excerpt: "tray T" },
+              { role: "value", target: { kind: "free", key: "amber_count", excerpt: "amber beads" }, excerpt: "amber beads" }
             ] }] },
             { conditions: [{ kind: "statement", predicate: "count", arguments: [
-              { role: "population", target: { kind: "reference", key: "blue" } },
-              { role: "container", target: { kind: "reference", key: "tray" } },
-              { role: "value", target: { kind: "free", key: "blue_count", excerpt: "blue beads" } }
+              { role: "population", target: { kind: "reference", key: "blue" }, excerpt: "blue beads" },
+              { role: "container", target: { kind: "reference", key: "tray" }, excerpt: "tray T" },
+              { role: "value", target: { kind: "free", key: "blue_count", excerpt: "blue beads" }, excerpt: "blue beads" }
             ] }] }
           ]
         }]
@@ -125,7 +125,7 @@ const nestedSourceSemanticQueryExamples = [
           description: "The past question act and past embedded polishing are not encoded by the retained frame." }],
         alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish", return: true,
           required_evidence_act: { act: "question", excerpt: "question asked whether" },
-          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" } }]
+          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" }, excerpt: "the lens" }]
         }] }]
       }
     }
@@ -141,7 +141,7 @@ const nestedSourceSemanticQueryExamples = [
           description: "The directive's past requirement is not encoded by the retained frame." }],
         alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish", return: true,
           required_evidence_act: { act: "directive", excerpt: "directive required" },
-          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" } }]
+          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" }, excerpt: "the lens" }]
         }] }]
       }
     }
@@ -157,8 +157,8 @@ const nestedSourceSemanticQueryExamples = [
           description: "The use event's past tense is not encoded by the retained predicate." }],
         alternatives: [{ conditions: [
           { kind: "statement", key: "use_event", predicate: "use", arguments: [
-            { role: "agent", target: { kind: "named", key: "steward", excerpt: "the workshop steward" } },
-            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+            { role: "agent", target: { kind: "named", key: "steward", excerpt: "the workshop steward" }, excerpt: "the workshop steward" },
+            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true }, excerpt: "Which tool" }
           ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
@@ -175,8 +175,8 @@ const nestedSourceSemanticQueryExamples = [
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
         alternatives: [{ conditions: [
           { kind: "statement", key: "use_event", predicate: "use", arguments: [
-            { role: "agent", target: { kind: "named", key: "technician", excerpt: "that technician" } },
-            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+            { role: "agent", target: { kind: "named", key: "technician", excerpt: "that technician" }, excerpt: "that technician" },
+            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true }, excerpt: "Which tool" }
           ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
@@ -204,8 +204,8 @@ const nestedSourceSemanticQueryExamples = [
           description: "The use event's past tense is not encoded by the retained predicate." }],
         alternatives: [{ conditions: [
           { kind: "statement", key: "use_event", predicate: "use", arguments: [
-            { role: "agent", target: { kind: "free", key: "person", excerpt: "someone" } },
-            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true } }
+            { role: "agent", target: { kind: "free", key: "person", excerpt: "someone" }, excerpt: "someone" },
+            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true }, excerpt: "Which tool" }
           ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
@@ -235,17 +235,17 @@ const nestedSourceSemanticQueryExamples = [
                 excerpt: "Tara sealing crate C on 3 March 2024" },
               { role: "end event", target: { kind: "reference", key: "opening" },
                 excerpt: "Tara opening crate C on 4 March 2024" },
-              { role: "hours", target: { kind: "free", key: "elapsed_hours", excerpt: "What is the elapsed time in hours", return: true } }
+              { role: "hours", target: { kind: "free", key: "elapsed_hours", excerpt: "What is the elapsed time in hours", return: true }, excerpt: "What is the elapsed time in hours" }
             ] },
             { kind: "statement", key: "sealing", predicate: "seal", arguments: [
-              { role: "agent", target: { kind: "reference", key: "tara" } },
-              { role: "theme", target: { kind: "reference", key: "crate" } },
-              { role: "date", target: { kind: "reference", key: "seal_day" } }
+              { role: "agent", target: { kind: "reference", key: "tara" }, excerpt: "Tara" },
+              { role: "theme", target: { kind: "reference", key: "crate" }, excerpt: "crate C" },
+              { role: "date", target: { kind: "reference", key: "seal_day" }, excerpt: "3 March 2024" }
             ] },
             { kind: "statement", key: "opening", predicate: "open", arguments: [
-              { role: "agent", target: { kind: "reference", key: "tara" } },
-              { role: "theme", target: { kind: "reference", key: "crate" } },
-              { role: "date", target: { kind: "reference", key: "open_day" } }
+              { role: "agent", target: { kind: "reference", key: "tara" }, excerpt: "Tara" },
+              { role: "theme", target: { kind: "reference", key: "crate" }, excerpt: "crate C" },
+              { role: "date", target: { kind: "reference", key: "open_day" }, excerpt: "4 March 2024" }
             ] }
           ],
           evidence_inputs: [
@@ -254,7 +254,7 @@ const nestedSourceSemanticQueryExamples = [
               { kind: "statement", key: "seal_time", predicate: "time of event", arguments: [
                 { role: "event", target: { kind: "reference", key: "sealing" },
                   excerpt: "Tara sealing crate C on 3 March 2024" },
-                { role: "time", target: { kind: "free", key: "start_time", excerpt: "Tara sealing crate C on 3 March 2024" } }
+                { role: "time", target: { kind: "free", key: "start_time", excerpt: "Tara sealing crate C on 3 March 2024" }, excerpt: "Tara sealing crate C on 3 March 2024" }
               ] }
             ] },
             { conditions: [
@@ -262,7 +262,7 @@ const nestedSourceSemanticQueryExamples = [
               { kind: "statement", key: "open_time", predicate: "time of event", arguments: [
                 { role: "event", target: { kind: "reference", key: "opening" },
                   excerpt: "Tara opening crate C on 4 March 2024" },
-                { role: "time", target: { kind: "free", key: "end_time", excerpt: "Tara opening crate C on 4 March 2024" } }
+                { role: "time", target: { kind: "free", key: "end_time", excerpt: "Tara opening crate C on 4 March 2024" }, excerpt: "Tara opening crate C on 4 March 2024" }
               ] }
             ] }
           ]
@@ -287,7 +287,7 @@ const nestedSourceSemanticQueryExamples = [
           evidence_inputs: [
             { conditions: [
               { kind: "statement", key: "borrow", predicate: "borrow", arguments: [
-                { role: "agent", target: { kind: "reference", key: "clerk" } },
+                { role: "agent", target: { kind: "reference", key: "clerk" }, excerpt: "the clerk" },
                 { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tools" }
               ] },
               { kind: "statement", key: "borrow_kind", predicate: "is a tool", arguments: [
@@ -296,7 +296,7 @@ const nestedSourceSemanticQueryExamples = [
             ] },
             { conditions: [
               { kind: "statement", key: "return", predicate: "return", arguments: [
-                { role: "agent", target: { kind: "reference", key: "clerk" } },
+                { role: "agent", target: { kind: "reference", key: "clerk" }, excerpt: "the clerk" },
                 { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tools" }
               ] },
               { kind: "statement", key: "return_kind", predicate: "is a tool", arguments: [

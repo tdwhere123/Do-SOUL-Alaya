@@ -393,7 +393,31 @@ function derefJsonSchema(root: Record<string, unknown>, node: Record<string, unk
   return derefJsonSchema(root, current);
 }
 
-/** Derive evidence_inputs => requested_operation from the carrier body owner; do not copy its grammar. */
+/** Require explicit producer grounding without changing historical receiver inheritance. */
+function requireQueryRoleExcerpts(schema: Record<string, unknown>, body: Record<string, unknown>): void {
+  const properties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
+  const nodes = isJsonSchemaObject(properties?.nodes) ? properties.nodes : undefined;
+  if (!isJsonSchemaObject(nodes?.items)) throw new AlayaError("VALIDATION", "query carrier schema is missing nodes.items");
+  const node = derefJsonSchema(schema, nodes.items);
+  const variants = Array.isArray(node.oneOf) ? node.oneOf : Array.isArray(node.anyOf) ? node.anyOf : [];
+  let found = false;
+  for (const variant of variants) {
+    if (!isJsonSchemaObject(variant)) continue;
+    const shape = derefJsonSchema(schema, variant);
+    const fields = isJsonSchemaObject(shape.properties) ? shape.properties : undefined;
+    if (!isJsonSchemaObject(fields?.arguments)) continue;
+    if (!isJsonSchemaObject(fields.arguments.items)) throw new AlayaError("VALIDATION", "query role schema is missing items");
+    const argument = derefJsonSchema(schema, fields.arguments.items);
+    if (!isJsonSchemaObject(argument.properties) || !isJsonSchemaObject(argument.properties.excerpt)) {
+      throw new AlayaError("VALIDATION", "query role schema is missing excerpt");
+    }
+    argument.required = [...new Set([...(Array.isArray(argument.required) ? argument.required : []), "excerpt"])];
+    found = true;
+  }
+  if (!found) throw new AlayaError("VALIDATION", "query carrier schema is missing statement arguments");
+}
+
+/** Derive producer constraints from the carrier body owner; do not copy its grammar. */
 function constrainQueryGenerationSchema(envelope: object): object {
   const schema = structuredClone(envelope) as Record<string, unknown>;
   const properties = isJsonSchemaObject(schema.properties) ? schema.properties : undefined;
@@ -401,6 +425,7 @@ function constrainQueryGenerationSchema(envelope: object): object {
     throw new AlayaError("VALIDATION", "query generation schema is missing properties.query");
   }
   const body = structuredClone(derefJsonSchema(schema, properties.query));
+  requireQueryRoleExcerpts(schema, body);
   const bodyProperties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
   if (body.anyOf !== undefined || body.oneOf !== undefined || bodyProperties?.requested_operation === undefined
     || !isJsonSchemaObject(bodyProperties.alternatives) || bodyProperties.alternatives.items === undefined) {

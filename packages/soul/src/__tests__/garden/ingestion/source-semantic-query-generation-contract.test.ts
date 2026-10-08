@@ -83,6 +83,45 @@ const operation = sourceSemanticQueryExamples.find((example) =>
   && example.response.query.alternatives.some((row) => row.evidence_inputs !== undefined))!;
 
 describe("query generation contract", () => {
+  it("requires every generated role to state its excerpt, while historical entity inheritance keeps its meaning", () => {
+    const explicit = operation.response;
+    const inherited = structuredClone(explicit);
+    for (const node of inherited.query.nodes) {
+      if (node.kind !== "statement") continue;
+      for (const argument of node.arguments) Reflect.deleteProperty(argument, "excerpt");
+    }
+    const direct = receive(operation.original_query, explicit);
+    const historical = receive(operation.original_query, inherited);
+    expect([direct.outcome.status, historical.outcome.status]).toEqual(["interpreted", "interpreted"]);
+    expect(canonicalJson(historical.query)).toBe(canonicalJson(direct.query));
+    expect(draft2020(schema, [
+      ...sourceSemanticQueryExamples.map((example) => ({ id: example.original_query, instance: example.response })),
+      { id: "inherited", instance: inherited }
+    ])).toEqual({
+      ...Object.fromEntries(sourceSemanticQueryExamples.map((example) => [example.original_query, true])),
+      inherited: false
+    });
+  });
+
+  it("rejects omitted event and free-answer grounding on both generation and receipt", () => {
+    const cases = [
+      { example: sourceSemanticQueryExamples.find((row) => row.original_query === "Did ringing precede flashing?")!,
+        key: "ring" },
+      { example: sourceSemanticQueryExamples.find((row) => row.original_query === "Who has already arrived?")!,
+        key: "person" }
+    ];
+    for (const { example, key } of cases) {
+      const missing = structuredClone(example.response);
+      const role = missing.query.nodes.flatMap((node) => node.kind === "statement" ? node.arguments : [])
+        .find((argument) => argument.target.key === key)!;
+      Reflect.deleteProperty(role, "excerpt");
+      expect(draft2020(schema, [
+        { id: "valid", instance: example.response }, { id: "missing", instance: missing }
+      ])).toEqual({ valid: true, missing: false });
+      expect(receive(example.original_query, missing).outcome.status).toBe("invalid");
+    }
+  });
+
   it("keeps the historical request/response contract ids and derives the generation union from the carrier body", () => {
     expect(SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT).toBe("source-semantic-query-request-v9");
     expect(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT).toBe("source-semantic-query-response-v8");
