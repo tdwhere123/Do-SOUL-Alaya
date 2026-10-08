@@ -83,6 +83,38 @@ const operation = sourceSemanticQueryExamples.find((example) =>
   && example.response.query.alternatives.some((row) => row.evidence_inputs !== undefined))!;
 
 describe("query generation contract", () => {
+  it("retains the requested property independently of the answer variable's local name", () => {
+    const example = sourceSemanticQueryExamples.find((row) => row.original_query === "What is the color of cabinet C?")!;
+    const result = receive(example.original_query, example.response);
+    expect(result.outcome.status).toBe("interpreted");
+    expect(result.query?.return_variables).toEqual(["value"]);
+    expect(result.query?.variables.find((row) => row.id === "value")?.reference).toBeUndefined();
+    expect(result.query?.alternatives[0]?.frames).toMatchObject([{
+      predicate_reading: "has color", role_requirements: [
+        { role_reading: "bearer", target_variable: "cabinet" },
+        { role_reading: "color", target_variable: "value" }
+      ]
+    }]);
+  });
+
+  it("connects a recommendation target to one qualified event without claiming the task was performed", () => {
+    const example = sourceSemanticQueryExamples.find((row) => row.original_query.startsWith("Please recommend"))!;
+    const result = receive(example.original_query, example.response);
+    expect(result.outcome.status).toBe("interpreted");
+    const query = result.query!;
+    expect(query.return_variables).toEqual(["camera"]);
+    expect(query.requested_operation?.reading).toContain("Recommend a camera");
+    expect(query.variables.find((row) => row.id === "rehearsal")?.reference?.excerpt).toBe("the upcoming rehearsal");
+    const frames = query.alternatives[0]!.frames;
+    for (const predicate of ["is suitable for recording", "is a rehearsal planned after the query time", "has venue"]) {
+      expect(frames.find((frame) => frame.predicate_reading === predicate)?.role_requirements)
+        .toEqual(expect.arrayContaining([expect.objectContaining({ target_variable: "rehearsal" })]));
+    }
+    expect(frames.find((frame) => frame.predicate_reading === "has venue")?.role_requirements)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ target_variable: "hall" })]));
+    expect(query.gaps).toMatchObject([{ kind: "unsupported_meaning", support: [{ excerpt: "Please recommend" }] }]);
+  });
+
   it.each(["free", "named"] as const)("keeps a %s reporter grounded through its entity declaration", (kind) => {
     const excerpt = kind === "free" ? "Who" : "Pia";
     const query = encodeSourceSemanticQueryCarrier({

@@ -908,6 +908,11 @@ A view retains governing context and sibling operands. It never introduces anoth
 query semantics or semantic correspondence identity.
 Direct answer conditions preserve every original restriction even when inputs
 are also declared. An unrepresented answer relation remains explicit.
+Producer guidance preserves a requested attribute in the relation itself and
+connects every qualification of a definite event to that same referent. An outer
+request to recommend, compare or calculate retains its requested operation and
+target; polite request wording alone does not seek evidence of the addressee's
+ability. Candidate suitability does not execute a recommendation.
 
 Reasoning `binding_results` distinguish `answer` from `evidence`; evidence
 always has `query_complete: false`. For an execution-owned answer binding,

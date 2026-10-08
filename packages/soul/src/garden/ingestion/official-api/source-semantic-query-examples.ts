@@ -3,6 +3,63 @@ import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrie
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v8" as const;
 
+const propertyAndTaskExamples = [
+  {
+    original_query: "What is the color of cabinet C?",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+        entities: [
+          { kind: "named", key: "cabinet", excerpt: "cabinet C" },
+          { kind: "free", key: "value", excerpt: "What is the color", return: true }
+        ],
+        alternatives: [{ conditions: [{
+          kind: "statement", predicate: "has color", arguments: [
+            { role: "bearer", target: { kind: "reference", key: "cabinet" }, excerpt: "cabinet C" },
+            { role: "color", target: { kind: "reference", key: "value" }, excerpt: "What is the color" }
+          ]
+        }] }]
+      }
+    }
+  },
+  {
+    original_query: "Please recommend a camera for recording the upcoming rehearsal in hall H.",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "free", key: "camera", excerpt: "a camera", return: true },
+          { kind: "named", key: "rehearsal", excerpt: "the upcoming rehearsal" },
+          { kind: "named", key: "hall", excerpt: "hall H" }
+        ],
+        requested_operation: { reading: "Recommend a camera suitable for recording the upcoming rehearsal in hall H.",
+          support: { kind: "query_text", excerpt: "recommend a camera for recording the upcoming rehearsal in hall H" } },
+        alternatives: [{ conditions: [
+          { kind: "statement", predicate: "is suitable for recording", arguments: [
+            { role: "instrument", target: { kind: "reference", key: "camera" }, excerpt: "a camera" },
+            { role: "recorded event", target: { kind: "reference", key: "rehearsal" }, excerpt: "the upcoming rehearsal" }
+          ] },
+          { kind: "statement", predicate: "is a camera", arguments: [
+            { role: "theme", target: { kind: "reference", key: "camera" }, excerpt: "a camera" }
+          ] },
+          { kind: "statement", predicate: "is a rehearsal planned after the query time", arguments: [
+            { role: "theme", target: { kind: "reference", key: "rehearsal" }, excerpt: "the upcoming rehearsal" }
+          ] },
+          { kind: "statement", predicate: "has venue", arguments: [
+            { role: "event", target: { kind: "reference", key: "rehearsal" }, excerpt: "the upcoming rehearsal" },
+            { role: "venue", target: { kind: "reference", key: "hall" }, excerpt: "hall H" }
+          ] }
+        ] }],
+        gaps: [{ kind: "unsupported_meaning", affected_ids: [],
+          support: [{ kind: "query_text", excerpt: "Please recommend" }],
+          description: "The requested recommendation remains an unexecuted operation; candidate suitability does not perform it." }]
+      }
+    }
+  },
+] as const;
+
 /** Complete neutral producer examples; their admission and incidence are tested. */
 const nestedSourceSemanticQueryExamples = [
   {
@@ -349,7 +406,8 @@ const nestedSourceSemanticQueryExamples = [
         ]
       }
     }
-  }
+  },
+  ...propertyAndTaskExamples
 ] as const;
 
 export const sourceSemanticQueryExamples = nestedSourceSemanticQueryExamples.map(example => {
