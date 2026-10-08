@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { createServer } from "node:http";
 import { describe, expect, it, vi } from "vitest";
 import {
   findProviderBinding,
@@ -79,6 +80,40 @@ describe("provider catalog", () => {
 });
 
 describe("provider protocol probe", () => {
+  it.each(["step-3.5-flash-2603", "step-5-preview"])(
+    "sends the required named schema for %s through actual HTTP", async model => {
+    let body;
+    const server = createServer((request, response) => {
+      const chunks = [];
+      request.on("data", chunk => chunks.push(chunk));
+      request.on("end", () => {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ message: { content: '{"probe":true}' }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }));
+      });
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const receipt = await probeProviderProtocol({ providerUrl: "https://api.stepfun.com/v1",
+        apiKey: "local-test-key", model,
+        fetchImpl: (url, init) => fetch(new URL(new URL(url).pathname, origin), init) });
+      expect(receipt).toMatchObject({ model, physical_calls: 1, json_object: true,
+        usage_present: true, finish_reason: "stop", usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        http_response: { bodyComplete: true, bodyTruncated: false } });
+      const retained = JSON.parse(Buffer.from(receipt.http_response.bodyBase64, "base64").toString("utf8"));
+      expect(retained.choices[0].message.content).toBe('{"probe":true}');
+      expect(body).toMatchObject({ model, reasoning_effort: "low", max_tokens: 256,
+        response_format: { type: "json_schema", json_schema: { name: "provider_protocol_probe", strict: true,
+          schema: { type: "object", properties: { probe: { type: "boolean" } },
+            required: ["probe"], additionalProperties: false } } } });
+    } finally {
+      server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+
   it("caps physical calls and confirms the sealed F3 identity", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],

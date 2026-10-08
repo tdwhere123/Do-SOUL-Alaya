@@ -1,5 +1,7 @@
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
-import { executeProviderChatCompletion } from "@do-soul/alaya-engine-gateway";
+import { isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { executeProviderChatCompletion, type ProviderHttpResponseEvidence,
+  type ProviderUsage } from "@do-soul/alaya-engine-gateway";
 import { sourceBoundF3Seal } from "@do-soul/alaya-soul";
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
 import { requireProviderBinding, resolveVendorModel } from "./catalog.js";
@@ -22,6 +24,8 @@ export interface ProviderProtocolProbeReceipt {
   readonly usage_present: boolean;
   readonly finish_reason: string | null;
   readonly f3_seal_current: true;
+  readonly usage?: ProviderUsage;
+  readonly http_response?: ProviderHttpResponseEvidence;
 }
 
 export async function probeProviderProtocol(
@@ -69,7 +73,13 @@ export async function probeProviderProtocol(
     userPrompt: "{\"probe\":true}",
     profile: binding.requestProfile,
     mode: framing,
-    jsonObject: true,
+    ...(isStepSemanticRequestProfile(binding.requestProfile) ? { retainCompleteHttpResponse: true } : {}),
+    ...(isStepSemanticRequestProfile(binding.requestProfile)
+      ? { jsonSchema: { name: "provider_protocol_probe", schema: {
+        type: "object", properties: { probe: { type: "boolean" } },
+        required: ["probe"], additionalProperties: false
+      } } }
+      : { jsonObject: true }),
     timeoutMs: 20_000,
     maxOutputTokens: 256,
     fetchImpl,
@@ -89,6 +99,8 @@ export async function probeProviderProtocol(
     json_object: execution.result.text.trim().startsWith("{"),
     usage_present: execution.result.usage !== undefined,
     finish_reason: execution.result.finishReason,
-    f3_seal_current: true
+    f3_seal_current: true,
+    ...(execution.result.usage === undefined ? {} : { usage: execution.result.usage }),
+    ...(execution.result.httpResponse === undefined ? {} : { http_response: execution.result.httpResponse })
   };
 }
