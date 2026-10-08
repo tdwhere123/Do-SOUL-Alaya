@@ -5,7 +5,8 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
-import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
+import { MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from
+  "@do-soul/alaya-engine-gateway";
 import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
@@ -196,12 +197,29 @@ async function listen(
   return { calls, intercepted };
 }
 
-it("withholds a truncated Step source response from reuse and SQLite publication after one attempt", async () => {
+it("retains a complete Step source stream beyond the diagnostic prefix for cache reuse", async () => {
+  const fixture = await scenario(1);
+  const http = await listen(body => ({
+    text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
+    padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES)
+  }));
+  await runExtractionFill(fixture.options);
+  const key = fixture.selected[0]!;
+  const raw = readProviderRawAttempt(roots.cacheRoot, key, 1)!;
+  expect(raw.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: false });
+  expect(raw.http_response!.bodyByteLength).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+  expect(Buffer.from(raw.http_response!.bodyBase64, "base64").toString("utf8")).toBe(http.calls[0]!.wire);
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, PROFILE).status).toBe("hit");
+  await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(1);
+});
+
+it("withholds a Step source stream beyond the complete evidence limit from reuse and SQLite publication", async () => {
   vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "1");
   const fixture = await scenario(2);
   const http = await listen((body, index) => ({
     text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
-    ...(index === 1 ? { padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) } : {})
+    ...(index === 1 ? { padding: " ".repeat(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES) } : {})
   }));
   await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
   expect(http.calls).toHaveLength(2);

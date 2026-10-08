@@ -256,6 +256,7 @@ async function dispatchInteractiveLine(
       outputTokenField: input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
         ? "max_tokens" : "maxOutputTokens",
       ...(input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? {
+        retainHttpResponseEvidence: true,
         responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
       } : {}),
       validateRawJson: () => undefined,
