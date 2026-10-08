@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { EvidenceSelectionIdentity, EvidenceSelectionItem } from "./input.js";
@@ -53,9 +54,18 @@ export function representEvidenceSelectionReferences(item: EvidenceSelectionItem
     return { sourceRef, ...identityAndMetadata, preview_segments: segments };
   });
   const { sources: _sources, ...questionAndMetadata } = item;
+  const representation = { contract: "source-reference-input-v1", ...questionAndMetadata, sources: representedSources };
+  const userPrompt = JSON.stringify(representation);
+  const { contract: _contract, sources: decodedSources, ...decodedQuestion } = JSON.parse(userPrompt) as typeof representation;
+  const restored = { ...decodedQuestion, sources: decodedSources.map(({ sourceRef: _ref, preview_segments, ...source }) => ({
+    ...source, preview: preview_segments.map((segment) => segment.text).join("")
+  })) };
+  // unknown metadata can serialize with changed values or missing members, even when preview text is intact.
+  if (!isDeepStrictEqual(restored, item)) {
+    throw new AlayaError("VALIDATION", "evidence selection reference input is not lossless");
+  }
   return {
-    userPrompt: JSON.stringify({ contract: "source-reference-input-v1", ...questionAndMetadata,
-      sources: representedSources }),
+    userPrompt,
     references: Object.freeze({ sources: Object.freeze(sources), witnesses: Object.freeze(witnesses) })
   };
 }

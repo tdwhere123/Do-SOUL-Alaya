@@ -15,6 +15,9 @@ import {
   EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY,
   EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
   EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY,
+  EVIDENCE_SELECTION_SOURCE_REFERENCE_LITERAL_POLICY,
+  EVIDENCE_SELECTION_SOURCE_REFERENCE_WITNESS_POLICY,
+  EVIDENCE_SELECTION_SOURCE_REFERENCE_PAIR_POLICY,
   evidenceSelectionCacheKey,
   evidenceSelectionResponseJsonSchema,
   interpretEvidenceSelectionDecoded,
@@ -239,7 +242,8 @@ it("materializes ordered full DTOs as one assembly treatment each with exact pai
 it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
   "refuses lossy header metadata before request binding", (metadata) => {
     for (const policy of [EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY, EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY,
-      EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY]) {
+      EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY, EVIDENCE_SELECTION_SOURCE_REFERENCE_LITERAL_POLICY,
+      EVIDENCE_SELECTION_SOURCE_REFERENCE_WITNESS_POLICY, EVIDENCE_SELECTION_SOURCE_REFERENCE_PAIR_POLICY]) {
       const paired = workset(ORIGIN, policy);
       expect(() => materializeEvidenceSelectionLines({
         ...paired, items: [{ ...paired.items[0]!, metadata }]
@@ -247,7 +251,8 @@ it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
       expect(() => materializeEvidenceSelectionLines({ ...paired,
         items: [{ ...paired.items[0]!, sources: [{ ...paired.items[0]!.sources[0]!, metadata }] }]
       }, MAX_OUTPUT)).toThrow(/not lossless/u);
-      if (policy === EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_POLICY) {
+      if (policy !== EVIDENCE_SELECTION_INPUT_REPRESENTATION_PAIR_POLICY &&
+          policy !== EVIDENCE_SELECTION_SOURCE_PROPOSAL_ASSEMBLY_PAIR_POLICY) {
         expect(() => materializeEvidenceSelectionLines({ ...paired,
           items: [paired.items[0]!, { ...paired.items[0]!, metadata }]
         }, MAX_OUTPUT)).toThrow(/not lossless/u);

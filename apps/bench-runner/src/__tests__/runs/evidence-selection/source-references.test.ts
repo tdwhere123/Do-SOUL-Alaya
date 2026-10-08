@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
+import { representEvidenceSelectionReferences } from "../../../runs/evidence-selection/source-references.js";
 import {
   EVIDENCE_SELECTION_SOURCE_REFERENCE_LITERAL_POLICY as LITERAL,
   EVIDENCE_SELECTION_SOURCE_REFERENCE_WITNESS_POLICY as WITNESS,
@@ -42,6 +43,32 @@ function decoded(line: EvidenceSelectionLine, selected: unknown[], unresolved: s
   return interpretEvidenceSelectionDecoded(line,
     { rawJson: JSON.stringify({ status: "proposal", selected, unresolved }), finishReason: "stop" }, PROFILE);
 }
+
+it.each([NaN, new Date("2026-01-01T00:00:00Z"), { omitted: undefined }])(
+  "rejects lossy metadata at the representation owner before native binding", (metadata) => {
+    expect(() => representEvidenceSelectionReferences({ ...item, metadata })).toThrow(/not lossless/u);
+    expect(() => representEvidenceSelectionReferences({ ...item,
+      sources: [item.sources[0]!, { ...item.sources[1]!, metadata }]
+    })).toThrow(/not lossless/u);
+  }
+);
+
+it.each([WITNESS, LITERAL, PAIR])("preserves valid JSON metadata in both item and source positions for %s", (policy) => {
+  const metadata = { unknown: null, observed: false, empty: "", zero: 0, finite: -2.5,
+    time: "2026-01-01T00:00:00Z", nested: [{ text: "😀\r\n**room**", absent: null }, [], {}] };
+  const second = { ...item, metadata, sources: item.sources.map((source) => ({ ...source, metadata })) };
+  const prepared = { ...workset(policy), items: [item, second] };
+  const materialized = materializeEvidenceSelectionLines(prepared, 1024);
+  const secondLines = materialized.slice(policy === PAIR ? 2 : 1);
+  expect(secondLines).toHaveLength(policy === PAIR ? 2 : 1);
+  for (const line of secondLines) {
+    const represented = JSON.parse(line.userPrompt);
+    expect(represented.metadata).toStrictEqual(metadata);
+    expect(represented.sources.map((source: { metadata: unknown }) => source.metadata))
+      .toStrictEqual([metadata, metadata, metadata, metadata]);
+    expect(line.sources).toStrictEqual(second.sources);
+  }
+});
 
 it("renders each original preview once with all interstitial bytes, metadata and unknown speaker state", () => {
   const [witness, literal] = lines();
