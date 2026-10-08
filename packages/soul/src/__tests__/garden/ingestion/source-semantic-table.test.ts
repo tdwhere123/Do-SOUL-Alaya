@@ -14,7 +14,7 @@ import { receiveSourceSemantics } from
 import { prepareSourceSemanticRevision } from
   "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { indexSourceSemanticUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
-import { SOURCE_SEMANTIC_TABLE_EXAMPLE } from
+import { SOURCE_SEMANTIC_TABLE_EXAMPLE, SOURCE_SEMANTIC_RELATION_EXAMPLE } from
   "../../../garden/ingestion/official-api/source-semantic-table-guidance.js";
 import { SOURCE_SEMANTIC_PRESERVATION_GUIDANCE, SOURCE_SEMANTIC_OPERATOR_GUIDANCE,
   SOURCE_SEMANTIC_SCOPE_GUIDANCE, SOURCE_SEMANTIC_DOMAIN_GUIDANCE,
@@ -119,6 +119,32 @@ describe("finite source table production receive", () => {
     expect(current.interpretation!.asserted_at_scope).toHaveLength(2);
     expect(current.interpretation!.gaps).toEqual([]);
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(request))).toContain("source-semantic-proposal-v8");
+  });
+
+  it("preserves property values and non-assertive acts without inventing transport speech events", () => {
+    const text = "The panel's color is amber. Please move it to bay D.\n\nAssistant: Is the panel's color amber?";
+    const { input, request } = setup(text);
+    expect(sourceSemanticSystemPrompt(request)).toContain(JSON.stringify(SOURCE_SEMANTIC_RELATION_EXAMPLE));
+    const result = receiveSourceSemantics(JSON.stringify(SOURCE_SEMANTIC_RELATION_EXAMPLE), request, input);
+    expect(result.outcome.status, JSON.stringify(result.outcome)).toBe("interpreted");
+    const h = result.interpretation!;
+    expect(h.frames.map(frame => frame.predicate_support.reading)).toEqual(["has color", "move", "has color"]);
+    expect(h.frames.map(frame => frame.context_owner)).toEqual([
+      { kind: "source_act", source_act: "assertion" },
+      { kind: "source_act", source_act: "directive" },
+      { kind: "source_act", source_act: "question" }
+    ]);
+    expect(h.asserted_at_scope).toEqual([h.frames[0]!.id]);
+    expect(h.operators).toEqual([]);
+    expect(h.gaps).toEqual([]);
+    const color = h.frames[0]!, move = h.frames[1]!, askedColor = h.frames[2]!;
+    expect(color.slots.map(slot => slot.role_reading)).toEqual(["bearer", "color value"]);
+    expect(move.slots.map(slot => slot.role_reading)).toEqual(["object moved", "destination"]);
+    expect(color.bindings).toEqual(askedColor.bindings);
+    expect(color.bindings[0]!.target).toEqual(move.bindings[0]!.target);
+    expect(closure(h, color.id)).toEqual(expect.arrayContaining(["panel", "amber", "color is"]));
+    expect(closure(h, move.id)).toEqual(expect.arrayContaining(["it", "bay D", "move"]));
+    expect(h.mentions.some(mention => mention.text === "User" || mention.text === "Assistant")).toBe(false);
   });
 
   it("rejects every gap-only shared alias and validates each materialized alias", () => {

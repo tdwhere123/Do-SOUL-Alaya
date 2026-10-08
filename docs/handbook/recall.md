@@ -947,6 +947,11 @@ target, and a local key cannot supply missing identifier or date text. A reporti
 event with its own time or other roles uses the ordinary statement with nested
 content; the `reported` scope operator does not supply those event attributes.
 These forms remain distinct, and neither asserts its embedded content independently.
+Producer guidance represents the source's relations and attribute values as
+predicates and arguments, rather than replacing them with a summary of an
+utterance. Transport labels do not introduce speech events. A statement can be
+the content of an assertion, directive or question; its root act preserves that
+distinction without an invented negation or reporting operator.
 Protocol assigns canonical IDs and compiles mentions,
 slot/binding pairs, reciprocal context owners, assertion membership, quantifier
 binders and canonical outcome gaps. A plain occurrence reference does not embed
