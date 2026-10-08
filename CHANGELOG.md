@@ -8,9 +8,15 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.4.0, engine gateway 1.0.0
+## Unreleased — protocol 13.5.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.5.0 adds the shared Step semantic request profile bindings under
+invariant §25 (minor: additive exports). Gateway, Eval and Bench use this one
+authority for explicit low and high reasoning profiles on `step-3.5-flash-2603`.
+Low remains the default; each profile retains its own request, cache and receipt
+identity. Existing MCP payload schemas remain unchanged.
 
 Protocol 13.4.0 adds optional typed source observation time to source
 disclosures under invariant §25 (minor: additive field). Current projections

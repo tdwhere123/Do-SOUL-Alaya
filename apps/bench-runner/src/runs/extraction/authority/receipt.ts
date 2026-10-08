@@ -1,5 +1,7 @@
 import { assertSampleReceipt, assertSampleInspection, assertExtractionSampleScope, type ExtractionSampleScope } from "./sample-scope.js";
-import { ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import {
+  isStepSemanticRequestProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking
+} from "@do-soul/alaya-protocol";
 import type { ExtractionAuthorityInspection as NativeExtractionAuthorityInspection } from "./inspection.js";
 import { createHash } from "node:crypto";
 import {
@@ -237,7 +239,7 @@ function buildUnsignedReceipt(
   const transport = input.observation.transport ?? {
     model: input.observation.extraction.model, providerUrl: input.observation.extraction.providerUrl
   };
-  const quoteBasis = input.observation.extraction.requestProfile === "step-3.5-2603-low-json-schema-v1"
+  const quoteBasis = isStepSemanticRequestProfile(input.observation.extraction.requestProfile)
     ? stepQuoteBasis(transport.model, transport.providerUrl) : undefined;
   assertStepQuoteRates(input.observation.extraction.requestProfile,
     input.priceEstimate.inputUsdPerMillion, input.priceEstimate.outputUsdPerMillion, quoteBasis);

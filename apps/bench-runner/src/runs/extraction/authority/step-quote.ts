@@ -1,8 +1,7 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ProviderUsage } from "@do-soul/alaya-engine-gateway";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 
 /** Conservative budget policy, not an FX quote or an invoice amount. */
 export const STEP_PLAN_QUOTE_BASIS = Object.freeze({
@@ -100,7 +99,7 @@ export function stepQuoteBasisForDigest(model: string, transportUrlSha256: strin
 export function assertStepQuoteBasis(
   profile: string, model: string, providerUrl: string, value: unknown
 ): void {
-  if (profile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+  if (!isStepSemanticRequestProfile(profile)) {
     if (value !== undefined) throw new AlayaError("CONFLICT", "non-Step authority cannot carry a Step quote");
     return;
   }
@@ -115,7 +114,7 @@ export function assertStepQuoteRates(
   profile: string, inputUsdPerMillion: number, outputUsdPerMillion: number,
   quoteBasis: StepQuoteBasis | undefined
 ): void {
-  if (profile !== STEP_SEMANTIC_REQUEST_PROFILE) return;
+  if (!isStepSemanticRequestProfile(profile)) return;
   const basis = StepQuoteBasisSchema.parse(quoteBasis);
   assertStepQuoteBasis(profile, basis.selected_model, basis.selected_provider_url, basis);
   if (inputUsdPerMillion !== basis.input_usd_equivalent_per_million ||
@@ -128,7 +127,7 @@ export function assertStepQuoteRates(
 export function assertStepReportedUsage(
   profile: string, usage: ProviderUsage | null | undefined, outputCap: number
 ): void {
-  if (profile !== STEP_SEMANTIC_REQUEST_PROFILE || usage === null || usage === undefined) return;
+  if (!isStepSemanticRequestProfile(profile) || usage === null || usage === undefined) return;
   if (usage.outputTokens > outputCap ||
       usage.cachedInputTokens !== undefined && usage.cachedInputTokens > usage.inputTokens ||
       usage.reasoningOutputTokens !== undefined && usage.reasoningOutputTokens > usage.outputTokens ||

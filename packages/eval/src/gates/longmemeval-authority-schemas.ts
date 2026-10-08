@@ -1,4 +1,4 @@
-import { ExtractionSourcePackingSchema } from "@do-soul/alaya-protocol";
+import { ExtractionSourcePackingSchema, STEP_SEMANTIC_REQUEST_PROFILES } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { LongMemEvalSelectionContractIdentitySchema } from
@@ -17,7 +17,7 @@ export const LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES = [
   "gemini-2.5-nonthinking-v1",
   "gemini-3.1-minimal-v1",
   "gemini-3.1-low-v1",
-  "step-3.5-2603-low-json-schema-v1",
+  ...STEP_SEMANTIC_REQUEST_PROFILES,
   "deepseek-v4-nonthinking-v1",
   "mimo-v2.5-nonthinking-v1"
 ] as const;

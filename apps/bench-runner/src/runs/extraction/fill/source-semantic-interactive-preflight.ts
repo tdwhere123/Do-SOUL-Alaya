@@ -1,4 +1,4 @@
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema } from "@do-soul/alaya-soul";
 import { z } from "zod";
 import { parseExtractionSampleKeys } from "../authority/sample-scope.js";
@@ -10,7 +10,6 @@ import { inspectExtractionFillPreparation } from "./fill-preparation.js";
 import { prepareSourceRequestWorkset } from "./source-request-workset.js";
 import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest,
   sourceSemanticInteractiveWireSha256, SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT } from "./source-semantic-interactive-request.js";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 import { isNativeGeminiRequestProfile } from "../request-profile.js";
 import { SourceRequestLineSchema, parseExtractionOpenSemanticsGeneration,
   parseSourceSemanticRequestLine } from "../request-artifact.js";
@@ -57,7 +56,7 @@ const RetainedPreflightSchema = z.object({
     transportProviderUrl: z.string().min(1).optional(),
     transportModel: z.string().min(1).optional(),
     modelFamily: z.string().min(1).optional(),
-    requestProfile: z.string().refine(profile => profile === STEP_SEMANTIC_REQUEST_PROFILE ||
+    requestProfile: z.string().refine(profile => isStepSemanticRequestProfile(profile) ||
       isNativeGeminiRequestProfile(profile)),
     apiKey: z.null(), sourcePacking: z.literal("complete-source"),
     openSemantics: z.unknown()
@@ -82,7 +81,7 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   const config = { ...report.config,
     openSemantics: parseExtractionOpenSemanticsGeneration(report.config.openSemantics) };
   const route = resolveExtractionTransportRoute(config);
-  if (config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE) {
+  if (isStepSemanticRequestProfile(config.requestProfile)) {
     assertStepQuoteBasis(config.requestProfile, route.model, route.providerUrl, report.quote_basis);
     if (report.output_token_field !== "max_tokens" ||
         report.wire_digest_contract !== undefined) {
@@ -139,7 +138,7 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
     const input = attemptInputByteUpperBound(wire.body);
     const wireSha256 = sourceSemanticInteractiveWireSha256(config, line, report.max_output_tokens);
     if (row.request_digest !== sourceSemanticRequestWireDigest(config, line, report.max_output_tokens) ||
-        (config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? row.wire_sha256 !== undefined : row.wire_sha256 !== wireSha256) ||
+        (isStepSemanticRequestProfile(config.requestProfile) ? row.wire_sha256 !== undefined : row.wire_sha256 !== wireSha256) ||
         row.request_url !== wire.url.href || row.input_byte_upper !== input) {
       throw new AlayaError("CONFLICT", "retained interactive preflight request differs from its encoded wire");
     }
@@ -178,7 +177,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     throw new AlayaError("VALIDATION", "interactive source dry preflight requires complete-source open semantics without execution authority");
   }
   const inspected = await inspectExtractionFillPreparation(options, options.cacheRoot, undefined);
-  const step = inspected.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE;
+  const step = isStepSemanticRequestProfile(inspected.config.requestProfile);
   if (!step && !isNativeGeminiRequestProfile(inspected.config.requestProfile)) {
     throw new AlayaError("VALIDATION", "interactive source dry preflight requires a native Step or Gemini profile");
   }

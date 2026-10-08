@@ -1,4 +1,4 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -10,7 +10,6 @@ import {
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../runs/semantic-proposal/fill.js";
 import type { CompileSeedExtractionConfig } from "../../runs/compile-seed/compile-seed-types.js";
 import { isNativeGeminiRequestProfile } from "../../runs/extraction/request-profile.js";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../runs/compile-seed/http/semantic-provider-http.js";
 import { canonicalExtractionTargetRoot } from "../../runs/extraction/authority/target-root-binding.js";
 
 export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>): Promise<number> {
@@ -68,7 +67,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
 }
 
 function gardenConfig(model: string, requestProfile: string, authorizedProviderUrl: string): CompileSeedExtractionConfig {
-  if (!isNativeGeminiRequestProfile(requestProfile) && requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+  if (!isNativeGeminiRequestProfile(requestProfile) && !isStepSemanticRequestProfile(requestProfile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
   const providerUrl = process.env.OFFICIAL_API_GARDEN_PROVIDER_URL?.trim()

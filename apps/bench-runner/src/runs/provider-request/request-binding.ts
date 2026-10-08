@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, type StepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
-import { prepareSemanticProviderRequest, STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
+import { prepareSemanticProviderRequest } from "../compile-seed/http/semantic-provider-http.js";
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import { attemptInputByteUpperBound } from "../extraction/authority/receipt-limits.js";
 import { buildExtractionTransportProvenance, resolveExtractionTransportRoute } from "../extraction/transport-route.js";
@@ -22,7 +22,7 @@ export function bindSemanticProviderRequest(
 ) {
   const encoded = prepareSemanticProviderRequest(config, {
     ...request, retryMode: "disabled",
-    outputTokenField: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens",
+    outputTokenField: isStepSemanticRequestProfile(config.requestProfile) ? "max_tokens" : "maxOutputTokens",
     validateRawJson: () => undefined
   }, schemaName);
   const route = resolveExtractionTransportRoute(config);
@@ -31,7 +31,7 @@ export function bindSemanticProviderRequest(
     requestDigest: createHash("sha256").update(JSON.stringify([encoded.url.href, encoded.body])).digest("hex"),
     transportProvenance: buildExtractionTransportProvenance({
       ...config,
-      transportProviderUrl: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+      transportProviderUrl: isStepSemanticRequestProfile(config.requestProfile)
         ? route.providerUrl : normalizeGeminiEndpoint(route.providerUrl).origin
     })
   };
@@ -55,7 +55,7 @@ export function semanticProviderRequestCacheKey(input: Readonly<{
   }, {
     systemPrompt: input.systemPrompt, userPrompt: input.userPrompt, maxOutputTokens: input.maxOutputTokens,
     responseJsonSchema: input.schema,
-    outputTokenField: requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens",
+    outputTokenField: isStepSemanticRequestProfile(requestProfile) ? "max_tokens" : "maxOutputTokens",
     retryMode: "disabled", validateRawJson: () => undefined
   }, input.schemaName);
   return createHash("sha256")
@@ -72,8 +72,8 @@ export function semanticProviderRequestCacheKey(input: Readonly<{
 
 function semanticRequestProfile(
   requestProfile: string
-): NativeGeminiRequestProfile | typeof STEP_SEMANTIC_REQUEST_PROFILE {
-  if (isNativeGeminiRequestProfile(requestProfile) || requestProfile === STEP_SEMANTIC_REQUEST_PROFILE) {
+): NativeGeminiRequestProfile | StepSemanticRequestProfile {
+  if (isNativeGeminiRequestProfile(requestProfile) || isStepSemanticRequestProfile(requestProfile)) {
     return requestProfile;
   }
   throw new AlayaError("VALIDATION", "semantic provider request requires a native semantic request profile");

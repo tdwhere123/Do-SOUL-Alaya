@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { AlayaError, canonicalJson, FieldContractDigestSchema } from "@do-soul/alaya-protocol";
+import {
+  isStepSemanticRequestProfile, type StepSemanticRequestProfile, AlayaError, canonicalJson,
+  FieldContractDigestSchema
+} from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import type { ExtractionTransportProvenance } from "../extraction/transport-route.js";
 import { normalizeGeminiEndpoint } from "../provider/gemini-endpoint.js";
@@ -16,7 +18,6 @@ import {
   decodeEvidenceSelectionSourceBlocks, encodeEvidenceSelectionSourceBlocks,
   serializeEvidenceSelectionJsonInput
 } from "./source-input-blocks.js";
-
 import { evidenceSelectionResponseJsonSchema, evidenceSelectionReferenceResponseJsonSchema } from "./selection-response.js";
 import {
   EVIDENCE_SELECTION_SOURCE_REFERENCE_LITERAL_POLICY, EVIDENCE_SELECTION_SOURCE_REFERENCE_PAIR_POLICY,
@@ -181,7 +182,7 @@ export function parseEvidenceSelectionWorkset(value: unknown): EvidenceSelection
   selectionRequestPolicy(workset);
   return {
     ...workset,
-    provider_url: workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
+    provider_url: isStepSemanticRequestProfile(workset.request_profile)
       ? workset.provider_url
       : normalizeGeminiEndpoint(workset.provider_url).origin
   };
@@ -331,8 +332,8 @@ function bindLine(
 
 function selectionRequestProfile(
   requestProfile: string
-): NativeGeminiRequestProfile | typeof STEP_SEMANTIC_REQUEST_PROFILE {
-  if (isNativeGeminiRequestProfile(requestProfile) || requestProfile === STEP_SEMANTIC_REQUEST_PROFILE) {
+): NativeGeminiRequestProfile | StepSemanticRequestProfile {
+  if (isNativeGeminiRequestProfile(requestProfile) || isStepSemanticRequestProfile(requestProfile)) {
     return requestProfile;
   }
   throw new AlayaError("VALIDATION", "evidence selection requires a native semantic request profile");

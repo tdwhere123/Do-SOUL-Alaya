@@ -225,12 +225,13 @@ function generationBody(request: SourceSemanticCorrespondenceRequest): string {
   });
 }
 
-it("sends Step correspondence through the pinned route and reopens its admitted raw", async () => {
+it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"] as const)(
+  "sends %s correspondence through its pinned route and reopens admitted raw", async profile => {
   const prepared = parseSemanticProposalWorkset({
     ...correspondenceWorkset(), contract: "source-semantic-proposal-workset-v4",
     provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
     model: STEP_PLAN_QUOTE_BASIS.selected_model,
-    request_profile: "step-3.5-2603-low-json-schema-v1"
+    request_profile: profile
   });
   const cacheRoot = join(tempRoot(), "step-cache");
   const authority = pinSemanticProposalAuthority({
@@ -253,7 +254,7 @@ it("sends Step correspondence through the pinned route and reopens its admitted 
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
-    const config: CompileSeedExtractionConfig = { model: prepared.model, requestProfile: "step-3.5-2603-low-json-schema-v1",
+    const config: CompileSeedExtractionConfig = { model: prepared.model, requestProfile: profile,
       providerUrl: prepared.provider_url, apiKey: "loopback-only" };
     const nativeFetch = globalThis.fetch;
     const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -262,12 +263,20 @@ it("sends Step correspondence through the pinned route and reopens its admitted 
       expect(selected.href).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
       return nativeFetch(new URL(selected.pathname, localOrigin), init);
     };
+    const otherProfile = profile === "step-3.5-2603-low-json-schema-v1"
+      ? "step-3.5-2603-high-json-schema-v1" : "step-3.5-2603-low-json-schema-v1";
+    await expect(executeSemanticProposalFill({
+      workset: parseSemanticProposalWorkset({ ...prepared, request_profile: otherProfile }), cacheRoot, authority,
+      config: { ...config, requestProfile: otherProfile }
+    })).rejects.toThrow();
+    expect(seen).toHaveLength(0);
     const result = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
       config, extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
     expect(result).toMatchObject({ interpreted: 1, newly_admitted: 1, attempts: 1 });
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
-      body: { reasoning_effort: "low", max_tokens: 4096, response_format: { type: "json_schema" } } });
+      body: { reasoning_effort: profile === "step-3.5-2603-low-json-schema-v1" ? "low" : "high",
+        max_tokens: 4096, response_format: { type: "json_schema" } } });
     expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({
       contract: "semantic-proposal-raw-attempt-v2", http_response: { bodyBase64: Buffer.from(wire).toString("base64") }
     });

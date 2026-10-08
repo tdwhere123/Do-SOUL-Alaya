@@ -55,7 +55,10 @@ async function withServer<T>(
 }
 
 describe("Step Chat Completions over local HTTP", () => {
-  it("sends the exact named schema, low effort, and finite cap to the selected path", async () => {
+  it.each([
+    { profile: "step-3.5-2603-low-json-schema-v1", effort: "low" },
+    { profile: "step-3.5-2603-high-json-schema-v1", effort: "high" }
+  ] as const)("sends the named schema, $effort effort, and finite cap to the selected path", async ({ profile, effort }) => {
     let path: string | undefined;
     let sentBody: unknown;
     await withServer((request, response) => {
@@ -78,7 +81,7 @@ describe("Step Chat Completions over local HTTP", () => {
         }));
       });
     }, async (providerUrl) => {
-      const request = stepRequest(providerUrl);
+      const request = { ...stepRequest(providerUrl), profile };
       const result = await executeProviderChatCompletion(request, {
         maxRetries: 0, retryDelaysMs: []
       });
@@ -105,7 +108,7 @@ describe("Step Chat Completions over local HTTP", () => {
         name: "semantic_payload", strict: true, schema: SCHEMA.schema
       } },
       max_tokens: 4096,
-      reasoning_effort: "low",
+      reasoning_effort: effort,
       messages: [
         { role: "system", content: "system" },
         { role: "user", content: "user" }

@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { ExtractionTransportProvenanceSchema } from "../extraction/transport-route.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { StepQuoteBasisSchema, assertStepQuoteRates, stepQuoteBasisForDigest } from "../extraction/authority/step-quote.js";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import {
   ExtractionTargetRootBindingSchema, assertExtractionTargetRootBinding, canonicalExtractionTargetRoot,
   initializeExtractionTargetRoot, inspectExtractionTargetRoot
@@ -159,7 +158,7 @@ export function buildPageSupportComparisonPreflight(input: Readonly<{
     maximum_attempts: missingLines.length * PAGE_SUPPORT_COMPARISON_ATTEMPTS_PER_KEY,
     max_output_tokens: input.maxOutputTokens,
     maximum_input_tokens_per_attempt: maxInput,
-    ...(input.request_profile === STEP_SEMANTIC_REQUEST_PROFILE ? {
+    ...(isStepSemanticRequestProfile(input.request_profile) ? {
       quote_basis: stepQuoteBasisForDigest(transport.model, transport.provider_url_sha256.slice("sha256:".length))
     } : {}),
     keys: missingLines.map((line) => line.key)
@@ -220,7 +219,7 @@ export function pinPageSupportComparisonAuthority(input: Readonly<{
       successful_shard_ceiling: preflight.missing,
       max_concurrency: 1 as const,
       max_output_tokens: preflight.max_output_tokens,
-      output_token_field: preflight.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
+      output_token_field: isStepSemanticRequestProfile(preflight.request_profile)
         ? "max_tokens" as const : "maxOutputTokens" as const
     },
     price: {
@@ -295,7 +294,7 @@ function comparisonMaterialDigest(lines: readonly PageSupportComparisonLine[]): 
 }
 
 function assertComparisonQuote(input: PageSupportComparisonPreflight | PageSupportComparisonAuthority): void {
-  const step = input.request_profile === STEP_SEMANTIC_REQUEST_PROFILE;
+  const step = isStepSemanticRequestProfile(input.request_profile);
   const quote = "price" in input ? input.price.quote_basis : input.quote_basis;
   const attempts = "price" in input ? input.limits.maximum_attempts_per_key : input.maximum_attempts_per_key;
   if (attempts !== PAGE_SUPPORT_COMPARISON_ATTEMPTS_PER_KEY) {

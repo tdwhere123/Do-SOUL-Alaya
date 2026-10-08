@@ -1,11 +1,10 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import type { ExtractionSampleScope } from "./sample-scope.js";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import type { StepQuoteBasis } from "./step-quote.js";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
 
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
 const MAX_ASSERTION_PARTITION_TREE_NODES =
@@ -158,7 +157,7 @@ export function expectedExtractionAuthorityLimits(
     return { maximumAttempts: 1, successfulShardCeiling: 1 };
   }
   return {
-    maximumAttempts: requestProfile === STEP_SEMANTIC_REQUEST_PROFILE && sourcePacking === "complete-source"
+    maximumAttempts: isStepSemanticRequestProfile(requestProfile) && sourcePacking === "complete-source"
       ? missing
       : sourcePacking === "complete-source"
       ? completeSourceFillAttemptCeiling(missing)

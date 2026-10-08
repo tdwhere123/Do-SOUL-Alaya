@@ -1,10 +1,10 @@
-import type { EnvLookup } from "@do-soul/alaya-protocol";
+import { STEP_SEMANTIC_REQUEST_PROFILES, type EnvLookup } from "@do-soul/alaya-protocol";
 
 export const PROVIDER_REQUEST_PROFILES = [
   "provider-default-v1",
   "deepseek-v4-nonthinking-v1",
   "mimo-v2.5-nonthinking-v1",
-  "step-3.5-2603-low-json-schema-v1"
+  ...STEP_SEMANTIC_REQUEST_PROFILES
 ] as const;
 
 export type ProviderRequestProfile = (typeof PROVIDER_REQUEST_PROFILES)[number];

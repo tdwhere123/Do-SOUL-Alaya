@@ -1,5 +1,6 @@
 import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
-import { AlayaError, type EnvLookup } from "@do-soul/alaya-protocol";
+import { AlayaError, isStepSemanticRequestProfile, stepSemanticReasoningEffort,
+  STEP_SEMANTIC_REQUEST_MODEL, type EnvLookup } from "@do-soul/alaya-protocol";
 import type {
   ProviderChatCompletionRequest,
   ProviderRequestProfile
@@ -52,8 +53,8 @@ export function buildProviderChatRequestBody(
   request: ProviderChatCompletionRequest
 ): Record<string, unknown> {
   const stream = request.mode === "sse";
-  if (request.profile === "step-3.5-2603-low-json-schema-v1") {
-    if (request.model !== "step-3.5-flash-2603" ||
+  if (isStepSemanticRequestProfile(request.profile)) {
+    if (request.model !== STEP_SEMANTIC_REQUEST_MODEL ||
         request.jsonSchema === undefined || request.jsonSchema.name.trim().length === 0 ||
         typeof request.jsonSchema.schema !== "object" || request.jsonSchema.schema === null ||
         Array.isArray(request.jsonSchema.schema) || request.jsonObject === true ||
@@ -71,7 +72,7 @@ export function buildProviderChatRequestBody(
         json_schema: { name: request.jsonSchema.name, strict: true, schema: request.jsonSchema.schema }
       },
       max_tokens: request.maxOutputTokens,
-      reasoning_effort: "low",
+      reasoning_effort: stepSemanticReasoningEffort(request.profile),
       messages: [
         { role: "system", content: request.systemPrompt },
         { role: "user", content: request.userPrompt }

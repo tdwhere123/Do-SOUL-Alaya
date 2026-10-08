@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { expect, it } from "vitest";
+import { STEP_SEMANTIC_REQUEST_PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE } from "@do-soul/alaya-protocol";
 import {
   inspectProviderChatCompletionResponse,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
 } from "@do-soul/alaya-engine-gateway";
 import {
   createSemanticProviderHttpExtractor,
-  prepareSemanticProviderRequest,
-  STEP_SEMANTIC_REQUEST_PROFILE
+  prepareSemanticProviderRequest
 } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
@@ -72,19 +72,21 @@ async function withLoopback(
   return { bodies };
 }
 
-it("retains complete Step SSE bytes past 64KiB only when full HTTP evidence is requested", async () => {
+it.each([STEP_SEMANTIC_REQUEST_PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE])(
+  "retains complete %s bytes past 64KiB only when full HTTP evidence is requested", async requestProfile => {
+  const selectedConfig = { ...config, requestProfile };
   const wire = oversizedStepSse();
   const original = Buffer.from(wire);
   expect(original.length).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
-  const withoutFlag = prepareSemanticProviderRequest(config, extractInput, "semantic_payload");
-  const withFlag = prepareSemanticProviderRequest(config, {
+  const withoutFlag = prepareSemanticProviderRequest(selectedConfig, extractInput, "semantic_payload");
+  const withFlag = prepareSemanticProviderRequest(selectedConfig, {
     ...extractInput, retainHttpResponseEvidence: true
   }, "semantic_payload");
   expect(withoutFlag.body).toBe(withFlag.body);
   expect(withoutFlag.url.href).toBe(withFlag.url.href);
 
   const { bodies } = await withLoopback(wire, async (createExtractor) => {
-    const extractor = createExtractor(config, "semantic_payload");
+    const extractor = createExtractor(selectedConfig, "semantic_payload");
     const retained = await extractor.extract({ ...extractInput, retainHttpResponseEvidence: true });
     const defaulted = await extractor.extract(extractInput);
 
@@ -124,7 +126,7 @@ it("retains complete Step SSE bytes past 64KiB only when full HTTP evidence is r
   expect(bodies[0]).toEqual(JSON.parse(withoutFlag.body));
   expect(bodies[0]).toMatchObject({
     model: STEP_PLAN_QUOTE_BASIS.selected_model, max_tokens: 4096, stream: true,
-    reasoning_effort: "low",
+    reasoning_effort: requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "low" : "high",
     response_format: { type: "json_schema", json_schema: { name: "semantic_payload", strict: true } }
   });
 });

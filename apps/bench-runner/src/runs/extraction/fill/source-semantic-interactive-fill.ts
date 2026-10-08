@@ -1,11 +1,10 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
 import { readGeminiFailureResponse } from "../../compile-seed/http/gemini-http.js";
-import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish,
-  readStepFailureResponse, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
+import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish, readStepFailureResponse } from "../../compile-seed/http/semantic-provider-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../../compile-seed/http/output-token-retry.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
@@ -58,11 +57,11 @@ export async function executeOpenSemanticsInteractiveFill(
   assertInteractiveOpenSemanticsScope(input);
   const authority = input.authority!;
   const profile = input.prepared.config.requestProfile;
-  if (!isGeminiGenerateContentProfile(profile) && profile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+  if (!isGeminiGenerateContentProfile(profile) && !isStepSemanticRequestProfile(profile)) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill request profile is unsupported");
   }
   if (authority.receipt.limits.output_token_field !==
-      (profile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens")) {
+      (isStepSemanticRequestProfile(profile) ? "max_tokens" : "maxOutputTokens")) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill output field differs from its profile");
   }
   const selected = selectedInteractiveKeys(authority);
@@ -71,7 +70,7 @@ export async function executeOpenSemanticsInteractiveFill(
     ...(selected === undefined ? {} : { executionCacheKeys: selected })
   });
   const maxOutputTokens = authority.receipt.limits.max_output_tokens;
-  if ((profile === STEP_SEMANTIC_REQUEST_PROFILE || authority.receipt.action === "sample") && input.concurrency !== 1) {
+  if ((isStepSemanticRequestProfile(profile) || authority.receipt.action === "sample") && input.concurrency !== 1) {
     throw new AlayaError("VALIDATION", "selected interactive source fill requires one sequential request");
   }
   for (const line of workset.lines) {
@@ -87,7 +86,7 @@ export async function executeOpenSemanticsInteractiveFill(
     const outcome = await fillInteractiveLine(input, workset, line, extractor, maxOutputTokens);
     if (outcome === "admitted") {
       newlyExtracted += 1;
-    } else if (profile === STEP_SEMANTIC_REQUEST_PROFILE || authority.receipt.action === "sample") {
+    } else if (isStepSemanticRequestProfile(profile) || authority.receipt.action === "sample") {
       throw new AlayaError("CONFLICT", `selected interactive source fill stopped after ${outcome} for ${line.key}`);
     }
   });
@@ -174,7 +173,7 @@ function replayInteractiveRaws(
 
 function interactiveAttemptLimit(input: InteractiveFillInput): number {
   return input.authority!.receipt.action === "sample" || input.authority!.receipt.action === "probe" ||
-    input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    isStepSemanticRequestProfile(input.prepared.config.requestProfile)
     ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
 }
 
@@ -253,9 +252,9 @@ async function dispatchInteractiveLine(
       systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
       timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
       maxOutputTokens,
-      outputTokenField: input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+      outputTokenField: isStepSemanticRequestProfile(input.prepared.config.requestProfile)
         ? "max_tokens" : "maxOutputTokens",
-      ...(input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? {
+      ...(isStepSemanticRequestProfile(input.prepared.config.requestProfile) ? {
         retainHttpResponseEvidence: true,
         responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
       } : {}),
@@ -335,7 +334,7 @@ function importInteractiveLine(
   const authority = input.authority!;
   const finishReason = extracted.responseMetadata?.finishReason ?? null;
   const provenance = {
-    transport: input.prepared.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+    transport: isStepSemanticRequestProfile(input.prepared.config.requestProfile)
       ? "step-chat-completion" as const : "gemini-generate-content" as const,
     finishReason, attemptOrdinal,
     responseSha256: batchDigest(extracted.rawJson),

@@ -1,7 +1,7 @@
 import { inspectExtractionAttemptLedger, ledgerPath, openExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, semanticProposalShardPath, SemanticProposalIdentityError,
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
 import { assertSemanticProposalExecutionScope, proposalAttemptLineage, verifySemanticProposalAuthority, type SemanticProposalAuthority } from "./authority.js";
@@ -144,7 +144,7 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
     },
     startingMissing: input.authority.limits.starting_missing,
     maximumAttempts: input.authority.limits.maximum_attempts,
-    ...(input.authority.request_profile === "step-3.5-2603-low-json-schema-v1"
+    ...(isStepSemanticRequestProfile(input.authority.request_profile)
       ? { maximumAttemptsPerKey: input.authority.limits.maximum_attempts_per_key } : {}),
     successfulShardCeiling: input.authority.limits.successful_shard_ceiling,
     inspectProviderShard: (cacheRoot, cacheKey, identity) => {

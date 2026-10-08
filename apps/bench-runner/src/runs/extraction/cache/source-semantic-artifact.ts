@@ -3,9 +3,8 @@ import {
   type SourceSemanticProposalResult
 } from "@do-soul/alaya-soul";
 import {
-  AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT, SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION,
-  SOURCE_SEMANTIC_PACKET_CONTRACT,
-  type UtteranceAttribution
+  isStepSemanticRequestProfile, AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT,
+  SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { readCachedEntry, writeCachedExtraction, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
@@ -21,7 +20,7 @@ import { extractionAdmissionGenerationSha256, readExtractionCacheManifestIdentit
   readRetainedSourceSemanticManifestIdentity, computeSystemPromptSha256 } from "./extraction-cache-manifest.js";
 import { normalizeGeminiEndpoint } from "../../provider/gemini-endpoint.js";
 import { assertInteractiveProvenance, inspectInteractiveTransportEvidence, interactiveResponseMetadata } from "./source-interactive-binding.js";
-import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
+import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provider-http.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js";
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
@@ -462,7 +461,7 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
       request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
       interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
-      kind: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "step_chat_completion" : "gemini_generate_content", completion,
+      kind: isStepSemanticRequestProfile(config.requestProfile) ? "step_chat_completion" : "gemini_generate_content", completion,
       source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, result }
   };
   inspectInteractiveTransportEvidence(entry.source_semantic as Extract<CachedSourceSemantic,

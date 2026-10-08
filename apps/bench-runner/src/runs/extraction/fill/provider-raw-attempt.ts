@@ -1,4 +1,4 @@
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -232,7 +232,7 @@ function isStepRawAttemptContract(contract: string): boolean {
 }
 
 function providerRawAttemptContract(kind: RawAttemptOwner["kind"], requestProfile: string): string {
-  const step = requestProfile === "step-3.5-2603-low-json-schema-v1";
+  const step = isStepSemanticRequestProfile(requestProfile);
   if (kind === "source_semantic") {
     return step ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : PROVIDER_RAW_ATTEMPT_CONTRACT;
   }
@@ -258,7 +258,7 @@ export function bindProviderRawAttempt(
   } & RawAttemptOwner>
 ): ProviderRawAttempt {
   assertProviderRawIntegrity(raw);
-  const step = expected.requestProfile === "step-3.5-2603-low-json-schema-v1";
+  const step = isStepSemanticRequestProfile(expected.requestProfile);
   if (step !== isStepRawAttemptContract(raw.contract)) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt contract/profile mismatch: ${expected.cacheKey}`);
   }
@@ -319,7 +319,7 @@ export function providerRawSuccessEvidenceState(
   raw: ProviderRawAttempt
 ): "bound" | "missing" | "truncated" | "failed" | "unsupported" {
   if (raw.transport_failure !== undefined) return "failed";
-  if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") {
+  if (isStepSemanticRequestProfile(raw.request_profile)) {
     if (raw.http_response === undefined) return "missing";
     return raw.http_response.bodyTruncated || !raw.http_response.bodyComplete ? "truncated" : "bound";
   }
@@ -378,11 +378,11 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
         http.bodyTruncated !== (httpBytes.length < http.bodyByteLength) ||
         !http.bodyTruncated && (httpBytes.length !== http.bodyByteLength ||
           createHash("sha256").update(httpBytes).digest("hex") !== http.bodySha256)) ||
-      raw.request_profile === "step-3.5-2603-low-json-schema-v1" &&
+      isStepSemanticRequestProfile(raw.request_profile) &&
         (!isStepRawAttemptContract(raw.contract) ||
          body !== undefined || raw.transport_failure === undefined &&
            (http === undefined || !http.bodyComplete)) ||
-      raw.request_profile !== "step-3.5-2603-low-json-schema-v1" && http !== undefined) {
+      !isStepSemanticRequestProfile(raw.request_profile) && http !== undefined) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt integrity mismatch: ${raw.cache_key}`);
   }
   assertCompletePhysicalResponse(raw, httpBytes);
@@ -394,7 +394,7 @@ function assertCompletePhysicalResponse(raw: ProviderRawAttempt, httpBytes: Buff
   if (raw.transport_failure !== undefined) return;
   let decoded: { text: string; finishReason: string | null; usage?: unknown } | undefined;
   try {
-    if (raw.request_profile === "step-3.5-2603-low-json-schema-v1") {
+    if (isStepSemanticRequestProfile(raw.request_profile)) {
       const http = raw.http_response;
       if (http?.bodyComplete && !http.bodyTruncated && httpBytes !== undefined) {
         decoded = inspectProviderChatCompletionResponse(httpBytes, http.contentType, 200,

@@ -1,9 +1,9 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
-import { readStepFailureResponse, STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
+import { readStepFailureResponse } from "../compile-seed/http/semantic-provider-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-token-retry.js";
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import type { ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
@@ -116,10 +116,10 @@ export async function executeProviderRequestLine(
         systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
         timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(context.maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
         maxOutputTokens: context.maxOutputTokens,
-        outputTokenField: context.config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+        outputTokenField: isStepSemanticRequestProfile(context.config.requestProfile)
           ? "max_tokens" : "maxOutputTokens",
         validateRawJson: () => undefined, responseJsonSchema: line.responseJsonSchema,
-        ...(context.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+        ...(isStepSemanticRequestProfile(context.requestProfile)
           ? { retainHttpResponseEvidence: true as const } : {})
       });
     } catch (cause) {

@@ -1,4 +1,5 @@
 import { ProviderChatCompletionError } from "./errors.js";
+import { isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import {
   providerFailureIdentityFromBody,
   readOptionalProviderFailureIdentity
@@ -63,7 +64,7 @@ async function runProviderChatRequest(
 ): Promise<ProviderChatCompletionResult> {
   const response = await postChatCompletion(request, signal);
   observeStatus(response.status);
-  if (request.profile === "step-3.5-2603-low-json-schema-v1") {
+  if (isStepSemanticRequestProfile(request.profile)) {
     let bodyText: string;
     let evidence: ProviderHttpResponseEvidence;
     try {

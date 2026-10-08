@@ -3,7 +3,7 @@ import {
   ProviderChatCompletionError, type ProviderChatCompletionRequest,
   type ProviderHttpResponseEvidence
 } from "@do-soul/alaya-engine-gateway";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed-types.js";
 import { assertRequiredRequestProfile, resolveExtractionTransportRoute } from "../../extraction/transport-route.js";
 import { prepareGeminiRequest, createGeminiHttpExtractor, GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "./gemini-http.js";
@@ -11,8 +11,6 @@ import { isNativeGeminiRequestProfile } from "../../extraction/request-profile.j
 import { resolveExtractionRequestTimeoutMs } from "./output-token-retry.js";
 import { mapGardenHttpAttemptFailure, toBenchTransportFailureAttempt } from "./garden-http-failure-attempt.js";
 import { wrapGardenHttpTransportError } from "./garden-http-terminal-error.js";
-
-export const STEP_SEMANTIC_REQUEST_PROFILE = "step-3.5-2603-low-json-schema-v1" as const;
 
 type ExtractInput = Parameters<BenchSignalExtractor["extract"]>[0];
 
@@ -29,7 +27,7 @@ export function prepareSemanticProviderRequest(
   if (isNativeGeminiRequestProfile(config.requestProfile)) {
     return prepareGeminiRequest(config, input);
   }
-  if (config.requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE ||
+  if (!isStepSemanticRequestProfile(config.requestProfile) ||
       input.outputTokenField !== "max_tokens" || input.responseJsonSchema === undefined) {
     throw new AlayaError("VALIDATION", "semantic provider request requires its explicit Step profile and response schema");
   }
@@ -42,7 +40,7 @@ export function prepareSemanticProviderRequest(
   const route = resolveExtractionTransportRoute(config);
   const gatewayRequest: ProviderChatCompletionRequest = {
     providerUrl: route.providerUrl, apiKey: "",
-    model: route.model, profile: STEP_SEMANTIC_REQUEST_PROFILE,
+    model: route.model, profile: config.requestProfile,
     systemPrompt: input.systemPrompt, userPrompt: input.userPrompt,
     jsonSchema: { name: schemaName, schema: input.responseJsonSchema as Record<string, unknown> },
     maxOutputTokens: input.maxOutputTokens, outputTokenField: "max_tokens",
@@ -61,7 +59,7 @@ export function createSemanticProviderHttpExtractor(
   fetchImpl?: typeof fetch
 ): BenchSignalExtractor {
   if (isNativeGeminiRequestProfile(config.requestProfile)) return createGeminiHttpExtractor(config, fetchImpl);
-  if (config.requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) {
+  if (!isStepSemanticRequestProfile(config.requestProfile)) {
     throw new AlayaError("VALIDATION", "semantic provider request profile is unsupported");
   }
   return { extract: async (input) => {
@@ -114,5 +112,5 @@ export function readStepFailureResponse(error: unknown): ProviderHttpResponseEvi
 }
 
 export function isCompleteSemanticFinish(profile: string, finishReason: string | null | undefined): boolean {
-  return profile === STEP_SEMANTIC_REQUEST_PROFILE ? finishReason === "stop" : finishReason === "STOP";
+  return isStepSemanticRequestProfile(profile) ? finishReason === "stop" : finishReason === "STOP";
 }

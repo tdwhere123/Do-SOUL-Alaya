@@ -1,6 +1,7 @@
+import { isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
-import { prepareSemanticProviderRequest, STEP_SEMANTIC_REQUEST_PROFILE } from
+import { prepareSemanticProviderRequest } from
   "../../compile-seed/http/semantic-provider-http.js";
 import type { SourceRequestLine } from "../request-artifact.js";
 import { requestEnvelopeDigest } from "./provider-raw-attempt.js";
@@ -13,18 +14,18 @@ export function prepareSourceSemanticRequestWire(
 ) {
   return prepareSemanticProviderRequest(config, {
     systemPrompt: line.systemPrompt, userPrompt: line.userPrompt,
-    ...(config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? {
+    ...(isStepSemanticRequestProfile(config.requestProfile) ? {
       responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
     } : {}),
     maxOutputTokens, retryMode: "disabled",
-    outputTokenField: config.requestProfile === STEP_SEMANTIC_REQUEST_PROFILE ? "max_tokens" : "maxOutputTokens"
+    outputTokenField: isStepSemanticRequestProfile(config.requestProfile) ? "max_tokens" : "maxOutputTokens"
   }, "source_semantic");
 }
 
 export function sourceSemanticRequestWireDigest(
   config: CompileSeedExtractionConfig, line: SourceRequestLine, maxOutputTokens: number
 ): string {
-  if (config.requestProfile !== STEP_SEMANTIC_REQUEST_PROFILE) return requestEnvelopeDigest(line.userPrompt);
+  if (!isStepSemanticRequestProfile(config.requestProfile)) return requestEnvelopeDigest(line.userPrompt);
   return sourceSemanticInteractiveWireSha256(config, line, maxOutputTokens);
 }
 

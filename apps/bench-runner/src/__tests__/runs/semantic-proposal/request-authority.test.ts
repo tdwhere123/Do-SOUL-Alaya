@@ -60,10 +60,11 @@ it("keeps an opaque retired query shard inspectable without current workset repl
     { kind: "query", model, request_profile: requestProfile })).toEqual(historical);
 });
 
-it("requires Step workset version and an exact supported quote route before authority", () => {
+it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"] as const)(
+  "requires the %s workset version and exact supported quote route before authority", profile => {
   const body = { contract: "source-semantic-proposal-workset-v4", kind: "query",
     model: STEP_PLAN_QUOTE_BASIS.selected_model,
-    request_profile: "step-3.5-2603-low-json-schema-v1",
+    request_profile: profile,
     provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
     items: [{ original_query: "Who sent the parcel?" }] };
   expect(() => parseSemanticProposalWorkset({ ...body,
@@ -78,13 +79,23 @@ it("requires Step workset version and an exact supported quote route before auth
     provider_url: "https://api.stepfun.com/alternate/v1" });
   expect(() => prepareSemanticProposal(otherRoute, root(), 4096, 1)).toThrow(/exact supported transport route/u);
   expect(() => prepareSemanticProposal(prepared, root(), 4096, 2)).toThrow(/one attempt per key/u);
+  const other = parseSemanticProposalWorkset({ ...body,
+    request_profile: profile === "step-3.5-2603-low-json-schema-v1"
+      ? "step-3.5-2603-high-json-schema-v1" : "step-3.5-2603-low-json-schema-v1" });
+  const line = materializeSemanticProposalLines(prepared, 4096)[0]!;
+  const otherLine = materializeSemanticProposalLines(other, 4096)[0]!;
+  expect(line.systemPrompt).toBe(otherLine.systemPrompt);
+  expect(line.userPrompt).toBe(otherLine.userPrompt);
+  expect(line.key).not.toBe(otherLine.key);
+  expect(line.requestDigest).not.toBe(otherLine.requestDigest);
 });
 
-it("stops Step proposal dispatch after first length response while retaining raw and unattempted keys", async () => {
+it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"] as const)(
+  "stops %s after the first length response while retaining raw and unattempted keys", async profile => {
   const prepared = parseSemanticProposalWorkset({
     contract: "source-semantic-proposal-workset-v4", kind: "query",
     model: STEP_PLAN_QUOTE_BASIS.selected_model,
-    request_profile: "step-3.5-2603-low-json-schema-v1",
+    request_profile: profile,
     provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
     items: [{ original_query: "Who sent the parcel?" }, { original_query: "What arrived?" }]
   });
@@ -98,7 +109,7 @@ it("stops Step proposal dispatch after first length response while retaining raw
   const bytes = Buffer.from(wire);
   let calls = 0;
   const stepConfig: CompileSeedExtractionConfig = {
-    model: prepared.model, requestProfile: "step-3.5-2603-low-json-schema-v1",
+    model: prepared.model, requestProfile: profile,
     providerUrl: prepared.provider_url, apiKey: "synthetic-fixture-key"
   };
   await expect(executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: stepConfig,

@@ -12,6 +12,16 @@ import { assertRequiredRequestProfile } from
 const MIMO = requireProviderBinding("mimo-v2.5");
 
 describe("provider catalog", () => {
+  it("keeps Step low as the default and binds high to the same exact model", () => {
+    expect(requireProviderBinding("step-3.5-flash-2603")).toMatchObject({
+      requestProfile: "step-3.5-2603-low-json-schema-v1",
+      supportedRequestProfiles: ["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"]
+    });
+    expect(() => assertRequiredRequestProfile({ model: "step-3.5-flash-2603",
+      requestProfile: "step-3.5-2603-high-json-schema-v1" })).not.toThrow();
+    expect(() => assertRequiredRequestProfile({ model: "gemini-3.1-flash-lite",
+      requestProfile: "step-3.5-2603-high-json-schema-v1" })).toThrow();
+  });
   it("keeps minimal default while accepting low only for the same Flash-Lite 3.1 model", () => {
     expect(requireProviderBinding("gemini-3.1-flash-lite").requestProfile).toBe("gemini-3.1-minimal-v1");
     for (const requestProfile of ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const) {

@@ -1,4 +1,4 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { boundedArtifactEntryExists } from "../cache-audit/bounded-artifact-reader.js";
 import { readExtractionAuthorityReceipt, writeExtractionAuthorityReceiptExclusive,
@@ -27,7 +27,7 @@ export function readRetainedInteractiveAuthority(root: string, digest: string, l
   const receipt = readExtractionAuthorityReceipt(receiptPath(root, digest));
   if (receipt.receipt_digest !== digest || receipt.lineage_digest !== lineageDigest ||
       receipt.observation.transport === undefined ||
-      (receipt.observation.extraction.requestProfile !== "step-3.5-2603-low-json-schema-v1" &&
+      (!isStepSemanticRequestProfile(receipt.observation.extraction.requestProfile) &&
         !isGeminiGenerateContentProfile(receipt.observation.extraction.requestProfile))) {
     throw new AlayaError("CONFLICT", "retained interactive authority binding mismatch");
   }

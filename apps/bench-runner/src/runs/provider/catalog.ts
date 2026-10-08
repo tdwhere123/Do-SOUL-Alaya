@@ -1,4 +1,6 @@
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
+import { STEP_SEMANTIC_REQUEST_MODEL, STEP_SEMANTIC_REQUEST_PROFILE,
+  STEP_SEMANTIC_REQUEST_PROFILES } from "@do-soul/alaya-protocol";
 
 export interface ProviderBinding {
   readonly id: string;
@@ -15,10 +17,10 @@ export interface ProviderBinding {
  */
 export const PROVIDER_BINDINGS: readonly ProviderBinding[] = [
   {
-    id: "step-3.5-flash-2603",
+    id: STEP_SEMANTIC_REQUEST_MODEL,
     aliases: [],
-    requestProfile: "step-3.5-2603-low-json-schema-v1",
-    supportedRequestProfiles: ["step-3.5-2603-low-json-schema-v1"],
+    requestProfile: STEP_SEMANTIC_REQUEST_PROFILE,
+    supportedRequestProfiles: STEP_SEMANTIC_REQUEST_PROFILES,
     probeCallCeiling: 2
   },
   {

@@ -1060,10 +1060,14 @@ unsupported disposition to native publication, which rechecks it against the
 exact source census and records it in the publication report after SQLite reopen.
 Interactive source preparation surfaces the same typed capacity reason as a
 validation error; its successful response contract is unchanged.
-The native Step Plan path uses `step-3.5-2603-low-json-schema-v1` only with
-`step-3.5-flash-2603` at the exact selected `/step_plan/v1` route. Source,
+The native Step path defaults to `step-3.5-2603-low-json-schema-v1`; the explicit
+`step-3.5-2603-high-json-schema-v1` profile selects high reasoning with the same
+exact `step-3.5-flash-2603` model. Protocol owns these identities and effort
+bindings. Profiles have distinct cache, wire and authority identities; one cannot
+reuse the other's receipt. The exact selected Step Plan or ordinary OpenAPI route
+remains bound to its quote. Source,
 query and correspondence preparation bind the gateway-encoded strict JSON
-schema body, low reasoning effort, `max_tokens`, route and profile before
+schema body, profile-owned reasoning effort, `max_tokens`, route and profile before
 reservation. The Step source dry preflight is provider-free and may select an
 exact set of ready keys while retaining the full source and unsupported
 occurrence counts. It defaults to 4096 output tokens; an explicit positive

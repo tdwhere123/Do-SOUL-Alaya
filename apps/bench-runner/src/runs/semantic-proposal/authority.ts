@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import type { SemanticProposalKind, SemanticProposalLine } from "./workset.js";
 import { ExtractionTransportProvenanceSchema } from "../extraction/transport-route.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { StepQuoteBasisSchema, assertStepQuoteRates, stepQuoteBasisForDigest } from "../extraction/authority/step-quote.js";
-import { STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
 import {
   ExtractionTargetRootBindingSchema, assertExtractionTargetRootBinding, canonicalExtractionTargetRoot,
   initializeExtractionTargetRoot, inspectExtractionTargetRoot
@@ -120,7 +119,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
 }>): SemanticProposalPreflight {
   const missingLines = input.lines.filter((line) => !input.cachedKeys.has(line.key));
   const attemptsPerKey = AttemptsPerKeySchema.parse(input.maxAttemptsPerKey ?? DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
-  if (input.request_profile === STEP_SEMANTIC_REQUEST_PROFILE && attemptsPerKey !== 1) {
+  if (isStepSemanticRequestProfile(input.request_profile) && attemptsPerKey !== 1) {
     throw new AlayaError("VALIDATION", "Step proposal preflight requires one attempt per key");
   }
   const maxInput = missingLines.reduce((max, line) => Math.max(max, line.inputByteUpper), 0);
@@ -129,7 +128,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
     throw new AlayaError("VALIDATION", "semantic proposal preflight requires one resolved transport route");
   }
   return {
-    contract: input.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
+    contract: isStepSemanticRequestProfile(input.request_profile)
       ? "source-semantic-proposal-preflight-v6" : "source-semantic-proposal-preflight-v5",
     kind: input.kind, model: input.model, request_profile: input.request_profile,
     transport_provenance: transport,
@@ -140,7 +139,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
     maximum_attempts: missingLines.length * attemptsPerKey,
     max_output_tokens: input.maxOutputTokens,
     maximum_input_tokens_per_attempt: maxInput,
-    ...(input.request_profile === STEP_SEMANTIC_REQUEST_PROFILE ? {
+    ...(isStepSemanticRequestProfile(input.request_profile) ? {
       quote_basis: stepQuoteBasisForDigest(transport.model, transport.provider_url_sha256.slice("sha256:".length))
     } : {}),
     keys: missingLines.map((line) => line.key)
@@ -171,7 +170,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
   }) };
   assertSemanticProposalExecutionScope(executionScope, scope.execution_root_path);
   const body = {
-    contract: preflight.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
+    contract: isStepSemanticRequestProfile(preflight.request_profile)
       ? STEP_SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT : SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT,
     action: "fill" as const,
     kind: input.preflight.kind, model: input.preflight.model, request_profile: input.preflight.request_profile,
@@ -186,7 +185,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
       successful_shard_ceiling: input.preflight.missing,
       max_concurrency: 1 as const,
       max_output_tokens: input.preflight.max_output_tokens,
-      output_token_field: preflight.request_profile === STEP_SEMANTIC_REQUEST_PROFILE
+      output_token_field: isStepSemanticRequestProfile(preflight.request_profile)
         ? "max_tokens" as const : "maxOutputTokens" as const
     },
     price: {
@@ -245,7 +244,7 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
 }
 
 function assertProposalQuote(input: SemanticProposalPreflight | SemanticProposalAuthority): void {
-  const step = input.request_profile === STEP_SEMANTIC_REQUEST_PROFILE;
+  const step = isStepSemanticRequestProfile(input.request_profile);
   const quote = "price" in input ? input.price.quote_basis : input.quote_basis;
   const expectedContract = "price" in input ? STEP_SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT :
     "source-semantic-proposal-preflight-v6";

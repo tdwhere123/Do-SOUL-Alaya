@@ -1,8 +1,10 @@
-import { AlayaError, canonicalJson, DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
+import {
+  isStepSemanticRequestProfile, AlayaError, canonicalJson, DEFAULT_EXTRACTION_SOURCE_PACKING
+} from "@do-soul/alaya-protocol";
 import type { CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { inspectCachedResponseMetadata, persistedResponseMetadata } from "../../compile-seed/cache/cached-response-metadata.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
-import { isCompleteSemanticFinish, STEP_SEMANTIC_REQUEST_PROFILE } from "../../compile-seed/http/semantic-provider-http.js";
+import { isCompleteSemanticFinish } from "../../compile-seed/http/semantic-provider-http.js";
 import { inspectExtractionAttemptLedger } from "../authority/attempt-ledger.js";
 import { baseReportedUsage } from "../authority/step-quote.js";
 import { computeExtractionRawJsonSha256 } from "../content-closure.js";
@@ -92,7 +94,7 @@ export function readCompletePhysicalSourceResponseForRequest(input: Readonly<{
 }
 
 export function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
-  const transport = requestProfile === STEP_SEMANTIC_REQUEST_PROFILE
+  const transport = isStepSemanticRequestProfile(requestProfile)
     ? "step-chat-completion" : "gemini-generate-content";
   if (provenance.transport !== transport || "job" in provenance || "inputFile" in provenance ||
       !Number.isSafeInteger(provenance.attemptOrdinal) || provenance.attemptOrdinal <= 0) {
@@ -115,7 +117,7 @@ export function inspectInteractiveTransportEvidence(
   readonly admissionState: "pending" | "admitted"; readonly requestBinding: "verified" | "unbound";
   readonly historyComplete: boolean } {
   if ((typed.kind === "step_chat_completion") !==
-      (entry.request_profile === STEP_SEMANTIC_REQUEST_PROFILE)) {
+      (isStepSemanticRequestProfile(entry.request_profile))) {
     throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
   }
   assertInteractiveProvenance(typed.result.provenance, entry.request_profile);

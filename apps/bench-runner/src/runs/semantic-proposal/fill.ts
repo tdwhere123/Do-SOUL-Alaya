@@ -2,14 +2,13 @@ import { createHash } from "node:crypto";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery, refuseRecallCampaignLiveExtraction
 } from "@do-soul/alaya-core";
-import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import {
   prepareSourceSemanticProposalRevision, proposeCorrespondenceSemantics, proposeQuerySemantics,
   type SourceSemanticProposalRevision,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
-import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish,
-  STEP_SEMANTIC_REQUEST_PROFILE } from "../compile-seed/http/semantic-provider-http.js";
+import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/receipt-limits.js";
 import { acquireExtractionCacheWriteLease, type ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
@@ -105,7 +104,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
     ).shard;
     if (existing !== undefined) {
       const prior = replayCachedProposalShard(line, existing);
-      if (input.workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE &&
+      if (isStepSemanticRequestProfile(input.workset.request_profile) &&
           prior !== "interpreted" && prior !== "abstained") {
         throw new AlayaError("CONFLICT", `Step proposal fill stopped after retained ${prior} for ${line.key}`);
       }
@@ -136,7 +135,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
           !ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) continue;
       const replayed = replayExistingProviderRequestRaws(
         proposalPhysicalRequestContext(input, line, ledger), line);
-      if (input.workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE && replayed.done &&
+      if (isStepSemanticRequestProfile(input.workset.request_profile) && replayed.done &&
           replayed.classified !== "interpreted" && replayed.classified !== "abstained") {
         throw new AlayaError("CONFLICT", `Step proposal fill stopped after retained ${replayed.classified} for ${line.key}`);
       }
@@ -153,7 +152,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
       const filled = await executeProviderRequestLine(
         proposalDispatchRequestContext(input, line, ledger, lease, extractor!), line);
       attempts += filled.attempts;
-      if (input.workset.request_profile === STEP_SEMANTIC_REQUEST_PROFILE &&
+      if (isStepSemanticRequestProfile(input.workset.request_profile) &&
           filled.classified !== "interpreted" && filled.classified !== "abstained") {
         throw new AlayaError("CONFLICT", `Step proposal fill stopped after ${filled.classified} for ${line.key}`);
       }
