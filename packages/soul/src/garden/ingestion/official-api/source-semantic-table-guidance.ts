@@ -39,7 +39,7 @@ export const SOURCE_SEMANTIC_TABLE_EXAMPLE = {
 } as const;
 
 export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
-  "Interpret every supplied source unit locally and return strict JSON matching the finite source occurrence table schema.",
+  "Interpret every supplied source unit locally and return compact strict JSON matching the finite source occurrence table schema, with no indentation or formatting line breaks. Use short local table keys and reuse their exact references. Preserve full evidence selections, predicate and role meanings, qualifications, scope and gaps; compact serialization must not omit source meaning.",
   `Use {"contract":"${SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT}","outcome":{"status":"interpreted"},"content":CONTENT}; legal non-interpreted outcomes omit content.`,
   SOURCE_SEMANTIC_PRESERVATION_GUIDANCE,
   "Declare each independent proposition as a root with act assertion, question, directive or unresolved. Give every statement or operator one node key; a root expression is {kind:\"content_ref\",key}. One content_ref in an argument or operator operand defines the nested node's governing parent. A content_reference reuses an already defined node only under that same immediate parent. An occurrence_ref is an ordinary non-governing reference to a declared node, including one under a different root. Do not assert nested content independently.",
