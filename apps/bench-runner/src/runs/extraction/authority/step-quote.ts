@@ -1,4 +1,5 @@
-import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, stepSemanticRequestModel, STEP_PREVIEW_REQUEST_PROFILE,
+  AlayaError } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ProviderUsage } from "@do-soul/alaya-engine-gateway";
@@ -39,6 +40,17 @@ export const STEP_OPENAPI_QUOTE_BASIS = Object.freeze({
   output_usd_equivalent_per_million: 0.42
 });
 
+/** Explicit preview-model policy on ordinary OpenAPI; no Plan authorization. */
+export const STEP_PREVIEW_OPENAPI_QUOTE_BASIS = Object.freeze({
+  ...STEP_OPENAPI_QUOTE_BASIS,
+  observed_date: "2026-10-08",
+  selected_model: stepSemanticRequestModel(STEP_PREVIEW_REQUEST_PROFILE),
+  input_cny_per_million: 7,
+  output_cny_per_million: 20,
+  input_usd_equivalent_per_million: 1.4,
+  output_usd_equivalent_per_million: 4
+});
+
 const StepPlanQuoteBasisSchema = z.object({
   contract: z.literal(STEP_PLAN_QUOTE_BASIS.contract),
   observed_date: z.literal(STEP_PLAN_QUOTE_BASIS.observed_date),
@@ -75,8 +87,17 @@ const StepOpenApiQuoteBasisSchema = z.object({
   transport_url_sha256: z.string().regex(/^[0-9a-f]{64}$/u)
 }).strict();
 
-export const StepQuoteBasisSchema = z.discriminatedUnion("contract", [
-  StepPlanQuoteBasisSchema, StepOpenApiQuoteBasisSchema
+const StepPreviewOpenApiQuoteBasisSchema = StepOpenApiQuoteBasisSchema.extend({
+  observed_date: z.literal(STEP_PREVIEW_OPENAPI_QUOTE_BASIS.observed_date),
+  selected_model: z.literal(STEP_PREVIEW_OPENAPI_QUOTE_BASIS.selected_model),
+  input_cny_per_million: z.literal(STEP_PREVIEW_OPENAPI_QUOTE_BASIS.input_cny_per_million),
+  output_cny_per_million: z.literal(STEP_PREVIEW_OPENAPI_QUOTE_BASIS.output_cny_per_million),
+  input_usd_equivalent_per_million: z.literal(STEP_PREVIEW_OPENAPI_QUOTE_BASIS.input_usd_equivalent_per_million),
+  output_usd_equivalent_per_million: z.literal(STEP_PREVIEW_OPENAPI_QUOTE_BASIS.output_usd_equivalent_per_million)
+});
+
+export const StepQuoteBasisSchema = z.union([
+  StepPlanQuoteBasisSchema, StepOpenApiQuoteBasisSchema, StepPreviewOpenApiQuoteBasisSchema
 ]);
 export type StepQuoteBasis = z.infer<typeof StepQuoteBasisSchema>;
 
@@ -86,7 +107,7 @@ export function stepQuoteBasis(model: string, providerUrl: string): StepQuoteBas
 }
 
 export function stepQuoteBasisForDigest(model: string, transportUrlSha256: string): StepQuoteBasis {
-  const basis = [STEP_PLAN_QUOTE_BASIS, STEP_OPENAPI_QUOTE_BASIS].find(candidate =>
+  const basis = [STEP_PLAN_QUOTE_BASIS, STEP_OPENAPI_QUOTE_BASIS, STEP_PREVIEW_OPENAPI_QUOTE_BASIS].find(candidate =>
     candidate.selected_model === model && createHash("sha256")
       .update(candidate.selected_provider_url, "utf8").digest("hex") === transportUrlSha256);
   if (basis === undefined) {
@@ -102,6 +123,9 @@ export function assertStepQuoteBasis(
   if (!isStepSemanticRequestProfile(profile)) {
     if (value !== undefined) throw new AlayaError("CONFLICT", "non-Step authority cannot carry a Step quote");
     return;
+  }
+  if (model !== stepSemanticRequestModel(profile)) {
+    throw new AlayaError("CONFLICT", "Step quote model differs from its request profile");
   }
   const actual = StepQuoteBasisSchema.parse(value);
   const expected = stepQuoteBasis(model, providerUrl);

@@ -8,9 +8,15 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.5.0, engine gateway 1.0.0
+## Unreleased — protocol 13.6.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.6.0 adds an explicit Step 5 Preview low-effort JSON Schema profile
+and the shared profile-to-model lookup under invariant §25 (minor: additive
+exports). Request, catalog and quote admission reject cross-model profile reuse.
+Bench supports its separately priced ordinary OpenAPI route. Existing Step 3.5
+defaults, historical quote bytes and MCP payload schemas remain unchanged.
 
 Protocol 13.5.0 adds the shared Step semantic request profile bindings under
 invariant §25 (minor: additive exports). Gateway, Eval and Bench use this one

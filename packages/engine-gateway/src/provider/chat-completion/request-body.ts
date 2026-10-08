@@ -1,6 +1,6 @@
 import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
 import { AlayaError, isStepSemanticRequestProfile, stepSemanticReasoningEffort,
-  STEP_SEMANTIC_REQUEST_MODEL, type EnvLookup } from "@do-soul/alaya-protocol";
+  stepSemanticRequestModel, type EnvLookup } from "@do-soul/alaya-protocol";
 import type {
   ProviderChatCompletionRequest,
   ProviderRequestProfile
@@ -54,14 +54,14 @@ export function buildProviderChatRequestBody(
 ): Record<string, unknown> {
   const stream = request.mode === "sse";
   if (isStepSemanticRequestProfile(request.profile)) {
-    if (request.model !== STEP_SEMANTIC_REQUEST_MODEL ||
+    if (request.model !== stepSemanticRequestModel(request.profile) ||
         request.jsonSchema === undefined || request.jsonSchema.name.trim().length === 0 ||
         typeof request.jsonSchema.schema !== "object" || request.jsonSchema.schema === null ||
         Array.isArray(request.jsonSchema.schema) || request.jsonObject === true ||
         !Number.isSafeInteger(request.maxOutputTokens) || (request.maxOutputTokens ?? 0) <= 0 ||
         request.outputTokenField !== undefined && request.outputTokenField !== "max_tokens" ||
         request.sseCompletionPolicy === "allow_clean_eof_v1") {
-      throw new AlayaError("VALIDATION", "Step 3.5 2603 profile requires its exact model, named JSON Schema, finite max_tokens, and witnessed completion");
+      throw new AlayaError("VALIDATION", "Step semantic profile requires its exact model, named JSON Schema, finite max_tokens, and witnessed completion");
     }
     return {
       model: request.model,
@@ -80,7 +80,7 @@ export function buildProviderChatRequestBody(
     };
   }
   if (request.jsonSchema !== undefined) {
-    throw new AlayaError("VALIDATION", "JSON Schema requires the Step 3.5 2603 profile");
+    throw new AlayaError("VALIDATION", "JSON Schema requires a Step semantic profile");
   }
   return {
     model: request.model,

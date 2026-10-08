@@ -4,7 +4,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { STEP_SEMANTIC_HIGH_REQUEST_PROFILE, type StepSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE,
+  stepSemanticRequestModel, type StepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from
   "@do-soul/alaya-engine-gateway";
@@ -17,7 +18,8 @@ import { assertExtractionAuthorityReceipt, createExtractionAuthorityReceipt, wri
   "../../../runs/extraction/authority/receipt.js";
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
 import { assertInteractiveSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
-import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS, assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
+import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS, STEP_PREVIEW_OPENAPI_QUOTE_BASIS,
+  assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
 import { inspectCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { inspectInteractiveTransportEvidence } from "../../../runs/extraction/cache/source-interactive-binding.js";
@@ -54,11 +56,13 @@ function responseFor(userPrompt: string): string {
 }
 
 async function scenario(selectedCount: number, outputTokenCap?: number, logicalModel = MODEL,
-  quoteBasis: typeof STEP_PLAN_QUOTE_BASIS | typeof STEP_OPENAPI_QUOTE_BASIS = STEP_PLAN_QUOTE_BASIS,
+  quoteBasis: typeof STEP_PLAN_QUOTE_BASIS | typeof STEP_OPENAPI_QUOTE_BASIS | typeof STEP_PREVIEW_OPENAPI_QUOTE_BASIS = STEP_PLAN_QUOTE_BASIS,
   profile: StepSemanticRequestProfile = PROFILE) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", logicalModel);
-  if (logicalModel !== MODEL) vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL", MODEL);
+  if (logicalModel !== stepSemanticRequestModel(profile)) {
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_TRANSPORT_MODEL", stepSemanticRequestModel(profile));
+  }
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", profile);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", quoteBasis.selected_provider_url);
   await writeDataset(Array.from({ length: 3 }, (_, i) => buildExtractionFillQuestion(
@@ -199,9 +203,11 @@ async function listen(
   return { calls, intercepted };
 }
 
-it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE] as const)(
+it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE] as const)(
   "retains complete %s source bytes beyond the diagnostic prefix for cache reuse", async profile => {
-  const fixture = await scenario(1, undefined, MODEL, STEP_PLAN_QUOTE_BASIS, profile);
+  const model = profile === STEP_PREVIEW_REQUEST_PROFILE ? "step-5-preview" : MODEL;
+  const quote = profile === STEP_PREVIEW_REQUEST_PROFILE ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
+  const fixture = await scenario(1, undefined, model, quote, profile);
   const http = await listen(body => ({
     text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
     padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES)
@@ -212,8 +218,9 @@ it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE] as const)(
   expect(raw.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: false });
   expect(raw.http_response!.bodyByteLength).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
   expect(Buffer.from(raw.http_response!.bodyBase64, "base64").toString("utf8")).toBe(http.calls[0]!.wire);
-  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, MODEL, profile).status).toBe("hit");
-  expect(http.calls[0]!.body.reasoning_effort).toBe(profile === PROFILE ? "low" : "high");
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, key, model, profile).status).toBe("hit");
+  expect(http.calls[0]!.body.model).toBe(model);
+  expect(http.calls[0]!.body.reasoning_effort).toBe(profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low");
   expect(raw.request_profile).toBe(profile);
   await runExtractionFill(fixture.options);
   expect(http.calls).toHaveLength(1);
@@ -268,17 +275,19 @@ it("withholds a Step source stream beyond the complete evidence limit from reuse
   } finally { database.close(); }
 });
 
-it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE] as const)(
+it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE] as const)(
   "binds %s to exact HTTP bytes and stops after its first incomplete response", async profile => {
-  const fixture = await scenario(4, undefined, MODEL, STEP_PLAN_QUOTE_BASIS, profile);
+  const model = profile === STEP_PREVIEW_REQUEST_PROFILE ? "step-5-preview" : MODEL;
+  const quote = profile === STEP_PREVIEW_REQUEST_PROFILE ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
+  const fixture = await scenario(4, undefined, model, quote, profile);
   const http = await listen((body) => {
     const userPrompt = (body.messages as { content: string }[])[1]!.content;
     return { text: responseFor(userPrompt), finish: "length" };
   });
   await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
   expect(http.calls).toHaveLength(1);
-  expect(http.calls[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
-    body: { model: MODEL, reasoning_effort: profile === PROFILE ? "low" : "high", max_tokens: 4096, stream: true,
+  expect(http.calls[0]).toMatchObject({ path: profile === STEP_PREVIEW_REQUEST_PROFILE ? "/v1/chat/completions" : "/step_plan/v1/chat/completions",
+    body: { model, reasoning_effort: profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low", max_tokens: 4096, stream: true,
       response_format: { type: "json_schema", json_schema: { strict: true } } } });
   const raws = fixture.selected.flatMap(key => listProviderRawAttempts(roots.cacheRoot, key));
   expect(raws).toHaveLength(1);

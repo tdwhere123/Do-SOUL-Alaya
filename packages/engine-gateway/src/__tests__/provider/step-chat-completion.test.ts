@@ -56,9 +56,10 @@ async function withServer<T>(
 
 describe("Step Chat Completions over local HTTP", () => {
   it.each([
-    { profile: "step-3.5-2603-low-json-schema-v1", effort: "low" },
-    { profile: "step-3.5-2603-high-json-schema-v1", effort: "high" }
-  ] as const)("sends the named schema, $effort effort, and finite cap to the selected path", async ({ profile, effort }) => {
+    { model: "step-3.5-flash-2603", profile: "step-3.5-2603-low-json-schema-v1", effort: "low" },
+    { model: "step-3.5-flash-2603", profile: "step-3.5-2603-high-json-schema-v1", effort: "high" },
+    { model: "step-5-preview", profile: "step-5-preview-low-json-schema-v1", effort: "low" }
+  ] as const)("sends $model with the named schema, $effort effort, and finite cap", async ({ model, profile, effort }) => {
     let path: string | undefined;
     let sentBody: unknown;
     await withServer((request, response) => {
@@ -81,7 +82,7 @@ describe("Step Chat Completions over local HTTP", () => {
         }));
       });
     }, async (providerUrl) => {
-      const request = { ...stepRequest(providerUrl), profile };
+      const request = { ...stepRequest(providerUrl), model, profile };
       const result = await executeProviderChatCompletion(request, {
         maxRetries: 0, retryDelaysMs: []
       });
@@ -103,7 +104,7 @@ describe("Step Chat Completions over local HTTP", () => {
     });
     expect(path).toBe("/step_plan/v1/chat/completions");
     expect(sentBody).toEqual({
-      model: "step-3.5-flash-2603",
+      model,
       response_format: { type: "json_schema", json_schema: {
         name: "semantic_payload", strict: true, schema: SCHEMA.schema
       } },
@@ -114,6 +115,12 @@ describe("Step Chat Completions over local HTTP", () => {
         { role: "user", content: "user" }
       ]
     });
+  });
+
+  it("rejects cross-model Step profile reuse before any transport", () => {
+    const request = stepRequest("https://api.stepfun.com/v1");
+    expect(() => buildProviderChatRequestBody({ ...request, model: "step-5-preview" })).toThrow(/exact model/u);
+    expect(() => buildProviderChatRequestBody({ ...request, profile: "step-5-preview-low-json-schema-v1" })).toThrow(/exact model/u);
   });
 
   it("keeps SSE reasoning separate and preserves length with no usage claim", async () => {
@@ -282,7 +289,7 @@ describe("Step Chat Completions over local HTTP", () => {
       { ...request, model: "step-3.5-flash" },
       { ...request, sseCompletionPolicy: "allow_clean_eof_v1" as const }
     ]) {
-      expect(() => buildProviderChatRequestBody(invalid)).toThrow(/Step 3.5 2603 profile/u);
+      expect(() => buildProviderChatRequestBody(invalid)).toThrow(/Step semantic profile/u);
     }
   });
 });

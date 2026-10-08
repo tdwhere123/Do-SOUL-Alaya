@@ -31,6 +31,26 @@ it("binds ordinary OpenAPI pricing without subscription credits or cache discoun
   expect(() => assertStepQuoteBasis(PROFILE, MODEL, STANDARD_URL, quote)).not.toThrow();
 });
 
+it("binds preview pricing to its exact model and profile on ordinary OpenAPI", () => {
+  const profile = "step-5-preview-low-json-schema-v1";
+  const quote = stepQuoteBasis("step-5-preview", STANDARD_URL);
+  expect(quote).toMatchObject({
+    contract: "step-openapi-policy-quote-v1", observed_date: "2026-10-08",
+    selected_model: "step-5-preview", selected_provider_url: STANDARD_URL,
+    input_cny_per_million: 7, output_cny_per_million: 20,
+    input_usd_equivalent_per_million: 1.4, output_usd_equivalent_per_million: 4,
+    cache_discount_assumed: false, transport_url_sha256: digest(STANDARD_URL)
+  });
+  expect(stepQuoteBasisForDigest("step-5-preview", digest(STANDARD_URL))).toEqual(quote);
+  expect(() => assertStepQuoteRates(profile, 1.4, 4, quote)).not.toThrow();
+  expect(() => assertStepQuoteRates(profile, 0.14, 0.42, quote)).toThrow(/frozen route-specific/u);
+  expect(() => assertStepQuoteRates(PROFILE, 1.4, 4, quote)).toThrow(/request profile/u);
+  expect(() => assertStepQuoteBasis(profile, MODEL, STANDARD_URL,
+    stepQuoteBasis(MODEL, STANDARD_URL))).toThrow(/request profile/u);
+  expect(() => stepQuoteBasis("step-5-preview", PLAN_URL)).toThrow(/transport route/u);
+  expect(StepQuoteBasisSchema.safeParse({ ...quote, output_cny_per_million: 2.1 }).success).toBe(false);
+});
+
 it("keeps historical Plan quote serialization and conservative policy unchanged", () => {
   const legacy = {
     contract: "step-plan-policy-quote-v1", observed_date: "2026-09-23",

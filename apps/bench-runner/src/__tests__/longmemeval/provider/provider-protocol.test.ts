@@ -22,6 +22,18 @@ describe("provider catalog", () => {
     expect(() => assertRequiredRequestProfile({ model: "gemini-3.1-flash-lite",
       requestProfile: "step-3.5-2603-high-json-schema-v1" })).toThrow();
   });
+  it("binds the preview model to its own explicit profile", () => {
+    expect(requireProviderBinding("step-5-preview")).toMatchObject({
+      requestProfile: "step-5-preview-low-json-schema-v1",
+      supportedRequestProfiles: ["step-5-preview-low-json-schema-v1"]
+    });
+    expect(() => assertRequiredRequestProfile({ model: "step-5-preview",
+      requestProfile: "step-5-preview-low-json-schema-v1" })).not.toThrow();
+    expect(() => assertRequiredRequestProfile({ model: "step-5-preview",
+      requestProfile: "step-3.5-2603-low-json-schema-v1" })).toThrow();
+    expect(() => assertRequiredRequestProfile({ model: "step-3.5-flash-2603",
+      requestProfile: "step-5-preview-low-json-schema-v1" })).toThrow();
+  });
   it("keeps minimal default while accepting low only for the same Flash-Lite 3.1 model", () => {
     expect(requireProviderBinding("gemini-3.1-flash-lite").requestProfile).toBe("gemini-3.1-minimal-v1");
     for (const requestProfile of ["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const) {
