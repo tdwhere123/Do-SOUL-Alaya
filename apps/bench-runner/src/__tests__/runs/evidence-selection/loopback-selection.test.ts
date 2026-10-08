@@ -16,7 +16,8 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { SOURCE_EVIDENCE_SELECTION_SCHEMA_NAME } from "../../../runs/provider-request/request-binding.js";
 import { evidenceSelectionShardPath, inspectEvidenceSelectionShard } from "../../../runs/evidence-selection/artifact.js";
 import { executeEvidenceSelectionFill, prepareEvidenceSelection, readEvidenceSelectionResults } from "../../../runs/evidence-selection/execute.js";
-import { materializeEvidenceSelectionLines, parseEvidenceSelectionWorkset } from "../../../runs/evidence-selection/input.js";
+import { EVIDENCE_SELECTION_SOURCE_REFERENCE_PAIR_POLICY, materializeEvidenceSelectionLines,
+  parseEvidenceSelectionWorkset } from "../../../runs/evidence-selection/input.js";
 import { openEvidenceSelectionAttemptLedger } from "../../../runs/evidence-selection/attempt.js";
 import { pinEvidenceSelectionAuthority, quoteEvidenceSelection } from "../../../runs/evidence-selection/authority.js";
 import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
@@ -293,6 +294,94 @@ it("keeps incomplete MAX_TOKENS output distinct from invalid and from abstain", 
     expect(replay).toMatchObject({ cache_hits: 1, attempts: 0, incomplete: 1 });
     expect(captured.hits).toBe(1);
   } finally {
+    server.closeAllConnections();
+    await closeServer(server);
+  }
+});
+
+it.each(["success", "grounding_failure"])("settles and reopens source reference pairs over native Step SSE: %s", async (mode) => {
+  const replies = mode === "success" ? [
+    { status: "proposal", selected: [{ sourceRef: "s1", witnessRefs: ["w1"], contribution: "Original departure report." }], unresolved: ["Time scope is unknown."] },
+    { status: "proposal", selected: [{ sourceRef: "s1", quotes: ["Lee left the lab on Tuesday"], contribution: "Original departure report." }], unresolved: ["Time scope is unknown."] }
+  ] : [
+    { status: "proposal", selected: [{ sourceRef: "s2", witnessRefs: ["w1"], contribution: "Wrong source pairing." }], unresolved: [] },
+    { status: "proposal", selected: [{ sourceRef: "s1", quotes: ["Lee never left the lab"], contribution: "Wrong literal copy." }], unresolved: [] }
+  ];
+  const captured: { bodies: string[]; reservations: string[]; wires: string[] } = { bodies: [], reservations: [], wires: [] };
+  let ledgerPath = "";
+  const server = await listen(async (req, res) => {
+    let requestBody = "";
+    for await (const chunk of req) requestBody += String(chunk);
+    const index = captured.bodies.push(requestBody) - 1;
+    captured.reservations.push(readFileSync(ledgerPath, "utf8"));
+    const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(replies[index]) }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } })}\n\ndata: [DONE]\n\n`;
+    captured.wires.push(wire);
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(wire);
+  });
+  const origin = originOf(server);
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = ((url, init) => {
+    const selected = new URL(String(url));
+    expect(selected.origin).toBe("https://api.stepfun.com");
+    return nativeFetch(new URL(selected.pathname + selected.search, origin), init);
+  }) as typeof fetch;
+  try {
+    vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "true");
+    const cacheRoot = join(tempRoot(), "cache");
+    const prepared = { ...stepWorkset(), request_policy: EVIDENCE_SELECTION_SOURCE_REFERENCE_PAIR_POLICY };
+    const lines = materializeEvidenceSelectionLines(prepared, 128);
+    const authority = pinEvidenceSelectionAuthority({ preflight: prepareEvidenceSelection(prepared, cacheRoot, 128),
+      inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
+      outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million });
+    ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`);
+    const result = await executeEvidenceSelectionFill({ workset: prepared, cacheRoot, authority, config: stepConfig() });
+    expect(result).toMatchObject({ attempts: 2, newly_admitted: mode === "success" ? 2 : 0,
+      interpreted: mode === "success" ? 2 : 0, rejected: mode === "success" ? 0 : 2 });
+    expect(captured.bodies).toHaveLength(2);
+    const bodies = captured.bodies.map((body) => JSON.parse(body));
+    for (const [index, line] of lines.entries()) {
+      expect(bodies[index]).toMatchObject({ stream: true, reasoning_effort: "low",
+        response_format: { type: "json_schema", json_schema: { strict: true, schema: line.responseJsonSchema } },
+        messages: [{ role: "system", content: line.systemPrompt }, { role: "user", content: line.userPrompt }] });
+    }
+    expect(bodies[0].messages[1]).toEqual(bodies[1].messages[1]);
+    const rows = readEvidenceSelectionResults(prepared, cacheRoot, 128);
+    if (mode === "success") {
+      expect(rows[0]).toMatchObject({ status: "interpreted", selection: { selected: [{ root_id: "src-alpha", quotes: [PREVIEW],
+        identity: { root_id: "src-alpha", version: "v1", digest: DIGEST_ALPHA, span: { start: 10, end: 64 } } }] } });
+      expect(rows[1]).toMatchObject({ status: "interpreted", selection: { selected: [{ root_id: "src-alpha", quotes: ["Lee left the lab on Tuesday"] }] } });
+    } else {
+      expect(rows[0]).toMatchObject({ status: "invalid", shard: { admitted: false, outcome: { reason: "witness_owner_mismatch" } } });
+      expect(rows[1]).toMatchObject({ status: "invalid", shard: { admitted: false, outcome: { reason: "quote_mismatch" } } });
+    }
+    const rawAttempts = lines.map((line, index) => readProviderRawAttempt(cacheRoot, line.key, index + 1)!);
+    rawAttempts.forEach((raw, index) => {
+      expect(raw.decoded_text).toBe(JSON.stringify(replies[index]));
+      expect(Buffer.from(raw.http_response!.bodyBase64, "base64").toString("utf8")).toBe(captured.wires[index]);
+    });
+    expect(openEvidenceSelectionAttemptLedger({ cacheRoot, authority }).snapshot()).toMatchObject({
+      attempts: 2, maximumAttempts: 2, telemetry: { totalTokens: 36 },
+      successfulKeys: mode === "success" ? lines.map((line) => line.key).sort() : [] });
+    const reopened = await executeEvidenceSelectionFill({ workset: prepared, cacheRoot, authority, config: { ...stepConfig(), apiKey: null } });
+    expect(reopened).toMatchObject({ attempts: 0, newly_admitted: 0, cache_hits: 2 });
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128)).toEqual(rows);
+    // Simulate the second write stopping after durable raw publication, before settlement.
+    unlinkSync(evidenceSelectionShardPath(cacheRoot, lines[1]!.key));
+    writeFileSync(ledgerPath, captured.reservations[1]!);
+    const recovered = await executeEvidenceSelectionFill({ workset: prepared, cacheRoot, authority,
+      config: { ...stepConfig(), apiKey: null } });
+    expect(recovered).toMatchObject({ attempts: 1, newly_admitted: mode === "success" ? 1 : 0 });
+    expect(captured.bodies).toHaveLength(2);
+    expect(readEvidenceSelectionResults(prepared, cacheRoot, 128).map((row) => row.status))
+      .toEqual(mode === "success" ? ["interpreted", "interpreted"] : ["invalid", "invalid"]);
+    expect(lines.map((line, index) => readProviderRawAttempt(cacheRoot, line.key, index + 1))).toEqual(rawAttempts);
+    expect(openEvidenceSelectionAttemptLedger({ cacheRoot, authority }).snapshot().telemetry.totalTokens).toBe(36);
+    expect(prepareEvidenceSelection(prepared, cacheRoot, 128)).toMatchObject({ missing: 0, maximum_attempts: 0, keys: [] });
+  } finally {
+    globalThis.fetch = nativeFetch;
+    vi.unstubAllEnvs();
     server.closeAllConnections();
     await closeServer(server);
   }
