@@ -106,7 +106,7 @@ describe("query generation contract", () => {
     expect(query.requested_operation?.reading).toContain("Recommend a camera");
     expect(query.variables.find((row) => row.id === "rehearsal")?.reference?.excerpt).toBe("the upcoming rehearsal");
     const frames = query.alternatives[0]!.frames;
-    for (const predicate of ["is suitable for recording", "is a rehearsal planned after the query time", "has venue"]) {
+    for (const predicate of ["is suitable for recording", "is a rehearsal expected to occur after the query time", "has venue"]) {
       expect(frames.find((frame) => frame.predicate_reading === predicate)?.role_requirements)
         .toEqual(expect.arrayContaining([expect.objectContaining({ target_variable: "rehearsal" })]));
     }

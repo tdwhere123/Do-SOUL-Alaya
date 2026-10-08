@@ -44,7 +44,7 @@ const propertyAndTaskExamples = [
           { kind: "statement", predicate: "is a camera", arguments: [
             { role: "theme", target: { kind: "reference", key: "camera" }, excerpt: "a camera" }
           ] },
-          { kind: "statement", predicate: "is a rehearsal planned after the query time", arguments: [
+          { kind: "statement", predicate: "is a rehearsal expected to occur after the query time", arguments: [
             { role: "theme", target: { kind: "reference", key: "rehearsal" }, excerpt: "the upcoming rehearsal" }
           ] },
           { kind: "statement", predicate: "has venue", arguments: [
