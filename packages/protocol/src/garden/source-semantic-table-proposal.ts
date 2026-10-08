@@ -90,10 +90,10 @@ const Measurement = NativeMeasurement.extend({ subject: EntityRef }).readonly();
 const GapTarget = z.discriminatedUnion("kind", [EntityRef, OccurrenceRef]);
 const SourceSemanticTableProposalSchema = z.object({ contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
   outcome: SourceSemanticSelectionOutcomeShape,
-  content: z.object({ roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS),
-    expression: ContentRef }).strict().readonly()).max(LIMIT.roots).readonly(),
+  content: z.object({ nodes: z.array(Nodes).max(LIMIT.frames + LIMIT.operators).readonly(),
     entities: z.array(Entity).max(LIMIT.entities).readonly(),
-    nodes: z.array(Nodes).max(LIMIT.frames + LIMIT.operators).readonly(),
+    roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS),
+    expression: ContentRef }).strict().readonly()).max(LIMIT.roots).readonly(),
     domains: z.array(Domain).max(LIMIT.domains).readonly().optional(),
     measurements: z.array(Measurement).max(LIMIT.measurements).readonly().optional(),
     gaps: z.array(z.object({ affected: z.array(GapTarget).max(LIMIT.gapAffected).readonly(),

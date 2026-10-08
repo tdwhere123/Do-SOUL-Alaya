@@ -10,17 +10,6 @@ const content = (key: string) => ({ kind: "content_ref", key });
 export const SOURCE_SEMANTIC_TABLE_EXAMPLE = {
   contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, outcome: { status: "interpreted" },
   content: {
-    roots: [
-      { act: "assertion", expression: content("first_validity") },
-      { act: "assertion", expression: content("unknown_validity") }
-    ],
-    entities: [
-      { form: "entity", key: "permitFirst", semantic_key: "permit", mentions: [support(1, "permit")] },
-      { form: "entity", key: "permitLater", semantic_key: "permit", mentions: [support(2, "permit")] },
-      { form: "selection", key: "tuesday", selection: support(1, "Tuesday") },
-      { form: "selection", key: "clerk", selection: support(2, "The clerk") },
-      { form: "selection", key: "thursday", selection: support(2, "Thursday") }
-    ],
     nodes: [
       { kind: "statement", key: "first_validity", predicate: { kind: "explicit", reading: "valid", support: support(1, "valid") },
         arguments: [{ role: "subject", target: entity("permitFirst") }],
@@ -34,6 +23,17 @@ export const SOURCE_SEMANTIC_TABLE_EXAMPLE = {
         qualifications: [] },
       { kind: "not", key: "unknown_validity", support: support(2, "does not"), content: content("knowledge") }
     ],
+    entities: [
+      { form: "entity", key: "permitFirst", semantic_key: "permit", mentions: [support(1, "permit")] },
+      { form: "entity", key: "permitLater", semantic_key: "permit", mentions: [support(2, "permit")] },
+      { form: "selection", key: "tuesday", selection: support(1, "Tuesday") },
+      { form: "selection", key: "clerk", selection: support(2, "The clerk") },
+      { form: "selection", key: "thursday", selection: support(2, "Thursday") }
+    ],
+    roots: [
+      { act: "assertion", expression: content("first_validity") },
+      { act: "assertion", expression: content("unknown_validity") }
+    ],
     gaps: []
   }
 } as const;
@@ -42,6 +42,7 @@ export const SOURCE_SEMANTIC_SYSTEM_PROMPT = [
   "Interpret every supplied source unit locally and return compact strict JSON matching the finite source occurrence table schema, with no indentation or formatting line breaks. Use short local table keys and reuse their exact references. Preserve full evidence selections, predicate and role meanings, qualifications, scope and gaps; compact serialization must not omit source meaning.",
   `Use {"contract":"${SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT}","outcome":{"status":"interpreted"},"content":CONTENT}; legal non-interpreted outcomes omit content.`,
   SOURCE_SEMANTIC_PRESERVATION_GUIDANCE,
+  "Construct the occurrence nodes first, including their complete arguments, qualifications and scope. Derive the entity table from actual materializing references in these nodes and any required domains or measurements; gap targets alone do not count. Do not predeclare a narrator, speaker or other participant merely because a transport role or possible analysis suggests one. Declare the independent roots after their nodes. Before returning, remove any unused entity declaration without adding invented relations to justify it; preserve all supported propositions and qualifications.",
   "Declare each independent proposition as a root with act assertion, question, directive or unresolved. Give every statement or operator one node key; a root expression is {kind:\"content_ref\",key}. One content_ref in an argument or operator operand defines the nested node's governing parent. A content_reference reuses an already defined node only under that same immediate parent. An occurrence_ref is an ordinary non-governing reference to a declared node, including one under a different root. Do not assert nested content independently.",
   "A statement has an explicit or implicit predicate, ordered arguments and qualifications. A qualification retains its own support; arguments and qualifications share the native eight-slot limit. Entity table keys are typed local lookups, separate from native semantic_key aliases and occurrence keys. Define each entity row once and use it in an argument, qualification, reporter, domain member or exclusion, or measurement subject. A gap alone cannot materialize an entity row. Compatible rows may share a semantic alias only when every row has a materializing use. Put multiple lawful mentions on the used row when one entity has multiple source mentions.",
   'Select exact original text as {assertion_id,text}, adding a zero-based occurrence only when multiple catalog-eligible exact matches exist in that assertion. Eligible matches start and end at complete ASCII-word or Unicode-scalar boundaries; overlapping matches count in start order. Missing, ambiguous, out-of-range or word-internal selections are rejected. Select a full contiguous phrase in one object; use a list for discontinuous support. This one selection form applies to predicates, arguments, operators, mentions, gaps, domains, measurements and no-proposition context_support. Never invent offsets or segment IDs. Entity rows have form "selection" with one selection or form "entity" with mentions and optional semantic_key/referent_kind. Use {kind:"unresolved"} plus supported evidence and a gap when the participant is unresolved.',
