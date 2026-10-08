@@ -12,7 +12,7 @@ import { proposeQuerySemantics } from "../../../garden/ingestion/official-api/so
 import { sourceSemanticQueryExamples } from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
 
 type JsonSchema = Record<string, unknown>;
-type CarrierQuery = (typeof sourceSemanticQueryExamples)[number]["response"]["query"];
+type CarrierQuery = (typeof SourceSemanticQueryCarrierBodySchema)["_output"];
 
 function isObject(value: unknown): value is JsonSchema {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -35,7 +35,7 @@ function receive(original_query: string, body: unknown) {
   );
 }
 
-function envelope(example: (typeof sourceSemanticQueryExamples)[number], outcome: object, query = example.response.query) {
+function envelope(example: (typeof sourceSemanticQueryExamples)[number], outcome: object, query: CarrierQuery = example.response.query) {
   return { contract: example.response.contract, outcome, query };
 }
 
@@ -83,6 +83,53 @@ const operation = sourceSemanticQueryExamples.find((example) =>
   && example.response.query.alternatives.some((row) => row.evidence_inputs !== undefined))!;
 
 describe("query generation contract", () => {
+  it.each(["free", "named"] as const)("keeps a %s reporter grounded through its entity declaration", (kind) => {
+    const excerpt = kind === "free" ? "Who" : "Pia";
+    const query = encodeSourceSemanticQueryCarrier({
+      contract: "source-semantic-query-meaning-v5", gaps: [],
+      entities: [{ kind, key: "reporter", excerpt }],
+      alternatives: [{ conditions: [{ kind: "reported", reporter: { kind: "reference", key: "reporter" },
+        content: { kind: "statement", predicate: "ring", arguments: [] } }] }]
+    });
+    const response = { contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "interpreted" }, query };
+    const inline = structuredClone(response);
+    const report = inline.query.nodes.find((node) => node.kind === "reported")!;
+    Object.assign(report, { reporter: { kind, key: "reporter", excerpt } });
+    Object.assign(inline.query, { entities: [] });
+    const ungrounded = structuredClone(response);
+    Reflect.deleteProperty(ungrounded.query.entities![0]!, "excerpt");
+    expect(draft2020(schema, [
+      { id: "reference", instance: response }, { id: "inline", instance: inline }, { id: "ungrounded", instance: ungrounded }
+    ])).toEqual({ reference: true, inline: false, ungrounded: false });
+    const original = `${excerpt} reported ringing?`;
+    expect(receive(original, response).outcome.status).toBe("interpreted");
+    expect(receive(original, inline).outcome.status).toBe("interpreted");
+    expect(receive(original, ungrounded).outcome.status).toBe("invalid");
+  });
+
+  it("generates entity declarations before references and retains legacy inline receipt", () => {
+    const example = sourceSemanticQueryExamples.find((row) => row.original_query === "Who has already arrived?")!;
+    const inline = structuredClone(example.response);
+    const declaration = inline.query.entities[0]!;
+    const statement = inline.query.nodes.find((node) => node.kind === "statement")!;
+    Object.assign(statement.arguments[0]!, { target: declaration });
+    Object.assign(inline.query, { entities: [] });
+    const omitted = structuredClone(example.response);
+    Reflect.deleteProperty(omitted.query, "entities");
+    expect(receive(example.original_query, inline).outcome.status).toBe("interpreted");
+    expect(draft2020(schema, [
+      { id: "table", instance: example.response }, { id: "inline", instance: inline }, { id: "omitted", instance: omitted }
+    ])).toEqual({ table: true, inline: false, omitted: false });
+    for (const name of ["queryRequiresRequestedOperation", "queryOmitsEvidenceInputs"]) {
+      const body = deref(schema, { $ref: `#/$defs/${name}` });
+      expect(body.required).toEqual(expect.arrayContaining(["entities"]));
+      expect(Object.keys(body.properties as object).slice(0, 3)).toEqual(["contract", "entities", "nodes"]);
+    }
+    for (const row of sourceSemanticQueryExamples) {
+      expect(Object.keys(row.response.query).slice(0, 3)).toEqual(["contract", "entities", "nodes"]);
+    }
+  });
+
   it("requires every generated role to state its excerpt, while historical entity inheritance keeps its meaning", () => {
     const explicit = operation.response;
     const inherited = structuredClone(explicit);
@@ -115,6 +162,9 @@ describe("query generation contract", () => {
       const role = missing.query.nodes.flatMap((node) => node.kind === "statement" ? node.arguments : [])
         .find((argument) => argument.target.key === key)!;
       Reflect.deleteProperty(role, "excerpt");
+      for (const entity of missing.query.entities) {
+        if (entity.key === key) Reflect.deleteProperty(entity, "excerpt");
+      }
       expect(draft2020(schema, [
         { id: "valid", instance: example.response }, { id: "missing", instance: missing }
       ])).toEqual({ valid: true, missing: false });
@@ -278,7 +328,11 @@ describe("query generation contract", () => {
       if (first === undefined || first.kind !== "statement") throw new Error("ordinary fixture missing a statement");
       const target = first.arguments[0]?.target;
       if (target === undefined || !("key" in target)) throw new Error("ordinary fixture missing a keyed target");
-      Object.assign(target, { key: `${target.key}_renamed` });
+      const previousKey = target.key;
+      Object.assign(target, { key: `${previousKey}_renamed` });
+      for (const entity of meaning.entities ?? []) {
+        if (entity.key === previousKey) Object.assign(entity, { key: target.key });
+      }
       if (first.arguments[0] !== undefined && first.kind === "statement" && first.content !== undefined
         && first.content.kind === "statement") {
         for (const argument of first.content.arguments) {

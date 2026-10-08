@@ -58,7 +58,7 @@ function proposeQuerySemantics(...args: Parameters<typeof receiveQuerySemantics>
   return receiveQuerySemantics(input, { rawJson: JSON.stringify(response) }, parseQuery);
 }
 
-type EditableWireNode = { node: string; arguments: { excerpt?: string; target: { excerpt?: string } }[] };
+type EditableWireNode = { node: string; arguments: { excerpt?: string; target: { key: string; excerpt?: string } }[] };
 function inputNode(response: unknown, inputIndex: number, conditionIndex: number): EditableWireNode {
   const query = (response as { query: {
     nodes: EditableWireNode[];
@@ -369,7 +369,9 @@ describe("query meaning receive and semantic_correspondence assessment", () => {
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(forgedRoleSupport) }).outcome.status).toBe("invalid");
     const withoutFreeInputSupport = structuredClone(example.response);
-    Object.assign(inputNode(withoutFreeInputSupport, 1, 1).arguments[1]!.target,
+    const inputRole = inputNode(withoutFreeInputSupport, 1, 1).arguments[1]!;
+    Object.assign(inputRole, { excerpt: undefined });
+    Object.assign(withoutFreeInputSupport.query.entities.find(entity => entity.key === inputRole.target.key)!,
       { excerpt: undefined });
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(withoutFreeInputSupport) }).outcome.status).toBe("invalid");

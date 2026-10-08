@@ -11,17 +11,21 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "free", key: "person", return: true, excerpt: "Who" },
+          { kind: "named", key: "lens", excerpt: "the lens" }
+        ],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["request"],
           support: [{ kind: "query_text", excerpt: "was asked" }],
           description: "The ask event's past tense is not encoded by the retained predicate." }],
         alternatives: [{ conditions: [{
           kind: "statement", key: "request", predicate: "ask",
-          arguments: [{ role: "recipient", target: { kind: "free", key: "person", return: true }, excerpt: "Who" }],
+          arguments: [{ role: "recipient", target: { kind: "reference", key: "person" }, excerpt: "Who" }],
           content: {
             kind: "statement", key: "action", predicate: "polish",
             arguments: [
               { role: "agent", target: { kind: "reference", key: "person" }, excerpt: "Who" },
-              { role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" }, excerpt: "the lens" }
+              { role: "theme", target: { kind: "reference", key: "lens" }, excerpt: "the lens" }
             ]
           }
         }] }]
@@ -34,11 +38,14 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+        entities: [
+          { kind: "free", key: "sensor", excerpt: "sensor" }
+        ],
         domains: [{ key: "sensors", excerpt: "every registered sensor" }],
         evaluation: { kind: "forall", domain: "sensors", binder: "sensor", local_variables: ["sensor", "calibration"] },
         alternatives: [{ conditions: [{
           kind: "statement", key: "calibration", predicate: "calibrated",
-          arguments: [{ role: "theme", target: { kind: "free", key: "sensor" }, excerpt: "sensor" }]
+          arguments: [{ role: "theme", target: { kind: "reference", key: "sensor" }, excerpt: "sensor" }]
         }] }]
       }
     }
@@ -49,9 +56,12 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "free", key: "person", return: true, excerpt: "Who" }
+        ],
         alternatives: [{ conditions: [{
           kind: "statement", key: "arrival", predicate: "arrive",
-          arguments: [{ role: "agent", target: { kind: "free", key: "person", return: true }, excerpt: "Who" }]
+          arguments: [{ role: "agent", target: { kind: "reference", key: "person" }, excerpt: "Who" }]
         }] }],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["arrival"],
           support: [{ kind: "query_text", excerpt: "has already arrived" }],
@@ -65,13 +75,15 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
-        requested_operation: { reading: "Compare the amber and blue bead counts in tray T.",
-          support: { kind: "query_text", excerpt: "more amber beads than blue beads" } },
         entities: [
           { kind: "named", key: "amber", excerpt: "amber beads" },
           { kind: "named", key: "blue", excerpt: "blue beads" },
-          { kind: "named", key: "tray", excerpt: "tray T" }
+          { kind: "named", key: "tray", excerpt: "tray T" },
+          { kind: "free", key: "amber_count", excerpt: "amber beads" },
+          { kind: "free", key: "blue_count", excerpt: "blue beads" }
         ],
+        requested_operation: { reading: "Compare the amber and blue bead counts in tray T.",
+          support: { kind: "query_text", excerpt: "more amber beads than blue beads" } },
         alternatives: [{
           conditions: [{ kind: "statement", predicate: "contain more than", arguments: [
             { role: "greater population", target: { kind: "reference", key: "amber" }, excerpt: "amber beads" },
@@ -82,12 +94,12 @@ const nestedSourceSemanticQueryExamples = [
             { conditions: [{ kind: "statement", predicate: "count", arguments: [
               { role: "population", target: { kind: "reference", key: "amber" }, excerpt: "amber beads" },
               { role: "container", target: { kind: "reference", key: "tray" }, excerpt: "tray T" },
-              { role: "value", target: { kind: "free", key: "amber_count", excerpt: "amber beads" }, excerpt: "amber beads" }
+              { role: "value", target: { kind: "reference", key: "amber_count" }, excerpt: "amber beads" }
             ] }] },
             { conditions: [{ kind: "statement", predicate: "count", arguments: [
               { role: "population", target: { kind: "reference", key: "blue" }, excerpt: "blue beads" },
               { role: "container", target: { kind: "reference", key: "tray" }, excerpt: "tray T" },
-              { role: "value", target: { kind: "free", key: "blue_count", excerpt: "blue beads" }, excerpt: "blue beads" }
+              { role: "value", target: { kind: "reference", key: "blue_count" }, excerpt: "blue beads" }
             ] }] }
           ]
         }]
@@ -100,6 +112,7 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["before", "ring", "flash"],
           support: [{ kind: "query_text", excerpt: "Did ringing precede flashing" }],
           description: "The requested past occurrence is not encoded by the retained event predicates." }],
@@ -120,12 +133,15 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "named", key: "lens", excerpt: "the lens" }
+        ],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["polish"],
           support: [{ kind: "query_text", excerpt: "question asked whether the lens was polished" }],
           description: "The past question act and past embedded polishing are not encoded by the retained frame." }],
         alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish", return: true,
           required_evidence_act: { act: "question", excerpt: "question asked whether" },
-          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" }, excerpt: "the lens" }]
+          arguments: [{ role: "theme", target: { kind: "reference", key: "lens" }, excerpt: "the lens" }]
         }] }]
       }
     }
@@ -136,12 +152,15 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "named", key: "lens", excerpt: "the lens" }
+        ],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["polish"],
           support: [{ kind: "query_text", excerpt: "directive required polishing" }],
           description: "The directive's past requirement is not encoded by the retained frame." }],
         alternatives: [{ conditions: [{ kind: "statement", key: "polish", predicate: "polish", return: true,
           required_evidence_act: { act: "directive", excerpt: "directive required" },
-          arguments: [{ role: "theme", target: { kind: "named", key: "lens", excerpt: "the lens" }, excerpt: "the lens" }]
+          arguments: [{ role: "theme", target: { kind: "reference", key: "lens" }, excerpt: "the lens" }]
         }] }]
       }
     }
@@ -152,13 +171,17 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "named", key: "steward", excerpt: "the workshop steward" },
+          { kind: "free", key: "tool", excerpt: "Which tool", return: true }
+        ],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["use_event"],
           support: [{ kind: "query_text", excerpt: "did the workshop steward use" }],
           description: "The use event's past tense is not encoded by the retained predicate." }],
         alternatives: [{ conditions: [
           { kind: "statement", key: "use_event", predicate: "use", arguments: [
-            { role: "agent", target: { kind: "named", key: "steward", excerpt: "the workshop steward" }, excerpt: "the workshop steward" },
-            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true }, excerpt: "Which tool" }
+            { role: "agent", target: { kind: "reference", key: "steward" }, excerpt: "the workshop steward" },
+            { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "Which tool" }
           ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
@@ -173,10 +196,14 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "named", key: "technician", excerpt: "that technician" },
+          { kind: "free", key: "tool", excerpt: "Which tool", return: true }
+        ],
         alternatives: [{ conditions: [
           { kind: "statement", key: "use_event", predicate: "use", arguments: [
-            { role: "agent", target: { kind: "named", key: "technician", excerpt: "that technician" }, excerpt: "that technician" },
-            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true }, excerpt: "Which tool" }
+            { role: "agent", target: { kind: "reference", key: "technician" }, excerpt: "that technician" },
+            { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "Which tool" }
           ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
@@ -199,13 +226,17 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "free", key: "person", excerpt: "someone" },
+          { kind: "free", key: "tool", excerpt: "Which tool", return: true }
+        ],
         gaps: [{ kind: "unsupported_meaning", affected_ids: ["use_event"],
           support: [{ kind: "query_text", excerpt: "did someone use" }],
           description: "The use event's past tense is not encoded by the retained predicate." }],
         alternatives: [{ conditions: [
           { kind: "statement", key: "use_event", predicate: "use", arguments: [
-            { role: "agent", target: { kind: "free", key: "person", excerpt: "someone" }, excerpt: "someone" },
-            { role: "theme", target: { kind: "free", key: "tool", excerpt: "Which tool", return: true }, excerpt: "Which tool" }
+            { role: "agent", target: { kind: "reference", key: "person" }, excerpt: "someone" },
+            { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "Which tool" }
           ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
@@ -220,14 +251,17 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
-        requested_operation: { reading: "Calculate elapsed hours from the sealing time to the opening time.",
-          support: { kind: "query_text", excerpt: "elapsed time in hours between" } },
         entities: [
           { kind: "named", key: "tara", excerpt: "Tara" },
           { kind: "named", key: "crate", excerpt: "crate C" },
           { kind: "named", key: "seal_day", excerpt: "3 March 2024" },
-          { kind: "named", key: "open_day", excerpt: "4 March 2024" }
+          { kind: "named", key: "open_day", excerpt: "4 March 2024" },
+          { kind: "free", key: "elapsed_hours", excerpt: "What is the elapsed time in hours", return: true },
+          { kind: "free", key: "start_time", excerpt: "Tara sealing crate C on 3 March 2024" },
+          { kind: "free", key: "end_time", excerpt: "Tara opening crate C on 4 March 2024" }
         ],
+        requested_operation: { reading: "Calculate elapsed hours from the sealing time to the opening time.",
+          support: { kind: "query_text", excerpt: "elapsed time in hours between" } },
         alternatives: [{
           conditions: [
             { kind: "statement", key: "elapsed", predicate: "elapsed hours between events", arguments: [
@@ -235,7 +269,7 @@ const nestedSourceSemanticQueryExamples = [
                 excerpt: "Tara sealing crate C on 3 March 2024" },
               { role: "end event", target: { kind: "reference", key: "opening" },
                 excerpt: "Tara opening crate C on 4 March 2024" },
-              { role: "hours", target: { kind: "free", key: "elapsed_hours", excerpt: "What is the elapsed time in hours", return: true }, excerpt: "What is the elapsed time in hours" }
+              { role: "hours", target: { kind: "reference", key: "elapsed_hours" }, excerpt: "What is the elapsed time in hours" }
             ] },
             { kind: "statement", key: "sealing", predicate: "seal", arguments: [
               { role: "agent", target: { kind: "reference", key: "tara" }, excerpt: "Tara" },
@@ -254,7 +288,7 @@ const nestedSourceSemanticQueryExamples = [
               { kind: "statement", key: "seal_time", predicate: "time of event", arguments: [
                 { role: "event", target: { kind: "reference", key: "sealing" },
                   excerpt: "Tara sealing crate C on 3 March 2024" },
-                { role: "time", target: { kind: "free", key: "start_time", excerpt: "Tara sealing crate C on 3 March 2024" }, excerpt: "Tara sealing crate C on 3 March 2024" }
+                { role: "time", target: { kind: "reference", key: "start_time" }, excerpt: "Tara sealing crate C on 3 March 2024" }
               ] }
             ] },
             { conditions: [
@@ -262,7 +296,7 @@ const nestedSourceSemanticQueryExamples = [
               { kind: "statement", key: "open_time", predicate: "time of event", arguments: [
                 { role: "event", target: { kind: "reference", key: "opening" },
                   excerpt: "Tara opening crate C on 4 March 2024" },
-                { role: "time", target: { kind: "free", key: "end_time", excerpt: "Tara opening crate C on 4 March 2024" }, excerpt: "Tara opening crate C on 4 March 2024" }
+                { role: "time", target: { kind: "reference", key: "end_time" }, excerpt: "Tara opening crate C on 4 March 2024" }
               ] }
             ] }
           ]
@@ -276,12 +310,12 @@ const nestedSourceSemanticQueryExamples = [
       outcome: { status: "interpreted" },
       query: {
         contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-        requested_operation: { reading: "Count tools across independently contributed borrow or return events.",
-          support: { kind: "query_text", excerpt: "How many" } },
         entities: [
           { kind: "named", key: "clerk", excerpt: "the clerk" },
           { kind: "free", key: "tool", excerpt: "tools" }
         ],
+        requested_operation: { reading: "Count tools across independently contributed borrow or return events.",
+          support: { kind: "query_text", excerpt: "How many" } },
         alternatives: [{
           conditions: [],
           evidence_inputs: [
@@ -318,10 +352,11 @@ const nestedSourceSemanticQueryExamples = [
   }
 ] as const;
 
-export const sourceSemanticQueryExamples = nestedSourceSemanticQueryExamples.map(example => ({
-  ...example, response: {
-    ...example.response,
-    contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-    query: encodeSourceSemanticQueryCarrier(example.response.query as SourceSemanticQueryMeaningBody)
-  }
-}));
+export const sourceSemanticQueryExamples = nestedSourceSemanticQueryExamples.map(example => {
+  const { contract, entities = [], nodes, ...meaning } = encodeSourceSemanticQueryCarrier(
+    example.response.query as SourceSemanticQueryMeaningBody);
+  return { ...example, response: {
+    ...example.response, contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+    query: { contract, entities, nodes, ...meaning }
+  } };
+});

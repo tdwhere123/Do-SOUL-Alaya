@@ -813,6 +813,11 @@ reachability, depth, expanded work and bytes before expanding into that unchange
 meaning compiler. Historical recursive responses retain their recorded wire and
 cache identities and cannot enter current execution. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
+The outgoing generation schema requires one entity declaration table and explicit
+role excerpts. Argument and reporter targets use local references; examples and
+schema present entities and nodes before branch roots. Historical current-wire
+inline declarations and unambiguous entity-support inheritance still use the
+same receiver. Generation shape does not certify reference closure or fidelity.
 The canonical query also binds the complete host-approved fixed context
 (`null` when none was supplied) and one `utterance-attribution-v1` value. Its
 identity changes when those consumed fields change, even if the query text and

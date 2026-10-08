@@ -393,8 +393,21 @@ function derefJsonSchema(root: Record<string, unknown>, node: Record<string, unk
   return derefJsonSchema(root, current);
 }
 
-/** Require explicit producer grounding without changing historical receiver inheritance. */
-function requireQueryRoleExcerpts(schema: Record<string, unknown>, body: Record<string, unknown>): void {
+function queryReferenceSchema(schema: Record<string, unknown>, target: Record<string, unknown>): object {
+  const resolved = derefJsonSchema(schema, target);
+  const variants = Array.isArray(resolved.oneOf) ? resolved.oneOf : Array.isArray(resolved.anyOf) ? resolved.anyOf : [];
+  for (const variant of variants) {
+    if (!isJsonSchemaObject(variant)) continue;
+    const shape = derefJsonSchema(schema, variant);
+    const properties = isJsonSchemaObject(shape.properties) ? shape.properties : undefined;
+    const kind = isJsonSchemaObject(properties?.kind) ? derefJsonSchema(schema, properties.kind) : undefined;
+    if (Array.isArray(kind?.enum) && kind.enum.length === 1 && kind.enum[0] === "reference") return structuredClone(shape);
+  }
+  throw new AlayaError("VALIDATION", "query target schema is missing a local reference variant");
+}
+
+/** Use one producer declaration location; historical receive syntax remains unchanged. */
+function constrainQueryGenerationNodes(schema: Record<string, unknown>, body: Record<string, unknown>): void {
   const properties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
   const nodes = isJsonSchemaObject(properties?.nodes) ? properties.nodes : undefined;
   if (!isJsonSchemaObject(nodes?.items)) throw new AlayaError("VALIDATION", "query carrier schema is missing nodes.items");
@@ -405,12 +418,15 @@ function requireQueryRoleExcerpts(schema: Record<string, unknown>, body: Record<
     if (!isJsonSchemaObject(variant)) continue;
     const shape = derefJsonSchema(schema, variant);
     const fields = isJsonSchemaObject(shape.properties) ? shape.properties : undefined;
+    if (isJsonSchemaObject(fields?.reporter)) fields.reporter = queryReferenceSchema(schema, fields.reporter);
     if (!isJsonSchemaObject(fields?.arguments)) continue;
     if (!isJsonSchemaObject(fields.arguments.items)) throw new AlayaError("VALIDATION", "query role schema is missing items");
     const argument = derefJsonSchema(schema, fields.arguments.items);
-    if (!isJsonSchemaObject(argument.properties) || !isJsonSchemaObject(argument.properties.excerpt)) {
-      throw new AlayaError("VALIDATION", "query role schema is missing excerpt");
+    if (!isJsonSchemaObject(argument.properties) || !isJsonSchemaObject(argument.properties.excerpt)
+      || !isJsonSchemaObject(argument.properties.target)) {
+      throw new AlayaError("VALIDATION", "query role schema is missing excerpt or target");
     }
+    argument.properties.target = queryReferenceSchema(schema, argument.properties.target);
     argument.required = [...new Set([...(Array.isArray(argument.required) ? argument.required : []), "excerpt"])];
     found = true;
   }
@@ -425,12 +441,28 @@ function constrainQueryGenerationSchema(envelope: object): object {
     throw new AlayaError("VALIDATION", "query generation schema is missing properties.query");
   }
   const body = structuredClone(derefJsonSchema(schema, properties.query));
-  requireQueryRoleExcerpts(schema, body);
+  constrainQueryGenerationNodes(schema, body);
   const bodyProperties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
   if (body.anyOf !== undefined || body.oneOf !== undefined || bodyProperties?.requested_operation === undefined
-    || !isJsonSchemaObject(bodyProperties.alternatives) || bodyProperties.alternatives.items === undefined) {
+    || !isJsonSchemaObject(bodyProperties.entities) || !isJsonSchemaObject(bodyProperties.alternatives)
+    || bodyProperties.alternatives.items === undefined) {
     throw new AlayaError("VALIDATION", "query carrier body cannot encode the operation/input generation union");
   }
+  if (!isJsonSchemaObject(bodyProperties.entities.items)) throw new AlayaError("VALIDATION", "query entity schema is missing items");
+  const entity = derefJsonSchema(schema, bodyProperties.entities.items);
+  const declarations = Array.isArray(entity.oneOf) ? entity.oneOf : Array.isArray(entity.anyOf) ? entity.anyOf : [];
+  if (declarations.length === 0) throw new AlayaError("VALIDATION", "query entity schema is missing declaration variants");
+  for (const declaration of declarations) {
+    if (!isJsonSchemaObject(declaration)) throw new AlayaError("VALIDATION", "invalid query entity declaration schema");
+    const shape = derefJsonSchema(schema, declaration);
+    if (!isJsonSchemaObject(shape.properties) || !isJsonSchemaObject(shape.properties.excerpt)) {
+      throw new AlayaError("VALIDATION", "query entity declaration schema is missing excerpt");
+    }
+    shape.required = [...new Set([...(Array.isArray(shape.required) ? shape.required : []), "excerpt"])];
+  }
+  body.required = [...new Set([...(Array.isArray(body.required) ? body.required : []), "entities"])];
+  const { contract, entities, nodes, ...remaining } = bodyProperties;
+  body.properties = { contract, entities, nodes, ...remaining };
   const itemNode = isJsonSchemaObject(bodyProperties.alternatives.items)
     ? bodyProperties.alternatives.items : { $ref: bodyProperties.alternatives.items };
   const items = structuredClone(derefJsonSchema(schema, itemNode));
@@ -497,11 +529,11 @@ export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): stri
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [
   `Propose query meaning for the original query only, using ${SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT}.`,
   "Describe meaning, not answers or execution. The host builds IDs, sorts, incidence and evidence branches; do not emit graphs, hashes, programs, execution statistics, ranking or verdicts. Omit optional statement/operator keys unless referenced elsewhere. Entity keys express identity; unknown answer values are free targets, not unresolved meaning.",
-  "Serialize each expression occurrence once in query.nodes with its own node token. alternatives.conditions and evidence_inputs[].conditions are arrays of node tokens. A statement/operator content, antecedent, consequent or operands field contains node tokens, never an embedded expression. Tokens are serialization references, separate from semantic local keys. Every token must resolve once; declare no unreachable nodes or cycles. An occurrence node uses its semantic key to refer to a declared event and still has its own serialization token.",
+  "After entity declarations, serialize each expression occurrence once in query.nodes with its own node token. Then write the branch roots that use these nodes. alternatives.conditions and evidence_inputs[].conditions are arrays of node tokens. A statement/operator content, antecedent, consequent or operands field contains node tokens, never an embedded expression. Tokens are serialization references, separate from semantic local keys. Every token must resolve once; emit only nodes reachable from a branch root, with no unused declarations or cycles. Semantic target references do not make an expression a branch root. An occurrence node uses its semantic key to refer to a declared event and still has its own serialization token.",
   "Decide the answer branch before adding inputs. Put the requested relation, its participants and every stated qualification in conditions; conditions are one conjunction, so do not require operand facts merely because they could help derive an answer. A Boolean question returns no fabricated result entity. A source can state the requested relation directly without supplying operands. For a requested calculation or other operation, also retain requested_operation:{reading,support:{kind:query_text,excerpt}} and independently useful evidence_inputs:[{conditions:[...]}]. Listed alternative operand actions belong in separate evidence_inputs, not extra conjuncts of that operation; requiring every listed action together changes or into and. Each input branch carries its own event, participant, time and other qualifications. Input facts never execute the operation or prove the answer. If no faithful answer relation is expressible, conditions:[] may accompany the operation and inputs; do not turn the inputs into a claimed answer.",
   `A nesting path may contain at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes. Deeper meaning must remain a located gap; never silently truncate its scope.`,
-  'An unknown answer or lawful witness is free; a named person or definite participant is named even when source identity is unknown. Shared incidence does not replace the named participant’s referent obligation. A named target preserves a referentially constrained expression in the original query, including a speaker, addressee, name or definite description; give it one exact query excerpt. A free target binds a value without an additional referent constraint; its excerpt supports a role, not a person. A free target leaves its value unknown without removing its stated nominal restrictions. A local key or support excerpt is not a class predicate. Express a stated class restriction as an ordinary predicate connected to the same variable in each independently sought branch, or keep unrepresentable meaning as a located gap. Named referent constraints and universal population or domain obligations remain distinct. If authorized query context leaves the intended named referent genuinely unresolved, retain named and locate an unresolved_referent gap on it, or abstain when no faithful usable query can be proposed. Unknown source correspondence alone requires no gap. Local keys are arbitrary identifiers, never text evidence or identity. Declare named/free entities inline or in the optional entities table, not both; reuse them with {kind:"reference",key}. Free targets, including a free reported.reporter or evidence-input value, need exact support on target or role. Reporter targets remain entities.',
-  'Use statement:{predicate,arguments,content?} and operators with explicit operands. A role reference to a declared event points to that occurrence; it does not embed the event, import its qualifications into another branch, or change its truth obligation. Give every statement/operator role reference its own exact original-query excerpt. Reuse a keyed event as a full condition with {kind:"occurrence",key} when that branch needs its qualifications. Use content when one event is within what another event says, asks or requires; retain the inner participants under that governing scope, without an independent asserted_at_source root. An entity reference may inherit its declaration’s unambiguous exact support. Resolve every reference by its declaration, never by its key. possible, not, reported and conditional preserve their scope; a report or hypothetical does not assert its embedded event.',
+  'An unknown answer or lawful witness is free; a named person or definite participant is named even when source identity is unknown. Shared incidence does not replace the named participant’s referent obligation. A named target preserves a referentially constrained expression in the original query, including a speaker, addressee, name or definite description; give it one exact query excerpt. A free target binds a value without an additional referent constraint; its excerpt supports a role, not a person. A free target leaves its value unknown without removing its stated nominal restrictions. A local key or support excerpt is not a class predicate. Express a stated class restriction as an ordinary predicate connected to the same variable in each independently sought branch, or keep unrepresentable meaning as a located gap. Named referent constraints and universal population or domain obligations remain distinct. If authorized query context leaves the intended named referent genuinely unresolved, retain named and locate an unresolved_referent gap on it, or abstain when no faithful usable query can be proposed. Unknown source correspondence alone requires no gap. Local keys are arbitrary identifiers, never text evidence or identity. First declare every named/free entity in the required entities table, using [] only when there are no entities. Entity declarations are the only place for kind named/free and entity return:true. All argument targets and reporter targets use {kind:"reference",key} to reuse a declaration. No keys are built in: a query speaker or addressee must be declared as named with its exact original-query excerpt. Free declarations, including a free reporter or evidence-input value, also retain their exact query excerpt. Reporter references remain entity-only.',
+  'Use statement:{predicate,arguments,content?} and operators with explicit operands. A role reference to a declared event points to that occurrence; it does not embed the event, import its qualifications into another branch, or change its truth obligation. Give every statement/operator role reference its own exact original-query excerpt. Reuse a keyed event as a full condition with {kind:"occurrence",key} when that branch needs its qualifications. Use content when one event is within what another event says, asks or requires; retain the inner participants under that governing scope, without an independent asserted_at_source root. For generation, every role includes its own excerpt even when an entity declaration also supplies support. Resolve every reference by its declaration, never by its key. possible, not, reported and conditional preserve their scope; a report or hypothetical does not assert its embedded event.',
   "required_evidence_act:{act,excerpt} constrains the speech act of sought evidence. Omit it for ordinary factual questions; select act question/directive only when the original query explicitly seeks that source act, with an exact excerpt supporting the constraint. A source act belongs to an independently sought source root, not its embedded content. Factual questions seek source assertions or entailments, not unconditional world truth. Mark each requested entity, statement or operator with return:true on its declaration; the host derives the return list and IDs. Do not mark containing events or operation inputs as returns. A question word can locate a free answer target; it does not make other constrained participants free.",
   'Optional domains are {key,excerpt}. Universal evaluation is {kind:"forall",domain,binder,local_variables}; binders occur in the body and cannot be returned. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Counterexample alternatives use purpose:"counterexample".',
   "Preserve universal population restrictions as domains and evaluation, not named entities or an invented census. Unknown domain members do not make the query referent unresolved. Nested universals remain unsupported. Preserve tense and temporal relation to the approved interpretation clock, completion/aspect, modality, units and other restrictions in meaningful predicates/roles or a located gap. A bare event lemma, supported participant, arbitrary key or asserted_at_source obligation does not imply that an event happened before the question clock. Do not invent an event date, and do not add a past restriction to a question that has none. A located gap makes represented evidence useful but never a complete answer.",
