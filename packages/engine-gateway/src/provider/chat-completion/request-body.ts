@@ -1,6 +1,6 @@
 import { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
 import { AlayaError, isStepSemanticRequestProfile, stepSemanticReasoningEffort,
-  stepSemanticRequestModel, type EnvLookup } from "@do-soul/alaya-protocol";
+  stepSemanticRequestModel, stepSemanticResponseFormat, type EnvLookup } from "@do-soul/alaya-protocol";
 import type {
   ProviderChatCompletionRequest,
   ProviderRequestProfile
@@ -63,18 +63,21 @@ export function buildProviderChatRequestBody(
         request.sseCompletionPolicy === "allow_clean_eof_v1") {
       throw new AlayaError("VALIDATION", "Step semantic profile requires its exact model, named JSON Schema, finite max_tokens, and witnessed completion");
     }
+    const instructionSchema = stepSemanticResponseFormat(request.profile) === "json_object";
     return {
       model: request.model,
       ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
       ...(stream ? { stream: true } : {}),
-      response_format: {
+      response_format: instructionSchema ? { type: "json_object" } : {
         type: "json_schema",
         json_schema: { name: request.jsonSchema.name, strict: true, schema: request.jsonSchema.schema }
       },
       max_tokens: request.maxOutputTokens,
       reasoning_effort: stepSemanticReasoningEffort(request.profile),
       messages: [
-        { role: "system", content: request.systemPrompt },
+        { role: "system", content: instructionSchema
+          ? `${request.systemPrompt}\n\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(request.jsonSchema)}`
+          : request.systemPrompt },
         { role: "user", content: request.userPrompt }
       ]
     };

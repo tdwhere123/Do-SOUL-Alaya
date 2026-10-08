@@ -56,10 +56,11 @@ async function withServer<T>(
 
 describe("Step Chat Completions over local HTTP", () => {
   it.each([
-    { model: "step-3.5-flash-2603", profile: "step-3.5-2603-low-json-schema-v1", effort: "low" },
-    { model: "step-3.5-flash-2603", profile: "step-3.5-2603-high-json-schema-v1", effort: "high" },
-    { model: "step-5-preview", profile: "step-5-preview-low-json-schema-v1", effort: "low" }
-  ] as const)("sends $model with the named schema, $effort effort, and finite cap", async ({ model, profile, effort }) => {
+    { model: "step-3.5-flash-2603", profile: "step-3.5-2603-low-json-schema-v1", effort: "low", format: "json_schema" },
+    { model: "step-3.5-flash-2603", profile: "step-3.5-2603-high-json-schema-v1", effort: "high", format: "json_schema" },
+    { model: "step-5-preview", profile: "step-5-preview-low-json-schema-v1", effort: "low", format: "json_schema" },
+    { model: "step-5-preview", profile: "step-5-preview-low-json-mode-v1", effort: "low", format: "json_object" }
+  ] as const)("sends $profile with its complete schema and finite cap", async ({ model, profile, effort, format }) => {
     let path: string | undefined;
     let sentBody: unknown;
     await withServer((request, response) => {
@@ -105,13 +106,15 @@ describe("Step Chat Completions over local HTTP", () => {
     expect(path).toBe("/step_plan/v1/chat/completions");
     expect(sentBody).toEqual({
       model,
-      response_format: { type: "json_schema", json_schema: {
+      response_format: format === "json_object" ? { type: "json_object" } : { type: "json_schema", json_schema: {
         name: "semantic_payload", strict: true, schema: SCHEMA.schema
       } },
       max_tokens: 4096,
       reasoning_effort: effort,
       messages: [
-        { role: "system", content: "system" },
+        { role: "system", content: format === "json_object"
+          ? `system\n\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(SCHEMA)}`
+          : "system" },
         { role: "user", content: "user" }
       ]
     });

@@ -82,6 +82,24 @@ it("keeps Q/C wire identity and quote on the shared request-binding owner", () =
   expect(estimatedSemanticProviderUpperUsd(quote, 1, 2)).toBe((4096 * 1 + 128 * 2) / 1_000_000 * 2);
 });
 
+it("binds JSON Mode identity to the complete instruction schema and selected format", () => {
+  const input = {
+    identityPrefix: SEMANTIC_PROPOSAL_WORKSET_CONTRACT, model: "step-5-preview",
+    requestProfile: "step-5-preview-low-json-mode-v1" as const,
+    systemPrompt: "Preserve the source.", userPrompt: "A source assertion.",
+    schema: { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false },
+    maxOutputTokens: 128, providerUrl: "https://api.stepfun.com/v1",
+    schemaName: SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME
+  };
+  const key = semanticProviderRequestCacheKey(input);
+  expect(semanticProviderRequestCacheKey({ ...input, requestProfile: "step-5-preview-low-json-schema-v1" }))
+    .not.toBe(key);
+  expect(semanticProviderRequestCacheKey({ ...input, schema: { ...input.schema, required: [] } }))
+    .not.toBe(key);
+  expect(semanticProviderRequestCacheKey({ ...input, schemaName: "changed_semantic_schema" }))
+    .not.toBe(key);
+});
+
 it("replays Q fill from retained raw over loopback HTTP without a second call or double settlement", async () => {
   const wires: string[] = [];
   const server = createServer((request, response) => {

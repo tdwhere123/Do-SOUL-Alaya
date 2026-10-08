@@ -73,7 +73,7 @@ export async function probeProviderProtocol(
     userPrompt: "{\"probe\":true}",
     profile: binding.requestProfile,
     mode: framing,
-    ...(isStepSemanticRequestProfile(binding.requestProfile) ? { retainCompleteHttpResponse: true } : {}),
+    ...(isStepSemanticRequestProfile(binding.requestProfile) ? { retainHttpResponseEvidence: true as const } : {}),
     ...(isStepSemanticRequestProfile(binding.requestProfile)
       ? { jsonSchema: { name: "provider_protocol_probe", schema: {
         type: "object", properties: { probe: { type: "boolean" } },

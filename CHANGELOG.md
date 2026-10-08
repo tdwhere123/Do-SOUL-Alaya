@@ -8,9 +8,16 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.6.0, engine gateway 1.0.0
+## Unreleased — protocol 13.7.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.7.0 adds an explicit Step 5 Preview JSON Mode profile and the shared
+wire-format lookup under invariant §25 (minor: additive exports). Gateway places
+the complete named schema in system guidance while requesting JSON Object output.
+The actual body is bound into existing request/cache/receipt identities. This
+provider projection does not change semantic schema, admission or defaults, and
+never activates in response to a failed attempt.
 
 Protocol 13.6.0 adds an explicit Step 5 Preview low-effort JSON Schema profile
 and the shared profile-to-model lookup under invariant §25 (minor: additive

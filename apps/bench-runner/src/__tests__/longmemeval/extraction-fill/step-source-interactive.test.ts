@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE,
+import { STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE,
   stepSemanticRequestModel, type StepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from
@@ -203,10 +203,10 @@ async function listen(
   return { calls, intercepted };
 }
 
-it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE] as const)(
+it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE] as const)(
   "retains complete %s source bytes beyond the diagnostic prefix for cache reuse", async profile => {
-  const model = profile === STEP_PREVIEW_REQUEST_PROFILE ? "step-5-preview" : MODEL;
-  const quote = profile === STEP_PREVIEW_REQUEST_PROFILE ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
+  const model = stepSemanticRequestModel(profile);
+  const quote = model === "step-5-preview" ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const fixture = await scenario(1, undefined, model, quote, profile);
   const http = await listen(body => ({
     text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
@@ -275,10 +275,10 @@ it("withholds a Step source stream beyond the complete evidence limit from reuse
   } finally { database.close(); }
 });
 
-it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE] as const)(
+it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE] as const)(
   "binds %s to exact HTTP bytes and stops after its first incomplete response", async profile => {
-  const model = profile === STEP_PREVIEW_REQUEST_PROFILE ? "step-5-preview" : MODEL;
-  const quote = profile === STEP_PREVIEW_REQUEST_PROFILE ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
+  const model = stepSemanticRequestModel(profile);
+  const quote = model === "step-5-preview" ? STEP_PREVIEW_OPENAPI_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const fixture = await scenario(4, undefined, model, quote, profile);
   const http = await listen((body) => {
     const userPrompt = (body.messages as { content: string }[])[1]!.content;
@@ -286,9 +286,10 @@ it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFI
   });
   await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
   expect(http.calls).toHaveLength(1);
-  expect(http.calls[0]).toMatchObject({ path: profile === STEP_PREVIEW_REQUEST_PROFILE ? "/v1/chat/completions" : "/step_plan/v1/chat/completions",
+  expect(http.calls[0]).toMatchObject({ path: model === "step-5-preview" ? "/v1/chat/completions" : "/step_plan/v1/chat/completions",
     body: { model, reasoning_effort: profile === STEP_SEMANTIC_HIGH_REQUEST_PROFILE ? "high" : "low", max_tokens: 4096, stream: true,
-      response_format: { type: "json_schema", json_schema: { strict: true } } } });
+      response_format: profile === STEP_PREVIEW_JSON_REQUEST_PROFILE ? { type: "json_object" }
+        : { type: "json_schema", json_schema: { strict: true } } } });
   const raws = fixture.selected.flatMap(key => listProviderRawAttempts(roots.cacheRoot, key));
   expect(raws).toHaveLength(1);
   const raw = raws[0]!;
@@ -304,6 +305,21 @@ it.each([PROFILE, STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFI
   expect(reopenedAuthority.snapshot()?.attempts).toBe(1);
   vi.stubEnv("E0_TEST_GARDEN_KEY", "");
   expect(readProviderRawAttempt(roots.cacheRoot, raw.cache_key, 1)).toEqual(raw);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow();
+  expect(http.calls).toHaveLength(1);
+});
+
+it("quarantines valid JSON that violates the source contract under JSON Mode", async () => {
+  const fixture = await scenario(2, undefined, "step-5-preview", STEP_PREVIEW_OPENAPI_QUOTE_BASIS,
+    STEP_PREVIEW_JSON_REQUEST_PROFILE);
+  const http = await listen(() => ({ text: '{"unrelated":"valid JSON"}', finish: "stop" }));
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+  expect(http.calls).toHaveLength(1);
+  const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
+  expect(raw.finish_reason).toBe("stop");
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, "step-5-preview",
+    STEP_PREVIEW_JSON_REQUEST_PROFILE).status).not.toBe("hit");
+  expect(listProviderRawAttempts(roots.cacheRoot, fixture.selected[1]!)).toHaveLength(0);
   await expect(runExtractionFill(fixture.options)).rejects.toThrow();
   expect(http.calls).toHaveLength(1);
 });

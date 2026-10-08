@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { createServer } from "node:http";
+import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { describe, expect, it, vi } from "vitest";
 import {
   findProviderBinding,
@@ -26,10 +27,12 @@ describe("provider catalog", () => {
   it("binds the preview model to its own explicit profile", () => {
     expect(requireProviderBinding("step-5-preview")).toMatchObject({
       requestProfile: "step-5-preview-low-json-schema-v1",
-      supportedRequestProfiles: ["step-5-preview-low-json-schema-v1"]
+      supportedRequestProfiles: ["step-5-preview-low-json-schema-v1", "step-5-preview-low-json-mode-v1"]
     });
     expect(() => assertRequiredRequestProfile({ model: "step-5-preview",
       requestProfile: "step-5-preview-low-json-schema-v1" })).not.toThrow();
+    expect(() => assertRequiredRequestProfile({ model: "step-5-preview",
+      requestProfile: "step-5-preview-low-json-mode-v1" })).not.toThrow();
     expect(() => assertRequiredRequestProfile({ model: "step-5-preview",
       requestProfile: "step-3.5-2603-low-json-schema-v1" })).toThrow();
     expect(() => assertRequiredRequestProfile({ model: "step-3.5-flash-2603",
@@ -89,7 +92,8 @@ describe("provider protocol probe", () => {
       request.on("end", () => {
         body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ choices: [{ message: { content: '{"probe":true}' }, finish_reason: "stop" }],
+        response.end(JSON.stringify({ padding: " ".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES),
+          choices: [{ message: { content: '{"probe":true}' }, finish_reason: "stop" }],
           usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }));
       });
     });
@@ -103,6 +107,7 @@ describe("provider protocol probe", () => {
         usage_present: true, finish_reason: "stop", usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
         http_response: { bodyComplete: true, bodyTruncated: false } });
       const retained = JSON.parse(Buffer.from(receipt.http_response.bodyBase64, "base64").toString("utf8"));
+      expect(receipt.http_response.bodyByteLength).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
       expect(retained.choices[0].message.content).toBe('{"probe":true}');
       expect(body).toMatchObject({ model, reasoning_effort: "low", max_tokens: 256,
         response_format: { type: "json_schema", json_schema: { name: "provider_protocol_probe", strict: true,

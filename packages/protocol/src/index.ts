@@ -185,8 +185,9 @@ export * from "./events/message-delta.js";
 export * from "./engine/engine-binding.js";
 export * from "./engine/engine-port.js";
 export { STEP_SEMANTIC_REQUEST_MODEL, STEP_SEMANTIC_REQUEST_PROFILE,
-  STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_SEMANTIC_REQUEST_PROFILES,
-  isStepSemanticRequestProfile, stepSemanticReasoningEffort, stepSemanticRequestModel,
+  STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE,
+  STEP_SEMANTIC_REQUEST_PROFILES, isStepSemanticRequestProfile, stepSemanticReasoningEffort,
+  stepSemanticRequestModel, stepSemanticResponseFormat,
   type StepSemanticRequestProfile } from "./engine/step-semantic-request-profile.js";
 export * from "./conversation/conversation-message.js";
 export * from "./conversation/conversation-tool-catalog.js";

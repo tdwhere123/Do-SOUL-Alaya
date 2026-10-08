@@ -4,11 +4,13 @@ export const STEP_SEMANTIC_REQUEST_MODEL = "step-3.5-flash-2603" as const;
 export const STEP_SEMANTIC_REQUEST_PROFILE = "step-3.5-2603-low-json-schema-v1" as const;
 export const STEP_SEMANTIC_HIGH_REQUEST_PROFILE = "step-3.5-2603-high-json-schema-v1" as const;
 export const STEP_PREVIEW_REQUEST_PROFILE = "step-5-preview-low-json-schema-v1" as const;
+export const STEP_PREVIEW_JSON_REQUEST_PROFILE = "step-5-preview-low-json-mode-v1" as const;
 
 const bindings = Object.freeze({
-  [STEP_SEMANTIC_REQUEST_PROFILE]: { model: STEP_SEMANTIC_REQUEST_MODEL, effort: "low" },
-  [STEP_SEMANTIC_HIGH_REQUEST_PROFILE]: { model: STEP_SEMANTIC_REQUEST_MODEL, effort: "high" },
-  [STEP_PREVIEW_REQUEST_PROFILE]: { model: "step-5-preview", effort: "low" }
+  [STEP_SEMANTIC_REQUEST_PROFILE]: { model: STEP_SEMANTIC_REQUEST_MODEL, effort: "low", format: "json_schema" },
+  [STEP_SEMANTIC_HIGH_REQUEST_PROFILE]: { model: STEP_SEMANTIC_REQUEST_MODEL, effort: "high", format: "json_schema" },
+  [STEP_PREVIEW_REQUEST_PROFILE]: { model: "step-5-preview", effort: "low", format: "json_schema" },
+  [STEP_PREVIEW_JSON_REQUEST_PROFILE]: { model: "step-5-preview", effort: "low", format: "json_object" }
 } as const);
 export type StepSemanticRequestProfile = keyof typeof bindings;
 export const STEP_SEMANTIC_REQUEST_PROFILES = Object.freeze(
@@ -29,4 +31,10 @@ export function stepSemanticReasoningEffort(profile: StepSemanticRequestProfile)
 export function stepSemanticRequestModel(profile: StepSemanticRequestProfile) {
   if (!isStepSemanticRequestProfile(profile)) throw new AlayaError("VALIDATION", "unsupported Step semantic request profile");
   return bindings[profile].model;
+}
+
+/** The wire format is explicit profile identity, never a response-triggered fallback. */
+export function stepSemanticResponseFormat(profile: StepSemanticRequestProfile) {
+  if (!isStepSemanticRequestProfile(profile)) throw new AlayaError("VALIDATION", "unsupported Step semantic request profile");
+  return bindings[profile].format;
 }
