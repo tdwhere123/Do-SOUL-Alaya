@@ -1,6 +1,7 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   SourceSemanticResourceExhausted, canonicalJson, type SourceRecordIdentity,
+  sourceSemanticGenerationTaskSummary,
   type SourceSemanticAccessReceipt, type SourceSemanticAccessSignal, type SourceSemanticAccessPolicy,
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents
 } from "@do-soul/alaya-protocol";
@@ -358,7 +359,8 @@ function observeInterpretation(runtime: SourceSemanticReadRuntime, workspace: st
   const signal = policy.interpretation(sources.get(record.identity)?.signal ?? UNKNOWN, interpretation, meter);
   const descriptor = { interpretation_id: checked.bound.interpretation_id,
     source_id: record.source_id, source_version: record.source_version, content_digest: record.content_digest,
-    producer_id: interpretation.producer_id, producer_version: interpretation.producer_version, contract_version: interpretation.contract_version };
+    producer_id: interpretation.producer_id, producer_version: interpretation.producer_version, contract_version: interpretation.contract_version,
+    ...(interpretation.generation_task === undefined ? {} : { generation_task: sourceSemanticGenerationTaskSummary(interpretation.generation_task) }) };
   const observation = { interpretation_id: descriptor.interpretation_id, record_id: record.identity, signal };
   meter.retain([descriptor, observation], "access interpretation retention");
   return { descriptor, observation };

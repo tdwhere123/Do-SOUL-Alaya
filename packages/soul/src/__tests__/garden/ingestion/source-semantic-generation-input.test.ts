@@ -49,14 +49,28 @@ describe("source semantic generation presentation", () => {
         { occurrence_id: "turn-one", utf8_span: [0, 34] as const, conversation_ref: "conversation", author_ref: "mira" },
         { occurrence_id: "turn-two", utf8_span: [36, 60] as const, conversation_ref: null, author_ref: null }
       ] };
-    const request = buildSourceSemanticRequest({ ...selected, attribution_context: attribution });
+    const generationTask = { contract: "source-semantic-generation-task-v1" as const,
+      context: "complete_original_source" as const, original_query: " Who saw Mira? \n",
+      responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
+    const request = buildSourceSemanticRequest({ ...selected, attribution_context: attribution, generationTask });
     expect(JSON.parse(sourceSemanticGenerationInput(request))).toEqual({ contract: "source-semantic-generation-view-v1",
       source_request: { source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
         attribution_context: attribution,
         assertion_locations: [
           { assertion_id: 1, source_utf8_span: [0, 20] }, { assertion_id: 2, source_utf8_span: [21, 34] },
           { assertion_id: 3, source_utf8_span: [36, 60] }
-        ], source_assertions: assertions } });
+        ], source_assertions: assertions, generation_task: generationTask, original_source: input.sourceCorpus } });
+    expect(request.source_request.generation_task).toEqual(generationTask);
+    const full = buildSourceSemanticRequest({ ...selected, attribution_context: attribution,
+      generationTask: { ...generationTask, responsibility: { kind: "all_supplied_meaning" } } });
+    expect(full.source_request.original_source).toBe(request.source_request.original_source);
+    expect(full.source_request.source_assertions).toEqual(request.source_request.source_assertions);
+    expect(full.source_request.generation_task?.original_query).toBe(generationTask.original_query);
+    expect(sourceSemanticSystemPrompt(full)).toBe(sourceSemanticSystemPrompt(request));
+    expect(() => buildSourceSemanticRequest({ ...selected, assertionIds: [1], sourceScope: undefined, generationTask }))
+      .toThrow(/complete.source/u);
+    expect(() => parseSourceSemanticRequest({ ...request, source_request: {
+      ...request.source_request, original_source: input.sourceCorpus.trim() + " changed" } })).toThrow(/original source/u);
   });
 
   it("keeps profiles and full revision context while rejecting presentation changes within a parent chain", () => {

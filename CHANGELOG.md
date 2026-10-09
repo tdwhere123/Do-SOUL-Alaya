@@ -8,9 +8,17 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.11.0, engine gateway 1.0.0
+## Unreleased — protocol 13.12.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.12.0 adds an opt-in source generation task for a single original-query
+family. Complete original source text and the unchanged source catalog are supplied
+in both full and scoped responsibility modes. Strict model responses cannot set
+host task metadata; admission binds it to the draft, H identity and native descriptor.
+Scoped H explicitly leaves other meaning unassessed. Structural gaps and native
+Q/C execution remain unchanged; task declarations do not certify semantic fidelity.
+Absent-task request bytes, prompts and H identities remain unchanged.
 
 Protocol 13.11.0 shares existing producer envelope admission policy with H v8/v9
 and Q/C generation schemas. Interpreted outcomes require their payload; H negative

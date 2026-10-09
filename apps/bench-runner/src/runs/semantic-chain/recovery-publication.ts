@@ -261,6 +261,7 @@ export async function publishInitialRecoverySemantics(input: Readonly<{
     descriptorExportSourceIds: window.window.map(row => row.source_id),
     populations: [{ name: window.population, nativeSnapshotPath: window.native_snapshot_path,
       model: window.source_model, requestProfile: window.source_request_profile,
+      openSemantics: parseExtractionOpenSemanticsGeneration(window.open_semantics),
       cacheRoots: owner.map(row => row.cacheRoot), publicationAssociations: active }] });
   const report = readNativeSourcePublicationReport(snapshotPath, window.native_snapshot_path);
   const exportRows = report.sources.flatMap(source => source.correspondence_descriptor === undefined ? [] : [{

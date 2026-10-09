@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SourceSemanticGenerationTaskSchema } from "./source-semantic-generation-task.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { SourceSemanticDiagnosticsSchema } from "./source-semantic-diagnostics.js";
@@ -55,6 +56,7 @@ const SourceSemanticInterpretationBaseSchema = z.object({
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,
+  generation_task: SourceSemanticGenerationTaskSchema.optional(),
   mentions: z.array(SourceSemanticNormalizedMentionSchema).max(512).readonly(),
   referents: SourceSemanticGraphFields.referents,
   frames: SourceSemanticGraphFields.frames,

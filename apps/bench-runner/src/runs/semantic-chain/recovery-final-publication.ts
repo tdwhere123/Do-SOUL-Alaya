@@ -67,6 +67,7 @@ export function interpretCompleteRecoverySourceChild(input: Readonly<{
       assertionIds: request.source_request.source_assertions.map(row => row.assertion_id),
       source_id: "unbound", source_version: "unbound", producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
       producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION,
+      ...(request.source_request.generation_task === undefined ? {} : { generationTask: request.source_request.generation_task }),
       ...(request.source_request.attribution_context === undefined ? {} : {
         attribution_context: request.source_request.attribution_context }) } });
   const cached = inspectCachedSourceSemantic(cacheRoot, line.key, model, requestProfile);
@@ -290,6 +291,7 @@ async function publishInterpretedChild(admitted: ReturnType<typeof admitFinalChi
     descriptorExportSourceIds: window.window.map(row => row.source_id),
     populations: [{ name: window.population, nativeSnapshotPath: window.native_snapshot_path,
       model: window.source_model, requestProfile: window.source_request_profile,
+      openSemantics: parseExtractionOpenSemanticsGeneration(window.open_semantics),
       cacheRoots: owners.map(row => row.cacheRoot), publicationAssociations: active }] });
   const report = readNativeSourcePublicationReport(snapshotPath, window.native_snapshot_path);
   const exported = report.sources.flatMap(source => source.correspondence_descriptor === undefined ? [] : [{

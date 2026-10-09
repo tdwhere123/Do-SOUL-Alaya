@@ -3,7 +3,7 @@ import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SOURCE_SEMANTIC_RESPONSE_CONTRACT, canonicalJson, type SourceInterpretationProfile,
   SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts, type SourceSemanticGenerationSchemaContract,
-  type UtteranceAttribution
+  type UtteranceAttribution, SourceSemanticGenerationTaskSchema, type SourceSemanticGenerationTask
 } from "@do-soul/alaya-protocol";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import {
@@ -58,6 +58,10 @@ export function parseSourceSemanticRequestLine(
       sourceSemanticPresentationContracts(parseExtractionOpenSemanticsGeneration(config.openSemantics).generation_schema_contract).generation_schema_contract) {
     throw new AlayaError("CONFLICT", "source semantic request schema differs from its generation");
   }
+  if (config.openSemantics !== undefined && canonicalJson(request.source_request.generation_task ?? null) !==
+      canonicalJson(parseExtractionOpenSemanticsGeneration(config.openSemantics).generation_task ?? null)) {
+    throw new AlayaError("CONFLICT", "source semantic request task differs from its generation");
+  }
   const expected = prepareSourceSemanticRequestLine(request, line.unitKeys, config);
   if (canonicalJson(line) !== canonicalJson(expected)) {
     throw new AlayaError("CONFLICT", "source semantic request line identity mismatch");
@@ -86,6 +90,7 @@ export type ExtractionOpenSemanticsGeneration = Readonly<{
   cache_contract: typeof SOURCE_SEMANTIC_CACHE_CONTRACT;
   generation_view_contract?: SourceSemanticGenerationViewContract;
   generation_schema_contract?: SourceSemanticGenerationSchemaContract;
+  generation_task?: SourceSemanticGenerationTask;
   revisions?: readonly SourceSemanticRevision[];
 }>;
 
@@ -101,16 +106,17 @@ export const EXTRACTION_OPEN_SEMANTICS_GENERATION: ExtractionOpenSemanticsGenera
 /** One generation owner for configuration, manifest replay and typed cache admission. */
 export function parseExtractionOpenSemanticsGeneration(value: unknown): ExtractionOpenSemanticsGeneration {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new AlayaError("CONFLICT", "invalid open semantics generation");
-  const { revisions, generation_view_contract, generation_schema_contract, ...base } = value as Record<string, unknown>;
+  const { revisions, generation_view_contract, generation_schema_contract, generation_task, ...base } = value as Record<string, unknown>;
   if (canonicalJson(base) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
     throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
   }
-  const selected = generation_view_contract === undefined && generation_schema_contract === undefined
+  const selected = generation_view_contract === undefined && generation_schema_contract === undefined && generation_task === undefined
     ? EXTRACTION_OPEN_SEMANTICS_GENERATION : Object.freeze({ ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
     ...(generation_view_contract === undefined ? {} : {
       generation_view_contract: SourceSemanticGenerationViewContractSchema.parse(generation_view_contract) }),
     ...(generation_schema_contract === undefined ? {} : {
-      generation_schema_contract: SourceSemanticGenerationSchemaContractSchema.parse(generation_schema_contract) }) });
+      generation_schema_contract: SourceSemanticGenerationSchemaContractSchema.parse(generation_schema_contract) }),
+    ...(generation_task === undefined ? {} : { generation_task: SourceSemanticGenerationTaskSchema.parse(generation_task) }) });
   if (revisions === undefined) return selected;
   if (!Array.isArray(revisions) || revisions.length === 0 || revisions.length > 256 ||
       Buffer.byteLength(JSON.stringify(revisions), "utf8") > 1_000_000) {
@@ -138,6 +144,9 @@ export function assertExclusiveExtractionGeneration(input: ExtractionGenerationI
   if (input.sourcePacking === "complete-source" && input.openSemantics === undefined) {
     throw new AlayaError("VALIDATION", "complete-source packing requires open semantics");
   }
+  if (input.openSemantics?.generation_task !== undefined && input.sourcePacking !== undefined && input.sourcePacking !== "complete-source") {
+    throw new AlayaError("VALIDATION", "source generation task requires complete-source packing");
+  }
 }
 
 export function extractionTypedArtifactMode(input: ExtractionGenerationInput): ExtractionTypedArtifactMode | undefined {
@@ -152,8 +161,10 @@ export function extractionArtifactPrompt(
   openSemantics?: ExtractionOpenSemanticsGeneration
 ): string {
   assertExclusiveExtractionGeneration({ sourceInterpretationProfile: profile, openSemantics });
-  if (openSemantics !== undefined) return sourceSemanticGenerationSystemPrompt(
-    parseExtractionOpenSemanticsGeneration(openSemantics).generation_schema_contract);
+  if (openSemantics !== undefined) {
+    const generation = parseExtractionOpenSemanticsGeneration(openSemantics);
+    return sourceSemanticGenerationSystemPrompt(generation.generation_schema_contract, generation.generation_task);
+  }
   return profile === undefined ? OFFICIAL_API_SYSTEM_PROMPT : OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT;
 }
 
@@ -202,6 +213,7 @@ export function sourceSemanticArtifactPreparations(sourceCorpus: string, packing
       sourceCorpus,
       ...(generation.generation_schema_contract === undefined ? {} : { generationSchemaContract: generation.generation_schema_contract }),
       ...(generation.generation_view_contract === undefined ? {} : { generationViewContract: generation.generation_view_contract }),
+      ...(generation.generation_task === undefined ? {} : { generationTask: generation.generation_task }),
       ...(source.source_scope === undefined ? {} : { sourceScope: source.source_scope }),
       assertionIds: source.source_assertions.map((row) => row.assertion_id),
       source_id: "unbound", source_version: "unbound",

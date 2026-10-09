@@ -785,6 +785,28 @@ float off that group's predicate frame. An older open source interpretation is n
 The profile-bound source-interpretation-v2 route and its recorded bytes remain
 separate regression contracts.
 
+Source generation may opt into `source-semantic-generation-task-v1` through the
+existing extraction generation config for one original-query family. Both
+`all_supplied_meaning` and `original_query_task` receive the same complete original
+source, catalog, roles and recorded attribution. The query cue supplies no source
+fact or identity relation. Scoped responsibility preserves every dependency needed
+for represented claims and declares other meaning `unassessed`, including meaning
+inside an otherwise represented assertion. Structural accounting remains unchanged;
+neither accounted units nor a task declaration certify semantic completeness.
+
+The shared source-request owner derives original text from `sourceCorpus` and
+verifies its digest, indexed units and locations. Strict model table/inline output
+cannot set task metadata. After materialization the host attaches the request task
+to `SourceSemanticHostBoundDraftSchema`; normalization, cache readmission, revisions
+and draft or normalized publication retain it. H identity binds the exact cue bytes.
+Full delivery includes the task; lightweight descriptors disclose responsibility
+without repeating the cue. Later use under another query remains task-scoped and
+cannot establish omitted-fact absence. Explicit abstention has no H and is not a
+corpus absence certificate. Raw text plus catalog duplication consumes the same
+finite input budget in both modes. Without a task the existing bytes and identities
+are preserved. Native population membership, inspection, preflight and publication
+associations regenerate requests from the same opt-in generation config.
+
 The additive MCP request may bind finite preview byte extents to exact current
 source tuples. Native source reads expose the bytes actually observed and retain
 unread tails as open; an available empty body is complete. A later `prepare_source`

@@ -33,6 +33,10 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION, prepareSourceSemanticRequestLine,
   sourceSemanticArtifactPreparations, parseExtractionOpenSemanticsGeneration } from "../../../runs/extraction/request-artifact.js";
 
 const roots: string[] = [];
+const generationTask = { contract: "source-semantic-generation-task-v1" as const,
+  context: "complete_original_source" as const, original_query: "Which file format did Mira use for the Atlas export?",
+  responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
+const taskGeneration = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION, generation_task: generationTask };
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 it("reports an available empty native source as complete under a tuple-bound preview", async () => {
@@ -175,6 +179,7 @@ it("preserves both source clocks, revisions and every document newline through n
   const recoveryRoot = join(root, "recovery");
   const recoveryConfigPath = join(root, "recovery-config.json");
   writeFileSync(recoveryConfigPath, JSON.stringify({ native_snapshot_path: snapshotPath, population: "native-records",
+    open_semantics: taskGeneration,
     source_model: "gemini-3.1-flash-lite", source_request_profile: "gemini-3.1-low-v1",
     source_cache_root: join(root, "source-cache"), recorded_at: "2026-09-25T00:00:00.000Z",
     producer_commit: "0".repeat(40), allowance: { total_work_units: 4_000_000_000,
@@ -226,7 +231,7 @@ it("preserves both source clocks, revisions and every document newline through n
   const cacheRoot = join(root, "source-cache"); mkdirSync(cacheRoot);
   const options = { variant: "native_source_snapshot" as const,
     nativeSourcePopulation: { name: "native-records", snapshotPath }, cacheRoot,
-    sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
+    sourcePacking: "complete-source" as const, openSemantics: taskGeneration };
   const inspection = await inspectExtractionAuthority({ ...options, action: "sample",
     revision: readCurrentExtractionAuthorityRevision() });
   expect(inspection.observation.dataset).toMatchObject({ variant: "native_source_snapshot",
@@ -239,6 +244,11 @@ it("preserves both source clocks, revisions and every document newline through n
     max_output_tokens: 16_384, output_token_field: "maxOutputTokens",
     maximum_attempts_per_key: 1 });
   expect(preflight.ready_requests.map(row => row.key)).toEqual(inspection.missingKeys);
+  for (const row of preflight.ready_requests) {
+    const request = parseSourceSemanticRequest(JSON.parse(row.userPrompt));
+    expect(request.source_request.generation_task).toEqual(generationTask);
+    expect(records.map(record => record.content_bytes)).toContain(request.source_request.original_source);
+  }
   expect(preflight.ready_requests.some(row => row.userPrompt.includes("Mira used Parquet for the Atlas export."))).toBe(true);
   expect(preflight.planned_requests.every(row => row.wire_sha256?.length === 64)).toBe(true);
   const sampleScope = createExtractionSampleScope(inspection.missingKeys, inspection);
@@ -273,13 +283,19 @@ it("preserves both source clocks, revisions and every document newline through n
   const filled = await runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 });
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(filled.newlyExtracted).toBe(2);
+  for (const row of preflight.ready_requests) {
+    const cached = inspectCachedSourceSemantic(cacheRoot, row.key, "gemini-3.1-flash-lite", "gemini-3.1-low-v1");
+    if (cached.status !== "hit") throw new Error("task-bearing native cache required");
+    expect(cached.admitted.draft?.generation_task).toEqual(generationTask);
+    expect(cached.admitted.interpretation?.generation_task).toEqual(generationTask);
+  }
   expect(preflight.ready_requests.every(row =>
     inspectCachedSourceSemantic(cacheRoot, row.key, "gemini-3.1-flash-lite", "gemini-3.1-low-v1").status === "hit"))
     .toBe(true);
   const preflightPath = join(root, "source-preflight.json");
   writeFileSync(preflightPath, JSON.stringify(preflight));
   const associations = await prepareSourcePublicationAssociations({ name: "native-records", nativeSnapshotPath: snapshotPath,
-    model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1" },
+    model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", openSemantics: taskGeneration },
   [{ cacheRoot, retainedPreparationPath: preflightPath }], join(root, "source-associations.json"));
   expect(associations.sources.every(row => row.status === "associated")).toBe(true);
   expect(readCompleteRetainedSourceResponse({ cacheRoot, preflight, line: preflight.ready_requests[0]! }))
@@ -289,6 +305,7 @@ it("preserves both source clocks, revisions and every document newline through n
     workspaceId: "native-source-test", runId: "native-source-test", producerCommit: "0".repeat(40),
     populations: [{ name: "native-records", nativeSnapshotPath: snapshotPath,
       model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1",
+      openSemantics: taskGeneration,
       cacheRoots: [cacheRoot], publicationAssociations: associations.publicationAssociations }] });
   expect(qualified.published_count).toBe(2);
   expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
@@ -303,6 +320,17 @@ it("preserves both source clocks, revisions and every document newline through n
   const initialPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(frozen.initial_chain_root, "prepare.json")));
   const initialQuery = initialPlan.queries[0];
   if (initialQuery?.status !== "ready") throw new Error("original Q was not admitted");
+  const qualifiedPlan = await prepareSemanticChain({ ...initialPlan.config, snapshot_path: initialQualified.snapshot_path,
+    snapshot_sha256: initialQualified.snapshot_sha256 }, join(root, "task-discovery"));
+  const qualifiedQuery = qualifiedPlan.queries[0];
+  if (qualifiedQuery?.status !== "ready") throw new Error("qualified task discovery required");
+  expect(qualifiedQuery.descriptors).not.toHaveLength(0);
+  expect(qualifiedQuery.descriptors.every(descriptor => descriptor.generation_task?.responsibility.kind === "original_query_task"))
+    .toBe(true);
+  for (const descriptor of qualifiedQuery.descriptors) {
+    expect(descriptor.generation_task).not.toHaveProperty("original_query");
+    expect(descriptor.interpretation?.generation_task).toEqual(generationTask);
+  }
   await withSemanticChainDaemon({ ...initialPlan.config, snapshot_path: initialQualified.snapshot_path,
     snapshot_sha256: initialQualified.snapshot_sha256 }, recoveryRoot, async daemon => {
     const missingC = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
@@ -421,7 +449,7 @@ it("preserves both source clocks, revisions and every document newline through n
   const selectedNative = verified.records.find(row => row.source_id === records[0].source_id)!;
   const mixed = await prepareSourcePublicationAssociations({ name: "native-records", nativeSnapshotPath: snapshotPath,
     model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1",
-    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    openSemantics: taskGeneration,
     activeRevision: { kind: "native", source_id: records[0].source_id, source_version: records[0].source_version,
       record_id: selectedNative.record.identity, key: revision.child_key, generation: revisedGeneration } }, [
       { cacheRoot, retainedPreparationPath: preflightPath },

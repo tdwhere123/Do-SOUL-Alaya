@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
+import { SourceSemanticGenerationTaskSummarySchema, sourceSemanticGenerationTaskSummary } from "./source-semantic-generation-task.js";
 import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
@@ -83,9 +85,14 @@ export const SourceSemanticHandleDescriptorSchema = z.object({
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
   contract_version: BoundedLabelSchema,
+  generation_task: SourceSemanticGenerationTaskSummarySchema.optional(),
   interpretation: SourceSemanticInterpretationSchema.optional(),
   source_disclosure: SourceDisclosureSchema.optional()
 }).strict().superRefine((value, context) => {
+  if (value.interpretation !== undefined && canonicalJson(value.generation_task ?? null) !== canonicalJson(
+    value.interpretation.generation_task === undefined ? null : sourceSemanticGenerationTaskSummary(value.interpretation.generation_task))) {
+    context.addIssue({ code: "custom", path: ["generation_task"], message: "descriptor task differs from its interpretation" });
+  }
   if (value.interpretation !== undefined && value.source_disclosure === undefined) {
     context.addIssue({ code: "custom", path: ["source_disclosure"], message: "delivered interpretation requires disclosure" });
   }

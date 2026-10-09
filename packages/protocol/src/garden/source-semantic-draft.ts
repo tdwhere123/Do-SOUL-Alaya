@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SourceSemanticGenerationTaskSchema } from "./source-semantic-generation-task.js";
 import { SOURCE_SEMANTIC_MIN_OCCURRENCES, sourceSemanticOwnershipProblems,
   sourceSemanticStructuralEdges } from "./source-semantic-structure.js";
 import { SourceAssertionIdSchema } from "../evidence/source-selection.js";
@@ -307,3 +308,8 @@ export const SourceSemanticDraftSchema = z.object({
 }).strict().superRefine((draft, context) => refineSourceSemanticGraph(draft, context)).readonly();
 
 export type SourceSemanticDraft = z.infer<typeof SourceSemanticDraftSchema>;
+
+/** The receiver attaches request metadata after strict model-draft admission. */
+export const SourceSemanticHostBoundDraftSchema = SourceSemanticDraftSchema.unwrap()
+  .safeExtend({ generation_task: SourceSemanticGenerationTaskSchema.optional() }).readonly();
+export type SourceSemanticHostBoundDraft = z.infer<typeof SourceSemanticHostBoundDraftSchema>;

@@ -15,6 +15,9 @@ export function sourceSemanticGenerationInput(requestValue: SourceSemanticReques
       attribution_context: source.attribution_context,
       ...(source.attribution_context.status === "captured" ? { assertion_locations: source.assertion_locations } : {}),
       source_assertions: source.source_assertions,
+      ...(source.generation_task === undefined ? {} : {
+        generation_task: source.generation_task, original_source: source.original_source
+      }),
       ...(source.revision === undefined ? {} : { revision: source.revision })
     },
     ...(request.profile === undefined ? {} : { profile: request.profile })

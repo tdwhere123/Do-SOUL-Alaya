@@ -8,6 +8,7 @@ import {
   sourceSemanticTableJsonSchema, sourceSemanticInlineJsonSchema,
   SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT,
   SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts,
+  SourceSemanticGenerationTaskSchema, canonicalJson, type SourceSemanticGenerationTask,
   type SourceSemanticGenerationSchemaContract,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
@@ -71,6 +72,8 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   source_scope: z.literal("complete-source").optional(),
   generation_schema_contract: SourceSemanticGenerationSchemaContractSchema,
   generation_view_contract: SourceSemanticGenerationViewContractSchema.optional(),
+  generation_task: SourceSemanticGenerationTaskSchema.optional(),
+  original_source: z.string().max(1_000_000).optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
@@ -115,6 +118,7 @@ export type SourceSemanticProposalInput = Readonly<{
   assertionIds: readonly number[];
   sourceScope?: SourceSemanticOpenRequestBody["source_scope"];
   generationViewContract?: SourceSemanticGenerationViewContract;
+  generationTask?: SourceSemanticGenerationTask;
   generationSchemaContract?: SourceSemanticGenerationSchemaContract;
   source_id: string;
   source_version: string;
@@ -223,6 +227,7 @@ export function parseSourceSemanticRequest(value: unknown): SourceSemanticReques
     throw new AlayaError("VALIDATION", "source semantic request has duplicate assertion identities");
   }
   const request = Object.freeze({ ...parsed, source_request }) as SourceSemanticRequest;
+  assertSourceSemanticTaskContext(request);
   requestCatalogs.set(request, sourceSemanticRequestCatalog(request));
   if (source_request.revision !== undefined) validateSourceSemanticRevision(request, source_request.revision);
   if (Buffer.byteLength(JSON.stringify(request), "utf8") > 1_000_000) {
@@ -238,10 +243,37 @@ export function sourceSemanticRequestCatalog(request: SourceSemanticRequest): So
   return buildSourceReferenceCatalog(request.source_digest, request.source_request.source_assertions, semanticSha256);
 }
 
+function assertionLocations(sourceCorpus: string, units: ReturnType<typeof indexSourceSemanticUnits>) {
+  return units.map(row => ({ assertion_id: row.assertion_id,
+    source_utf8_span: [Buffer.byteLength(sourceCorpus.slice(0, row.start)), Buffer.byteLength(sourceCorpus.slice(0, row.end))] }));
+}
+
+/** Complete original text and catalog units have one source owner; task scope does not select input. */
+function assertSourceSemanticTaskContext(request: SourceSemanticRequest): void {
+  const body = request.source_request;
+  if ((body.generation_task === undefined) !== (body.original_source === undefined)) {
+    throw new AlayaError("VALIDATION", "source generation task and original source must appear together");
+  }
+  if (body.generation_task === undefined || body.original_source === undefined) return;
+  if (body.source_scope !== "complete-source" || semanticSha256(body.original_source) !== request.source_digest) {
+    throw new AlayaError("CONFLICT", "source generation task requires its exact complete original source");
+  }
+  const units = indexSourceSemanticUnits(body.original_source);
+  if (canonicalJson(units.map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role }))) !==
+      canonicalJson(body.source_assertions) || canonicalJson(assertionLocations(body.original_source, units)) !==
+      canonicalJson(body.assertion_locations)) {
+    throw new AlayaError("CONFLICT", "source generation task original text differs from its source units or locations");
+  }
+  bindUtteranceAttribution(body.attribution_context, body.original_source);
+}
+
 export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticHostPreparation {
   rejectForbiddenProposalInput(input);
   const units = input.sourceScope === "complete-source"
     ? indexSourceSemanticUnits(input.sourceCorpus) : selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds);
+  if (input.generationTask !== undefined && input.sourceScope !== "complete-source") {
+    throw new AlayaError("VALIDATION", "source generation task requires complete-source input");
+  }
   if (input.sourceScope === "complete-source" && (units.length !== input.assertionIds.length ||
     units.some((unit, index) => unit.assertion_id !== input.assertionIds[index]))) {
     throw new AlayaError("CONFLICT", "complete source scope requires every source unit in original order");
@@ -254,6 +286,7 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     source_digest: sourceDigest, ...(input.profile === undefined ? {} : { profile: input.profile }) });
   if (input.revision !== undefined) SourceSemanticRevisionSchema.parse(input.revision);
   if (input.generationViewContract !== undefined) SourceSemanticGenerationViewContractSchema.parse(input.generationViewContract);
+  if (input.generationTask !== undefined) SourceSemanticGenerationTaskSchema.parse(input.generationTask);
   const presentation = sourceSemanticPresentationContracts(input.generationSchemaContract);
   const capacity = sourceReferenceCapacityReason(units);
   if (capacity !== null) {
@@ -275,12 +308,11 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
     generation_schema_contract: presentation.generation_schema_contract,
     ...(input.generationViewContract === undefined ? {} : { generation_view_contract: input.generationViewContract }),
+    ...(input.generationTask === undefined ? {} : { generation_task: input.generationTask, original_source: input.sourceCorpus }),
     producer_capability: producer,
     resource_limits: limits,
     attribution_context: bindUtteranceAttribution(input.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION, input.sourceCorpus),
-    assertion_locations: units.map((row) => ({
-      assertion_id: row.assertion_id, source_utf8_span: [Buffer.byteLength(input.sourceCorpus.slice(0, row.start)), Buffer.byteLength(input.sourceCorpus.slice(0, row.end))]
-    })),
+    assertion_locations: assertionLocations(input.sourceCorpus, units),
     source_assertions: units.map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role }))
   });
   const request = parseSourceSemanticRequest({
@@ -544,7 +576,8 @@ export function sourceSemanticCorrespondenceResponseJsonSchema(
 
 /** Current source-table prompt bytes are owned by the table guidance. */
 export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
-  return sourceSemanticGenerationSystemPrompt(parseSourceSemanticRequest(request).source_request.generation_schema_contract);
+  const source = parseSourceSemanticRequest(request).source_request;
+  return sourceSemanticGenerationSystemPrompt(source.generation_schema_contract, source.generation_task);
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [

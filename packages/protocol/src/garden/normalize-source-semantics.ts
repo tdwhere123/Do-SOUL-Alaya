@@ -12,8 +12,8 @@ import {
   type SourceReferenceCatalog
 } from "../evidence/source-reference.js";
 import {
-  SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticDraftSchema,
-  type SourceSemanticDraft, type SourceSemanticMention
+  SOURCE_SEMANTIC_PACKET_CONTRACT, SourceSemanticHostBoundDraftSchema,
+  type SourceSemanticDraft, type SourceSemanticHostBoundDraft, type SourceSemanticMention
 } from "./source-semantic-draft.js";
 import {
   SourceSemanticInterpretationSchema, SourceSemanticSourceBindingSchema,
@@ -72,7 +72,7 @@ function normalize(input: SourceSemanticNormalizationInput): SourceSemanticNorma
   } catch (error) { return fromCaught(error); }
   const mentions = resolveMentions(accounted.mentions, input.catalog, input.sha256);
   if (mentions.status !== "ok") return mentions;
-  return assemble(accounted, mentions.value, input, meter);
+  return assemble(accounted, mentions.value, input, meter, draft.value.generation_task);
 }
 
 function gateResources(
@@ -93,10 +93,10 @@ function gateResources(
   }
 }
 
-function parseDraft(value: unknown, meter: SourceSemanticResourceLedger): Ok<SourceSemanticDraft> | SourceSemanticNormalizationResult {
+function parseDraft(value: unknown, meter: SourceSemanticResourceLedger): Ok<SourceSemanticHostBoundDraft> | SourceSemanticNormalizationResult {
   try { chargeSourceSemanticValidation(value, meter); }
   catch (error) { return fromCaught(error); }
-  const parsed = SourceSemanticDraftSchema.safeParse(value);
+  const parsed = SourceSemanticHostBoundDraftSchema.safeParse(value);
   return parsed.success ? { status: "ok", value: parsed.data } : fromIssues(parsed.error.issues);
 }
 
@@ -131,7 +131,8 @@ function assemble(
   draft: SourceSemanticDraft,
   mentions: readonly SourceSemanticNormalizedMention[],
   input: SourceSemanticNormalizationInput,
-  meter: SourceSemanticResourceLedger
+  meter: SourceSemanticResourceLedger,
+  generationTask: SourceSemanticHostBoundDraft["generation_task"]
 ): SourceSemanticNormalizationResult {
   const source = SourceSemanticSourceBindingSchema.safeParse(input.source);
   if (!source.success) return fromIssues(source.error.issues);
@@ -146,6 +147,7 @@ function assemble(
     producer_id: input.producer_id,
     producer_version: input.producer_version,
     contract_version: input.contract_version,
+    ...(generationTask === undefined ? {} : { generation_task: generationTask }),
     mentions,
     referents: draft.referents,
     frames: draft.frames,

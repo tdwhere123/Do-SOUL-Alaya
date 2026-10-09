@@ -5,7 +5,7 @@ import {
   createSourceSemanticInterpretationPublication, deriveAddressableSpanViews, EvidenceService,
   fieldContractSha256, type FieldFormationStores
 } from "@do-soul/alaya-core";
-import { prepareSourceSemanticRequest, sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
+import { sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
   type SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
 import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson,
   sourceSemanticInterpretationIdentity,
@@ -25,7 +25,8 @@ import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
 import { readVerifiedNativeSourceSnapshot } from "./native.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
-import { SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION } from "../../extraction/request-artifact.js";
+import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
+  type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 
 type UnsupportedPreparation = Extract<SourceSemanticHostPreparation, { status: "unsupported_source" }>;
 type HostPreparation = Readonly<{ status: "ready" }> | UnsupportedPreparation;
@@ -68,6 +69,7 @@ type SourcePublicationPopulationBase = Readonly<{
   model: string;
   requestProfile: ExtractionRequestProfile;
   publicationAssociations?: readonly SourcePublicationAssociation[];
+  openSemantics?: ExtractionOpenSemanticsGeneration;
 }>;
 export type SourcePublicationPopulation = SourcePublicationPopulationBase & (
   Readonly<{ dataDir: string; pinnedMetaRoot: string; questionWindow?: Readonly<{ offset: number; limit: number }>;
@@ -201,7 +203,7 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
       nativePopulation.nativeSnapshotPath === undefined)) {
     throw new AlayaError("VALIDATION", "native source publication requires one complete source population");
   }
-  const preparations = prepareCensusSources(census);
+  const preparations = prepareCensusSources(census, input.populations);
   const descriptorExport = new Set(input.descriptorExportSourceIds ?? []);
   if (descriptorExport.size !== (input.descriptorExportSourceIds?.length ?? 0) || descriptorExport.size > 10 ||
       [...descriptorExport].some(id => !census.some(row => row.records.some(source => source.source_id === id)))) {
@@ -228,14 +230,16 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   }));
 }
 
-function prepareCensusSources(census: readonly SourceCensus[]): ReadonlyMap<string, HostPreparation> {
+function prepareCensusSources(census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]): ReadonlyMap<string, HostPreparation> {
   const preparations = new Map<string, HostPreparation>();
-  for (const source of census.flatMap((population) => population.records)) {
-    const result = prepareSourceSemanticRequest({ sourceCorpus: source.content_bytes,
-      assertionIds: source.units.map((unit) => unit.assertion_id), sourceScope: "complete-source",
-      source_id: source.source_id, source_version: source.source_version,
-      producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION });
-    preparations.set(source.source_id, result.status === "ready" ? { status: "ready" } : result);
+  for (const population of census) {
+    const config = populations.find(row => row.name === population.population)?.openSemantics;
+    const generation = config ?? EXTRACTION_OPEN_SEMANTICS_GENERATION;
+    for (const source of population.records) {
+      const [prepared] = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
+      if (prepared === undefined) throw new AlayaError("CONFLICT", "complete source publication has no host preparation");
+      preparations.set(source.source_id, prepared.status === "ready" ? { status: "ready" } : prepared.disposition);
+    }
   }
   return preparations;
 }

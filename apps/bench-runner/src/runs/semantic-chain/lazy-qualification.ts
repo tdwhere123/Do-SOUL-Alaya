@@ -331,7 +331,7 @@ export async function sealLazyQualificationFinal(root: string) {
     : await publishSourceSemanticSnapshot({ snapshotPath, dataDirRoot: join(root, "final-publication-runtime"),
       recordedAt: config.recorded_at, producerCommit: config.producer_commit,
       workspaceId: config.chain.workspace_id, runId: config.chain.run_id,
-      populations: [{ ...population, cacheRoots: config.cache_owners.map(owner => owner.cacheRoot),
+      populations: [{ ...population, openSemantics: generation, cacheRoots: config.cache_owners.map(owner => owner.cacheRoot),
         publicationAssociations: associations as readonly SourcePublicationAssociation[] }] });
   if (report.snapshot_path !== snapshotPath || report.census_count !== census.records.length ||
       hashRegularFileNoFollow(snapshotPath) !== report.db_sha256 ||

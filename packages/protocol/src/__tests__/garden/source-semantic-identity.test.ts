@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
 import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
 import { SourceSemanticInterpretationSchema } from "../../garden/source-semantic-interpretation.js";
+import { SourceSemanticHandleDescriptorSchema } from "../../garden/source-semantic-worker.js";
+import { sourceSemanticGenerationTaskSummary } from "../../garden/source-semantic-generation-task.js";
 import { UNKNOWN_UTTERANCE_ATTRIBUTION, UTTERANCE_ATTRIBUTION_CONTRACT } from "../../conversation/utterance-attribution.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import { SourceSemanticCorrespondenceSchema } from "../../recall/conditional-field/semantic-correspondence.js";
@@ -77,6 +79,29 @@ it("keeps query-semantics identity independent of source interpretation", () => 
   expect(querySemanticsId).toBe(sourceSemanticQueryIdentity(query, sha));
   expect(querySemanticsId).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
   expect(SourceSemanticQuerySchema.safeParse({ ...query, source_interpretation_id: digest }).success).toBe(false);
+});
+
+it("binds declared responsibility and exact cue bytes while checking full and lightweight task disclosure", () => {
+  const generation_task = { contract: "source-semantic-generation-task-v1" as const, context: "complete_original_source" as const,
+    original_query: "What was sent?", responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
+  const scoped = { ...interpretation, generation_task };
+  const identity = sourceSemanticInterpretationIdentity(scoped, sha);
+  expect(identity).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
+  expect(sourceSemanticInterpretationIdentity({ ...scoped, generation_task: { ...generation_task, original_query: "What was sent? " } }, sha))
+    .not.toBe(identity);
+  expect(sourceSemanticInterpretationIdentity({ ...scoped, generation_task: { ...generation_task,
+    responsibility: { kind: "all_supplied_meaning" } } }, sha)).not.toBe(identity);
+  expect(sourceSemanticInterpretationPreimage(interpretation)).not.toHaveProperty("generation_task");
+  const descriptor = { interpretation_id: identity, source_id: "src", source_version: "1", content_digest: digest,
+    producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
+    generation_task: sourceSemanticGenerationTaskSummary(generation_task) };
+  expect(SourceSemanticHandleDescriptorSchema.parse(descriptor).generation_task).not.toHaveProperty("original_query");
+  const full = { ...descriptor, interpretation: scoped, source_disclosure: { material_kind: "interpretation", source_binding: "unbound",
+    evaluated_as_of: "2026-10-09T00:00:00Z", validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
+    proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+  expect(SourceSemanticHandleDescriptorSchema.parse(full).interpretation?.generation_task).toEqual(generation_task);
+  expect(SourceSemanticHandleDescriptorSchema.safeParse({ ...full, generation_task: undefined }).success).toBe(false);
+  expect(SourceSemanticHandleDescriptorSchema.safeParse({ ...full, interpretation }).success).toBe(false);
 });
 
 it("binds exact approved query context and scoped utterance attribution into Q and H identities", () => {

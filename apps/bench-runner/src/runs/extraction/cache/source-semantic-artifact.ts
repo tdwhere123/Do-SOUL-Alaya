@@ -1,11 +1,11 @@
 import { interactiveSourceTransportBinding } from "../request-profile.js";
 import {
   parseSourceSemanticRequest, completeEmptySourceSemantics, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES,
-  type SourceSemanticProposalResult
+  type SourceSemanticProposalResult, type SourceSemanticRequest
 } from "@do-soul/alaya-soul";
 import {
   AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT,
-  SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT, type UtteranceAttribution
+  SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT
 } from "@do-soul/alaya-protocol";
 import { readCachedEntry, writeCachedExtraction, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { computeCacheKey } from "../../compile-seed/cache/cache-key.js";
@@ -80,9 +80,11 @@ function unboundProposal(sourceCorpus: string): {
   };
 }
 
-function proposalForRequest(sourceCorpus: string, assertionIds: readonly number[], attribution?: UtteranceAttribution) {
-  return { ...unboundProposal(sourceCorpus), assertionIds,
-    ...(attribution === undefined ? {} : { attribution_context: attribution }) };
+function proposalForRequest(sourceCorpus: string, request: SourceSemanticRequest) {
+  const body = request.source_request;
+  return { ...unboundProposal(sourceCorpus), assertionIds: body.source_assertions.map(row => row.assertion_id),
+    attribution_context: body.attribution_context,
+    ...(body.generation_task === undefined ? {} : { generationTask: body.generation_task }) };
 }
 
 /** Two retained copies of raw JSON may each expand sixfold; host IR/refs add another escaped copy. */
@@ -120,8 +122,7 @@ function inspectInteractiveGenerateContent(
   const input = {
     config: { model: entry.model, requestProfile: entry.request_profile },
     line: typed.result.line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
-    proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id),
-      request.source_request.attribution_context)
+    proposal: proposalForRequest(typed.source_corpus, request)
   };
   const admitted = receiveSourceSemanticBatchLine(input);
   const completion = retainableOutcome(admitted);
@@ -155,8 +156,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       throw new AlayaError("CONFLICT", "deterministic open semantics cannot carry a provider receipt");
     }
     if (entry.raw_json !== "") throw new AlayaError("CONFLICT", "deterministic open semantics has nonempty output");
-    const proposal = proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id),
-      request.source_request.attribution_context);
+    const proposal = proposalForRequest(typed.source_corpus, request);
     admitted = completeEmptySourceSemantics(request, proposal);
     if (admitted.outcome.status !== "no_eligible_source" || typed.completion !== "no_eligible_source") {
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
@@ -183,8 +183,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     const input = {
       config: { model: entry.model, requestProfile: entry.request_profile },
       line, rawJson: entry.raw_json, sourceCorpus: typed.source_corpus,
-      proposal: proposalForRequest(typed.source_corpus, request.source_request.source_assertions.map((row) => row.assertion_id),
-        request.source_request.attribution_context),
+      proposal: proposalForRequest(typed.source_corpus, request),
       retained: { plan: retained.plan, provenance: retained.result.provenance }
     };
     admitted = receiveSourceSemanticBatchLine(input);
@@ -379,8 +378,7 @@ function admitSourceSemanticLine(input: SourceSemanticImportBase & {
   try {
     admitted = receiveSourceSemanticBatchLine({
       config: input.config, line: input.line, rawJson: input.rawJson, sourceCorpus: input.sourceCorpus,
-      proposal: proposalForRequest(input.sourceCorpus, request.source_request.source_assertions.map((row) => row.assertion_id),
-        request.source_request.attribution_context),
+      proposal: proposalForRequest(input.sourceCorpus, request),
       ...(input.retained === undefined ? {} : { retained: input.retained })
     });
   } catch (cause) {
@@ -483,7 +481,7 @@ export function writeDeterministicSourceSemanticArtifact(input: Readonly<{
   if (computeCacheKey(config.model, config.requestProfile, line.systemPrompt, line.userPrompt) !== line.key) {
     throw new AlayaError("CONFLICT", "deterministic open-semantics generation mismatch");
   }
-  completeEmptySourceSemantics(request, proposalForRequest(input.sourceCorpus, request.source_request.source_assertions.map((row) => row.assertion_id)));
+  completeEmptySourceSemantics(request, proposalForRequest(input.sourceCorpus, request));
   const rawJson = "";
   const entry: CachedExtractionEntry = { model: config.model, request_profile: config.requestProfile,
     cache_key: line.key, raw_json: rawJson, extracted_at: new Date().toISOString(),

@@ -30,6 +30,7 @@ function interpretationPreimage(value: SourceSemanticInterpretation) {
     producer_id: value.producer_id,
     producer_version: value.producer_version,
     contract_version: value.contract_version,
+    ...(value.generation_task === undefined ? {} : { generation_task: value.generation_task }),
     body: {
       contract: value.contract,
       mentions: value.mentions.map(({ utf8_span: _span, span_space: _space, ...mention }) => mention),

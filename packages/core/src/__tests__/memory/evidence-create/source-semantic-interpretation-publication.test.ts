@@ -44,6 +44,8 @@ import {
 const CLOCK = "2026-09-14T00:00:00.000Z";
 const ASSERTION = "Alice uses tools.";
 const SOURCE = `User: ${ASSERTION}`;
+const generationTask = { contract: "source-semantic-generation-task-v1" as const, context: "complete_original_source" as const,
+  original_query: "What does Alice use?", responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
 const databases = new Set<StorageDatabase>();
 
 afterEach(() => {
@@ -273,13 +275,14 @@ describe("source semantic interpretation publication", () => {
     const beforeRelations = countRows(fixture.database, "SELECT COUNT(*) AS n FROM relation_assertions");
     const catalog = catalogFor(ASSERTION);
     const [first, raced] = await Promise.all([
-      fixture.publication.publish(publicationInput(catalog)),
-      fixture.publication.publish(publicationInput(catalog))
+      fixture.publication.publish(publicationInput(catalog, { draft: { ...usesDraft(catalog, ASSERTION), generation_task: generationTask } })),
+      fixture.publication.publish(publicationInput(catalog, { draft: { ...usesDraft(catalog, ASSERTION), generation_task: generationTask } }))
     ]);
     expect(raced.evidence.object_id).toBe(first.evidence.object_id);
-    const again = await fixture.publication.publish(publicationInput(catalog));
+    const again = await fixture.publication.publish(publicationInput(catalog, { draft: { ...usesDraft(catalog, ASSERTION), generation_task: generationTask } }));
     expect(again.bound).toEqual(first.bound);
     expect(first.bound.semantic_status).toBe("unreviewed");
+    expect(first.bound.interpretation.generation_task).toEqual(generationTask);
     expect(first.bound.contract).toBe("published-source-interpretation-v5");
     expect(first.bound.source_target.root_id).toBe(admitted.record.identity);
     expect(first.bound.source_target.evidence_object_id).toBeNull();
@@ -322,6 +325,7 @@ describe("source semantic interpretation publication", () => {
     const checked = verifyPublishedSourceSemanticInterpretation(
       reopened.owner, rebound, REAL_SQLITE_TEST_WORKSPACE_ID
     );
+    expect(checked.bound.interpretation.generation_task).toEqual(generationTask);
     expect(checked.bound.interpretation_id).toBe(sourceInterpretationId);
     expect(checked.stored.record.identity).toBe(rootId);
     expect(countRows(reopened.database, "SELECT COUNT(*) AS n FROM memory_entries")).toBe(beforeMemory);
@@ -582,8 +586,10 @@ it("retains exact old source bytes after replacement while current interpretatio
   const original = captured("author-a"), corrected = captured("author-b");
   await admitSource(fixture, SOURCE, "1", CLOCK, null, "artifact-1", original);
   const { bound } = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION), {
-    attribution_context: original
+    attribution_context: original, draft: { ...usesDraft(catalogFor(ASSERTION), ASSERTION), generation_task: generationTask }
   }));
+  expect(bound.interpretation.generation_task).toEqual(generationTask);
+  expect(bound.interpretation.source.attribution_context).toEqual(original);
   const originalRecord = fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, bound.source_target.root_id);
   expect(originalRecord?.content_bytes).toBe(SOURCE);
   expect(originalRecord?.record.attribution_context).toEqual(original);
@@ -605,7 +611,7 @@ it("publishes only an explicitly unbound normalized interpretation with matching
   const admitted = await admitSource(fixture);
   const catalog = catalogFor(ASSERTION);
   const normalized = normalizeSourceSemantics({
-    draft: usesDraft(catalog, ASSERTION), catalog, sha256: fieldContractSha256,
+    draft: { ...usesDraft(catalog, ASSERTION), generation_task: generationTask }, catalog, sha256: fieldContractSha256,
     source: { source_id: "unbound", source_version: "unbound", content_digest: admitted.record.content_digest,
       attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
     producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
@@ -614,6 +620,7 @@ it("publishes only an explicitly unbound normalized interpretation with matching
   const { draft: _draft, ...base } = publicationInput(catalog);
   const published = await fixture.publication.publish({ ...base, interpretation: normalized.interpretation });
   expect(published.bound.interpretation.source.source_id).toBe(admitted.record.source_id);
+  expect(published.bound.interpretation.generation_task).toEqual(generationTask);
   expect(published.bound.interpretation.source.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
   await expect(fixture.publication.publish({ ...base, interpretation: {
     ...normalized.interpretation,

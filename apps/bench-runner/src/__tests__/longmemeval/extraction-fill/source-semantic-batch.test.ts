@@ -6,6 +6,7 @@ import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, prepareSourceSemanticRevision, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
+import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import * as authorityInspection from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
@@ -27,6 +28,8 @@ const PROFILE = { contract: "source-interpretation-profile-v1" as const, descrip
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
 const VARIANT = "longmemeval_s" as const;
+const generationTask = { contract: "source-semantic-generation-task-v1" as const, context: "complete_original_source" as const,
+  original_query: "What did I complete?", responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), VARIANT);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -64,18 +67,20 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
   const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
   const revisionPath = join(cacheRoot, "revisions.json");
   let generation = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
-    ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } : {}) };
+    ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, generation_task: generationTask } : {}) };
   if (revise) {
     const preview = join(cacheRoot, "base-preview.json");
-    expect(await runCli(["extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
+    if (projected) {
+      writeFileSync(preview, JSON.stringify(await preflightExtractionBatch({ variant: VARIANT, dataDir, pinnedMetaRoot,
+        cacheRoot, sourcePacking, openSemantics: generation, batch: { operation: "prepare", limits } })));
+    } else expect(await runCli(["extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
       "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-operation", "prepare",
       "--extraction-source-packing", sourcePacking,
       "--batch-limits", limitsPath, "--extraction-preflight-out", preview])).toBe(0);
     const lines = JSON.parse(readFileSync(preview, "utf8")).planned_requests as GeminiBatchPlan["lines"];
     const revisions = lines.map((line) => {
       const host = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
-      const request = projected ? parseSourceSemanticRequest({ ...host, source_request: { ...host.source_request,
-        generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } }) : host;
+      const request = host;
       if (revise !== "complete_invalid_json") return prepareSourceSemanticRevision(request, authoredResponse(line.userPrompt, "unknown_alias"));
       const completed = decodeGeminiGenerateContent({ candidates: [{ finishReason: "STOP",
         content: { parts: [{ text: authoredResponse(line.userPrompt) + "}" }] } }] });
@@ -326,6 +331,8 @@ it.each([false, "complete_invalid_json"] as const)("imports and reopens projecte
     const view = JSON.parse(wire.request.contents[0].parts[0].text);
     expect(view.contract).toBe("source-semantic-generation-view-v1");
     expect(view.source_request.source_assertions).toEqual(host.source_request.source_assertions);
+    expect(view.source_request.generation_task).toEqual(generationTask);
+    expect(view.source_request.original_source).toBe(host.source_request.original_source);
     expect(view.source_request).not.toHaveProperty("producer_capability");
     expect(view.source_request).not.toHaveProperty("assertion_locations");
     expect(wire.request.generationConfig.responseJsonSchema).toBeDefined();
@@ -341,6 +348,8 @@ it.each([false, "complete_invalid_json"] as const)("imports and reopens projecte
     const cached = inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE);
     expect(cached.status).toBe("hit");
     if (cached.status !== "hit") throw new Error("projected partial semantics must replay");
+    expect(cached.admitted.draft?.generation_task).toEqual(generationTask);
+    expect(cached.admitted.interpretation?.generation_task).toEqual(generationTask);
     expect(cached.admitted.draft?.gaps).toHaveLength(1);
     expect(cached.admitted.interpretation?.gaps).toEqual(expect.arrayContaining([...cached.admitted.draft!.gaps]));
     expect(cached.admitted.outcome).toEqual({ status: "interpreted", gaps: cached.admitted.interpretation?.gaps });

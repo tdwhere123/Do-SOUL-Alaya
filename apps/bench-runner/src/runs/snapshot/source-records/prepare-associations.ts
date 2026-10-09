@@ -24,7 +24,6 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparation
 export type SourceAssociationCacheOwner = Readonly<{ cacheRoot: string; retainedPreparationPath: string;
   physicalPreparationPath?: string }>;
 type SourceAssociationPopulation = Omit<SourcePublicationPopulation, "cacheRoots" | "publicationAssociations"> & Readonly<{
-  openSemantics?: ExtractionOpenSemanticsGeneration;
   activeRevision?: Readonly<{ source_id: string; source_version: string;
     key: string; generation: ExtractionOpenSemanticsGeneration }> & (
       Readonly<{ kind: "native"; record_id: string }> |

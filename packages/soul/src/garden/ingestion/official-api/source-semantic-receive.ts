@@ -17,7 +17,7 @@ import {
   verifySourceSemanticDisposition, canonicalJson,
   type SourceSemanticCorrespondence, type SourceSemanticCorrespondenceAssessment, type SourceSemanticDraft,
   type SourceSemanticInterpretation,
-  type SourceSemanticOutcome, type SourceSemanticQuery,
+  type SourceSemanticHostBoundDraft, type SourceSemanticOutcome, type SourceSemanticQuery,
   type SourceSemanticQueryOutcome
 } from "@do-soul/alaya-protocol";
 import {
@@ -41,7 +41,7 @@ export type SourceSemanticProposalResult = Readonly<{
   outcome: SourceSemanticOutcome;
   provider_attempts: 0 | 1;
   request: SourceSemanticRequest;
-  draft?: SourceSemanticDraft;
+  draft?: SourceSemanticHostBoundDraft;
   interpretation?: SourceSemanticInterpretation;
   raw_response_id?: string;
   rawJson?: string;
@@ -297,9 +297,11 @@ function admitInterpretedDraft(
   draft: SourceSemanticDraft, request: SourceSemanticRequest, input: SourceSemanticProposalInput,
   attempt: Attempt<SourceSemanticRequest>, meter: SourceSemanticResourceLedger
 ): SourceSemanticProposalResult {
+  const boundDraft: SourceSemanticHostBoundDraft = Object.freeze({ ...draft,
+    ...(request.source_request.generation_task === undefined ? {} : { generation_task: request.source_request.generation_task }) });
   const limits = request.source_request.resource_limits;
   const normalization = {
-    draft, catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256,
+    draft: boundDraft, catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256,
     source: {
       source_id: input.source_id, source_version: input.source_version,
       content_digest: `sha256:${semanticSha256(input.sourceCorpus)}`,
@@ -315,12 +317,12 @@ function admitInterpretedDraft(
       ? { budget: { work_units: limits.work_units, memory_bytes: limits.memory_bytes } } : {})
   };
   const normalized = normalizeSourceSemantics(normalization);
-  if (normalized.status === "resource_exhausted") return { ...attempt, outcome: { status: "resource_exhausted" }, draft };
+  if (normalized.status === "resource_exhausted") return { ...attempt, outcome: { status: "resource_exhausted" }, draft: boundDraft };
   if (normalized.status !== "normalized") {
-    return { ...attempt, outcome: { status: "invalid", reason: normalized.reason }, draft };
+    return { ...attempt, outcome: { status: "invalid", reason: normalized.reason }, draft: boundDraft };
   }
   return {
-    ...attempt, outcome: { status: "interpreted", gaps: normalized.interpretation.gaps }, draft,
+    ...attempt, outcome: { status: "interpreted", gaps: normalized.interpretation.gaps }, draft: boundDraft,
     interpretation: normalized.interpretation
   };
 }
@@ -333,6 +335,9 @@ function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposa
     canonicalJson(expected.source_request.attribution_context) !== canonicalJson(request.source_request.attribution_context) ||
     canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {
     throw new AlayaError("CONFLICT", "source semantic assertion locations differ from the source owner");
+  }
+  if (canonicalJson(expected.source_request.generation_task ?? null) !== canonicalJson(request.source_request.generation_task ?? null)) {
+    throw new AlayaError("CONFLICT", "source semantic task differs from its request owner");
   }
   if (semanticSha256(input.sourceCorpus) !== sourceSemanticRequestCatalog(request).source_digest) {
     throw new AlayaError("CONFLICT", "source semantic source generation mismatch");
