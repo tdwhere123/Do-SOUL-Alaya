@@ -77,6 +77,17 @@ async function listen(finish: "stop" | "length", valid = true,
     response.end(wire);
   });
 
+  await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
+  const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const nativeFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    expect(String(url)).toBe(`${ENDPOINT}/chat/completions`);
+    expect(init?.redirect).toBe("error");
+    return nativeFetch(new URL(new URL(String(url)).pathname, localOrigin), init);
+  });
+  return calls;
+}
+
 it.each([{ prompt_tokens: 10, completion_tokens: 2, total_tokens: 13 },
   { prompt_tokens: 10, completion_tokens: 8193, total_tokens: 8203 }])(
   "closes contradictory H usage with immutable reported values and accounting-invalid quarantine", async usage => {
@@ -95,16 +106,6 @@ it.each([{ prompt_tokens: 10, completion_tokens: 2, total_tokens: 13 },
     expect(calls).toHaveLength(1);
     expect(inspectCachedSourceSemantic(roots.cacheRoot, raw.cache_key, MODEL, PROFILE).status).not.toBe("hit");
   });
-  await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
-  const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const nativeFetch = globalThis.fetch;
-  vi.stubGlobal("fetch", (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    expect(String(url)).toBe(`${ENDPOINT}/chat/completions`);
-    expect(init?.redirect).toBe("error");
-    return nativeFetch(new URL(new URL(String(url)).pathname, localOrigin), init);
-  });
-  return calls;
-}
 
 it("binds free complete-source H to exact JSON wire, finite resource limits and retained unknown usage", async () => {
   const fixture = await scenario();

@@ -208,7 +208,7 @@ it("rejects an oversized successful Q envelope, retaining partial bytes and term
       expect(raw.decoded_text).toBe("");
       expect(raw.transport_failure?.kind).toBe("response_schema_error");
       expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().unresolvedAttempts).toEqual([]);
-      await expect(run()).rejects.toThrow(/retained terminal/u);
+      await expect(run()).rejects.toThrow(/retained empty/u);
       expect(calls).toHaveLength(1);
     }, { oversized: true });
 });

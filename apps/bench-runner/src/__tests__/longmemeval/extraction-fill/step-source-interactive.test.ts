@@ -263,7 +263,8 @@ it("withholds a Step source stream beyond the complete evidence limit from reuse
   const complete = listProviderRawAttempts(roots.cacheRoot, completeKey!)[0]!;
   const truncated = listProviderRawAttempts(roots.cacheRoot, truncatedKey!)[0]!;
   expect(complete.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: false });
-  expect(truncated.http_response).toMatchObject({ bodyComplete: true, bodyTruncated: true });
+  expect(truncated.http_response).toMatchObject({ bodyComplete: false });
+  expect(Buffer.from(truncated.http_response!.bodyBase64, "base64")).toHaveLength(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
   expect(inspectCachedSourceSemantic(roots.cacheRoot, completeKey!, MODEL, PROFILE).status).toBe("hit");
   expect(inspectCachedSourceSemantic(roots.cacheRoot, truncatedKey!, MODEL, PROFILE).status).not.toBe("hit");
   const rawPath = providerRawAttemptPath(roots.cacheRoot, truncatedKey!, truncated.attempt_ordinal);

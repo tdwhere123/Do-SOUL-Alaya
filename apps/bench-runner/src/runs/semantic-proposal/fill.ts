@@ -351,6 +351,11 @@ function interpretProposalDecoded(
 function replayCachedProposalShard(
   line: SemanticProposalLine, shard: SemanticProposalShard
 ): ProposalAttemptClass | "empty" {
+  // Raw/reservation inspection has already verified this accounting rejection;
+  // semantic parsing must not reinterpret it into admitted output or abstention.
+  if (typeof shard.outcome === "object" && shard.outcome !== null && "reason" in shard.outcome &&
+      "status" in shard.outcome && shard.outcome.status === "invalid" &&
+      shard.outcome.reason === "invalid_usage") return "terminal";
   if (typeof shard.outcome === "object" && shard.outcome !== null && "reason" in shard.outcome &&
       ["missing_response_body", "truncated_response_body", "unsupported_response_body"]
         .includes(String(shard.outcome.reason))) return "incomplete";
