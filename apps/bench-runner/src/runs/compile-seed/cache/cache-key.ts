@@ -3,7 +3,7 @@ import type { SourceInterpretationProfile, ExtractionSourcePacking } from "@do-s
 import type { ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";
 import { createHash } from "node:crypto";
 import { geminiGenerationSchemaCacheMaterial } from "../../extraction/fill/batch/generation-schema.js";
-import { officialApiExtractionResponseSchemaPreimage } from "@do-soul/alaya-soul";
+import { officialApiExtractionResponseSchemaPreimage, sourceSemanticGenerationPresentation } from "@do-soul/alaya-soul";
 import { ExtractionCacheInvariantError } from
   "../../extraction/cache/cache-invariant-error.js";
 import type { LongMemEvalExtractionTurn } from
@@ -23,11 +23,15 @@ export function computeCacheKey(
   systemPrompt: string,
   extractionRequest: string
 ): string {
+  const presentation = sourceSemanticGenerationPresentation(extractionRequest);
+  const requestIdentity = presentation === undefined ? extractionRequest : JSON.stringify({
+    contract: presentation.contract, host_request_json: extractionRequest, model_input_json: presentation.modelInputJson
+  });
   return hashCacheIdentity(
     model,
     requestProfile,
     systemPrompt,
-    extractionRequest,
+    requestIdentity,
     generationSchemaCacheMaterial(extractionRequest, model)
   );
 }

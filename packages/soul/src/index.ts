@@ -308,6 +308,7 @@ export {
   SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
   SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, SourceSemanticGenerationViewContractSchema, type SourceSemanticGenerationViewContract,
   sourceSemanticSystemPrompt, buildSourceSemanticRequest, prepareSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema,
   buildSourceSemanticQueryRequest,
   buildSourceSemanticCorrespondenceRequest, parseSourceSemanticRequest,
@@ -317,6 +318,7 @@ export {
   type SourceSemanticCorrespondenceProposalInput, type SourceInterpretationDescriptor, type SourceSemanticQueryRequest,
   type SourceSemanticCorrespondenceRequest
 } from "./garden/ingestion/official-api/source-semantic-request.js";
+export { sourceSemanticGenerationInput, sourceSemanticGenerationPresentation } from "./garden/ingestion/official-api/source-semantic-generation-input.js";
 export {
   SourceSemanticRevisionSchema, prepareSourceSemanticRevision, sourceSemanticBaseRequestDigest,
   type SourceSemanticRevision

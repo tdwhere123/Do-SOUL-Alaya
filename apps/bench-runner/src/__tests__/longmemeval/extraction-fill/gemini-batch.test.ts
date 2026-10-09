@@ -19,8 +19,12 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT,
   buildOfficialApiExtractionRequest,
   buildOfficialApiSourceCorpus,
+  buildSourceSemanticRequest, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
   stringifyOfficialApiExtractionRequest
 } from "@do-soul/alaya-soul";
+import { prepareSourceSemanticRequestLine } from "../../../runs/extraction/request-artifact.js";
+import { receiveSourceSemanticBatchLine } from "../../../runs/extraction/fill/batch/source-semantic-interpretation.js";
+import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 import { createGardenHttpExtractor } from "../../../runs/compile-seed/compile-seed-http.js";
 import {
   ExtractionResponseAdmissionError,
@@ -127,7 +131,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
     writeFileSync(path, JSON.stringify(state));
   }
 
-  it.each(["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const)("uploads the same %s normalized source schema body used by interactive extraction", async (requestProfile) => {
+  it.each(["gemini-3.1-minimal-v1", "gemini-3.1-low-v1"] as const)("shares %s normalized schema and source content while retaining distinct thought-stream settings", async (requestProfile) => {
     const source = "I collect vintage postcards.";
     const userPrompt = stringifyOfficialApiExtractionRequest(
       buildOfficialApiExtractionRequest(source, [{ role: "user", content: source }])
@@ -147,7 +151,13 @@ describe("durable Gemini Batch HTTP extraction", () => {
       providerUrl: "https://synthetic.invalid", apiKey: "synthetic-key" }, { fetch: fetchImpl })
       .extract({ systemPrompt: line.systemPrompt, userPrompt, retryMode: "disabled",
         maxOutputTokens: base.limits.maxOutputTokens, outputTokenField: "maxOutputTokens" });
-    expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string)).toEqual(batchBody);
+    const interactiveBody = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string);
+    const expectedThinking = requestProfile === "gemini-3.1-minimal-v1" ? { thinkingLevel: "minimal" } : { thinkingLevel: "low" };
+    const { thinkingConfig: interactiveThinking, ...interactiveGeneration } = interactiveBody.generationConfig;
+    const { thinkingConfig: batchThinking, ...batchGeneration } = batchBody.generationConfig;
+    expect(interactiveThinking).toEqual({ ...expectedThinking, includeThoughts: true });
+    expect(batchThinking).toEqual(expectedThinking);
+    expect({ ...interactiveBody, generationConfig: interactiveGeneration }).toEqual({ ...batchBody, generationConfig: batchGeneration });
     metadataOverride = { model: "models/gemini-3.1-flash-lite" };
     state = "BATCH_STATE_SUCCEEDED";
     output = result(line.key);
@@ -181,6 +191,45 @@ describe("durable Gemini Batch HTTP extraction", () => {
     });
     await run("import");
     expect(importer).toHaveBeenCalledTimes(2);
+    expect(creates).toBe(1);
+  });
+
+  it("uploads the exact projected source view over HTTP and receives the complete logical request after reopen", async () => {
+    const proposal = { sourceCorpus: "User: I completed alpha.", assertionIds: [1], sourceScope: "complete-source" as const,
+      generationViewContract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
+      source_id: "source", source_version: "1", producer_id: "producer", producer_version: "1" };
+    const base = plan();
+    const line = prepareSourceSemanticRequestLine(buildSourceSemanticRequest(proposal), ["unit"],
+      { model: base.model, requestProfile: base.requestProfile });
+    const sourcePlan = { ...base, lines: [line], limits: { ...base.limits,
+      maxInputTokensPerJob: 100_000, maxEnqueuedTokens: 100_000 } };
+    const rawJson = JSON.stringify(tableCompletedResponse(1, "alpha"));
+    output = JSON.stringify({ key: line.key, response: { candidates: [{ finishReason: "STOP",
+      content: { parts: [{ text: rawJson }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 7, totalTokenCount: 17 } } }) + "\n";
+    importer.mockImplementation(async result => {
+      expect(result.line).toEqual(line);
+      const received = receiveSourceSemanticBatchLine({ config: { model: base.model, requestProfile: base.requestProfile },
+        line: result.line, rawJson: result.rawJson, sourceCorpus: proposal.sourceCorpus, proposal,
+        retained: { plan: sourcePlan, provenance: result.provenance } });
+      expect(received.outcome.status).toBe("interpreted");
+      admitted.add(result.line.key);
+    });
+    await run("prepare", { plan: sourcePlan });
+    const submitted = await run("submit", { plan: sourcePlan });
+    expect(uploads).toHaveLength(1);
+    expect(batchDigest(uploads[0]!)).toBe(submitted.jobs[0]!.inputSha256);
+    const wire = JSON.parse(uploads[0]!.trim());
+    expect(wire.request.contents[0].parts[0].text).toBe(JSON.stringify({ contract: "source-semantic-generation-view-v1",
+      source_request: { source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
+        attribution_context: { contract: "utterance-attribution-v1", status: "unknown" },
+        source_assertions: [{ assertion_id: 1, text: "User: I completed alpha.", source_role: "user" }] } }));
+    expect(wire.request.generationConfig.responseJsonSchema).toBeDefined();
+    state = "BATCH_STATE_SUCCEEDED";
+    const resumed = await run("resume", { plan: sourcePlan });
+    expect(resumed.jobs[0]!.status).toBe("succeeded");
+    expect(resumed.jobs[0]!.outcomes[line.key]?.status).toBe("admitted");
+    await run("import", { plan: sourcePlan });
+    expect(importer).toHaveBeenCalledTimes(1);
     expect(creates).toBe(1);
   });
 

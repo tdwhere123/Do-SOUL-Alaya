@@ -12,7 +12,9 @@ vi.hoisted(() => {
   });
 });
 import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
-import { buildSourceSemanticRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { buildSourceSemanticRequest, parseSourceSemanticRequest, sourceSemanticRequestCatalog,
+  SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, sourceSemanticGenerationInput, type SourceSemanticRequest } from "@do-soul/alaya-soul";
+import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
 import { runCli } from "../../../cli/cli.js";
 import * as geminiHttp from "../../../runs/compile-seed/http/gemini-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
@@ -48,7 +50,7 @@ const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDi
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias" = "semantic") {
-  const request = parseSourceSemanticRequest(JSON.parse(userPrompt));
+  const request: { source_request: Pick<SourceSemanticRequest["source_request"], "source_assertions"> } = JSON.parse(userPrompt);
   const assertion = request.source_request.source_assertions.find((row) => row.text.includes("completed"))!;
   const theme = assertion.text.includes("alpha") ? "alpha" : "decoy";
   const envelope = tableCompletedResponse(assertion.assertion_id, theme);
@@ -59,7 +61,7 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
 }
 
 async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic", questions = 1,
-  providerUrl = "https://fixture-provider.invalid") {
+  providerUrl = "https://fixture-provider.invalid", projected = false) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
@@ -68,9 +70,11 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic",
     "I completed alpha. The room was quiet. The desk was clear. The lamp was on. The window was open. " +
     `The door was closed. The shelf was full. The clock was ticking. The floor was clean. It is ready. Record ${index}.`,
     `I completed decoy. Record ${index}.`), question: index === 3 ? "What was repaired?" : "What was completed?" })));
+  const openSemantics = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } : {}) };
   const inspection = await inspectExtractionAuthority({
     variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, sourcePacking: "complete-source",
-    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, revision: readCurrentExtractionAuthorityRevision(),
+    openSemantics, revision: readCurrentExtractionAuthorityRevision(),
     action: "fill"
   });
   const receipt = createExtractionAuthorityReceipt({
@@ -94,7 +98,7 @@ async function setupInteractive(mode: "semantic" | "unknown_alias" = "semantic",
     });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { fetchMock, receiptPath, keys: inspection.missingKeys };
+  return { fetchMock, receiptPath, keys: inspection.missingKeys, openSemantics };
 }
 
 it("fills complete-source open semantics through interactive generateContent without Batch isolation or packing-size errors", async () => {
@@ -215,13 +219,16 @@ it("withholds a source after its settled usage witness is removed", async () => 
   expect(readFileSync(ledgerPath, "utf8")).toBe(ledgerBefore);
 }, 60000);
 
-it("persists exact JSON and SSE bodies from loopback HTTP through baseline source publication", async () => {
+it.each([false, true])("persists exact JSON and SSE bodies through loopback source publication with projected view %s", async (projected) => {
   const bodies = new Map<string, Buffer>();
+  const requests = new Map<string, string>();
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const userPrompt = JSON.parse(Buffer.concat(chunks).toString("utf8")).contents[0].parts[0].text as string;
+      const requestBody = Buffer.concat(chunks).toString("utf8");
+      const userPrompt = JSON.parse(requestBody).contents[0].parts[0].text as string;
+      requests.set(userPrompt, requestBody);
       const rawJson = authoredResponse(userPrompt);
       const usageMetadata = { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 };
       const sse = bodies.size % 2 === 1;
@@ -243,16 +250,21 @@ it("persists exact JSON and SSE bodies from loopback HTTP through baseline sourc
   });
   try {
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const fixture = await setupInteractive("semantic", 1, origin);
+    const fixture = await setupInteractive("semantic", 1, origin, projected);
     vi.unstubAllGlobals();
     const filled = await runExtractionFill({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot,
-      sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
+      sourcePacking: "complete-source", openSemantics: fixture.openSemantics,
       authorityReceiptPath: fixture.receiptPath });
     expect(filled.coverage).toBe(1);
     expect(bodies.size).toBe(fixture.keys.length);
     for (const key of fixture.keys) {
       const shard = JSON.parse(readFileSync(cacheFilePath(cacheRoot, key), "utf8"));
-      const physical = bodies.get(shard.source_semantic.result.line.userPrompt);
+      const line = shard.source_semantic.result.line;
+      const modelInput = sourceSemanticGenerationInput(parseSourceSemanticRequest(JSON.parse(line.userPrompt)));
+      const physical = bodies.get(modelInput);
+      const wire = prepareSourceSemanticRequestWire({ model: MODEL, providerUrl: origin, apiKey: null,
+        requestProfile: REQUEST_PROFILE, openSemantics: fixture.openSemantics }, line, 4096);
+      expect(requests.get(modelInput)).toBe(wire.body);
       const raw = listProviderRawAttempts(cacheRoot, key)[0];
       expect(physical).toBeDefined();
       expect(Buffer.from(raw!.response_body!.text, "utf8").equals(physical!)).toBe(true);

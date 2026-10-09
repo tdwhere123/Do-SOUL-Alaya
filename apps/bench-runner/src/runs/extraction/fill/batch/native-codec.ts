@@ -1,7 +1,8 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../../request-profile.js";
 import { findProviderBinding, supportsProviderRequestProfile } from "../../../provider/catalog.js";
-import { officialApiExtractionResponseSchema } from "@do-soul/alaya-soul";
+import { officialApiExtractionResponseSchema, sourceSemanticGenerationPresentation,
+  SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } from "@do-soul/alaya-soul";
 import { projectGeminiGenerationSchema } from "./generation-schema.js";
 
 export interface GeminiGenerateContentSettings {
@@ -27,12 +28,17 @@ export function encodeGeminiGenerateContent(
   settings: GeminiGenerateContentSettings
 ): object {
   assertGeminiGenerateContentSettings(settings);
-  const responseJsonSchema = settings.responseJsonSchema ?? officialApiExtractionResponseSchema(line.userPrompt);
+  const presentation = sourceSemanticGenerationPresentation(line.userPrompt);
+  const responseJsonSchema = settings.responseJsonSchema ?? presentation?.responseJsonSchema ??
+    officialApiExtractionResponseSchema(line.userPrompt);
+  if (responseJsonSchema === undefined && isPreparedSourceSemanticView(line.userPrompt)) {
+    throw new AlayaError("VALIDATION", "prepared source semantic generation view requires its explicit response schema");
+  }
   const projected = responseJsonSchema === undefined ? undefined : projectGeminiGenerationSchema(responseJsonSchema);
   return {
     systemInstruction: { parts: [{ text: line.systemPrompt },
       ...(projected?.instruction === undefined ? [] : [{ text: projected.instruction }])] },
-    contents: [{ role: "user", parts: [{ text: line.userPrompt }] }],
+    contents: [{ role: "user", parts: [{ text: presentation?.modelInputJson ?? line.userPrompt }] }],
     generationConfig: {
       responseMimeType: "application/json", maxOutputTokens: settings.maxOutputTokens,
       ...(projected?.schema === undefined ? {} : { responseJsonSchema: projected.schema }),
@@ -45,6 +51,11 @@ export function encodeGeminiGenerateContent(
       } : {})
     }
   };
+}
+
+function isPreparedSourceSemanticView(userPrompt: string): boolean {
+  try { return JSON.parse(userPrompt)?.contract === SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT; }
+  catch { return false; }
 }
 
 export class GeminiProviderEnvelopeError extends Error {

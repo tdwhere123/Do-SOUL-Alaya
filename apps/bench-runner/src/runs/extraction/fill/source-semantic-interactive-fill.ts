@@ -23,8 +23,7 @@ import { newFillStats, readFillRetryTelemetry } from "./fill-stats.js";
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import { prepareSourceRequestWorkset, type SourceRequestWorkset } from "./source-request-workset.js";
-import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "@do-soul/alaya-soul";
-import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest } from "./source-semantic-interactive-request.js";
+import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest, sourceSemanticInteractiveInput } from "./source-semantic-interactive-request.js";
 import type { SourceRequestLine } from "../request-artifact.js";
 import { batchDigest } from "./batch/plan.js";
 import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
@@ -251,14 +250,13 @@ async function dispatchInteractiveLine(
   let extracted: Awaited<ReturnType<typeof extractor.extract>>;
   try {
     extracted = await extractor.extract({
-      systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
+      ...sourceSemanticInteractiveInput(line), retryMode: "disabled",
       timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
       maxOutputTokens,
       outputTokenField: isChatSemanticRequestProfile(input.prepared.config.requestProfile)
         ? "max_tokens" : "maxOutputTokens",
       ...(isChatSemanticRequestProfile(input.prepared.config.requestProfile) ? {
         retainHttpResponseEvidence: true,
-        responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
       } : {}),
       validateRawJson: () => undefined,
       ...(input.options.signal === undefined ? {} : { abortSignal: input.options.signal })

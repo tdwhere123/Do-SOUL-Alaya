@@ -7,7 +7,7 @@ import { materializeSourceSemanticTableProposal, sourceSemanticEvidenceClosure,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SourceSemanticResourceExhausted,
   SourceSemanticTableValidationError } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticRequest, semanticSha256, sourceSemanticRequestCatalog,
-  sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt } from
+  sourceSemanticResponseJsonSchema, sourceSemanticSystemPrompt, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } from
   "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { receiveSourceSemantics } from
   "../../../garden/ingestion/official-api/source-semantic-receive.js";
@@ -42,29 +42,30 @@ const table = <N extends object, E extends object = object, G extends object = o
   content: { roots: roots.map(key => ({ act: "assertion", expression: contentRef(key) })), entities, nodes, gaps }
 });
 
-function setup(text: string) {
-  const sourceCorpus = `User: ${text}`;
-  const input = { sourceCorpus, assertionIds: indexSourceSemanticUnits(sourceCorpus).map(row => row.assertion_id),
-    sourceScope: "complete-source" as const, source_id: "unbound", source_version: "unbound",
-    producer_id: "official-api-source-semantic", producer_version: "1" };
-  const request = buildSourceSemanticRequest(input);
-  return { input, request };
-}
-
-function receiveTable(text: string, value: unknown, resource_limits?: { output_byte_limit?: number; work_units?: number; memory_bytes?: number }) {
-  const prepared = setup(text);
-  const input = resource_limits === undefined ? prepared.input : { ...prepared.input, resource_limits };
-  return receiveSourceSemantics(JSON.stringify(value),
-    resource_limits === undefined ? prepared.request : buildSourceSemanticRequest(input), input);
-}
-
 function closure(h: SourceSemanticInterpretation, id: string) {
   const ids = sourceSemanticEvidenceClosure(h, [id],
     new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 }));
   return h.mentions.filter(m => ids.has(m.id)).map(m => m.text);
 }
 
-describe("finite source table production receive", () => {
+describe.each([undefined, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT] as const)("finite source table receive with view %s", (generationViewContract) => {
+  function setup(text: string) {
+    const sourceCorpus = `User: ${text}`;
+    const input = { sourceCorpus, assertionIds: indexSourceSemanticUnits(sourceCorpus).map(row => row.assertion_id),
+      sourceScope: "complete-source" as const, source_id: "unbound", source_version: "unbound",
+      ...(generationViewContract === undefined ? {} : { generationViewContract }),
+      producer_id: "official-api-source-semantic", producer_version: "1" };
+    const request = buildSourceSemanticRequest(input);
+    return { input, request };
+  }
+
+  function receiveTable(text: string, value: unknown, resource_limits?: { output_byte_limit?: number; work_units?: number; memory_bytes?: number }) {
+    const prepared = setup(text);
+    const input = resource_limits === undefined ? prepared.input : { ...prepared.input, resource_limits };
+    return receiveSourceSemantics(JSON.stringify(value),
+      resource_limits === undefined ? prepared.request : buildSourceSemanticRequest(input), input);
+  }
+
   for (const [id, text] of Object.entries(originals)) it(`preserves the complete ${id} graph and evidence closure`, () => {
     const { input, request } = setup(text);
     const table = fixture(`${id}-conformed.json`);
@@ -246,6 +247,21 @@ describe("finite source table production receive", () => {
     const limitedInput = { ...input, resource_limits: { output_byte_limit: 1024 } };
     const limited = buildSourceSemanticRequest(limitedInput);
     expect(receiveSourceSemantics(JSON.stringify(value) + " ".repeat(1024), limited, limitedInput).outcome).toEqual({ status: "truncated" });
+  });
+
+  it.each([
+    { status: "abstained" }, { status: "invalid", reason: "unsupported reading" },
+    { status: "quarantine", reason: "uncertain source" }, { status: "truncated" },
+    { status: "transport_failure" }, { status: "resource_exhausted" }
+  ])("preserves producer disposition $status without changing its meaning", (outcome) => {
+    expect(receiveTable("Mira approved pilot", { contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, outcome }).outcome).toEqual(outcome);
+  });
+
+  it.each([
+    { status: "no_eligible_source", provider_attempts: 0 }, { status: "unavailable", reason: "provider absent" },
+    { status: "unexercised" }, { status: "preparation_required", missing: "query_semantics" }
+  ])("rejects producer claims to host-only state $status", (outcome) => {
+    expect(receiveTable("Mira approved pilot", { contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, outcome }).outcome.status).toBe("invalid");
   });
 
   it("reaches every operator and root act through production receive", () => {

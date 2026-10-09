@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as MODEL, INTERN_SEMANTIC_REQUEST_PROFILE as PROFILE,
   INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, type SourceSemanticRequest } from "@do-soul/alaya-soul";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
@@ -16,6 +16,8 @@ import { listProviderRawAttempts } from "../../../runs/extraction/fill/provider-
 import { preflightSourceSemanticInteractive, parseSourceSemanticInteractivePreflight } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
+import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
+import { requestEnvelopeDigest } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
@@ -31,14 +33,15 @@ afterEach(async () => {
   }
 });
 
-async function scenario() {
+async function scenario(projected = false) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", ENDPOINT);
   await writeDataset([buildExtractionFillQuestion("completed", "I completed alpha.", "I completed decoy.")]);
   const options = { ...roots, variant: "longmemeval_s" as const, sourcePacking: "complete-source" as const,
-    openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION, concurrency: 1, log: () => undefined };
+    openSemantics: { ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
+      ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } : {}) }, concurrency: 1, log: () => undefined };
   const inspection = await inspectExtractionAuthority({ ...options, action: "sample",
     revision: readCurrentExtractionAuthorityRevision() });
   const selected = inspection.missingKeys.slice(0, 1);
@@ -61,7 +64,7 @@ async function listen(finish: "stop" | "length", valid = true) {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    const source = parseSourceSemanticRequest(JSON.parse(body.messages[1].content));
+    const source: { source_request: Pick<SourceSemanticRequest["source_request"], "source_assertions"> } = JSON.parse(body.messages[1].content);
     const assertion = source.source_request.source_assertions.find(row => row.text.includes("completed"))!;
     const content = valid ? JSON.stringify(tableCompletedResponse(assertion.assertion_id,
       assertion.text.includes("alpha") ? "alpha" : "decoy")) : "{bad JSON";
@@ -108,6 +111,37 @@ it("binds free complete-source H to exact JSON wire, finite resource limits and 
   expect(calls).toHaveLength(1);
   expect(() => parseSourceSemanticInteractivePreflight({ ...fixture.preflight,
     max_output_tokens: 4096 })).toThrow(/encoded wire/u);
+});
+
+it("sends the independently expected view through preflight, actual HTTP, retained raw and reopened cache", async () => {
+  const fixture = await scenario(true), retained = fixture.preflight.planned_requests[0]!;
+  const host = parseSourceSemanticRequest(JSON.parse(retained.userPrompt));
+  const sourceText = retained.userPrompt.includes("alpha") ? "User: I completed alpha." : "User: I completed decoy.";
+  const expectedView = { contract: "source-semantic-generation-view-v1", source_request: {
+    source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
+    attribution_context: { contract: "utterance-attribution-v1", status: "unknown" }, source_assertions: [
+      { assertion_id: 1, text: sourceText, source_role: "user" },
+      ...(sourceText.includes("alpha") ? [{ assertion_id: 2, text: "Assistant: Acknowledged.", source_role: "assistant" }] : [])
+    ]
+  } };
+  const wire = prepareSourceSemanticRequestWire({ ...fixture.preflight.config, openSemantics: fixture.options.openSemantics }, retained, 8192);
+  expect(host.source_request.generation_view_contract).toBe(SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT);
+  expect(host.source_request.assertion_locations).toHaveLength(sourceText.includes("alpha") ? 2 : 1);
+  expect(JSON.parse(wire.body).messages[1].content).toBe(JSON.stringify(expectedView));
+  const calls = await listen("stop");
+  const filled = await runExtractionFill(fixture.options);
+  expect(filled.newlyExtracted).toBe(1);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.body).toEqual(JSON.parse(wire.body));
+  expect(retained.request_digest).toBe(requestEnvelopeDigest(JSON.stringify([wire.url.href, wire.body])));
+  const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
+  expect(raw).toMatchObject({ source_request_sha256: retained.requestSha256 });
+  expect(raw.request_digest).toBe(retained.request_digest);
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
+  await runExtractionFill(fixture.options);
+  expect(calls).toHaveLength(1);
+  expect(() => parseSourceSemanticInteractivePreflight({ ...fixture.preflight,
+    config: { ...fixture.preflight.config, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION } })).toThrow(/view differs/u);
 });
 
 it.each([{ finish: "length", valid: true }, { finish: "stop", valid: false }] as const)(

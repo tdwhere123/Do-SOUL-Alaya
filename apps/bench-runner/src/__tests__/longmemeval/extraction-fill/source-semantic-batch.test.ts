@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, prepareSourceSemanticRevision, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } from "@do-soul/alaya-soul";
 import { runCli } from "../../../cli/cli.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -17,7 +17,7 @@ import { resolveCompileSeedExtractionConfig } from "../../../runs/compile-seed/c
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, extractionArtifactRequests } from "../../../runs/extraction/request-artifact.js";
 import { decodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { batchDigest } from "../../../runs/extraction/fill/batch/plan.js";
-import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState } from "../../../runs/extraction/fill/batch/contract.js";
+import type { GeminiBatchLimits, GeminiBatchPlan, GeminiBatchState, GeminiBatchOperation } from "../../../runs/extraction/fill/batch/contract.js";
 import { buildAuthorityQuestion, registerExtractionFillHooks, setExtractionCredentialFixture, buildExtractionFillQuestion } from "./fixture.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
@@ -47,7 +47,7 @@ function authoredResponse(userPrompt: string, mode: "semantic" | "unknown_alias"
 }
 
 async function setup(providerUrl = "https://fixture-provider.invalid", questionOnly = false, revise: boolean | "complete_invalid_json" = false,
-  sourcePacking: ExtractionSourcePacking = "reference-eight") {
+  sourcePacking: ExtractionSourcePacking = "reference-eight", projected = false) {
   setExtractionCredentialFixture(); vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", providerUrl);
@@ -63,15 +63,19 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
   const limitsPath = join(cacheRoot, "limits.json"); writeFileSync(limitsPath, JSON.stringify(limits));
   const revisionPath = join(cacheRoot, "revisions.json");
-  let generation = EXTRACTION_OPEN_SEMANTICS_GENERATION;
+  let generation = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } : {}) };
   if (revise) {
     const preview = join(cacheRoot, "base-preview.json");
     expect(await runCli(["extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
       "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-operation", "prepare",
+      "--extraction-source-packing", sourcePacking,
       "--batch-limits", limitsPath, "--extraction-preflight-out", preview])).toBe(0);
     const lines = JSON.parse(readFileSync(preview, "utf8")).planned_requests as GeminiBatchPlan["lines"];
     const revisions = lines.map((line) => {
-      const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+      const host = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+      const request = projected ? parseSourceSemanticRequest({ ...host, source_request: { ...host.source_request,
+        generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } }) : host;
       if (revise !== "complete_invalid_json") return prepareSourceSemanticRevision(request, authoredResponse(line.userPrompt, "unknown_alias"));
       const completed = decodeGeminiGenerateContent({ candidates: [{ finishReason: "STOP",
         content: { parts: [{ text: authoredResponse(line.userPrompt) + "}" }] } }] });
@@ -112,8 +116,13 @@ async function setup(providerUrl = "https://fixture-provider.invalid", questionO
     "--extraction-cache-root", cacheRoot, "--extraction-open-semantics", "--batch-limits", limitsPath,
     "--extraction-source-packing", sourcePacking,
     ...(revise ? ["--extraction-source-revisions", revisionPath] : [])];
-  const run = (operation: string, extra: readonly string[] = []) => runCli([...args, "--extraction-authority", receiptPath,
-    "--batch-operation", operation, ...extra]);
+  const run = async (operation: string, extra: readonly string[] = []) => {
+    if (!projected) return runCli([...args, "--extraction-authority", receiptPath, "--batch-operation", operation, ...extra]);
+    await runExtractionFill({ variant: VARIANT, cacheRoot, dataDir, pinnedMetaRoot, openSemantics: generation,
+      sourcePacking, authorityReceiptPath: receiptPath,
+      batch: { operation: operation as GeminiBatchOperation, limits: JSON.parse(readFileSync(limitsPath, "utf8")) }, log: () => undefined });
+    return 0;
+  };
   const plan = () => JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan.json"), "utf8")) as GeminiBatchPlan;
   const state = () => JSON.parse(readFileSync(join(cacheRoot, `batch-state-${plan().identity}.json`), "utf8")) as GeminiBatchState;
   return { run, plan, state, args, fetchMock, receiptPath, keys: inspection.missingKeys,
@@ -301,6 +310,46 @@ it("preserves partial interpretation gaps through native Batch cache replay", as
     expect(cached.admitted.draft?.gaps).toHaveLength(1);
     expect(cached.admitted.outcome).toEqual({ status: "interpreted", gaps: cached.admitted.interpretation?.gaps });
     expect(cached.admitted.interpretation?.gaps).toEqual(expect.arrayContaining([...cached.admitted.draft!.gaps]));
+  }
+}, 60000);
+
+it.each([false, "complete_invalid_json"] as const)("imports and reopens projected partial H with retained revision %s", async (revise) => {
+  const fixture = await setup("https://fixture-provider.invalid", false, revise, "complete-source", true);
+  fixture.mode("partial");
+  expect(await fixture.run("prepare")).toBe(0);
+  expect(await fixture.run("submit")).toBe(0);
+  const upload = fixture.fetchMock.mock.calls.find(([url]) => new URL(String(url)).pathname === "/upload-session")!;
+  const wireLines = String(upload[1]!.body).trim().split("\n").map(line => JSON.parse(line));
+  for (const wire of wireLines) {
+    const line = fixture.plan().lines.find(line => line.key === wire.key)!;
+    const host = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+    const view = JSON.parse(wire.request.contents[0].parts[0].text);
+    expect(view.contract).toBe("source-semantic-generation-view-v1");
+    expect(view.source_request.source_assertions).toEqual(host.source_request.source_assertions);
+    expect(view.source_request).not.toHaveProperty("producer_capability");
+    expect(view.source_request).not.toHaveProperty("assertion_locations");
+    expect(wire.request.generationConfig.responseJsonSchema).toBeDefined();
+    expect(view.source_request.revision).toEqual(host.source_request.revision);
+  }
+  expect(await fixture.run("resume")).toBe(0);
+  const calls = fixture.fetchMock.mock.calls.length;
+  expect(await fixture.run("import")).toBe(0);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(calls);
+  expect(readExtractionCacheManifestIdentity(cacheRoot)!.manifest.source_semantic_generation?.generation_view_contract)
+    .toBe(SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT);
+  for (const line of fixture.plan().lines) {
+    const cached = inspectCachedSourceSemantic(cacheRoot, line.key, MODEL, REQUEST_PROFILE);
+    expect(cached.status).toBe("hit");
+    if (cached.status !== "hit") throw new Error("projected partial semantics must replay");
+    expect(cached.admitted.draft?.gaps).toHaveLength(1);
+    expect(cached.admitted.interpretation?.gaps).toEqual(expect.arrayContaining([...cached.admitted.draft!.gaps]));
+    expect(cached.admitted.outcome).toEqual({ status: "interpreted", gaps: cached.admitted.interpretation?.gaps });
+    const host = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+    if (revise) {
+      expect(host.source_request.revision?.previous_response).toContain("}");
+      expect(JSON.parse(host.source_request.revision!.parent_request_json).source_request.generation_view_contract)
+        .toBe(SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT);
+    }
   }
 }, 60000);
 

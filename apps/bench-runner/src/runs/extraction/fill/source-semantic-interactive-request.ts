@@ -1,5 +1,5 @@
 import { isChatSemanticRequestProfile } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema, sourceSemanticGenerationInput } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { prepareSemanticProviderRequest } from
   "../../compile-seed/http/semantic-provider-http.js";
@@ -8,15 +8,18 @@ import { requestEnvelopeDigest } from "./provider-raw-attempt.js";
 
 export const SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT = "source-semantic-interactive-wire-v1" as const;
 
+export function sourceSemanticInteractiveInput(line: SourceRequestLine) {
+  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+  return { systemPrompt: line.systemPrompt, userPrompt: sourceSemanticGenerationInput(request),
+    responseJsonSchema: sourceSemanticResponseJsonSchema(request) };
+}
+
 /** The exact logical source descriptor is encoded once for preflight and dispatch. */
 export function prepareSourceSemanticRequestWire(
   config: CompileSeedExtractionConfig, line: SourceRequestLine, maxOutputTokens: number
 ) {
   return prepareSemanticProviderRequest(config, {
-    systemPrompt: line.systemPrompt, userPrompt: line.userPrompt,
-    ...(isChatSemanticRequestProfile(config.requestProfile) ? {
-      responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
-    } : {}),
+    ...sourceSemanticInteractiveInput(line),
     maxOutputTokens, retryMode: "disabled",
     outputTokenField: isChatSemanticRequestProfile(config.requestProfile) ? "max_tokens" : "maxOutputTokens"
   }, "source_semantic");
@@ -25,7 +28,10 @@ export function prepareSourceSemanticRequestWire(
 export function sourceSemanticRequestWireDigest(
   config: CompileSeedExtractionConfig, line: SourceRequestLine, maxOutputTokens: number
 ): string {
-  if (!isChatSemanticRequestProfile(config.requestProfile)) return requestEnvelopeDigest(line.userPrompt);
+  if (!isChatSemanticRequestProfile(config.requestProfile) &&
+      parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request.generation_view_contract === undefined) {
+    return requestEnvelopeDigest(line.userPrompt);
+  }
   return sourceSemanticInteractiveWireSha256(config, line, maxOutputTokens);
 }
 

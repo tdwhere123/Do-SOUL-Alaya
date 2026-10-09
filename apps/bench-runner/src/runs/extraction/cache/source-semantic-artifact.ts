@@ -27,7 +27,7 @@ import { readRetainedBatchAuthority } from "../fill/batch/retained-authority.js"
 import { readRetainedBatchLine } from "../fill/batch/retained-line.js";
 import { inspectSettledProviderAttempt } from "../authority/attempt-ledger/admission.js";
 import {
-  SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION
+  SOURCE_SEMANTIC_BATCH_PRODUCER_ID, SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION, parseSourceSemanticRequestLine
 } from "../request-artifact.js";
 import { SourceRequestLineSchema, type SourceRequestLine } from "../request-artifact.js";
 
@@ -402,9 +402,7 @@ function bindOpenSemanticsImport(input: SourceSemanticImportBase, line: SourceRe
   assertExtractionCacheIdentity({
     config: input.config, manifest: identity.manifest, systemPrompt: line.systemPrompt, validateProvider: true
   });
-  if (computeCacheKey(input.config.model, input.config.requestProfile, line.systemPrompt, line.userPrompt) !== line.key) {
-    throw new AlayaError("CONFLICT", "open-semantics cache request key mismatch");
-  }
+  parseSourceSemanticRequestLine(line, input.config);
   return identity;
 }
 

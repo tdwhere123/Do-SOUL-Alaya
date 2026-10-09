@@ -30,6 +30,9 @@ export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v4" as const;
+export const SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT = "source-semantic-generation-view-v1" as const;
+export type SourceSemanticGenerationViewContract = typeof SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT;
+export const SourceSemanticGenerationViewContractSchema = z.literal(SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT);
 
 const FORBIDDEN_PROPOSAL_KEYS = [
   "answers", "answer", "ranking", "seeds", "seed", "programs", "program",
@@ -55,6 +58,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT),
   source_scope: z.literal("complete-source").optional(),
   generation_schema_contract: z.literal(SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT),
+  generation_view_contract: SourceSemanticGenerationViewContractSchema.optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
   resource_limits: SourceSemanticResourceLimitsSchema,
@@ -97,6 +101,7 @@ export type SourceSemanticProposalInput = Readonly<{
   sourceCorpus: string;
   assertionIds: readonly number[];
   sourceScope?: SourceSemanticOpenRequestBody["source_scope"];
+  generationViewContract?: SourceSemanticGenerationViewContract;
   source_id: string;
   source_version: string;
   producer_id: string;
@@ -234,6 +239,7 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT, source_request: null,
     source_digest: sourceDigest, ...(input.profile === undefined ? {} : { profile: input.profile }) });
   if (input.revision !== undefined) SourceSemanticRevisionSchema.parse(input.revision);
+  if (input.generationViewContract !== undefined) SourceSemanticGenerationViewContractSchema.parse(input.generationViewContract);
   const capacity = sourceReferenceCapacityReason(units);
   if (capacity !== null) {
     if (input.sourceScope !== "complete-source") throw new SourceReferenceCapacityExceeded(capacity);
@@ -253,6 +259,7 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
     generation_schema_contract: SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
+    ...(input.generationViewContract === undefined ? {} : { generation_view_contract: input.generationViewContract }),
     producer_capability: producer,
     resource_limits: limits,
     attribution_context: bindUtteranceAttribution(input.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION, input.sourceCorpus),
