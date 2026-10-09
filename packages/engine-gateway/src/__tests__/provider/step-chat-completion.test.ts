@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
+  const original = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (new URL(String(input)).hostname !== "127.0.0.1" || init?.redirect !== "error") throw new Error("only no-redirect loopback transport is allowed");
+    return original(input, init);
+  });
+});
 import {
   buildProviderChatRequestBody,
   executeProviderChatCompletion,
@@ -12,6 +20,7 @@ import {
   providerChatCompletionsUrl,
   type ProviderChatCompletionRequest
 } from "../../provider/chat-completion/index.js";
+import { PROVIDER_FAILURE_BODY_DIGEST_BYTES } from "../../provider/chat-completion/failure-identity.js";
 
 const SCHEMA = {
   name: "semantic_payload",
@@ -192,30 +201,51 @@ describe("Step Chat Completions over local HTTP", () => {
     });
   });
 
-  it("retains a bounded raw HTTP failure with a digest of all received bytes", async () => {
-    const raw = "x".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES + 5);
+  it.each([200, 500])("retains received bytes when a real HTTP %s socket is lost without status-based retry", async status => {
+    const prefix = Buffer.from("partial received body");
+    let calls = 0;
     await withServer((_request, response) => {
-      response.writeHead(429, { "content-type": "text/plain" });
-      response.end(raw);
-    }, async (providerUrl) => {
+      calls++;
+      response.writeHead(status, { "content-type": "text/plain" });
+      response.write(prefix);
+      setTimeout(() => response.destroy(), 40);
+    }, async providerUrl => {
       const error = await executeProviderChatCompletion(stepRequest(providerUrl), {
+        maxRetries: 1, retryDelaysMs: [0], retryHttpStatuses: [500], retryBodyReadErrors: false
+      }).catch((cause: unknown) => cause);
+      expect(error).toMatchObject({ kind: "body_read_error", httpStatus: status, httpResponse: {
+        bodyComplete: false, bodyTruncated: false, bodyByteLength: prefix.length,
+        bodyBase64: prefix.toString("base64"), bodySha256: createHash("sha256").update(prefix).digest("hex")
+      } });
+      expect(calls).toBe(1);
+    });
+  });
+
+  it("retains a bounded raw HTTP failure with a digest of all received bytes", async () => {
+    const original = Buffer.from("x".repeat(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES + 5));
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.enqueue(original); }, cancel });
+    {
+      const providerUrl = "http://127.0.0.1:1/step_plan/v1";
+      const error = await executeProviderChatCompletion({ ...stepRequest(providerUrl),
+        fetchImpl: async () => new Response(body, { status: 429, headers: { "content-type": "text/plain" } }) }, {
         maxRetries: 0, retryDelaysMs: []
       }).then(() => { throw new Error("expected HTTP failure"); }, (cause: unknown) => cause);
       expect(error).toBeInstanceOf(ProviderChatCompletionError);
       const failure = error as ProviderChatCompletionError;
       expect(failure.kind).toBe("http_error");
       expect(failure.httpStatus).toBe(429);
+      const prefix = original.subarray(0, PROVIDER_FAILURE_BODY_DIGEST_BYTES);
       expect(failure.httpResponse).toMatchObject({
-        contentType: "text/plain", bodyByteLength: raw.length,
-        bodyTruncated: true, bodyComplete: true
+        contentType: "text/plain", bodyByteLength: original.length,
+        bodyTruncated: true, bodyComplete: false,
+        bodySha256: createHash("sha256").update(original).digest("hex")
       });
-      expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64").byteLength).toBe(
-        MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
-      );
-      expect(failure.httpResponse?.bodySha256).toBe(createHash("sha256").update(raw).digest("hex"));
+      expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64")).toEqual(prefix);
+      expect(cancel).toHaveBeenCalledOnce();
       expect(Object.hasOwn(failure, "httpResponse")).toBe(false);
       expect(JSON.stringify(failure)).not.toContain("bodyBase64");
-    });
+    }
   });
 
   it("retains complete SSE bytes past 64KiB only when full HTTP evidence is requested", async () => {
@@ -262,25 +292,32 @@ describe("Step Chat Completions over local HTTP", () => {
     });
   });
 
-  it("still truncates genuinely oversized Step evidence when full retention is requested", async () => {
-    const raw = "x".repeat(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES + 5);
-    await withServer((_request, response) => {
-      response.writeHead(429, { "content-type": "text/plain" });
-      response.end(raw);
-    }, async (providerUrl) => {
+  it("bounds non-OK Step evidence even when full retention is requested", async () => {
+    const original = Buffer.from("x".repeat(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES + 5));
+    const cancel = vi.fn();
+    let reads = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { reads += 1; controller.enqueue(original); },
+      cancel
+    });
+    {
+      const providerUrl = "http://127.0.0.1:1/step_plan/v1";
       const error = await executeProviderChatCompletion(
-        { ...stepRequest(providerUrl), retainHttpResponseEvidence: true },
+        { ...stepRequest(providerUrl), retainHttpResponseEvidence: true,
+          fetchImpl: async () => new Response(body, { status: 429, headers: { "content-type": "text/plain" } }) },
         { maxRetries: 0, retryDelaysMs: [] }
       ).then(() => { throw new Error("expected HTTP failure"); }, (cause: unknown) => cause);
       expect(error).toBeInstanceOf(ProviderChatCompletionError);
       const failure = error as ProviderChatCompletionError;
+      const prefix = original.subarray(0, PROVIDER_FAILURE_BODY_DIGEST_BYTES);
       expect(failure.httpResponse).toMatchObject({
-        bodyByteLength: raw.length, bodyTruncated: true, bodyComplete: true
+        bodyByteLength: original.length, bodyTruncated: true, bodyComplete: false,
+        bodySha256: createHash("sha256").update(original).digest("hex")
       });
-      expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64").byteLength).toBe(
-        MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
-      );
-    });
+      expect(Buffer.from(failure.httpResponse!.bodyBase64, "base64")).toEqual(prefix);
+      expect(reads).toBeLessThanOrEqual(2);
+      expect(cancel).toHaveBeenCalledOnce();
+    }
   });
 
   it("rejects missing schema, cap, alternate model, and clean EOF before transport", () => {

@@ -123,6 +123,25 @@ export class SqliteSourceHintReader {
       truncated: !exhausted, resourceLimited };
   }
 
+  /** Read-only legacy-key adapter; remove when workspace-free interpretation keys are explicitly retired.
+   * Every candidate is looked up within the caller's workspace. Multiple bindings fail closed.
+   */
+  public readBoundInterpretationCompatible(workspaceId: string, objectIds: readonly string[], byteLimit: number, metadataOnly = false) {
+    const allowance = boundedBytes(byteLimit);
+    if (!workspaceId.trim() || objectIds.length !== 2 || new Set(objectIds).size !== 2) {
+      throw new AlayaError("VALIDATION", "compatibility lookup requires a workspace and two distinct keys");
+    }
+    if (allowance < 48) return { gist: null, bytesRead: 0, nativeVisits: 0, status: "resource_limited" as const };
+    const present = this.db.prepare(`SELECT CASE object_id WHEN ? THEN 0 ELSE 1 END AS candidate FROM evidence_capsules
+      WHERE workspace_id=? AND object_id IN (?,?) LIMIT 2`).all(objectIds[0], workspaceId, ...objectIds) as { candidate: number }[];
+    if (present.length > 1) return { gist: null, bytesRead: 32, nativeVisits: 2, status: "ambiguous" as const };
+    if (present.length === 0) return { gist: null, bytesRead: 32, nativeVisits: 2, status: "absent" as const };
+    const objectId = objectIds[present[0]!.candidate]!;
+    if (metadataOnly) return { gist: null, objectId, bytesRead: 32, nativeVisits: 2, status: "complete" as const };
+    const result = this.readBoundInterpretation(workspaceId, objectId, allowance - 32);
+    return { ...result, objectId, bytesRead: result.bytesRead + 32, nativeVisits: result.nativeVisits + 2 };
+  }
+
   /** One active packet by identity; a refused body is distinct from absence. */
   public readBoundInterpretation(workspaceId: string, objectId: string, byteLimit: number) {
     const allowance = boundedBytes(byteLimit);

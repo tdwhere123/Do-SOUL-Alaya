@@ -8,7 +8,11 @@ import { publishOfflineBatchPacket } from "./source-interpretation-batch.test-su
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
+  vi.stubGlobal("fetch", vi.fn(() => { throw new Error("provider transport forbidden"); }));
+});
 import { createAuditedSourceAdmission, createSourceInterpretationPacketPublication, EvidenceService,
   fieldContractSha256 } from "@do-soul/alaya-core";
 import { buildSourceReferenceCatalog, sourceReferenceResolver, sourceReferencePreparationCost, assertSourceInterpretationPacketProfile, hashLabeledIdentity, SourceInterpretationPacketSchema, SourceInterpretationReasoningResultSchema, sourceInterpretationProfileIdentity, sourceInterpretationRelationKey, type QueryProgram,
@@ -79,7 +83,8 @@ const PROGRAM: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and
 ] };
 
 async function withPublishedPackets(packets: readonly SourceInterpretationPacket[], body: (input: {
-  ids: readonly string[]; reason: (request: SourceInterpretationReasoningRequest) => Promise<SourceInterpretationReasoningResult>
+  ids: readonly string[]; filename: string; client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>; sourceRecordId: string;
+  reason: (request: SourceInterpretationReasoningRequest) => Promise<SourceInterpretationReasoningResult>
 }) => Promise<void>, options: Readonly<{ valid_from?: string; valid_to?: string; state?: "retired" | "erased" | "superseded";
   scope?: "project" | "global_core"; profile?: typeof PROFILE }> = {}) {
   const profile = options.profile ?? PROFILE;
@@ -92,7 +97,7 @@ async function withPublishedPackets(packets: readonly SourceInterpretationPacket
   const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
     evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
-  await admission.admit({ workspace_id: WS, source_id: "orion-parcel-source", source_version: "1", content_bytes: SOURCE,
+  const admitted = await admission.admit({ workspace_id: WS, source_id: "orion-parcel-source", source_version: "1", content_bytes: SOURCE,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: options.valid_from ?? null, valid_to: options.valid_to ?? null,
     speaker: "user", scope_class: options.scope ?? "project", spans: deriveAddressableSpanViews(SOURCE) }, { workspaceId: WS });
   const publisher = createSourceInterpretationPacketPublication({ stores, evidenceService, sha256: fieldContractSha256 });
@@ -139,7 +144,7 @@ async function withPublishedPackets(packets: readonly SourceInterpretationPacket
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
   try {
     await client.ready();
-    await body({ ids, reason: (request) => client.sourceInterpretationPort!.reason({ workspace_id: WS,
+    await body({ ids, filename, client, sourceRecordId: admitted.record.identity, reason: (request) => client.sourceInterpretationPort!.reason({ workspace_id: WS,
       as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request }) });
   } finally { await client.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true }); }
 }
@@ -149,6 +154,33 @@ function request(packet_id: string, program = PROGRAM): SourceInterpretationReas
     packet_id, profile_id: PROFILE_ID, original_query: "Which sent parcel has a recipient who promised to inspect that same parcel?",
     seed_nodes: ["sending"], program, budget: BUDGET, output_byte_limit: 1000000 };
 }
+
+it("waits for an independent packet request and rejects erasure committed during another snapshot", async () => {
+  await withPublishedPackets([packet()], async ({ ids, reason, filename, client, sourceRecordId }) => {
+    let opened!: () => void, release!: () => void;
+    const ready = new Promise<void>(resolve => { opened = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const snapshot = client.readSnapshot.isolate!(async () => {
+      await client.readSnapshot.beginDeferred();
+      try { await reason(request(ids[0]!)); opened(); await hold; }
+      finally { await client.readSnapshot.rollback(); }
+    });
+    await ready;
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    new SqliteFieldEraseBarrierRepo(database, fieldContractSha256).apply({
+      identity: hashLabeledIdentity("erase_barrier", [WS, "source_record", sourceRecordId, ""], fieldContractSha256),
+      barrier_id: "erase-during-packet-read", workspace_id: WS, generation_id: null, subject_kind: "source_record",
+      subject_id: sourceRecordId, erased_at: CLOCK
+    });
+    database.close(); closeCachedDatabase(filename);
+    let settled = false;
+    const independent = reason(request(ids[0]!)).finally(() => { settled = true; });
+    const rejected = expect(independent).rejects.toThrow();
+    try { await new Promise(resolve => setTimeout(resolve, 30)); expect(settled).toBe(false); }
+    finally { release(); await snapshot; }
+    await rejected;
+  });
+});
 
 it("composes same-hypothesis extracted event roles through SQLite reopen and the existing worker solver", async () => {
   const positive = packet();

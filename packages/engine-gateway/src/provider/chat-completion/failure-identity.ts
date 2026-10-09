@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-const PROVIDER_FAILURE_BODY_DIGEST_BYTES = 16_384;
+export const PROVIDER_FAILURE_BODY_DIGEST_BYTES = 16_384;
 const MAX_IDENTITY_TOKEN_LENGTH = 128;
 
 export interface ProviderFailureIdentity {

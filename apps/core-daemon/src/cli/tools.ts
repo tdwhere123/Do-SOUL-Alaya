@@ -1,3 +1,4 @@
+import { runToolsSession } from "./tools-session.js";
 import { randomUUID } from "node:crypto";
 import {
   isHumanReviewerAgentTarget,
@@ -35,7 +36,7 @@ export interface ToolsCommandDependencies {
 }
 
 interface ToolsArgs {
-  readonly action: "list" | "call";
+  readonly action: "list" | "call" | "session";
   readonly toolName: string | null;
   readonly input: unknown;
   readonly contextOverrides: Readonly<{
@@ -48,7 +49,7 @@ interface ToolsArgs {
 export function createToolsCommand(deps: ToolsCommandDependencies): AlayaSubcommandSpec<ToolsArgs> {
   return {
     name: "tools",
-    description: "List or call Alaya first-party MCP memory tools.",
+    description: "List or call Alaya first-party MCP memory tools. tools session accepts JSON lines {tool, arguments} under one principal (256 calls, 5 minutes, 1 MiB per line). Close stdin to end the session; handles expire on worker loss.",
     argsSchema: toolsArgsSchema(),
     requiresDaemonReady: false,
     handler: async (ctx, args) => await executeToolsCommand(ctx, args, deps)
@@ -62,6 +63,12 @@ async function executeToolsCommand(
 ): Promise<AlayaCliResult> {
   if (args.action === "list") {
     return listToolsCommand(ctx);
+  }
+  if (args.action === "session") {
+    const bound = await buildCallContext(ctx, args, deps);
+    if (!bound.ok) { ctx.stderr.write(`${bound.message}\n`); return { exitCode: ALAYA_SYSEXITS.DATAERR }; }
+    return await runToolsSession(ctx, async (toolName, input, signal) => await callToolsCommand(
+      { ...ctx, jsonRequested: true }, { ...args, action: "call", toolName, input }, deps, { ...bound.context, abortSignal: signal }));
   }
   return await callToolsCommand(ctx, args, deps);
 }
@@ -83,13 +90,15 @@ function listToolsCommand(ctx: AlayaCliContext): AlayaCliResult {
 async function callToolsCommand(
   ctx: AlayaCliContext,
   args: ToolsArgs,
-  deps: ToolsCommandDependencies
+  deps: ToolsCommandDependencies,
+  boundContext?: McpMemoryToolCallContext
 ): Promise<AlayaCliResult> {
   if (args.toolName === null) {
     ctx.stderr.write("tools call requires a tool name\n");
     return { exitCode: ALAYA_SYSEXITS.USAGE };
   }
-  const callContextResult = await buildCallContext(ctx, args, deps);
+  const callContextResult = boundContext === undefined ? await buildCallContext(ctx, args, deps)
+    : { ok: true as const, context: boundContext };
   if (!callContextResult.ok) {
     ctx.stderr.write(`${callContextResult.message}\n`);
     return { exitCode: ALAYA_SYSEXITS.DATAERR };
@@ -168,6 +177,10 @@ function parseToolsArgs(input: readonly string[]):
   const options = parseContextOptions(input.slice(1));
   if (!options.ok) {
     return options;
+  }
+  if (action === "session") {
+    const parsed = parseListToolsArgs(options);
+    return parsed.ok ? { ok: true, args: { ...parsed.args, action: "session" } } : parsed;
   }
   return action === "list"
     ? parseListToolsArgs(options)

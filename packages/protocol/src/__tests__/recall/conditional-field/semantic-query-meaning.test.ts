@@ -36,6 +36,18 @@ const occurrenceMeaning = (target = "ring", excerpt: string | null = "ringing") 
 });
 const occurrenceEnvelope = { ...identity, original_query: "Did ringing precede flashing?" };
 
+it("materializes repeated handle-shaped role readings without duplicate role labels", () => {
+  const query = compiled(statement("use", [
+    { role: "r1", target: { kind: "free", key: "actor", excerpt: "Who" } },
+    { role: "r1", target: { kind: "free", key: "theme", excerpt: "sample" } }
+  ]));
+  const roles = query.alternatives[0]!.frames[0]!.role_requirements;
+  expect(new Set(roles.map(role => role.id)).size).toBe(2);
+  expect(roles.map(role => role.role_reading)).toEqual(["r1", "r1"]);
+  expect(roles.map(role => role.target_variable)).toEqual(["actor", "theme"]);
+  expect(SourceSemanticQuerySchema.safeParse(query).success).toBe(true);
+});
+
 it("resolves forward role references to declared propositions without creating entities or embedding", () => {
   const query = materializeSourceSemanticQueryMeaning(occurrenceMeaning(), occurrenceEnvelope);
   expect(query.return_variables).toEqual([]);

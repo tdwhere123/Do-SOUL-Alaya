@@ -12,6 +12,7 @@ import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudg
 import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
   sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase, type SourceSemanticLease } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
+import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalization.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
@@ -27,7 +28,9 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
     if (payload.request.kind === "prepare_source" || payload.request.kind === "validate_source") return prepareSource(runtime, payload, authorized, meter);
     if (payload.request.kind === "prepare_query") return prepareQuery(runtime, payload, authorized, meter);
     if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter);
-    return reasonSemantics(runtime, payload, authorized, meter);
+    const result = reasonSemantics(runtime, payload, authorized, meter);
+    return result.kind === "reason" && payload.request.kind === "reason"
+      ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;
   };
   return withSourceSemanticTransaction(runtime, payload, meter, run);
 }
@@ -281,13 +284,5 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
       ? projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: lease?.as_of ?? payload.as_of,
         source: checked.stored.record, proof_use: "conditional_support" }) : source_disclosure,
     coverage, work: workOf(meter) });
-  if (Buffer.byteLength(JSON.stringify(full)) <= request.output_byte_limit) return full;
-  const limited = SourceSemanticWorkerResultSchema.parse({ kind: "reason",
-    source_disclosure,
-    result: { contract: result.contract, conditional_computation_id: result.conditional_computation_id, source_interpretation_id: result.source_interpretation_id, query_semantics_id: result.query_semantics_id, semantic_correspondence_id: result.semantic_correspondence_id,
-      semantic_status: result.semantic_status, conclusion_scope: result.conclusion_scope, world_claim: result.world_claim,
-      outcome: { status: "truncated" }, consumed_leaves: [] },
-    coverage: { ...coverage, payload: "truncated" }, work: workOf(meter) });
-  if (Buffer.byteLength(JSON.stringify(limited)) > request.output_byte_limit) throw new CoreError("VALIDATION", "output budget cannot retain interpretation qualifiers");
-  return limited;
+  return full;
 }

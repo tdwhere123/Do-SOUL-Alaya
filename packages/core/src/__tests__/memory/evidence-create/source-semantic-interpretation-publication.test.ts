@@ -2,6 +2,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
+  vi.stubGlobal("fetch", vi.fn(() => { throw new Error("network forbidden"); }));
+});
 import {
   buildSourceReferenceCatalog,
   hashLabeledIdentity,
@@ -9,10 +13,11 @@ import {
   sourceReferenceResolver,
   sourceSemanticInterpretationIdentity,
   SourceSemanticPublishedInterpretationSchema,
-  UNKNOWN_UTTERANCE_ATTRIBUTION,
+  UNKNOWN_UTTERANCE_ATTRIBUTION, WorkspaceKind, WorkspaceState, RunMode, RunState,
   type SourceReferenceCatalog, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import {
+  SqliteWorkspaceRepo, SqliteRunRepo, SqliteSourceHintReader, SqliteEvidenceCapsuleRepo,
   SqliteEventLogRepo,
   SqliteFieldEraseBarrierRepo,
   SqliteKarmaEventRepo,
@@ -82,10 +87,11 @@ async function admitSource(
   recordedAt = CLOCK,
   evidenceObjectId: string | null = null,
   sourceId = "artifact-1",
-  attribution: UtteranceAttribution = UNKNOWN_UTTERANCE_ATTRIBUTION
+  attribution: UtteranceAttribution = UNKNOWN_UTTERANCE_ATTRIBUTION,
+  workspaceId = REAL_SQLITE_TEST_WORKSPACE_ID
 ) {
   return await fixture.sourceAdmission.admit({
-    workspace_id: REAL_SQLITE_TEST_WORKSPACE_ID,
+    workspace_id: workspaceId,
     source_id: sourceId,
     source_version: sourceVersion,
     attribution_context: attribution,
@@ -98,7 +104,7 @@ async function admitSource(
     speaker: "user",
     scope_class: "project",
     spans: deriveAddressableSpanViews(content)
-  }, { workspaceId: REAL_SQLITE_TEST_WORKSPACE_ID });
+  }, { workspaceId });
 }
 
 function catalogFor(text: string): SourceReferenceCatalog {
@@ -167,6 +173,64 @@ function countRows(database: StorageDatabase, sql: string): number {
   return (database.connection.prepare(sql).get() as { n: number }).n;
 }
 
+it("separates equal H publications by workspace and preserves replay through SQLite reopen", async () => {
+  const filename = join(mkdtempSync(join(tmpdir(), "alaya-workspace-interpretation-")), "memory.sqlite");
+  const fixture = await openFixture(filename);
+  const foreign = "workspace-two", foreignRun = "run-two";
+  await new SqliteWorkspaceRepo(fixture.database).create({ workspace_id: foreign, name: "two", root_path: "/tmp/ws2",
+    workspace_kind: WorkspaceKind.LOCAL_REPO, workspace_state: WorkspaceState.ACTIVE, default_engine_binding: null });
+  await new SqliteRunRepo(fixture.database).create({ run_id: foreignRun, workspace_id: foreign, title: "two", goal: null,
+    run_mode: RunMode.CHAT, run_state: RunState.IDLE, engine_binding_id: null, engine_class: null, current_surface_id: null });
+  await admitSource(fixture);
+  await admitSource(fixture, SOURCE, "1", CLOCK, null, "artifact-1", UNKNOWN_UTTERANCE_ATTRIBUTION, foreign);
+  const input = publicationInput(catalogFor(ASSERTION));
+  const first = await fixture.publication.publish(input);
+  const second = await fixture.publication.publish({ ...input, workspaceId: foreign, runId: foreignRun });
+  expect(second.bound.interpretation_id).toBe(first.bound.interpretation_id);
+  expect(second.evidence.object_id).not.toBe(first.evidence.object_id);
+  expect(second.evidence.workspace_id).toBe(foreign);
+  expect(await fixture.evidenceService.findByIdScoped(first.evidence.object_id, foreign)).toBeNull();
+  fixture.database.close(); databases.delete(fixture.database);
+  const reopened = await openFixture(filename);
+  await admitSource(reopened);
+  await admitSource(reopened, SOURCE, "1", CLOCK, null, "artifact-1", UNKNOWN_UTTERANCE_ATTRIBUTION, foreign);
+  expect((await reopened.publication.publish(input)).evidence.object_id).toBe(first.evidence.object_id);
+  expect((await reopened.publication.publish({ ...input, workspaceId: foreign, runId: foreignRun })).evidence.object_id).toBe(second.evidence.object_id);
+  expect(countRows(reopened.database, "SELECT count(*) AS n FROM evidence_capsules")).toBe(2);
+});
+
+it("reads a retained workspace-free key only in its workspace and fails closed on ambiguity", async () => {
+  const fixture = await openFixture();
+  await admitSource(fixture);
+  const input = publicationInput(catalogFor(ASSERTION));
+  // Seed the recorded old writer format without changing an existing ID or disabling FKs.
+  const created = await createSourceSemanticInterpretationPublication({ ...fixture.owner,
+    evidenceService: {
+      findByIdScoped: (id, workspace) => fixture.evidenceService.findByIdScoped(id, workspace),
+      create: (value, ...rest) => fixture.evidenceService.create({ ...value, object_id:
+        semanticInterpretationEvidenceId(JSON.parse(value.gist).interpretation_id, fieldContractSha256) }, ...rest)
+    }
+  }).publish(input);
+  const legacy = created.evidence.object_id;
+  const scoped = semanticInterpretationEvidenceId(created.bound.interpretation_id, fieldContractSha256, REAL_SQLITE_TEST_WORKSPACE_ID);
+  const bytes = created.evidence.gist;
+  const replay = await fixture.publication.publish(input);
+  expect(replay.evidence.object_id).toBe(legacy);
+  expect(replay.evidence.gist).toBe(bytes);
+  expect(countRows(fixture.database, "SELECT count(*) AS n FROM evidence_capsules")).toBe(1);
+  const keys = [scoped, legacy];
+  const reader = new SqliteSourceHintReader(fixture.database.connection);
+  expect(reader.readBoundInterpretationCompatible(REAL_SQLITE_TEST_WORKSPACE_ID, keys, 1_000_000))
+    .toMatchObject({ status: "complete", gist: bytes, objectId: legacy });
+  expect(reader.readBoundInterpretationCompatible("foreign", keys, 1_000_000))
+    .toMatchObject({ status: "absent", gist: null });
+  await new SqliteEvidenceCapsuleRepo(fixture.database).create({ ...created.evidence, object_id: scoped });
+  expect(reader.readBoundInterpretationCompatible(REAL_SQLITE_TEST_WORKSPACE_ID, keys, 1_000_000))
+    .toMatchObject({ status: "ambiguous", gist: null });
+  await expect(fixture.publication.publish(input)).rejects.toThrow(/ambiguous/u);
+  expect((await fixture.evidenceService.findByIdScoped(legacy, REAL_SQLITE_TEST_WORKSPACE_ID))?.gist).toBe(bytes);
+});
+
 describe("source semantic interpretation publication", () => {
   it("persists structural gaps across SQLite reopen and rejects normalized inputs that erase them", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-accounting-"));
@@ -230,7 +294,7 @@ describe("source semantic interpretation publication", () => {
       sourceSemanticInterpretationIdentity(first.bound.interpretation, fieldContractSha256)
     );
     expect(first.evidence.object_id).toBe(
-      semanticInterpretationEvidenceId(first.bound.interpretation_id, fieldContractSha256)
+      semanticInterpretationEvidenceId(first.bound.interpretation_id, fieldContractSha256, REAL_SQLITE_TEST_WORKSPACE_ID)
     );
     expect(first.evidence.object_id).not.toBe(first.bound.source_target.root_id);
     expect(first.bound.interpretation_id).not.toBe(first.bound.source_target.root_id);

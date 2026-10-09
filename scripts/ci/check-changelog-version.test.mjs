@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const script = fileURLToPath(new URL("./check-changelog-version.mjs", import.meta.url));
 const releaseScript = fileURLToPath(new URL("../check-release-version.mjs", import.meta.url));
 function check({ gateway = "0.3.12", app = "0.3.11", protocol = "4.16.0", declared = true, tag,
-  unreleased = true, protocolMarker = true } = {}) {
+  unreleased = true, protocolMarker = true, duplicateUnreleased = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "alaya-changelog-"));
   try {
     const pkg = (path, name, version) => { mkdirSync(join(root, path), { recursive: true }); writeFileSync(join(root, path, "package.json"), JSON.stringify({ name, version })); };
@@ -17,12 +17,18 @@ function check({ gateway = "0.3.12", app = "0.3.11", protocol = "4.16.0", declar
     pkg("packages/engine-gateway", "@do-soul/alaya-engine-gateway", gateway);
     const declarations = (protocolMarker ? "protocol 4.16.0\n" : "") +
       (declared ? "`@do-soul/alaya-engine-gateway` is\n`0.3.12` for the MCP tool surface.\n" : "");
-    writeFileSync(join(root, "CHANGELOG.md"), unreleased
+    writeFileSync(join(root, "CHANGELOG.md"), (unreleased
       ? "## Unreleased\nDo not tag `Unreleased`.\n" + declarations + "## v0.3.11\nPublished app.\n"
-      : "## v0.3.11\n" + declarations + "Published app.\n");
+      : "## v0.3.11\n" + declarations + "Published app.\n") +
+      (duplicateUnreleased ? "\n## Unreleased — protocol 1.0.0\nConflicting current version.\n" : ""));
     return spawnSync(process.execPath, tag === undefined ? [script] : [releaseScript, tag], { cwd: root, encoding: "utf8" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
+test("a later Unreleased section cannot hide behind correct first-section versions", () => {
+  const result = check({ duplicateUnreleased: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /at most one active Unreleased section/u);
+});
 test("independent MCP packages match their explicit unreleased declarations", () => assert.equal(check().status, 0));
 test("an undeclared gateway version drift still fails", () => assert.equal(check({ declared: false }).status, 1));
 test("declared protocol or gateway version mismatch still fails", () => {

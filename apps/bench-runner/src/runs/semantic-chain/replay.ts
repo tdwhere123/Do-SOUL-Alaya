@@ -407,10 +407,12 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
     if (!correspondences.some((value) => canonicalJson(value) === canonicalJson(proof.semantic_correspondence))) {
       throw new AlayaError("CONFLICT", "delivered proof lacks its retained semantic correspondence");
     }
-    const capsule = reader.readBoundInterpretation(plan.config.workspace_id,
-      semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256), 1_000_000);
+    const capsule = reader.readBoundInterpretationCompatible(plan.config.workspace_id,
+      [semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256, plan.config.workspace_id),
+        semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256)], 1_000_000);
     if (capsule.status !== "complete" || capsule.gist === null) throw new AlayaError("CONFLICT", "delivered interpretation is unavailable in sealed snapshot");
     const checked = verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256 }, JSON.parse(capsule.gist), plan.config.workspace_id);
+    if (checked.bound.interpretation_id !== proof.source_interpretation_id) throw new AlayaError("CONFLICT", "delivered interpretation differs from its proof identity");
     authorizeSemanticScope(checked.stored.record.scope_class, scopes);
     records.push(checked.stored.record);
   }

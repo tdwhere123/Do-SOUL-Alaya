@@ -417,6 +417,7 @@ function publishInteractiveFill(
     if (!(cause instanceof ExtractionCacheInvariantError)) throw cause;
     status = "in_progress";
   }
+  if (input.authority!.receipt.action === "sample") status = "in_progress";
   const manifest = buildFillManifest({
     config: input.prepared.config, variant: input.prepared.variant,
     existingManifest: readExtractionCacheManifestIdentity(input.cacheRoot)?.manifest,

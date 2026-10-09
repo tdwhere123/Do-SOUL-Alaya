@@ -586,6 +586,7 @@ class QueryMeaningCompiler {
     const candidate = SourceSemanticHandleSchema.safeParse(role).success ? role : this.fresh("r");
     const id = used.has(candidate) ? this.fresh("r") : candidate;
     used.add(id);
+    this.used.add(id);
     return id;
   }
 

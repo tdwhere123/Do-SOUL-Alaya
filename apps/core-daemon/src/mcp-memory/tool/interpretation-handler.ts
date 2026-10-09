@@ -3,6 +3,7 @@ import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, Sour
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
   type AuthorizedScopesAdmission, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
+import { finalizeSourceSemanticReason } from "../../runtime/recall-read-worker/source-semantic-reason-finalization.js";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { ToolUnavailableError, ToolValidationError } from "./tool-handler-support.js";
 import type { McpMemoryToolCallContext } from "./tool-handler-types.js";
@@ -48,7 +49,9 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
     try {
       const result = await executeWorker(input, context, { kind: operation, ...rest } as SourceSemanticWorkerRequest,
         authorized_scopes ?? { mode: "unrestricted" });
-      return mcpFromWorker(result);
+      const fitted = request.operation === "reason" && result.kind === "reason"
+        ? finalizeSourceSemanticReason(result, request.output_byte_limit, value => JSON.stringify(mcpFromWorker(value))) : result;
+      return mcpFromWorker(fitted);
     } catch (error) {
       if (request.operation === "prepare_source" && error instanceof CoreError) {
         const work = measuredFailure(error);

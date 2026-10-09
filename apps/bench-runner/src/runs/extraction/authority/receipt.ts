@@ -1,3 +1,4 @@
+import { extractionSamplePolicies, type ExtractionSamplePolicyBinding } from "./sample-policy.js";
 import { assertSampleReceipt, assertSampleInspection, assertExtractionSampleScope, type ExtractionSampleScope } from "./sample-scope.js";
 import {
   isStepSemanticRequestProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking
@@ -115,6 +116,7 @@ export interface ExtractionAuthorityReceipt {
   readonly price: ExtractionAuthorityReceiptPrice;
   readonly probe_key?: string;
   readonly sample_scope?: ExtractionSampleScope;
+  readonly sample_policy?: ExtractionSamplePolicyBinding;
   readonly source_preflight_digest?: string;
   readonly target_selection_digest?: string;
   readonly direct_spend?: DirectExtractionSpendAuthorization;
@@ -142,6 +144,7 @@ export interface ExtractionAuthorityReceiptInput {
   readonly maxConcurrency?: number;
   readonly probeKey?: string;
   readonly sampleScope?: ExtractionSampleScope;
+  readonly samplePolicyIdentity?: string;
   readonly sourcePreflight?: unknown;
   readonly targetSelectionDigest?: string;
   readonly cumulativeLimits?: {
@@ -236,6 +239,9 @@ function buildUnsignedReceipt(
       sourcePacking: input.observation.extraction.sourcePacking
     })
   });
+  const samplePolicy = input.action !== "sample" ? undefined : extractionSamplePolicies.binding(
+    input.samplePolicyIdentity ?? (sourcePreflightDigest === undefined
+      ? "longmemeval-first-100-sample-v1" : "complete-source-interactive-sample-v1"));
   const transport = input.observation.transport ?? {
     model: input.observation.extraction.model, providerUrl: input.observation.extraction.providerUrl
   };
@@ -254,7 +260,7 @@ function buildUnsignedReceipt(
     generated_at: (input.now ?? new Date()).toISOString(),
     identity_digest: computeExtractionAuthorityIdentityDigest(input.observation),
     lineage_digest: computeExtractionAuthorityLineageDigest(
-      input.observation, input.continuation, input.sampleScope
+      input.observation, input.continuation, input.sampleScope, samplePolicy
     ),
     observation: freezeAuthorityObservation(input.observation),
     inspection: freezeAuthorityInspection(input.inspection),
@@ -276,6 +282,7 @@ function buildUnsignedReceipt(
       keys: Object.freeze([...input.sampleScope.keys]),
       key_set_sha256: input.sampleScope.key_set_sha256
     }) }),
+    ...(samplePolicy === undefined ? {} : { sample_policy: samplePolicy }),
     ...(sourcePreflightDigest === undefined ? {} : { source_preflight_digest: sourcePreflightDigest })
   };
 }
@@ -296,7 +303,7 @@ export function assertExtractionAuthorityReceipt(
   }
   assertReceiptIdentity(receipt);
   if (receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(
-    observation, receipt.continuation, receipt.sample_scope
+    observation, receipt.continuation, receipt.sample_scope, receipt.sample_policy
   )) {
     throw new Error("extraction authority receipt does not match the current identity drift");
   }
@@ -356,7 +363,8 @@ export function computeExtractionAuthorityIdentityDigest(
 export function computeExtractionAuthorityLineageDigest(
   observation: ExtractionAuthorityObservation,
   continuation?: SameRootExtractionContinuation,
-  sampleScope?: ExtractionSampleScope
+  sampleScope?: ExtractionSampleScope,
+  samplePolicy?: ExtractionSamplePolicyBinding
 ): string {
   assertObservation(observation);
   if (continuation !== undefined) assertSameRootExtractionContinuation(continuation);
@@ -365,6 +373,7 @@ export function computeExtractionAuthorityLineageDigest(
     .update(JSON.stringify({
       ...canonicalAuthorityLineage(observation),
       ...(continuation === undefined ? {} : { continuation }),
+      ...(samplePolicy === undefined ? {} : { sample_policy: samplePolicy }),
       ...(sampleScope === undefined ? {} : { sample_scope: sampleScope })
     }), "utf8")
     .digest("hex");
@@ -500,7 +509,7 @@ function isInspection(value: unknown): value is ExtractionAuthorityInspection {
 function assertReceiptIdentity(receipt: ExtractionAuthorityReceipt): void {
   if (receipt.identity_digest !== computeExtractionAuthorityIdentityDigest(receipt.observation) ||
       receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(
-        receipt.observation, receipt.continuation, receipt.sample_scope
+        receipt.observation, receipt.continuation, receipt.sample_scope, receipt.sample_policy
       )) {
     throw new Error("extraction authority receipt identity digest is invalid");
   }

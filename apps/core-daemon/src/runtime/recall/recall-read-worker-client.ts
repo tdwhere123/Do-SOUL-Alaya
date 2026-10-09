@@ -278,26 +278,41 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   }
 
   public readonly sourceInterpretationPort = {
-    reason: async (input: WorkerOperationPayload<"conditionalField.interpretation">): Promise<SourceInterpretationReasoningResult> =>
-      await this.request<SourceInterpretationReasoningResult>("conditionalField.interpretation", input)
+    reason: async (input: WorkerOperationPayload<"conditionalField.interpretation">): Promise<SourceInterpretationReasoningResult> => {
+      const run = async () => await this.request<SourceInterpretationReasoningResult>("conditionalField.interpretation", input);
+      return this.snapshotSession.pinnedWorker() === undefined
+        ? await this.readSnapshot.isolate!(run) : await run();
+    }
   };
 
   public readonly sourceSemanticsPort = {
     execute: async (input: WorkerOperationPayload<"conditionalField.sourceSemantics">): Promise<SourceSemanticWorkerResult> => {
       const handle = input.request.kind === "reason" ? input.request.query_handle
+        : input.request.kind === "recall" ? input.request.continuation?.continuation_id ?? input.request.query_handle
         : input.request.kind === "prepare_query" ? input.request.continuation_handle ?? input.request.source_handle
         : input.request.kind === "validate_source" ? input.request.source_handle : undefined;
-      const worker = handle === undefined
-        ? this.requireWorker("conditionalField.sourceSemantics")
-        : this.deliveryOwner(handle);
-      const parsed = await this.dispatchToWorker<SourceSemanticWorkerResult>(
-        worker, "conditionalField.sourceSemantics", input);
-      const issued = parsed.kind === "prepare_source" ? parsed.source_handle
-        : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
-      if (issued !== undefined) this.deliveryOwners.set(issued, worker);
-      if (parsed.kind === "prepare_query" && parsed.continuation_handle !== undefined) this.deliveryOwners.set(parsed.continuation_handle, worker);
-      while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
-      return parsed;
+      if (handle !== undefined) this.deliveryOwner(handle);
+      // Independent requests acquire the owner's worker; same-request reads keep their pin.
+      const run = async (): Promise<SourceSemanticWorkerResult> => {
+        const worker = this.requireWorker("conditionalField.sourceSemantics");
+        if (handle !== undefined && this.deliveryOwner(handle) !== worker) {
+          throw new CoreError("VALIDATION", "preparation handle belongs to another snapshot worker");
+        }
+        const parsed = await this.dispatchToWorker<SourceSemanticWorkerResult>(
+          worker, "conditionalField.sourceSemantics", input);
+        const issued = parsed.kind === "prepare_source" ? parsed.source_handle
+          : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
+        if (issued !== undefined) this.deliveryOwners.set(issued, worker);
+        if (parsed.kind === "prepare_query" && parsed.continuation_handle !== undefined) this.deliveryOwners.set(parsed.continuation_handle, worker);
+        if (parsed.kind === "recall") {
+          this.deliveryOwners.set(parsed.delivery_id, worker);
+          if (parsed.index.continuation !== null) this.deliveryOwners.set(parsed.index.continuation.continuation_id, worker);
+        }
+        while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
+        return parsed;
+      };
+      return this.snapshotSession.pinnedWorker() === undefined
+        ? await this.readSnapshot.isolate!(run, handle) : await run();
     }
   };
 
@@ -476,6 +491,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   }
 
   private workerAt(index: number): Worker {
+    if (this.closed || this.closeStarted) throw new CoreError("CONFLICT", "recall read worker is closed");
     const existing = this.workers[index] ?? null;
     if (existing !== null) return existing;
     const worker = this.spawnWorker(index);

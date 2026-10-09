@@ -159,7 +159,15 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
       meter.retain(input.draft ?? input.interpretation, "publication input");
       const activeOwner = { ...owner, meter };
       const bound = bindSemanticInterpretation(activeOwner, input);
-      const objectId = semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256);
+      const objectId = semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256, input.workspaceId);
+      // Read-only compatibility until all legacy workspace-free capsule keys are explicitly retired.
+      const findExisting = async () => {
+        const rows = await Promise.all([objectId, semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256)]
+          .map(id => owner.evidenceService.findByIdScoped(id, input.workspaceId)));
+        const found = rows.filter(row => row !== null);
+        if (found.length > 1) throw new CoreError("CONFLICT", "ambiguous workspace interpretation capsules");
+        return found[0] ?? null;
+      };
       const current = () => verifyPublishedSourceSemanticInterpretation(activeOwner, bound, input.workspaceId);
       const storedBound = (evidence: { lifecycle_state: string; gist: string }) => {
         const stored = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(evidence.gist));
@@ -168,7 +176,7 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
         }
         return stored;
       };
-      const existing = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
+      const existing = await findExisting();
       current();
       if (existing !== null) {
         const checked = current();
@@ -187,7 +195,7 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
         run_id: input.runId, workspace_id: input.workspaceId, surface_id: null
       }, [], undefined, undefined, undefined, current);
       } catch (error) {
-        const raced = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
+        const raced = await findExisting();
         if (raced === null) throw error;
         const checked = current();
         return { bound: storedBound(raced), evidence: raced,
@@ -293,8 +301,11 @@ function assemblePublishedInterpretation(sha256: FieldContractSha256, stored: Re
   });
 }
 
-export function semanticInterpretationEvidenceId(interpretationId: string, sha256: FieldContractSha256): string {
-  return uuidFromHex(sha256(`source-semantic-interpretation:${interpretationId}`));
+/** Omitted workspace derives the frozen legacy key for explicit scoped compatibility reads only. */
+export function semanticInterpretationEvidenceId(interpretationId: string, sha256: FieldContractSha256, workspaceId?: string): string {
+  if (workspaceId !== undefined && workspaceId.trim().length === 0) throw new CoreError("VALIDATION", "workspace required for interpretation key");
+  return uuidFromHex(sha256(workspaceId === undefined ? `source-semantic-interpretation:${interpretationId}`
+    : canonicalJson({ contract: "workspace-source-semantic-interpretation-v1", workspace_id: workspaceId, interpretation_id: interpretationId })));
 }
 
 export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,

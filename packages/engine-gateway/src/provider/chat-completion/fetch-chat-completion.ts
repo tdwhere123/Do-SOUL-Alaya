@@ -1,6 +1,7 @@
 import { ProviderChatCompletionError } from "./errors.js";
-import { isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { AlayaError, isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import {
+  PROVIDER_FAILURE_BODY_DIGEST_BYTES,
   providerFailureIdentityFromBody,
   readOptionalProviderFailureIdentity
 } from "./failure-identity.js";
@@ -67,21 +68,14 @@ async function runProviderChatRequest(
   if (isStepSemanticRequestProfile(request.profile)) {
     let bodyText: string;
     let evidence: ProviderHttpResponseEvidence;
-    try {
-      ({ bodyText, evidence } = await readProviderResponseWithEvidence(
-        response, observeResponse,
-        request.retainHttpResponseEvidence === true
-          ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined
-      ));
-    } catch (cause) {
-      if (response.ok) throw cause;
-      throw new ProviderChatCompletionError(
-        `provider chat completion failed: HTTP ${response.status} ${response.statusText}`,
-        "http_error", response.status,
-        { cause, httpResponse: cause instanceof ProviderChatCompletionError
-          ? cause.httpResponse : undefined }
-      );
-    }
+    const boundedError = !response.ok;
+    ({ bodyText, evidence } = await readProviderResponseWithEvidence(
+      response, observeResponse,
+      boundedError ? PROVIDER_FAILURE_BODY_DIGEST_BYTES
+        : request.retainHttpResponseEvidence === true ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined,
+      // Cancellation threshold only. Received bytes beyond the retained prefix stay in the digest.
+      boundedError ? PROVIDER_FAILURE_BODY_DIGEST_BYTES : undefined
+    ));
     if (!response.ok) {
       throw new ProviderChatCompletionError(
         `provider chat completion failed: HTTP ${response.status} ${response.statusText}`,
@@ -233,7 +227,7 @@ function normalizeTransportError(
   if (callerSignal?.aborted === true || requestSignal.aborted) {
     return toCancellationError(error, callerSignal, requestSignal, knownStatus, knownResponse);
   }
-  if (error instanceof ProviderChatCompletionError) return error;
+  if (error instanceof ProviderChatCompletionError || error instanceof AlayaError) return error;
   return new ProviderChatCompletionError(
     "provider chat completion transport failed",
     "network_error",

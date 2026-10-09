@@ -53,12 +53,14 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
         }
         if (!retainedRow?.correspondence_outcomes?.some((row) => row.key === found.line.key
           && row.raw_digest === found.shard?.raw_digest)) throw new AlayaError("CONFLICT", "retained native semantic-correspondence artifact changed");
-        const capsule = new SqliteSourceHintReader(database.connection).readBoundInterpretation(plan.config.workspace_id,
-          semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256), plan.config.budget.memory_bytes);
+        const capsule = new SqliteSourceHintReader(database.connection).readBoundInterpretationCompatible(plan.config.workspace_id,
+          [semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256, plan.config.workspace_id),
+            semanticInterpretationEvidenceId(proof.source_interpretation_id!, fieldContractSha256)], plan.config.budget.memory_bytes);
         if (capsule.status !== "complete" || capsule.gist === null) throw new AlayaError("CONFLICT", "withdrawal source interpretation unavailable in snapshot");
         const checked = verifyPublishedSourceSemanticInterpretation({ stores: sourceLookupStores(database),
           sha256: fieldContractSha256, meter: new SourceSemanticResourceLedger(plan.config.budget) },
         JSON.parse(capsule.gist), plan.config.workspace_id);
+        if (checked.bound.interpretation_id !== proof.source_interpretation_id) throw new AlayaError("CONFLICT", "withdrawal interpretation differs from its proof identity");
         const executed = executeSourceSemanticInterpretation({
           source_interpretation: checked.bound, query_semantics: query.query_semantics, semantic_correspondence: found.received.semantic_correspondence,
           original_query: query.original_query, workspaceId: plan.config.workspace_id,

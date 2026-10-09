@@ -153,7 +153,9 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   }
   const deterministic = report.ready_requests.filter(line =>
     parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request.source_assertions.length === 0);
-  if (deterministic.length !== report.deterministic_requests ||
+  // Warm deterministic-empty artifacts are cache hits, not missing zero-attempt work.
+  if (report.deterministic_requests > deterministic.length ||
+      deterministic.length - report.deterministic_requests > report.cached_requests ||
       deterministic.some(line => planned.has(line.key))) {
     throw new AlayaError("CONFLICT", "retained interactive preflight deterministic source count differs from ready requests");
   }

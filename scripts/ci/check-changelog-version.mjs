@@ -12,6 +12,9 @@ export function checkChangelogVersions(releaseTag) {
   }
 
   const changelog = readFileSync(changelogPath, "utf8");
+  if ([...changelog.matchAll(/^## Unreleased\b/gmu)].length > 1) {
+    throw new Error("CHANGELOG.md must have at most one active Unreleased section");
+  }
   const publishedHeadings = [...changelog.matchAll(/^## (v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?)\b/gmu)].map(
     (match) => match[1]
   );

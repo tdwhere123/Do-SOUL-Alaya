@@ -82,20 +82,23 @@ function gardenApiKey(): string | null {
     if ("value" in resolved && typeof resolved.value === "string" && resolved.value.trim().length > 0) {
       return resolved.value;
     }
+    throw new AlayaError("VALIDATION", `configured Garden secret reference could not be resolved: ${"kind" in resolved ? resolved.kind : "empty"}`);
   }
   const direct = process.env.OFFICIAL_API_GARDEN_API_KEY?.trim();
   return direct === undefined || direct.length === 0 ? null : direct;
 }
 
 function required(args: ReadonlyArray<string>, name: string): string {
-  const index = args.indexOf(name);
-  const value = index >= 0 ? args[index + 1] : undefined;
-  if (value === undefined || value.startsWith("--")) throw new AlayaError("VALIDATION", `${name} is required`);
+  const matches = args.filter(token => token === name || token.startsWith(`${name}=`));
+  if (matches.length > 1) throw new AlayaError("VALIDATION", `${name} must not be repeated`);
+  const token = matches[0];
+  const value = token === name ? args[args.indexOf(name) + 1] : token?.slice(name.length + 1);
+  if (value === undefined || value.length === 0 || value.startsWith("--")) throw new AlayaError("VALIDATION", `${name} is required`);
   return value;
 }
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
-  return args.includes(name);
+  return args.some(token => token === name || token.startsWith(`${name}=`));
 }
 
 function integerFlag(args: ReadonlyArray<string>, name: string, fallback: number): number {

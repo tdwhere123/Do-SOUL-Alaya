@@ -24,10 +24,13 @@ export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: stri
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   beforeSourceRead?: (bound: ReturnType<typeof SourceSemanticPublishedInterpretationSchema.parse>) => boolean): VerifiedInterpretation | null {
   const expected = typeof identity === "string" ? identity : undefined;
-  const objectId = typeof identity === "string" ? semanticInterpretationEvidenceId(identity, fieldContractSha256) : identity.evidence_object_id;
-  meter.reserve(1, 16);
-  const capsule = new SqliteSourceHintReader(runtime.database.connection).readBoundInterpretation(
-    workspace, objectId, meter.bytes);
+  let objectId = typeof identity === "string" ? semanticInterpretationEvidenceId(identity, fieldContractSha256, workspace) : identity.evidence_object_id;
+  meter.reserve(3, 48);
+  const reader = new SqliteSourceHintReader(runtime.database.connection);
+  const capsule = expected === undefined ? reader.readBoundInterpretation(workspace, objectId, meter.bytes)
+    : reader.readBoundInterpretationCompatible(workspace,
+      [objectId, semanticInterpretationEvidenceId(expected, fieldContractSha256)], meter.bytes);
+  if ("objectId" in capsule && typeof capsule.objectId === "string") objectId = capsule.objectId;
   meter.read(capsule.nativeVisits, capsule.bytesRead);
   if (capsule.status !== "complete" || capsule.gist === null) {
     throw new CoreError("CONFLICT", `source semantic interpretation read is ${capsule.status}`, { details: { admission: "unavailable", unavailable: capsule.status } });
@@ -45,9 +48,20 @@ export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: stri
       { details: { admission: "invalid", reason: "malformed_interpretation" } });
   }
   const bound = parsed.data;
-  if (expected !== undefined && bound.interpretation_id !== expected
-      || semanticInterpretationEvidenceId(bound.interpretation_id, fieldContractSha256) !== objectId) {
+  const ids = [semanticInterpretationEvidenceId(bound.interpretation_id, fieldContractSha256, workspace),
+    semanticInterpretationEvidenceId(bound.interpretation_id, fieldContractSha256)];
+  if (expected !== undefined && bound.interpretation_id !== expected || !ids.includes(objectId) ||
+      bound.source_target.workspace_id !== workspace) {
     throw new CoreError("VALIDATION", "interpretation identity mismatch");
+  }
+  if (expected === undefined) {
+    meter.reserve(3, 48);
+    const compatible = reader.readBoundInterpretationCompatible(workspace, ids, meter.bytes, true);
+    meter.read(compatible.nativeVisits, compatible.bytesRead);
+    if (compatible.status !== "complete" || compatible.objectId !== objectId) {
+      throw new CoreError("CONFLICT", `source semantic interpretation read is ${compatible.status}`,
+        { details: { admission: "unavailable", unavailable: compatible.status } });
+    }
   }
   // A bounded initial preview cannot verify source locations by reading hidden bytes.
   // The caller may defer this candidate; it enters the pool only after full verification.

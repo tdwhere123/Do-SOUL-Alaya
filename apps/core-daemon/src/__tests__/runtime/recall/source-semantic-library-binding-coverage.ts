@@ -302,7 +302,7 @@ export async function publishedInterpretation(filename: string, interpretationId
   const { database } = await createRecallRealStorage(() => undefined, filename);
   try {
     const row = database.connection.prepare("SELECT gist FROM evidence_capsules WHERE object_id=?")
-      .get(semanticInterpretationEvidenceId(interpretationId, fieldContractSha256)) as { gist: string } | undefined;
+      .get(semanticInterpretationEvidenceId(interpretationId, fieldContractSha256, WS)) as { gist: string } | undefined;
     if (row === undefined) throw new Error(`missing published interpretation ${interpretationId}`);
     return JSON.parse(row.gist) as { interpretation: SourceSemanticLibraryProof["interpretation"] };
   } finally {

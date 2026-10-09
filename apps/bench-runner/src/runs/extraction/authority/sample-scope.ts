@@ -1,4 +1,5 @@
 import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { extractionSamplePolicies } from "./sample-policy.js";
 import { z } from "zod";
 import { computeExtractionKeySetSha256 } from "../content-closure.js";
 import type { ExtractionAuthorityInspection } from "./inspection.js";
@@ -65,15 +66,15 @@ export function assertExtractionSampleScope(value: unknown): asserts value is Ex
 
 export function assertSampleReceipt(receipt: ExtractionAuthorityReceipt): void {
   if (receipt.action !== "sample") {
-    if (receipt.sample_scope !== undefined || receipt.source_preflight_digest !== undefined) {
+    if (receipt.sample_scope !== undefined || receipt.sample_policy !== undefined || receipt.source_preflight_digest !== undefined) {
       throw new Error("sample scope and source preflight proof require the sample action");
     }
     return;
   }
   assertExtractionSampleScope(receipt.sample_scope);
   const count = receipt.sample_scope.keys.length;
-  // Canonical population windows retain their target-root selection contract;
-  // other inspected windows are bound by the receipt's dataset and key identities.
+  extractionSamplePolicies.assert(receipt.sample_policy, receipt.observation,
+    receipt.sample_scope.keys, receipt.source_preflight_digest !== undefined);
   const requiresSelection = requiresExtractionTargetSelection(receipt.observation);
   if (receipt.schema_version !== 5 ||
       requiresSelection !== (receipt.target_selection_digest !== undefined) ||

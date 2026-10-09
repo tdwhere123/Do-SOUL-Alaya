@@ -25,8 +25,8 @@ export function createRecallReadSnapshotSession(input: {
       isolate: async (work, affinity) => {
         const preferred = affinity === undefined ? undefined : input.affinityWorkerIndex?.(affinity);
         const index = await acquire(input.workerCount, held, waiters, preferred);
-        const worker = input.getWorker(index);
         try {
+          const worker = input.getWorker(index);
           return await als.run(worker, work);
         } finally {
           release(index, held, waiters);

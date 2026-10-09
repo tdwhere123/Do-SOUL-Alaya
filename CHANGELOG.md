@@ -196,8 +196,9 @@ source enumeration before any broad usefulness claim. Source retrieval remains
 scoreable when proof-conditioned measurement is unavailable. No provider calls,
 benchmark execution or default cutover are authorized by this contract change.
 
-## Unreleased — protocol 6.6.0
+## Historical unreleased development notes — protocol 6.6.0
 
+The following notes record earlier development versions, not current package versions.
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`

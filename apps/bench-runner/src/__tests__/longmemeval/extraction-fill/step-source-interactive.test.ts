@@ -4,6 +4,15 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
+  const nativeFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (new URL(String(input)).hostname !== "127.0.0.1" || init?.redirect !== "error") throw new Error("only no-redirect loopback transport allowed");
+    return nativeFetch(input, init);
+  });
+});
+import { hasCompleteExtractionFillAuthority } from "../../../runs/extraction/fill/fill-authority.js";
 import { STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE,
   stepSemanticRequestModel, type StepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
@@ -102,6 +111,21 @@ async function scenario(selectedCount: number, outputTokenCap?: number, logicalM
   return { options: { ...options, authorityReceiptPath: receiptPath }, selected, preflight, receipt,
     receiptInput };
 }
+
+it("keeps a fully settled interactive sample partial across warm replay", async () => {
+  const fixture = await scenario(6);
+  const http = await listen(body => ({ text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop" }));
+  const filled = await runExtractionFill(fixture.options);
+  expect(http.calls).toHaveLength(6);
+  expect(filled.manifest.cached_turns).toBe(filled.manifest.expected_turns);
+  expect(filled.manifest.fill_status).toBe("in_progress");
+  expect(filled.manifest.content_closure_index).toBeUndefined();
+  expect(hasCompleteExtractionFillAuthority(filled.manifest)).toBe(false);
+  const warm = await runExtractionFill(fixture.options);
+  expect(warm.manifest.fill_status).toBe("in_progress");
+  expect(hasCompleteExtractionFillAuthority(warm.manifest)).toBe(false);
+  expect(http.calls).toHaveLength(6);
+});
 
 it("reopens a configured logical model alias through its recorded Step transport", async () => {
   const logicalModel = "fixture-step-alias";

@@ -1,3 +1,10 @@
+import { PassThrough } from "node:stream";
+import { withCliInterpretationSession } from "../../support/cli-interpretation-session.test-support.js";
+import { createToolsCommand } from "../../../cli/tools.js";
+import { createAlayaCliBridge } from "../../../cli/bridge.js";
+import { runAlayaCli } from "../../../cli/support/module-loader.js";
+import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
+import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -6,8 +13,14 @@ import { dirname } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
+  vi.stubGlobal("fetch", vi.fn(() => { throw new Error("network forbidden"); }));
+});
+import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import {
+  SoulInterpretationResponseSchema,
   buildSourceReferenceCatalog, hashLabeledIdentity, sourceReferenceResolver, canonicalJson,
   SourceSemanticPublishedInterpretationSchema, sourceSemanticInterpretationIdentity,
   type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
@@ -145,10 +158,10 @@ function correspondenceOf(sourceInterpretationId: string, querySemantics: Source
 }
 
 async function withPublished(body: (input: {
-  sourceInterpretationId: string; allIds: readonly string[]; execute: Execute; filename: string; client: RecallReadWorkerClient;
+  sourceInterpretationId: string; sourceRecordId: string; allIds: readonly string[]; execute: Execute; filename: string; client: RecallReadWorkerClient;
 }) => Promise<void>, options: Readonly<{
   valid_from?: string; valid_to?: string; state?: "erased" | "superseded";
-  scope?: "project" | "global_core"; count?: number; large?: boolean;
+  scope?: "project" | "global_core"; count?: number; large?: boolean; workerCount?: number; legacyKeys?: boolean;
 }> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-reasoning-"));
   const filename = join(directory, "alaya.db");
@@ -159,6 +172,11 @@ async function withPublished(body: (input: {
   const evidenceService = new EvidenceService({
     eventLogRepo, runtimeNotifier, evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK
   });
+  const publicationEvidenceService = options.legacyKeys !== true ? evidenceService : {
+    findByIdScoped: (id: string, workspace: string) => evidenceService.findByIdScoped(id, workspace),
+    create: (value: Parameters<EvidenceService["create"]>[0], ...rest: Parameters<EvidenceService["create"]> extends [unknown, ...infer Rest] ? Rest : never) =>
+      evidenceService.create({ ...value, object_id: semanticInterpretationEvidenceId(JSON.parse(value.gist).interpretation_id, fieldContractSha256) }, ...rest)
+  };
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
   const admitted = await admission.admit({
     workspace_id: WS, source_id: "artifact-1", source_version: "1", content_bytes: SOURCE,
@@ -168,7 +186,7 @@ async function withPublished(body: (input: {
   }, { workspaceId: WS });
   const catalog = catalogFor(ASSERTION);
   const published = await createSourceSemanticInterpretationPublication({
-    stores, evidenceService, sha256: fieldContractSha256
+    stores, evidenceService: publicationEvidenceService, sha256: fieldContractSha256
   }).publish({
     workspaceId: WS, runId: RUN, artifactKey: "artifact-1", source: SOURCE, catalog,
     attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
@@ -214,11 +232,11 @@ async function withPublished(body: (input: {
     eraser.apply(barrier); eraser.apply(barrier);
   }
   database.close(); closeCachedDatabase(filename);
-  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
+  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: options.workerCount ?? 1 })!;
   try {
     await client.ready();
     await body({
-      sourceInterpretationId: published.bound.interpretation_id, allIds, execute: (input) => client.sourceSemanticsPort!.execute(input),
+      sourceInterpretationId: published.bound.interpretation_id, sourceRecordId: admitted.record.identity, allIds, execute: (input) => client.sourceSemanticsPort!.execute(input),
       filename, client
     });
   } finally {
@@ -239,11 +257,137 @@ function call(execute: Execute, request: SourceSemanticWorkerRequest, extra: {
   });
 }
 
+it("fits preparation-required reasons at native and public UTF-8 boundaries without inventing conclusions", async () => {
+  await withPublished(async ({ sourceInterpretationId, execute }) => {
+    const publicReason = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
+    for (const extra of [{}, { query_semantics: queryOf() }, { semantic_correspondence: correspondenceOf(sourceInterpretationId, queryOf()) }]) {
+      const request = { accepts_unreviewed_conditional_results: true as const,
+        source_interpretation_id: sourceInterpretationId, original_query: ORIGINAL, budget: BUDGET,
+        output_byte_limit: 1024, ...extra };
+      const native = await call(execute, { kind: "reason", ...request });
+      const response = await publicReason({ operation: "reason", ...request }, { workspaceId: WS, runId: RUN, agentTarget: "test", sessionId: "test" });
+      expect(Buffer.byteLength(JSON.stringify(native), "utf8")).toBeLessThanOrEqual(1024);
+      expect(Buffer.byteLength(JSON.stringify(response), "utf8")).toBeLessThanOrEqual(1024);
+      if (native.kind !== "reason" || response.operation !== "reason") throw new Error("expected reasons");
+      expect(native.result.outcome.status).toBe("preparation_required");
+      expect(response.result?.outcome.status).toBe("preparation_required");
+      expect(response.result?.world_claim).toBe("unknown");
+      expect(response.coverage.payload).toBe("truncated");
+    }
+  });
+});
+
+it("fits multibyte preparation output and measures the public envelope rather than the native envelope", async () => {
+  await withPublished(async ({ allIds, execute }) => {
+    const request = { accepts_unreviewed_conditional_results: true as const, source_interpretation_id: allIds[1]!,
+      original_query: ORIGINAL, budget: { ...BUDGET, work_units: 1_000_000 }, output_byte_limit: 1_000_000 };
+    const full = await call(execute, { kind: "reason", ...request });
+    if (full.kind !== "reason") throw new Error("expected reason");
+    const nativeBytes = Buffer.byteLength(JSON.stringify(full), "utf8");
+    expect(nativeBytes).toBeGreaterThan(JSON.stringify(full).length);
+    const publicReason = createSourceSemanticInterpretationHandler({ now: () => CLOCK,
+      sourceSemanticsPort: { execute: async () => full } });
+    const response = await publicReason({ operation: "reason", ...request, output_byte_limit: nativeBytes },
+      { workspaceId: WS, runId: RUN, agentTarget: "test", sessionId: "test" });
+    expect(Buffer.byteLength(JSON.stringify(response), "utf8")).toBeLessThanOrEqual(nativeBytes);
+    expect(response.coverage.payload).toBe("truncated");
+    if (response.operation !== "reason") throw new Error("expected reason");
+    expect(response.result?.outcome.status).toBe("preparation_required");
+  }, { count: 2, large: true });
+});
+
+it("waits for an independent semantic request instead of inheriting an ordinary worker snapshot", async () => {
+  await withPublished(async ({ execute, client, filename, sourceRecordId }) => {
+    let ready!: () => void, release!: () => void;
+    const opened = new Promise<void>(resolve => { ready = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const snapshot = client.readSnapshot.isolate!(async () => {
+      await client.readSnapshot.beginDeferred();
+      try {
+        await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET });
+        ready(); await hold;
+      } finally { await client.readSnapshot.rollback(); }
+    });
+    await opened;
+    let settled = false;
+    const writer = await createRecallRealStorage(() => undefined, filename);
+    try {
+      new SqliteFieldEraseBarrierRepo(writer.database, fieldContractSha256).apply({
+        identity: hashLabeledIdentity("erase_barrier", [WS, "source_record", sourceRecordId, ""], fieldContractSha256),
+        barrier_id: "erase-during-independent-read", workspace_id: WS, generation_id: null,
+        subject_kind: "source_record", subject_id: sourceRecordId, erased_at: CLOCK
+      });
+    } finally { writer.database.close(); closeCachedDatabase(filename); }
+    const independent = call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET }).finally(() => { settled = true; });
+    const rejected = expect(independent).rejects.toThrow();
+    try {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(settled).toBe(false);
+    } finally { release(); await snapshot; }
+    await rejected;
+  });
+});
+
+it("redeems query preparation on its owning nondefault worker after another snapshot releases", async () => {
+  await withPublished(async ({ execute, client, sourceInterpretationId }) => {
+    let ready!: () => void, release!: () => void;
+    const opened = new Promise<void>(resolve => { ready = resolve; });
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const snapshot = client.readSnapshot.isolate!(async () => {
+      await client.readSnapshot.beginDeferred(); ready();
+      try { await hold; } finally { await client.readSnapshot.rollback(); }
+    });
+    await opened;
+    let prepared: Awaited<ReturnType<Execute>>;
+    try {
+      prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
+    } finally { release(); await snapshot; }
+    if (prepared.kind !== "prepare_query" || prepared.query_handle === undefined) throw new Error("expected query handle");
+    const reason = await call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle, source_interpretation_id: sourceInterpretationId, budget: BUDGET, output_byte_limit: 1000000 });
+    expect(reason.kind).toBe("reason");
+    const recall = await call(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+      query_handle: prepared.query_handle, budget: BUDGET, output_byte_limit: 1000000 });
+    expect(recall.kind).toBe("recall");
+    if (recall.kind !== "recall") throw new Error("expected library recall");
+    expect(recall.index.entries).toHaveLength(1);
+  }, { workerCount: 2 });
+});
+
+it("reads current legacy-key H through the worker without mutation and rejects ambiguous or foreign lookups", async () => {
+  await withPublished(async ({ execute, sourceInterpretationId, filename }) => {
+    const reason = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
+      source_interpretation_id: sourceInterpretationId, original_query: ORIGINAL, query_semantics: queryOf(),
+      semantic_correspondence: correspondenceOf(sourceInterpretationId, queryOf()), budget: BUDGET, output_byte_limit: 1_000_000 };
+    const result = await call(execute, reason);
+    if (result.kind !== "reason") throw new Error("reason expected");
+    expect(result.result.outcome.status).toBe("interpreted");
+    const discovery = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
+    if (discovery.kind !== "prepare_query") throw new Error("query expected");
+    expect(discovery.candidates.map(row => row.interpretation_id)).toContain(sourceInterpretationId);
+    await expect(execute({ workspace_id: "foreign", as_of: CLOCK, authorized_scopes: { mode: "unrestricted" }, request: reason }))
+      .rejects.toThrow(/absent/u);
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const repo = new SqliteEvidenceCapsuleRepo(database);
+    const legacy = semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256);
+    const original = await repo.findById(legacy);
+    if (original === null) throw new Error("legacy row missing");
+    await repo.create({ ...original, object_id: semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256, WS) });
+    expect((await repo.findById(legacy))?.gist).toBe(original.gist);
+    database.close(); closeCachedDatabase(filename);
+    await expect(call(execute, reason)).rejects.toThrow(/ambiguous/u);
+    const ambiguous = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
+    if (ambiguous.kind !== "prepare_query") throw new Error("query expected");
+    expect(ambiguous.candidates).toEqual([]);
+    expect(ambiguous.coverage.discovery).toBe("truncated");
+  }, { legacyKeys: true });
+});
+
 it("keeps durable legacy interpretation bytes and identity while failing closed through the worker", async () => {
   await withPublished(async ({ sourceInterpretationId, execute, filename }) => {
     const { database } = await createRecallRealStorage(() => undefined, filename);
     const repo = new SqliteEvidenceCapsuleRepo(database);
-    const capsule = await repo.findById(semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256));
+    const capsule = await repo.findById(semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256, WS));
     if (capsule === null) throw new Error("published capsule missing");
     const current = JSON.parse(capsule.gist), sourceInterpretation = { ...current.interpretation,
       contract: "source-interpretation-v3", contract_version: "source-interpretation-v3",
@@ -278,7 +422,7 @@ it("keeps discovery open and returns typed validation for persisted interpretati
   await withPublished(async ({ sourceInterpretationId, execute, filename }) => {
     const { database } = await createRecallRealStorage(() => undefined, filename);
     const repo = new SqliteEvidenceCapsuleRepo(database);
-    const capsule = await repo.findById(semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256));
+    const capsule = await repo.findById(semanticInterpretationEvidenceId(sourceInterpretationId, fieldContractSha256, WS));
     if (capsule === null) throw new Error("published capsule missing");
     const published = SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(capsule.gist));
     const interpretation = { ...published.interpretation, frames: published.interpretation.frames.map((frame) => ({
@@ -413,6 +557,10 @@ it("invalidates expired handles and does not recover them after worker loss", as
     const live = await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET });
     if (live.kind !== "prepare_source") throw new Error("expected live handle");
     await client.close();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET }))
+        .rejects.toThrow(/closed/u);
+    }
     const reopened = createRecallReadWorkerClient({
       databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1
     })!;
@@ -573,6 +721,14 @@ it("reports a failed semantic_correspondence as invalid instead of charging a de
     if (result.kind !== "reason") throw new Error("expected reason");
     expect(result.result.outcome).toEqual({ status: "invalid", reason: "malformed_correspondence" });
     expect(result.coverage.conditional_computation).toBe("unexercised");
+    const publicReason = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
+    const bounded = await publicReason({ operation: "reason", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: forged,
+      original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1024 },
+      { workspaceId: WS, runId: RUN, agentTarget: "test", sessionId: "test" });
+    expect(Buffer.byteLength(JSON.stringify(bounded), "utf8")).toBeLessThanOrEqual(1024);
+    if (bounded.operation !== "reason") throw new Error("expected reason");
+    expect(bounded.result?.outcome.status).toBe("invalid");
   });
 });
 
@@ -607,13 +763,107 @@ it("reasons through the worker on receiver-produced query and semantic_correspon
   });
 });
 
+it("uses prepare, propose, query preparation and reasoning within the actual persistent CLI session and rejects restart handles", async () => {
+  await withPublished(async ({ filename, client, sourceInterpretationId }) => {
+    await client.close();
+    let oldSourceHandle = "";
+    await withCliInterpretationSession(dirname(filename), WS, RUN, async request => {
+      const sourceRow = await request({ operation: "prepare_source", source_id: "artifact-1", budget: BUDGET });
+      expect(sourceRow.exitCode).toBe(0);
+      const source = SoulInterpretationResponseSchema.parse(sourceRow.output);
+      if (source.operation !== "prepare_source" || source.catalog === undefined || source.source_handle === undefined) throw new Error("source preparation expected");
+      oldSourceHandle = source.source_handle;
+      const assertion = source.catalog.assertions[0]!.segments.map(row => row.text).join("");
+      const proposed = await request({ operation: "propose", source_handle: source.source_handle,
+        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4",
+        draft: usesDraft(source.catalog, assertion), budget: BUDGET });
+      expect(proposed.exitCode).toBe(0);
+      expect(proposed.output).toMatchObject({ operation: "propose", outcome: { status: "interpreted" }, provider_attempts: 0 });
+      const queryRow = await request({ operation: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
+      expect(queryRow.exitCode).toBe(0);
+      const query = SoulInterpretationResponseSchema.parse(queryRow.output);
+      if (query.operation !== "prepare_query" || query.query_handle === undefined) throw new Error("query handle expected");
+      const reason = await request({ operation: "reason", accepts_unreviewed_conditional_results: true,
+        query_handle: query.query_handle, semantic_correspondence: correspondenceOf(sourceInterpretationId, queryOf()),
+        budget: BUDGET, output_byte_limit: 1_000_000 });
+      expect(reason.exitCode).toBe(0);
+      expect(reason.output).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown" }, provider_attempts: 0 });
+    });
+    await withCliInterpretationSession(dirname(filename), WS, RUN, async request => {
+      const restarted = await request({ operation: "propose", source_handle: oldSourceHandle,
+        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4",
+        draft: usesDraft(catalogFor(ASSERTION), ASSERTION), budget: BUDGET });
+      expect(restarted.exitCode).not.toBe(0);
+      expect(restarted.output).toMatchObject({ ok: false });
+    });
+  });
+}, 45000);
+
+it("consumes descriptor continuation in the actual CLI session under its original principal", async () => {
+  await withPublished(async ({ filename, client }) => {
+    await client.close();
+    await withCliInterpretationSession(dirname(filename), WS, RUN, async request => {
+      const base = { operation: "prepare_query" as const, original_query: ORIGINAL,
+        query_semantics: queryOf(), budget: { ...BUDGET, work_units: 1_000_000 } };
+      const first = await request(base);
+      expect(first.exitCode).toBe(0);
+      const prepared = SoulInterpretationResponseSchema.parse(first.output);
+      if (prepared.operation !== "prepare_query" || prepared.continuation_handle === undefined) throw new Error("descriptor continuation expected");
+      const second = await request({ ...base, continuation_handle: prepared.continuation_handle });
+      expect(second.exitCode).toBe(0);
+      const page = SoulInterpretationResponseSchema.parse(second.output);
+      if (page.operation !== "prepare_query") throw new Error("descriptor page expected");
+      const firstIds = new Set(prepared.candidates.map(row => row.interpretation_id));
+      expect(page.candidates.length).toBeGreaterThan(0);
+      expect(page.candidates.every(row => !firstIds.has(row.interpretation_id))).toBe(true);
+      expect(firstIds.size + page.candidates.length).toBe(20);
+    });
+  }, { count: 20 });
+}, 45000);
+
+it("rejects a prepared CLI query when its real worker is lost and cleans up the launcher runtime", async () => {
+  await withPublished(async ({ client }) => {
+    const stdin = new PassThrough(), stdout = new PassThrough(), stderr = new PassThrough();
+    const handler = createMcpMemoryToolHandler({ ...createDeps(), now: () => CLOCK,
+      sourceSemanticsPort: client.sourceSemanticsPort });
+    let stopped = false;
+    const startup = runAlayaCli(["tools", "session", "--workspace", WS, "--run", RUN], {
+      stdin, stdout, stderr, env: {}, loadModules: async () => ({
+        softwareExit: 70, createAlayaCliBridge,
+        createAlayaDaemonRuntime: async () => ({ startupSteps: [], shutdown: async () => { stopped = true; } }) as never,
+        registerAlayaCliCommands: bridge => bridge.registerSubcommand(createToolsCommand({ handler,
+          runService: { getById: async () => ({ workspace_id: WS }) } }))
+      })
+    });
+    const next = () => new Promise<string>(resolve => stdout.once("data", bytes => resolve(bytes.toString())));
+    const first = next();
+    stdin.write(`${JSON.stringify({ tool: "soul.interpretation", arguments: { operation: "prepare_query",
+      original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET } })}\n`);
+    const row = JSON.parse(await first);
+    expect(row.exitCode).toBe(0);
+    const query = SoulInterpretationResponseSchema.parse(row.output);
+    if (query.operation !== "prepare_query" || query.query_handle === undefined) throw new Error("query handle expected");
+    await client.close();
+    const second = next();
+    stdin.write(`${JSON.stringify({ tool: "soul.interpretation", arguments: { operation: "recall",
+      accepts_unreviewed_conditional_results: true, query_handle: query.query_handle, budget: BUDGET, output_byte_limit: 1_000_000 } })}\n`);
+    const lost = JSON.parse(await second);
+    expect(lost.exitCode).not.toBe(0);
+    expect(lost.output).toMatchObject({ ok: false });
+    stdin.end();
+    expect(await startup).toBe(0);
+    expect(stopped).toBe(true);
+  });
+});
+
 it("delivers qualified answers through the actual CLI executable with no provider credentials", async () => {
   await withPublished(async ({ sourceInterpretationId, filename, client }) => {
     await client.close();
     const querySemantics = queryOf(), args = { operation: "reason", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
     const root = dirname(filename), binary = fileURLToPath(new URL("../../../../../../bin/alaya.mjs", import.meta.url));
-    const output = await promisify(execFile)(process.execPath, [binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
+    const guard = fileURLToPath(new URL("../../support/provider-free-cli.mjs", import.meta.url));
+    const output = await promisify(execFile)(process.execPath, ["--import", guard, binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
       "--workspace", WS, "--run", RUN, "--agent", "codex", "--json"], {
       cwd: root, timeout: 30000, maxBuffer: 2_000_000,
       env: { PATH: process.env.PATH, HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: root, DATA_DIR: root }
