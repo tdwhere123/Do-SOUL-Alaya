@@ -150,6 +150,9 @@ function questionChainConfig(frozen: LongMemEvalSemanticFreeze, selected: LongMe
       ? config.correspondence_cache_root : join(directory, "semantic_correspondence-cache"),
     max_output_tokens: config.max_output_tokens, discovery_page_cap: "arm" in config ? config.discovery_page_cap : 1,
     correspondence_pair_cap: "arm" in config ? config.correspondence_pair_cap : 0,
+    ...("arm" in config && config.correspondence_demand !== undefined ? {
+      correspondence_demand: config.correspondence_demand, correspondence_cap: config.correspondence_cap
+    } : {}),
     access_policy: frozen.contract === "longmemeval-native-semantic-v3" ? frozen.native_route.access_policy
       : SourceSemanticAccessPolicySchema.enum["canonical-v1"],
     budget: config.budget, output_byte_limit: config.output_byte_limit,

@@ -113,7 +113,8 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
     assertUnknown(root, retainArchive(root, fixture.plan, rows), fixture.plan, native.query_key, reason);
   }
   const qualifiers = response.slot_qualifiers;
-  const proofOffset = qualifiers?.findIndex((slot) => slot.evidence_kind === "semantic_proof") ?? -1;
+  const proofQualifier = qualifiers?.find((slot) => slot.evidence_kind === "semantic_proof");
+  const proofOffset = proofQualifier?.index ?? -1;
   const proofResult = response.results?.[proofOffset];
   if (proofOffset < 0 || proofResult?.target.kind !== "source_evidence" || qualifiers === undefined) {
     throw new Error("native proof preview fixture required");
@@ -127,7 +128,7 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
   const omittedProof = { ...native, response: { ...response, results: response.results!.map((result, position) =>
     position === proofOffset ? { ...result, content_preview: "[payload omitted]",
       budget_state: { ...result.budget_state, within_budget: false } } : result),
-    slot_qualifiers: qualifiers.map((slot, position) => position === proofOffset
+    slot_qualifiers: qualifiers.map((slot) => slot.index === proofOffset
       ? { ...slot, payload_support: "not_applicable" as const } : slot) } };
   const omittedRoot = join(archiveRoot, "omitted-proof-with-forged-qualifier");
   assertUnknown(omittedRoot, retainArchive(omittedRoot, fixture.plan, original.rows.map((row) =>
@@ -140,7 +141,7 @@ export async function assertSemanticChainArchiveAdmission(fixture: Fixture): Pro
     content_complete: false, original_complete: false };
   const target = { ...proofResult.target, span };
   const result = { ...proofResult, target, content_preview: "[empty source] [payload omitted]" };
-  expect(() => admitEmittedSourcePreview(span, result, qualifiers[proofOffset], target, source, true)).not.toThrow();
+  expect(() => admitEmittedSourcePreview(span, result, proofQualifier, target, source, true)).not.toThrow();
   const short = { ...result, content_preview: "[empty source]", budget_state: { ...result.budget_state, within_budget: false } };
   expect(() => admitEmittedSourcePreview(span, short, undefined, target, source, false)).not.toThrow();
   const marker = "[payload omitted]", markerSpan = { ...span, content_start: 0, content_end: Buffer.byteLength(marker) };

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+  sourceSemanticCorrespondenceGenerationPolicies, SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY,
   type SourceSemanticQuery, type SourceSemanticQueryUnavailableReason, type SourceSemanticHandleDescriptor } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "@do-soul/alaya-core";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
@@ -68,14 +69,17 @@ export async function prepareSemanticChain(value: unknown, root: string,
           continue;
         }
         const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, config.correspondence_pair_cap);
+        const demands = prepareCorrespondenceDemands(config, querySemantics, selected);
         queries.push({ ...base, status: "ready", query_semantics: querySemantics, ...found,
+          ...(config.correspondence_demand === undefined ? {} : { correspondence_demand_opportunities: demands.opportunities }),
           initial_discovery_elapsed_ms: performance.now() - discoveryStarted,
           selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id),
           correspondence_opportunities: found.descriptors.map((descriptor) => ({ source_interpretation_id: descriptor.interpretation_id,
             decision: descriptor.interpretation === undefined ? "missing_interpretation" : config.correspondence_pair_cap === 0
               ? "zero_budget" : selected.includes(descriptor) ? "selected" : "not_selected" })) });
-        for (const descriptor of selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: querySemantics,
-          source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }] });
+        for (const demand of demands.selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: querySemantics,
+          ...(config.correspondence_demand === undefined ? {} : { generation_policy: demand.generation_policy }),
+          source_interpretation_descriptors: [{ source_interpretation_id: demand.descriptor.interpretation_id, interpretation: demand.descriptor.interpretation }] });
       }
     };
     if (liveDaemon === undefined) await withSemanticChainDaemon(config, root, prepare);
@@ -93,34 +97,12 @@ export async function prepareSemanticChain(value: unknown, root: string,
       if (queries.length !== 1 || queries[0]?.status !== "ready") {
         throw new AlayaError("CONFLICT", "observed C subset requires one settled native query");
       }
-      workset = selectObservedSettledCorrespondence(workset, queries[0], config.correspondence_pair_cap,
+      workset = selectObservedSettledCorrespondence(workset, queries[0], config.correspondence_cap ?? config.correspondence_pair_cap,
         config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens).workset;
     }
-    if (settledCorrespondenceWorkset !== undefined && workset !== null) {
-      if (queries.length !== 1 || queries[0]?.status !== "ready" ||
-          workset.kind !== "semantic_correspondence" ||
-          workset.model !== cGeneration.model || workset.request_profile !== cGeneration.request_profile ||
-          workset.provider_url !== cGeneration.provider_url ||
-          workset.items.length > config.correspondence_pair_cap) {
-        throw new AlayaError("CONFLICT", "settled C workset changed final native query or producer setting");
-      }
-      const query = queries[0];
-      const seen = new Set<string>();
-      for (const line of materializeSemanticProposalLines(workset, config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens)) {
-        if (line.kind !== "semantic_correspondence") {
-          throw new AlayaError("CONFLICT", "settled C workset changed request kind");
-        }
-        const request = line.request as SourceSemanticCorrespondenceRequest;
-        const descriptor = request.source_interpretation_descriptors[0];
-        const native = query.descriptors.find(row => row.interpretation_id === descriptor?.source_interpretation_id);
-        if (request.original_query !== query.original_query ||
-            canonicalJson(request.admitted_query_semantics) !== canonicalJson(query.query_semantics) ||
-            native === undefined || canonicalJson(descriptor?.interpretation) !== canonicalJson(native.interpretation) ||
-            seen.has(native.interpretation_id)) {
-          throw new AlayaError("CONFLICT", "settled C request does not bind a distinct current native H descriptor");
-        }
-        seen.add(native.interpretation_id);
-      }
+    if (settledCorrespondenceWorkset !== undefined) {
+      const selectedTasks = workset === null ? [] : validateSettledCorrespondenceWorkset(workset, queries, config, cGeneration);
+      reconcileSettledDemandSelection(queries, config, selectedTasks);
     }
     const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
       config, queries, correspondence_workset: workset,
@@ -130,6 +112,73 @@ export async function prepareSemanticChain(value: unknown, root: string,
     onLiveHandles?.(liveHandles);
     return plan;
   });
+}
+
+function reconcileSettledDemandSelection(queries: SemanticChainPlan["queries"], config: SemanticChainConfig,
+  selectedTasks: ReturnType<typeof validateSettledCorrespondenceWorkset>): void {
+  const selectedIds = new Set(selectedTasks.map(row => row.source_interpretation_id));
+  for (let index = 0; index < queries.length; index++) {
+    const query = queries[index]!;
+    if (query.status !== "ready") continue;
+    const policies = sourceSemanticCorrespondenceGenerationPolicies(query.query_semantics, config.correspondence_demand);
+    queries[index] = { ...query, selected_source_interpretation_ids: [...selectedIds],
+      correspondence_opportunities: query.correspondence_opportunities.map(row => ({ ...row,
+        decision: row.decision === "missing_interpretation" ? row.decision : selectedIds.has(row.source_interpretation_id)
+          ? "selected" : config.correspondence_pair_cap === 0 ? "zero_budget" : "not_selected" })),
+      ...(config.correspondence_demand === undefined ? {} : {
+        correspondence_demand_opportunities: query.descriptors.filter(row => row.interpretation !== undefined)
+          .flatMap(descriptor => policies.map(generation_policy => ({
+            source_interpretation_id: descriptor.interpretation_id, generation_policy,
+            decision: config.correspondence_cap === 0 ? "zero_budget" as const
+              : selectedTasks.some(task => task.source_interpretation_id === descriptor.interpretation_id &&
+                canonicalJson(task.generation_policy) === canonicalJson(generation_policy))
+                ? "selected" as const : "not_selected" as const
+          }))) }) };
+  }
+}
+
+function prepareCorrespondenceDemands(config: SemanticChainConfig, query: SourceSemanticQuery,
+  descriptors: readonly SourceSemanticHandleDescriptor[]) {
+  const policies = sourceSemanticCorrespondenceGenerationPolicies(query, config.correspondence_demand);
+  const cap = config.correspondence_cap ?? config.correspondence_pair_cap;
+  const candidates = descriptors.flatMap(descriptor => policies.map(generation_policy => ({ descriptor, generation_policy })));
+  return {
+    selected: candidates.slice(0, cap),
+    opportunities: candidates.map((row, index) => ({ source_interpretation_id: row.descriptor.interpretation_id,
+      generation_policy: row.generation_policy, decision: cap === 0 ? "zero_budget" as const
+        : index < cap ? "selected" as const : "not_selected" as const }))
+  };
+}
+
+function validateSettledCorrespondenceWorkset(workset: SemanticProposalWorkset, queries: SemanticChainPlan["queries"],
+  config: SemanticChainConfig, generation: { model: string; request_profile: string; provider_url: string }) {
+  if (queries.length !== 1 || queries[0]?.status !== "ready" || workset.kind !== "semantic_correspondence" ||
+      workset.model !== generation.model || workset.request_profile !== generation.request_profile ||
+      workset.provider_url !== generation.provider_url || workset.items.length > (config.correspondence_cap ?? config.correspondence_pair_cap)) {
+    throw new AlayaError("CONFLICT", "settled C workset changed final native query or producer setting");
+  }
+  const query = queries[0], seen = new Set<string>(), interpretations = new Set<string>();
+  const selectedTasks: { source_interpretation_id: string; generation_policy: NonNullable<SourceSemanticCorrespondenceRequest["generation_policy"]> }[] = [];
+  const policies = sourceSemanticCorrespondenceGenerationPolicies(query.query_semantics, config.correspondence_demand).map(canonicalJson);
+  for (const line of materializeSemanticProposalLines(workset, config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens)) {
+    const request = line.request as SourceSemanticCorrespondenceRequest;
+    const descriptor = request.source_interpretation_descriptors[0];
+    const native = query.descriptors.find(row => row.interpretation_id === descriptor?.source_interpretation_id);
+    const policy = request.generation_policy ?? SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY;
+    const task = canonicalJson({ source_interpretation_id: descriptor?.source_interpretation_id, generation_policy: policy });
+    if (request.original_query !== query.original_query ||
+        canonicalJson(request.admitted_query_semantics) !== canonicalJson(query.query_semantics) ||
+        native === undefined || canonicalJson(descriptor?.interpretation) !== canonicalJson(native.interpretation) ||
+        !policies.includes(canonicalJson(policy)) || seen.has(task)) {
+      throw new AlayaError("CONFLICT", "settled C request does not bind a distinct current native H demand");
+    }
+    seen.add(task); interpretations.add(native.interpretation_id);
+    selectedTasks.push({ source_interpretation_id: native.interpretation_id, generation_policy: policy });
+    if (interpretations.size > config.correspondence_pair_cap) {
+      throw new AlayaError("CONFLICT", "settled C exceeds the frozen interpretation opportunity cap");
+    }
+  }
+  return selectedTasks;
 }
 
 /** Native preparation owns the observed subset; publication may contain H beyond preview extents. */

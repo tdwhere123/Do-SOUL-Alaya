@@ -849,9 +849,10 @@ The canonical query also binds the complete host-approved fixed context
 (`null` when none was supplied) and one `utterance-attribution-v1` value. Its
 identity changes when those consumed fields change, even if the query text and
 meaning body do not. Source records hold the same attribution schema; the current
-source request and published interpretation carry the exact source value, and
-the current correspondence assessment request is v7. Its versioned endpoint-evidence
-projection copies declared named-reference uses, source mentions, attribution,
+source request and published interpretation carry the exact source value. The
+full-catalog correspondence request is v7; the optional native branch-demand
+request is v8. Both use the same versioned endpoint-evidence
+projection, which copies declared named-reference uses, source mentions, attribution,
 assertion locations, frame context, support and bindings onto the existing catalog
 handles. It selects no equivalence and gives no new proof authority. Mention span
 units remain tagged separately from source UTF-8 assertion and attribution spans;
@@ -873,6 +874,29 @@ are never repaired. Pair choice, source support, context and unresolved meaning
 remain producer responsibilities. This mechanical completion does not certify
 semantic correspondence. Benchmark request identities include the new schema
 and prompt; retained raw v4 responses and Q/H-keyed library caches are not upgraded.
+Scoped request v8 uses response v6 and a Protocol-owned `branch_demand` policy
+addressing an existing query alternative and answer/evidence target. The existing
+branch-view owner retains governing context and connected obligations. The host
+derives the exact demanded catalog handles; generation and receive require one
+assessment per demanded handle. Full Q/H, catalog and endpoint evidence remain
+bound. Endpoints outside the demand stay explicitly unassessed, never synthesized
+as unresolved. Successful receive reports demanded, assessed, unassessed,
+supported and unresolved coverage; failed or unattempted work has no successful
+coverage receipt. Coverage describes producer work and grants no proof authority.
+The original full-catalog request/response bytes and two-part cache identity stay
+unchanged. Scoped cache material additionally binds the policy, and native request
+keys bind its version, full request, prompt and schema. A scoped result cannot
+satisfy another demand or a full-catalog cache lookup. Each C remains a separate
+premise through the existing runtime; there is no union of conflicting mappings.
+Library/benchmark preparation independently bounds H candidates and total C
+requests, retaining every attempt and its costs. Replay and withdrawal select the
+exact correspondence identity consumed by the proof. A delivered source root
+occupies one slot and may carry several independent proof qualifiers. Consumers
+join qualifiers by their explicit slot index and full Q/H/C/computation identity;
+qualifier array position is not slot position. Each qualifier's witnesses and
+support come from that proof alone. Protocol 14.0.0 records this public semantic
+change under invariant §25; occupied-source counts remain distinct from proof
+counts.
 Only supported pairs lower to the existing canonical C; grounding and unresolved
 explanations remain inspectable metadata, not executable proof. Protocol counts
 projected JSON bytes incrementally before expanding each endpoint and repeated

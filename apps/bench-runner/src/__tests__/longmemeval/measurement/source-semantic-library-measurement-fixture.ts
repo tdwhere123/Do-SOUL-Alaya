@@ -1,8 +1,8 @@
 import { IndexEntrySchema, indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   SourceSemanticWorkerResultSchema, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, projectSourceDisclosure,
-  sourceSemanticLibrarySourceEntry, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
-import { deliveredProofFixture, source } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
+  sourceSemanticLibrarySourceEntry, sourceGoldRootIdentity, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
+import { deliveredProofFixture, source, query, correspondenceFor } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { sourceGoldUnitFromPublishedRoot } from "../../../runs/measurement/source-gold-join.js";
 
 export const DIGEST = `sha256:${"ab".repeat(32)}`;
@@ -54,7 +54,7 @@ export function workerRecall(index: InformationIndex) {
   }));
   const source_disclosures = Object.fromEntries(index.entries.map((entry, offset) => [indexEntryCacheKey(entry),
     projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: index.as_of ?? CLOCK,
-      proof_use: slot_qualifiers[offset]?.evidence_kind === "semantic_proof" ? "conditional_support" : "source_only" })]));
+      proof_use: slot_qualifiers.find(qualifier => qualifier.index === offset)?.evidence_kind === "semantic_proof" ? "conditional_support" : "source_only" })]));
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "recall", request_budget: REQUEST, delivery_id: "delivery", request_identity: `sha256:${"c".repeat(64)}`,
     query_semantics_status: { status: "admitted", query_semantics_id: DIGEST },
@@ -99,4 +99,45 @@ export function nativeProofResponseFixture(unverifiedFirst = false, workspaceId 
   if (target.kind !== "source_evidence") throw new Error("native source root expected");
   const record = fixtures.find((fixture) => fixture.record.identity === target.root_id)!.record;
   return { response, record, gold: sourceGoldUnitFromPublishedRoot(target) };
+}
+
+/** Independent H/C proofs share a root; a raw slot separates it from another proof root. */
+export function nativeMultiProofResponseFixture(partial?: "count" | "tense") {
+  const original = partial === "count" ? "how many tools does Alice use?"
+    : partial === "tense" ? "which tools did Alice use?" : "which tools does Alice use?";
+  const base = source();
+  const semantics = query(original);
+  if (partial !== undefined) Object.assign(semantics, { gaps: [{
+    kind: partial === "count" ? "aggregate" : "unsupported_meaning", affected_ids: [partial === "count" ? "tools" : "use"],
+    support: [{ kind: "query_text", excerpt: partial === "count" ? "how many" : "did" }],
+    description: partial === "count" ? "Count remains uncomputed." : "Past tense remains unresolved."
+  }] });
+  const first = deliveredProofFixture({ library: true, original, interpretation: base, semantics });
+  const second = deliveredProofFixture({ library: true, original, interpretation: base, semantics,
+    correspondence: { ...correspondenceFor(base, semantics), correspondences: correspondenceFor(base, semantics).correspondences
+      .filter(row => !("frame" in row.source_endpoint) || row.source_endpoint.frame !== "fBob") } });
+  const third = deliveredProofFixture({ library: true, original, semantics,
+    interpretation: { ...base, producer_version: "2" } });
+  const last = deliveredProofFixture({ library: true, original, semantics,
+    interpretation: { ...base, source: { ...base.source, source_id: "later-source" } } });
+  const fixtures = [first, second, third, last];
+  const proofs = fixtures.map(fixture => fixture.proof);
+  const raw = sourceOnly("raw");
+  const index = assembleSourceSemanticLibraryIndex({ query_id: first.index.query_id, snapshot_id: first.index.snapshot_id,
+    interpretation_id: "library-interpretation", as_of: CLOCK, source_entries: [raw], truncated: false, open_residuals: false,
+    proof_groups: fixtures.map(fixture => ({ entries: fixture.index.entries, explanations: fixture.index.explanations })),
+    selected_entries: [first.entry, raw, last.entry],
+    root_order: [first.target, raw.target, last.target].map(target => {
+      if (target.kind !== "source_evidence") throw new Error("source root expected");
+      return sourceGoldRootIdentity(target);
+    }) }).index;
+  const worker = { ...workerRecall(index), proofs, slot_qualifiers: slotQualifiersFor(index, proofs),
+    query_semantics_status: { status: "admitted" as const, query_semantics_id: first.proof.query_semantics_id! } };
+  const response = encodeSourceSemanticLibraryResponse(worker);
+  if (response.operation !== "recall") throw new Error("native proof response expected");
+  return { worker, response, records: [first.record, last.record],
+    gold: [first.target, raw.target, last.target].map(target => {
+      if (target.kind !== "source_evidence") throw new Error("source root expected");
+      return sourceGoldUnitFromPublishedRoot(target);
+    }) };
 }

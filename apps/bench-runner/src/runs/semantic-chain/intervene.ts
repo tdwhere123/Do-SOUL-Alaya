@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { AlayaError, canonicalJson, SourceSemanticResourceLedger,
+import { AlayaError, canonicalJson, sourceSemanticCorrespondenceIdentity, SourceSemanticResourceLedger,
   type SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { authorizedScopesFromAdmission, executeSourceSemanticInterpretation, fieldContractSha256,
   semanticInterpretationEvidenceId, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
@@ -45,8 +45,12 @@ export function interveneSemanticChain(root: string, replayPath: string, leafTri
       for (const proof of proofs) {
         const found = semantic_correspondences.find((row) => {
           const request = row.line.request as SourceSemanticCorrespondenceRequest;
+          const correspondence = row.received !== undefined && "semantic_correspondence" in row.received
+            ? row.received.semantic_correspondence : undefined;
           return row.line.original_query === query.original_query && request.source_interpretation_descriptors[0]?.source_interpretation_id === proof.source_interpretation_id
-            && canonicalJson(request.admitted_query_semantics) === canonicalJson(query.query_semantics);
+            && canonicalJson(request.admitted_query_semantics) === canonicalJson(query.query_semantics)
+            && correspondence !== undefined
+            && sourceSemanticCorrespondenceIdentity(correspondence, fieldContractSha256) === proof.semantic_correspondence_id;
         });
         if (found?.received === undefined || !("semantic_correspondence" in found.received) || found.received.semantic_correspondence === undefined) {
           throw new AlayaError("CONFLICT", "retained native proof lacks its exact available semantic correspondence");

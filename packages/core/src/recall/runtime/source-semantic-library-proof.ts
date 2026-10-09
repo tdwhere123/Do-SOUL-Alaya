@@ -6,9 +6,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { verifySourceSemanticSourceBinding } from "../../memory/evidence-create/source-interpretation-packet-publication.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
-import { proofForLibraryEntry, scopeSourceSemanticLibraryBranch, sourceSemanticLibraryQueryIdentity, sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
+import { proofForLibraryEntry, proofForLibraryQualifier, scopeSourceSemanticLibraryBranch, sourceSemanticLibraryQueryIdentity } from "./source-semantic-library-recall.js";
 import { executeSourceSemanticInterpretation, SOURCE_SEMANTIC_REASONING_BUDGET } from "./source-semantic-reasoning.js";
-import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
 import { sourceSemanticSupportExtent } from "../../memory/evidence-create/source-semantic-support-window.js";
 
 /** Reproduce the actual accepting witness; missing proof means unverified, including exhaustion. Usage is this verification's logical cost. */
@@ -24,25 +23,16 @@ export function deliveredSourceSemanticLibraryProof(
   let verified_proofs: readonly SourceSemanticLibraryProof[] = [];
   try {
     const representative = proofForLibraryEntry(entry, proofs);
-    if (representative !== undefined && entry.target.kind === "source_evidence" && qualifier.evidence_kind === "semantic_proof"
-      && representative.source_target !== undefined
-      && sameRecallTarget(sourceEvidenceRootTarget(representative.source_target), sourceEvidenceRootTarget(entry.target))
-      && qualifier.source_interpretation_id === representative.source_interpretation_id
-      && qualifier.query_semantics_id === representative.query_semantics_id
-      && qualifier.semantic_correspondence_id === representative.semantic_correspondence_id
-      && qualifier.conditional_computation_id === representative.conditional_computation_id) {
-      const root = sourceGoldRootIdentity(entry.target);
-      const claims = proofs.filter(row => row.source_target !== undefined && sourceGoldRootIdentity(row.source_target) === root);
-      const witnesses = claims.flatMap(row => (row.binding_results ?? []).map(binding => ({
-        conditional_computation_id: row.conditional_computation_id, binding_id: binding.binding_id
-      })));
-      if (witnesses.length > 0 && canonicalJson(witnesses) === canonicalJson(qualifier.witnesses)
-        && new Set(witnesses.map(row => canonicalJson(row))).size === witnesses.length
-        && claims.every(row => row.query_semantics_id === representative.query_semantics_id)
-        && canonicalJson(qualifier.support) === canonicalJson(projectSourceSemanticQuerySupport(representative.query,
-          claims.flatMap(row => row.binding_results ?? [])))
-        && claims.every(row => verifyDeliveredProof(index, entry, row, trustedSourceRecord, verificationBudget, meter))) {
-        proof = representative; verified_proofs = claims;
+    const selected = proofForLibraryQualifier(entry, qualifier, proofs);
+    if (representative !== undefined && selected !== undefined && entry.target.kind === "source_evidence"
+      && selected.source_target !== undefined
+      && sameRecallTarget(sourceEvidenceRootTarget(selected.source_target), sourceEvidenceRootTarget(entry.target))) {
+      const witnesses = qualifier.witnesses ?? [];
+      if (witnesses.length > 0 && new Set(witnesses.map(row => canonicalJson(row))).size === witnesses.length
+        && verifyDeliveredProof(index, entry, selected, trustedSourceRecord, verificationBudget, meter)
+        && (selected === representative
+          || verifyDeliveredProof(index, entry, representative, trustedSourceRecord, verificationBudget, meter))) {
+        proof = selected; verified_proofs = [selected];
       }
     }
   }

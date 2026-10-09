@@ -1,5 +1,9 @@
 import { join, resolve } from "node:path";
-import { AlayaError, SourceSemanticReasoningResultSchema, canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceSemanticReasoningResultSchema, canonicalJson,
+  SourceSemanticCorrespondencePreparationOptionsSchema, sourceSemanticCorrespondenceGenerationPolicies,
+  sourceSemanticCorrespondenceIdentity, type SourceSemanticCorrespondencePreparationOptions } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset,
   semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
@@ -16,13 +20,18 @@ import { admitRecoveryNomination } from "./recovery-reason.js";
 export function buildRecoveryCorrespondenceWorkset(query: Readonly<{
   original_query: string; query_semantics: import("@do-soul/alaya-protocol").SourceSemanticQuery
 }>, descriptors: readonly Readonly<{ descriptor: { source_interpretation_id: string; interpretation: unknown } }>[],
-generation: Readonly<{ model: string; request_profile: string; provider_url: string }>) {
-  return descriptors.length === 0 ? null : parseSemanticProposalWorkset({
+generation: Readonly<{ model: string; request_profile: string; provider_url: string }>,
+options: SourceSemanticCorrespondencePreparationOptions = {}) {
+  const policy = SourceSemanticCorrespondencePreparationOptionsSchema.parse(options);
+  const policies = sourceSemanticCorrespondenceGenerationPolicies(query.query_semantics, policy.correspondence_demand);
+  const items = descriptors.flatMap(row => policies.map(generation_policy => ({
+    original_query: query.original_query, admitted_query_semantics: query.query_semantics,
+    ...(policy.correspondence_demand === undefined ? {} : { generation_policy }),
+    source_interpretation_descriptors: [row.descriptor]
+  }))).slice(0, policy.correspondence_cap ?? descriptors.length);
+  return items.length === 0 ? null : parseSemanticProposalWorkset({
     contract: semanticProposalWorksetContract(generation.request_profile), kind: "semantic_correspondence",
-    model: generation.model, request_profile: generation.request_profile, provider_url: generation.provider_url,
-    items: descriptors.map(row => ({ original_query: query.original_query,
-      admitted_query_semantics: query.query_semantics,
-      source_interpretation_descriptors: [row.descriptor] }))
+    model: generation.model, request_profile: generation.request_profile, provider_url: generation.provider_url, items
   });
 }
 
@@ -33,47 +42,71 @@ export function applyAffectedRecoveryCorrespondencePolicy(input: Readonly<{
   baseWorkset: ReturnType<typeof buildRecoveryCorrespondenceWorkset>;
   initialWorkset: ReturnType<typeof buildRecoveryCorrespondenceWorkset>;
   initialCacheRoot: string; maxOutputTokens: number; queryChanged: boolean;
-  nomination: Readonly<{ source_id: string; source_version: string; record_id: string }> | null;
+  nomination: Readonly<{ source_id: string; source_version: string; record_id: string;
+    attention?: { semantic_correspondence_id?: string } | null }> | null;
   reasonResults: readonly Readonly<{ source_interpretation_id?: string; response?: { result?: unknown } }>[];
 }>) {
   const initialLines = input.initialWorkset === null ? []
     : materializeSemanticProposalLines(input.initialWorkset, input.maxOutputTokens);
   const initialKeys = new Set(initialLines.map(line => line.key));
-  let workset = input.baseWorkset;
-  if (!input.queryChanged && workset !== null && input.initialWorkset !== null && input.nomination !== null) {
-    const baseLines = materializeSemanticProposalLines(workset, input.maxOutputTokens);
-    const selectedIndex = input.selected.findIndex(row => row.source_id === input.nomination!.source_id &&
-      row.source_version === input.nomination!.source_version && row.record_id === input.nomination!.record_id);
-    const current = input.selected[selectedIndex];
-    const parentIndex = initialLines.findIndex(line => line.key === baseLines[selectedIndex]?.key);
-    if (current !== undefined && parentIndex >= 0) {
-      const reasoning = input.reasonResults.find(row => row.source_interpretation_id ===
-        current.descriptor.source_interpretation_id)?.response?.result;
-      const result = reasoning === undefined ? undefined : SourceSemanticReasoningResultSchema.parse(reasoning);
-      const attention = result?.attention;
-      const comments = attention?.source_interpretation_id !== current.descriptor.source_interpretation_id ? []
-        : attention.kind === "preparation" && attention.missing === "semantic_correspondence"
-          ? [JSON.stringify({ state: "semantic_correspondence_missing", observation: attention.observation })]
-          : attention.kind === "computed" && !attention.truncated && attention.entries.length <= 32 &&
-              attention.entries.some(entry => entry.state === "correspondence_missing") &&
-              attention.semantic_correspondence_id === result?.semantic_correspondence_id
-            ? attention.entries.map(entry => JSON.stringify(entry)) : [];
-      if (comments.length > 0 && comments.every(comment => comment.length <= 2048)) {
-        const parentRows = readSemanticChainProposalResults(input.initialWorkset,
-          input.initialCacheRoot, input.maxOutputTokens);
-        if (parentRows[parentIndex]?.shard !== undefined &&
-            !["pending", "unknown", "unattempted", "cache_invalid", "unavailable"].includes(parentRows[parentIndex]!.status)) {
-          const revision = prepareRetainedSemanticProposalRevision({ workset: input.initialWorkset,
-            parentCacheRoot: input.initialCacheRoot, maxOutputTokens: input.maxOutputTokens,
-            itemIndex: parentIndex, reviewComments: comments });
-          workset = parseSemanticProposalWorkset({ ...workset,
-            revision_parent_cache_root: input.initialCacheRoot,
-            items: workset.items.map((item, index) => index === selectedIndex ? { ...(item as object), revision } : item) });
-        }
-      }
-    }
+  const workset = input.baseWorkset;
+  if (input.queryChanged || workset === null || input.initialWorkset === null || input.nomination === null) {
+    return { workset, initialKeys };
   }
-  return { workset, initialKeys };
+  const current = input.selected.find(row => row.source_id === input.nomination!.source_id &&
+    row.source_version === input.nomination!.source_version && row.record_id === input.nomination!.record_id);
+  if (current === undefined) return { workset, initialKeys };
+  const baseLines = materializeSemanticProposalLines(workset, input.maxOutputTokens);
+  const candidates = baseLines.flatMap((line, index) => {
+    const request = line.request as SourceSemanticCorrespondenceRequest;
+    const parentIndex = initialLines.findIndex(parent => parent.key === line.key);
+    return request.source_interpretation_descriptors[0]?.source_interpretation_id ===
+      current.descriptor.source_interpretation_id && parentIndex >= 0 ? [{ index, parentIndex }] : [];
+  });
+  if (candidates.length === 0) return { workset, initialKeys };
+  const consumedId = input.nomination.attention?.semantic_correspondence_id;
+  const reasons = input.reasonResults.flatMap(row => {
+    if (row.source_interpretation_id !== current.descriptor.source_interpretation_id ||
+        row.response?.result === undefined) return [];
+    const result = SourceSemanticReasoningResultSchema.parse(row.response.result);
+    const attention = result.attention;
+    if (result.source_interpretation_id !== current.descriptor.source_interpretation_id ||
+        attention?.source_interpretation_id !== current.descriptor.source_interpretation_id ||
+        consumedId !== undefined && result.semantic_correspondence_id !== consumedId) return [];
+    const comments = attention.kind === "preparation" && attention.missing === "semantic_correspondence"
+      ? [JSON.stringify({ state: "semantic_correspondence_missing", observation: attention.observation })]
+      : attention.kind === "computed" && !attention.truncated && attention.entries.length <= 32 &&
+          attention.entries.some(entry => entry.state === "correspondence_missing") &&
+          attention.semantic_correspondence_id === result.semantic_correspondence_id &&
+          attention.query_semantics_id === result.query_semantics_id &&
+          attention.conditional_computation_id === result.conditional_computation_id
+        ? attention.entries.map(entry => JSON.stringify(entry)) : [];
+    return comments.length > 0 && comments.every(comment => comment.length <= 2048)
+      ? [{ result, comments }] : [];
+  });
+  if (reasons.length === 0) return { workset, initialKeys };
+  if (reasons.length !== 1) throw new AlayaError("CONFLICT", "C revision attention does not select one consumed correspondence");
+  const { result, comments } = reasons[0]!;
+  const parents = readSemanticChainProposalResults(input.initialWorkset, input.initialCacheRoot, input.maxOutputTokens);
+  const affected = result.attention?.kind === "preparation" ? candidates : candidates.filter(candidate => {
+    const received = parents[candidate.parentIndex]?.received;
+    return received !== undefined && "semantic_correspondence" in received && received.semantic_correspondence !== undefined &&
+      received.semantic_correspondence.query_semantics_id === result.query_semantics_id &&
+      sourceSemanticCorrespondenceIdentity(received.semantic_correspondence, fieldContractSha256) === result.semantic_correspondence_id;
+  });
+  if (affected.length !== 1) throw new AlayaError("CONFLICT", "C revision cannot bind attention to one exact retained parent");
+  const { index, parentIndex } = affected[0]!;
+  const parent = parents[parentIndex];
+  if (parent?.shard === undefined ||
+      ["pending", "unknown", "unattempted", "cache_invalid", "unavailable"].includes(parent.status)) {
+    return { workset, initialKeys };
+  }
+  const revision = prepareRetainedSemanticProposalRevision({ workset: input.initialWorkset,
+    parentCacheRoot: input.initialCacheRoot, maxOutputTokens: input.maxOutputTokens,
+    itemIndex: parentIndex, reviewComments: comments });
+  return { workset: parseSemanticProposalWorkset({ ...workset,
+    revision_parent_cache_root: input.initialCacheRoot,
+    items: workset.items.map((item, itemIndex) => itemIndex === index ? { ...(item as object), revision } : item) }), initialKeys };
 }
 
 function initialCorrespondenceInputs(root: string, readAllowanceRoot: string) {
@@ -86,7 +119,8 @@ function initialCorrespondenceInputs(root: string, readAllowanceRoot: string) {
   const generation = plan.config.correspondence_generation;
   if (generation === undefined) throw new AlayaError("VALIDATION", "recovery requires an explicit C producer setting");
   const selected = settled.descriptor_export.slice(0, plan.config.correspondence_pair_cap);
-  const workset = buildRecoveryCorrespondenceWorkset(query, selected, generation);
+  const workset = buildRecoveryCorrespondenceWorkset(query, selected, generation, {
+    correspondence_demand: plan.config.correspondence_demand, correspondence_cap: plan.config.correspondence_cap });
   return { settled, query, selected, workset };
 }
 
@@ -148,7 +182,8 @@ export function prepareFinalRecoveryCorrespondence(rootInput: string) {
   if (generation === undefined) throw new AlayaError("VALIDATION", "recovery requires an explicit C producer setting");
   const selected = final.descriptor_export.slice(0, plan.config.correspondence_pair_cap);
   const baseWorkset = buildRecoveryCorrespondenceWorkset({ original_query: query.original_query,
-    query_semantics: review.active_query }, selected, generation);
+    query_semantics: review.active_query }, selected, generation, {
+      correspondence_demand: plan.config.correspondence_demand, correspondence_cap: plan.config.correspondence_cap });
   const cap = generation.max_output_tokens;
   const initial = prepareInitialRecoveryCorrespondence(root);
   const initialWorkset = initial.workset_path === null ? null : parseSemanticProposalWorkset(JSON.parse(

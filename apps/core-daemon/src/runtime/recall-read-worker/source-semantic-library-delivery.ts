@@ -156,8 +156,8 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
     query_semantics_status: base.query_semantics_status,
     delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
-    discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map((row, position) => ({ ...row,
-      payload_support: page[position]!.payload_support, selection_basis: page[position]!.selection_basis })),
+    discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map(row => ({ ...row,
+      payload_support: page[row.index]!.payload_support, selection_basis: page[row.index]!.selection_basis })),
     ...(proofs.length === 0 ? {} : { proofs }),
     ...(unproved.length === 0 ? {} : { unproved_computations: unproved }), previews, source_disclosures, work,
     coverage: { ...base.coverage, conditional_computation: base.query_semantics_status.status === "unavailable" ? "unexercised"

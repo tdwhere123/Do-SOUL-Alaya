@@ -5,7 +5,8 @@ import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissi
   SourceSemanticQuerySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticAccessPolicySchema,
   SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
   SourceSemanticQueryStatusSchema, SourceSemanticQueryUnavailableReasonSchema,
-  SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SourceSemanticCorrespondencePreparationOptionsSchema,
+  SourceSemanticCorrespondenceGenerationPolicySchema } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -32,10 +33,19 @@ export const SemanticChainConfigSchema = z.object({
   source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
   // Candidate opportunity per query; the proposal authority owns global spend.
   correspondence_pair_cap: z.number().int().min(0).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
+  // Protocol owns the paired demand selection and total request cap, distinct from the H cap.
+  ...SourceSemanticCorrespondencePreparationOptionsSchema.unwrap().shape,
   access_policy: SourceSemanticAccessPolicySchema,
   budget: RequestBudgetSchema, authorized_scopes: AuthorizedScopesAdmissionSchema,
   output_byte_limit: z.number().int().min(1024).max(1_000_000)
-}).strict();
+}).strict().superRefine((config, context) => {
+  const preparation = SourceSemanticCorrespondencePreparationOptionsSchema.safeParse({
+    correspondence_demand: config.correspondence_demand, correspondence_cap: config.correspondence_cap
+  });
+  if (!preparation.success) for (const issue of preparation.error.issues) {
+    context.addIssue({ code: "custom", path: issue.path, message: issue.message });
+  }
+});
 export type SemanticChainConfig = z.infer<typeof SemanticChainConfigSchema>;
 
 const QueryBase = { query_key: Digest, original_query: z.string(), raw_digest: Digest.nullable() };
@@ -58,6 +68,10 @@ export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
     correspondence_opportunities: z.array(z.object({ source_interpretation_id: z.string(),
       decision: z.enum(["selected", "zero_budget", "missing_interpretation", "not_selected"])
     }).strict()),
+    correspondence_demand_opportunities: z.array(z.object({ source_interpretation_id: z.string(),
+      generation_policy: SourceSemanticCorrespondenceGenerationPolicySchema,
+      decision: z.enum(["selected", "zero_budget", "not_selected"])
+    }).strict()).optional(),
   }).strict()
 ]);
 export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v6" as const;

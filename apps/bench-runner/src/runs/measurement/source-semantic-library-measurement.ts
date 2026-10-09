@@ -328,10 +328,10 @@ function assessDeliveredProofSlots(
   const unverifiedGoldRanks = new Set<number>();
   const usage = { proof_slots_checked: 0, work_units: 0, logical_memory_bytes: 0 };
   let allVerified = true;
-  for (const slot of slots) {
-    if (slot.object_kind !== "semantic_proof") continue;
+  for (const qualifier of qualifiers) {
+    if (qualifier.evidence_kind !== "semantic_proof") continue;
+    const slot = slots[qualifier.index]!;
     const entry = index.entries[slot.index_entry_offset]!;
-    const qualifier = qualifiers[slot.index_entry_offset]!;
     const delivered = deliveredSourceSemanticLibraryProof(index, entry, qualifier, proofs,
         sourceRecords.find((record) => entry.target.kind === "source_evidence" && record.identity === entry.target.root_id
           && record.workspace_id === entry.target.workspace_id), verificationBudget);
@@ -358,9 +358,13 @@ function measurementMetrics(slots: readonly z.infer<typeof ExposureSlotSchema>[]
 function librarySlotsMatchIndex(slots: readonly z.infer<typeof ExposureSlotSchema>[], index: InformationIndex,
   qualifiers: readonly SourceSemanticLibrarySlotQualifier[]): boolean {
   const native = exposureSlots({ results: encodeSourceSemanticLibraryResults(index) });
-  return slots.length === index.entries.length && qualifiers.length === slots.length
-    && canonicalJson(slots) === canonicalJson(native)
-    && qualifiers.every((qualifier, offset) => qualifier.index === offset && qualifier.evidence_kind === native[offset]?.object_kind);
+  if (slots.length !== index.entries.length || canonicalJson(slots) !== canonicalJson(native)
+    || new Set(qualifiers.map(qualifier => canonicalJson(qualifier))).size !== qualifiers.length
+    || !qualifiers.every(qualifier => qualifier.evidence_kind === native[qualifier.index]?.object_kind)) return false;
+  return native.every((slot, offset) => {
+    const count = qualifiers.filter(qualifier => qualifier.index === offset).length;
+    return slot.object_kind === "semantic_proof" ? count > 0 : count === 1;
+  });
 }
 
 function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold: readonly SourceGoldUnit[],

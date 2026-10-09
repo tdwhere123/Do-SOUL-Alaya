@@ -17,7 +17,7 @@ import {
   SourceSemanticInterpretationSchema, SourceSemanticQuerySchema,
   buildSourceSemanticCorrespondenceEndpointCatalog, buildSourceSemanticCorrespondenceEndpointEvidence,
   sourceSemanticInterpretationIdentity,
-  UNKNOWN_UTTERANCE_ATTRIBUTION
+  UNKNOWN_UTTERANCE_ATTRIBUTION, sourceSemanticCorrespondenceGenerationPolicies
 } from "@do-soul/alaya-protocol";
 import {
   buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest,
@@ -43,6 +43,19 @@ import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-q
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
 import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
+import { readSemanticChainProposalResults, semanticChainQueryCorrespondences } from "../../../runs/semantic-chain/inputs.js";
+import { SemanticChainQuerySchema } from "../../../runs/semantic-chain/contract.js";
+
+vi.hoisted(() => {
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+      throw new Error("provider-free correspondence test refused non-loopback fetch");
+    }
+    return nativeFetch(input, { ...init, redirect: "error" });
+  };
+});
 
 vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
   const answer = { address: "93.184.216.34", family: 4 }; return options?.all ? [answer] : answer;
@@ -612,6 +625,68 @@ it("admits an semantic_correspondence shard only after Core admission", async ()
   expect(replayed.cache_hits).toBe(1);
   expect(replayed.interpreted).toBe(1);
   expect(replayed.newly_admitted).toBe(0);
+});
+
+function branchDemandWorkset() {
+  const query = admittedQuery(), originalFrame = query.alternatives[0]!.frames[0]!;
+  const branched = SourceSemanticQuerySchema.parse({ ...query,
+    requested_operation: { reading: "identify parcel", support: { kind: "query_text", excerpt: "which parcel" } },
+    variables: [...query.variables, { id: "fInspect", sort: "proposition" }],
+    alternatives: [{ frames: [originalFrame, { ...originalFrame, id: "qInspect", variable: "fInspect", predicate_reading: "inspect" }],
+      context_obligations: [{ frame: "qSend", kind: "asserted_at_source" }, { frame: "qInspect", kind: "asserted_at_source" }],
+      answer_frames: [], evidence_inputs: [{ frames: ["qSend"] }, { frames: ["qInspect"] }] }] });
+  const base = correspondenceWorkset(), descriptor = { source_interpretation_id: sourceSemanticInterpretationIdentity(interpretation(), sha256),
+    interpretation: interpretation() };
+  const policies = sourceSemanticCorrespondenceGenerationPolicies(branched,
+    { kind: "query_branches", maximum_demands_per_interpretation: 2 });
+  return { workset: parseSemanticProposalWorkset({ ...base, items: policies.map(generation_policy => ({
+    original_query: ORIGINAL, admitted_query_semantics: branched, source_interpretation_descriptors: [descriptor], generation_policy
+  })) }), query: branched, descriptor };
+}
+
+it.each([false, true])("retains separate scoped attempts and coverage after cache reopen (second invalid: %s)", async (invalidSecond) => {
+  const { workset, query, descriptor } = branchDemandWorkset(), cacheRoot = tempRoot();
+  const lines = materializeSemanticProposalLines(workset, 4096);
+  expect(lines).toHaveLength(2);
+  expect(lines[0]!.key).not.toBe(lines[1]!.key);
+  expect((lines[0]!.request as SourceSemanticCorrespondenceRequest).demand?.demanded_handles).toEqual(["qe1", "qe2"]);
+  expect((lines[1]!.request as SourceSemanticCorrespondenceRequest).demand?.demanded_handles).toEqual(["qe3", "qe4"]);
+  const raws = lines.map((line, index) => {
+    if (invalidSecond && index === 1) return "{";
+    const request = line.request as SourceSemanticCorrespondenceRequest;
+    return JSON.stringify({ contract: "source-semantic-correspondence-response-v6", outcome: { status: "interpreted", gaps: [] },
+      semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
+        assessments: request.demand!.demanded_handles.map(queryHandle => ({ query: queryHandle, status: "unresolved",
+          query_excerpt: "parcel", explanation: "No semantic equivalence is proposed in this authored mechanism fixture." })) } });
+  });
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 4096, 1),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const produced = extractor(raws);
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: produced });
+  expect(produced.calls).toHaveLength(2);
+  const rows = readSemanticChainProposalResults(workset, cacheRoot, 4096);
+  const { attribution_context: _attribution, ...sourceIdentity } = descriptor.interpretation.source;
+  const prepared = SemanticChainQuerySchema.parse({ status: "ready", query_key: "a".repeat(64), original_query: ORIGINAL,
+    raw_digest: null, query_semantics: query, descriptors: [{ interpretation_id: descriptor.source_interpretation_id,
+      ...sourceIdentity, producer_id: descriptor.interpretation.producer_id,
+      producer_version: descriptor.interpretation.producer_version, contract_version: descriptor.interpretation.contract_version }],
+    discovery_trace: [], discovery_pages: 1, discovery_open: false, discovery_truncated: false,
+    unvisited_source_interpretation_count: 0, selected_source_interpretation_ids: [descriptor.source_interpretation_id],
+    correspondence_opportunities: [{ source_interpretation_id: descriptor.source_interpretation_id, decision: "selected" }] });
+  if (prepared.status !== "ready") throw new Error("ready query fixture required");
+  const delivered = semanticChainQueryCorrespondences(prepared, rows);
+  expect(delivered.ready).toHaveLength(invalidSecond ? 1 : 2);
+  expect(delivered.outcomes.map(row => row.status)).toEqual(["interpreted", invalidSecond ? "invalid" : "interpreted"]);
+  expect(delivered.outcomes.map(row => row.key)).toEqual(lines.map(line => line.key));
+  expect(delivered.outcomes[0]?.coverage).toMatchObject({ demanded: ["qe1", "qe2"], assessed: ["qe1", "qe2"],
+    unassessed: ["qe3", "qe4"], supported: [], unresolved: ["qe1", "qe2"] });
+  if (invalidSecond) expect(delivered.outcomes[1]?.coverage).toBeNull();
+  else expect(delivered.outcomes[1]?.coverage).toMatchObject({ demanded: ["qe3", "qe4"], unassessed: ["qe1", "qe2"] });
+  expect(delivered.outcomes.map(row => row.producer_usage)).toEqual([
+    { inputTokens: 3, outputTokens: 5, totalTokens: 8 }, { inputTokens: 3, outputTokens: 5, totalTokens: 8 }]);
+  const warm = extractor([]);
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: warm });
+  expect(warm.calls).toEqual([]);
 });
 
 it("retains a Core-invalid interpreted semantic_correspondence as non-executable cache", async () => {

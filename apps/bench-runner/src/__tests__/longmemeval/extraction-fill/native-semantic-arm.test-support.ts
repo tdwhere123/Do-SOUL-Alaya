@@ -13,7 +13,7 @@ import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-recor
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { listRetainedSourceSemanticKeys } from "../../../runs/snapshot/source-records/publish.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
-import { LongMemEvalExperimentFreezeSchema } from "../../../runs/longmemeval-semantic/contract.js";
+import { LongMemEvalExperimentFreezeSchema, LongMemEvalNativeSemanticConfigSchema } from "../../../runs/longmemeval-semantic/contract.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun, LongMemEvalPublicationSchema } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import { SemanticChainPlanSchema, readChainArtifact, type SemanticChainConfig } from "../../../runs/semantic-chain/contract.js";
@@ -58,6 +58,8 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   expect(LongMemEvalExperimentFreezeSchema.safeParse({ ...frozen, contract: "longmemeval-native-semantic-v2" }).success).toBe(false);
   expect(frozen.metric).toBe("source-bearing-union-first-exposure-any-at-k-v1");
   expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([2, 2, 2, 2]);
+  expect(LongMemEvalNativeSemanticConfigSchema.safeParse({ ...frozen.config,
+    correspondence_demand: { kind: "query_branches", maximum_demands_per_interpretation: 1 } }).success).toBe(false);
   expect(JSON.stringify(frozen)).not.toContain("answer q0");
   await fillAuthored({ ...frozen.query_workset, items: frozen.query_workset.items.filter((_item, index) => index !== 2) }, queryCache, authoredQuery);
   const invalidQuery = materializeSemanticProposalLines(frozen.query_workset, 4096)[2]!;
@@ -146,6 +148,24 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
     mechanism: { status: "unexercised", validated_proof_ranks: [] },
     evaluator_usage: { proof_slots_checked: 0 }
   }] });
+  const scopedRoot = join(root, "scoped-zero-cap");
+  await freezeLongMemEvalSemanticRun({ ...frozen.config, question_ids: ["q0"],
+    workspace_prefix: "authored-scoped-arm",
+    correspondence_demand: { kind: "query_branches", maximum_demands_per_interpretation: 1 },
+    correspondence_cap: 0 }, scopedRoot);
+  const scopedPrepared = await prepareLongMemEvalSemanticRun(scopedRoot);
+  const scopedRow = scopedPrepared.result.rows[0]!;
+  if (scopedRow.status !== "prepared") throw new Error(scopedRow.reason);
+  const scopedPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(scopedRow.chain_root, "prepare.json")));
+  expect(scopedPlan.config).toMatchObject({ correspondence_cap: 0,
+    correspondence_demand: { kind: "query_branches", maximum_demands_per_interpretation: 1 } });
+  expect(scopedPlan.correspondence_workset).toBeNull();
+  expect(scopedPlan.queries[0]?.status).toBe("ready");
+  if (scopedPlan.queries[0]?.status === "ready") {
+    const opportunities = scopedPlan.queries[0].correspondence_demand_opportunities;
+    expect(opportunities?.length).toBeGreaterThan(0);
+    expect(opportunities?.every(row => row.decision === "zero_budget")).toBe(true);
+  }
   const manifest = join(cacheRoots[0]!, "manifest.json"), bytes = readFileSync(manifest);
   writeFileSync(manifest, "{}");
   try { await expect(prepareLongMemEvalSemanticRun(root)).rejects.toThrow(/source interpretation cache changed/u); }
@@ -172,6 +192,36 @@ export async function assertPerQueryOpportunity(config: SemanticChainConfig, roo
   const zero = await prepareSemanticChain({ ...config, correspondence_pair_cap: 0 }, join(root, "zero-opportunities"));
   expect(zero.correspondence_workset).toBeNull();
   expect(zero.queries.every((query) => query.status === "ready" && query.correspondence_opportunities.every((row) => row.decision === "zero_budget"))).toBe(true);
+  await assertSettledScopedOpportunities(config, root);
+}
+
+async function assertSettledScopedOpportunities(config: SemanticChainConfig, root: string) {
+  const scoped = { ...config, correspondence_pair_cap: 2,
+    query_workset: { ...config.query_workset, items: config.query_workset.items.slice(0, 1) },
+    correspondence_demand: { kind: "query_branches" as const, maximum_demands_per_interpretation: 1 },
+    correspondence_cap: 2 };
+  const full = await prepareSemanticChain(scoped, join(root, "scoped-opportunities"));
+  expect(full.correspondence_workset?.items).toHaveLength(2);
+  const retained = { ...full.correspondence_workset!, items: full.correspondence_workset!.items.slice(1) };
+  const retainedLine = materializeSemanticProposalLines(retained, config.max_output_tokens)[0]!;
+  const request = retainedLine.request as SourceSemanticCorrespondenceRequest;
+  const sourceId = request.source_interpretation_descriptors[0]!.source_interpretation_id;
+  const settled = await prepareSemanticChain({ ...scoped, correspondence_pair_cap: 1, correspondence_cap: 1 },
+    join(root, "settled-scoped-opportunities"), undefined, undefined, retained);
+  const selected = settled.queries[0]!;
+  if (selected.status !== "ready") throw new Error("settled scoped query must remain ready");
+  expect(selected.selected_source_interpretation_ids).toEqual([sourceId]);
+  expect(selected.correspondence_opportunities.filter(row => row.decision === "selected")
+    .map(row => row.source_interpretation_id)).toEqual([sourceId]);
+  expect(selected.correspondence_demand_opportunities?.filter(row => row.decision === "selected"))
+    .toEqual([{ source_interpretation_id: sourceId, generation_policy: request.generation_policy, decision: "selected" }]);
+  const empty = await prepareSemanticChain({ ...scoped, correspondence_cap: 0 },
+    join(root, "empty-scoped-opportunities"), undefined, undefined, null);
+  expect(empty.correspondence_workset).toBeNull();
+  const emptyQuery = empty.queries[0]!;
+  if (emptyQuery.status !== "ready") throw new Error("zero-cap query must remain ready");
+  expect(emptyQuery.selected_source_interpretation_ids).toEqual([]);
+  expect(emptyQuery.correspondence_demand_opportunities?.every(row => row.decision === "zero_budget")).toBe(true);
 }
 
 function authoredQuery(userPrompt: string) {

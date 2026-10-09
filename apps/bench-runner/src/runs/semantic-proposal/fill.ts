@@ -416,6 +416,7 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version,
     resource_limits: request.resource_limits,
+    ...(request.generation_policy === undefined ? {} : { generation_policy: request.generation_policy }),
     ...(request.revision === undefined ? {} : { revision: request.revision })
   }, { rawJson });
   if (canonicalJson(received.request) !== canonicalJson(request)) {

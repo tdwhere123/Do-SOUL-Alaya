@@ -3,12 +3,15 @@ import {
   sourceSemanticProducerEnvelopeJsonSchema,
   AlayaError, SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticCorrespondenceAssessmentSchema,
   countSourceSemanticCorrespondenceJsonBytes,
+  type SourceSemanticCorrespondenceDemand,
   type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticQuery,
   type SourceSemanticQueryCatalogEntry
 } from "@do-soul/alaya-protocol";
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT =
   "source-semantic-correspondence-response-v5" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT =
+  "source-semantic-correspondence-response-v6" as const;
 
 export type SourceSemanticQueryProvenanceQuote = Readonly<{
   handle: string;
@@ -62,13 +65,21 @@ export function sourceSemanticCorrespondenceGenerationResponseJsonSchema(
     original_query: string;
     admitted_query_semantics: SourceSemanticQuery;
     catalog: SourceSemanticCorrespondenceEndpointCatalog;
+    demand?: SourceSemanticCorrespondenceDemand;
+    response_contract?: typeof SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT
+      | typeof SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT;
   }>
 ): object {
+  const demanded = request.demand?.demanded_handles;
+  const catalog = demanded === undefined ? request.catalog : {
+    query_endpoints: request.catalog.query_endpoints.filter((row) => demanded.includes(row.handle)),
+    source_endpoints: request.catalog.source_endpoints
+  };
   const resolution = resolveSourceSemanticQueryProvenance(
-    request.admitted_query_semantics, request.catalog, request.original_query
+    request.admitted_query_semantics, catalog, request.original_query
   );
   const envelope = z.toJSONSchema(z.object({
-    contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT),
+    contract: z.literal(request.response_contract ?? SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT),
     outcome: GenerationOutcomeSchema,
     semantic_correspondence: SourceSemanticCorrespondenceAssessmentSchema.optional()
   }).strict().readonly(), {

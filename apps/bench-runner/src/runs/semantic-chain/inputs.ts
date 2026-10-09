@@ -152,23 +152,31 @@ export function readSemanticChainCorrespondenceOwners(workset: SemanticProposalW
 export function semanticChainQueryCorrespondences(query: Extract<SemanticChainPlan["queries"][number], { status: "ready" }>,
   semanticCorrespondences: ReturnType<typeof readSemanticChainCorrespondences>["semantic_correspondences"]) {
   const ready: SourceSemanticCorrespondence[] = [];
-  const outcomes = query.descriptors.map((descriptor) => {
-    const found = semanticCorrespondences.find((row) => {
+  const outcomes = query.descriptors.flatMap((descriptor) => {
+    const matching = semanticCorrespondences.filter((row) => {
       const request = row.line.request as SourceSemanticCorrespondenceRequest;
       return row.line.original_query === query.original_query &&
         request.source_interpretation_descriptors[0]?.source_interpretation_id === descriptor.interpretation_id &&
         canonicalJson(request.admitted_query_semantics) === canonicalJson(query.query_semantics);
     });
-    if (found?.received !== undefined && "semantic_correspondence" in found.received && found.received.semantic_correspondence !== undefined) {
-      ready.push(found.received.semantic_correspondence);
-    }
-    return { source_interpretation_id: descriptor.interpretation_id, status: found?.status ?? "unattempted",
-      reason: query.correspondence_opportunities.find((entry) => entry.source_interpretation_id === descriptor.interpretation_id)!.decision,
-      core_admitted: found?.received !== undefined,
-      admitted_endpoint_pairs: found?.received !== undefined && "semantic_correspondence" in found.received
-        ? found.received.semantic_correspondence?.correspondences.length ?? null : null,
-      attempt_ordinal: found?.shard?.attempt_ordinal ?? null, producer_usage: found?.shard?.usage ?? null,
-      key: found?.line.key ?? null, raw_digest: found?.shard?.raw_digest ?? null, cache_identity: found?.cache_identity ?? null };
+    // Each bounded assessment remains a separate premise and attempt. Completing
+    // one demand does not consume or hide another demand for the same Q/H.
+    return (matching.length === 0 ? [undefined] : matching).map((found) => {
+      if (found?.received !== undefined && "semantic_correspondence" in found.received && found.received.semantic_correspondence !== undefined) {
+        ready.push(found.received.semantic_correspondence);
+      }
+      const request = found?.line.request as SourceSemanticCorrespondenceRequest | undefined;
+      return { source_interpretation_id: descriptor.interpretation_id, status: found?.status ?? "unattempted",
+        ...(request?.generation_policy === undefined ? {} : { generation_policy: request.generation_policy,
+          demand: request.demand, coverage: found?.received !== undefined && "coverage" in found.received
+            ? found.received.coverage ?? null : null }),
+        reason: query.correspondence_opportunities.find((entry) => entry.source_interpretation_id === descriptor.interpretation_id)!.decision,
+        core_admitted: found?.received !== undefined,
+        admitted_endpoint_pairs: found?.received !== undefined && "semantic_correspondence" in found.received
+          ? found.received.semantic_correspondence?.correspondences.length ?? null : null,
+        attempt_ordinal: found?.shard?.attempt_ordinal ?? null, producer_usage: found?.shard?.usage ?? null,
+        key: found?.line.key ?? null, raw_digest: found?.shard?.raw_digest ?? null, cache_identity: found?.cache_identity ?? null };
+    });
   });
   return { ready, outcomes };
 }

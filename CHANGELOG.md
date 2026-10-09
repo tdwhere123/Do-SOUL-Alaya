@@ -8,7 +8,21 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.13.0, engine gateway 1.1.0
+## Unreleased — protocol 14.0.0, engine gateway 1.1.0
+
+Protocol 14.0.0 changes semantic-library `slot_qualifiers` under invariant §25
+(major: a source slot can expose multiple independent proof qualifiers). Consumers
+must join each qualifier using its explicit `index` and full Q/H/C/computation
+identity, not array position or one qualifier per occupied root. Each qualifier
+owns only its proof's witnesses and partial support. Source occupancy remains
+one slot per root; exact-C withdrawal leaves other independent proofs intact.
+Existing single-proof/source-only shapes still parse, but consumers must adopt
+the new multiplicity before using this version. No release is performed here.
+
+Native scoped C requests additionally bind a query-branch demand and explicit
+assessed/unassessed coverage, with separate H and total-C budgets. This producer
+metadata grants no proof authority. Full-catalog request identities stay stable;
+scoped results cannot satisfy another task or a full-catalog cache lookup.
 
 `@do-soul/alaya-engine-gateway` is `1.1.0`; app packages remain `0.3.11`.
 

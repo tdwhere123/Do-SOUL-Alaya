@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceSemanticAccessReceiptSchema,
+  SourceSemanticCorrespondencePreparationOptionsSchema } from "@do-soul/alaya-protocol";
 import { censusNativeSourceRecords } from "../snapshot/source-records/census.js";
 import { readVerifiedNativeSourceSnapshot } from "../snapshot/source-records/native.js";
 import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport } from "../snapshot/source-records/publish.js";
@@ -26,6 +27,17 @@ import { recordRecoveryNativeWork } from "./recovery-allowance.js";
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const PhysicalSourceOwnerSchema = z.object({ key: Digest, cache_root: z.string().min(1),
   physical_preflight_path: z.string().min(1) }).strict();
+// Refined chain objects reject .omit; drop snapshot fields and reuse protocol pairing.
+const { snapshot_path: _snapshotPath, snapshot_sha256: _snapshotSha256, ...recoveryChainFields } =
+  SemanticChainConfigSchema.shape;
+const RecoveryChainConfigSchema = z.object(recoveryChainFields).strict().superRefine((config, context) => {
+  const preparation = SourceSemanticCorrespondencePreparationOptionsSchema.safeParse({
+    correspondence_demand: config.correspondence_demand, correspondence_cap: config.correspondence_cap
+  });
+  if (!preparation.success) for (const issue of preparation.error.issues) {
+    context.addIssue({ code: "custom", path: issue.path, message: issue.message });
+  }
+});
 const RecoveryFreezeInputSchema = z.object({
   native_snapshot_path: z.string().min(1), population: z.string().min(1),
   source_model: z.string().min(1), source_request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
@@ -35,7 +47,7 @@ const RecoveryFreezeInputSchema = z.object({
   producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
   allowance: RecoveryAllowanceSchema,
   open_semantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional(),
-  chain: SemanticChainConfigSchema.omit({ snapshot_path: true, snapshot_sha256: true })
+  chain: RecoveryChainConfigSchema
 }).strict();
 const WindowSourceSchema = z.object({ rank: z.number().int().min(1).max(10),
   source_id: z.string(), source_version: z.string(), record_id: z.string().min(1),

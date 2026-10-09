@@ -1,6 +1,11 @@
 import { join, resolve } from "node:path";
 import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  canonicalJson } from "@do-soul/alaya-protocol";
+  canonicalJson, SourceSemanticCorrespondencePreparationOptionsSchema,
+  SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY, sourceSemanticCorrespondenceCacheMaterial,
+  sourceSemanticCorrespondenceGenerationPolicies, sourceSemanticQueryIdentity,
+  SourceSemanticReasoningResultSchema, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "@do-soul/alaya-core";
+import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import { readSemanticChainProposalResults } from "./inputs.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, withSemanticChainDaemon,
@@ -9,7 +14,6 @@ import { parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { admitInitialQualified, initialSourcePhysicalOwner } from "./recovery-publication.js";
 import { reserveRecoveryEffect } from "./recovery-window.js";
-import { SourceSemanticReasoningResultSchema } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
 import { readCompleteRetainedSourceResponse } from "../extraction/cache/source-interactive-binding.js";
 import { reserveRecoveryRead, reserveRecoveryAction, reserveRecoveryHostEffect,
@@ -18,6 +22,60 @@ import { reserveRecoveryRead, reserveRecoveryAction, reserveRecoveryHostEffect,
 type RecoveryReasonRound = { identity?: string; qualified_snapshot_identity?: string;
   results?: { source_interpretation_id?: string; status?: string; response?: { result?: unknown } }[] };
 type RecoveryWindowSource = ReturnType<typeof admitInitialQualified>["window"]["window"][number];
+type RecoveryReasonQuery = Readonly<{ original_query: string; query_semantics: SourceSemanticQuery }>;
+type RecoveryReasonSelected = readonly Readonly<{ descriptor: { source_interpretation_id: string; interpretation: unknown } }>[];
+
+/** Q × selected H × protocol policies; full-catalog omits generation_policy bytes. */
+export function buildRecoveryReasonCorrespondenceItems(query: RecoveryReasonQuery,
+  selected: RecoveryReasonSelected, options: unknown = {}) {
+  const policy = SourceSemanticCorrespondencePreparationOptionsSchema.parse(options);
+  const policies = sourceSemanticCorrespondenceGenerationPolicies(query.query_semantics, policy.correspondence_demand);
+  return selected.flatMap(row => policies.map(generation_policy => ({
+    original_query: query.original_query, admitted_query_semantics: query.query_semantics,
+    ...(policy.correspondence_demand === undefined ? {} : { generation_policy }),
+    source_interpretation_descriptors: [row.descriptor]
+  }))).slice(0, policy.correspondence_cap ?? selected.length);
+}
+
+function correspondenceCacheMaterial(query: RecoveryReasonQuery, sourceInterpretationId: string,
+  generationPolicy: SourceSemanticCorrespondenceRequest["generation_policy"]) {
+  return sourceSemanticCorrespondenceCacheMaterial({
+    query_semantics_id: sourceSemanticQueryIdentity(query.query_semantics, fieldContractSha256),
+    source_interpretation_id: sourceInterpretationId,
+    generation_policy: generationPolicy ?? SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY });
+}
+
+/** Bind each retained C by H id and policy cache material, not workset index or a v7 contract. */
+export function bindRecoveryReasonCorrespondence<T extends Readonly<{ line: { request: unknown } }>>(
+  rows: readonly T[], selected: RecoveryReasonSelected, query: RecoveryReasonQuery, options: unknown = {}) {
+  const policy = SourceSemanticCorrespondencePreparationOptionsSchema.parse(options);
+  const items = buildRecoveryReasonCorrespondenceItems(query, selected, policy);
+  if (rows.length !== items.length) throw new AlayaError("CONFLICT", "initial correspondence denominator changed");
+  const expected = new Set(items.map(item => correspondenceCacheMaterial(query,
+    item.source_interpretation_descriptors[0]!.source_interpretation_id,
+    "generation_policy" in item ? item.generation_policy as SourceSemanticCorrespondenceRequest["generation_policy"] : undefined)));
+  const seen = new Set<string>();
+  return rows.map(row => {
+    const request = row.line.request;
+    if (typeof request !== "object" || request === null || !("source_interpretation_descriptors" in request) ||
+        !("admitted_query_semantics" in request) || !("original_query" in request)) {
+      throw new AlayaError("CONFLICT", "initial C no longer binds frozen Q and published H");
+    }
+    const correspondence = request as SourceSemanticCorrespondenceRequest;
+    const source = selected.find(entry => entry.descriptor.source_interpretation_id ===
+      correspondence.source_interpretation_descriptors[0]?.source_interpretation_id);
+    const material = source === undefined ? undefined : correspondenceCacheMaterial(query,
+      source.descriptor.source_interpretation_id, correspondence.generation_policy);
+    if (source === undefined || material === undefined || !expected.has(material) || seen.has(material) ||
+        canonicalJson(correspondence.admitted_query_semantics) !== canonicalJson(query.query_semantics) ||
+        correspondence.original_query !== query.original_query ||
+        (correspondence.generation_policy === undefined) !== (policy.correspondence_demand === undefined)) {
+      throw new AlayaError("CONFLICT", "initial C no longer binds frozen Q and published H");
+    }
+    seen.add(material);
+    return { row, descriptor: source.descriptor };
+  });
+}
 
 /** Attention first, then eligible frozen order; physical-parent eligibility is supplied by the caller. */
 export function selectRecoveryNomination(window: readonly RecoveryWindowSource[],
@@ -99,9 +157,12 @@ export async function reasonInitialRecovery(rootInput: string) {
   if (query?.status !== "ready" || plan.queries.length !== 1) {
     throw new AlayaError("CONFLICT", "initial reason requires the frozen admitted original query");
   }
-  const expected = settled.descriptor_export.slice(0, plan.config.correspondence_pair_cap);
+  const selected = settled.descriptor_export.slice(0, plan.config.correspondence_pair_cap);
+  const preparation = { correspondence_demand: plan.config.correspondence_demand,
+    correspondence_cap: plan.config.correspondence_cap };
+  const items = buildRecoveryReasonCorrespondenceItems(query, selected, preparation);
   const worksetPath = join(root, "initial-correspondence-workset.json");
-  const workset = expected.length === 0 ? null : parseSemanticProposalWorkset(JSON.parse(
+  const workset = items.length === 0 ? null : parseSemanticProposalWorkset(JSON.parse(
     readBoundedCanonicalUtf8Artifact({ path: worksetPath, maxBytes: 32 * 1024 * 1024,
       label: "initial correspondence workset" })));
   const binding = readChainArtifact(join(root, "initial-correspondence-binding.json")) as {
@@ -111,24 +172,15 @@ export async function reasonInitialRecovery(rootInput: string) {
       binding.qualified_snapshot_identity !== settled.publication_identity) {
     throw new AlayaError("CONFLICT", "initial C workset lacks its Q/H stage binding");
   }
-  if ((workset?.items.length ?? 0) !== expected.length ||
-      canonicalJson(binding.source_interpretation_ids) !== canonicalJson(expected.map(row => row.descriptor.source_interpretation_id))) {
+  if ((workset === null ? 0 : workset.items.length) !== items.length ||
+      (workset !== null && canonicalJson(workset.items) !== canonicalJson(items)) ||
+      canonicalJson(binding.source_interpretation_ids) !== canonicalJson(selected.map(row => row.descriptor.source_interpretation_id))) {
     throw new AlayaError("CONFLICT", "initial correspondence denominator changed");
   }
   const cacheRoot = resolve(plan.config.correspondence_cache_root);
   const rows = workset === null ? [] : readSemanticChainProposalResults(workset, cacheRoot,
     plan.config.correspondence_generation?.max_output_tokens ?? plan.config.max_output_tokens);
-  const current = rows.map((row, index) => {
-    const request = row.line.request;
-    const descriptor = expected[index]?.descriptor;
-    if (request.contract !== "source-semantic-correspondence-request-v7" ||
-        canonicalJson(request.admitted_query_semantics) !== canonicalJson(query.query_semantics) ||
-        request.original_query !== query.original_query ||
-        request.source_interpretation_descriptors[0]?.source_interpretation_id !== descriptor?.source_interpretation_id) {
-      throw new AlayaError("CONFLICT", "initial C no longer binds frozen Q and published H");
-    }
-    return { row, descriptor };
-  });
+  const current = bindRecoveryReasonCorrespondence(rows, selected, query, preparation);
   const resultPath = join(root, "initial-reason.json");
   const identity = chainIdentity({ window: chainIdentity(window), qualified: settled.publication_identity,
     workset: workset === null ? null : chainIdentity(workset),
@@ -149,7 +201,7 @@ export async function reasonInitialRecovery(rootInput: string) {
   const pending = current.map(({ row, descriptor }, index) => {
     const correspondence = row.received !== undefined && "semantic_correspondence" in row.received
       ? row.received.semantic_correspondence : undefined;
-    const callIdentity = chainIdentity({ identity, source_interpretation_id: descriptor!.source_interpretation_id,
+    const callIdentity = chainIdentity({ identity, source_interpretation_id: descriptor.source_interpretation_id,
       correspondence: correspondence ?? null });
     const prior = readChainArtifact(join(root, `initial-reason-${index}.json`));
     reserveRecoveryAction(root, `initial-native-reason-${index}`, callIdentity,
@@ -165,20 +217,20 @@ export async function reasonInitialRecovery(rootInput: string) {
         ? row.received.semantic_correspondence : undefined;
       const slotPath = join(root, `initial-reason-${index}.json`);
       const prior = readChainArtifact(slotPath);
-      const callIdentity = chainIdentity({ identity, source_interpretation_id: descriptor!.source_interpretation_id,
+      const callIdentity = chainIdentity({ identity, source_interpretation_id: descriptor.source_interpretation_id,
         correspondence: correspondence ?? null });
       reserveRecoveryEffect(`${slotPath}.reserved`, callIdentity, prior !== undefined);
       if (prior !== undefined) { results.push(prior as typeof results[number]); continue; }
       const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
         SoulInterpretationRequestSchema.parse({ operation: "reason", original_query: query.original_query,
-          query_semantics: query.query_semantics, source_interpretation_id: descriptor!.source_interpretation_id,
+          query_semantics: query.query_semantics, source_interpretation_id: descriptor.source_interpretation_id,
           ...(correspondence === undefined ? {} : { semantic_correspondence: correspondence }),
           accepts_unreviewed_conditional_results: true,
           budget: config.budget, output_byte_limit: config.output_byte_limit,
           authorized_scopes: config.authorized_scopes })));
       if (response.operation !== "reason") throw new AlayaError("CONFLICT", "native worker changed reason operation");
       recordRecoveryNativeWork(root, `initial-native-reason-${index}`, response.work);
-      const item = { source_interpretation_id: descriptor!.source_interpretation_id,
+      const item = { source_interpretation_id: descriptor.source_interpretation_id,
         status: correspondence === undefined ? "preparation_required" : "reasoned",
         proposal_status: row.status, response };
       writeChainArtifact(slotPath, item);

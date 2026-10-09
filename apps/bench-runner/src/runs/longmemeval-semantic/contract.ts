@@ -1,4 +1,4 @@
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceSemanticCorrespondencePreparationOptionsSchema } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { z } from "zod";
 import { loadDatasetWindowWithIdentity } from "../../datasets/longmemeval/ingestion/fetch.js";
@@ -18,15 +18,28 @@ export const LongMemEvalSemanticConfigSchema = z.object({
   provider_url: SemanticProposalWorksetSchema.shape.provider_url,
   model: z.string().min(1), request_profile: z.string().refine(isExtractionRequestProfile),
   query_cache_root: z.string().min(1), recorded_at: z.string().datetime(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
-  ...SemanticChainConfigSchema.pick({ budget: true, output_byte_limit: true, max_output_tokens: true }).shape
+  budget: SemanticChainConfigSchema.shape.budget,
+  output_byte_limit: SemanticChainConfigSchema.shape.output_byte_limit,
+  max_output_tokens: SemanticChainConfigSchema.shape.max_output_tokens
 }).strict();
 export type LongMemEvalSemanticConfig = z.infer<typeof LongMemEvalSemanticConfigSchema>;
 export const LongMemEvalNativeSemanticConfigSchema = LongMemEvalSemanticConfigSchema.extend({
   arm: z.literal("native_semantic"), workspace_prefix: z.string().min(1),
   source_cache_roots: z.array(z.string().min(1)), correspondence_cache_root: z.string().min(1),
   source_publication_associations: z.array(SourcePublicationAssociationRowSchema),
-  ...SemanticChainConfigSchema.pick({ discovery_page_cap: true, correspondence_pair_cap: true, authorized_scopes: true }).shape
-}).strict();
+  discovery_page_cap: SemanticChainConfigSchema.shape.discovery_page_cap,
+  correspondence_pair_cap: SemanticChainConfigSchema.shape.correspondence_pair_cap,
+  authorized_scopes: SemanticChainConfigSchema.shape.authorized_scopes,
+  correspondence_demand: SemanticChainConfigSchema.shape.correspondence_demand,
+  correspondence_cap: SemanticChainConfigSchema.shape.correspondence_cap
+}).strict().superRefine((config, context) => {
+  const parsed = SourceSemanticCorrespondencePreparationOptionsSchema.safeParse({
+    correspondence_demand: config.correspondence_demand, correspondence_cap: config.correspondence_cap
+  });
+  if (!parsed.success) for (const issue of parsed.error.issues) {
+    context.addIssue({ code: "custom", path: issue.path, message: issue.message });
+  }
+});
 export const LongMemEvalExperimentConfigSchema = z.union([LongMemEvalSemanticConfigSchema, LongMemEvalNativeSemanticConfigSchema]);
 const InventoryRow = z.object({ index: z.number().int().nonnegative(), question_id: z.string(),
   cohort: z.enum(["answerable", "abstention"]) }).strict();

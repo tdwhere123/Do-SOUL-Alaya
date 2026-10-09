@@ -1,10 +1,10 @@
 import {
   isChatSemanticRequestProfile, AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
-  UNKNOWN_UTTERANCE_ATTRIBUTION
+  UNKNOWN_UTTERANCE_ATTRIBUTION, SourceSemanticCorrespondenceGenerationPolicySchema
 } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import {
-  SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
+  sourceSemanticCorrespondenceSystemPrompt, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   SourceSemanticProposalRevisionSchema,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest,
   sourceSemanticCorrespondenceResponseJsonSchema, sourceSemanticQueryResponseJsonSchema,
@@ -40,6 +40,7 @@ const CorrespondenceItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
   admitted_query_semantics: z.unknown(),
   source_interpretation_descriptors: z.array(z.unknown()).min(1).max(1),
+  generation_policy: SourceSemanticCorrespondenceGenerationPolicySchema.optional(),
   revision: SourceSemanticProposalRevisionSchema.optional()
 }).strict();
 
@@ -115,9 +116,10 @@ export function materializeSemanticProposalLines(
       admitted_query_semantics: parsed.admitted_query_semantics as SourceSemanticCorrespondenceRequest["admitted_query_semantics"],
       source_interpretation_descriptors: parsed.source_interpretation_descriptors as SourceSemanticCorrespondenceRequest["source_interpretation_descriptors"],
       producer_id, producer_version,
+      ...(parsed.generation_policy === undefined ? {} : { generation_policy: parsed.generation_policy }),
       ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
     });
-    return bindLine(workset, "semantic_correspondence", SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, request,
+    return bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request), request,
       sourceSemanticCorrespondenceResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
   });
 }

@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
+  const nativeFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (new URL(String(input)).hostname !== "127.0.0.1" || init?.redirect !== "error") throw new Error("only no-redirect loopback transport allowed");
+    return nativeFetch(input, init);
+  });
+});
 import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";

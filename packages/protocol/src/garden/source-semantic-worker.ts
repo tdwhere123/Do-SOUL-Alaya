@@ -359,7 +359,9 @@ export const SourceSemanticLibraryDeliverySchema = z.object({
   page_purpose: z.literal("membership"),
   discovery: SourceSemanticLibraryDiscoverySchema,
   order: SourceSemanticLibraryOrderSchema,
-  slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema).max(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
+  // Each occupied root has a source qualifier or one qualifier per independent proof.
+  slot_qualifiers: z.array(SourceSemanticLibrarySlotQualifierSchema)
+    .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP + SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET).readonly(),
   source_disclosures: z.record(z.string(), SourceDisclosureSchema),
   proofs: z.array(SourceSemanticLibraryProofSchema).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).readonly().optional(),
   unproved_computations: z.array(SourceSemanticLibraryUnprovedComputationSchema)

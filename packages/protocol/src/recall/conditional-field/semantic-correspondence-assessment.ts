@@ -365,11 +365,48 @@ export function countSourceSemanticCorrespondenceJsonBytes(
 }
 
 export type SourceSemanticCorrespondenceEndpointEvidence = ReturnType<typeof buildSourceSemanticCorrespondenceEndpointEvidence>;
+export type SourceSemanticCorrespondenceAssessmentDemand = Readonly<{
+  readonly demanded_handles: readonly string[];
+  readonly generation_policy: { readonly kind: string };
+}>;
+
+function assessmentIssue(path: readonly (string | number)[], message: string): never {
+  throw new z.ZodError([{ code: "custom", path: [...path], message }]);
+}
+
+/** Exact demanded (or full-catalog) query handles. Shared by materialization and coverage. */
+export function assertSourceSemanticCorrespondenceAssessmentRequirement(
+  catalog: SourceSemanticCorrespondenceEndpointCatalog,
+  assessments: readonly { readonly query: string }[],
+  demand?: SourceSemanticCorrespondenceAssessmentDemand
+): void {
+  const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
+  const required = new Set(demand === undefined || demand.generation_policy.kind === "full_catalog"
+    ? catalog.query_endpoints.map((row) => row.handle)
+    : demand.demanded_handles);
+  const seenQueries = new Set<string>();
+  for (const [index, assessment] of assessments.entries()) {
+    if (!queryByHandle.has(assessment.query)) {
+      assessmentIssue(["assessments", index, "query"], "undeclared local reference");
+    }
+    if (!required.has(assessment.query)) {
+      assessmentIssue(["assessments", index, "query"], "extra query endpoint assessment");
+    }
+    if (seenQueries.has(assessment.query)) {
+      assessmentIssue(["assessments", index, "query"], "duplicate query endpoint assessment");
+    }
+    seenQueries.add(assessment.query);
+  }
+  if (seenQueries.size !== required.size) {
+    assessmentIssue(["assessments"], "missing query endpoint assessment");
+  }
+}
 
 export function materializeSourceSemanticCorrespondenceAssessment(
   body: unknown,
   catalog: SourceSemanticCorrespondenceEndpointCatalog,
-  envelope: SourceSemanticCorrespondenceAssessmentEnvelope
+  envelope: SourceSemanticCorrespondenceAssessmentEnvelope,
+  demand?: SourceSemanticCorrespondenceAssessmentDemand
 ): SourceSemanticCorrespondence {
   try {
     countSourceSemanticCorrespondenceJsonBytes(body, SOURCE_SEMANTIC_MAX_BYTES);
@@ -377,19 +414,12 @@ export function materializeSourceSemanticCorrespondenceAssessment(
     throw new z.ZodError([{ code: "custom", path: [], message: "source semantic semantic_correspondence exceeds its byte bound" }]);
   }
   const parsed = SourceSemanticCorrespondenceAssessmentSchema.parse(body);
+  assertSourceSemanticCorrespondenceAssessmentRequirement(catalog, parsed.assessments, demand);
   const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
   const sourceByHandle = new Map(catalog.source_endpoints.map((row) => [row.handle, row]));
-  const seenQueries = new Set<string>();
   const correspondences: SourceSemanticEndpointCorrespondence[] = [];
   for (const [index, assessment] of parsed.assessments.entries()) {
-    const query = queryByHandle.get(assessment.query);
-    if (query === undefined) {
-      throw new z.ZodError([{ code: "custom", path: ["assessments", index, "query"], message: "undeclared local reference" }]);
-    }
-    if (seenQueries.has(assessment.query)) {
-      throw new z.ZodError([{ code: "custom", path: ["assessments", index, "query"], message: "duplicate query endpoint assessment" }]);
-    }
-    seenQueries.add(assessment.query);
+    const query = queryByHandle.get(assessment.query)!;
     if (assessment.status === "unresolved") {
       if (!envelope.original_query.includes(assessment.query_excerpt)) {
         throw new z.ZodError([{ code: "custom", path: ["assessments", index, "query_excerpt"], message: "query excerpt is not in the original query" }]);
@@ -425,9 +455,6 @@ export function materializeSourceSemanticCorrespondenceAssessment(
         ...(equivalent.applicable_context === undefined ? {} : { applicable_context: equivalent.applicable_context })
       });
     }
-  }
-  if (seenQueries.size !== catalog.query_endpoints.length) {
-    throw new z.ZodError([{ code: "custom", path: ["assessments"], message: "missing query endpoint assessment" }]);
   }
   return SourceSemanticCorrespondenceSchema.parse({
     contract: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,

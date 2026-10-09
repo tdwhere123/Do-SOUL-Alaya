@@ -16,6 +16,8 @@ import {
   buildSourceReferenceCatalog, buildSourceSemanticCorrespondenceEndpointCatalog,
   buildSourceSemanticCorrespondenceEndpointEvidence, countSourceSemanticCorrespondenceJsonBytes,
   SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES,
+  SourceSemanticCorrespondenceGenerationPolicySchema, sourceSemanticCorrespondenceDemand,
+  type SourceSemanticCorrespondenceGenerationPolicy, type SourceSemanticCorrespondenceDemand,
   sourceReferenceCapacityReason, SourceReferenceCapacityExceeded, SourceReferenceCapacityReasonSchema,
   SOURCE_REFERENCE_MAX_ASSERTIONS,
   type SourceInterpretationProfile, type SourceReferenceCatalog, type SourceSemanticQuery,
@@ -29,12 +31,17 @@ export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semant
 import { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 import { assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
-import { sourceSemanticCorrespondenceGenerationResponseJsonSchema } from "./source-semantic-query-provenance.js";
+import {
+  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
+  sourceSemanticCorrespondenceGenerationResponseJsonSchema
+} from "./source-semantic-query-provenance.js";
+export { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT } from "./source-semantic-query-provenance.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 export { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v8" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v4" as const;
 export const SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT = "source-semantic-generation-view-v1" as const;
 export type SourceSemanticGenerationViewContract = typeof SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT;
@@ -164,6 +171,7 @@ export type SourceSemanticCorrespondenceProposalInput = Readonly<{
   producer_version: string;
   resource_limits?: Partial<SourceSemanticResourceLimits>;
   revision?: SourceSemanticProposalRevision;
+  generation_policy?: SourceSemanticCorrespondenceGenerationPolicy;
 }>;
 
 export type SourceSemanticQueryRequest = Readonly<{
@@ -180,7 +188,8 @@ export type SourceSemanticQueryRequest = Readonly<{
 
 export type SourceSemanticCorrespondenceRequest = Readonly<{
   original_query: string;
-  contract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT
+    | typeof SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   admitted_query_semantics: SourceSemanticQuery;
   source_interpretation_descriptors: readonly SourceInterpretationDescriptor[];
@@ -189,6 +198,8 @@ export type SourceSemanticCorrespondenceRequest = Readonly<{
   catalog: SourceSemanticCorrespondenceEndpointCatalog;
   endpoint_evidence: SourceSemanticCorrespondenceEndpointEvidence;
   revision?: SourceSemanticProposalRevision;
+  generation_policy?: SourceSemanticCorrespondenceGenerationPolicy;
+  demand?: SourceSemanticCorrespondenceDemand;
 }>;
 
 export function semanticSha256(text: string): string {
@@ -379,15 +390,25 @@ export function buildSourceSemanticCorrespondenceRequest(
     source_interpretation_handle: `source${index + 1}`, interpretation: row.interpretation
   }));
   const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, descriptors);
+  const parsedPolicy = input.generation_policy === undefined
+    ? undefined
+    : SourceSemanticCorrespondenceGenerationPolicySchema.parse(input.generation_policy);
+  const scoped = parsedPolicy?.kind === "branch_demand";
+  const demand = scoped
+    ? sourceSemanticCorrespondenceDemand(admitted_query_semantics, catalog, parsedPolicy)
+    : undefined;
   const requestBase = {
-    contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT,
+    contract: scoped
+      ? SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+      : SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_query_semantics,
     original_query: input.original_query,
     source_interpretation_descriptors,
     producer_capability: producerCapability(input.producer_id, input.producer_version),
     resource_limits: resourceLimits(input.resource_limits),
-    catalog
+    catalog,
+    ...(scoped ? { generation_policy: parsedPolicy, demand } : {})
   };
   const baseBytes = countSourceSemanticCorrespondenceJsonBytes({ ...requestBase, endpoint_evidence: null },
     SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES) - 4;
@@ -566,7 +587,16 @@ export function sourceSemanticQueryResponseJsonSchema(): object {
 export function sourceSemanticCorrespondenceResponseJsonSchema(
   request?: SourceSemanticCorrespondenceRequest
 ): object {
-  if (request !== undefined) return sourceSemanticCorrespondenceGenerationResponseJsonSchema(request);
+  if (request !== undefined) {
+    return sourceSemanticCorrespondenceGenerationResponseJsonSchema({
+      original_query: request.original_query,
+      admitted_query_semantics: request.admitted_query_semantics,
+      catalog: request.catalog,
+      ...(request.demand === undefined ? {} : { demand: request.demand }),
+      ...(request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+        ? { response_contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT } : {})
+    });
+  }
   return sourceSemanticProducerEnvelopeJsonSchema(producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
     outcome: CorrespondenceGenerationOutcomeSchema,
@@ -612,3 +642,21 @@ export const SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT = [
   "Domain identifiers are exact admitted_query_semantics.domains[].id and the selected source interpretation's domains[].id. A frame, entity, statement, endpoint handle or conceptual category is not a domain identifier. If the source interpretation has no declared domains, omit domains and membership_assumptions or return empty arrays. Ordinary free-answer questions do not require inventing finite-domain membership. The source must already supply any domain you reference.",
   "An interpreted semantic_correspondence has no gap channel: omit outcome.gaps or send []. Explicit unresolved endpoint assessments are not world-negation or canonical C gaps."
 ].join(" ");
+
+const CORRESPONDENCE_FULL_ASSESS =
+  "Assess every advertised qeN exactly once for that interpretation, even when no equivalence is supported. Do not assess source endpoints as query endpoints.";
+
+export function sourceSemanticCorrespondenceSystemPrompt(
+  request?: SourceSemanticCorrespondenceRequest
+): string {
+  if (request?.contract !== SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+    || request.generation_policy?.kind !== "branch_demand"
+    || request.demand === undefined) {
+    return SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT;
+  }
+  const handles = request.demand.demanded_handles.join(", ");
+  return SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT.replace(
+    CORRESPONDENCE_FULL_ASSESS,
+    `Assess every demanded query endpoint exactly once for that interpretation (${handles}), even when no equivalence is supported. Do not assess host-unassessed remainder; omitted remainder is unassessed, not unresolved. Do not assess source endpoints as query endpoints.`
+  );
+}

@@ -241,6 +241,8 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
       validated_proof_ranks: evaluated?.validatedProofRanks ?? [],
       source_interpretation_candidates: prepared.status === "blocked" ? 0 : prepared.descriptors.length,
       correspondence_opportunities: prepared.status === "ready" ? prepared.correspondence_opportunities : [],
+      ...(prepared.status === "ready" && prepared.correspondence_demand_opportunities !== undefined
+        ? { correspondence_demand_opportunities: prepared.correspondence_demand_opportunities } : {}),
       correspondence_outcomes: row.correspondence_outcomes ?? null },
     preparation_trace: row.preparation_trace ?? null, preparation_elapsed_ms: row.preparation_elapsed_ms ?? null,
     diagnostics: row.response?.operation === "recall" ? {
@@ -399,8 +401,11 @@ function admitDeliveredSources(plan: SemanticChainPlan, response: Extract<z.infe
       content_digest: current.record.content_digest, evidence_object_id: current.record.evidence_object_id }))) {
       throw new AlayaError("CONFLICT", "delivered source identity differs from current sealed source");
     }
-    admitEmittedSourcePreview(target.span, response.results[position]!, response.slot_qualifiers?.[position],
-      target, current.content_bytes, proofForLibraryEntry(entry, response.proofs ?? []) !== undefined);
+    const qualifiers = response.slot_qualifiers?.filter(qualifier => qualifier.index === position) ?? [];
+    for (const qualifier of qualifiers.length === 0 ? [undefined] : qualifiers) {
+      admitEmittedSourcePreview(target.span, response.results[position]!, qualifier,
+        target, current.content_bytes, proofForLibraryEntry(entry, response.proofs ?? []) !== undefined);
+    }
     records.push(current.record);
   }
   for (const proof of response.proofs ?? []) {

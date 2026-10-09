@@ -306,8 +306,11 @@ export { receiveOfficialApiSourcePacket, completeEmptyOfficialApiSourcePacket, M
 export { collectSourceSemanticUnitPacks, indexSourceSemanticUnits, sourceSemanticTransportUnits } from "./garden/ingestion/official-api/source-semantic-units.js";
 export {
   SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
+  sourceSemanticCorrespondenceSystemPrompt,
   SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, SourceSemanticGenerationViewContractSchema, type SourceSemanticGenerationViewContract,
   sourceSemanticSystemPrompt, sourceSemanticGenerationSystemPrompt, buildSourceSemanticRequest, prepareSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema,
   buildSourceSemanticQueryRequest,
@@ -336,6 +339,6 @@ export {
 export {
   prepareSourceSemanticLibrary, sourceSemanticLibraryCorrespondenceCacheKey,
   type SourceSemanticLibraryPrepareInput, type SourceSemanticLibraryPrepareResult,
-  type SourceSemanticLibraryProduceResult, type SourceSemanticLibraryPrepareOutcome,
+  type SourceSemanticLibraryProduceResult, type SourceSemanticLibraryProduceTask, type SourceSemanticLibraryPrepareOutcome,
   type SourceSemanticLibraryPrepareCacheEntry, type SourceSemanticLibraryPrepareStatus
 } from "./garden/ingestion/official-api/source-semantic-library-prepare.js";

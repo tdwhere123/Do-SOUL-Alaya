@@ -312,22 +312,35 @@ export function proofForLibraryEntry<T extends SourceSemanticReasoningResult>(
 export function slotQualifiersFor(
   index: InformationIndex, proofs: readonly SourceSemanticLibraryProof[]
 ): SourceSemanticLibrarySlotQualifier[] {
-  return index.entries.map((entry, offset) => {
-    const proof = proofForLibraryEntry(entry, proofs);
-    if (proof === undefined) return { index: offset, evidence_kind: "source_evidence" as const };
-    const rootProofs = proofs.filter(row => row.source_target !== undefined && entry.target.kind === "source_evidence"
-      && sourceGoldRootIdentity(row.source_target) === sourceGoldRootIdentity(entry.target));
-    return {
-      index: offset, evidence_kind: "semantic_proof" as const,
-      ...(proof.source_interpretation_id === undefined ? {} : { source_interpretation_id: proof.source_interpretation_id }),
-      ...(proof.query_semantics_id === undefined ? {} : { query_semantics_id: proof.query_semantics_id }),
-      ...(proof.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: proof.semantic_correspondence_id }),
-      ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id }),
-      witnesses: rootProofs.flatMap(row => (row.binding_results ?? []).map(binding => ({
-        conditional_computation_id: row.conditional_computation_id!, binding_id: binding.binding_id }))),
-      support: projectSourceSemanticQuerySupport(proof.query, rootProofs.flatMap(row => row.binding_results ?? []))
-    };
+  return index.entries.flatMap((entry, offset): SourceSemanticLibrarySlotQualifier[] => {
+    if (proofForLibraryEntry(entry, proofs) === undefined) return [{ index: offset, evidence_kind: "source_evidence" }];
+    return proofs.filter(row => row.source_target !== undefined && entry.target.kind === "source_evidence"
+      && sourceGoldRootIdentity(row.source_target) === sourceGoldRootIdentity(entry.target))
+      .map(proof => sourceSemanticProofQualifier(proof, offset));
   });
+}
+
+/** A source slot can carry independent Q/H/C premises; its position never identifies a proof. */
+export function proofForLibraryQualifier(
+  entry: IndexEntry, qualifier: SourceSemanticLibrarySlotQualifier, proofs: readonly SourceSemanticLibraryProof[]
+): SourceSemanticLibraryProof | undefined {
+  const { payload_support: _payload, selection_basis: _selection, ...semantic } = qualifier;
+  return proofs.find(proof => proof.source_target !== undefined && entry.target.kind === "source_evidence"
+    && sourceGoldRootIdentity(proof.source_target) === sourceGoldRootIdentity(entry.target)
+    && canonicalJson(semantic) === canonicalJson(sourceSemanticProofQualifier(proof, qualifier.index)));
+}
+
+function sourceSemanticProofQualifier(proof: SourceSemanticLibraryProof, index: number): SourceSemanticLibrarySlotQualifier {
+  return {
+    index, evidence_kind: "semantic_proof",
+    ...(proof.source_interpretation_id === undefined ? {} : { source_interpretation_id: proof.source_interpretation_id }),
+    ...(proof.query_semantics_id === undefined ? {} : { query_semantics_id: proof.query_semantics_id }),
+    ...(proof.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: proof.semantic_correspondence_id }),
+    ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id }),
+    witnesses: (proof.binding_results ?? []).map(binding => ({
+      conditional_computation_id: proof.conditional_computation_id!, binding_id: binding.binding_id })),
+    support: projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? [])
+  };
 }
 
 function mergeProofGroups(
