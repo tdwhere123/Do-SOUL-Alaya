@@ -53,9 +53,10 @@ Usage:
   alaya-bench-runner semantic-proposal-fill --kind query|semantic_correspondence --action prepare|authorize|fill --workset <json> --cache-root <dir> [--max-output-tokens N]
     prepare writes --preflight-out. authorize reads --preflight and writes --receipt-out with prices. fill reads --authority.
     Interactive Gemini streamGenerateContent; query/semantic correspondence schemas are caller-owned. Do not import runCli in-process when HTTPS_PROXY must be honored — use this bin.
-  alaya-bench-runner extraction-fill --extraction-open-semantics --extraction-source-packing complete-source --extraction-preflight-out <new-report.json> [--extraction-preflight-keys <keys.json>] [--extraction-preflight-output-token-cap N]
+  alaya-bench-runner extraction-fill --extraction-open-semantics [--generation-task-json <task.json>] --extraction-source-packing complete-source --extraction-preflight-out <new-report.json> [--extraction-preflight-keys <keys.json>] [--extraction-preflight-output-token-cap N]
+    --generation-task-json <path> reads a protocol generation task; requires --extraction-open-semantics. Use the same task for preflight, authorize-extraction, select-extraction-target, and execution.
     Provider-free Step source preparation defaults to 4096 output tokens; an explicit positive safe cap binds its encoded request and quoted bound.
-  alaya-bench-runner extraction-fill --extraction-open-semantics [--extraction-source-packing complete-source] --extraction-authority <receipt.json> [ordinary fill options]
+  alaya-bench-runner extraction-fill --extraction-open-semantics [--generation-task-json <task.json>] [--extraction-source-packing complete-source] --extraction-authority <receipt.json> [ordinary fill options]
     Gemini uses generateContent and Step uses Plan Chat Completions; both share whole-source request and admission owners. Step complete-source samples require retained v3 proof; Gemini samples remain Batch-only.
   alaya-bench-runner extraction-fill [ordinary fill options] [--extraction-packet-profile <profile.json> | --extraction-open-semantics] [--extraction-preflight-out <new-report.json> --extraction-preflight-keys <keys.json>] --batch-operation prepare|submit|status|resume|recover|import|cancel --batch-limits <json> [--batch-window <name>] [--batch-request-limit N] [--batch-local-job <id> --batch-remote-job <batches/id>]
     Gemini uses --extraction-output-token-field maxOutputTokens when creating its extraction authority. Batch prices, input/output caps and root spending remain receipt-bound. A named window selects missing work; resume never submits new jobs.
@@ -121,6 +122,9 @@ function commandFlagCompatibilityError(
   command: string | undefined,
   opts: ParsedFlags
 ): string | null {
+  if (opts.extractionGenerationTaskJson !== undefined && command !== "extraction-fill") {
+    return "--generation-task-json is only valid for extraction commands";
+  }
   if (opts.extractionPredecessorAuthority !== undefined &&
       command !== "extraction-fill") {
     return "--extraction-predecessor-authority is only valid for " +

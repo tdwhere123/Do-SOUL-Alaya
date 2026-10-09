@@ -851,7 +851,7 @@ identity changes when those consumed fields change, even if the query text and
 meaning body do not. Source records hold the same attribution schema; the current
 source request and published interpretation carry the exact source value. The
 full-catalog correspondence request is v7; the optional native branch-demand
-request is v8. Both use the same versioned endpoint-evidence
+request is v9. Both use the same versioned endpoint-evidence
 projection, which copies declared named-reference uses, source mentions, attribution,
 assertion locations, frame context, support and bindings onto the existing catalog
 handles. It selects no equivalence and gives no new proof authority. Mention span
@@ -874,8 +874,16 @@ are never repaired. Pair choice, source support, context and unresolved meaning
 remain producer responsibilities. This mechanical completion does not certify
 semantic correspondence. Benchmark request identities include the new schema
 and prompt; retained raw v4 responses and Q/H-keyed library caches are not upgraded.
-Scoped request v8 uses response v6 and a Protocol-owned `branch_demand` policy
-addressing an existing query alternative and answer/evidence target. The existing
+Scoped request v9 uses the flat response v7: the model returns `decision`
+(`assess` or `abstain`), required `assessments`, and optional domain/membership
+arrays. The host binds the internal assessment contract, outcome and sole H
+handle from the captured request. A scoped v9 request requires exactly one
+identity-validated H descriptor. Abstention cannot carry assessments or domain
+payload; optional absence is preserved and `null` is rejected. Captured v8
+requests retain their v6 envelope decoder; response shape cannot select a decoder,
+and historical raw results are not upgraded into new request identities.
+The Protocol-owned `branch_demand` policy
+addresses an existing query alternative and answer/evidence target. The existing
 branch-view owner retains governing context and connected obligations. The host
 derives the exact demanded catalog handles; generation and receive require one
 assessment per demanded handle. Full Q/H, catalog and endpoint evidence remain
@@ -897,6 +905,25 @@ qualifier array position is not slot position. Each qualifier's witnesses and
 support come from that proof alone. Protocol 14.0.0 records this public semantic
 change under invariant §25; occupied-source counts remain distinct from proof
 counts.
+Native benchmark source preparation can bind an explicit `native_first_page`
+scope with a source cap against the retained first ten source opportunities. It
+preserves complete source text, the entire census and original ordering. Eligible
+but unowned sources remain distinct from sources outside the assessed scope.
+An explicit empty dry-preflight selection produces zero requests; execution
+sample authority still requires a nonempty key set. `--generation-task-json`
+passes the same protocol-validated query task through extraction CLI preparation,
+quote, authority inspection and execution. Bounded binding requires the exact
+original question; changing the task changes request identity and invalidates
+old request ownership. The existing complete-census caller retains its full
+ownership requirement when no bounded scope is supplied.
+
+Producer disposition eligibility has one kind-specific Protocol authority:
+H permits `interpreted`, `no_executable_proposition` or `abstained`; Q and C
+permit `interpreted` or `abstained`. Flat C decisions map through the same policy.
+Generation and receive both derive eligibility from this owner. Models cannot
+claim operational failures or supply host raw-response provenance. Actual
+transport, truncation, resource and parse failures remain host-observed states;
+the canonical runtime outcome schema retains those distinctions.
 Only supported pairs lower to the existing canonical C; grounding and unresolved
 explanations remain inspectable metadata, not executable proof. Protocol counts
 projected JSON bytes incrementally before expanding each endpoint and repeated

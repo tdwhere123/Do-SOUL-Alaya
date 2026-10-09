@@ -1,18 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import {
-  SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
-  SourceSemanticInterpretationSchema, SourceSemanticQuerySchema,
+  SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PRODUCER_OUTCOMES,
+  SourceSemanticInterpretationSchema, SourceSemanticQuerySchema, SourceSemanticResourceLedger,
   sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity, UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
-  buildSourceSemanticCorrespondenceRequest, semanticSha256, sourceSemanticCorrespondenceResponseJsonSchema,
+  buildSourceSemanticCorrespondenceRequest, parseSourceSemanticCorrespondenceRequest, semanticSha256, sourceSemanticCorrespondenceResponseJsonSchema,
   sourceSemanticCorrespondenceSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
-import { proposeCorrespondenceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
+import { materializeSourceSemanticCorrespondenceFlatDraft, SourceSemanticCorrespondenceFlatDraftSchema } from "../../../garden/ingestion/official-api/source-semantic-correspondence-presentation.js";
+import { proposeCorrespondenceSemantics, receiveCorrespondenceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import {
   prepareSourceSemanticLibrary, sourceSemanticLibraryCorrespondenceCacheKey
 } from "../../../garden/ingestion/official-api/source-semantic-library-prepare.js";
@@ -123,8 +125,12 @@ function assessmentBody(handles: readonly string[], frameHandle: string, excerpt
   };
 }
 
+function flatAssessment(handles: readonly string[], frameHandle: string, excerpt: string) {
+  return { decision: "assess", assessments: assessmentBody(handles, frameHandle, excerpt).assessments };
+}
+
 describe("source semantic correspondence branch demand", () => {
-  it("keeps omitted generation_policy on the v7 full-catalog request and serializes v8 only for branch demand", () => {
+  it("keeps omitted generation_policy on the v7 full-catalog request and serializes v9 only for branch demand", () => {
     const prepared = input();
     const full = buildSourceSemanticCorrespondenceRequest(prepared);
     const explicitFull = buildSourceSemanticCorrespondenceRequest({
@@ -153,23 +159,31 @@ describe("source semantic correspondence branch demand", () => {
     expect(wash.demand?.query_refs.frames).toEqual(["wash"]);
   });
 
-  it("accepts independent wash and mend v6 receipts, rejects v4 on scoped, and leaves coverage off the full path", () => {
+  it("accepts flat drafts with identical canonical C and coverage to historical v6 receipts, rejects older responses on scoped, and leaves coverage off full", () => {
     const prepared = input();
     const washRequest = buildSourceSemanticCorrespondenceRequest({ ...prepared, generation_policy: washPolicy });
     const frame = washRequest.catalog.source_endpoints.find((row) => row.kind === "frame")!.handle;
     const washBody = assessmentBody(washRequest.demand!.demanded_handles, frame, "wash");
     const wash = proposeCorrespondenceSemantics({ ...prepared, generation_policy: washPolicy }, {
-      rawJson: JSON.stringify({
-        contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
-        outcome: { status: "interpreted" }, semantic_correspondence: washBody
-      })
+      rawJson: JSON.stringify(flatAssessment(washRequest.demand!.demanded_handles, frame, "wash"))
     });
+    const historical = receiveCorrespondenceSemantics(JSON.stringify({
+      contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
+      outcome: { status: "interpreted" }, semantic_correspondence: washBody
+    }), { ...washRequest, contract: SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT });
+    expect(historical.outcome.status).toBe("interpreted");
+    expect(wash.semantic_correspondence).toEqual(historical.semantic_correspondence);
+    expect(wash.coverage).toEqual(historical.coverage);
+    expect(wash.assessment?.contract).toBe("source-semantic-correspondence-assessment-v1");
+    expect(wash.assessment?.source_interpretation_handle).toBe("source1");
     expect(wash.outcome.status).toBe("interpreted");
     expect(wash.coverage?.demanded).toEqual(washRequest.demand!.demanded_handles);
     expect(wash.coverage?.unassessed).toHaveLength(3);
     expect(wash.semantic_correspondence?.correspondences.length).toBeGreaterThan(0);
     const schema = JSON.stringify(sourceSemanticCorrespondenceResponseJsonSchema(washRequest));
-    expect(schema).toContain(SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT);
+    expect(schema).toContain('"decision"');
+    expect(schema).not.toContain("source_interpretation_handle");
+    expect(schema).not.toContain("source-semantic-correspondence-assessment-v1");
     for (const handle of washRequest.demand!.demanded_handles) expect(schema).toContain(handle);
     const v4 = proposeCorrespondenceSemantics({ ...prepared, generation_policy: washPolicy }, {
       rawJson: JSON.stringify({
@@ -205,10 +219,7 @@ describe("source semantic correspondence branch demand", () => {
     });
     expect(scopedOnFull.outcome.status).toBe("invalid");
     const abstained = proposeCorrespondenceSemantics({ ...prepared, generation_policy: washPolicy }, {
-      rawJson: JSON.stringify({
-        contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
-        outcome: { status: "abstained" }
-      })
+      rawJson: JSON.stringify({ decision: "abstain", assessments: [] })
     });
     expect(abstained.outcome.status).toBe("abstained");
     expect(abstained.coverage).toBeUndefined();
@@ -218,17 +229,9 @@ describe("source semantic correspondence branch demand", () => {
     const prepared = input();
     const washRequest = buildSourceSemanticCorrespondenceRequest({ ...prepared, generation_policy: washPolicy });
     const frame = washRequest.catalog.source_endpoints.find((row) => row.kind === "frame")!.handle;
-    const washJson = JSON.stringify({
-      contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
-      outcome: { status: "interpreted" },
-      semantic_correspondence: assessmentBody(washRequest.demand!.demanded_handles, frame, "wash")
-    });
+    const washJson = JSON.stringify(flatAssessment(washRequest.demand!.demanded_handles, frame, "wash"));
     const mendRequest = buildSourceSemanticCorrespondenceRequest({ ...prepared, generation_policy: mendPolicy });
-    const mendJson = JSON.stringify({
-      contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
-      outcome: { status: "interpreted" },
-      semantic_correspondence: assessmentBody(mendRequest.demand!.demanded_handles, frame, "mend")
-    });
+    const mendJson = JSON.stringify(flatAssessment(mendRequest.demand!.demanded_handles, frame, "mend"));
     const queryId = sourceSemanticQueryIdentity(prepared.admitted_query_semantics, semanticSha256);
     const sourceId = prepared.source_interpretation_descriptors[0]!.source_interpretation_id;
     let calls = 0;
@@ -324,6 +327,166 @@ describe("source semantic correspondence branch demand", () => {
     expect(() => prepareSourceSemanticLibrary({
       ...prepared, correspondence_cap: 1, produce: () => ({ rawJson: washJson })
     })).toThrow(/must appear together/u);
+  });
+
+  it("advertises exactly the shared eligible producer statuses through one mapped flat decision schema", () => {
+    const request = buildSourceSemanticCorrespondenceRequest({ ...input(), generation_policy: washPolicy });
+    const decisions = SourceSemanticCorrespondenceFlatDraftSchema.unwrap().shape.decision.options;
+    const statusByDecision = { assess: "interpreted", abstain: "abstained" };
+    expect(new Set(decisions.map(decision => statusByDecision[decision])))
+      .toEqual(new Set(SOURCE_SEMANTIC_PRODUCER_OUTCOMES.correspondence));
+    const generated = sourceSemanticCorrespondenceResponseJsonSchema(request) as {
+      properties: { decision: { enum: string[] } }; anyOf: { properties: { decision: { enum: string[] } } }[]
+    };
+    expect(generated.properties.decision.enum).toEqual(decisions);
+    expect(generated.anyOf.flatMap(branch => branch.properties.decision.enum)).toEqual(decisions);
+  });
+
+  it.each(["missing assessments", "null assessments", "null domains", "null membership", "empty supported",
+    "missing demanded", "duplicate demanded", "extra undemanded", "predicate excerpt omitted", "unknown decision",
+    "outer contract", "outcome wrapper", "inner contract", "source handle", "extra assessment field", "abstain payload"])(
+    "rejects a flat draft with %s without canonical C or coverage", (condition) => {
+      const prepared = { ...input(), generation_policy: washPolicy };
+      const request = buildSourceSemanticCorrespondenceRequest(prepared);
+      const frame = request.catalog.source_endpoints.find((row) => row.kind === "frame")!.handle;
+      const flat = flatAssessment(request.demand!.demanded_handles, frame, "wash");
+      const cases: Record<string, unknown> = {
+        "missing assessments": { decision: "assess" }, "null assessments": { ...flat, assessments: null },
+        "null domains": { ...flat, domains: null }, "null membership": { ...flat, membership_assumptions: null },
+        "empty supported": { ...flat, assessments: flat.assessments.map(row => row.status === "supported" ? { ...row, equivalents: [] } : row) },
+        "missing demanded": { ...flat, assessments: flat.assessments.slice(1) },
+        "duplicate demanded": { ...flat, assessments: [...flat.assessments, flat.assessments[0]] },
+        "extra undemanded": { ...flat, assessments: [...flat.assessments, { query: "qe5", status: "unresolved", query_excerpt: "mend", explanation: "Open." }] },
+        "predicate excerpt omitted": { ...flat, assessments: flat.assessments.map(row => row.status === "supported"
+          ? { ...row, equivalents: row.equivalents.map(({ query_excerpt: _quote, ...rest }) => rest) } : row) },
+        "unknown decision": { ...flat, decision: "no_match" }, "outer contract": { ...flat, contract: "source-semantic-correspondence-response-v7" },
+        "outcome wrapper": { ...flat, outcome: { status: "interpreted" } },
+        "inner contract": { ...flat, contract: "source-semantic-correspondence-assessment-v1" },
+        "source handle": { ...flat, source_interpretation_handle: "source1" },
+        "extra assessment field": { ...flat, assessments: [{ ...flat.assessments[0], invented: true }, ...flat.assessments.slice(1)] },
+        "abstain payload": { ...flat, decision: "abstain" }
+      };
+      const received = proposeCorrespondenceSemantics(prepared, { rawJson: JSON.stringify(cases[condition]) });
+      expect(received.outcome.status).toBe("invalid");
+      expect(received.semantic_correspondence).toBeUndefined();
+      expect(received.coverage).toBeUndefined();
+    });
+
+  it("keeps optional absence, completes eligible excerpts, and binds original raw bytes and all host identities", () => {
+    const prepared = { ...input(), generation_policy: washPolicy };
+    const request = buildSourceSemanticCorrespondenceRequest(prepared);
+    const frame = request.catalog.source_endpoints.find((row) => row.kind === "frame")!.handle;
+    const flat = flatAssessment(request.demand!.demanded_handles, frame, "wash");
+    const omitted = { ...flat, assessments: flat.assessments.map(row => {
+      if (row.status === "supported") return row;
+      const { query_excerpt: _quote, ...rest } = row;
+      return rest;
+    }) };
+    const rawJson = ` \n${JSON.stringify(omitted, null, 2)}\n`;
+    const received = proposeCorrespondenceSemantics(prepared, { rawJson });
+    expect(received.outcome.status).toBe("interpreted");
+    expect(received.rawJson).toBe(rawJson);
+    expect(received.raw_response_id).toBe(`sha256:${semanticSha256(rawJson)}`);
+    expect(received.assessment?.assessments.filter(row => row.status === "unresolved").map(row => row.query_excerpt))
+      .toEqual(["Maya", "Maya", "things"]);
+    expect(Object.hasOwn(received.assessment!, "domains")).toBe(false);
+    expect(Object.hasOwn(received.assessment!, "membership_assumptions")).toBe(false);
+    expect(received.semantic_correspondence).toMatchObject({
+      source_interpretation_id: prepared.source_interpretation_descriptors[0]!.source_interpretation_id,
+      query_semantics_id: sourceSemanticQueryIdentity(prepared.admitted_query_semantics, semanticSha256),
+      producer_id: prepared.producer_id, producer_version: prepared.producer_version
+    });
+    const empty = proposeCorrespondenceSemantics(prepared, { rawJson: JSON.stringify({ ...flat, domains: [], membership_assumptions: [] }) });
+    expect(empty.assessment?.domains).toEqual([]);
+    expect(empty.assessment?.membership_assumptions).toEqual([]);
+    const old = { ...request, contract: SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT };
+    expect(receiveCorrespondenceSemantics(rawJson, old).outcome.status).toBe("invalid");
+    expect(proposeCorrespondenceSemantics(prepared, { rawJson: JSON.stringify({
+      contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
+      outcome: { status: "interpreted" }, semantic_correspondence: assessmentBody(request.demand!.demanded_handles, frame, "wash")
+    }) }).outcome.status).toBe("invalid");
+    expect(sourceSemanticCorrespondenceResponseJsonSchema(old)).not.toEqual(sourceSemanticCorrespondenceResponseJsonSchema(request));
+    expect(sourceSemanticCorrespondenceSystemPrompt(old)).not.toBe(sourceSemanticCorrespondenceSystemPrompt(request));
+    const ajv = new Ajv2020({ strict: false });
+    const validate = ajv.compile(sourceSemanticCorrespondenceResponseJsonSchema(request));
+    expect(validate(omitted)).toBe(true);
+    expect(validate({ decision: "abstain", assessments: [] })).toBe(true);
+    expect(validate({ ...omitted, source_interpretation_handle: "source1" })).toBe(false);
+    expect(validate({ ...omitted, decision: "abstain" })).toBe(false);
+    const exhausted = proposeCorrespondenceSemantics({ ...prepared, resource_limits: { work_units: 0, memory_bytes: 0 } }, { rawJson });
+    expect(exhausted.outcome.status).toBe("resource_exhausted");
+    expect(exhausted.semantic_correspondence).toBeUndefined();
+  });
+
+  it.each(["canonical correspondence row allocation", "coverage demanded entry"])(
+    "preserves provenance and returns no partial result when the shared nonzero budget exhausts during %s", phase => {
+      const prepared = { ...input(), generation_policy: washPolicy };
+      const request = buildSourceSemanticCorrespondenceRequest(prepared);
+      const frame = request.catalog.source_endpoints.find(row => row.kind === "frame")!.handle;
+      const flat = flatAssessment(request.demand!.demanded_handles, frame, "wash");
+      const rawJson = ` \n${JSON.stringify(flat, null, 2)}\n`;
+      let workAtPhase: number | undefined;
+      const charge = SourceSemanticResourceLedger.prototype.charge;
+      const observer = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(function (
+        this: SourceSemanticResourceLedger, work, bytes, currentPhase = "preparation"
+      ) {
+        if (currentPhase === phase && workAtPhase === undefined) workAtPhase = this.spentWork;
+        charge.call(this, work, bytes, currentPhase);
+      });
+      try { expect(proposeCorrespondenceSemantics(prepared, { rawJson }).outcome.status).toBe("interpreted"); }
+      finally { observer.mockRestore(); }
+      if (workAtPhase === undefined || workAtPhase === 0) throw new Error("expected a nonzero downstream budget");
+      const resource_limits = { work_units: workAtPhase, memory_bytes: 20000000 };
+      const limited = buildSourceSemanticCorrespondenceRequest({ ...prepared, resource_limits });
+      // A real ledger with this same allowance can finish presentation before downstream receive exhausts.
+      expect(() => materializeSourceSemanticCorrespondenceFlatDraft(flat, limited,
+        new SourceSemanticResourceLedger(resource_limits))).not.toThrow();
+      const reserve = vi.spyOn(SourceSemanticResourceLedger.prototype, "reserve");
+      try {
+        const received = receiveCorrespondenceSemantics(rawJson, limited);
+        expect(reserve.mock.lastCall?.[2]).toBe(phase);
+        expect(received.outcome).toEqual({ status: "resource_exhausted" });
+        expect(received.semantic_correspondence).toBeUndefined();
+        expect(received.assessment).toBeUndefined();
+        expect(received.coverage).toBeUndefined();
+        expect(received.rawJson).toBe(rawJson);
+        expect(received.raw_response_id).toBe(`sha256:${semanticSha256(rawJson)}`);
+      } finally { reserve.mockRestore(); }
+    });
+
+  it("accepts empty abstention arrays only, without a canonical C or successful coverage", () => {
+    const prepared = { ...input(), generation_policy: washPolicy };
+    for (const optional of [{}, { domains: [] }, { membership_assumptions: [] }, { domains: [], membership_assumptions: [] }]) {
+      const received = proposeCorrespondenceSemantics(prepared, { rawJson: JSON.stringify({ decision: "abstain", assessments: [], ...optional }) });
+      expect(received.outcome).toEqual({ status: "abstained" });
+      expect(received.semantic_correspondence).toBeUndefined();
+      expect(received.coverage).toBeUndefined();
+    }
+    for (const payload of [{}, { domains: null }, { membership_assumptions: null }, { reason: "uncertain" },
+      { domains: [{ query_domain: "q", source_domain: "s", query_support: { kind: "query_text", excerpt: "Maya" }, source_semantic_support: [] }] },
+      { membership_assumptions: [{ query_variable: "maya", source_domain: "s", restrictions: [], status: "member",
+        query_support: { kind: "query_text", excerpt: "Maya" }, description: "Conditional" }] }]) {
+      const raw = Object.keys(payload).length === 0 ? { decision: "abstain" } : { decision: "abstain", assessments: [], ...payload };
+      expect(proposeCorrespondenceSemantics(prepared, { rawJson: JSON.stringify(raw) }).outcome.status).toBe("invalid");
+    }
+  });
+
+  it("captures exactly one identity-validated H in v9 and preserves the historical multi-descriptor v8 bound", () => {
+    const prepared = input();
+    const doubled = { ...prepared, source_interpretation_descriptors: [...prepared.source_interpretation_descriptors, ...prepared.source_interpretation_descriptors] };
+    expect(() => buildSourceSemanticCorrespondenceRequest({ ...doubled, generation_policy: washPolicy })).toThrow();
+    const request = buildSourceSemanticCorrespondenceRequest({ ...prepared, generation_policy: washPolicy });
+    const oldMulti = { ...buildSourceSemanticCorrespondenceRequest(doubled),
+      contract: SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT,
+      generation_policy: washPolicy, demand: request.demand };
+    expect(parseSourceSemanticCorrespondenceRequest(oldMulti).source_interpretation_descriptors).toHaveLength(2);
+    expect(() => parseSourceSemanticCorrespondenceRequest({ ...oldMulti, contract: request.contract })).toThrow();
+    const mutated = structuredClone(request);
+    Reflect.set(mutated.source_interpretation_descriptors[0]!, "source_interpretation_id", `sha256:${"0".repeat(64)}`);
+    expect(() => receiveCorrespondenceSemantics('{"decision":"abstain","assessments":[]}', mutated)).toThrow(/identity/u);
+    const recataloged = structuredClone(request);
+    Reflect.set(recataloged.catalog.query_endpoints[0]!, "reading", "forged");
+    expect(() => parseSourceSemanticCorrespondenceRequest(recataloged)).toThrow(/differs/u);
   });
 
   it("reports a local descriptor rejection without a producer attempt or transport outcome", () => {

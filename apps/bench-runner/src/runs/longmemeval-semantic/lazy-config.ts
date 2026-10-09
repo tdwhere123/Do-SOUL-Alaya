@@ -3,7 +3,7 @@ import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
 import { verifySemanticChainQueries } from "../semantic-chain/inputs.js";
-import { admitNativeLazyConfig } from "../semantic-chain/bind-lazy.js";
+import { admitNativeLazyConfig, type NativeSourceRequestScope } from "../semantic-chain/bind-lazy.js";
 import { readLongMemEvalSemanticFreeze, loadFrozenLongMemEvalDataset } from "./contract.js";
 import { ExperimentPreparedSchema, verifyLongMemEvalQuestionPublication,
   verifyLongMemEvalQuestionChain } from "./execute.js";
@@ -13,6 +13,7 @@ export type LongMemEvalLazyConfigInput = Readonly<{
   preparedPath: string;
   sourcePreflightPath: string;
   sourceCacheRoot: string;
+  sourceRequestScope?: NativeSourceRequestScope;
 }>;
 
 async function readInitialQuestion(input: LongMemEvalLazyConfigInput) {
@@ -75,7 +76,8 @@ export async function admitLongMemEvalLazyConfig(input: LongMemEvalLazyConfigInp
   }
   const bound = await admitNativeLazyConfig({ plan, initialChainRoot: chainRoot, population,
     sourcePreflightPath: input.sourcePreflightPath,
-    sourceCacheRoot: input.sourceCacheRoot, recordedAt: frozen.config.recorded_at,
+    sourceCacheRoot: input.sourceCacheRoot, sourceRequestScope: input.sourceRequestScope,
+    recordedAt: frozen.config.recorded_at,
     producerCommit: frozen.config.producer_commit });
   const projected = bound.census.records.map(({ source_id, source_version, content_digest, corpus_digest,
     session_id, session_index, round_index, source_observed_at, roles }) => ({ source_id, source_version,

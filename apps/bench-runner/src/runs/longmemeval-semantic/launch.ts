@@ -16,13 +16,15 @@ export async function runLongMemEvalSemanticLauncher(args: readonly string[]): P
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
       if (!["--root", "--config", "--prepared", "--replay", "--source-preflight", "--source-cache-root",
-        "--lazy-root", "--evaluator-root", "--out", "--member", "--stage"].includes(key) || flags.has(key) || value === undefined) {
+        "--lazy-root", "--evaluator-root", "--out", "--member", "--stage", "--source-cap"].includes(key) || flags.has(key) || value === undefined) {
         throw new AlayaError("VALIDATION", "invalid LongMemEval semantic arguments");
       }
       flags.set(key, value);
     }
     const required = (key: string) => { const value = flags.get(key); if (!value) throw new AlayaError("VALIDATION", `${key} is required`); return value; };
     const root = required("--root");
+    const sourceScope = flags.has("--source-cap") ? { sourceRequestScope: {
+      kind: "native_first_page" as const, source_cap: Number(flags.get("--source-cap")) } } : {};
     let result: unknown;
     if (operation === "freeze") result = await freezeLongMemEvalSemanticRun(JSON.parse(readBoundedCanonicalUtf8Artifact({
       path: required("--config"), maxBytes: 1024 * 1024, label: "LongMemEval semantic config" })), root);
@@ -31,10 +33,10 @@ export async function runLongMemEvalSemanticLauncher(args: readonly string[]): P
     else if (operation === "measure") result = await measureLongMemEvalSemanticRun(root, required("--replay"), required("--evaluator-root"));
     else if (operation === "bind-lazy") result = await writeLongMemEvalLazyConfig({ root,
       preparedPath: required("--prepared"), sourcePreflightPath: required("--source-preflight"),
-      sourceCacheRoot: required("--source-cache-root") }, required("--out"));
+      sourceCacheRoot: required("--source-cache-root"), ...sourceScope }, required("--out"));
     else if (operation === "measure-lazy") result = await measureLongMemEvalLazyFirstExposure({ root,
       preparedPath: required("--prepared"), sourcePreflightPath: required("--source-preflight"),
-      sourceCacheRoot: required("--source-cache-root"), lazyRoot: required("--lazy-root"),
+      sourceCacheRoot: required("--source-cache-root"), ...sourceScope, lazyRoot: required("--lazy-root"),
       evaluatorRoot: required("--evaluator-root") });
     else if (operation === "freeze-population") result = freezeLongMemEvalLazyPopulation(JSON.parse(readBoundedCanonicalUtf8Artifact({
       path: required("--config"), maxBytes: 1024 * 1024, label: "LongMemEval population metadata" })), root);

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  sourceSemanticProducerEnvelopeJsonSchema,
+  sourceSemanticProducerEnvelopeJsonSchema, sourceSemanticProducerGenerationOutcomeSchema,
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
@@ -30,18 +30,23 @@ import { sourceSemanticQueryExamples, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CON
 export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
 import { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
-import { assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
+import { SourceSemanticProposalRevisionSchema, assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
   sourceSemanticCorrespondenceGenerationResponseJsonSchema
 } from "./source-semantic-query-provenance.js";
+import {
+  sourceSemanticCorrespondenceFlatResponseJsonSchema, sourceSemanticCorrespondenceFlatSystemPrompt
+} from "./source-semantic-correspondence-presentation.js";
+export { SOURCE_SEMANTIC_CORRESPONDENCE_FLAT_RESPONSE_CONTRACT } from "./source-semantic-correspondence-presentation.js";
 export { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT } from "./source-semantic-query-provenance.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 export { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
-export const SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v8" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v8" as const;
+export const SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT = "source-semantic-correspondence-response-v4" as const;
 export const SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT = "source-semantic-generation-view-v1" as const;
 export type SourceSemanticGenerationViewContract = typeof SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT;
@@ -189,6 +194,7 @@ export type SourceSemanticQueryRequest = Readonly<{
 export type SourceSemanticCorrespondenceRequest = Readonly<{
   original_query: string;
   contract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT
+    | typeof SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT
     | typeof SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   admitted_query_semantics: SourceSemanticQuery;
@@ -378,28 +384,38 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
 export function buildSourceSemanticCorrespondenceRequest(
   input: SourceSemanticCorrespondenceProposalInput
 ): SourceSemanticCorrespondenceRequest {
+  return captureSourceSemanticCorrespondenceRequest(input, SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT);
+}
+
+function captureSourceSemanticCorrespondenceRequest(
+  input: SourceSemanticCorrespondenceProposalInput,
+  scopedContract: typeof SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+    | typeof SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT
+): SourceSemanticCorrespondenceRequest {
   rejectForbiddenProposalInput(input);
   const admitted_query_semantics = SourceSemanticQuerySchema.parse(input.admitted_query_semantics);
   if (admitted_query_semantics.original_query_digest !== originalQueryDigest(input.original_query)) {
     throw new AlayaError("VALIDATION", "semantic_correspondence request does not bind the original query");
   }
-  const source_interpretation_descriptors = z.array(SourceInterpretationDescriptorSchema).min(1).max(64).parse(input.source_interpretation_descriptors);
+  const parsedPolicy = input.generation_policy === undefined
+    ? undefined
+    : SourceSemanticCorrespondenceGenerationPolicySchema.parse(input.generation_policy);
+  const scoped = parsedPolicy?.kind === "branch_demand";
+  const source_interpretation_descriptors = z.array(SourceInterpretationDescriptorSchema).min(1)
+    .max(scoped && scopedContract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT ? 1 : 64)
+    .parse(input.source_interpretation_descriptors);
   countSourceSemanticCorrespondenceJsonBytes(source_interpretation_descriptors,
     SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES, "semantic_correspondence descriptors exceed input budget");
   const descriptors = source_interpretation_descriptors.map((row, index) => ({
     source_interpretation_handle: `source${index + 1}`, interpretation: row.interpretation
   }));
   const catalog = buildSourceSemanticCorrespondenceEndpointCatalog(admitted_query_semantics, descriptors);
-  const parsedPolicy = input.generation_policy === undefined
-    ? undefined
-    : SourceSemanticCorrespondenceGenerationPolicySchema.parse(input.generation_policy);
-  const scoped = parsedPolicy?.kind === "branch_demand";
   const demand = scoped
     ? sourceSemanticCorrespondenceDemand(admitted_query_semantics, catalog, parsedPolicy)
     : undefined;
   const requestBase = {
     contract: scoped
-      ? SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+      ? scopedContract
       : SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     admitted_query_semantics,
@@ -425,21 +441,36 @@ export function buildSourceSemanticCorrespondenceRequest(
   return request;
 }
 
+/** Rebuild captured routing fields from their owners, including historical v8 descriptor cardinality. */
+export function parseSourceSemanticCorrespondenceRequest(value: unknown): SourceSemanticCorrespondenceRequest {
+  countSourceSemanticCorrespondenceJsonBytes(value, SOURCE_SEMANTIC_CORRESPONDENCE_REQUEST_MAX_BYTES);
+  const captured = z.object({
+    contract: z.enum([SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT,
+      SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT]),
+    k_version: z.literal(SOURCE_SEMANTIC_K_VERSION), original_query: z.string(),
+    admitted_query_semantics: SourceSemanticQuerySchema,
+    source_interpretation_descriptors: z.array(SourceInterpretationDescriptorSchema).min(1).max(64),
+    producer_capability: ProducerCapability, resource_limits: SourceSemanticResourceLimitsSchema,
+    catalog: z.unknown(), endpoint_evidence: z.unknown(), revision: SourceSemanticProposalRevisionSchema.optional(),
+    generation_policy: SourceSemanticCorrespondenceGenerationPolicySchema.optional(), demand: z.unknown().optional()
+  }).strict().parse(value);
+  const rebuilt = captureSourceSemanticCorrespondenceRequest({
+    ...captured, producer_id: captured.producer_capability.producer_id,
+    producer_version: captured.producer_capability.producer_version
+  }, captured.contract === SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT
+    ? SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT : SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT);
+  if (canonicalJson(rebuilt) !== canonicalJson(captured)) {
+    throw new AlayaError("CONFLICT", "captured correspondence request differs from its query, descriptor or demand owner");
+  }
+  return rebuilt;
+}
+
 /** Current table generation schema, without profile enums. */
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
   const selected = request === undefined ? undefined : parseSourceSemanticRequest(request).source_request.generation_schema_contract;
   return selected === SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT ? sourceSemanticInlineJsonSchema() : sourceSemanticTableJsonSchema();
 }
 
-const QueryCorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("interpreted") }).strict().readonly(),
-  z.object({ status: z.literal("abstained") }).strict().readonly()
-]);
-
-const CorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("interpreted") }).strict().readonly(),
-  z.object({ status: z.literal("abstained") }).strict().readonly()
-]);
 
 function producerResponseJsonSchema(schema: z.ZodType, reused?: "ref"): object {
   return z.toJSONSchema(schema, {
@@ -578,7 +609,7 @@ function constrainQueryGenerationSchema(envelope: object): object {
 export function sourceSemanticQueryResponseJsonSchema(): object {
   return sourceSemanticProducerEnvelopeJsonSchema(constrainQueryGenerationSchema(producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
-    outcome: QueryCorrespondenceGenerationOutcomeSchema,
+    outcome: sourceSemanticProducerGenerationOutcomeSchema("query"),
     query: SourceSemanticQueryCarrierBodySchema.optional()
   }).strict().readonly(), "ref")), "query");
 }
@@ -587,19 +618,22 @@ export function sourceSemanticQueryResponseJsonSchema(): object {
 export function sourceSemanticCorrespondenceResponseJsonSchema(
   request?: SourceSemanticCorrespondenceRequest
 ): object {
+  if (request?.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT) {
+    return sourceSemanticCorrespondenceFlatResponseJsonSchema(request);
+  }
   if (request !== undefined) {
     return sourceSemanticCorrespondenceGenerationResponseJsonSchema({
       original_query: request.original_query,
       admitted_query_semantics: request.admitted_query_semantics,
       catalog: request.catalog,
       ...(request.demand === undefined ? {} : { demand: request.demand }),
-      ...(request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+      ...(request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT
         ? { response_contract: SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT } : {})
     });
   }
   return sourceSemanticProducerEnvelopeJsonSchema(producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
-    outcome: CorrespondenceGenerationOutcomeSchema,
+    outcome: sourceSemanticProducerGenerationOutcomeSchema("correspondence"),
     semantic_correspondence: SourceSemanticCorrespondenceAssessmentSchema.optional()
   }).strict().readonly()), "correspondence");
 }
@@ -649,7 +683,10 @@ const CORRESPONDENCE_FULL_ASSESS =
 export function sourceSemanticCorrespondenceSystemPrompt(
   request?: SourceSemanticCorrespondenceRequest
 ): string {
-  if (request?.contract !== SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+  if (request?.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT) {
+    return sourceSemanticCorrespondenceFlatSystemPrompt(request, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT);
+  }
+  if (request?.contract !== SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT
     || request.generation_policy?.kind !== "branch_demand"
     || request.demand === undefined) {
     return SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT;

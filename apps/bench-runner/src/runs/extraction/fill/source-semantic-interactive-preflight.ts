@@ -1,7 +1,7 @@
 import { isStepSemanticRequestProfile, isChatSemanticRequestProfile, isInternSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema } from "@do-soul/alaya-soul";
 import { z } from "zod";
-import { parseExtractionSampleKeys } from "../authority/sample-scope.js";
+import { parseExtractionPreflightKeys } from "../authority/sample-scope.js";
 import { attemptInputByteUpperBound } from "../authority/receipt-limits.js";
 import { NativeChatQuoteBasisSchema, assertNativeChatQuoteBasis, nativeChatQuoteBasis } from "../authority/native-chat-quote.js";
 import { ExtractionTransportProvenanceSchema, buildExtractionTransportProvenance,
@@ -187,7 +187,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     throw new AlayaError("VALIDATION", "interactive source dry preflight requires a native chat or Gemini profile");
   }
   const selectedKeys = options.preflightKeys === undefined ? undefined :
-    new Set(parseExtractionSampleKeys(options.preflightKeys));
+    new Set(parseExtractionPreflightKeys(options.preflightKeys));
   const workset = prepareSourceRequestWorkset({ prepared: inspected, cacheRoot: options.cacheRoot,
     ...(selectedKeys === undefined ? {} : { executionCacheKeys: selectedKeys }) });
   if (workset.unsupportedSources.length !== inspected.unsupportedSourceOccurrences) {

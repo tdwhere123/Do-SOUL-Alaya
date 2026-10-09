@@ -407,6 +407,26 @@ describe("query provenance generation completion", () => {
     expect(abstained.assessment).toBeUndefined();
   });
 
+  it("rejects well-formed host-state claims while preserving actual host parse and transport outcomes", () => {
+    const prepared = input();
+    for (const outcome of [
+      { status: "truncated" }, { status: "transport_failure" }, { status: "resource_exhausted" },
+      { status: "invalid", reason: "unsupported reading" }
+    ]) {
+      const body = { contract: SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT, outcome };
+      const received = proposeCorrespondenceSemantics(prepared, { rawJson: JSON.stringify(body) });
+      expect(received.outcome.status).toBe("invalid");
+      expect(received.outcome).not.toMatchObject(outcome);
+      expect(received.rawJson).toBe(JSON.stringify(body));
+    }
+    const parsed = proposeCorrespondenceSemantics(prepared, { rawJson: "{" });
+    expect(parsed.outcome).toEqual({ status: "invalid", reason: "malformed_json" });
+    expect(parsed.rawJson).toBe("{");
+    const empty = proposeCorrespondenceSemantics(prepared, { rawJson: "" });
+    expect(empty.outcome.status).toBe("transport_failure");
+    expect(empty.rawJson).toBe("");
+  });
+
   it("derives a request-aware generation schema with at most two quote groups", () => {
     const request = proposeCorrespondenceSemantics(input()).request;
     const v4 = sourceSemanticCorrespondenceResponseJsonSchema() as Record<string, unknown>;

@@ -37,22 +37,38 @@ function sourceAttemptHistory(cacheRoot: string, key: string, config: LazyQualif
     digest: row.decoded_text_digest, extracted_at: row.extracted_at })), complete };
 }
 
-export function selectedSourceState(source: SourceCensusRecord,
-  config: LazyQualificationConfig, owned: ReturnType<typeof readRetainedSourcePublicationOwners>["owned"],
-  artifacts: readonly { key: string; cache_root: string; status: string; reason?: string }[]) {
+/** Request membership is independent of cache/attempt state and is reused on retained-window admission. */
+export function sourceRequestOwnership(source: SourceCensusRecord,
+  config: LazyQualificationConfig, owned: ReturnType<typeof readRetainedSourcePublicationOwners>["owned"]) {
+  if (config.source_request_selection?.unassessed_source_ids.includes(source.source_id)) {
+    return { kind: "unassessed" as const };
+  }
   const generation = parseExtractionOpenSemanticsGeneration(config.source_population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
   const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
   if (preparations.length !== 1) throw new AlayaError("CONFLICT", "selected source has no single host preparation");
   const prepared = preparations[0]!;
-  if (prepared.status === "unsupported_source") return { key: null, cache_root: null,
-    state: "unsupported_source" as const, cache_identity: null, attempt_identity: null,
-    starting_attempt_refs: [], starting_raw_refs: [], attempt_history_complete: true };
+  if (prepared.status === "unsupported_source") return { kind: "unsupported_source" as const };
   const line = prepareSourceSemanticRequestLine(prepared.semantic, [], config.source_population);
   const owner = owned.get(line.key);
-  const artifact = artifacts.find(row => row.key === line.key);
-  if (owner === undefined) return { key: line.key, cache_root: null,
+  return owner === undefined ? { kind: "unowned" as const, line }
+    : { kind: "owned" as const, line, owner };
+}
+
+export function selectedSourceState(source: SourceCensusRecord,
+  config: LazyQualificationConfig, owned: ReturnType<typeof readRetainedSourcePublicationOwners>["owned"],
+  artifacts: readonly { key: string; cache_root: string; status: string; reason?: string }[]) {
+  const ownership = sourceRequestOwnership(source, config, owned);
+  if (ownership.kind === "unassessed" || ownership.kind === "unsupported_source") {
+    return { key: null, cache_root: null, state: ownership.kind,
+      cache_identity: null, attempt_identity: null, starting_attempt_refs: [], starting_raw_refs: [],
+      attempt_history_complete: true };
+  }
+  const { line } = ownership;
+  if (ownership.kind === "unowned") return { key: line.key, cache_root: null,
     state: "unowned" as const, cache_identity: null, attempt_identity: null,
     starting_attempt_refs: [], starting_raw_refs: [], attempt_history_complete: true };
+  const { owner } = ownership;
+  const artifact = artifacts.find(row => row.key === line.key);
   const cacheRoot = owner.cacheRoot;
   const cache = inspectCachedSourceSemantic(cacheRoot, line.key,
     config.source_population.model, config.source_population.requestProfile);

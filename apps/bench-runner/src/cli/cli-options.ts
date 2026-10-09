@@ -51,6 +51,7 @@ export interface ParsedFlags {
   readonly extractionSourcePacking?: ExtractionSourcePacking;
   readonly extractionPacketProfile?: string;
   readonly extractionSourceRevisions?: string;
+  readonly extractionGenerationTaskJson?: string;
   readonly extractionOpenSemantics?: boolean;
   readonly extractionPreflightOut?: string;
   readonly extractionPreflightKeys?: string;
@@ -105,6 +106,7 @@ export interface ParsedFlagsState {
   extractionSourcePacking?: ExtractionSourcePacking;
   extractionPacketProfile?: string;
   extractionSourceRevisions?: string;
+  extractionGenerationTaskJson?: string;
   extractionOpenSemantics?: boolean;
   extractionPreflightOut?: string;
   extractionPreflightKeys?: string;
@@ -356,6 +358,13 @@ function consumeSnapshotCachePathFlags(
   if (matchFlagToken(token, "--extraction-packet-profile")) {
     if (state.extractionPacketProfile !== undefined) throw new AlayaError("VALIDATION", "packet profile may be supplied only once");
     state.extractionPacketProfile = readFlagValue(args, index, token, "--extraction-packet-profile");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--generation-task-json")) {
+    if (state.extractionGenerationTaskJson !== undefined) throw new AlayaError("VALIDATION", "generation task may be supplied only once");
+    const taskPath = readRequiredFlagValue(args, index, token, "--generation-task-json", "--generation-task-json requires a path");
+    if (taskPath.length === 0 || taskPath.startsWith("--")) throw new AlayaError("VALIDATION", "--generation-task-json requires a path");
+    state.extractionGenerationTaskJson = taskPath;
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--extraction-source-revisions")) {

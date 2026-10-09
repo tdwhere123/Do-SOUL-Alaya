@@ -1,4 +1,4 @@
-import { sourceSemanticProducerEnvelopeViolation } from "./source-semantic-producer-envelope.js";
+import { sourceSemanticProducerClaimedEnvelopeViolation, sourceSemanticProducerEnvelopeViolation } from "./source-semantic-producer-envelope.js";
 import { AlayaError } from "../shared/alaya-error.js";
 import { SOURCE_SEMANTIC_MAX_DEPTH } from "./source-semantic-draft.js";
 import { compileSourceSemanticSelection } from "./source-semantic-selection-lowering.js";
@@ -165,6 +165,8 @@ export function materializeSourceSemanticTableProposal(value: unknown,
   binding: Readonly<{ catalog: SourceReferenceCatalog; sha256: FieldContractSha256 }>,
   meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })) {
   meter.retain(value, "table proposal input");
+  const claimed = sourceSemanticProducerClaimedEnvelopeViolation("source", value);
+  if (claimed !== undefined) fail(claimed, "producer");
   const proposal = SourceSemanticTableProposalSchema.parse(value);
   const violation = sourceSemanticProducerEnvelopeViolation("source", proposal.outcome.status, proposal.content !== undefined);
   if (violation !== undefined) fail(violation, proposal.outcome.status);

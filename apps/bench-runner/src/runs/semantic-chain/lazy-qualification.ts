@@ -19,8 +19,8 @@ import { admitSemanticChainReplay, inspectSemanticChainReplayTarget, ReplaySchem
 import { SemanticChainPlanSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
   writeChainArtifact, writeChainJson } from "./contract.js";
 import { Digest, SourceTuple, PublicationReport, LazyQualificationConfigSchema,
-  admitNativeLazyConfig, type LazyQualificationConfig } from "./bind-lazy.js";
-import { selectedProducerAttempts, selectedSourceState } from "./lazy-qualification-source-state.js";
+  admitNativeLazyConfig, nativeLazySourceOpportunities, type LazyQualificationConfig } from "./bind-lazy.js";
+import { selectedProducerAttempts, selectedSourceState, sourceRequestOwnership } from "./lazy-qualification-source-state.js";
 
 type Config = LazyQualificationConfig;
 
@@ -30,7 +30,7 @@ const WindowRow = SourceTuple.extend({
   round_index: z.number().int().nonnegative(), source_observed_at: z.string().datetime(),
   roles: z.array(z.enum(["user", "assistant"])), speaker: z.enum(["user", "assistant", "system"]).nullable(),
   source_record: SourceRecordIdentitySchema,
-  state: z.enum(["observation_incomplete", "unsupported_source", "unowned", "foreign_cache", "cache_hit_interpreted", "cache_hit_abstained",
+  state: z.enum(["observation_incomplete", "unsupported_source", "unowned", "unassessed", "foreign_cache", "cache_hit_interpreted", "cache_hit_abstained",
     "cache_hit_empty", "cache_invalid", "cache_miss", "attempt_pending", "attempt_failed", "attempt_unknown"]),
   cache_identity: z.string().nullable(), attempt_identity: z.string().nullable(),
   starting_attempt_refs: z.array(z.string()), starting_raw_refs: z.array(z.string()),
@@ -85,12 +85,14 @@ function finalAssociationPolicy(window: LazyQualificationWindow, row: SourcePubl
   if (selected === undefined) return warm === undefined ? "forbidden" : "outside_warm";
   if (selected.source_version !== row.source_version) return "forbidden";
   if (warm !== undefined) return "selected_warm";
-  return selected.state === "observation_incomplete" || selected.state === "unsupported_source"
+  return selected.state === "observation_incomplete" || selected.state === "unsupported_source" ||
+    selected.state === "unassessed" || selected.state === "unowned" || selected.cache_root === null ||
+    selected.key !== row.generation_key
     ? "forbidden" : "selected_new";
 }
 
 async function assertNativeBinding(config: Config) {
-  // Native stages re-admit the retained preparation and complete source owner.
+  // Native stages re-admit the retained preparation and its source request scope.
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(config.initial_chain_root, "prepare.json")));
   const population = config.source_population;
   const owner = config.cache_owners[0];
@@ -99,6 +101,7 @@ async function assertNativeBinding(config: Config) {
     population: { name: population.name, dataDir: population.dataDir,
       pinnedMetaRoot: population.pinnedMetaRoot, questionWindow: population.questionWindow },
     sourcePreflightPath: owner.retainedPreparationPath, sourceCacheRoot: owner.cacheRoot,
+    ...(config.source_request_scope === undefined ? {} : { sourceRequestScope: config.source_request_scope }),
     recordedAt: config.recorded_at, producerCommit: config.producer_commit });
   if (canonicalJson(bound.config) !== canonicalJson(config)) {
     throw new AlayaError("CONFLICT", "lazy qualification config differs from its native binding");
@@ -156,6 +159,11 @@ export async function admitLazyWindow(root: string, expectedConfig?: Config) {
   }
   const bound = await assertNativeBinding(window.config);
   const { publication, census } = bound;
+  const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(window.config.initial_chain_root, "prepare.json")));
+  const native = nativeLazySourceOpportunities(plan, publication, census);
+  if (canonicalJson(window.starting_access) !== canonicalJson(native.first.access)) {
+    throw new AlayaError("CONFLICT", "lazy window changed its retained native first-page opportunities");
+  }
   assertWindowOwner(root, window, publication);
   if (currentQuery(window.config).identity !== window.query_state_identity ||
       window.query_state_identity !== window.config.initial_query_state_identity ||
@@ -176,6 +184,15 @@ export async function admitLazyWindow(root: string, expectedConfig?: Config) {
         row.source_observed_at !== source.source_observed_at ||
         canonicalJson(row.roles) !== canonicalJson(source.roles) || row.speaker !== (source.speaker ?? null)) {
       throw new AlayaError("CONFLICT", "frozen source occurrence metadata changed");
+    }
+    if (row.state === "observation_incomplete") continue;
+    const ownership = sourceRequestOwnership(source, window.config, bound.sourceOwners);
+    const key = ownership.kind === "owned" || ownership.kind === "unowned" ? ownership.line.key : null;
+    const cacheRoot = ownership.kind === "owned" ? ownership.owner.cacheRoot : null;
+    if (row.key !== key || row.cache_root !== cacheRoot ||
+        (ownership.kind === "owned" ? ["unowned", "unassessed", "unsupported_source"].includes(row.state)
+          : row.state !== ownership.kind)) {
+      throw new AlayaError("CONFLICT", "frozen source request ownership or unassessed state changed");
     }
   }
   return { window, publication, census };
@@ -249,15 +266,6 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
   const bound = await assertNativeBinding(config);
   const { publication, census } = bound;
   const population = config.source_population;
-  const catalog = new Map(census.records.map(row => [row.source_id, row]));
-  const published = new Map(publication.sources.map(row => [row.source_id, row]));
-  if (catalog.size !== census.records.length || published.size !== publication.sources.length ||
-      canonicalJson(census.records.map(row => ({ source_id: row.source_id, source_version: row.source_version,
-        content_digest: row.content_digest, corpus_digest: row.corpus_digest }))) !==
-      canonicalJson(publication.sources.map(row => ({ source_id: row.source_id, source_version: row.source_version,
-        content_digest: row.content_digest, corpus_digest: row.corpus_digest })))) {
-    throw new AlayaError("CONFLICT", "starting snapshot no longer matches the complete source census");
-  }
   const generation = parseExtractionOpenSemanticsGeneration(population.openSemantics ?? EXTRACTION_OPEN_SEMANTICS_GENERATION);
   const starting = await prepareSourcePublicationAssociations({ ...population, openSemantics: generation },
     config.cache_owners, join(root, "starting-associations.json"));
@@ -266,27 +274,12 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
     throw new AlayaError("CONFLICT", "query state changed after the bound initial preparation");
   }
   const initialPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(config.initial_chain_root, "prepare.json")));
-  const initialQuery = initialPlan.queries[0];
-  if (initialPlan.queries.length !== 1 || initialQuery === undefined ||
-      initialQuery.status === "blocked" || initialQuery.discovery_pages < 1 ||
-      initialQuery.query_key !== query.row.line.key || initialQuery.initial_discovery_elapsed_ms === undefined) {
-    throw new AlayaError("CONFLICT", "frozen lazy window requires one retained initial native preparation page");
+  const { query: initialQuery, first, opportunities } = nativeLazySourceOpportunities(initialPlan, publication, census);
+  if (initialQuery.query_key !== query.row.line.key) {
+    throw new AlayaError("CONFLICT", "native source opportunities belong to another query");
   }
-  const first = initialQuery.discovery_trace[0];
-  if (first === undefined || first.access.trace.kind !== "preparation_page" || first.access.trace.source_offset !== 0) {
-    throw new AlayaError("CONFLICT", "native access did not expose the first bounded raw source window");
-  }
-  const seen = new Set<string>();
-  const window = first.access.source_candidates.slice(0, 10).map((row, index) => {
-    const source = catalog.get(row.source_id), priorSource = published.get(row.source_id);
-    if (source === undefined || priorSource === undefined || seen.has(row.record_id) ||
-        priorSource.record_id !== row.record_id || priorSource.source_record.identity !== row.record_id ||
-        priorSource.source_record.source_version !== source.source_version ||
-        priorSource.source_record.content_digest !== source.content_digest) {
-      throw new AlayaError("CONFLICT", "native source window is stale, repeated, or incomplete");
-    }
-    seen.add(row.record_id);
-    return { rank: index + 1, source_id: source.source_id, source_version: source.source_version,
+  const window = opportunities.map(({ candidate: row, source, publication: priorSource, rank }) => {
+    return { rank, source_id: source.source_id, source_version: source.source_version,
       content_digest: source.content_digest, corpus_digest: source.corpus_digest, record_id: row.record_id,
       question_id: source.question_id, session_id: source.session_id, session_index: source.session_index,
       round_index: source.round_index, source_observed_at: source.source_observed_at,

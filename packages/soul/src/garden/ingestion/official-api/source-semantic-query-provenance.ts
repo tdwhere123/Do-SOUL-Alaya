@@ -1,11 +1,11 @@
 import { z } from "zod";
 import {
-  sourceSemanticProducerEnvelopeJsonSchema,
+  sourceSemanticProducerEnvelopeJsonSchema, sourceSemanticProducerGenerationOutcomeSchema,
   AlayaError, SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticCorrespondenceAssessmentSchema,
   countSourceSemanticCorrespondenceJsonBytes,
   type SourceSemanticCorrespondenceDemand,
   type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticQuery,
-  type SourceSemanticQueryCatalogEntry
+  type SourceSemanticQueryCatalogEntry, type SourceSemanticResourceLedger
 } from "@do-soul/alaya-protocol";
 
 export const SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT =
@@ -23,10 +23,6 @@ export type SourceSemanticQueryProvenanceResolution = Readonly<{
   ineligible: readonly string[];
 }>;
 
-const GenerationOutcomeSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("interpreted") }).strict().readonly(),
-  z.object({ status: z.literal("abstained") }).strict().readonly()
-]);
 
 /** Exact unique stored original-query excerpt for one catalog handle. Predicates never resolve. */
 export function resolveSourceSemanticQueryProvenance(
@@ -50,13 +46,17 @@ export function resolveSourceSemanticQueryProvenance(
 export function completeSourceSemanticCorrespondenceGenerationAssessment(
   body: unknown,
   resolution: SourceSemanticQueryProvenanceResolution,
-  maximumBytes = SOURCE_SEMANTIC_MAX_BYTES
+  maximumBytes = SOURCE_SEMANTIC_MAX_BYTES,
+  meter?: SourceSemanticResourceLedger
 ): unknown {
   if (!isRecord(body) || !Array.isArray(body.assessments)) return body;
   const quotes = new Map(resolution.eligible.map((row) => [row.handle, row.excerpt]));
   const omitted = collectOmittedQuotes(body.assessments, quotes);
   if (omitted.length === 0) return body;
   premeterOmittedQuotes(body, omitted, maximumBytes);
+  meter?.retain(body, "correspondence excerpt expansion copy");
+  meter?.charge(omitted.length,
+    omitted.reduce((bytes, row) => bytes + 128 + 4 * row.excerpt.length, 0), "correspondence excerpt allocation");
   return { ...body, assessments: body.assessments.map((row) => completeAssessmentRow(row, quotes)) };
 }
 
@@ -80,7 +80,7 @@ export function sourceSemanticCorrespondenceGenerationResponseJsonSchema(
   );
   const envelope = z.toJSONSchema(z.object({
     contract: z.literal(request.response_contract ?? SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT),
-    outcome: GenerationOutcomeSchema,
+    outcome: sourceSemanticProducerGenerationOutcomeSchema("correspondence"),
     semantic_correspondence: SourceSemanticCorrespondenceAssessmentSchema.optional()
   }).strict().readonly(), {
     io: "output",
@@ -88,7 +88,7 @@ export function sourceSemanticCorrespondenceGenerationResponseJsonSchema(
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
     }
   });
-  return sourceSemanticProducerEnvelopeJsonSchema(constrainCorrespondenceGenerationSchema(envelope, resolution), "correspondence");
+  return sourceSemanticProducerEnvelopeJsonSchema(constrainSourceSemanticCorrespondenceGenerationSchema(envelope, resolution), "correspondence");
 }
 
 function storedCatalogExcerpt(
@@ -189,7 +189,7 @@ function completeAssessmentRow(row: unknown, quotes: ReadonlyMap<string, string>
   return filled ? { ...row, equivalents } : row;
 }
 
-function constrainCorrespondenceGenerationSchema(
+export function constrainSourceSemanticCorrespondenceGenerationSchema(
   envelope: object, resolution: SourceSemanticQueryProvenanceResolution
 ): object {
   const schema = structuredClone(envelope) as Record<string, unknown>;
@@ -210,10 +210,11 @@ function constrainCorrespondenceGenerationSchema(
 
 function assessmentsSchema(root: Record<string, unknown>): Record<string, unknown> {
   const properties = isObject(root.properties) ? root.properties : undefined;
-  if (!isObject(properties?.semantic_correspondence)) {
+  const body = isObject(properties?.assessments) ? root
+    : isObject(properties?.semantic_correspondence) ? deref(root, properties.semantic_correspondence) : undefined;
+  if (body === undefined) {
     throw new AlayaError("VALIDATION", "correspondence generation schema is missing semantic_correspondence");
   }
-  const body = deref(root, properties.semantic_correspondence);
   const bodyProperties = isObject(body.properties) ? body.properties : undefined;
   if (!isObject(bodyProperties?.assessments)) {
     throw new AlayaError("VALIDATION", "correspondence generation schema is missing assessments");

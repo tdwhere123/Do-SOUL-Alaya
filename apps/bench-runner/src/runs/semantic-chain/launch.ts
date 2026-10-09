@@ -29,7 +29,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     const flags = new Map<string, string>();
     const allowed = new Set(["--root", "--config", "--replay", "--gold", "--evaluator-root", "--arm", "--out", "--leaf-trials",
       "--population", "--source-preflight", "--source-cache-root", "--source-owners",
-      "--source-physical-preflight", "--recorded-at", "--producer-commit"]);
+      "--source-physical-preflight", "--recorded-at", "--producer-commit", "--source-cap"]);
     for (let index = 0; index < rest.length; index += 2) {
       const key = rest[index]!, value = rest[index + 1];
       if (!allowed.has(key) || flags.has(key) || value === undefined) throw new AlayaError("VALIDATION", "invalid semantic chain arguments");
@@ -63,6 +63,8 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
     else if (operation === "bind-lazy") result = await writeDirectLazyConfig({ root: required("--root"),
       chainConfig: json(required("--config")), population: json(required("--population")),
       sourcePreflightPath: required("--source-preflight"), sourceCacheRoot: required("--source-cache-root"),
+      ...(flags.has("--source-cap") ? { sourceRequestScope: {
+        kind: "native_first_page" as const, source_cap: Number(flags.get("--source-cap")) } } : {}),
       recordedAt: required("--recorded-at"), producerCommit: required("--producer-commit") }, required("--out"));
     else if (operation === "qualify-window") result = await prepareLazyQualificationWindow(json(required("--config")), required("--root"));
     else if (operation === "qualify-final") result = await sealLazyQualificationFinal(required("--root"));

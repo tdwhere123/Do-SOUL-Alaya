@@ -654,10 +654,9 @@ it.each([false, true])("retains separate scoped attempts and coverage after cach
   const raws = lines.map((line, index) => {
     if (invalidSecond && index === 1) return "{";
     const request = line.request as SourceSemanticCorrespondenceRequest;
-    return JSON.stringify({ contract: "source-semantic-correspondence-response-v6", outcome: { status: "interpreted", gaps: [] },
-      semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
-        assessments: request.demand!.demanded_handles.map(queryHandle => ({ query: queryHandle, status: "unresolved",
-          query_excerpt: "parcel", explanation: "No semantic equivalence is proposed in this authored mechanism fixture." })) } });
+    return JSON.stringify({ decision: "assess",
+      assessments: request.demand!.demanded_handles.map(queryHandle => ({ query: queryHandle, status: "unresolved",
+        query_excerpt: "parcel", explanation: "No semantic equivalence is proposed in this authored mechanism fixture." })) });
   });
   const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 4096, 1),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2 });

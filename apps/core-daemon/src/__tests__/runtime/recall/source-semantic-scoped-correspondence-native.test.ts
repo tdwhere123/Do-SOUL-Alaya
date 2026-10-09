@@ -193,7 +193,7 @@ function authoredScopedCorrespondences(query: SourceSemanticQuery, interpretatio
       source_interpretation_descriptors: [{ source_interpretation_id: interpretationId, interpretation }],
       producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" };
     const request = buildSourceSemanticCorrespondenceRequest(proposal);
-    expect(request.contract).toBe("source-semantic-correspondence-request-v8");
+    expect(request.contract).toBe("source-semantic-correspondence-request-v9");
     if (request.demand === undefined) throw new Error("scoped correspondence request must carry its derived demand");
     expect(request.admitted_query_semantics).toEqual(query);
     expect(request.source_interpretation_descriptors[0]?.interpretation).toEqual(interpretation);
@@ -212,11 +212,9 @@ function authoredScopedCorrespondences(query: SourceSemanticQuery, interpretatio
         ...(role === undefined ? { query_excerpt: branch.query } : {}),
         source_semantic_support: [{ kind: "lexical", mentions: [lexical.id] }], grounding: `Authored ${branch.predicate} premise.` }] };
     });
-    const received = proposeCorrespondenceSemantics(proposal, { rawJson: JSON.stringify({
-      contract: "source-semantic-correspondence-response-v6", outcome: { status: "interpreted" },
-      semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1",
-        source_interpretation_handle: "source1", assessments }
-    }) });
+    const rawJson = JSON.stringify({ decision: "assess", assessments });
+    const received = proposeCorrespondenceSemantics(proposal, { rawJson });
+    expect(received.rawJson).toBe(rawJson);
     expect(received.outcome, JSON.stringify(received.outcome)).toMatchObject({ status: "interpreted" });
     expect(received.coverage).toMatchObject({ assessed: request.demand.demanded_handles,
       supported: request.demand.demanded_handles, unresolved: [] });

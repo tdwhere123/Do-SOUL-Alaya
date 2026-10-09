@@ -1,10 +1,12 @@
+import { materializeSourceSemanticCorrespondenceFlatDraft } from "./source-semantic-correspondence-presentation.js";
 import { materializeSourceSemanticPresentation } from "./source-semantic-presentation.js";
 import { z } from "zod";
 import {
+  SourceSemanticProducerAbstainedOutcomeSchema,
+  sourceSemanticProducerClaimedEnvelopeViolation,
   sourceSemanticProducerEnvelopeViolation,
   AlayaError, SOURCE_SEMANTIC_PACKET_CONTRACT,
-  SourceSemanticCorrespondenceSchema,
-  SourceSemanticGapSchema, SourceSemanticOutcomeSchema,
+  SourceSemanticGapSchema,
   SourceSemanticQueryGapSchema, SourceSemanticQueryOutcomeGapBindingSchema,
   SourceSemanticQuerySchema, SourceSemanticCorrespondenceAssessmentSchema, materializeSourceSemanticQueryMeaning,
   expandSourceSemanticQueryCarrier,
@@ -23,11 +25,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   sourceSemanticCorrespondenceSystemPrompt,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
-  parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
+  parseSourceSemanticRequest, parseSourceSemanticCorrespondenceRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
   type SourceSemanticCorrespondenceProposalInput, type SourceSemanticCorrespondenceRequest,
   type SourceInterpretationDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
@@ -170,6 +172,8 @@ function receiveQuerySemantics(
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
+  const claimed = sourceSemanticProducerClaimedEnvelopeViolation("query", parsed.value);
+  if (claimed !== undefined) return { ...attempt, outcome: { status: "invalid", reason: claimed } };
   const envelope = QueryMeaningResponseSchema.safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
@@ -218,16 +222,32 @@ export function proposeCorrespondenceSemantics(
   return { ...receiveCorrespondenceSemantics(injected.rawJson, request), system_prompt };
 }
 
-function receiveCorrespondenceSemantics(
-  rawJson: string, request: SourceSemanticCorrespondenceRequest
+export function receiveCorrespondenceSemantics(
+  rawJson: string, requestValue: SourceSemanticCorrespondenceRequest
 ): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
+  const request = parseSourceSemanticCorrespondenceRequest(requestValue);
   const attempt = bindAttempt(rawJson, request);
   const bounded = boundRawJson(rawJson, request.resource_limits.output_byte_limit, attempt);
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
-  const contract = responseContract(parsed.value);
   if (request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT) {
+    try {
+      const meter = new SourceSemanticResourceLedger({
+        work_units: request.resource_limits.work_units ?? 200000,
+        memory_bytes: request.resource_limits.memory_bytes ?? 20000000
+      });
+      const envelope = materializeSourceSemanticCorrespondenceFlatDraft(parsed.value, request, meter);
+      return finishCorrespondenceEnvelope(envelope, request, attempt, envelope.semantic_correspondence, true, meter);
+    } catch (error) {
+      return { ...attempt, outcome: error instanceof SourceSemanticResourceExhausted
+        ? { status: "resource_exhausted" } : invalidProposalOutcome(error) };
+    }
+  }
+  const claimed = sourceSemanticProducerClaimedEnvelopeViolation("correspondence", parsed.value);
+  if (claimed !== undefined) return { ...attempt, outcome: { status: "invalid", reason: claimed } };
+  const contract = responseContract(parsed.value);
+  if (request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT) {
     if (contract !== SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT) {
       return { ...attempt, outcome: { status: "invalid", reason: "malformed_response" } };
     }
@@ -280,17 +300,23 @@ function finishCorrespondenceEnvelope(
   request: SourceSemanticCorrespondenceRequest,
   attempt: Attempt<SourceSemanticCorrespondenceRequest>,
   body: unknown,
-  scoped: boolean
+  scoped: boolean,
+  meter?: SourceSemanticResourceLedger
 ): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
   const violation = sourceSemanticProducerEnvelopeViolation("correspondence", envelope.outcome.status, body !== undefined);
   if (violation !== undefined) return { ...attempt, outcome: { status: "invalid", reason: violation } };
   if (envelope.outcome.status !== "interpreted") return { ...attempt, outcome: envelope.outcome as SourceSemanticOutcome };
   try {
-    const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse(materializeCorrespondence(body, request));
+    const semantic_correspondence = materializeCorrespondence(body, request, meter);
+    meter?.retain(body, "received assessment validation copy");
     const assessment = SourceSemanticCorrespondenceAssessmentSchema.parse(body);
-    SourceSemanticOutcomeGapBindingSchema.parse({
+    meter?.charge(1, 4 * 64, "correspondence gap binding envelope");
+    const gapBinding = {
       outcome: { status: "interpreted", gaps: envelope.outcome.gaps ?? [] }, gaps: []
-    });
+    };
+    meter?.retain(gapBinding, "correspondence gap binding validation copy");
+    SourceSemanticOutcomeGapBindingSchema.parse(gapBinding);
+    meter?.retain(request.admitted_query_semantics, "received correspondence query identity");
     if (semantic_correspondence.query_semantics_id !== sourceSemanticQueryIdentity(request.admitted_query_semantics, semanticSha256)) {
       return { ...attempt, outcome: { status: "invalid", reason: "correspondence_query_semantics_mismatch" } };
     }
@@ -298,12 +324,14 @@ function finishCorrespondenceEnvelope(
       return { ...attempt, outcome: { status: "invalid", reason: "correspondence_source_interpretation_mismatch" } };
     }
     const coverage = scoped && request.demand !== undefined
-      ? sourceSemanticCorrespondenceCoverage(request.catalog, request.demand, assessment)
+      ? sourceSemanticCorrespondenceCoverage(request.catalog, request.demand, assessment, meter)
       : undefined;
+    meter?.charge(1, 4 * 64, "correspondence receive result");
     return { ...attempt, outcome: { status: "interpreted", gaps: [] }, semantic_correspondence, assessment,
       ...(coverage === undefined ? {} : { coverage }) };
   } catch (error) {
-    return { ...attempt, outcome: invalidProposalOutcome(error) };
+    return { ...attempt, outcome: error instanceof SourceSemanticResourceExhausted
+      ? { status: "resource_exhausted" } : invalidProposalOutcome(error) };
   }
 }
 
@@ -410,17 +438,21 @@ function materializeQuery(
   );
 }
 
-function materializeCorrespondence(body: unknown, request: SourceSemanticCorrespondenceRequest): unknown {
+function materializeCorrespondence(body: unknown, request: SourceSemanticCorrespondenceRequest,
+  meter?: SourceSemanticResourceLedger): SourceSemanticCorrespondence {
+  meter?.retain(body, "correspondence handle validation copy");
   const record = asRecord(body);
   rejectForbiddenProposalInput(record);
   const parsed = z.object({ source_interpretation_handle: z.string() }).passthrough().parse(record);
+  meter?.retain(request.admitted_query_semantics, "correspondence materializer query identity");
+  meter?.charge(1, 64, "correspondence host binding envelope");
   return materializeSourceSemanticCorrespondenceAssessment(record, request.catalog, {
     original_query: request.original_query,
     source_interpretation_id: bindCorrespondenceHandle(parsed.source_interpretation_handle, request.source_interpretation_descriptors),
     query_semantics_id: sourceSemanticQueryIdentity(request.admitted_query_semantics, semanticSha256),
     producer_id: request.producer_capability.producer_id,
     producer_version: request.producer_capability.producer_version
-  }, request.demand);
+  }, request.demand, meter);
 }
 
 function bindCorrespondenceHandle(handle: string, descriptors: readonly SourceInterpretationDescriptor[]): string {
@@ -457,12 +489,12 @@ const InterpretedOutcome = z.object({
 }).strict().readonly();
 const ProducerResponseOutcomeSchema = z.discriminatedUnion("status", [
   InterpretedOutcome,
-  ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
+  SourceSemanticProducerAbstainedOutcomeSchema
 ]);
 const QueryResponseOutcomeSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("interpreted"),
     gaps: z.array(SourceSemanticQueryGapSchema).max(256).readonly().optional() }).strict().readonly(),
-  ...SourceSemanticOutcomeSchema.options.filter((option) => option.unwrap().shape.status.value !== "interpreted")
+  SourceSemanticProducerAbstainedOutcomeSchema
 ]);
 
 const QueryMeaningResponseSchema = z.object({

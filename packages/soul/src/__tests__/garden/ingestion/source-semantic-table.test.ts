@@ -250,11 +250,21 @@ describe.each([undefined, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT] as const)("f
   });
 
   it.each([
-    { status: "abstained" }, { status: "invalid", reason: "unsupported reading" },
-    { status: "quarantine", reason: "uncertain source" }, { status: "truncated" },
-    { status: "transport_failure" }, { status: "resource_exhausted" }
+    { status: "abstained" }
   ])("preserves producer disposition $status without changing its meaning", (outcome) => {
     expect(receiveTable("Mira approved pilot", { contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, outcome }).outcome).toEqual(outcome);
+  });
+
+  it.each([
+    { status: "invalid", reason: "unsupported reading" },
+    { status: "quarantine", reason: "uncertain source" }, { status: "truncated" },
+    { status: "transport_failure" }, { status: "resource_exhausted" }
+  ])("rejects well-formed host-state claim $status as invalid without taking the claimed state", (outcome) => {
+    const rawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, outcome });
+    const received = receiveTable("Mira approved pilot", { contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, outcome });
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.outcome).not.toEqual(outcome);
+    expect(received.rawJson).toBe(rawJson);
   });
 
   it.each([

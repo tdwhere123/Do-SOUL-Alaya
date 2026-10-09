@@ -411,6 +411,32 @@ describe("query generation contract", () => {
 });
 
 
+it("rejects well-formed host-state claims and keeps host parse, transport, and truncation distinct", () => {
+  const example = sourceSemanticQueryExamples[0]!;
+  for (const outcome of [
+    { status: "truncated" }, { status: "transport_failure" }, { status: "resource_exhausted" },
+    { status: "invalid", reason: "unsupported reading" }, { status: "no_executable_proposition" }
+  ]) {
+    const body = { contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome };
+    const received = receive(example.original_query, body);
+    expect(received.outcome.status).toBe("invalid");
+    expect(received.outcome).not.toMatchObject(outcome);
+    expect(received.rawJson).toBe(JSON.stringify(body));
+  }
+  const parsed = proposeQuerySemantics(
+    { original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
+    { rawJson: "{" }
+  );
+  expect(parsed.outcome).toEqual({ status: "invalid", reason: "malformed_json" });
+  expect(parsed.rawJson).toBe("{");
+  const empty = proposeQuerySemantics(
+    { original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
+    { rawJson: "" }
+  );
+  expect(empty.outcome.status).toBe("transport_failure");
+  expect(empty.rawJson).toBe("");
+});
+
 it("requires interpreted query payload while retaining the existing optional negative payload", () => {
   const example = sourceSemanticQueryExamples[0]!;
   const interpreted = { contract: example.response.contract, outcome: { status: "interpreted" } };

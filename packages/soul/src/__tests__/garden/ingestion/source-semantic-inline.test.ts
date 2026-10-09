@@ -226,9 +226,7 @@ describe.each([false, true])("emitted source envelope policy, inline %s", inline
     expect(admitted.outcome.status, JSON.stringify(admitted.outcome)).toBe("interpreted");
     expect(admitted.interpretation!.gaps).toHaveLength(1);
     for (const outcome of [
-      { status: "abstained" }, { status: "invalid", reason: "unsupported reading" },
-      { status: "quarantine", reason: "uncertain source" }, { status: "truncated" },
-      { status: "transport_failure" }, { status: "resource_exhausted" },
+      { status: "abstained" },
       { status: "no_executable_proposition", description: "Context only", context_support: [atom("Mira")] }
     ]) {
       const value = { contract, outcome };
@@ -236,6 +234,18 @@ describe.each([false, true])("emitted source envelope policy, inline %s", inline
       expect(receiveSourceSemantics(JSON.stringify(value), request, input).outcome.status).toBe(outcome.status);
       expect(validate({ ...value, content })).toBe(false);
       expect(receiveSourceSemantics(JSON.stringify({ ...value, content }), request, input).outcome.status).toBe("invalid");
+    }
+    for (const outcome of [
+      { status: "invalid", reason: "unsupported reading" },
+      { status: "quarantine", reason: "uncertain source" }, { status: "truncated" },
+      { status: "transport_failure" }, { status: "resource_exhausted" }
+    ]) {
+      const value = { contract, outcome };
+      expect(validate(value)).toBe(false);
+      const received = receiveSourceSemantics(JSON.stringify(value), request, input);
+      expect(received.outcome.status).toBe("invalid");
+      expect(received.outcome).not.toMatchObject(outcome);
+      expect(received.rawJson).toBe(JSON.stringify(value));
     }
     for (const outcome of [{ status: "no_eligible_source", provider_attempts: 0 },
       { status: "unavailable", reason: "provider absent" }, { status: "unexercised" },

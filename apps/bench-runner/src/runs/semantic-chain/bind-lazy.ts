@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, FieldContractDigestSchema,
-  SourceRecordIdentitySchema } from "@do-soul/alaya-protocol";
+  SourceRecordIdentitySchema, SourceSemanticGenerationTaskSchema } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
 import { loadDatasetWindowWithIdentity } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -20,6 +20,10 @@ import { SemanticChainConfigSchema, SemanticChainPlanSchema, assertChainSnapshot
 import { readSemanticChainProposalResults, semanticChainProposalStates, verifySemanticChainQueries } from "./inputs.js";
 
 export const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
+export const NativeSourceRequestScopeSchema = z.object({
+  kind: z.literal("native_first_page"), source_cap: z.number().int().min(0).max(10)
+}).strict();
+export type NativeSourceRequestScope = z.infer<typeof NativeSourceRequestScopeSchema>;
 const SourcePopulationSchema = z.object({
   name: z.string().min(1), dataDir: z.string().min(1), pinnedMetaRoot: z.string().min(1),
   questionWindow: z.object({ offset: z.number().int().nonnegative(), limit: z.literal(1) }).strict(),
@@ -34,6 +38,10 @@ export const LazyQualificationConfigSchema = z.object({
   source_preparation: z.object({ retained_preflight_identity: Digest,
     output_token_cap: z.number().int().positive(),
     contract: z.enum(["source-semantic-interactive-preflight-v3", "extraction-batch-preflight-v2"]) }).strict(),
+  source_request_scope: NativeSourceRequestScopeSchema.optional(),
+  source_request_selection: z.object({
+    eligible_source_ids: z.array(z.string()), unassessed_source_ids: z.array(z.string())
+  }).strict().optional(),
   recorded_at: z.string().datetime(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u)
 }).strict();
 export type LazyQualificationConfig = z.infer<typeof LazyQualificationConfigSchema>;
@@ -94,6 +102,7 @@ export type NativeLazyBindingInput = Readonly<{
   population: Population;
   sourcePreflightPath: string;
   sourceCacheRoot: string;
+  sourceRequestScope?: NativeSourceRequestScope;
   recordedAt: string;
   producerCommit: string;
 }>;
@@ -118,8 +127,38 @@ function readPreparedQuery(input: NativeLazyBindingInput) {
     plan.config.query_workset, plan.config.query_cache_root, plan.config.max_output_tokens))) };
 }
 
-/** Complete-source request and occurrence ownership, independent of the question text. */
-async function readCompleteSourceOwner(input: NativeLazyBindingInput, population: Population, census: SourceCensus) {
+/** One retained native prefix owns both bounded request eligibility and lazy qualification. */
+export function nativeLazySourceOpportunities(plan: SemanticChainPlan,
+  publication: z.infer<typeof PublicationReport>, census: SourceCensus) {
+  const query = plan.queries[0];
+  const first = query?.status === "blocked" ? undefined : query?.discovery_trace[0];
+  if (plan.queries.length !== 1 || query === undefined || query.status === "blocked" ||
+      query.discovery_pages < 1 || query.initial_discovery_elapsed_ms === undefined ||
+      first === undefined || first.access.trace.kind !== "preparation_page" || first.access.trace.source_offset !== 0) {
+    throw new AlayaError("CONFLICT", "native access did not expose the first bounded raw source window");
+  }
+  const catalog = new Map(census.records.map(row => [row.source_id, row]));
+  const published = new Map(publication.sources.map(row => [row.source_id, row]));
+  const seen = new Set<string>();
+  const opportunities = first.access.source_candidates.slice(0, 10).map((candidate, index) => {
+    const source = catalog.get(candidate.source_id), retained = published.get(candidate.source_id);
+    if (source === undefined || retained === undefined || seen.has(candidate.record_id) ||
+        retained.record_id !== candidate.record_id || retained.source_record.identity !== candidate.record_id ||
+        retained.source_version !== source.source_version || retained.content_digest !== source.content_digest ||
+        retained.corpus_digest !== source.corpus_digest ||
+        retained.source_record.source_version !== source.source_version ||
+        retained.source_record.content_digest !== source.content_digest) {
+      throw new AlayaError("CONFLICT", "native source window is stale, repeated, or incomplete");
+    }
+    seen.add(candidate.record_id);
+    return { candidate, source, publication: retained, rank: index + 1 };
+  });
+  return { query, first, opportunities };
+}
+
+/** Complete-census compatibility and bounded ownership share exact source/request joins. */
+async function readSourceOwner(input: NativeLazyBindingInput, population: Population, census: SourceCensus,
+  plan: SemanticChainPlan, publication: z.infer<typeof PublicationReport>) {
   const loaded = await loadDatasetWindowWithIdentity("longmemeval_s", {
     dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
     offset: population.questionWindow.offset, limit: 1 });
@@ -141,6 +180,25 @@ async function readCompleteSourceOwner(input: NativeLazyBindingInput, population
     throw new AlayaError("CONFLICT", "lazy source owner requires complete-source semantic preparation");
   }
   const generation = parseExtractionOpenSemanticsGeneration(preflight.config.openSemantics);
+  const scope = input.sourceRequestScope === undefined ? undefined : NativeSourceRequestScopeSchema.parse(input.sourceRequestScope);
+  let selection: z.infer<typeof LazyQualificationConfigSchema>["source_request_selection"];
+  if (scope !== undefined) {
+    const expectedTask = SourceSemanticGenerationTaskSchema.parse({
+      contract: "source-semantic-generation-task-v1", context: "complete_original_source",
+      original_query: plan.queries[0]!.original_query,
+      responsibility: { kind: "original_query_task", other_meaning: "unassessed" }
+    });
+    if (preflight.contract !== "source-semantic-interactive-preflight-v3" ||
+        canonicalJson(generation.generation_task ?? null) !== canonicalJson(expectedTask)) {
+      throw new AlayaError("CONFLICT", "bounded source owner requires the exact original query task");
+    }
+    const eligible = nativeLazySourceOpportunities(plan, publication, census).opportunities
+      .slice(0, scope.source_cap).filter(row => row.candidate.complete).map(row => row.source.source_id);
+    const eligibleSet = new Set(eligible);
+    selection = { eligible_source_ids: eligible,
+      unassessed_source_ids: census.records.filter(row => !eligibleSet.has(row.source_id)).map(row => row.source_id) };
+  }
+  const eligibleSources = selection === undefined ? undefined : new Set(selection.eligible_source_ids);
   if (!isExtractionRequestProfile(preflight.config.requestProfile)) {
     throw new AlayaError("VALIDATION", "source preflight has an unsupported request profile");
   }
@@ -150,6 +208,7 @@ async function readCompleteSourceOwner(input: NativeLazyBindingInput, population
     retainedPreparationPath: resolve(input.sourcePreflightPath) }];
   const owners = readRetainedSourcePublicationOwners(cacheOwners, sourcePopulation, generation, census.dataset_sha256);
   const expectedKeys = new Set<string>();
+  const eligibleKeys = new Set<string>();
   const expectedUnits = new Map<string, Set<string>>();
   const unsupported: unknown[] = [];
   const occurrences = inspectTurnContentKeySpace(loaded.questions, "complete-source", true).occurrenceExtractionTurns;
@@ -170,9 +229,11 @@ async function readCompleteSourceOwner(input: NativeLazyBindingInput, population
       continue;
     }
     const line = prepareSourceSemanticRequestLine(item.semantic, [], sourcePopulation);
-    if (owners.owned.get(line.key)?.line.requestSha256 !== line.requestSha256) {
-      throw new AlayaError("CONFLICT", "full-source preflight does not own a current ready source");
+    const retained = owners.owned.get(line.key);
+    if ((retained !== undefined || scope === undefined) && retained?.line.requestSha256 !== line.requestSha256) {
+      throw new AlayaError("CONFLICT", "source preflight does not own a current ready source");
     }
+    if (eligibleSources?.has(source.source_id)) eligibleKeys.add(line.key);
     const units = sourceSemanticTransportUnits(source.content_bytes,
       occurrence.turnMessages.map(message => message.message_id), census.dataset_sha256);
     const byAssertion = new Map(units.map(unit => [unit.assertionId, unit]));
@@ -188,22 +249,29 @@ async function readCompleteSourceOwner(input: NativeLazyBindingInput, population
     expectedKeys.add(line.key);
   }
   for (const [key, units] of expectedUnits) {
-    if (canonicalJson(owners.owned.get(key)?.line.unitKeys) !== canonicalJson([...units].sort())) {
+    if ((owners.owned.has(key) || scope === undefined) &&
+        canonicalJson(owners.owned.get(key)?.line.unitKeys) !== canonicalJson([...units].sort())) {
       throw new AlayaError("CONFLICT", "retained source preflight changed source occurrence assignments");
     }
   }
+  const ownedKeys = [...owners.owned.keys()].sort();
+  if (scope !== undefined && ownedKeys.some(key => !eligibleKeys.has(key))) {
+    throw new AlayaError("CONFLICT", "bounded source request is outside the native first-page source cap");
+  }
+  const requiredKeys = scope === undefined ? [...expectedKeys].sort() : ownedKeys;
   if (preflight.dataset_revision !== census.dataset_sha256 ||
       preflight.source_occurrences !== census.records.length ||
       preflight.unsupported_source_occurrences !== unsupported.length ||
       canonicalJson(preflight.unsupported_sources) !== canonicalJson(unsupported) ||
       preflight.total_requests !== expectedKeys.size ||
-      readyRequests.length !== expectedKeys.size ||
-      preflight.selected_requests + preflight.cached_requests + deterministicRequests !== expectedKeys.size ||
-      canonicalJson(preflight.selected_keys) !== canonicalJson([...expectedKeys].sort()) ||
-      owners.owned.size !== expectedKeys.size) {
-    throw new AlayaError("CONFLICT", "retained source preflight is not the complete original source owner");
+      readyRequests.length !== requiredKeys.length ||
+      preflight.selected_requests + preflight.cached_requests + deterministicRequests !== requiredKeys.length ||
+      canonicalJson(preflight.selected_keys) !== canonicalJson(requiredKeys) ||
+      owners.owned.size !== requiredKeys.length) {
+    throw new AlayaError("CONFLICT", "retained source preflight differs from its original source owner inventory");
   }
-  return { sourcePopulation, cacheOwners, preflight, outputTokenCap, sourceOwners: owners.owned };
+  return { sourcePopulation, cacheOwners, preflight, outputTokenCap, sourceOwners: owners.owned,
+    ...(scope === undefined ? {} : { scope, selection }) };
 }
 
 /** Admission shared by direct native chains and dataset-specific freeze adapters. */
@@ -218,14 +286,15 @@ export async function admitNativeLazyConfig(input: NativeLazyBindingInput) {
     dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
     questionWindow: population.questionWindow });
   assertInitialPublicationCensus(publication, census);
-  const { sourcePopulation, cacheOwners, preflight, outputTokenCap, sourceOwners } =
-    await readCompleteSourceOwner(input, population, census);
+  const { sourcePopulation, cacheOwners, preflight, outputTokenCap, sourceOwners, scope, selection } =
+    await readSourceOwner(input, population, census, plan, publication);
   const config = LazyQualificationConfigSchema.parse({ chain: plan.config,
     initial_chain_root: resolve(input.initialChainRoot),
     source_population: sourcePopulation, cache_owners: cacheOwners,
     initial_query_state_identity: queryStateIdentity,
     source_preparation: { retained_preflight_identity: chainIdentity(preflight),
       output_token_cap: outputTokenCap, contract: preflight.contract },
+    ...(scope === undefined ? {} : { source_request_scope: scope, source_request_selection: selection }),
     recorded_at: input.recordedAt, producer_commit: input.producerCommit });
   return { config, query_state_identity: queryStateIdentity,
     source_preflight_identity: chainIdentity(preflight), source_output_token_cap: outputTokenCap,

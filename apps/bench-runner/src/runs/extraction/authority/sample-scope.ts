@@ -8,7 +8,8 @@ import type { ExtractionFillOptions } from "../extraction-fill.js";
 import { requiresExtractionTargetSelection } from "./target-selection/receipt.js";
 import { isNativeGeminiRequestProfile } from "../request-profile.js";
 
-const SampleKeysSchema = z.array(z.string().regex(/^[a-f0-9]{64}$/u)).min(1).readonly();
+const PreflightKeysSchema = z.array(z.string().regex(/^[a-f0-9]{64}$/u));
+const SampleKeysSchema = PreflightKeysSchema.min(1).readonly();
 const SampleScopeSchema = z.object({
   keys: SampleKeysSchema,
   key_set_sha256: z.string().regex(/^[a-f0-9]{64}$/u)
@@ -33,7 +34,12 @@ export function isInteractiveSourceSampleReceipt(receipt: ExtractionAuthorityRec
 
 /** A syntactic key proposal has no authority until a receipt binds its inspected scope. */
 export function parseExtractionSampleKeys(value: unknown): readonly string[] {
-  const keys = SampleKeysSchema.parse(value);
+  return parseExtractionPreflightKeys(SampleKeysSchema.parse(value));
+}
+
+/** Empty selection is meaningful only for provider-free preparation, never execution authority. */
+export function parseExtractionPreflightKeys(value: unknown): readonly string[] {
+  const keys = PreflightKeysSchema.parse(value);
   if (new Set(keys).size !== keys.length) {
     throw new AlayaError("VALIDATION", "sample scope requires distinct canonical keys");
   }

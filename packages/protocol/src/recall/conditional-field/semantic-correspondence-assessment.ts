@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AlayaError } from "../../shared/alaya-error.js";
+import type { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import {
   SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticHandleSchema, SourceSemanticSupportSchema
 } from "../../garden/source-semantic-draft.js";
@@ -378,14 +379,22 @@ function assessmentIssue(path: readonly (string | number)[], message: string): n
 export function assertSourceSemanticCorrespondenceAssessmentRequirement(
   catalog: SourceSemanticCorrespondenceEndpointCatalog,
   assessments: readonly { readonly query: string }[],
-  demand?: SourceSemanticCorrespondenceAssessmentDemand
+  demand?: SourceSemanticCorrespondenceAssessmentDemand,
+  meter?: SourceSemanticResourceLedger
 ): void {
-  const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
+  const queryByHandle = catalogIndex(catalog.query_endpoints, meter, "assessment query index");
+  const requiredCount = demand === undefined || demand.generation_policy.kind === "full_catalog"
+    ? catalog.query_endpoints.length : demand.demanded_handles.length;
+  // Two sets, their entries, and the full-catalog handle array when needed.
+  meter?.charge(2 + requiredCount, 128 + requiredCount * 32 +
+    (demand === undefined || demand.generation_policy.kind === "full_catalog" ? 64 + requiredCount * 8 : 0),
+    "assessment required handles");
   const required = new Set(demand === undefined || demand.generation_policy.kind === "full_catalog"
     ? catalog.query_endpoints.map((row) => row.handle)
     : demand.demanded_handles);
   const seenQueries = new Set<string>();
   for (const [index, assessment] of assessments.entries()) {
+    meter?.charge(1, 32, "assessment seen query entry");
     if (!queryByHandle.has(assessment.query)) {
       assessmentIssue(["assessments", index, "query"], "undeclared local reference");
     }
@@ -406,19 +415,23 @@ export function materializeSourceSemanticCorrespondenceAssessment(
   body: unknown,
   catalog: SourceSemanticCorrespondenceEndpointCatalog,
   envelope: SourceSemanticCorrespondenceAssessmentEnvelope,
-  demand?: SourceSemanticCorrespondenceAssessmentDemand
+  demand?: SourceSemanticCorrespondenceAssessmentDemand,
+  meter?: SourceSemanticResourceLedger
 ): SourceSemanticCorrespondence {
+  meter?.retain(body, "canonical assessment validation copy");
   try {
     countSourceSemanticCorrespondenceJsonBytes(body, SOURCE_SEMANTIC_MAX_BYTES);
   } catch (error) {
     throw new z.ZodError([{ code: "custom", path: [], message: "source semantic semantic_correspondence exceeds its byte bound" }]);
   }
   const parsed = SourceSemanticCorrespondenceAssessmentSchema.parse(body);
-  assertSourceSemanticCorrespondenceAssessmentRequirement(catalog, parsed.assessments, demand);
-  const queryByHandle = new Map(catalog.query_endpoints.map((row) => [row.handle, row]));
-  const sourceByHandle = new Map(catalog.source_endpoints.map((row) => [row.handle, row]));
+  assertSourceSemanticCorrespondenceAssessmentRequirement(catalog, parsed.assessments, demand, meter);
+  const queryByHandle = catalogIndex(catalog.query_endpoints, meter, "canonical query index");
+  const sourceByHandle = catalogIndex(catalog.source_endpoints, meter, "canonical source index");
+  meter?.charge(1, 64, "canonical correspondence array");
   const correspondences: SourceSemanticEndpointCorrespondence[] = [];
   for (const [index, assessment] of parsed.assessments.entries()) {
+    meter?.charge(1, 0, "canonical assessment traversal");
     const query = queryByHandle.get(assessment.query)!;
     if (assessment.status === "unresolved") {
       if (!envelope.original_query.includes(assessment.query_excerpt)) {
@@ -426,8 +439,11 @@ export function materializeSourceSemanticCorrespondenceAssessment(
       }
       continue;
     }
+    meter?.charge(1, 64, "canonical equivalent set");
     const seenSources = new Set<string>();
     for (const [pairIndex, equivalent] of assessment.equivalents.entries()) {
+      // Four result objects, one output slot, the diagnostic path, and one set entry.
+      meter?.charge(1, 4 * 64 + 8 + 64 + 4 * 8 + 32, "canonical correspondence row allocation");
       const pairPath = ["assessments", index, "equivalents", pairIndex];
       const source = sourceByHandle.get(equivalent.source);
       if (source === undefined) {
@@ -456,7 +472,8 @@ export function materializeSourceSemanticCorrespondenceAssessment(
       });
     }
   }
-  return SourceSemanticCorrespondenceSchema.parse({
+  meter?.charge(1, 64, "canonical correspondence envelope");
+  const canonical = {
     contract: SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
     source_interpretation_id: envelope.source_interpretation_id,
     query_semantics_id: envelope.query_semantics_id,
@@ -466,7 +483,25 @@ export function materializeSourceSemanticCorrespondenceAssessment(
     correspondences,
     ...(parsed.domains === undefined ? {} : { domains: parsed.domains }),
     ...(parsed.membership_assumptions === undefined ? {} : { membership_assumptions: parsed.membership_assumptions })
-  });
+  };
+  meter?.retain(canonical, "canonical correspondence validation copy");
+  if (meter !== undefined) {
+    const bytes = countSourceSemanticCorrespondenceJsonBytes(canonical, SOURCE_SEMANTIC_MAX_BYTES);
+    // Schema refinement allocates a UTF-16 JSON string and its UTF-8 encoding.
+    meter.charge(bytes, 2 * bytes + bytes, "canonical correspondence byte validation");
+  }
+  return SourceSemanticCorrespondenceSchema.parse(canonical);
+}
+
+function catalogIndex<T extends { readonly handle: string }>(rows: readonly T[],
+  meter: SourceSemanticResourceLedger | undefined, phase: string): Map<string, T> {
+  meter?.charge(1, 64, phase);
+  const index = new Map<string, T>();
+  for (const row of rows) {
+    meter?.charge(1, 32, phase);
+    index.set(row.handle, row);
+  }
+  return index;
 }
 
 function queryEndpoint(entry: SourceSemanticQueryCatalogEntry): SourceSemanticQueryEndpoint {

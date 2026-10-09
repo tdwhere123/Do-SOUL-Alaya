@@ -4,12 +4,15 @@ import {
   SourceSemanticDecimalSchema, SourceSemanticReadingSchema
 } from "./source-semantic-draft.js";
 import { compileSourceSemanticCompact } from "./source-semantic-compact-lowering.js";
-import { SourceSemanticOutcomeSchema, SourceSemanticNoPropositionOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
+import { SourceSemanticNoPropositionOutcomeSchema, type SourceSemanticResponseEnvelope } from "./source-semantic-interpretation.js";
 import { SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
 import { sourceReferenceResolver, sourceReferencePreparationCost, type SourceReferenceCatalog } from "../evidence/source-reference.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
-import { sourceSemanticProducerPayloadViolation } from "./source-semantic-producer-envelope.js";
+import {
+  SOURCE_SEMANTIC_PRODUCER_OUTCOMES, SourceSemanticProducerAbstainedOutcomeSchema,
+  SourceSemanticProducerInterpretedStatusSchema, sourceSemanticProducerPayloadViolation
+} from "./source-semantic-producer-envelope.js";
 
 /** Canonical coalesced spans retained after meaning-preserving merge; not a silent clip. */
 export const SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND = 8 as const;
@@ -92,10 +95,17 @@ function contentShape(expression: z.ZodType<ExpressionValue>) {
   }).strict().readonly();
 }
 export const SourceSemanticSelectionContentShape = contentShape(Expression);
-export const SourceSemanticSelectionOutcomeShape = z.discriminatedUnion("status", [z.object({ status: z.literal("interpreted") }).strict().readonly(),
-  SourceSemanticNoPropositionOutcomeSchema.unwrap().extend({
+const sourceProducerOutcomeOptions = {
+  interpreted: SourceSemanticProducerInterpretedStatusSchema,
+  no_executable_proposition: SourceSemanticNoPropositionOutcomeSchema.unwrap().extend({
     context_support: z.array(SupportAtom).min(1).max(8).readonly() }).strict().readonly(),
-  ...SourceSemanticOutcomeSchema.options.filter(option => !["interpreted", "no_executable_proposition"].includes(option.unwrap().shape.status.value))]);
+  abstained: SourceSemanticProducerAbstainedOutcomeSchema
+} as const satisfies Record<(typeof SOURCE_SEMANTIC_PRODUCER_OUTCOMES.source)[number], z.ZodType>;
+export const SourceSemanticSelectionOutcomeShape = z.discriminatedUnion("status", [
+  sourceProducerOutcomeOptions.interpreted,
+  sourceProducerOutcomeOptions.no_executable_proposition,
+  sourceProducerOutcomeOptions.abstained
+]);
 type ContentValue = z.infer<typeof SourceSemanticSelectionContentShape>;
 
 /** Current table compiler phase: exact source text resolves to compact anchors. */

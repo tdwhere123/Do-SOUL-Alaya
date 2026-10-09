@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AlayaError } from "../../shared/alaya-error.js";
+import type { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { canonicalJson } from "../selection/capture/canonical-json.js";
 import { SourceSemanticHandleSchema } from "../../garden/source-semantic-draft.js";
 import { SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP } from "../../garden/source-semantic-worker.js";
@@ -168,22 +169,37 @@ export function sourceSemanticCorrespondenceDemand(
 export function sourceSemanticCorrespondenceCoverage(
   catalog: SourceSemanticCorrespondenceEndpointCatalog,
   demand: SourceSemanticCorrespondenceDemand,
-  assessment: SourceSemanticCorrespondenceAssessment
+  assessment: SourceSemanticCorrespondenceAssessment,
+  meter?: SourceSemanticResourceLedger
 ): SourceSemanticCorrespondenceCoverage {
+  meter?.retain(demand, "coverage demand validation copy");
   const parsedDemand = SourceSemanticCorrespondenceDemandSchema.parse(demand);
+  meter?.retain(assessment, "coverage assessment validation copy");
   const parsedAssessment = SourceSemanticCorrespondenceAssessmentSchema.parse(assessment);
-  assertSourceSemanticCorrespondenceAssessmentRequirement(catalog, parsedAssessment.assessments, parsedDemand);
-  const demanded = [...parsedDemand.demanded_handles];
-  const demandedSet = new Set(demanded);
-  const assessed = parsedAssessment.assessments.map((row) => row.query);
-  return SourceSemanticCorrespondenceCoverageSchema.parse({
-    generation_policy: parsedDemand.generation_policy,
-    demanded,
-    assessed,
-    unassessed: catalog.query_endpoints.map((row) => row.handle).filter((handle) => !demandedSet.has(handle)),
-    supported: parsedAssessment.assessments.filter((row) => row.status === "supported").map((row) => row.query),
-    unresolved: parsedAssessment.assessments.filter((row) => row.status === "unresolved").map((row) => row.query)
-  });
+  assertSourceSemanticCorrespondenceAssessmentRequirement(catalog, parsedAssessment.assessments, parsedDemand, meter);
+  // Five result arrays, their containing object, and the demand lookup set.
+  meter?.charge(1, 7 * 64, "coverage arrays and set");
+  const demanded: string[] = [], assessed: string[] = [], unassessed: string[] = [];
+  const supported: string[] = [], unresolved: string[] = [];
+  const demandedSet = new Set<string>();
+  for (const handle of parsedDemand.demanded_handles) {
+    meter?.charge(1, 8 + 32, "coverage demanded entry");
+    demanded.push(handle);
+    demandedSet.add(handle);
+  }
+  for (const row of parsedAssessment.assessments) {
+    meter?.charge(1, 2 * 8, "coverage assessment entries");
+    assessed.push(row.query);
+    (row.status === "supported" ? supported : unresolved).push(row.query);
+  }
+  for (const row of catalog.query_endpoints) {
+    meter?.charge(1, demandedSet.has(row.handle) ? 0 : 8, "coverage catalog traversal");
+    if (!demandedSet.has(row.handle)) unassessed.push(row.handle);
+  }
+  const coverage = { generation_policy: parsedDemand.generation_policy,
+    demanded, assessed, unassessed, supported, unresolved };
+  meter?.retain(coverage, "coverage validation copy");
+  return SourceSemanticCorrespondenceCoverageSchema.parse(coverage);
 }
 
 /** Q + H + policy. Catalog is determined by Q/H; full_catalog keeps the existing two-part key. */
