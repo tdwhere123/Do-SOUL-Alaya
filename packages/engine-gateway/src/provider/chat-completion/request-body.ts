@@ -69,7 +69,7 @@ export function buildProviderChatRequestBody(
       model: request.model,
       max_tokens: request.maxOutputTokens,
       messages: [
-        { role: "system", content: `${request.systemPrompt}\n\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(request.jsonSchema)}` },
+        { role: "system", content: `${request.systemPrompt}\n\nSchema identifier (metadata): ${JSON.stringify(request.jsonSchema.name)}\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(request.jsonSchema.schema)}` },
         { role: "user", content: request.userPrompt }
       ]
     };

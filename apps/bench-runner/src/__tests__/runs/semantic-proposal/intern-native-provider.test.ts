@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,11 +72,18 @@ it.each([
     expect(calls).toHaveLength(1);
     expect(Object.keys(calls[0]!).sort()).toEqual(["max_tokens", "messages", "model"]);
     expect(calls[0]).toMatchObject({ model: MODEL, max_tokens: 8192 });
+    const schemaPayload = '{"type":"object","properties":{"probe":{"type":"boolean"}},"required":["probe"],"additionalProperties":false}';
+    expect(calls[0]!.messages).toEqual([
+      { role: "system", content: 'Return JSON only.\n\nSchema identifier (metadata): "provider_protocol_probe"\n' +
+        "Return only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n" + schemaPayload },
+      { role: "user", content: '{"probe":true}' }
+    ]);
     expect(receipt).toMatchObject({ json_schema_valid: valid, physical_calls: 1, profile: PROFILE,
       provider_url: ENDPOINT, usage_present: false, declared_bounds: {
         max_output_tokens: 8192, timeout_ms: 180000, maximum_attempts: 1 },
       http_response: { bodyBase64: Buffer.from(wire).toString("base64"), bodyComplete: true } });
-    expect(receipt.request_digest).toMatch(/^[a-f0-9]{64}$/u);
+    expect(receipt.request_digest).toBe(createHash("sha256")
+      .update(JSON.stringify([`${ENDPOINT}/chat/completions`, JSON.stringify(calls[0])])).digest("hex"));
     expect(receipt.usage).toBeUndefined();
     const request = { providerUrl: ENDPOINT, apiKey: "loopback-only", model: MODEL,
       profile: PROFILE, systemPrompt: "s", userPrompt: "u", maxOutputTokens: 8192,
