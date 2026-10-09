@@ -1,5 +1,5 @@
 import { lookup } from "node:dns/promises";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertAllowedProviderChatUrl,
   assertAllowedProviderChatUrlResolved
@@ -16,6 +16,7 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 const PRIVATE_OPT_IN = { ALAYA_ALLOW_PRIVATE_PROVIDER_URL: "1" } as const;
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("provider url guard", () => {
   it("rejects private and metadata hosts even on the default local daemon", () => {
@@ -80,5 +81,36 @@ describe("provider url guard", () => {
     await expect(
       assertAllowedProviderChatUrlResolved("https://missing.example/v1")
     ).rejects.toThrow(/could not be resolved/u);
+  });
+
+  it.each(["allowed", "refused"])("cleans up the bounded guard after an immediately %s URL", async state => {
+    vi.useFakeTimers();
+    const caller = new AbortController(), add = vi.spyOn(caller.signal, "addEventListener"),
+      remove = vi.spyOn(caller.signal, "removeEventListener");
+    const operation = assertAllowedProviderChatUrlResolved(state === "allowed"
+      ? "https://api.example/v1" : "http://127.0.0.1/v1", {}, { abortSignal: caller.signal, timeoutMs: 100 });
+    if (state === "allowed") await expect(operation).resolves.toBeUndefined();
+    else await expect(operation).rejects.toThrow(/private/u);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(remove.mock.calls).toEqual(add.mock.calls);
+  });
+
+  it.each(["cancel", "timeout"])("settles %s while DNS is pending and handles a later resolver rejection", async state => {
+    vi.useFakeTimers();
+    const caller = new AbortController(), reason = { owner: "caller" },
+      add = vi.spyOn(caller.signal, "addEventListener"), remove = vi.spyOn(caller.signal, "removeEventListener");
+    let rejectDns!: (cause: Error) => void;
+    vi.mocked(lookup).mockImplementationOnce((() => new Promise((_, reject) => { rejectDns = reject; })) as unknown as typeof lookup);
+    const operation = assertAllowedProviderChatUrlResolved("https://api.example/v1", {},
+      { abortSignal: caller.signal, timeoutMs: 100 }).catch(error => error as unknown);
+    if (state === "cancel") caller.abort(reason);
+    else await vi.advanceTimersByTimeAsync(100);
+    const result = await operation;
+    if (state === "cancel") expect(result).toBe(reason);
+    else expect(result).toMatchObject({ kind: "timeout" });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(remove.mock.calls).toEqual(add.mock.calls);
+    rejectDns(new Error("late ENOTFOUND"));
+    await Promise.resolve(); await Promise.resolve();
   });
 });

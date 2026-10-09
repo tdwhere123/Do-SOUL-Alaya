@@ -1,5 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { ProviderChatCompletionError } from "./errors.js";
+import { createProviderChatDeadline, type ProviderChatDeadlineOptions } from "./request-deadline.js";
 import {
   assertPublicHttpProviderUrl,
   isBlockedProviderHost,
@@ -21,8 +23,25 @@ export function assertAllowedProviderChatUrl(
 
 export async function assertAllowedProviderChatUrlResolved(
   endpoint: string,
-  env: EnvLookup = {}
+  env: EnvLookup = {},
+  deadlineOptions?: ProviderChatDeadlineOptions
 ): Promise<void> {
+  if (deadlineOptions === undefined) return await assertResolvedProviderUrl(endpoint, env);
+  const deadline = createProviderChatDeadline(deadlineOptions);
+  try {
+    deadlineOptions.abortSignal?.throwIfAborted();
+    await deadline.settle(assertResolvedProviderUrl(endpoint, env));
+  } catch (cause) {
+    // Caller cancellation keeps its original reason; readiness is not a transport attempt.
+    deadlineOptions.abortSignal?.throwIfAborted();
+    if (deadline.signal.aborted) {
+      throw new ProviderChatCompletionError("provider readiness timed out", "timeout", null, { cause });
+    }
+    throw cause;
+  } finally { deadline.dispose(); }
+}
+
+async function assertResolvedProviderUrl(endpoint: string, env: EnvLookup): Promise<void> {
   assertAllowedProviderChatUrl(endpoint, env);
   if (parseEnvBoolean(env[PRIVATE_PROVIDER_OPT_IN], PRIVATE_PROVIDER_OPT_IN)) {
     return;

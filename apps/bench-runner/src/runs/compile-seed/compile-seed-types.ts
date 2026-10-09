@@ -30,7 +30,7 @@ import type {
 export interface BenchSignalExtractor extends SignalExtractor {
   /** HTTP delegates reject local transport configuration before attempt reservation.
    * Forwarding wrappers must retain this hook; offline delegates need no hook. */
-  readonly assertTransportReady?: (signal?: AbortSignal) => Promise<void>;
+  readonly assertTransportReady?: (signal?: AbortSignal, timeoutMs?: number) => Promise<void>;
   extract(input: Parameters<SignalExtractor["extract"]>[0] & {
     readonly systemPrompt: string;
     readonly userPrompt: string;

@@ -6,6 +6,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as MODEL, INTERN_SEMANTIC_REQUEST_PROFILE as PROFILE,
   INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT, isChatSemanticRequestProfile } from "@do-soul/alaya-protocol";
@@ -27,6 +28,7 @@ import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority
 import { isExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";
 import { supportsProviderRequestProfile } from "../../../runs/provider/catalog.js";
 import { readProviderResponseWithEvidence } from "../../../../../../packages/engine-gateway/src/provider/chat-completion/response-evidence.js";
+import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 
 vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
   const answer = { address: "93.184.216.34", family: 4 }; return options?.all ? [answer] : answer;
@@ -38,6 +40,43 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+it("expires pending readiness DNS and releases the Q cache without spending an attempt", async () => {
+  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "0");
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT, items: [{ original_query: "Who sent the parcel?" }] });
+  const cacheRoot = root(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+  let finishDns!: (answers: { address: string; family: number }[]) => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  vi.mocked(lookup).mockImplementationOnce((() => {
+    entered(); return new Promise(resolve => { finishDns = resolve; });
+  }) as unknown as typeof lookup);
+  const fetchImpl = vi.fn<typeof fetch>(), config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const operation = executeSemanticProposalFill({ workset, cacheRoot, authority, config,
+    extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) })
+    .then(() => "completed", error => error as unknown);
+  await started;
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().attempts).toBe(0);
+  expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toBeUndefined();
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(() => acquireExtractionCacheWriteLease(cacheRoot)).toThrow();
+  try {
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    const settled = await Promise.race([operation, delay(150).then(() => "still_pending")]);
+    expect(settled).toMatchObject({ kind: "timeout" });
+    const lease = acquireExtractionCacheWriteLease(cacheRoot); lease.release();
+    expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot())
+      .toMatchObject({ attempts: 0, unresolvedAttempts: [], pendingKeys: [], settledAttempts: [], transportFailures: [] });
+    expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toBeUndefined();
+    expect(readSemanticProposalShard(cacheRoot, line.key)).toBeUndefined();
+    expect(readSemanticProposalResults(workset, cacheRoot, 8192)[0]?.status).toBe("unattempted");
+  } finally { vi.useRealTimers(); finishDns([{ address: "93.184.216.34", family: 4 }]); await operation; }
+  expect(fetchImpl).not.toHaveBeenCalled();
 });
 function root() {
   const value = mkdtempSync(join(tmpdir(), "intern-native-provider-")); roots.push(value); return value;

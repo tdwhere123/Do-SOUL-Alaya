@@ -12,6 +12,7 @@ import {
   type ProviderResponseInspectionReason
 } from "./inspect-response.js";
 import { assertAllowedProviderChatUrlResolved } from "./provider-url-guard.js";
+import { CALLER_ABORT, createProviderChatDeadline, resolveProviderChatTimeoutMs } from "./request-deadline.js";
 import {
   MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
   readProviderResponseWithEvidence
@@ -26,35 +27,25 @@ import type {
   ProviderHttpResponseEvidence
 } from "./types.js";
 
-export const DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS = 10_000;
-
-const INTERNAL_TIMEOUT = Object.freeze({ source: "timeout" as const });
-const CALLER_ABORT = Object.freeze({ source: "caller" as const });
+export { DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS } from "./request-deadline.js";
 
 export async function fetchProviderChatCompletion(
   request: ProviderChatCompletionRequest
 ): Promise<ProviderChatCompletionResult> {
-  const controller = new AbortController();
-  const onAbort = (): void => {
-    controller.abort(CALLER_ABORT);
-  };
-  bindAbort(request.abortSignal, onAbort);
-  const timer = startTimeout(request.timeoutMs, controller);
+  const deadline = createProviderChatDeadline(request);
   let knownStatus: number | null = null;
   let responseSnapshot: (() => ProviderHttpResponseEvidence) | undefined;
   try {
-    return await settleUnlessAborted(
-      runProviderChatRequest(request, controller.signal,
+    return await deadline.settle(
+      runProviderChatRequest(request, deadline.signal,
         (status) => { knownStatus = status; },
-        (snapshot) => { responseSnapshot = snapshot; }),
-      controller.signal
+        (snapshot) => { responseSnapshot = snapshot; })
     );
   } catch (error) {
-    throw normalizeTransportError(error, request.abortSignal, controller.signal,
+    throw normalizeTransportError(error, request.abortSignal, deadline.signal,
       knownStatus, responseSnapshot?.());
   } finally {
-    if (timer !== null) clearTimeout(timer);
-    request.abortSignal?.removeEventListener("abort", onAbort);
+    deadline.dispose();
   }
 }
 
@@ -188,60 +179,6 @@ function inspectBody(
       }
     );
   }
-}
-
-function bindAbort(
-  signal: AbortSignal | undefined,
-  onAbort: () => void
-): void {
-  if (signal === undefined) return;
-  if (signal.aborted) onAbort();
-  else signal.addEventListener("abort", onAbort);
-}
-
-function startTimeout(
-  timeoutMs: number | undefined,
-  controller: AbortController
-): ReturnType<typeof setTimeout> | null {
-  const resolvedMs = resolveProviderChatTimeoutMs(timeoutMs);
-  const timer = setTimeout(() => controller.abort(INTERNAL_TIMEOUT), resolvedMs);
-  timer.unref?.();
-  return timer;
-}
-
-function resolveProviderChatTimeoutMs(timeoutMs: number | undefined): number {
-  return timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
-    ? timeoutMs
-    : DEFAULT_PROVIDER_CHAT_COMPLETION_TIMEOUT_MS;
-}
-
-async function settleUnlessAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    void work.catch(() => undefined);
-    throw abortCause(signal);
-  }
-  let onAbort: (() => void) | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        onAbort = () => reject(abortCause(signal));
-        signal.addEventListener("abort", onAbort, { once: true });
-      })
-    ]);
-  } catch (error) {
-    if (signal.aborted) void work.catch(() => undefined);
-    throw error;
-  } finally {
-    if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
-  }
-}
-
-function abortCause(signal: AbortSignal): Error {
-  if (signal.reason instanceof Error) return signal.reason;
-  const error = new Error("aborted");
-  error.name = "AbortError";
-  return error;
 }
 
 function normalizeTransportError(

@@ -62,11 +62,12 @@ export function createSemanticProviderHttpExtractor(
   if (!isChatSemanticRequestProfile(config.requestProfile)) {
     throw new AlayaError("VALIDATION", "semantic provider request profile is unsupported");
   }
-  return { assertTransportReady: async signal => {
+  return { assertTransportReady: async (signal, timeoutMs) => {
     signal?.throwIfAborted();
     requireSemanticApiKey(config);
     const route = resolveExtractionTransportRoute(config);
-    await assertAllowedProviderChatUrlResolved(providerChatCompletionsUrl(route.providerUrl, process.env), process.env);
+    await assertAllowedProviderChatUrlResolved(providerChatCompletionsUrl(route.providerUrl, process.env), process.env,
+      { ...(signal === undefined ? {} : { abortSignal: signal }), ...(timeoutMs === undefined ? {} : { timeoutMs }) });
     signal?.throwIfAborted();
   }, extract: async (input) => {
     const prepared = prepareSemanticProviderRequest(config, input, schemaName);

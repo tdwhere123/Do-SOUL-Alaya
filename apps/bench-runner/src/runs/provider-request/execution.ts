@@ -100,6 +100,7 @@ export async function executeProviderRequestLine(
   }
   let used = replayed.attempts;
   const attemptLimit = context.maximumAttemptsPerKey;
+  const timeoutMs = Math.max(resolveExtractionRequestTimeoutMs(context.maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS);
   while (used < attemptLimit) {
     if (remainingProviderRequestSlots(context.ledger) <= 0) {
       return { classified: "retryable", admitted: false, attempts: used };
@@ -108,7 +109,7 @@ export async function executeProviderRequestLine(
       throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
     }
     context.assertScope();
-    await context.extractor.assertTransportReady?.();
+    await context.extractor.assertTransportReady?.(undefined, timeoutMs);
     context.assertScope();
     const ordinal = context.ledger.reserveAttemptOrdinal(line.key);
     used += 1;
@@ -117,7 +118,7 @@ export async function executeProviderRequestLine(
     try {
       extracted = await context.extractor.extract({
         systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
-        timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(context.maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
+        timeoutMs,
         maxOutputTokens: context.maxOutputTokens,
         outputTokenField: isChatSemanticRequestProfile(context.config.requestProfile)
           ? "max_tokens" : "maxOutputTokens",

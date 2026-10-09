@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as model, INTERN_SEMANTIC_PROVIDER_URL as providerUrl,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT } from "@do-soul/alaya-protocol";
@@ -19,6 +20,7 @@ import { listProviderRawAttempts } from "../../../runs/extraction/fill/provider-
 import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
 import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
+import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 
 vi.hoisted(() => { for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key]; });
 vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
@@ -68,6 +70,36 @@ it.each(["blocked", "unresolved"])("refuses %s provider DNS before reserving a n
     .toMatchObject({ attempts: 0, unresolvedAttempts: [], pendingKeys: [], settledAttempts: [], transportFailures: [] });
   expect(listProviderRawAttempts(fixture.cacheRoot, fixture.key)).toEqual([]);
   expect(inspectCachedSourceSemantic(fixture.cacheRoot, fixture.key, model, requestProfile).status).toBe("missing");
+});
+
+it("cancels pending readiness DNS and releases the native source cache without spending an attempt", async () => {
+  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "0");
+  const fixture = await sourceFixture(), controller = new AbortController();
+  let finishDns!: (answers: { address: string; family: number }[]) => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  vi.mocked(lookup).mockImplementationOnce((() => {
+    entered(); return new Promise(resolve => { finishDns = resolve; });
+  }) as unknown as typeof lookup);
+  const fetchImpl = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchImpl);
+  const operation = runExtractionFill({ ...fixture.options, signal: controller.signal })
+    .then(() => "completed", error => error as unknown);
+  await started;
+  expect(createExtractionExecutionAuthority(fixture.receipt, fixture.cacheRoot).snapshot()?.attempts).toBe(0);
+  expect(listProviderRawAttempts(fixture.cacheRoot, fixture.key)).toEqual([]);
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(() => acquireExtractionCacheWriteLease(fixture.cacheRoot)).toThrow();
+  const reason = new Error("source fill cancelled by caller"); controller.abort(reason);
+  try {
+    const settled = await Promise.race([operation, delay(150).then(() => "still_pending")]);
+    expect(settled).toBe(reason);
+    const lease = acquireExtractionCacheWriteLease(fixture.cacheRoot); lease.release();
+    expect(controller.signal.reason).toBe(reason);
+    expect(createExtractionExecutionAuthority(fixture.receipt, fixture.cacheRoot).snapshot())
+      .toMatchObject({ attempts: 0, unresolvedAttempts: [], pendingKeys: [], settledAttempts: [], transportFailures: [] });
+    expect(listProviderRawAttempts(fixture.cacheRoot, fixture.key)).toEqual([]);
+    expect(inspectCachedSourceSemantic(fixture.cacheRoot, fixture.key, model, requestProfile).status).toBe("missing");
+  } finally { finishDns([{ address: "93.184.216.34", family: 4 }]); await operation; }
+  expect(fetchImpl).not.toHaveBeenCalled();
 });
 
 it("uses one allowed physical source request and replays cache without requiring current DNS readiness", async () => {

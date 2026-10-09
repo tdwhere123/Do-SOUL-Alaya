@@ -16,7 +16,11 @@ Engine gateway 1.1.0 exposes the existing resolved provider URL guard. Native ch
 Bench HTTP delegates use it before source and Q/C attempt reservation; local URL,
 DNS or missing-credential refusal leaves the key unattempted. Offline delegates,
 cached replay and Gemini dispatch retain their behavior. The actual fetch keeps
-its DNS guard, so a later DNS change can still consume an attempt. Request/schema
+its DNS guard, so a later DNS change can still consume an attempt. Readiness
+now uses the gateway's existing cancellation/deadline lifecycle: pending
+DNS releases the fill lease on caller cancellation or its finite request budget,
+without reservation or provider raw. Readiness and later transport each receive
+their own budget; this does not establish an end-to-end deadline. Request/schema
 bytes and semantic cache key definitions remain unchanged.
 
 Protocol 13.12.0 adds an opt-in source generation task for a single original-query

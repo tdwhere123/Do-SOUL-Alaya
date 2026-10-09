@@ -252,13 +252,14 @@ async function dispatchInteractiveLine(
   if (input.prepared.config.apiKey === null || input.prepared.config.apiKey.trim().length === 0) {
     throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
   }
-  await extractor.assertTransportReady?.(input.options.signal);
+  const timeoutMs = Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS);
+  await extractor.assertTransportReady?.(input.options.signal, timeoutMs);
   const attemptOrdinal = await authority.reserveAttemptOrdinal(line.key, input.options.signal);
   let extracted: Awaited<ReturnType<typeof extractor.extract>>;
   try {
     extracted = await extractor.extract({
       ...sourceSemanticInteractiveInput(line), retryMode: "disabled",
-      timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
+      timeoutMs,
       maxOutputTokens,
       outputTokenField: isChatSemanticRequestProfile(input.prepared.config.requestProfile)
         ? "max_tokens" : "maxOutputTokens",
