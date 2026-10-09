@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { lookup } from "node:dns/promises";
 import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -13,7 +14,7 @@ import { probeProviderProtocol } from "../../../runs/provider/protocol-probe.js"
 import { runProviderPreflightCommand } from "../../../cli/provider-preflight/command.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { parseSemanticProposalWorkset, materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
-import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
+import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, semanticProposalLookup } from "../../../runs/semantic-proposal/attempt.js";
 import * as proposalAttempts from "../../../runs/semantic-proposal/attempt.js";
@@ -25,6 +26,11 @@ import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-r
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
 import { isExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";
 import { supportsProviderRequestProfile } from "../../../runs/provider/catalog.js";
+import { readProviderResponseWithEvidence } from "../../../../../../packages/engine-gateway/src/provider/chat-completion/response-evidence.js";
+
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+  const answer = { address: "93.184.216.34", family: 4 }; return options?.all ? [answer] : answer;
+}) }));
 
 const probeProfiles = [PROFILE, "intern-agents-a1-probe-json-object-v1", "intern-agents-a1-probe-json-schema-v1"] as const;
 
@@ -36,6 +42,69 @@ afterEach(() => {
 function root() {
   const value = mkdtempSync(join(tmpdir(), "intern-native-provider-")); roots.push(value); return value;
 }
+
+it.each(["blocked", "unresolved"])("refuses %s provider DNS before reserving a Q attempt", async failure => {
+  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "0");
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT, items: [{ original_query: "Who sent the parcel?" }] });
+  const cacheRoot = root(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+  expect(line.key).toBe("6d451566eacd06f10e06c97ac3442c9f20a5ac3b31afb4612a9e6d804f047e13");
+  if (failure === "blocked") vi.mocked(lookup).mockImplementationOnce((async () => [
+    { address: "198.18.0.105", family: 4 }
+  ]) as unknown as typeof lookup);
+  else vi.mocked(lookup).mockRejectedValueOnce(new Error("ENOTFOUND"));
+  const fetchImpl = vi.fn<typeof fetch>();
+  const config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+  await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config,
+    extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) })).rejects.toThrow();
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot()).toMatchObject({
+    attempts: 0, unresolvedAttempts: [], pendingKeys: [], settledAttempts: [], transportFailures: [] });
+  expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toBeUndefined();
+  expect(readSemanticProposalShard(cacheRoot, line.key)).toBeUndefined();
+  expect(readSemanticProposalResults(workset, cacheRoot, 8192)[0]?.status).toBe("unattempted");
+});
+
+it("executes an injected offline Q delegate without DNS and preserves its exact key", async () => {
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT, items: [{ original_query: "Who sent the parcel?" }] });
+  const cacheRoot = root(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+  const rawJson = '{"contract":"source-semantic-query-response-v8","outcome":{"status":"abstained"}}';
+  const retained = await readProviderResponseWithEvidence(new Response(JSON.stringify({
+    choices: [{ message: { content: rawJson }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } }));
+  const previous = vi.mocked(lookup).getMockImplementation()!;
+  vi.mocked(lookup).mockClear().mockRejectedValue(new Error("ENOTFOUND"));
+  try {
+    const extractor = { extract: vi.fn(async () => ({ rawJson, responseMetadata: { finishReason: "stop" }, httpResponse: retained.evidence })) };
+    await expect(executeSemanticProposalFill({ workset, cacheRoot, authority,
+      config: { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: null }, extractor }))
+      .resolves.toMatchObject({ abstained: 1, attempts: 1 });
+    expect(lookup).not.toHaveBeenCalled(); expect(extractor.extract).toHaveBeenCalledTimes(1);
+    expect(line.key).toBe("6d451566eacd06f10e06c97ac3442c9f20a5ac3b31afb4612a9e6d804f047e13");
+  } finally { vi.mocked(lookup).mockImplementation(previous); }
+});
+
+it("retains the reserved attempt if DNS becomes blocked between readiness and actual fetch", async () => {
+  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "0");
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT, items: [{ original_query: "Who sent the parcel?" }] });
+  const cacheRoot = root(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+  vi.mocked(lookup).mockImplementationOnce((async () => [{ address: "93.184.216.34", family: 4 }]) as unknown as typeof lookup)
+    .mockImplementationOnce((async () => [{ address: "198.18.0.105", family: 4 }]) as unknown as typeof lookup);
+  const fetchImpl = vi.fn<typeof fetch>(), config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+  await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config,
+    extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) })).rejects.toThrow(/stopped after/u);
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().attempts).toBe(1);
+  expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({ usage_known: false, usage: null,
+    transport_failure: { kind: "network_error", phase: "request" } });
+});
 
 async function localHttp<T>(content: string | null, finish: string | null, status: number,
   run: (fetchImpl: typeof fetch, calls: Record<string, unknown>[], wire: string) => Promise<T>,

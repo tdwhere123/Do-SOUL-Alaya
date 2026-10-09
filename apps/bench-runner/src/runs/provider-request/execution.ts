@@ -108,6 +108,8 @@ export async function executeProviderRequestLine(
       throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
     }
     context.assertScope();
+    await context.extractor.assertTransportReady?.();
+    context.assertScope();
     const ordinal = context.ledger.reserveAttemptOrdinal(line.key);
     used += 1;
     const lastAttempt = isFinalReservedProviderRequestAttempt(context.ledger, line.key, ordinal, attemptLimit);

@@ -28,6 +28,9 @@ import type {
 
 /** Bench operation hooks extend Soul's transport-neutral consumer port. */
 export interface BenchSignalExtractor extends SignalExtractor {
+  /** HTTP delegates reject local transport configuration before attempt reservation.
+   * Forwarding wrappers must retain this hook; offline delegates need no hook. */
+  readonly assertTransportReady?: (signal?: AbortSignal) => Promise<void>;
   extract(input: Parameters<SignalExtractor["extract"]>[0] & {
     readonly systemPrompt: string;
     readonly userPrompt: string;

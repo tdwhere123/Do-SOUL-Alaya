@@ -1,5 +1,5 @@
 import {
-  buildProviderChatRequestBody, executeProviderChatCompletion, providerChatCompletionsUrl,
+  assertAllowedProviderChatUrlResolved, buildProviderChatRequestBody, executeProviderChatCompletion, providerChatCompletionsUrl,
   ProviderChatCompletionError, type ProviderChatCompletionRequest,
   type ProviderHttpResponseEvidence
 } from "@do-soul/alaya-engine-gateway";
@@ -62,15 +62,19 @@ export function createSemanticProviderHttpExtractor(
   if (!isChatSemanticRequestProfile(config.requestProfile)) {
     throw new AlayaError("VALIDATION", "semantic provider request profile is unsupported");
   }
-  return { extract: async (input) => {
+  return { assertTransportReady: async signal => {
+    signal?.throwIfAborted();
+    requireSemanticApiKey(config);
+    const route = resolveExtractionTransportRoute(config);
+    await assertAllowedProviderChatUrlResolved(providerChatCompletionsUrl(route.providerUrl, process.env), process.env);
+    signal?.throwIfAborted();
+  }, extract: async (input) => {
     const prepared = prepareSemanticProviderRequest(config, input, schemaName);
     const request = prepared.gatewayRequest!;
-    if (config.apiKey === null || config.apiKey.trim().length === 0) {
-      throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
-    }
+    const apiKey = requireSemanticApiKey(config);
     await input.onTransportAttempt?.(input.abortSignal);
     try {
-      const execution = await executeProviderChatCompletion({ ...request, apiKey: config.apiKey,
+      const execution = await executeProviderChatCompletion({ ...request, apiKey,
         ...(fetchImpl === undefined ? {} : { fetchImpl }) }, { maxRetries: 0, retryDelaysMs: [] });
       const response = execution.result;
       return {
@@ -104,6 +108,13 @@ export function createSemanticProviderHttpExtractor(
       throw wrapped;
     }
   } };
+}
+
+function requireSemanticApiKey(config: CompileSeedExtractionConfig): string {
+  if (config.apiKey === null || config.apiKey.trim().length === 0) {
+    throw new AlayaError("UNAVAILABLE", "garden API key is unavailable");
+  }
+  return config.apiKey;
 }
 
 const nativeChatResponseEvidence = new WeakMap<object, ProviderHttpResponseEvidence>();

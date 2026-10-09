@@ -8,9 +8,16 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.12.0, engine gateway 1.0.0
+## Unreleased — protocol 13.12.0, engine gateway 1.1.0
 
-`@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `1.1.0`; app packages remain `0.3.11`.
+
+Engine gateway 1.1.0 exposes the existing resolved provider URL guard. Native chat
+Bench HTTP delegates use it before source and Q/C attempt reservation; local URL,
+DNS or missing-credential refusal leaves the key unattempted. Offline delegates,
+cached replay and Gemini dispatch retain their behavior. The actual fetch keeps
+its DNS guard, so a later DNS change can still consume an attempt. Request/schema
+bytes and semantic cache key definitions remain unchanged.
 
 Protocol 13.12.0 adds an opt-in source generation task for a single original-query
 family. Complete original source text and the unchanged source catalog are supplied

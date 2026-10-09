@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { lookup } from "node:dns/promises";
 import type { AddressInfo } from "node:net";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
@@ -43,6 +44,10 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
 import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
+  const answer = { address: "93.184.216.34", family: 4 }; return options?.all ? [answer] : answer;
+}) }));
+
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
 const ORIGINAL = "which parcel was sent and inspected?";
@@ -53,7 +58,31 @@ proposalRecoveryCases({ workset: correspondenceWorkset,
   body: line => assessmentBody(line.request as SourceSemanticCorrespondenceRequest), config });
 
 afterEach(() => {
+  vi.unstubAllEnvs(); vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+it("refuses blocked provider DNS before reserving a correspondence attempt", async () => {
+  vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "0");
+  const basis = INTERN_DISCOVERY_QUOTE_BASIS;
+  const workset = parseSemanticProposalWorkset({ ...correspondenceWorkset(), contract: "source-semantic-proposal-workset-v4",
+    model: basis.selected_model, request_profile: "intern-agents-a1-json-schema-v1", provider_url: basis.selected_provider_url });
+  const cacheRoot = tempRoot(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 4096), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 4096)[0]!;
+  expect(line.key).toBe("daac31de6bf64f3fa5effe24c2457288cfcc8aabf83b7152fcc9788a985f650d");
+  vi.mocked(lookup).mockImplementationOnce((async () => [{ address: "198.18.0.105", family: 4 }]) as unknown as typeof lookup);
+  const fetchImpl = vi.fn<typeof fetch>();
+  const selected: CompileSeedExtractionConfig = { providerUrl: workset.provider_url, model: workset.model,
+    requestProfile: "intern-agents-a1-json-schema-v1", apiKey: "loopback-only" };
+  await expect(executeSemanticProposalFill({ workset, cacheRoot, authority, config: selected,
+    extractor: createSemanticProviderHttpExtractor(selected, "source_semantic_proposal", fetchImpl) })).rejects.toThrow();
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "semantic_correspondence" }).snapshot())
+    .toMatchObject({ attempts: 0, unresolvedAttempts: [], pendingKeys: [], settledAttempts: [], transportFailures: [] });
+  expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toBeUndefined();
+  expect(inspectSemanticProposalShard(cacheRoot, line.key, { kind: workset.kind, model: workset.model,
+    request_profile: workset.request_profile })).toBeUndefined();
 });
 
 function tempRoot(): string {

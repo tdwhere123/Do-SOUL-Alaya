@@ -31,7 +31,7 @@ export {
   MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
 } from "./response-evidence.js";
-export { assertAllowedProviderChatUrl } from "./provider-url-guard.js";
+export { assertAllowedProviderChatUrl, assertAllowedProviderChatUrlResolved } from "./provider-url-guard.js";
 export {
   buildProviderChatRequestBody,
   buildProviderChatRequestInit,
