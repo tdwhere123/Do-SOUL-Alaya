@@ -1,4 +1,5 @@
 import { ProviderChatCompletionError } from "./errors.js";
+import { getGlobalDispatcher } from "undici";
 import { AlayaError, isChatSemanticRequestProfile, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import {
   PROVIDER_FAILURE_BODY_DIGEST_BYTES,
@@ -115,11 +116,22 @@ async function postChatCompletion(
   const url = providerChatCompletionsUrl(request.providerUrl, request.env);
   await assertAllowedProviderChatUrlResolved(url, request.env);
   const fetchImpl = request.fetchImpl ?? fetch;
+  // The runtime owns the underlying dispatcher and its proxy policy/pools. This
+  // request-local composition owns no clients and must never close that dispatcher.
+  const timeoutMs = Math.ceil(resolveProviderChatTimeoutMs(request.timeoutMs));
+  const dispatcher = isChatSemanticRequestProfile(request.profile) &&
+    (isInternSemanticRequestProfile(request.profile) || request.retainHttpResponseEvidence === true)
+    ? getGlobalDispatcher().compose(dispatch => (options, handler) => dispatch({
+      ...options, headersTimeout: timeoutMs, bodyTimeout: timeoutMs
+    }, handler)) : undefined;
   // RequestInit must not carry the caller abortSignal; timeout abort would then
   // be indistinguishable from an operator abort.
   return await fetchImpl(
     url,
-    { ...buildProviderChatRequestInit(request), signal, redirect: "error" }
+    { ...buildProviderChatRequestInit(request), signal, redirect: "error",
+      // Node's older undici-types compose overload differs from the supported
+      // runtime Dispatcher contract shared by Node and this direct dependency.
+      ...(dispatcher === undefined ? {} : { dispatcher: dispatcher as unknown as RequestInit["dispatcher"] }) }
   );
 }
 

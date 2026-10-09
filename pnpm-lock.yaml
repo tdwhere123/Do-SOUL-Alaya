@@ -386,6 +386,9 @@ importers:
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../protocol
+      undici:
+        specifier: 7.24.4
+        version: 7.24.4
 
   packages/eval:
     dependencies:
@@ -2559,6 +2562,10 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
+  undici@7.24.4:
+    resolution: {integrity: sha512-BM/JzwwaRXxrLdElV2Uo6cTLEjhSb3WXboncJamZ15NgUURmvlXvxa6xkwIOILIjPNo9i8ku136ZvWV0Uly8+w==}
+    engines: {node: '>=20.18.1'}
+
   universalify@0.2.0:
     resolution: {integrity: sha512-CJ1QgKmNg3CwvAv/kOFmtnEN05f0D/cn9QntgNOQlQF9dgvVTHj3t+8JPdjqawCHk7V/KA+fbUqzZ9XWhcqPUg==}
     engines: {node: '>= 4.0.0'}
@@ -4699,6 +4706,8 @@ snapshots:
   unbash@4.0.11: {}
 
   undici-types@7.18.2: {}
+
+  undici@7.24.4: {}
 
   universalify@0.2.0: {}
 
