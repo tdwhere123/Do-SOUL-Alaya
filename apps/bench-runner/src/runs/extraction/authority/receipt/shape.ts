@@ -4,7 +4,7 @@ import {
   expectedExtractionAuthorityLimits,
   isExtractionOutputTokenField
 } from "../receipt-limits.js";
-import { StepQuoteBasisSchema } from "../step-quote.js";
+import { NativeChatQuoteBasisSchema } from "../native-chat-quote.js";
 
 export const LEGACY_RECEIPT_VERSION = 2;
 export const PREVIOUS_RECEIPT_VERSION = 3;
@@ -70,7 +70,7 @@ export function isExtractionAuthorityReceiptPrice(value: unknown): boolean {
     typeof value.output_usd_per_million === "number" &&
     isNonNegativeSafeInteger(value.maximum_input_tokens_per_attempt) &&
     typeof value.estimated_upper_usd === "number" &&
-    (value.quote_basis === undefined || StepQuoteBasisSchema.safeParse(value.quote_basis).success);
+    (value.quote_basis === undefined || NativeChatQuoteBasisSchema.safeParse(value.quote_basis).success);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

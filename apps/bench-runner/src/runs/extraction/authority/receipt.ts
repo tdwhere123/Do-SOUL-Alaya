@@ -1,7 +1,7 @@
 import { extractionSamplePolicies, type ExtractionSamplePolicyBinding } from "./sample-policy.js";
 import { assertSampleReceipt, assertSampleInspection, assertExtractionSampleScope, type ExtractionSampleScope } from "./sample-scope.js";
 import {
-  isStepSemanticRequestProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking
+  isChatSemanticRequestProfile, ExtractionSourcePackingSchema, type ExtractionSourcePacking
 } from "@do-soul/alaya-protocol";
 import type { ExtractionAuthorityInspection as NativeExtractionAuthorityInspection } from "./inspection.js";
 import { createHash } from "node:crypto";
@@ -54,7 +54,7 @@ import {
   writeExtractionAuthorityReceiptArtifactExclusive
 } from "./receipt/artifact-io.js";
 import { assertExtractionAuthorityReceiptScope } from "./receipt/scope.js";
-import { assertStepQuoteBasis, assertStepQuoteRates, stepQuoteBasis } from "./step-quote.js";
+import { assertNativeChatQuoteBasis, assertNativeChatQuoteRates, nativeChatQuoteBasis } from "./native-chat-quote.js";
 import { bindInteractiveSourcePreflight } from "./source-preflight-binding.js";
 import {
   CURRENT_RECEIPT_VERSION,
@@ -245,9 +245,9 @@ function buildUnsignedReceipt(
   const transport = input.observation.transport ?? {
     model: input.observation.extraction.model, providerUrl: input.observation.extraction.providerUrl
   };
-  const quoteBasis = isStepSemanticRequestProfile(input.observation.extraction.requestProfile)
-    ? stepQuoteBasis(transport.model, transport.providerUrl) : undefined;
-  assertStepQuoteRates(input.observation.extraction.requestProfile,
+  const quoteBasis = isChatSemanticRequestProfile(input.observation.extraction.requestProfile)
+    ? nativeChatQuoteBasis(input.observation.extraction.requestProfile, transport.model, transport.providerUrl) : undefined;
+  assertNativeChatQuoteRates(input.observation.extraction.requestProfile,
     input.priceEstimate.inputUsdPerMillion, input.priceEstimate.outputUsdPerMillion, quoteBasis);
   const basePrice = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
   const price: ExtractionAuthorityReceiptPrice = quoteBasis === undefined ? basePrice
@@ -442,9 +442,9 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
     model: verified.observation.extraction.model,
     providerUrl: verified.observation.extraction.providerUrl
   };
-  assertStepQuoteRates(verified.observation.extraction.requestProfile,
+  assertNativeChatQuoteRates(verified.observation.extraction.requestProfile,
     verified.price.input_usd_per_million, verified.price.output_usd_per_million, verified.price.quote_basis);
-  assertStepQuoteBasis(verified.observation.extraction.requestProfile,
+  assertNativeChatQuoteBasis(verified.observation.extraction.requestProfile,
     transport.model, transport.providerUrl, verified.price.quote_basis);
   assertExtractionAuthorityReceiptScope(verified);
   if (verified.receipt_digest !== computeReceiptDigest(withoutReceiptDigest(verified))) {

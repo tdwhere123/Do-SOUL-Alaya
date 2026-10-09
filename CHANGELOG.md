@@ -8,9 +8,17 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.7.0, engine gateway 1.0.0
+## Unreleased — protocol 13.8.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.8.0 adds an explicit Agents-A1 Discovery JSON guidance profile under
+invariant §25 (minor: additive exports). Gateway sends the complete named schema
+as guidance with finite `max_tokens`, retains physical HTTP evidence and keeps
+reasoning separate from final content. Bench binds the exact Discovery route,
+model, wire, one-attempt limits and a dated limited-time zero ink price into
+existing preflight, authority and cache owners. Missing usage remains unknown.
+Ordinary defaults, historical provider profiles and semantic admission are unchanged.
 
 Protocol 13.7.0 adds an explicit Step 5 Preview JSON Mode profile and the shared
 wire-format lookup under invariant §25 (minor: additive exports). Gateway places

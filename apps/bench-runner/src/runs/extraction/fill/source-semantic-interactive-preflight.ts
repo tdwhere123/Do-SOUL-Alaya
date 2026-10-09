@@ -1,9 +1,9 @@
-import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isStepSemanticRequestProfile, isChatSemanticRequestProfile, isInternSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SourceSemanticUnsupportedSourceSchema } from "@do-soul/alaya-soul";
 import { z } from "zod";
 import { parseExtractionSampleKeys } from "../authority/sample-scope.js";
 import { attemptInputByteUpperBound } from "../authority/receipt-limits.js";
-import { StepQuoteBasisSchema, assertStepQuoteBasis, stepQuoteBasis } from "../authority/step-quote.js";
+import { NativeChatQuoteBasisSchema, assertNativeChatQuoteBasis, nativeChatQuoteBasis } from "../authority/native-chat-quote.js";
 import { ExtractionTransportProvenanceSchema, buildExtractionTransportProvenance,
   resolveExtractionTransportRoute } from "../transport-route.js";
 import { inspectExtractionFillPreparation } from "./fill-preparation.js";
@@ -27,7 +27,7 @@ const GeminiQuoteBasisSchema = z.object({
   input_usd_equivalent_per_million: z.number().positive().finite(),
   output_usd_equivalent_per_million: z.number().positive().finite()
 }).strict();
-const QuoteBasisSchema = z.union([StepQuoteBasisSchema, GeminiQuoteBasisSchema]);
+const QuoteBasisSchema = z.union([NativeChatQuoteBasisSchema, GeminiQuoteBasisSchema]);
 const PlannedRequestSchema = SourceRequestLineSchema.unwrap().extend({
   request_digest: DigestSchema,
   wire_sha256: DigestSchema.optional(),
@@ -56,7 +56,7 @@ const RetainedPreflightSchema = z.object({
     transportProviderUrl: z.string().min(1).optional(),
     transportModel: z.string().min(1).optional(),
     modelFamily: z.string().min(1).optional(),
-    requestProfile: z.string().refine(profile => isStepSemanticRequestProfile(profile) ||
+    requestProfile: z.string().refine(profile => isChatSemanticRequestProfile(profile) ||
       isNativeGeminiRequestProfile(profile)),
     apiKey: z.null(), sourcePacking: z.literal("complete-source"),
     openSemantics: z.unknown()
@@ -81,11 +81,13 @@ export function parseSourceSemanticInteractivePreflight(value: unknown): SourceS
   const config = { ...report.config,
     openSemantics: parseExtractionOpenSemanticsGeneration(report.config.openSemantics) };
   const route = resolveExtractionTransportRoute(config);
-  if (isStepSemanticRequestProfile(config.requestProfile)) {
-    assertStepQuoteBasis(config.requestProfile, route.model, route.providerUrl, report.quote_basis);
+  if (isChatSemanticRequestProfile(config.requestProfile)) {
+    assertNativeChatQuoteBasis(config.requestProfile, route.model, route.providerUrl, report.quote_basis);
     if (report.output_token_field !== "max_tokens" ||
-        report.wire_digest_contract !== undefined) {
-      throw new AlayaError("CONFLICT", "retained Step preflight profile and quote differ");
+        (isInternSemanticRequestProfile(config.requestProfile)
+          ? report.wire_digest_contract !== SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT
+          : report.wire_digest_contract !== undefined)) {
+      throw new AlayaError("CONFLICT", "retained native chat preflight profile and quote differ");
     }
   } else if (report.output_token_field !== "maxOutputTokens" ||
       report.quote_basis.contract !== "gemini-source-experimental-quote-v1" ||
@@ -180,8 +182,9 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
   }
   const inspected = await inspectExtractionFillPreparation(options, options.cacheRoot, undefined);
   const step = isStepSemanticRequestProfile(inspected.config.requestProfile);
-  if (!step && !isNativeGeminiRequestProfile(inspected.config.requestProfile)) {
-    throw new AlayaError("VALIDATION", "interactive source dry preflight requires a native Step or Gemini profile");
+  const chat = isChatSemanticRequestProfile(inspected.config.requestProfile);
+  if (!chat && !isNativeGeminiRequestProfile(inspected.config.requestProfile)) {
+    throw new AlayaError("VALIDATION", "interactive source dry preflight requires a native chat or Gemini profile");
   }
   const selectedKeys = options.preflightKeys === undefined ? undefined :
     new Set(parseExtractionSampleKeys(options.preflightKeys));
@@ -191,7 +194,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     throw new AlayaError("CONFLICT", "interactive host preparation lost unsupported source occurrences");
   }
   const route = resolveExtractionTransportRoute(inspected.config);
-  const quote = step ? stepQuoteBasis(route.model, route.providerUrl) : GeminiQuoteBasisSchema.parse({
+  const quote = chat ? nativeChatQuoteBasis(inspected.config.requestProfile, route.model, route.providerUrl) : GeminiQuoteBasisSchema.parse({
     contract: "gemini-source-experimental-quote-v1", selected_model: route.model,
     selected_provider_url: route.providerUrl, value_kind: "declared_experimental_usd_policy_not_invoice",
     input_usd_equivalent_per_million: options.geminiQuoteRates?.inputUsdPerMillion,
@@ -227,7 +230,7 @@ export async function preflightSourceSemanticInteractive(options: ExtractionFill
     quote_basis: quote,
     max_output_tokens: maxOutputTokens,
     ...(step ? {} : { wire_digest_contract: SOURCE_SEMANTIC_INTERACTIVE_WIRE_DIGEST_CONTRACT }),
-    output_token_field: step ? "max_tokens" as const : "maxOutputTokens" as const,
+    output_token_field: chat ? "max_tokens" as const : "maxOutputTokens" as const,
     maximum_attempts_per_key: 1 as const,
     maximum_input_tokens_per_attempt: maximumInputTokensPerAttempt,
     input_token_bound: requests.reduce((sum, row) => sum + row.input_byte_upper, 0),

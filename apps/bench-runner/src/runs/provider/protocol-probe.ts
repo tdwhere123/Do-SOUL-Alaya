@@ -1,7 +1,9 @@
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
-import { isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
-import { executeProviderChatCompletion, type ProviderHttpResponseEvidence,
-  type ProviderUsage } from "@do-soul/alaya-engine-gateway";
+import { createHash } from "node:crypto";
+import { isChatSemanticRequestProfile, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { buildProviderChatRequestBody, executeProviderChatCompletion, ProviderChatCompletionError,
+  providerChatCompletionsUrl, type ProviderChatCompletionRequest, type ProviderHttpResponseEvidence,
+  type ProviderRequestProfile, type ProviderUsage } from "@do-soul/alaya-engine-gateway";
 import { sourceBoundF3Seal } from "@do-soul/alaya-soul";
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
 import { requireProviderBinding, resolveVendorModel } from "./catalog.js";
@@ -26,6 +28,11 @@ export interface ProviderProtocolProbeReceipt {
   readonly f3_seal_current: true;
   readonly usage?: ProviderUsage;
   readonly http_response?: ProviderHttpResponseEvidence;
+  readonly declared_bounds?: Readonly<{ max_output_tokens: number; timeout_ms: number; maximum_attempts: 1 }>;
+  readonly json_schema_valid?: boolean;
+  readonly provider_url?: string;
+  readonly request_digest?: string;
+  readonly failure?: Readonly<{ kind: string; http_status: number | null; provider_code: string | null }>;
 }
 
 export async function probeProviderProtocol(
@@ -48,6 +55,10 @@ export async function probeProviderProtocol(
   };
   const model = resolveVendorModel(input.model);
   const framing = input.framing ?? "json";
+  const intern = isInternSemanticRequestProfile(binding.requestProfile);
+  if (intern && framing !== "json") throw new Error("Intern protocol probe supports JSON framing only");
+  const timeoutMs = intern ? 180_000 : 20_000;
+  const maxOutputTokens = intern ? 8192 : 256;
   if (isNativeGeminiRequestProfile(binding.requestProfile)) {
     if (framing !== "json") throw new Error("Gemini protocol probe supports JSON framing only");
     const response = await createGeminiHttpExtractor({
@@ -65,42 +76,80 @@ export async function probeProviderProtocol(
       finish_reason: response.responseMetadata?.finishReason ?? null, f3_seal_current: true
     };
   }
-  const execution = await executeProviderChatCompletion({
+  return probeChatCompletion(input, binding.requestProfile, model, framing, fetchImpl,
+    () => physicalCalls, timeoutMs, maxOutputTokens);
+}
+
+async function probeChatCompletion(input: ProviderProtocolProbeInput, profile: ProviderRequestProfile,
+  model: string, framing: "json" | "sse", fetchImpl: typeof fetch, physicalCalls: () => number,
+  timeoutMs: number, maxOutputTokens: number): Promise<ProviderProtocolProbeReceipt> {
+  const intern = isInternSemanticRequestProfile(profile);
+  const request: ProviderChatCompletionRequest = {
     providerUrl: input.providerUrl,
     apiKey: input.apiKey,
     model,
     systemPrompt: "Return JSON only.",
     userPrompt: "{\"probe\":true}",
-    profile: binding.requestProfile,
+    profile,
     mode: framing,
-    ...(isStepSemanticRequestProfile(binding.requestProfile) ? { retainHttpResponseEvidence: true as const } : {}),
-    ...(isStepSemanticRequestProfile(binding.requestProfile)
+    ...(isChatSemanticRequestProfile(profile) ? { retainHttpResponseEvidence: true as const } : {}),
+    ...(isChatSemanticRequestProfile(profile)
       ? { jsonSchema: { name: "provider_protocol_probe", schema: {
         type: "object", properties: { probe: { type: "boolean" } },
         required: ["probe"], additionalProperties: false
       } } }
       : { jsonObject: true }),
-    timeoutMs: 20_000,
-    maxOutputTokens: 256,
+    timeoutMs,
+    maxOutputTokens,
     fetchImpl,
     env: process.env
-  }, {
-    maxRetries: 0,
-    retryDelaysMs: []
-  });
-  if (physicalCalls === 0) {
+  };
+  const body = buildProviderChatRequestBody(request);
+  const url = providerChatCompletionsUrl(input.providerUrl, process.env);
+  const declared = intern ? {
+    provider_url: input.providerUrl,
+    request_digest: createHash("sha256").update(JSON.stringify([url, JSON.stringify(body)])).digest("hex"),
+    declared_bounds: { max_output_tokens: maxOutputTokens, timeout_ms: timeoutMs, maximum_attempts: 1 as const }
+  } : {};
+  let execution;
+  try {
+    execution = await executeProviderChatCompletion(request, { maxRetries: 0, retryDelaysMs: [] });
+  } catch (cause) {
+    if (!intern || !(cause instanceof ProviderChatCompletionError)) throw cause;
+    return {
+      profile, model, framing, physical_calls: physicalCalls(), json_object: false,
+      json_schema_valid: false, usage_present: false, finish_reason: null, f3_seal_current: true,
+      ...declared,
+      failure: { kind: cause.kind, http_status: cause.httpStatus, provider_code: cause.providerCode },
+      ...(cause.httpResponse === undefined ? {} : { http_response: cause.httpResponse })
+    };
+  }
+  if (physicalCalls() === 0) {
     throw new Error("provider protocol probe made no physical call");
   }
   return {
-    profile: binding.requestProfile,
+    profile,
     model,
     framing,
-    physical_calls: physicalCalls,
-    json_object: execution.result.text.trim().startsWith("{"),
+    physical_calls: physicalCalls(),
+    json_object: intern ? probeSchemaValid(execution.result.text) : execution.result.text.trim().startsWith("{"),
     usage_present: execution.result.usage !== undefined,
     finish_reason: execution.result.finishReason,
     f3_seal_current: true,
     ...(execution.result.usage === undefined ? {} : { usage: execution.result.usage }),
-    ...(execution.result.httpResponse === undefined ? {} : { http_response: execution.result.httpResponse })
+    ...(execution.result.httpResponse === undefined ? {} : { http_response: execution.result.httpResponse }),
+    ...(intern ? {
+      ...declared,
+      json_schema_valid: probeSchemaValid(execution.result.text) && execution.result.finishReason === "stop" &&
+        execution.result.completion?.mode === "json"
+    } : {})
   };
+}
+
+function probeSchemaValid(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null && !Array.isArray(value) &&
+      Object.keys(value).length === 1 && "probe" in value && value.probe === true;
+  } catch { return false; }
 }

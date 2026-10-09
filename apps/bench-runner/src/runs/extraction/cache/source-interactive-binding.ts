@@ -1,5 +1,6 @@
+import { interactiveSourceTransportBinding } from "../request-profile.js";
 import {
-  isStepSemanticRequestProfile, AlayaError, canonicalJson, DEFAULT_EXTRACTION_SOURCE_PACKING
+  isChatSemanticRequestProfile, AlayaError, canonicalJson, DEFAULT_EXTRACTION_SOURCE_PACKING
 } from "@do-soul/alaya-protocol";
 import type { CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
 import { inspectCachedResponseMetadata, persistedResponseMetadata } from "../../compile-seed/cache/cached-response-metadata.js";
@@ -94,8 +95,7 @@ export function readCompletePhysicalSourceResponseForRequest(input: Readonly<{
 }
 
 export function assertInteractiveProvenance(provenance: InteractiveSemanticProvenance, requestProfile: string): void {
-  const transport = isStepSemanticRequestProfile(requestProfile)
-    ? "step-chat-completion" : "gemini-generate-content";
+  const transport = interactiveSourceTransportBinding(requestProfile).transport;
   if (provenance.transport !== transport || "job" in provenance || "inputFile" in provenance ||
       !Number.isSafeInteger(provenance.attemptOrdinal) || provenance.attemptOrdinal <= 0) {
     throw new AlayaError("CONFLICT", "typed open-semantics interactive transport binding mismatch");
@@ -109,15 +109,14 @@ export function interactiveResponseMetadata(provenance: InteractiveSemanticProve
 
 /** One outer-evidence check for import, current reuse, and retained classification. */
 export function inspectInteractiveTransportEvidence(
-  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
+  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" | "intern_chat_completion" }>,
   entry: CachedExtractionEntry,
   cacheRoot: string,
   retainedOnly = false
 ): { readonly attemptOrdinal: number; readonly authorityLineageDigest: string;
   readonly admissionState: "pending" | "admitted"; readonly requestBinding: "verified" | "unbound";
   readonly historyComplete: boolean } {
-  if ((typed.kind === "step_chat_completion") !==
-      (isStepSemanticRequestProfile(entry.request_profile))) {
+  if (typed.kind !== interactiveSourceTransportBinding(entry.request_profile).kind) {
     throw new AlayaError("CONFLICT", "typed source semantic cache kind/profile mismatch");
   }
   assertInteractiveProvenance(typed.result.provenance, entry.request_profile);
@@ -150,9 +149,9 @@ export function inspectInteractiveTransportEvidence(
     providerUrl: logical.providerUrl, transportProviderUrl: transport.providerUrl,
     transportModel: transport.model, apiKey: null
   };
-  // Retired Step schema bytes have no independent wire witness here. Preserve
+  // Retired native chat schema bytes have no independent wire witness here. Preserve
   // their accounting, but never classify an unchecked digest as verified.
-  const requestBinding = retainedOnly && typed.kind === "step_chat_completion" ? "unbound" : "verified";
+  const requestBinding = retainedOnly && isChatSemanticRequestProfile(entry.request_profile) ? "unbound" : "verified";
   const requestDigestMatches = requestBinding === "unbound" ||
     raw.request_digest === sourceSemanticRequestWireDigest(requestConfig, line, receipt.limits.max_output_tokens);
   if (manifest?.providerUrl !== logical.providerUrl ||

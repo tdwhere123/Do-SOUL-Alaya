@@ -1,4 +1,5 @@
 import { LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES } from "@do-soul/alaya-eval/authority";
+import { isInternSemanticRequestProfile, isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
 
 export const EXTRACTION_REQUEST_PROFILES = LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES;
 
@@ -29,4 +30,15 @@ export type NativeGeminiRequestProfile = Extract<ExtractionRequestProfile, `gemi
 
 export function isNativeGeminiRequestProfile(value: unknown): value is NativeGeminiRequestProfile {
   return isExtractionRequestProfile(value) && value.startsWith("gemini-");
+}
+
+/** Persisted transport vocabulary keeps each provider family explicit. */
+export function interactiveSourceTransportBinding(profile: string) {
+  if (isInternSemanticRequestProfile(profile)) return {
+    kind: "intern_chat_completion", transport: "intern-chat-completion"
+  } as const;
+  if (isStepSemanticRequestProfile(profile)) return {
+    kind: "step_chat_completion", transport: "step-chat-completion"
+  } as const;
+  return { kind: "gemini_generate_content", transport: "gemini-generate-content" } as const;
 }

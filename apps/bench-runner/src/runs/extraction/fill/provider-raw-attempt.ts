@@ -1,4 +1,4 @@
-import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -232,20 +232,20 @@ function isStepRawAttemptContract(contract: string): boolean {
 }
 
 function providerRawAttemptContract(kind: RawAttemptOwner["kind"], requestProfile: string): string {
-  const step = isStepSemanticRequestProfile(requestProfile);
+  const chat = isChatSemanticRequestProfile(requestProfile);
   if (kind === "source_semantic") {
-    return step ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : PROVIDER_RAW_ATTEMPT_CONTRACT;
+    return chat ? STEP_PROVIDER_RAW_ATTEMPT_CONTRACT : PROVIDER_RAW_ATTEMPT_CONTRACT;
   }
   if (kind === "source_evidence_selection") {
-    return step ? STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT : EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT;
+    return chat ? STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT : EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT;
   }
   if (kind === "source_evidence_preservation") {
-    return step ? STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT : EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT;
+    return chat ? STEP_EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT : EVIDENCE_PRESERVATION_RAW_ATTEMPT_CONTRACT;
   }
   if (kind === "page_support_comparison") {
-    return step ? STEP_PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT : PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT;
+    return chat ? STEP_PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT : PAGE_SUPPORT_COMPARISON_RAW_ATTEMPT_CONTRACT;
   }
-  return step ? STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT;
+  return chat ? STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT : PROPOSAL_RAW_ATTEMPT_CONTRACT;
 }
 
 export function bindProviderRawAttempt(
@@ -258,8 +258,8 @@ export function bindProviderRawAttempt(
   } & RawAttemptOwner>
 ): ProviderRawAttempt {
   assertProviderRawIntegrity(raw);
-  const step = isStepSemanticRequestProfile(expected.requestProfile);
-  if (step !== isStepRawAttemptContract(raw.contract)) {
+  const chat = isChatSemanticRequestProfile(expected.requestProfile);
+  if (chat !== isStepRawAttemptContract(raw.contract)) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt contract/profile mismatch: ${expected.cacheKey}`);
   }
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
@@ -319,7 +319,7 @@ export function providerRawSuccessEvidenceState(
   raw: ProviderRawAttempt
 ): "bound" | "missing" | "truncated" | "failed" | "unsupported" {
   if (raw.transport_failure !== undefined) return "failed";
-  if (isStepSemanticRequestProfile(raw.request_profile)) {
+  if (isChatSemanticRequestProfile(raw.request_profile)) {
     if (raw.http_response === undefined) return "missing";
     return raw.http_response.bodyTruncated || !raw.http_response.bodyComplete ? "truncated" : "bound";
   }
@@ -378,11 +378,11 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
         http.bodyTruncated !== (httpBytes.length < http.bodyByteLength) ||
         !http.bodyTruncated && (httpBytes.length !== http.bodyByteLength ||
           createHash("sha256").update(httpBytes).digest("hex") !== http.bodySha256)) ||
-      isStepSemanticRequestProfile(raw.request_profile) &&
+      isChatSemanticRequestProfile(raw.request_profile) &&
         (!isStepRawAttemptContract(raw.contract) ||
          body !== undefined || raw.transport_failure === undefined &&
            (http === undefined || !http.bodyComplete)) ||
-      !isStepSemanticRequestProfile(raw.request_profile) && http !== undefined) {
+      !isChatSemanticRequestProfile(raw.request_profile) && http !== undefined) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt integrity mismatch: ${raw.cache_key}`);
   }
   assertCompletePhysicalResponse(raw, httpBytes);
@@ -394,7 +394,7 @@ function assertCompletePhysicalResponse(raw: ProviderRawAttempt, httpBytes: Buff
   if (raw.transport_failure !== undefined) return;
   let decoded: { text: string; finishReason: string | null; usage?: unknown } | undefined;
   try {
-    if (isStepSemanticRequestProfile(raw.request_profile)) {
+    if (isChatSemanticRequestProfile(raw.request_profile)) {
       const http = raw.http_response;
       if (http?.bodyComplete && !http.bodyTruncated && httpBytes !== undefined) {
         decoded = inspectProviderChatCompletionResponse(httpBytes, http.contentType, 200,

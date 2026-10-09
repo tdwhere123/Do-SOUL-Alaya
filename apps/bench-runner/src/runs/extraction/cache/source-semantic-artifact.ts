@@ -1,9 +1,10 @@
+import { interactiveSourceTransportBinding } from "../request-profile.js";
 import {
   parseSourceSemanticRequest, completeEmptySourceSemantics, MAX_SOURCE_SEMANTIC_RESPONSE_BYTES,
   type SourceSemanticProposalResult
 } from "@do-soul/alaya-soul";
 import {
-  isStepSemanticRequestProfile, AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT,
+  AlayaError, canonicalJson, SOURCE_SEMANTIC_CACHE_CONTRACT,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
 import { readCachedEntry, writeCachedExtraction, MAX_EXTRACTION_CACHE_SHARD_BYTES, type CachedExtractionEntry } from "../../compile-seed/cache/cache-shard.js";
@@ -33,7 +34,7 @@ import { SourceRequestLineSchema, type SourceRequestLine } from "../request-arti
 export class SourceSemanticAdmissionError extends Error {}
 
 export type InteractiveSemanticProvenance = Readonly<{
-  readonly transport: "gemini-generate-content" | "step-chat-completion";
+  readonly transport: "gemini-generate-content" | "step-chat-completion" | "intern-chat-completion";
   readonly finishReason: string | null;
   readonly attemptOrdinal: number;
   readonly responseSha256: string;
@@ -61,6 +62,7 @@ export type CachedSourceSemantic = Readonly<{
   | Readonly<{ kind: "gemini_batch"; plan_identity: string; authority_receipt_digest: string; result: Parameters<GeminiBatchInvocation["importLine"]>[0] }>
   | Readonly<{ kind: "gemini_generate_content"; result: InteractiveSemanticLineResult }>
   | Readonly<{ kind: "step_chat_completion"; result: InteractiveSemanticLineResult }>
+  | Readonly<{ kind: "intern_chat_completion"; result: InteractiveSemanticLineResult }>
   | Readonly<{ kind: "deterministic_empty"; line: SourceRequestLine }>
 );
 
@@ -109,7 +111,7 @@ function assertCompleteProviderFinish(finishReason: string | null, requestProfil
 }
 
 function inspectInteractiveGenerateContent(
-  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" }>,
+  typed: Extract<CachedSourceSemantic, { kind: "gemini_generate_content" | "step_chat_completion" | "intern_chat_completion" }>,
   entry: CachedExtractionEntry,
   cacheRoot: string,
   request: ReturnType<typeof parseSourceSemanticRequest>
@@ -135,7 +137,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
       typed.interpretation_contract !== SOURCE_SEMANTIC_PACKET_CONTRACT ||
       typeof typed.source_corpus !== "string" || typeof typed.producer_id !== "string" ||
       (typed.kind !== "gemini_batch" && typed.kind !== "gemini_generate_content" &&
-       typed.kind !== "step_chat_completion" &&
+       typed.kind !== "step_chat_completion" && typed.kind !== "intern_chat_completion" &&
        typed.kind !== "deterministic_empty")) {
     throw new AlayaError("CONFLICT", "invalid typed source semantic cache artifact");
   }
@@ -159,7 +161,7 @@ function inspectSourceSemanticEntry(entry: CachedExtractionEntry, cacheRoot: str
     if (admitted.outcome.status !== "no_eligible_source" || typed.completion !== "no_eligible_source") {
       throw new AlayaError("CONFLICT", "deterministic open semantics is not a zero-attempt empty catalog");
     }
-  } else if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
+  } else if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion" || typed.kind === "intern_chat_completion") {
     const inspected = inspectInteractiveGenerateContent(typed, entry, cacheRoot, request);
     admitted = inspected.admitted;
     interactiveBinding = inspected.binding;
@@ -331,7 +333,7 @@ function inspectRetiredSourceSemanticEntry(entry: CachedExtractionEntry, cacheRo
     }
     return;
   }
-  if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion") {
+  if (typed.kind === "gemini_generate_content" || typed.kind === "step_chat_completion" || typed.kind === "intern_chat_completion") {
     inspectInteractiveTransportEvidence(typed, entry, cacheRoot, true);
     return;
   }
@@ -461,11 +463,11 @@ function importInteractiveSourceSemanticArtifact(input: SourceSemanticImportBase
       request_key: result.line.key, raw_json_sha256: computeExtractionRawJsonSha256(result.rawJson) },
     source_semantic: { contract: SOURCE_SEMANTIC_CACHE_CONTRACT, source_binding: "unbound",
       interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
-      kind: isStepSemanticRequestProfile(config.requestProfile) ? "step_chat_completion" : "gemini_generate_content", completion,
+      kind: interactiveSourceTransportBinding(config.requestProfile).kind, completion,
       source_corpus: input.sourceCorpus, producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID, result }
   };
   inspectInteractiveTransportEvidence(entry.source_semantic as Extract<CachedSourceSemantic,
-    { kind: "gemini_generate_content" | "step_chat_completion" }>, entry, input.cacheRoot);
+    { kind: "gemini_generate_content" | "step_chat_completion" | "intern_chat_completion" }>, entry, input.cacheRoot);
   persistSemanticEntry(input, entry, identity.manifestSha256);
   return admitted;
 }

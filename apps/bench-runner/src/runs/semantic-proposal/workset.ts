@@ -1,5 +1,5 @@
 import {
-  isStepSemanticRequestProfile, AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
+  isChatSemanticRequestProfile, AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
   UNKNOWN_UTTERANCE_ATTRIBUTION
 } from "@do-soul/alaya-protocol";
 import { z } from "zod";
@@ -25,7 +25,7 @@ export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
 
 export function semanticProposalWorksetContract(requestProfile: string) {
-  return isStepSemanticRequestProfile(requestProfile)
+  return isChatSemanticRequestProfile(requestProfile)
     ? STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT : SEMANTIC_PROPOSAL_WORKSET_CONTRACT;
 }
 
@@ -73,11 +73,11 @@ export type SemanticProposalLine = Readonly<{
 
 export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWorkset {
   const workset = SemanticProposalWorksetSchema.parse(value);
-  const step = isStepSemanticRequestProfile(workset.request_profile);
+  const chat = isChatSemanticRequestProfile(workset.request_profile);
   if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
   }
-  return { ...workset, provider_url: step
+  return { ...workset, provider_url: chat
     ? workset.provider_url : normalizeGeminiEndpoint(workset.provider_url).origin };
 }
 
@@ -87,7 +87,7 @@ export function materializeSemanticProposalLines(
   if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
   }
-  if (!isNativeGeminiRequestProfile(workset.request_profile) && !isStepSemanticRequestProfile(workset.request_profile)) {
+  if (!isNativeGeminiRequestProfile(workset.request_profile) && !isChatSemanticRequestProfile(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
   if (workset.kind === "query") {
@@ -131,7 +131,7 @@ function bindLine(
   original_query: string,
   maxOutputTokens: number
 ): SemanticProposalLine {
-  if (!isNativeGeminiRequestProfile(workset.request_profile) && !isStepSemanticRequestProfile(workset.request_profile)) {
+  if (!isNativeGeminiRequestProfile(workset.request_profile) && !isChatSemanticRequestProfile(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
   const userPrompt = JSON.stringify(request);
@@ -159,7 +159,7 @@ export function proposalCacheKey(
   model: string, requestProfile: string, systemPrompt: string, userPrompt: string, schema: object,
   maxOutputTokens: number, providerUrl: string
 ): string {
-  if (!isNativeGeminiRequestProfile(requestProfile) && !isStepSemanticRequestProfile(requestProfile)) {
+  if (!isNativeGeminiRequestProfile(requestProfile) && !isChatSemanticRequestProfile(requestProfile)) {
     throw new AlayaError("VALIDATION", "semantic proposal requires a native semantic profile");
   }
   return semanticProviderRequestCacheKey({

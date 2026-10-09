@@ -1,5 +1,5 @@
 import { ProviderChatCompletionError } from "./errors.js";
-import { AlayaError, isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { AlayaError, isChatSemanticRequestProfile, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import {
   PROVIDER_FAILURE_BODY_DIGEST_BYTES,
   providerFailureIdentityFromBody,
@@ -65,16 +65,18 @@ async function runProviderChatRequest(
 ): Promise<ProviderChatCompletionResult> {
   const response = await postChatCompletion(request, signal);
   observeStatus(response.status);
-  if (isStepSemanticRequestProfile(request.profile)) {
+  if (isChatSemanticRequestProfile(request.profile)) {
     let bodyText: string;
     let evidence: ProviderHttpResponseEvidence;
     const boundedError = !response.ok;
+    const intern = isInternSemanticRequestProfile(request.profile);
+    const failureCap = intern ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : PROVIDER_FAILURE_BODY_DIGEST_BYTES;
     ({ bodyText, evidence } = await readProviderResponseWithEvidence(
       response, observeResponse,
-      boundedError ? PROVIDER_FAILURE_BODY_DIGEST_BYTES
-        : request.retainHttpResponseEvidence === true ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined,
+      boundedError ? failureCap
+        : intern || request.retainHttpResponseEvidence === true ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined,
       // Cancellation threshold only. Received bytes beyond the retained prefix stay in the digest.
-      boundedError ? PROVIDER_FAILURE_BODY_DIGEST_BYTES : undefined
+      boundedError ? failureCap : undefined
     ));
     if (!response.ok) {
       throw new ProviderChatCompletionError(
@@ -147,6 +149,9 @@ function inspectBody(
     const result = inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus, {
       sseCompletionPolicy: request.sseCompletionPolicy
     });
+    if (isInternSemanticRequestProfile(request.profile) && result.completion?.mode !== "json") {
+      throw new ProviderResponseInspectionError("Intern JSON profile received unexpected streaming framing", "schema");
+    }
     return evidence === undefined ? result : { ...result, httpResponse: evidence };
   } catch (error) {
     throw new ProviderChatCompletionError(

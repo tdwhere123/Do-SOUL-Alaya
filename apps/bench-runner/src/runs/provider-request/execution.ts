@@ -1,6 +1,7 @@
+import { assertNativeChatReportedUsage } from "../extraction/authority/native-chat-quote.js";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
 import { readStepFailureResponse } from "../compile-seed/http/semantic-provider-http.js";
@@ -8,7 +9,7 @@ import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-t
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import type { ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import type { ExtractionTransportOutcome } from "../extraction/authority/attempt-ledger/outcome.js";
-import { assertStepReportedUsage, baseReportedUsage } from "../extraction/authority/step-quote.js";
+import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import {
   listProviderRawAttempts, readProviderRawAttempt, writeProviderRawAttempt,
@@ -116,10 +117,10 @@ export async function executeProviderRequestLine(
         systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
         timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(context.maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
         maxOutputTokens: context.maxOutputTokens,
-        outputTokenField: isStepSemanticRequestProfile(context.config.requestProfile)
+        outputTokenField: isChatSemanticRequestProfile(context.config.requestProfile)
           ? "max_tokens" : "maxOutputTokens",
         validateRawJson: () => undefined, responseJsonSchema: line.responseJsonSchema,
-        ...(isStepSemanticRequestProfile(context.requestProfile)
+        ...(isChatSemanticRequestProfile(context.requestProfile)
           ? { retainHttpResponseEvidence: true as const } : {})
       });
     } catch (cause) {
@@ -219,7 +220,7 @@ function replayPersistedProviderRequestRaw(
   lastAttempt: boolean
 ): { classified: ProviderRequestAttemptClass; admitted: boolean } {
   context.assertReservation(raw);
-  assertStepReportedUsage(context.requestProfile, raw.usage, context.maxOutputTokens);
+  assertNativeChatReportedUsage(context.requestProfile, raw.usage, context.maxOutputTokens);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     if (raw.failure_retryable !== true || lastAttempt) {

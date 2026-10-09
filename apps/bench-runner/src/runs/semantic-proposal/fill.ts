@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery, refuseRecallCampaignLiveExtraction
 } from "@do-soul/alaya-core";
-import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import {
   prepareSourceSemanticProposalRevision, proposeCorrespondenceSemantics, proposeQuerySemantics,
   type SourceSemanticProposalRevision,
@@ -104,9 +104,9 @@ export async function executeSemanticProposalFill(input: Readonly<{
     ).shard;
     if (existing !== undefined) {
       const prior = replayCachedProposalShard(line, existing);
-      if (isStepSemanticRequestProfile(input.workset.request_profile) &&
+      if (isChatSemanticRequestProfile(input.workset.request_profile) &&
           prior !== "interpreted" && prior !== "abstained") {
-        throw new AlayaError("CONFLICT", `Step proposal fill stopped after retained ${prior} for ${line.key}`);
+        throw new AlayaError("CONFLICT", `native chat proposal fill stopped after retained ${prior} for ${line.key}`);
       }
       cacheHits += 1;
       if (authorized.has(line.key)) retainedLines.push(line);
@@ -135,9 +135,9 @@ export async function executeSemanticProposalFill(input: Readonly<{
           !ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) continue;
       const replayed = replayExistingProviderRequestRaws(
         proposalPhysicalRequestContext(input, line, ledger), line);
-      if (isStepSemanticRequestProfile(input.workset.request_profile) && replayed.done &&
+      if (isChatSemanticRequestProfile(input.workset.request_profile) && replayed.done &&
           replayed.classified !== "interpreted" && replayed.classified !== "abstained") {
-        throw new AlayaError("CONFLICT", `Step proposal fill stopped after retained ${replayed.classified} for ${line.key}`);
+        throw new AlayaError("CONFLICT", `native chat proposal fill stopped after retained ${replayed.classified} for ${line.key}`);
       }
       if (ledger.snapshot().pendingKeys.includes(line.key) ||
           ledger.snapshot().unresolvedAttempts.some((item) => item.cacheKey === line.key)) {
@@ -152,9 +152,9 @@ export async function executeSemanticProposalFill(input: Readonly<{
       const filled = await executeProviderRequestLine(
         proposalDispatchRequestContext(input, line, ledger, lease, extractor!), line);
       attempts += filled.attempts;
-      if (isStepSemanticRequestProfile(input.workset.request_profile) &&
+      if (isChatSemanticRequestProfile(input.workset.request_profile) &&
           filled.classified !== "interpreted" && filled.classified !== "abstained") {
-        throw new AlayaError("CONFLICT", `Step proposal fill stopped after ${filled.classified} for ${line.key}`);
+        throw new AlayaError("CONFLICT", `native chat proposal fill stopped after ${filled.classified} for ${line.key}`);
       }
       if (filled.admitted) {
         newlyAdmitted += 1;

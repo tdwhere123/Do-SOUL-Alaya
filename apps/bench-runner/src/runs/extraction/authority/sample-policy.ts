@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AlayaError, canonicalJson, isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, isChatSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import type { ExtractionAuthorityObservation } from "./receipt.js";
 import { isNativeGeminiRequestProfile } from "../request-profile.js";
 
@@ -47,7 +47,7 @@ export function createExtractionSamplePolicyRegistry(policies: readonly Extracti
       const { rules } = entry.policy;
       const dataset = observation.dataset;
       const interactive = observation.extraction.sourcePacking === "complete-source" &&
-        (isStepSemanticRequestProfile(observation.extraction.requestProfile) ||
+        (isChatSemanticRequestProfile(observation.extraction.requestProfile) ||
           isNativeGeminiRequestProfile(observation.extraction.requestProfile));
       if (rules.inventory === "first-100"
         ? dataset.variant !== "longmemeval_s" || dataset.windowOffset !== 0 || dataset.windowLimit !== 100 || preflight

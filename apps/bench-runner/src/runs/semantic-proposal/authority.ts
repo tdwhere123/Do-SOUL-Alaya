@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
-import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, isInternSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import type { SemanticProposalKind, SemanticProposalLine } from "./workset.js";
 import { ExtractionTransportProvenanceSchema } from "../extraction/transport-route.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
-import { StepQuoteBasisSchema, assertStepQuoteRates, stepQuoteBasisForDigest } from "../extraction/authority/step-quote.js";
+import { NativeChatQuoteBasisSchema, assertNativeChatQuoteRates, nativeChatQuoteBasisForDigest } from "../extraction/authority/native-chat-quote.js";
 import {
   ExtractionTargetRootBindingSchema, assertExtractionTargetRootBinding, canonicalExtractionTargetRoot,
   initializeExtractionTargetRoot, inspectExtractionTargetRoot
@@ -50,7 +50,7 @@ const AuthoritySchema = z.object({
     output_usd_per_million: z.number().nonnegative(),
     maximum_input_tokens_per_attempt: z.number().int().nonnegative(),
     estimated_upper_usd: z.number().nonnegative(),
-    quote_basis: StepQuoteBasisSchema.optional()
+    quote_basis: NativeChatQuoteBasisSchema.optional()
   }).strict(),
   keys: z.array(z.string().regex(/^[0-9a-f]{64}$/u)).readonly()
 }).strict();
@@ -71,7 +71,7 @@ const PreflightSchema = z.object({
   maximum_attempts: z.number().int().nonnegative(),
   max_output_tokens: z.number().int().positive(),
   maximum_input_tokens_per_attempt: z.number().int().nonnegative(),
-  quote_basis: StepQuoteBasisSchema.optional(),
+  quote_basis: NativeChatQuoteBasisSchema.optional(),
   keys: z.array(z.string().regex(/^[0-9a-f]{64}$/u)).readonly()
 }).strict();
 
@@ -118,9 +118,10 @@ export function buildSemanticProposalPreflight(input: Readonly<{
   executionScope: SemanticProposalPreflight["execution_scope"];
 }>): SemanticProposalPreflight {
   const missingLines = input.lines.filter((line) => !input.cachedKeys.has(line.key));
-  const attemptsPerKey = AttemptsPerKeySchema.parse(input.maxAttemptsPerKey ?? DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY);
-  if (isStepSemanticRequestProfile(input.request_profile) && attemptsPerKey !== 1) {
-    throw new AlayaError("VALIDATION", "Step proposal preflight requires one attempt per key");
+  const attemptsPerKey = AttemptsPerKeySchema.parse(input.maxAttemptsPerKey ??
+    (isInternSemanticRequestProfile(input.request_profile) ? 1 : DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY));
+  if (isChatSemanticRequestProfile(input.request_profile) && attemptsPerKey !== 1) {
+    throw new AlayaError("VALIDATION", "native chat proposal preflight requires one attempt per key");
   }
   const maxInput = missingLines.reduce((max, line) => Math.max(max, line.inputByteUpper), 0);
   const transport = input.lines[0]?.transportProvenance;
@@ -128,7 +129,7 @@ export function buildSemanticProposalPreflight(input: Readonly<{
     throw new AlayaError("VALIDATION", "semantic proposal preflight requires one resolved transport route");
   }
   return {
-    contract: isStepSemanticRequestProfile(input.request_profile)
+    contract: isChatSemanticRequestProfile(input.request_profile)
       ? "source-semantic-proposal-preflight-v6" : "source-semantic-proposal-preflight-v5",
     kind: input.kind, model: input.model, request_profile: input.request_profile,
     transport_provenance: transport,
@@ -139,8 +140,8 @@ export function buildSemanticProposalPreflight(input: Readonly<{
     maximum_attempts: missingLines.length * attemptsPerKey,
     max_output_tokens: input.maxOutputTokens,
     maximum_input_tokens_per_attempt: maxInput,
-    ...(isStepSemanticRequestProfile(input.request_profile) ? {
-      quote_basis: stepQuoteBasisForDigest(transport.model, transport.provider_url_sha256.slice("sha256:".length))
+    ...(isChatSemanticRequestProfile(input.request_profile) ? {
+      quote_basis: nativeChatQuoteBasisForDigest(input.request_profile, transport.model, transport.provider_url_sha256.slice("sha256:".length))
     } : {}),
     keys: missingLines.map((line) => line.key)
   };
@@ -154,7 +155,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
 }>): SemanticProposalAuthority {
   const preflight = PreflightSchema.parse(input.preflight);
   assertProposalQuote(preflight);
-  assertStepQuoteRates(preflight.request_profile, input.inputUsdPerMillion, input.outputUsdPerMillion,
+  assertNativeChatQuoteRates(preflight.request_profile, input.inputUsdPerMillion, input.outputUsdPerMillion,
     preflight.quote_basis);
   if (preflight.execution_scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "semantic proposal executable revision changed since preflight");
@@ -170,7 +171,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
   }) };
   assertSemanticProposalExecutionScope(executionScope, scope.execution_root_path);
   const body = {
-    contract: isStepSemanticRequestProfile(preflight.request_profile)
+    contract: isChatSemanticRequestProfile(preflight.request_profile)
       ? STEP_SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT : SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT,
     action: "fill" as const,
     kind: input.preflight.kind, model: input.preflight.model, request_profile: input.preflight.request_profile,
@@ -185,7 +186,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
       successful_shard_ceiling: input.preflight.missing,
       max_concurrency: 1 as const,
       max_output_tokens: input.preflight.max_output_tokens,
-      output_token_field: isStepSemanticRequestProfile(preflight.request_profile)
+      output_token_field: isChatSemanticRequestProfile(preflight.request_profile)
         ? "max_tokens" as const : "maxOutputTokens" as const
     },
     price: {
@@ -211,7 +212,7 @@ export function estimatedUpperUsd(
 export function verifySemanticProposalAuthority(authority: SemanticProposalAuthority): SemanticProposalAuthority {
   authority = AuthoritySchema.parse(authority);
   assertProposalQuote(authority);
-  assertStepQuoteRates(authority.request_profile,
+  assertNativeChatQuoteRates(authority.request_profile,
     authority.price.input_usd_per_million, authority.price.output_usd_per_million,
     authority.price.quote_basis);
   const { identity_digest, ...body } = authority;
@@ -244,22 +245,22 @@ export function verifySemanticProposalAuthority(authority: SemanticProposalAutho
 }
 
 function assertProposalQuote(input: SemanticProposalPreflight | SemanticProposalAuthority): void {
-  const step = isStepSemanticRequestProfile(input.request_profile);
+  const chat = isChatSemanticRequestProfile(input.request_profile);
   const quote = "price" in input ? input.price.quote_basis : input.quote_basis;
   const expectedContract = "price" in input ? STEP_SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT :
     "source-semantic-proposal-preflight-v6";
-  if (step !== (input.contract === expectedContract) ||
-      "price" in input && input.limits.output_token_field !== (step ? "max_tokens" : "maxOutputTokens") ||
-      step && ("price" in input ? input.limits.maximum_attempts_per_key : input.maximum_attempts_per_key) !== 1) {
+  if (chat !== (input.contract === expectedContract) ||
+      "price" in input && input.limits.output_token_field !== (chat ? "max_tokens" : "maxOutputTokens") ||
+      chat && ("price" in input ? input.limits.maximum_attempts_per_key : input.maximum_attempts_per_key) !== 1) {
     throw new AlayaError("CONFLICT", "semantic proposal profile/contract/output field mismatch");
   }
-  if (!step) {
-    if (quote !== undefined) throw new AlayaError("CONFLICT", "Gemini proposal has a Step quote");
+  if (!chat) {
+    if (quote !== undefined) throw new AlayaError("CONFLICT", "Gemini proposal has a native chat quote");
     return;
   }
-  const expected = stepQuoteBasisForDigest(input.transport_provenance.model,
+  const expected = nativeChatQuoteBasisForDigest(input.request_profile, input.transport_provenance.model,
     input.transport_provenance.provider_url_sha256.slice("sha256:".length));
-  if (canonicalJson(StepQuoteBasisSchema.parse(quote)) !== canonicalJson(expected)) {
+  if (canonicalJson(NativeChatQuoteBasisSchema.parse(quote)) !== canonicalJson(expected)) {
     throw new AlayaError("CONFLICT", "semantic proposal quote differs from its route");
   }
 }

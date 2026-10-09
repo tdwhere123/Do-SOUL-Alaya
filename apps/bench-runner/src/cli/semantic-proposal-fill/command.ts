@@ -1,4 +1,4 @@
-import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, isInternSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { resolveSecretRef } from "@do-soul/alaya";
@@ -26,7 +26,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
     const maxOutputTokens = integerFlag(args, "--max-output-tokens", SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT);
     if (action === "prepare") {
       const preflight = prepareSemanticProposal(workset, cacheRoot, maxOutputTokens,
-        integerFlag(args, "--max-attempts-per-key", DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY));
+        integerFlag(args, "--max-attempts-per-key", isInternSemanticRequestProfile(workset.request_profile) ? 1 : DEFAULT_SEMANTIC_PROPOSAL_ATTEMPTS_PER_KEY));
       writeJsonExclusive(required(args, "--preflight-out"), preflight);
       process.stdout.write(`${JSON.stringify(preflight)}\n`);
       return 0;
@@ -67,7 +67,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
 }
 
 function gardenConfig(model: string, requestProfile: string, authorizedProviderUrl: string): CompileSeedExtractionConfig {
-  if (!isNativeGeminiRequestProfile(requestProfile) && !isStepSemanticRequestProfile(requestProfile)) {
+  if (!isNativeGeminiRequestProfile(requestProfile) && !isChatSemanticRequestProfile(requestProfile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
   const providerUrl = process.env.OFFICIAL_API_GARDEN_PROVIDER_URL?.trim()

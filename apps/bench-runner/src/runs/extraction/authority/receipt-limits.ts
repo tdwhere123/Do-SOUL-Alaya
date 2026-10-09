@@ -1,10 +1,10 @@
-import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import type { ExtractionSampleScope } from "./sample-scope.js";
 import { OFFICIAL_API_EXTRACTION_ASSERTIONS_PER_BATCH } from "@do-soul/alaya-soul";
 import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { BENCH_HTTP_MAX_RETRIES } from "../../compile-seed/http/garden-http-retry-policy.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
-import type { StepQuoteBasis } from "./step-quote.js";
+import type { NativeChatQuoteBasis } from "./native-chat-quote.js";
 
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
 const MAX_ASSERTION_PARTITION_TREE_NODES =
@@ -42,7 +42,7 @@ export interface ExtractionAuthorityReceiptPrice {
   readonly output_usd_per_million: number;
   readonly maximum_input_tokens_per_attempt: number;
   readonly estimated_upper_usd: number;
-  readonly quote_basis?: StepQuoteBasis;
+  readonly quote_basis?: NativeChatQuoteBasis;
 }
 
 export interface ExtractionAuthorityReceiptLimitInput {
@@ -157,7 +157,7 @@ export function expectedExtractionAuthorityLimits(
     return { maximumAttempts: 1, successfulShardCeiling: 1 };
   }
   return {
-    maximumAttempts: isStepSemanticRequestProfile(requestProfile) && sourcePacking === "complete-source"
+    maximumAttempts: isChatSemanticRequestProfile(requestProfile) && sourcePacking === "complete-source"
       ? missing
       : sourcePacking === "complete-source"
       ? completeSourceFillAttemptCeiling(missing)

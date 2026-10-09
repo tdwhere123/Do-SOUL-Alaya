@@ -11,7 +11,7 @@ import {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID
 } from "@do-soul/alaya-core";
 import {
-  AlayaError, canonicalJson, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
+  INTERN_SEMANTIC_REQUEST_PROFILE, AlayaError, canonicalJson, SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION,
   SourceSemanticInterpretationSchema, SourceSemanticQuerySchema,
   buildSourceSemanticCorrespondenceEndpointCatalog, buildSourceSemanticCorrespondenceEndpointEvidence,
   sourceSemanticInterpretationIdentity,
@@ -35,6 +35,7 @@ import {
 } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
+import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
@@ -225,22 +226,26 @@ function generationBody(request: SourceSemanticCorrespondenceRequest): string {
   });
 }
 
-it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"] as const)(
+it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1", INTERN_SEMANTIC_REQUEST_PROFILE] as const)(
   "sends %s correspondence through its pinned route and reopens admitted raw", async profile => {
+  const intern = profile === INTERN_SEMANTIC_REQUEST_PROFILE;
+  const basis = intern ? INTERN_DISCOVERY_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const prepared = parseSemanticProposalWorkset({
     ...correspondenceWorkset(), contract: "source-semantic-proposal-workset-v4",
-    provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
-    model: STEP_PLAN_QUOTE_BASIS.selected_model,
+    provider_url: basis.selected_provider_url,
+    model: basis.selected_model,
     request_profile: profile
   });
   const cacheRoot = join(tempRoot(), "step-cache");
   const authority = pinSemanticProposalAuthority({
     preflight: prepareSemanticProposal(prepared, cacheRoot, 4096, 1),
-    inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
-    outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million
+    inputUsdPerMillion: basis.input_usd_equivalent_per_million,
+    outputUsdPerMillion: basis.output_usd_equivalent_per_million
   });
   const line = materializeSemanticProposalLines(prepared, 4096)[0]!;
-  const wire = `data: ${JSON.stringify({ choices: [{
+  const content = assessmentBody(line.request as SourceSemanticCorrespondenceRequest);
+  const wire = intern ? JSON.stringify({ choices: [{ message: { content, reasoning_content: "separate reasoning" },
+    finish_reason: "stop" }], usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 } }) : `data: ${JSON.stringify({ choices: [{
     delta: { content: assessmentBody(line.request as SourceSemanticCorrespondenceRequest) },
     finish_reason: "stop"
   }], usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 } })}\n\ndata: [DONE]\n\n`;
@@ -249,7 +254,7 @@ it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     seen.push({ path: request.url, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
-    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.writeHead(200, { "content-type": intern ? "application/json" : "text/event-stream" });
     response.end(wire);
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -260,7 +265,7 @@ it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"
     const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const fetchImpl: typeof fetch = (url, init) => {
       const selected = new URL(String(url));
-      expect(selected.href).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
+      expect(selected.href).toBe(`${basis.selected_provider_url}/chat/completions`);
       return nativeFetch(new URL(selected.pathname, localOrigin), init);
     };
     const otherProfile = profile === "step-3.5-2603-low-json-schema-v1"
@@ -274,7 +279,11 @@ it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"
       config, extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
     expect(result).toMatchObject({ interpreted: 1, newly_admitted: 1, attempts: 1 });
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
+    if (intern) {
+      expect(seen[0]?.path).toBe("/v1/chat/completions");
+      expect(Object.keys(seen[0]!.body).sort()).toEqual(["max_tokens", "messages", "model"]);
+      expect((seen[0]!.body.messages as {content: string}[])[0]!.content).toContain(JSON.stringify(line.responseJsonSchema));
+    } else expect(seen[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
       body: { reasoning_effort: profile === "step-3.5-2603-low-json-schema-v1" ? "low" : "high",
         max_tokens: 4096, response_format: { type: "json_schema" } } });
     expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({

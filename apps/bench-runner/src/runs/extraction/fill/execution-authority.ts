@@ -1,4 +1,4 @@
-import { isStepSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import { assertSampleKeys, assertSampleReceipt, isInteractiveSourceSampleReceipt } from "../authority/sample-scope.js";
 import { readRootBatchRuns } from "./batch/store.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
@@ -161,7 +161,7 @@ function openReceiptAttemptLedger(receipt: ExtractionAuthorityReceipt, cacheRoot
     cacheIdentity: receiptExtractionCacheIdentity(receipt),
     startingMissing: receipt.limits.starting_missing,
     maximumAttempts: receipt.limits.maximum_attempts,
-    ...((isStepSemanticRequestProfile(receipt.observation.extraction.requestProfile) &&
+    ...((isChatSemanticRequestProfile(receipt.observation.extraction.requestProfile) &&
       receipt.observation.extraction.sourcePacking === "complete-source" ||
       isInteractiveSourceSampleReceipt(receipt))
       ? { maximumAttemptsPerKey: 1 } : {}),

@@ -1,4 +1,4 @@
-import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { extractionSamplePolicies } from "./sample-policy.js";
 import { z } from "zod";
 import { computeExtractionKeySetSha256 } from "../content-closure.js";
@@ -19,7 +19,7 @@ export type ExtractionSampleScope = z.infer<typeof SampleScopeSchema>;
 /** Step interactive uses the sample's exact key set with one reserved attempt per key. */
 export function isStepInteractiveSampleReceipt(receipt: ExtractionAuthorityReceipt): boolean {
   return receipt.action === "sample" &&
-    isStepSemanticRequestProfile(receipt.observation.extraction.requestProfile) &&
+    isChatSemanticRequestProfile(receipt.observation.extraction.requestProfile) &&
     receipt.observation.extraction.sourcePacking === "complete-source";
 }
 

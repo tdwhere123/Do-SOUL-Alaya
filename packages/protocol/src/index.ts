@@ -184,6 +184,7 @@ export * from "./events/event-log-orphan.js";
 export * from "./events/message-delta.js";
 export * from "./engine/engine-binding.js";
 export * from "./engine/engine-port.js";
+export * from "./engine/intern-semantic-request-profile.js";
 export { STEP_SEMANTIC_REQUEST_MODEL, STEP_SEMANTIC_REQUEST_PROFILE,
   STEP_SEMANTIC_HIGH_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE, STEP_PREVIEW_JSON_REQUEST_PROFILE,
   STEP_SEMANTIC_REQUEST_PROFILES, isStepSemanticRequestProfile, stepSemanticReasoningEffort,

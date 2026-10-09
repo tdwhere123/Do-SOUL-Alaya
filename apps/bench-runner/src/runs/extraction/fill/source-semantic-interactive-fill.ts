@@ -1,4 +1,6 @@
-import { isStepSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
+import { interactiveSourceTransportBinding } from "../request-profile.js";
+import { assertNativeChatReportedUsage } from "../authority/native-chat-quote.js";
+import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
@@ -26,7 +28,7 @@ import { prepareSourceSemanticRequestWire, sourceSemanticRequestWireDigest } fro
 import type { SourceRequestLine } from "../request-artifact.js";
 import { batchDigest } from "./batch/plan.js";
 import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
-import { assertStepReportedUsage, baseReportedUsage } from "../authority/step-quote.js";
+import { baseReportedUsage } from "../authority/step-quote.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, requestEnvelopeDigest,
   writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation,
@@ -57,11 +59,11 @@ export async function executeOpenSemanticsInteractiveFill(
   assertInteractiveOpenSemanticsScope(input);
   const authority = input.authority!;
   const profile = input.prepared.config.requestProfile;
-  if (!isGeminiGenerateContentProfile(profile) && !isStepSemanticRequestProfile(profile)) {
+  if (!isGeminiGenerateContentProfile(profile) && !isChatSemanticRequestProfile(profile)) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill request profile is unsupported");
   }
   if (authority.receipt.limits.output_token_field !==
-      (isStepSemanticRequestProfile(profile) ? "max_tokens" : "maxOutputTokens")) {
+      (isChatSemanticRequestProfile(profile) ? "max_tokens" : "maxOutputTokens")) {
     throw new AlayaError("VALIDATION", "open-semantics interactive fill output field differs from its profile");
   }
   const selected = selectedInteractiveKeys(authority);
@@ -70,7 +72,7 @@ export async function executeOpenSemanticsInteractiveFill(
     ...(selected === undefined ? {} : { executionCacheKeys: selected })
   });
   const maxOutputTokens = authority.receipt.limits.max_output_tokens;
-  if ((isStepSemanticRequestProfile(profile) || authority.receipt.action === "sample") && input.concurrency !== 1) {
+  if ((isChatSemanticRequestProfile(profile) || authority.receipt.action === "sample") && input.concurrency !== 1) {
     throw new AlayaError("VALIDATION", "selected interactive source fill requires one sequential request");
   }
   for (const line of workset.lines) {
@@ -86,7 +88,7 @@ export async function executeOpenSemanticsInteractiveFill(
     const outcome = await fillInteractiveLine(input, workset, line, extractor, maxOutputTokens);
     if (outcome === "admitted") {
       newlyExtracted += 1;
-    } else if (isStepSemanticRequestProfile(profile) || authority.receipt.action === "sample") {
+    } else if (isChatSemanticRequestProfile(profile) || authority.receipt.action === "sample") {
       throw new AlayaError("CONFLICT", `selected interactive source fill stopped after ${outcome} for ${line.key}`);
     }
   });
@@ -173,7 +175,7 @@ function replayInteractiveRaws(
 
 function interactiveAttemptLimit(input: InteractiveFillInput): number {
   return input.authority!.receipt.action === "sample" || input.authority!.receipt.action === "probe" ||
-    isStepSemanticRequestProfile(input.prepared.config.requestProfile)
+    isChatSemanticRequestProfile(input.prepared.config.requestProfile)
     ? 1 : COMPLETE_SOURCE_FILL_ATTEMPTS_PER_MISSING_SHARD;
 }
 
@@ -192,7 +194,7 @@ function importInteractiveFromRaw(
     sourceRequestSha256: line.requestSha256
   });
   if (verifyProviderRawReservation(raw, input.authority!.snapshot()) === "rejected") return "quarantined";
-  assertStepReportedUsage(input.prepared.config.requestProfile, raw.usage,
+  assertNativeChatReportedUsage(input.prepared.config.requestProfile, raw.usage,
     input.authority!.receipt.limits.max_output_tokens);
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
@@ -252,9 +254,9 @@ async function dispatchInteractiveLine(
       systemPrompt: line.systemPrompt, userPrompt: line.userPrompt, retryMode: "disabled",
       timeoutMs: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS),
       maxOutputTokens,
-      outputTokenField: isStepSemanticRequestProfile(input.prepared.config.requestProfile)
+      outputTokenField: isChatSemanticRequestProfile(input.prepared.config.requestProfile)
         ? "max_tokens" : "maxOutputTokens",
-      ...(isStepSemanticRequestProfile(input.prepared.config.requestProfile) ? {
+      ...(isChatSemanticRequestProfile(input.prepared.config.requestProfile) ? {
         retainHttpResponseEvidence: true,
         responseJsonSchema: sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)))
       } : {}),
@@ -334,8 +336,7 @@ function importInteractiveLine(
   const authority = input.authority!;
   const finishReason = extracted.responseMetadata?.finishReason ?? null;
   const provenance = {
-    transport: isStepSemanticRequestProfile(input.prepared.config.requestProfile)
-      ? "step-chat-completion" as const : "gemini-generate-content" as const,
+    transport: interactiveSourceTransportBinding(input.prepared.config.requestProfile).transport,
     finishReason, attemptOrdinal,
     responseSha256: batchDigest(extracted.rawJson),
     ...(extracted.usage === undefined ? {} : { usage: extracted.usage })

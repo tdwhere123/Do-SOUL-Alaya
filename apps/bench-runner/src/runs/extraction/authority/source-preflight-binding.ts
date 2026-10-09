@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { isStepSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { isNativeGeminiRequestProfile } from "../request-profile.js";
 import { parseSourceSemanticInteractivePreflight } from "../fill/source-semantic-interactive-preflight.js";
 import { resolveExtractionTransportRoute } from "../transport-route.js";
@@ -22,7 +22,7 @@ export function assertInteractiveSourcePreflightReceipt(
 /** An interactive sample can only reserve the exact provider-free preparation it names. */
 export function bindInteractiveSourcePreflight(input: ExtractionAuthorityReceiptInput): string | undefined {
   const interactiveSample = input.action === "sample" &&
-    (isStepSemanticRequestProfile(input.observation.extraction.requestProfile) ||
+    (isChatSemanticRequestProfile(input.observation.extraction.requestProfile) ||
       isNativeGeminiRequestProfile(input.observation.extraction.requestProfile) && input.sourcePreflight !== undefined) &&
     input.observation.extraction.sourcePacking === "complete-source";
   if (!interactiveSample) {
