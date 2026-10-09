@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
-import { readNativeChatFailureResponse } from "../compile-seed/http/semantic-provider-http.js";
+import { isCompleteSemanticFinish, readNativeChatFailureResponse } from "../compile-seed/http/semantic-provider-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-token-retry.js";
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import type { ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
@@ -252,6 +252,12 @@ function replayPersistedProviderRequestRaw(
       reason: physicalEvidence === "missing" ? "missing_response_body" :
         physicalEvidence === "truncated" ? "truncated_response_body" : "unsupported_response_body"
     }, false);
+    context.ledger.recordTransportOutcome(line.key, settledProviderRequestOutcome(baseReportedUsage(raw.usage)), raw.attempt_ordinal);
+    context.ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return { classified: "incomplete", admitted: false };
+  }
+  if (!isCompleteSemanticFinish(context.requestProfile, raw.finish_reason)) {
+    publishPhysicalFailure(context, line, raw, { status: "incomplete", reason: "noncomplete" }, false);
     context.ledger.recordTransportOutcome(line.key, settledProviderRequestOutcome(baseReportedUsage(raw.usage)), raw.attempt_ordinal);
     context.ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
     return { classified: "incomplete", admitted: false };

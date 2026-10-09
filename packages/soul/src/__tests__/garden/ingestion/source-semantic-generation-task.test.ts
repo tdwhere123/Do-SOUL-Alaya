@@ -44,11 +44,14 @@ it.each([undefined, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT])("scopes exhaust
   const scoped = buildSourceSemanticRequest({ ...input, generationSchemaContract });
   const full = buildSourceSemanticRequest({ ...input, generationSchemaContract,
     generationTask: { ...task, responsibility: { kind: "all_supplied_meaning" } } });
-  const prompt = sourceSemanticSystemPrompt(scoped);
-  expect(prompt).toBe(sourceSemanticSystemPrompt(full));
-  expect(prompt).toContain("Represent each expressed relation required by the declared task");
-  expect(prompt).toContain("Declare each independent proposition required by the declared task");
-  expect(prompt).toContain("every source-supported dependency of each published claim");
+  const prompt = sourceSemanticSystemPrompt(scoped), fullPrompt = sourceSemanticSystemPrompt(full);
+  expect(prompt).not.toBe(fullPrompt);
+  expect(prompt).toContain("active responsibility is original_query_task");
+  expect(prompt).toContain("original_query_task requires source meaning needed by the original question");
+  expect(prompt).not.toContain("all_supplied_meaning requires every supplied unit's meaning");
+  expect(fullPrompt).toContain("active responsibility is all_supplied_meaning");
+  expect(fullPrompt).toContain("all_supplied_meaning requires every supplied unit's meaning");
+  expect(fullPrompt).not.toContain("original_query_task requires source meaning needed by the original question");
   expect(prompt).not.toContain("Interpret every supplied source unit locally");
   expect(prompt).not.toContain("Declare each independent proposition as a root");
   expect(prompt).not.toContain("preserve all supported propositions and qualifications.");

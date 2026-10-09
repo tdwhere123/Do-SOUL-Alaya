@@ -6,7 +6,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery,
@@ -46,16 +46,11 @@ import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js"
 import { readSemanticChainProposalResults, semanticChainQueryCorrespondences } from "../../../runs/semantic-chain/inputs.js";
 import { SemanticChainQuerySchema } from "../../../runs/semantic-chain/contract.js";
 
-vi.hoisted(() => {
-  const nativeFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
-    if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
-      throw new Error("provider-free correspondence test refused non-loopback fetch");
-    }
-    return nativeFetch(input, { ...init, redirect: "error" });
-  };
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
 });
+afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
 
 vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
   const answer = { address: "93.184.216.34", family: 4 }; return options?.all ? [answer] : answer;
@@ -83,7 +78,10 @@ it("refuses blocked provider DNS before reserving a correspondence attempt", asy
   const cacheRoot = tempRoot(), authority = pinSemanticProposalAuthority({
     preflight: prepareSemanticProposal(workset, cacheRoot, 4096), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
   const line = materializeSemanticProposalLines(workset, 4096)[0]!;
-  expect(line.key).toBe("02ee34c6266ce16ce3c1f7c8784635222df3efb699a2bc3fa7cc9fd2632c33a7");
+  const priorKey = proposalCacheKey(workset.model, workset.request_profile, line.systemPrompt,
+    JSON.stringify(line.request), line.responseJsonSchema, 4096, workset.provider_url);
+  expect(priorKey).toBe("02ee34c6266ce16ce3c1f7c8784635222df3efb699a2bc3fa7cc9fd2632c33a7");
+  expect(line.key).not.toBe(priorKey);
   vi.mocked(lookup).mockImplementationOnce((async () => [{ address: "198.18.0.105", family: 4 }]) as unknown as typeof lookup);
   const fetchImpl = vi.fn<typeof fetch>();
   const selected: CompileSeedExtractionConfig = { providerUrl: workset.provider_url, model: workset.model,
@@ -372,6 +370,15 @@ it.each([
     } else expect(seen[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
       body: { reasoning_effort: profile === "step-3.5-2603-low-json-schema-v1" ? "low" : "high",
         max_tokens: 4096, response_format: { type: "json_schema" } } });
+    const messages = seen[0]!.body.messages as { role: string; content: string }[];
+    const { response_schema: visibleSchema, ...visibleRequest } =
+      JSON.parse(messages.find(message => message.role === "user")!.content);
+    expect(visibleRequest).toEqual(line.request);
+    expect(visibleSchema).toEqual(line.responseJsonSchema);
+    if (profile !== INTERN_SEMANTIC_REQUEST_PROFILE) {
+      const format = seen[0]!.body.response_format as { json_schema: { schema: unknown } };
+      expect(visibleSchema).toEqual(format.json_schema.schema);
+    }
     expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({
       contract: "semantic-proposal-raw-attempt-v2", http_response: { bodyBase64: Buffer.from(wire).toString("base64") }
     });
@@ -649,6 +656,17 @@ it.each([false, true])("retains separate scoped attempts and coverage after cach
   const lines = materializeSemanticProposalLines(workset, 4096);
   expect(lines).toHaveLength(2);
   expect(lines[0]!.key).not.toBe(lines[1]!.key);
+  for (const line of lines) {
+    const { response_schema: schema, ...visibleRequest } = JSON.parse(line.userPrompt);
+    expect(visibleRequest).toEqual(line.request);
+    expect(schema.required).toEqual(expect.arrayContaining(["decision", "assessments"]));
+    expect(schema.properties).not.toHaveProperty("outcome");
+    const validate = new Ajv2020({ strict: false, inlineRefs: false }).compile(schema);
+    expect(validate({ decision: "abstain", assessments: [] })).toBe(true);
+    expect(validate({ decision: "assess" })).toBe(false);
+    expect(line.key).not.toBe(proposalCacheKey(workset.model, workset.request_profile,
+      line.systemPrompt, JSON.stringify(line.request), line.responseJsonSchema, 4096, workset.provider_url));
+  }
   expect((lines[0]!.request as SourceSemanticCorrespondenceRequest).demand?.demanded_handles).toEqual(["qe1", "qe2"]);
   expect((lines[1]!.request as SourceSemanticCorrespondenceRequest).demand?.demanded_handles).toEqual(["qe3", "qe4"]);
   const raws = lines.map((line, index) => {

@@ -213,6 +213,17 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
     replayCachedProposalShard(line, shard);
     if (!hasAdmittedProposalOutcome(shard)) {
       const outcome = proposalOutcomeStatus(shard);
+      // Witnessed non-complete finish is incomplete only when the reserved raw is a
+      // complete physical response. Finish on a transport-failed or truncated body
+      // must not hide the original transport_failure. The shard is not rewritten.
+      if (typeof shard.finish_reason === "string" && shard.finish_reason.length > 0 &&
+          !isCompleteSemanticFinish(shard.request_profile, shard.finish_reason)) {
+        const raw = readProviderRawAttempt(cacheRoot, line.key, shard.attempt_ordinal);
+        if (raw !== undefined && raw.transport_failure === undefined && raw.full_replay_possible &&
+            providerRawSuccessEvidenceState(raw) === "bound") {
+          return { line, shard, status: "incomplete" as const };
+        }
+      }
       // Retry/cache classification is not a semantic outcome. In particular,
       // absent decoded text on a failed HTTP attempt is not valid-empty output.
       const status = outcome === "transport_failure" ? outcome : !hasVerifiedProposalCompletion(shard) ||
@@ -266,7 +277,7 @@ function assertRetainedProposalRevisionParents(workset: SemanticProposalWorkset,
     }
     const { revision: _revision, ...baseItem } = item as Record<string, unknown>;
     const parent = materializeSemanticProposalLines({ ...workset, items: [baseItem] }, maxOutputTokens)[0]!;
-    if (parent.userPrompt !== revision.parent_request_json ||
+    if (JSON.stringify(parent.request) !== revision.parent_request_json ||
         completeProposalParentRaw(workset, workset.revision_parent_cache_root!, maxOutputTokens, parent) !== revision.previous_response) {
       throw new AlayaError("CONFLICT", "proposal revision differs from its complete retained parent");
     }
@@ -359,6 +370,13 @@ function replayCachedProposalShard(
   if (typeof shard.outcome === "object" && shard.outcome !== null && "reason" in shard.outcome &&
       ["missing_response_body", "truncated_response_body", "unsupported_response_body"]
         .includes(String(shard.outcome.reason))) return "incomplete";
+  if (typeof shard.finish_reason === "string" && shard.finish_reason.length > 0 &&
+      !isCompleteSemanticFinish(shard.request_profile, shard.finish_reason)) {
+    if (shard.admitted) {
+      throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);
+    }
+    return "incomplete";
+  }
   if (shard.raw_json.length === 0) {
     if (shard.admitted || proposalOutcomeStatus(shard) === "interpreted") {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);

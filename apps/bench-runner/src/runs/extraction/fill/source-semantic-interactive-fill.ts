@@ -351,7 +351,11 @@ function importInteractiveLine(
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\tincomplete\tfinish_reason=${String(finishReason)}\n`);
     authority.abandonPendingShard(line.key, attemptOrdinal);
-    recordInteractiveOutcome(authority, line.key, attemptOrdinal, extracted, "quarantined", provenance.responseSha256);
+    authority.recordTransportOutcome(line.key, {
+      retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1,
+      usageRequestCount: extracted.usage === undefined ? 0 : 1, transportFailures: [],
+      ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
+    }, attemptOrdinal);
     return "quarantined";
   }
   try {

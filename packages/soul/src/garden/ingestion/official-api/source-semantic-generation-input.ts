@@ -9,6 +9,7 @@ export function sourceSemanticGenerationInput(requestValue: SourceSemanticReques
   if (source.generation_view_contract === undefined) return JSON.stringify(request);
   return JSON.stringify({
     contract: source.generation_view_contract,
+    response_schema: sourceSemanticResponseJsonSchema(request),
     source_request: {
       ...(source.source_scope === undefined ? {} : { source_scope: source.source_scope }),
       resource_limits: source.resource_limits,

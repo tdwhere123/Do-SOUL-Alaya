@@ -136,7 +136,9 @@ function bindLine(
   if (!isNativeGeminiRequestProfile(workset.request_profile) && !isChatSemanticRequestProfile(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
-  const userPrompt = JSON.stringify(request);
+  const userPrompt = JSON.stringify(kind === "semantic_correspondence"
+    ? { ...request, response_schema: responseJsonSchema }
+    : request);
   const config = { model: workset.model, providerUrl: workset.provider_url,
     requestProfile: workset.request_profile, apiKey: null };
   const binding = semanticProposalRequestBinding(config, { systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema });
