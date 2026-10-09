@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { producerResponseJsonSchema } from "./source-semantic-response-schema.js";
 import {
   sourceSemanticProducerEnvelopeJsonSchema, sourceSemanticProducerGenerationOutcomeSchema,
   AlayaError, SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticCorrespondenceAssessmentSchema,
@@ -78,16 +79,11 @@ export function sourceSemanticCorrespondenceGenerationResponseJsonSchema(
   const resolution = resolveSourceSemanticQueryProvenance(
     request.admitted_query_semantics, catalog, request.original_query
   );
-  const envelope = z.toJSONSchema(z.object({
+  const envelope = producerResponseJsonSchema(z.object({
     contract: z.literal(request.response_contract ?? SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT),
     outcome: sourceSemanticProducerGenerationOutcomeSchema("correspondence"),
     semantic_correspondence: SourceSemanticCorrespondenceAssessmentSchema.optional()
-  }).strict().readonly(), {
-    io: "output",
-    override: ({ jsonSchema }) => {
-      if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
-    }
-  });
+  }).strict().readonly());
   return sourceSemanticProducerEnvelopeJsonSchema(constrainSourceSemanticCorrespondenceGenerationSchema(envelope, resolution), "correspondence");
 }
 

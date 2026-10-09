@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { producerResponseJsonSchema } from "./source-semantic-response-schema.js";
 import {
   sourceSemanticProducerEnvelopeJsonSchema, sourceSemanticProducerGenerationOutcomeSchema,
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
@@ -471,16 +472,6 @@ export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest
   return selected === SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT ? sourceSemanticInlineJsonSchema() : sourceSemanticTableJsonSchema();
 }
 
-
-function producerResponseJsonSchema(schema: z.ZodType, reused?: "ref"): object {
-  return z.toJSONSchema(schema, {
-    io: "output",
-    ...(reused === undefined ? {} : { reused }),
-    override: ({ jsonSchema }) => {
-      if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
-    }
-  });
-}
 
 function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

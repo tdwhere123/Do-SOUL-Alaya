@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { producerResponseJsonSchema } from "./source-semantic-response-schema.js";
 import {
   AlayaError, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, SOURCE_SEMANTIC_MAX_BYTES,
   SourceSemanticCorrespondenceAssessmentSchema, SourceSemanticResourceLedger,
@@ -51,7 +52,7 @@ function provenance(request: SourceSemanticCorrespondenceRequest, meter?: Source
 }
 
 export function sourceSemanticCorrespondenceFlatResponseJsonSchema(request: SourceSemanticCorrespondenceRequest): object {
-  const schema = z.toJSONSchema(SourceSemanticCorrespondenceFlatDraftSchema, { io: "output" });
+  const schema = producerResponseJsonSchema(SourceSemanticCorrespondenceFlatDraftSchema);
   return constrainSourceSemanticCorrespondenceGenerationSchema({ ...schema, anyOf: DecisionSchema.options.map((decision) => ({
     properties: { decision: { enum: [decision] },
       ...(decisionStatuses[decision] === "abstained"

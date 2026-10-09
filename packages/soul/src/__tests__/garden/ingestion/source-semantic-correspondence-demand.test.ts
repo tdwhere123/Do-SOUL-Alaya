@@ -182,6 +182,8 @@ describe("source semantic correspondence branch demand", () => {
     expect(wash.semantic_correspondence?.correspondences.length).toBeGreaterThan(0);
     const schema = JSON.stringify(sourceSemanticCorrespondenceResponseJsonSchema(washRequest));
     expect(schema).toContain('"decision"');
+    expect(schema).not.toContain('"const":');
+    expect(schema).toContain('"enum":["supported"]');
     expect(schema).not.toContain("source_interpretation_handle");
     expect(schema).not.toContain("source-semantic-correspondence-assessment-v1");
     for (const handle of washRequest.demand!.demanded_handles) expect(schema).toContain(handle);
