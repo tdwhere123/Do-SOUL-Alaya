@@ -176,10 +176,14 @@ describe("request-selected inline entity uses", () => {
     expect(received.interpretation!.asserted_at_scope).toHaveLength(2);
   });
 
-  it("selects schema/guidance/revision coherently, rejects the other codec and retains unchanged input view", () => {
+  it("selects schema/guidance/revision coherently and retains source input across codecs", () => {
     const { input, request, receive } = setup("Mira approved the pilot.");
     const legacy = buildSourceSemanticRequest({ ...input, generationSchemaContract: undefined });
-    expect(sourceSemanticGenerationInput(request)).toBe(sourceSemanticGenerationInput(legacy));
+    const { response_schema: selectedSchema, ...selectedInput } = JSON.parse(sourceSemanticGenerationInput(request));
+    const { response_schema: tableSchema, ...tableInput } = JSON.parse(sourceSemanticGenerationInput(legacy));
+    expect(selectedInput).toEqual(tableInput);
+    expect(selectedSchema).toEqual(sourceSemanticResponseJsonSchema(request));
+    expect(tableSchema).toEqual(sourceSemanticResponseJsonSchema(legacy));
     expect(sourceSemanticSystemPrompt(request)).not.toContain("Entity rows have form");
     expect(JSON.stringify(sourceSemanticResponseJsonSchema(request))).not.toContain("semantic_key");
     expect(sourceSemanticSystemPrompt(request)).toContain(JSON.stringify(SOURCE_SEMANTIC_INLINE_EXAMPLE));

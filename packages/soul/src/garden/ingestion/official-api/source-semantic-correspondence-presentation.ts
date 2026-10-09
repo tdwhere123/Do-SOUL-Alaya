@@ -52,12 +52,18 @@ function provenance(request: SourceSemanticCorrespondenceRequest, meter?: Source
 }
 
 export function sourceSemanticCorrespondenceFlatResponseJsonSchema(request: SourceSemanticCorrespondenceRequest): object {
-  const schema = producerResponseJsonSchema(SourceSemanticCorrespondenceFlatDraftSchema);
-  return constrainSourceSemanticCorrespondenceGenerationSchema({ ...schema, anyOf: DecisionSchema.options.map((decision) => ({
-    properties: { decision: { enum: [decision] },
+  const schema = constrainSourceSemanticCorrespondenceGenerationSchema(
+    producerResponseJsonSchema(SourceSemanticCorrespondenceFlatDraftSchema), provenance(request)
+  ) as Record<string, unknown>;
+  const { $schema: _dialect, $defs: _defs, definitions: _definitions, ...body } = schema;
+  const properties = body.properties as Record<string, Record<string, unknown>>;
+  // Specialize provenance before copying branches so each contains the same complete row grammar.
+  return { ...schema, anyOf: DecisionSchema.options.map((decision) => ({
+    ...body,
+    properties: { ...properties, decision: { ...properties.decision, enum: [decision] },
       ...(decisionStatuses[decision] === "abstained"
-        ? Object.fromEntries(payloadFields.map((field) => [field, { maxItems: 0 }])) : {}) }
-  })) }, provenance(request));
+        ? Object.fromEntries(payloadFields.map((field) => [field, { ...properties[field], maxItems: 0 }])) : {}) }
+  })) };
 }
 
 /** Expand only mechanical host bindings; the ordinary materializer owns assessment semantics. */

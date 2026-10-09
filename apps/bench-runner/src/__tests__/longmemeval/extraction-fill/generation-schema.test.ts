@@ -40,10 +40,12 @@ describe("Gemini complete generation schema guidance", () => {
       expect(validate({ contract: row.contract, outcome: { status: "interpreted" } })).toBe(false);
       expect(validate({ contract: row.contract, outcome: { status: "abstained" } })).toBe(true);
       const branches = wireSchema.anyOf as Record<string, unknown>[];
-      expect(branches).toHaveLength(2);
-      expect(branches[0]).toMatchObject({ required: [row.field] });
+      expect(branches).toHaveLength(row.field === "content" ? 3 : 2);
+      expect(branches[0]).toMatchObject({ type: "object", additionalProperties: false });
+      expect(branches[0]!.required).toEqual(expect.arrayContaining(["contract", "outcome", row.field]));
       for (const branch of branches) {
-        expect(Object.keys(branch).every(key => ["type", "properties", "required", "additionalProperties"].includes(key))).toBe(true);
+        expect(branch.required).toEqual(expect.arrayContaining(["contract", "outcome"]));
+        expect(Object.keys(branch).every(key => ["readOnly", "type", "properties", "required", "additionalProperties"].includes(key))).toBe(true);
       }
       if ("faithful" in row) {
         expect(projected.schema).toBeDefined();

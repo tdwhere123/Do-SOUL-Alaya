@@ -17,13 +17,15 @@ const input = { sourceCorpus: "Mira saw Mira. Mira arrived.", assertionIds: [1, 
 const request = () => soul.buildSourceSemanticRequest({ ...input, generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT });
 const config = { model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1" as const,
   modelFamily: "gemini-2.5-flash-lite", providerUrl: "https://fixture-provider.invalid", apiKey: null };
-const expectedView = JSON.stringify({ contract: "source-semantic-generation-view-v1", source_request: {
-  source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
-  attribution_context: { contract: "utterance-attribution-v1", status: "unknown" }, source_assertions: [
-    { assertion_id: 1, text: "Mira saw Mira.", source_role: "user" },
-    { assertion_id: 2, text: "Mira arrived.", source_role: "user" }
-  ]
-} });
+function expectedView(response_schema = soul.sourceSemanticResponseJsonSchema(request())) {
+  return JSON.stringify({ contract: "source-semantic-generation-view-v1", response_schema, source_request: {
+    source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
+    attribution_context: { contract: "utterance-attribution-v1", status: "unknown" }, source_assertions: [
+      { assertion_id: 1, text: "Mira saw Mira.", source_role: "user" },
+      { assertion_id: 2, text: "Mira arrived.", source_role: "user" }
+    ]
+  } });
+}
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic retained and physical generation identities", () => {
@@ -35,6 +37,7 @@ describe("source semantic retained and physical generation identities", () => {
       const line = prepareSourceSemanticRequestLine(host, ["unit"], config);
       const schema = JSON.parse(soul.officialApiExtractionResponseSchemaPreimage(line.userPrompt));
       expect(schema.properties.content.properties.nodes.minItems).toBe(1);
+      const expectedInput = "generationViewContract" in selectors ? expectedView(schema) : line.userPrompt;
       const wire = prepareSourceSemanticRequestWire(config, line, 4096);
       const wireDigest = sourceSemanticRequestWireDigest(config, line, 4096);
       delete schema.properties.content.properties.nodes.minItems;
@@ -49,24 +52,30 @@ describe("source semantic retained and physical generation identities", () => {
         expect(sourceSemanticRequestWireDigest(config, line, 4096)).toBe(wireDigest);
         expect(wireDigest).toBe(requestEnvelopeDigest(line.userPrompt));
       }
-      expect(soul.sourceSemanticGenerationInput(host)).toBe("generationViewContract" in selectors ? expectedView : line.userPrompt);
+      expect(soul.sourceSemanticGenerationInput(host)).toBe(expectedInput);
     });
-  it("changes native H cache identity when only the producer envelope schema guard changes", () => {
+  it.each([undefined, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT])(
+    "changes native H cache identity when only envelope representation changes for %s", generationSchemaContract => {
     const native = { model: INTERN_SEMANTIC_REQUEST_MODEL, requestProfile: INTERN_SEMANTIC_REQUEST_PROFILE,
       modelFamily: INTERN_SEMANTIC_REQUEST_MODEL, providerUrl: INTERN_SEMANTIC_PROVIDER_URL, apiKey: null };
     const host = soul.buildSourceSemanticRequest({ ...input,
-      generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
-      generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT });
+      generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, generationSchemaContract });
     const line = prepareSourceSemanticRequestLine(host, ["unit"], native);
     const schema = JSON.parse(soul.officialApiExtractionResponseSchemaPreimage(line.userPrompt));
-    expect(schema.anyOf).toHaveLength(2);
+    expect(schema.anyOf).toHaveLength(3);
+    const currentInput = expectedView(schema);
     const fullWire = prepareSourceSemanticRequestWire(native, line, 4096).body;
-    delete schema.anyOf;
+    const selector = (statuses: string[]) => ({ type: "object", properties: { status: { type: "string", enum: statuses } }, required: ["status"] });
+    schema.anyOf = [
+      { type: "object", properties: { outcome: selector(["interpreted"]) }, required: ["content"] },
+      { type: "object", properties: { contract: schema.properties.contract,
+        outcome: selector(["no_executable_proposition", "abstained"]) }, additionalProperties: false }
+    ];
     vi.spyOn(soul, "officialApiExtractionResponseSchemaPreimage").mockReturnValue(JSON.stringify(schema));
     vi.spyOn(soul, "sourceSemanticResponseJsonSchema").mockReturnValue(schema);
     expect(computeCacheKey(native.model, native.requestProfile, line.systemPrompt, line.userPrompt)).not.toBe(line.key);
     expect(prepareSourceSemanticRequestWire(native, line, 4096).body).not.toBe(fullWire);
-    expect(soul.sourceSemanticGenerationInput(host)).toBe(expectedView);
+    expect(soul.sourceSemanticGenerationInput(host)).toBe(currentInput);
   });
   it("binds opt-in codec, manifest generation and schema preimage while preserving the exact input view", () => {
     const legacy = request();
@@ -79,10 +88,10 @@ describe("source semantic retained and physical generation identities", () => {
     const line = prepareSourceSemanticRequestLine(host, ["unit"], config);
     const schema = JSON.stringify(soul.sourceSemanticResponseJsonSchema(host));
     const identity = JSON.stringify({ contract: "source-semantic-generation-view-v1", host_request_json: line.userPrompt,
-      model_input_json: expectedView });
+      model_input_json: expectedView(JSON.parse(schema)) });
     expect(line.key).toBe(createHash("sha256").update([config.model, config.requestProfile, line.systemPrompt,
       identity, geminiGenerationSchemaCacheMaterial(schema)].join("\0")).digest("hex"));
-    expect(soul.sourceSemanticGenerationInput(host)).toBe(expectedView);
+    expect(soul.sourceSemanticGenerationInput(host)).toBe(expectedView(JSON.parse(schema)));
     expect(line.key).not.toBe(prepareSourceSemanticRequestLine(legacy, ["unit"], config).key);
     expect(parseSourceSemanticRequestLine(line, { ...config, openSemantics: selected })).toEqual(line);
     expect(() => parseSourceSemanticRequestLine(line, { ...config, openSemantics: {
@@ -107,7 +116,7 @@ describe("source semantic retained and physical generation identities", () => {
     const host = request(), line = prepareSourceSemanticRequestLine(host, ["unit"], config);
     const schema = JSON.stringify(soul.sourceSemanticResponseJsonSchema(host));
     const identity = JSON.stringify({ contract: "source-semantic-generation-view-v1", host_request_json: line.userPrompt,
-      model_input_json: expectedView });
+      model_input_json: expectedView() });
     const expected = createHash("sha256").update([config.model, config.requestProfile, line.systemPrompt, identity,
       geminiGenerationSchemaCacheMaterial(schema)].join("\0")).digest("hex");
     expect(line.key).toBe(expected);
@@ -126,7 +135,7 @@ describe("source semantic retained and physical generation identities", () => {
     const mutate = (value: soul.SourceSemanticRequest) => computeCacheKey(config.model, config.requestProfile, line.systemPrompt, JSON.stringify(value));
     const changedProducer = soul.parseSourceSemanticRequest({ ...host, source_request: { ...host.source_request,
       producer_capability: { ...host.source_request.producer_capability, producer_version: "2" } } });
-    expect(soul.sourceSemanticGenerationInput(changedProducer)).toBe(expectedView);
+    expect(soul.sourceSemanticGenerationInput(changedProducer)).toBe(expectedView());
     expect(mutate(changedProducer)).not.toBe(line.key);
     for (const source_assertions of [
       [{ ...host.source_request.source_assertions[0]!, text: "Mira saw Oren." }, host.source_request.source_assertions[1]!],
@@ -150,7 +159,7 @@ describe("source semantic retained and physical generation identities", () => {
         { symbol: "see", meaning: "Seeing", governing_roles: [] }], roles: [{ symbol: "observer", meaning: "Observer" }] } }))).not.toBe(line.key);
     expect(computeCacheKey(config.model, "gemini-3.1-low-v1", line.systemPrompt, line.userPrompt)).not.toBe(line.key);
     const presentation = soul.sourceSemanticGenerationPresentation(line.userPrompt)!;
-    const projection = vi.spyOn(soul, "sourceSemanticGenerationPresentation").mockReturnValue({ ...presentation, modelInputJson: expectedView + " " });
+    const projection = vi.spyOn(soul, "sourceSemanticGenerationPresentation").mockReturnValue({ ...presentation, modelInputJson: expectedView() + " " });
     expect(computeCacheKey(config.model, config.requestProfile, line.systemPrompt, line.userPrompt)).not.toBe(line.key);
     projection.mockRestore();
     vi.spyOn(soul, "officialApiExtractionResponseSchemaPreimage").mockReturnValue('{"type":"null"}');
@@ -179,13 +188,13 @@ describe("source semantic retained and physical generation identities", () => {
     const schema = soul.sourceSemanticResponseJsonSchema(host), projectedSchema = projectGeminiGenerationSchema(schema);
     const expected = { systemInstruction: { parts: [{ text: line.systemPrompt },
       ...(projectedSchema.instruction === undefined ? [] : [{ text: projectedSchema.instruction }])] },
-      contents: [{ role: "user", parts: [{ text: expectedView }] }], generationConfig: {
+      contents: [{ role: "user", parts: [{ text: expectedView() }] }], generationConfig: {
         responseMimeType: "application/json", maxOutputTokens: 4096, responseJsonSchema: projectedSchema.schema,
         thinkingConfig: { thinkingBudget: 0 }
       } };
     expect(encoded).toEqual(expected);
-    expect(encodeGeminiGenerateContent({ ...line, userPrompt: expectedView }, { ...settings, responseJsonSchema: schema })).toEqual(expected);
-    expect(() => encodeGeminiGenerateContent({ ...line, userPrompt: expectedView }, settings)).toThrow(/explicit response schema/u);
+    expect(encodeGeminiGenerateContent({ ...line, userPrompt: expectedView() }, { ...settings, responseJsonSchema: schema })).toEqual(expected);
+    expect(() => encodeGeminiGenerateContent({ ...line, userPrompt: expectedView() }, settings)).toThrow(/explicit response schema/u);
     const wire = prepareSourceSemanticRequestWire(config, line, 4096);
     expect(JSON.parse(wire.body)).toEqual(expected);
     expect(sourceSemanticRequestWireDigest(config, line, 4096)).toBe(requestEnvelopeDigest(JSON.stringify([wire.url.href, wire.body])));

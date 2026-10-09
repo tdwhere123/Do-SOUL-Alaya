@@ -63,20 +63,39 @@ describe("source semantic producer outcome allowlist", () => {
     )).toEqual([...SOURCE_SEMANTIC_PRODUCER_OUTCOMES.correspondence]);
   });
 
-  it("filters generation schema unions by the allowlist while preserving payload presence branches", () => {
-    const schema = sourceSemanticProducerEnvelopeJsonSchema({
-      type: "object",
+  it("renders complete branches without mutating body grammars or reference locations", () => {
+    const input = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      $defs: { content: { type: "object", properties: { text: { type: "string", maxLength: 64 } },
+        required: ["text"], additionalProperties: false, readOnly: true } },
+      type: "object", readOnly: true,
       properties: {
+        contract: { type: "string", const: "source-response" },
         outcome: { oneOf: ["interpreted", "no_executable_proposition", "abstained", "truncated", "future_status"]
-          .map((status) => ({ type: "object", properties: { status: { const: status } } })) },
-        content: { type: "object" }
-      }
-    }, "source");
-    const outcome = (schema as { properties: { outcome: { oneOf: { properties: { status: { const: string } } }[] } } })
-      .properties.outcome;
-    expect(outcome.oneOf.map((option) => option.properties.status.const)).toEqual([
+          .map((status) => ({ type: "object", readOnly: true, properties: { status: { const: status } },
+            required: ["status"], additionalProperties: false })) },
+        content: { $ref: "#/$defs/content" }
+      }, required: ["contract", "outcome"], additionalProperties: false
+    };
+    const before = structuredClone(input);
+    const schema = sourceSemanticProducerEnvelopeJsonSchema(input, "source") as typeof input & {
+      anyOf: { type: string; readOnly: boolean; required: string[]; additionalProperties: boolean;
+        properties: { contract: object; outcome: (typeof input.properties.outcome.oneOf)[number]; content?: object } }[]
+    };
+    expect(input).toEqual(before);
+    expect(schema.$defs).toEqual(before.$defs);
+    expect(schema.properties.content).toEqual({ $ref: "#/$defs/content" });
+    expect(schema.properties.outcome.oneOf.map((option) => option.properties.status.const)).toEqual([
       ...SOURCE_SEMANTIC_PRODUCER_OUTCOMES.source
     ]);
-    expect((schema as { anyOf: unknown[] }).anyOf).toHaveLength(2);
+    expect(schema.anyOf).toHaveLength(3);
+    for (const [index, branch] of schema.anyOf.entries()) {
+      expect(branch).toMatchObject({ type: "object", readOnly: true, additionalProperties: false });
+      expect(branch.required).toEqual(index === 0 ? ["contract", "outcome", "content"] : ["contract", "outcome"]);
+      expect(branch.properties.contract).toEqual(before.properties.contract);
+      expect(branch.properties.outcome).toEqual(before.properties.outcome.oneOf[index]);
+      expect(branch.properties.content).toEqual(index === 0 ? before.properties.content : undefined);
+      expect(branch).not.toHaveProperty("$defs");
+    }
   });
 });

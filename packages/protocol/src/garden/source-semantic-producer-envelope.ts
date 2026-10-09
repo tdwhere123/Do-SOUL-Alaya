@@ -75,23 +75,35 @@ export function sourceSemanticProducerGenerationOutcomeSchema(
   ]);
 }
 
-/** Mechanically render the same presence policy over an already owned body grammar. */
+/** Render complete producer branches from the owned body, outcomes and presence policy. */
 export function sourceSemanticProducerEnvelopeJsonSchema(schema: object, kind: SourceSemanticProducerKind): object {
-  const root = schema as { properties: Record<string, Record<string, unknown>> };
+  const root = structuredClone(schema) as {
+    properties: Record<string, Record<string, unknown>>;
+    required?: string[];
+    $schema?: unknown;
+    $defs?: unknown;
+    definitions?: unknown;
+  };
   const policy = payloadPolicies[kind];
   const outcome = root.properties.outcome!;
   const union = Array.isArray(outcome.oneOf) ? "oneOf" : "anyOf";
   const options = outcome[union] as { properties: { status: { enum?: string[]; const?: string } } }[];
   const status = (option: typeof options[number]) => option.properties.status.enum?.[0] ?? option.properties.status.const!;
   const producerOptions = options.filter(option => isSourceSemanticProducerOutcome(kind, status(option)));
-  const selector = (statuses: string[]) => ({ type: "object", properties: { status: { type: "string", enum: statuses } }, required: ["status"] });
+  const { [union]: _variants, ...outcomeBody } = outcome;
+  const { $schema: _dialect, $defs: _defs, definitions: _definitions, ...body } = root;
   const negativeProperties = Object.fromEntries(Object.entries(root.properties).filter(([field]) => field !== policy.field));
-  // anyOf/required/additionalProperties belong to Gemini's supported JSON Schema subset.
-  // The body and outcome grammars stay owned by the original schema constructors.
-  return { ...root, properties: { ...root.properties, outcome: { ...outcome, [union]: producerOptions } }, anyOf: [
-    { type: "object", properties: { outcome: selector([ "interpreted" ]) }, required: [policy.field] },
-    { type: "object", properties: { ...(policy.negative === "forbidden" ? negativeProperties : {}),
-      outcome: selector(producerOptions.map(status).filter(value => value !== "interpreted")) },
-      ...(policy.negative === "forbidden" ? { additionalProperties: false } : {}) }
-  ] };
+  // Grammar consumers may select a union branch without applying sibling object keywords.
+  // Keep root properties for existing JSON pointers, but repeat the complete body in every branch.
+  return { ...root, properties: { ...root.properties, outcome: { ...outcome, [union]: producerOptions } },
+    anyOf: producerOptions.map(option => {
+      const interpreted = status(option) === "interpreted";
+      return { ...body,
+        properties: { ...(interpreted || policy.negative === "optional" ? root.properties : negativeProperties),
+          outcome: { ...outcomeBody, ...option } },
+        required: [...new Set([...(root.required ?? []), ...(interpreted ? [policy.field] : [])])],
+        ...(!interpreted && policy.negative === "forbidden" ? { additionalProperties: false } : {})
+      };
+    })
+  };
 }
