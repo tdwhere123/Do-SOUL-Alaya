@@ -1,4 +1,4 @@
-import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
+import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticInterpretation, type SoulInterpretationRequest,
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
   type AuthorizedScopesAdmission, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
@@ -104,12 +104,15 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
     const remaining = { ...budget, work_units: budget.work_units - usedWork,
       memory_bytes: budget.memory_bytes - prepared.work.logical_memory_bytes };
     if (remaining.work_units < 0 || remaining.memory_bytes < 0) throw new CoreError("CONFLICT", "publication preparation budget exhausted");
+    const draft = request.generation_task === undefined || request.draft === undefined
+      ? request.draft
+      : SourceSemanticHostBoundDraftSchema.parse({ ...request.draft, generation_task: request.generation_task });
     const published = await publication.publish({ workspaceId: context.workspaceId, runId: context.runId,
       artifactKey: prepared.source_id, source: prepared.source, catalog: prepared.catalog,
       assertion_locations: prepared.assertion_locations, budget: remaining,
       attribution_context: prepared.attribution_context,
       provenance: { producer_id: request.producer_id, principal: context.agentTarget, preparation_handle: request.source_handle },
-      draft: request.draft, producer_version: request.producer_version, contract_version: request.contract_version });
+      draft, producer_version: request.producer_version, contract_version: request.contract_version });
     return SoulInterpretationResponseSchema.parse({ operation: "propose",
       outcome: { status: "interpreted", gaps: published.bound.interpretation.gaps }, published: published.bound,
       source_disclosure: projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: input.interpretationClock ?? input.now(),

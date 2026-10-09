@@ -10,6 +10,7 @@ import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-
 import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
 import { SourceSemanticDraftSchema } from "../garden/source-semantic-draft.js";
+import { SourceSemanticGenerationTaskSchema } from "../garden/source-semantic-generation-task.js";
 import {
   SourceSemanticInterpretationSchema, SourceSemanticNoPropositionOutcomeSchema, SourceSemanticSourceBindingSchema,
   SourceSemanticOutcomeSchema,
@@ -52,6 +53,7 @@ export const SoulInterpretationProposeRequestSchema = z.object({
   operation: z.literal("propose"),
   source_handle: BoundedIdSchema,
   draft: SourceSemanticDraftSchema.optional(),
+  generation_task: SourceSemanticGenerationTaskSchema.optional(),
   disposition: SourceSemanticNoPropositionOutcomeSchema.optional(),
   producer_id: BoundedIdSchema,
   producer_version: BoundedLabelSchema,
@@ -60,6 +62,9 @@ export const SoulInterpretationProposeRequestSchema = z.object({
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().superRefine((request, context) => {
   if ((request.draft === undefined) === (request.disposition === undefined)) context.addIssue({ code: "custom", message: "propose requires a draft or an explicit no-proposition disposition" });
+  if (request.generation_task !== undefined && request.draft === undefined) {
+    context.addIssue({ code: "custom", path: ["generation_task"], message: "generation_task requires a draft" });
+  }
 }).readonly();
 
 export const SoulInterpretationPrepareQueryRequestSchema = z.object({

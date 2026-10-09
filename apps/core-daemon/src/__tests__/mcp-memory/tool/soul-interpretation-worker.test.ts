@@ -455,6 +455,100 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
   }
 }, 30000);
 
+it("retains public propose generation_task through SQLite reopen and lightweight disclosure", async () => {
+  const generation_task = {
+    contract: "source-semantic-generation-task-v1" as const, context: "complete_original_source" as const,
+    original_query: ORIGINAL, responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const }
+  };
+  const directory = await mkdtemp(join(tmpdir(), "soul-interpretation-task-"));
+  const filename = join(directory, "memory.sqlite");
+  const { database } = await createRecallRealStorage(() => undefined, filename);
+  const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
+  await createAuditedSourceAdmission({
+    stores, eventLogRepo: new SqliteEventLogRepo(database),
+    runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256
+  }).admit({
+    workspace_id: WS, source_id: "artifact-1", source_version: "1", content_bytes: SOURCE, evidence_object_id: null,
+    recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null, speaker: "user", scope_class: "project",
+    spans: deriveAddressableSpanViews(SOURCE)
+  }, { workspaceId: WS });
+  database.close();
+  closeCachedDatabase(filename);
+  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
+  const { database: publishDb } = await createRecallRealStorage(() => undefined, filename);
+  const publication = createSourceSemanticInterpretationPublication({
+    stores: createSqliteFieldFormationStores({ database: publishDb, repos: createDaemonFieldRepos({ database: publishDb }) }),
+    evidenceService: new EvidenceService({
+      eventLogRepo: new SqliteEventLogRepo(publishDb), runtimeNotifier: { notifyEntry: async () => undefined },
+      evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(publishDb), now: () => CLOCK
+    }), sha256: fieldContractSha256
+  });
+  const context = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: "soul-interpretation-task" };
+  const handler = createMcpMemoryToolHandler({
+    ...createDeps(), now: () => CLOCK, sourceSemanticsPort: client.sourceSemanticsPort,
+    sourceSemanticPublication: { publish: (input) => publication.publish(input) }
+  });
+  try {
+    await client.ready();
+    const prepared = await callInterpretation(handler, {
+      toolName: "soul.interpretation",
+      arguments: SoulInterpretationRequestSchema.parse({ operation: "prepare_source", source_id: "artifact-1", budget: BUDGET }),
+      context
+    });
+    if (!prepared.ok || prepared.output.operation !== "prepare_source" || prepared.output.source_handle === undefined
+      || prepared.output.catalog === undefined) throw new Error("prepare_source must return a handle and catalog");
+    const proposed = await callInterpretation(handler, {
+      toolName: "soul.interpretation",
+      arguments: SoulInterpretationRequestSchema.parse({
+        operation: "propose", source_handle: prepared.output.source_handle,
+        draft: usesDraft(prepared.output.catalog, SOURCE), generation_task,
+        producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4"
+      }),
+      context
+    });
+    if (!proposed.ok || proposed.output.operation !== "propose" || proposed.output.published === undefined) {
+      throw new Error("propose must publish the source interpretation");
+    }
+    expect(proposed.output.published.interpretation.generation_task).toEqual(generation_task);
+    const sourceInterpretationId = proposed.output.published.interpretation_id;
+    publishDb.close();
+    closeCachedDatabase(filename);
+    await client.close();
+    closeCachedDatabase(filename);
+    const reopened = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
+    const freshHandler = createMcpMemoryToolHandler({
+      ...createDeps(), now: () => CLOCK, sourceSemanticsPort: reopened.sourceSemanticsPort
+    });
+    try {
+      await reopened.ready();
+      const preparedQuery = await callInterpretation(freshHandler, {
+        toolName: "soul.interpretation",
+        arguments: SoulInterpretationRequestSchema.parse({
+          operation: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET
+        }),
+        context
+      });
+      if (!preparedQuery.ok || preparedQuery.output.operation !== "prepare_query") throw new Error("prepare_query must succeed");
+      const descriptor = preparedQuery.output.candidates.find((row) => row.interpretation_id === sourceInterpretationId);
+      expect(descriptor?.generation_task).toEqual({
+        contract: "source-semantic-generation-task-v1", context: "complete_original_source",
+        responsibility: { kind: "original_query_task", other_meaning: "unassessed" }
+      });
+      expect(descriptor?.generation_task).not.toHaveProperty("original_query");
+      const { database: inspectedDb } = await createRecallRealStorage(() => undefined, filename);
+      try {
+        const stored = inspectedDb.connection.prepare("SELECT gist FROM evidence_capsules").get() as { gist: string } | undefined;
+        expect(JSON.parse(stored!.gist).interpretation.generation_task).toEqual(generation_task);
+      } finally { inspectedDb.close(); }
+    } finally { await reopened.close(); }
+  } finally {
+    try { publishDb.close(); } catch { /* already closed */ }
+    try { await client.close(); } catch { /* already closed */ }
+    closeCachedDatabase(filename);
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30000);
+
 it("publishes a legal ablated source interpretation, rebinds semantic correspondence, and keeps the unbound-theme-independent agent proof", async () => {
   const directory = await mkdtemp(join(tmpdir(), "soul-interpretation-ablate-"));
   const filename = join(directory, "memory.sqlite");

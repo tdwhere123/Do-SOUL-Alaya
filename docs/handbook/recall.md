@@ -798,7 +798,12 @@ The shared source-request owner derives original text from `sourceCorpus` and
 verifies its digest, indexed units and locations. Strict model table/inline output
 cannot set task metadata. After materialization the host attaches the request task
 to `SourceSemanticHostBoundDraftSchema`; normalization, cache readmission, revisions
-and draft or normalized publication retain it. H identity binds the exact cue bytes.
+and draft or normalized publication retain it. Public MCP `soul.interpretation`
+`propose` carries the same declaration as an optional sibling of the strict model
+draft; nested `draft.generation_task` stays invalid. The handler binds a validated
+sibling through that host-bound draft owner after source-handle admission and before
+existing publication. The field is caller-declared responsibility, not verified
+generation history or completeness. H identity binds the exact cue bytes.
 Full delivery includes the task; lightweight descriptors disclose responsibility
 without repeating the cue. Later use under another query remains task-scoped and
 cannot establish omitted-fact absence. Explicit abstention has no H and is not a

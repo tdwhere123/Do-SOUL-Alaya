@@ -30,6 +30,28 @@ const DRAFT = {
   gaps: []
 };
 
+const GENERATION_TASK = {
+  contract: "source-semantic-generation-task-v1" as const,
+  context: "complete_original_source" as const,
+  original_query: "which tools does Alice use?",
+  responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const }
+};
+
+function proposeBranch(schema: Record<string, unknown>): Record<string, unknown> {
+  const branches = schema.oneOf;
+  if (!Array.isArray(branches)) throw new Error("soul.interpretation schema must advertise oneOf operations");
+  const propose = branches.find((branch): branch is Record<string, unknown> => {
+    if (branch === null || typeof branch !== "object" || Array.isArray(branch)) return false;
+    const operation = (branch.properties as Record<string, unknown> | undefined)?.operation;
+    if (operation === null || typeof operation !== "object" || Array.isArray(operation)) return false;
+    return (operation as { const?: unknown }).const === "propose"
+      || (Array.isArray((operation as { enum?: unknown }).enum)
+        && (operation as { enum: unknown[] }).enum.includes("propose"));
+  });
+  if (propose === undefined) throw new Error("soul.interpretation schema must advertise propose");
+  return propose;
+}
+
 it("parses soul.interpretation host operations including library recall and rejects unknown operations", () => {
   expect(SoulInterpretationRequestSchema.parse({
     operation: "prepare_source",
@@ -75,4 +97,33 @@ it("parses soul.interpretation host operations including library recall and reje
   expect(soulToolJsonSchemas["soul.interpretation"]).toMatchObject({
     oneOf: [{ type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }]
   });
+});
+
+it("accepts propose generation_task only as a draft sibling and advertises that field", () => {
+  const base = {
+    operation: "propose" as const,
+    source_handle: "src-handle",
+    producer_id: "author",
+    producer_version: "1",
+    contract_version: "source-interpretation-v4"
+  };
+  const absent = SoulInterpretationRequestSchema.parse({ ...base, draft: DRAFT });
+  const present = SoulInterpretationRequestSchema.parse({ ...base, draft: DRAFT, generation_task: GENERATION_TASK });
+  if (absent.operation !== "propose" || present.operation !== "propose") throw new Error("propose required");
+  expect(absent.generation_task).toBeUndefined();
+  expect(present.generation_task).toEqual(GENERATION_TASK);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...base, draft: { ...DRAFT, generation_task: GENERATION_TASK } }).success)
+    .toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...base, draft: DRAFT, generation_task: { ...GENERATION_TASK, original_query: " " } }).success)
+    .toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({
+    ...base, generation_task: GENERATION_TASK,
+    disposition: { status: "no_executable_proposition", description: "no claim", context_support: [] }
+  }).success).toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...base, generation_task: GENERATION_TASK }).success).toBe(false);
+  const advertised = proposeBranch(soulToolJsonSchemas["soul.interpretation"]);
+  const properties = advertised.properties as Record<string, unknown>;
+  expect(properties).toHaveProperty("generation_task");
+  const draft = properties.draft as { properties?: Record<string, unknown> } | undefined;
+  expect(draft?.properties ?? {}).not.toHaveProperty("generation_task");
 });

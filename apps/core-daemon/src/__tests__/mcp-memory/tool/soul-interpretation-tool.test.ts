@@ -384,6 +384,51 @@ it("does not fold an unavailable body during propose into malformed interpretati
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" }, provider_attempts: 0 } });
 });
 
+it("binds sibling generation_task after source validation and leaves task-absent drafts unchanged", async () => {
+  const generation_task = {
+    contract: "source-semantic-generation-task-v1" as const,
+    context: "complete_original_source" as const,
+    original_query: "which tools does Alice use?",
+    responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const }
+  };
+  const drafts: unknown[] = [];
+  const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async (input) => {
+    drafts.push(input.draft);
+    throw new CoreError("VALIDATION", "malformed interpretation");
+  });
+  const execute = vi.fn<SourceSemanticHostPort["execute"]>(async ({ request }) => workerResult(request));
+  const handler = createHandler({ sourceSemanticsPort: { execute }, publication: { publish } });
+  const proposed = await callInterpretation(handler, {
+    operation: "propose", source_handle: "source-handle", draft: DRAFT, generation_task,
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET
+  });
+  expect(execute.mock.invocationCallOrder[0]).toBeLessThan(publish.mock.invocationCallOrder[0]!);
+  expect(drafts[0]).toEqual({ ...DRAFT, generation_task });
+  expect(proposed).toMatchObject({ ok: true, output: { outcome: { status: "invalid", reason: "malformed_interpretation" } } });
+  const absent = await callInterpretation(handler, {
+    operation: "propose", source_handle: "source-handle", draft: DRAFT,
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET
+  });
+  expect(drafts[1]).toEqual(DRAFT);
+  expect(drafts[1]).not.toHaveProperty("generation_task");
+  expect(absent).toMatchObject({ ok: true, output: { outcome: { status: "invalid", reason: "malformed_interpretation" } } });
+  const expiredPublish = vi.fn(async () => { throw new Error("publish must not run"); });
+  const expired = await callInterpretation(createHandler({
+    sourceSemanticsPort: createPort(async ({ request }) => {
+      if (request.kind === "validate_source") {
+        throw new CoreError("VALIDATION", "source semantic preparation handle expired", { details: { admission: "expired" } });
+      }
+      return workerResult(request);
+    }),
+    publication: { publish: expiredPublish }
+  }), {
+    operation: "propose", source_handle: "source-handle", draft: DRAFT, generation_task,
+    producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET
+  });
+  expect(expiredPublish).not.toHaveBeenCalled();
+  expect(expired).toMatchObject({ ok: true, output: { outcome: { status: "invalid", reason: "expired_handle" } } });
+});
+
 it("accepts a located no-proposition disposition without publishing a fictitious source interpretation", async () => {
   const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async () => { throw new Error("no source interpretation should be published"); });
   const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
