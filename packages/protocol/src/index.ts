@@ -270,6 +270,8 @@ export {
 
 export * from "./garden/source-interpretation-profile.js";
 export * from "./garden/source-semantic-draft.js";
+export { sourceSemanticProducerEnvelopeViolation,
+  sourceSemanticProducerEnvelopeJsonSchema } from "./garden/source-semantic-producer-envelope.js";
 export { SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT,
   SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts,
   sourceSemanticInlineJsonSchema, type SourceSemanticGenerationSchemaContract

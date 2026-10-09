@@ -33,6 +33,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "catalog:"
+    "@types/better-sqlite3": "catalog:",
+    "ajv": "8.20.0"
   }
 }

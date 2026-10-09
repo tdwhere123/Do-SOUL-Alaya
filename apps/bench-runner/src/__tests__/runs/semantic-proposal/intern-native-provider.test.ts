@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,6 +178,10 @@ it.each(([PROFILE, "intern-agents-a1-json-schema-v1"] as const).flatMap(profile 
       else if (content === "{malformed") await expect(run()).rejects.toThrow(/stopped after retryable/u);
       else await run();
       const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+      const validate = new Ajv2020({ strict: false }).compile(line.responseJsonSchema);
+      const envelope = { contract: "source-semantic-query-response-v8", outcome: { status: "interpreted" } };
+      expect(validate(envelope)).toBe(false);
+      expect(validate({ ...envelope, outcome: { status: "abstained" } })).toBe(true);
       expect(calls[0]!.response_format).toEqual(profile === PROFILE ? undefined : {
         type: "json_schema", json_schema: { name: "source_semantic_proposal", strict: true, schema: line.responseJsonSchema }
       });

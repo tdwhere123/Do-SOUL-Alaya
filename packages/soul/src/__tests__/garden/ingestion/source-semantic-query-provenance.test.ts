@@ -423,6 +423,13 @@ describe("query provenance generation completion", () => {
     const ajv = new Ajv2020({ strict: false, allErrors: true, validateSchema: true });
     expect(ajv.validateSchema(generated)).toBe(true);
     const validate = ajv.compile(generated);
+    const missing = { contract: SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT, outcome: { status: "interpreted" } };
+    expect(validate(missing)).toBe(false);
+    expect(proposeCorrespondenceSemantics(input(), { rawJson: JSON.stringify(missing) }).outcome)
+      .toEqual({ status: "invalid", reason: "interpreted_correspondence_required" });
+    expect(validate({ ...missing, outcome: { status: "abstained" } })).toBe(true);
+    const validateRetained = ajv.compile(v4);
+    expect(validateRetained({ ...missing, contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT })).toBe(false);
     const { referent, predicate, agent, theme } = handles();
     const eligibleOmitted = {
       contract: SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT,
@@ -438,6 +445,11 @@ describe("query provenance generation completion", () => {
       }
     };
     expect(validate(structuredClone(eligibleOmitted))).toBe(true);
+    const negativeWithPayload = { ...eligibleOmitted, outcome: { status: "abstained" } };
+    expect(validate(negativeWithPayload)).toBe(true);
+    expect(proposeCorrespondenceSemantics(input(), { rawJson: JSON.stringify(negativeWithPayload) }).outcome)
+      .toEqual({ status: "abstained" });
+    expect(validateRetained({ ...negativeWithPayload, contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT })).toBe(true);
     const supported = (query: string) => ({ query, status: "supported", equivalents: [{
       source: handles().frame.handle, grounding: "The relation is explicit in the source.",
       source_semantic_support: [{ kind: "lexical", mentions: ["mMend"] }]

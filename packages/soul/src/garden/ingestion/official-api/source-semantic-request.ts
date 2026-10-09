@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
+  sourceSemanticProducerEnvelopeJsonSchema,
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
@@ -522,11 +523,11 @@ function constrainQueryGenerationSchema(envelope: object): object {
 
 /** Generation envelope for query semantics. Syntax follows the request contract; never inferred from body fields. */
 export function sourceSemanticQueryResponseJsonSchema(): object {
-  return constrainQueryGenerationSchema(producerResponseJsonSchema(z.object({
+  return sourceSemanticProducerEnvelopeJsonSchema(constrainQueryGenerationSchema(producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
     outcome: QueryCorrespondenceGenerationOutcomeSchema,
     query: SourceSemanticQueryCarrierBodySchema.optional()
-  }).strict().readonly(), "ref"));
+  }).strict().readonly(), "ref")), "query");
 }
 
 /** Historical v4 assessment envelope; a request selects the request-aware generation envelope. */
@@ -534,11 +535,11 @@ export function sourceSemanticCorrespondenceResponseJsonSchema(
   request?: SourceSemanticCorrespondenceRequest
 ): object {
   if (request !== undefined) return sourceSemanticCorrespondenceGenerationResponseJsonSchema(request);
-  return producerResponseJsonSchema(z.object({
+  return sourceSemanticProducerEnvelopeJsonSchema(producerResponseJsonSchema(z.object({
     contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
     outcome: CorrespondenceGenerationOutcomeSchema,
     semantic_correspondence: SourceSemanticCorrespondenceAssessmentSchema.optional()
-  }).strict().readonly());
+  }).strict().readonly()), "correspondence");
 }
 
 /** Current source-table prompt bytes are owned by the table guidance. */

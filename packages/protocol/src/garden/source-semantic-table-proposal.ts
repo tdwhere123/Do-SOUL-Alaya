@@ -1,3 +1,4 @@
+import { sourceSemanticProducerEnvelopeViolation } from "./source-semantic-producer-envelope.js";
 import { AlayaError } from "../shared/alaya-error.js";
 import { SOURCE_SEMANTIC_MAX_DEPTH } from "./source-semantic-draft.js";
 import { compileSourceSemanticSelection } from "./source-semantic-selection-lowering.js";
@@ -165,12 +166,8 @@ export function materializeSourceSemanticTableProposal(value: unknown,
   meter = new SourceSemanticResourceLedger({ work_units: 200000, memory_bytes: 20000000 })) {
   meter.retain(value, "table proposal input");
   const proposal = SourceSemanticTableProposalSchema.parse(value);
-  if (["no_eligible_source", "unavailable", "unexercised", "preparation_required"].includes(proposal.outcome.status)) {
-    fail("host_only_outcome", proposal.outcome.status);
-  }
-  if ((proposal.outcome.status === "interpreted") !== (proposal.content !== undefined)) {
-    fail("outcome_content_mismatch", proposal.outcome.status);
-  }
+  const violation = sourceSemanticProducerEnvelopeViolation("source", proposal.outcome.status, proposal.content !== undefined);
+  if (violation !== undefined) fail(violation, proposal.outcome.status);
   const content = proposal.content;
   if (content === undefined) return compileSourceSemanticSelection(undefined, proposal.outcome, binding, meter);
   const { nodes, entities } = index(content, meter);

@@ -9,6 +9,7 @@ import { SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/sou
 import { sourceReferenceResolver, sourceReferencePreparationCost, type SourceReferenceCatalog } from "../evidence/source-reference.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "./source-semantic-resources.js";
+import { sourceSemanticProducerPayloadViolation } from "./source-semantic-producer-envelope.js";
 
 /** Canonical coalesced spans retained after meaning-preserving merge; not a silent clip. */
 export const SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND = 8 as const;
@@ -103,7 +104,7 @@ export function compileSourceSemanticSelection(contentValue: unknown, outcomeVal
   meter: SourceSemanticResourceLedger): SourceSemanticResponseEnvelope {
   preflight({ outcome: outcomeValue, content: contentValue }, meter);
   const outcome = SourceSemanticSelectionOutcomeShape.parse(outcomeValue);
-  if ((outcome.status === "interpreted") !== (contentValue !== undefined)) {
+  if (sourceSemanticProducerPayloadViolation("source", outcome.status, contentValue !== undefined)) {
     invalid(["content"], "outcome_content_mismatch", "", "Interpreted outcome requires content; other outcomes must not carry content.");
   }
   const lowerer = contentValue !== undefined || outcome.status === "no_executable_proposition"

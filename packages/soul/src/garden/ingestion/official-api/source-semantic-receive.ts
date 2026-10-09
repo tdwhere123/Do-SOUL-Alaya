@@ -1,6 +1,7 @@
 import { materializeSourceSemanticPresentation } from "./source-semantic-presentation.js";
 import { z } from "zod";
 import {
+  sourceSemanticProducerEnvelopeViolation,
   AlayaError, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SourceSemanticCorrespondenceSchema,
   SourceSemanticGapSchema, SourceSemanticOutcomeSchema,
@@ -35,7 +36,6 @@ import {
 } from "./source-semantic-query-provenance.js";
 
 export const MAX_SOURCE_SEMANTIC_RESPONSE_BYTES = 1024 * 1024;
-const HOST_ONLY_OUTCOMES = new Set(["no_eligible_source", "unavailable", "unexercised", "preparation_required"]);
 
 export type SourceSemanticProposalResult = Readonly<{
   outcome: SourceSemanticOutcome;
@@ -136,9 +136,6 @@ function decodeSourceSemantics(
     return { ...attempt, outcome: invalidProposalOutcome(error) };
   }
   const { outcome, draft } = envelope;
-  if (HOST_ONLY_OUTCOMES.has(outcome.status)) {
-    return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
-  }
   if (outcome.status === "no_executable_proposition") {
     try { return { ...attempt, outcome: verifySourceSemanticDisposition(outcome, sourceSemanticRequestCatalog(request), semanticSha256) }; }
     catch { return { ...attempt, outcome: { status: "invalid", reason: "unbound_disposition_support" } }; }
@@ -172,13 +169,9 @@ function receiveQuerySemantics(
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
-  if (HOST_ONLY_OUTCOMES.has(envelope.data.outcome.status)) {
-    return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
-  }
+  const violation = sourceSemanticProducerEnvelopeViolation("query", envelope.data.outcome.status, envelope.data.query !== undefined);
+  if (violation !== undefined) return { ...attempt, outcome: { status: "invalid", reason: violation } };
   if (envelope.data.outcome.status !== "interpreted") return { ...attempt, outcome: envelope.data.outcome };
-  if (envelope.data.query === undefined) {
-    return { ...attempt, outcome: { status: "invalid", reason: "interpreted_query_required" } };
-  }
   try {
     const meter = new SourceSemanticResourceLedger({
       work_units: request.resource_limits.work_units ?? 200000,
@@ -266,15 +259,9 @@ function finishCorrespondenceEnvelope(
   attempt: Attempt<SourceSemanticCorrespondenceRequest>,
   body: unknown
 ): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
-  if (HOST_ONLY_OUTCOMES.has(envelope.outcome.status)) {
-    return { ...attempt, outcome: { status: "invalid", reason: "host_only_outcome" } };
-  }
-  if (envelope.outcome.status !== "interpreted") {
-    return { ...attempt, outcome: envelope.outcome as SourceSemanticOutcome };
-  }
-  if (body === undefined) {
-    return { ...attempt, outcome: { status: "invalid", reason: "interpreted_correspondence_required" } };
-  }
+  const violation = sourceSemanticProducerEnvelopeViolation("correspondence", envelope.outcome.status, body !== undefined);
+  if (violation !== undefined) return { ...attempt, outcome: { status: "invalid", reason: violation } };
+  if (envelope.outcome.status !== "interpreted") return { ...attempt, outcome: envelope.outcome as SourceSemanticOutcome };
   try {
     const semantic_correspondence = SourceSemanticCorrespondenceSchema.parse(materializeCorrespondence(body, request));
     const assessment = SourceSemanticCorrespondenceAssessmentSchema.parse(body);

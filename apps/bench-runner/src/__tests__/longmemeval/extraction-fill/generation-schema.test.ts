@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
-import { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
   buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage,
   receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema,
+  sourceSemanticResponseJsonSchema,
   sourceSemanticCorrespondenceResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
@@ -14,11 +16,42 @@ import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial,
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
 import { proposalCacheKey } from "../../../runs/semantic-proposal/workset.js";
 import { createGeminiHttpExtractor } from "../../../runs/compile-seed/http/gemini-http.js";
+import { tableCompletedResponse, inlineCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
 const input = { sourceCorpus: "Mira promised to lend the atlas. Every visitor might read it.", assertionIds: [1, 2],
   source_id: "example", source_version: "1", producer_id: "authored", producer_version: "1" };
 
 describe("Gemini complete generation schema guidance", () => {
+  it("retains producer payload guards after the actual Gemini schema projection", () => {
+    const cases = [false, true].map(inline => {
+      const request = buildSourceSemanticRequest({ ...input, sourceCorpus: "I completed alpha.", assertionIds: [1],
+        ...(inline ? { generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } : {}) });
+      return { schema: sourceSemanticResponseJsonSchema(request), field: "content",
+        contract: request.source_request.proposal_contract, faithful: (inline ? inlineCompletedResponse : tableCompletedResponse)(1, "alpha") };
+    });
+    const envelopes = [...cases,
+      { schema: sourceSemanticQueryResponseJsonSchema(), field: "query", contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT },
+      { schema: sourceSemanticCorrespondenceResponseJsonSchema(), field: "semantic_correspondence",
+        contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT }];
+    for (const row of envelopes) {
+      const projected = projectGeminiGenerationSchema(row.schema);
+      const wireSchema = projected.schema ?? JSON.parse(projected.instruction!.slice(projected.instruction!.indexOf("{")));
+      const validate = new Ajv2020({ strict: false }).compile(wireSchema);
+      expect(validate({ contract: row.contract, outcome: { status: "interpreted" } })).toBe(false);
+      expect(validate({ contract: row.contract, outcome: { status: "abstained" } })).toBe(true);
+      const branches = wireSchema.anyOf as Record<string, unknown>[];
+      expect(branches).toHaveLength(2);
+      expect(branches[0]).toMatchObject({ required: [row.field] });
+      for (const branch of branches) {
+        expect(Object.keys(branch).every(key => ["type", "properties", "required", "additionalProperties"].includes(key))).toBe(true);
+      }
+      if ("faithful" in row) {
+        expect(projected.schema).toBeDefined();
+        expect(validate(row.faithful)).toBe(true);
+        expect(validate({ ...row.faithful, outcome: { status: "abstained" } })).toBe(false);
+      }
+    }
+  });
   it.each([SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
     "source-semantic-correspondence-response-v5"])(
     "keeps compact but exponentially expanded %s envelopes in JSON mode", (contract) => {

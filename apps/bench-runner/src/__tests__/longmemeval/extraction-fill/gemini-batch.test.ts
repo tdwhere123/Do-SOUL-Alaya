@@ -1,4 +1,5 @@
 import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -227,6 +228,12 @@ describe("durable Gemini Batch HTTP extraction", () => {
         attribution_context: { contract: "utterance-attribution-v1", status: "unknown" },
         source_assertions: [{ assertion_id: 1, text: "User: I completed alpha.", source_role: "user" }] } }));
     expect(wire.request.generationConfig.responseJsonSchema).toBeDefined();
+    const validate = new Ajv2020({ strict: false }).compile(wire.request.generationConfig.responseJsonSchema);
+    expect(validate(JSON.parse(rawJson))).toBe(true);
+    expect(validate({ contract: inline ? "source-semantic-proposal-v9" : "source-semantic-proposal-v8",
+      outcome: { status: "interpreted" } })).toBe(false);
+    expect(validate({ contract: inline ? "source-semantic-proposal-v9" : "source-semantic-proposal-v8",
+      outcome: { status: "abstained" } })).toBe(true);
     expect(JSON.stringify(wire.request.generationConfig.responseJsonSchema)).toContain(
       inline ? "source-semantic-proposal-v9" : "source-semantic-proposal-v8");
     state = "BATCH_STATE_SUCCEEDED";

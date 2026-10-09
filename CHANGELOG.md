@@ -8,9 +8,16 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.10.0, engine gateway 1.0.0
+## Unreleased — protocol 13.11.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.11.0 shares existing producer envelope admission policy with H v8/v9
+and Q/C generation schemas. Interpreted outcomes require their payload; H negative
+outcomes forbid content, while Q/C retain optional negative payloads. Exactly four
+host-only outcomes are excluded from generated responses. Supported `anyOf` branches
+preserve these guards through Gemini projection, with native admission unchanged.
+Schema-bound request/cache identities change; Q wording and v9 opt-in remain unchanged.
 
 Protocol 13.10.0 also adds an opt-in source proposal v9 presentation with inline
 entity-use constructors and one model identity token. It preserves local mention

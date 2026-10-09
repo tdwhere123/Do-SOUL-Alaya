@@ -1,3 +1,4 @@
+import { sourceSemanticProducerEnvelopeJsonSchema } from "./source-semantic-producer-envelope.js";
 import { z } from "zod";
 import { AlayaError } from "../shared/alaya-error.js";
 import { SOURCE_SEMANTIC_GAP_KINDS, SOURCE_SEMANTIC_SOURCE_ACTS, SourceSemanticDraftSchema,
@@ -109,10 +110,10 @@ export type SourceSemanticTableTarget = z.infer<typeof Target>;
 export type SourceSemanticTableOperand = z.infer<typeof Operand>;
 
 function presentationJsonSchema(schema: z.ZodType): object {
-  return z.toJSONSchema(schema, { io: "output", reused: "ref",
+  return sourceSemanticProducerEnvelopeJsonSchema(z.toJSONSchema(schema, { io: "output", reused: "ref",
     override: ({ jsonSchema }) => {
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
-    } });
+    } }), "source");
 }
 export function sourceSemanticTableJsonSchema(): object {
   return presentationJsonSchema(SourceSemanticTableProposalSchema);

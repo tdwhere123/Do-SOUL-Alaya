@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, materializeSourceSemanticInlineProposal,
@@ -193,5 +194,59 @@ describe("request-selected inline entity uses", () => {
     expect(revised.source_request.generation_schema_contract).toBe(SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT);
     expect(receiveSourceSemantics(JSON.stringify(raw), revised, { ...input, revision }).outcome.status).toBe("interpreted");
     expect(receive({ contract: SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, outcome: { status: "abstained" } }).outcome).toEqual({ status: "abstained" });
+  });
+});
+
+
+describe.each([false, true])("emitted source envelope policy, inline %s", inline => {
+  it("rejects absent interpreted content and host states while retaining lawful negatives and partial content", () => {
+    const prepared = setup("Mira approved the pilot and she hesitated.");
+    const input = { ...prepared.input, generationSchemaContract: inline ? SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT : undefined };
+    const request = buildSourceSemanticRequest(input);
+    const ajv = new Ajv2020({ strict: false, allErrors: true, validateSchema: true });
+    const schema = sourceSemanticResponseJsonSchema(request);
+    expect(ajv.validateSchema(schema)).toBe(true);
+    const validate = ajv.compile(schema);
+    const contract = inline ? SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT : SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT;
+    const originalRaw = '{"contract":"source-semantic-proposal-v9","outcome":{"status":"interpreted"}}';
+    const missing = { ...JSON.parse(originalRaw), contract };
+    expect(validate(missing), ajv.errorsText(validate.errors)).toBe(false);
+    const rejected = receiveSourceSemantics(inline ? originalRaw : JSON.stringify(missing), request, input);
+    expect(rejected.outcome.status).toBe("invalid");
+    expect(rejected.rawJson).toBe(inline ? originalRaw : JSON.stringify(missing));
+    const content = { nodes: [{ kind: "statement", key: "event",
+      predicate: { kind: "explicit", reading: "approve", support: atom("approved") },
+      arguments: [{ role: "approver", target: inline ? entity("Mira", "person") : { kind: "entity_ref", key: "used" } }],
+      qualifications: [] }], roots: [{ act: "assertion", expression: ref("event") }],
+      ...(inline ? {} : { entities: [{ form: "entity", key: "used", semantic_key: "person", mentions: [atom("Mira")] }] }),
+      gaps: [{ kind: "uninterpreted_clause", support: atom("hesitated"), affected: [{ kind: "occurrence_ref", key: "event" }] }] };
+    const partial = { contract, outcome: { status: "interpreted" }, content };
+    expect(validate(partial), ajv.errorsText(validate.errors)).toBe(true);
+    const admitted = receiveSourceSemantics(JSON.stringify(partial), request, input);
+    expect(admitted.outcome.status, JSON.stringify(admitted.outcome)).toBe("interpreted");
+    expect(admitted.interpretation!.gaps).toHaveLength(1);
+    for (const outcome of [
+      { status: "abstained" }, { status: "invalid", reason: "unsupported reading" },
+      { status: "quarantine", reason: "uncertain source" }, { status: "truncated" },
+      { status: "transport_failure" }, { status: "resource_exhausted" },
+      { status: "no_executable_proposition", description: "Context only", context_support: [atom("Mira")] }
+    ]) {
+      const value = { contract, outcome };
+      expect(validate(value), ajv.errorsText(validate.errors)).toBe(true);
+      expect(receiveSourceSemantics(JSON.stringify(value), request, input).outcome.status).toBe(outcome.status);
+      expect(validate({ ...value, content })).toBe(false);
+      expect(receiveSourceSemantics(JSON.stringify({ ...value, content }), request, input).outcome.status).toBe("invalid");
+    }
+    for (const outcome of [{ status: "no_eligible_source", provider_attempts: 0 },
+      { status: "unavailable", reason: "provider absent" }, { status: "unexercised" },
+      { status: "preparation_required", missing: "query_semantics" }]) {
+      const value = { contract, outcome };
+      expect(validate(value)).toBe(false);
+      expect(receiveSourceSemantics(JSON.stringify(value), request, input).outcome.status).toBe("invalid");
+    }
+    const empty = { contract, outcome: { status: "interpreted" }, content: { nodes: [], roots: [], gaps: [],
+      ...(inline ? {} : { entities: [] }) } };
+    expect(validate(empty)).toBe(true);
+    expect(receiveSourceSemantics(JSON.stringify(empty), request, input).outcome.status).toBe("interpreted");
   });
 });

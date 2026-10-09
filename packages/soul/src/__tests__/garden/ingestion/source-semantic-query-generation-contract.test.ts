@@ -409,3 +409,16 @@ describe("query generation contract", () => {
     });
   });
 });
+
+
+it("requires interpreted query payload while retaining the existing optional negative payload", () => {
+  const example = sourceSemanticQueryExamples[0]!;
+  const interpreted = { contract: example.response.contract, outcome: { status: "interpreted" } };
+  const abstained = { contract: example.response.contract, outcome: { status: "abstained" } };
+  expect(draft2020(sourceSemanticQueryResponseJsonSchema(), [
+    { id: "missing", instance: interpreted }, { id: "lawful", instance: example.response },
+    { id: "negative", instance: abstained }, { id: "negative_with_payload", instance: { ...abstained, query: example.response.query } }
+  ])).toEqual({ missing: false, lawful: true, negative: true, negative_with_payload: true });
+  expect(receive(example.original_query, interpreted).outcome).toEqual({ status: "invalid", reason: "interpreted_query_required" });
+  expect(receive(example.original_query, { ...abstained, query: example.response.query }).outcome).toEqual({ status: "abstained" });
+});

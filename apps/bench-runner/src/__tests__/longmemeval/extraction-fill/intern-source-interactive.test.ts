@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as MODEL, INTERN_SEMANTIC_REQUEST_PROFILE as PROFILE,
@@ -63,7 +64,7 @@ async function scenario(projected = false, profile: typeof PROFILE | "intern-age
 }
 
 async function listen(finish: "stop" | "length", valid = true,
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }, inline = false) {
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }, inline = false, omitPayload = false) {
   const calls: { body: Record<string, unknown>; wire: string }[] = [];
   server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -71,7 +72,7 @@ async function listen(finish: "stop" | "length", valid = true,
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     const source: { source_request: Pick<SourceSemanticRequest["source_request"], "source_assertions"> } = JSON.parse(body.messages[1].content);
     const assertion = source.source_request.source_assertions.find(row => row.text.includes("completed"))!;
-    const content = valid ? JSON.stringify((inline ? inlineCompletedResponse : tableCompletedResponse)(assertion.assertion_id,
+    const content = omitPayload ? '{"contract":"source-semantic-proposal-v9","outcome":{"status":"interpreted"}}' : valid ? JSON.stringify((inline ? inlineCompletedResponse : tableCompletedResponse)(assertion.assertion_id,
       assertion.text.includes("alpha") ? "alpha" : "decoy")) : "{bad JSON";
     const wire = JSON.stringify({ choices: [{ message: { content, reasoning_content: "reasoning only" }, finish_reason: finish }],
       ...(usage === undefined ? {} : { usage }) });
@@ -152,6 +153,24 @@ it.each([PROFILE, "intern-agents-a1-json-schema-v1"] as const)(
   expect(calls).toHaveLength(1);
   expect(() => parseSourceSemanticInteractivePreflight({ ...fixture.preflight,
     max_output_tokens: 4096 })).toThrow(/encoded wire/u);
+});
+
+it("rejects the original interpreted-only inline envelope at strict native HTTP while retaining its exact bytes", async () => {
+  const fixture = await scenario(true, "intern-agents-a1-json-schema-v1", true);
+  const calls = await listen("stop", true, undefined, true, true);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+  expect(calls).toHaveLength(1);
+  const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
+  const original = '{"contract":"source-semantic-proposal-v9","outcome":{"status":"interpreted"}}';
+  expect(Buffer.byteLength(original)).toBe(77);
+  expect(raw.decoded_text).toBe(original);
+  expect(raw.http_response?.bodyBase64).toBe(Buffer.from(calls[0]!.wire).toString("base64"));
+  const format = calls[0]!.body.response_format as { json_schema: { schema: object } };
+  expect(new Ajv2020({ strict: false }).compile(format.json_schema.schema)(JSON.parse(original))).toBe(false);
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL,
+    "intern-agents-a1-json-schema-v1").status).not.toBe("hit");
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow();
+  expect(calls).toHaveLength(1);
 });
 
 it("denies the strict semantic profile at Batch preflight and fill without dispatch", async () => {

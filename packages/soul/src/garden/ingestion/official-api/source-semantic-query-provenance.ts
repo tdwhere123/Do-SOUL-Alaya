@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  sourceSemanticProducerEnvelopeJsonSchema,
   AlayaError, SOURCE_SEMANTIC_MAX_BYTES, SourceSemanticCorrespondenceAssessmentSchema,
   countSourceSemanticCorrespondenceJsonBytes,
   type SourceSemanticCorrespondenceEndpointCatalog, type SourceSemanticQuery,
@@ -76,7 +77,7 @@ export function sourceSemanticCorrespondenceGenerationResponseJsonSchema(
       if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
     }
   });
-  return constrainCorrespondenceGenerationSchema(envelope, resolution);
+  return sourceSemanticProducerEnvelopeJsonSchema(constrainCorrespondenceGenerationSchema(envelope, resolution), "correspondence");
 }
 
 function storedCatalogExcerpt(

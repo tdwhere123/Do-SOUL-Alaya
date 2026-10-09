@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +36,7 @@ import {
 } from "../../../runs/semantic-proposal/workset.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
+import { projectGeminiGenerationSchema } from "../../../runs/extraction/fill/batch/generation-schema.js";
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
@@ -252,6 +254,13 @@ it.each([
   });
   const line = materializeSemanticProposalLines(prepared, 4096)[0]!;
   const content = assessmentBody(line.request as SourceSemanticCorrespondenceRequest);
+  const projected = projectGeminiGenerationSchema(line.responseJsonSchema);
+  const schema = projected.schema ?? JSON.parse(projected.instruction!.slice(projected.instruction!.indexOf("{")));
+  const validate = new Ajv2020({ strict: false }).compile(schema);
+  const envelope = JSON.parse(content);
+  expect(validate(envelope)).toBe(true);
+  expect(validate({ contract: envelope.contract, outcome: { status: "interpreted" } })).toBe(false);
+  expect(validate({ ...envelope, outcome: { status: "abstained" } })).toBe(true);
   const usage = { prompt_tokens: 21, completion_tokens: 8, total_tokens: invalid ? 30 : 29 };
   const wire = intern ? JSON.stringify({ choices: [{ message: { content, reasoning_content: "separate reasoning" },
     finish_reason: "stop" }], usage }) : `data: ${JSON.stringify({ choices: [{

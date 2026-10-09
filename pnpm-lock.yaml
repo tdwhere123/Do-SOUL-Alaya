@@ -209,6 +209,9 @@ importers:
       '@types/better-sqlite3':
         specifier: 'catalog:'
         version: 9.6.0
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
 
   apps/core-daemon:
     dependencies:

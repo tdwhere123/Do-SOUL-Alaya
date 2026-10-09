@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as soul from "@do-soul/alaya-soul";
-import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT, INTERN_SEMANTIC_REQUEST_MODEL,
+  INTERN_SEMANTIC_REQUEST_PROFILE, INTERN_SEMANTIC_PROVIDER_URL } from "@do-soul/alaya-protocol";
 import { computeCacheKey, EXTRACTION_CACHE_KEY_GOLDEN_VECTOR } from "../../../runs/compile-seed/cache/cache-key.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration,
   prepareSourceSemanticRequestLine, parseSourceSemanticRequestLine, sourceSemanticArtifactPreparations
@@ -26,6 +27,23 @@ const expectedView = JSON.stringify({ contract: "source-semantic-generation-view
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic retained and physical generation identities", () => {
+  it("changes native H cache identity when only the producer envelope schema guard changes", () => {
+    const native = { model: INTERN_SEMANTIC_REQUEST_MODEL, requestProfile: INTERN_SEMANTIC_REQUEST_PROFILE,
+      modelFamily: INTERN_SEMANTIC_REQUEST_MODEL, providerUrl: INTERN_SEMANTIC_PROVIDER_URL, apiKey: null };
+    const host = soul.buildSourceSemanticRequest({ ...input,
+      generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
+      generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT });
+    const line = prepareSourceSemanticRequestLine(host, ["unit"], native);
+    const schema = JSON.parse(soul.officialApiExtractionResponseSchemaPreimage(line.userPrompt));
+    expect(schema.anyOf).toHaveLength(2);
+    const fullWire = prepareSourceSemanticRequestWire(native, line, 4096).body;
+    delete schema.anyOf;
+    vi.spyOn(soul, "officialApiExtractionResponseSchemaPreimage").mockReturnValue(JSON.stringify(schema));
+    vi.spyOn(soul, "sourceSemanticResponseJsonSchema").mockReturnValue(schema);
+    expect(computeCacheKey(native.model, native.requestProfile, line.systemPrompt, line.userPrompt)).not.toBe(line.key);
+    expect(prepareSourceSemanticRequestWire(native, line, 4096).body).not.toBe(fullWire);
+    expect(soul.sourceSemanticGenerationInput(host)).toBe(expectedView);
+  });
   it("binds opt-in codec, manifest generation and schema preimage while preserving the exact input view", () => {
     const legacy = request();
     const selected = parseExtractionOpenSemanticsGeneration({ ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
