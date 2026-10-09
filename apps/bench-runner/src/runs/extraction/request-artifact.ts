@@ -105,7 +105,8 @@ export function parseExtractionOpenSemanticsGeneration(value: unknown): Extracti
   if (canonicalJson(base) !== canonicalJson(EXTRACTION_OPEN_SEMANTICS_GENERATION)) {
     throw new AlayaError("CONFLICT", "open semantics generation differs from live K/normalizer/request/response identity");
   }
-  const selected = Object.freeze({ ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
+  const selected = generation_view_contract === undefined && generation_schema_contract === undefined
+    ? EXTRACTION_OPEN_SEMANTICS_GENERATION : Object.freeze({ ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
     ...(generation_view_contract === undefined ? {} : {
       generation_view_contract: SourceSemanticGenerationViewContractSchema.parse(generation_view_contract) }),
     ...(generation_schema_contract === undefined ? {} : {

@@ -12,7 +12,8 @@ import { prepareSourceSemanticRevision } from "../../../garden/ingestion/officia
 import { indexSourceSemanticUnits } from "../../../garden/ingestion/official-api/source-semantic-units.js";
 import { SOURCE_SEMANTIC_INLINE_EXAMPLE } from "../../../garden/ingestion/official-api/source-semantic-inline-guidance.js";
 
-const atom = (text: string) => ({ assertion_id: 1, text });
+const atom = (text: string, occurrence?: number) => ({ assertion_id: 1, text,
+  ...(occurrence === undefined ? {} : { occurrence }) });
 const entity = (text: string, key?: string) => ({ kind: "entity", mentions: [atom(text)], ...(key === undefined ? {} : { key }) });
 const ref = (key: string) => ({ kind: "content_ref", key });
 const statement = (key: string, reading: string, target = entity("Mira", "person")) => ({ kind: "statement", key,
@@ -92,15 +93,21 @@ describe("request-selected inline entity uses", () => {
   });
 
   it("adapts reporter, domain members/exclusions and measurement subjects through the same constructor", () => {
-    const { receive } = setup("Mira reported joined, Oren excluded and measured 12.");
+    const reported = setup("Mira reported event").receive({ contract: SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT,
+      outcome: { status: "interpreted" }, content: { nodes: [
+        { ...statement("event", "event"), arguments: [] },
+        { kind: "reported", key: "report", support: atom("reported"), content: ref("event"), reporter: entity("Mira", "mira") }
+      ], roots: [{ act: "assertion", expression: ref("report") }], gaps: [] } });
+    expect(reported.outcome.status, JSON.stringify(reported.outcome)).toBe("interpreted");
+    expect(reported.interpretation!.operators[0]!.operator).toBe("reported");
+    const { receive } = setup("Mira joined, Oren excluded and measured 12");
     const domain = { key: "people", context: null, support: atom("Mira"),
       members: [{ referent: entity("Mira", "mira"), evidence: "joined", restrictions: [] }],
       exclusions: [{ referent: entity("Oren", "oren"), evidence: "excluded" }], closure: { kind: "open" } };
     const base = proposal([statement("joined", "joined", entity("Mira", "mira")), statement("excluded", "excluded", entity("Oren", "oren")),
-      statement("measured", "measured", entity("Mira", "mira")), { kind: "reported", key: "report", support: atom("reported"),
-        content: ref("joined"), reporter: entity("Mira", "mira") }]);
+      statement("measured", "measured", entity("Mira", "mira"))]);
     const value = { ...base, content: { ...base.content,
-      roots: ["report", "excluded", "measured"].map(key => ({ act: "assertion", expression: ref(key) })), domains: [domain],
+      roots: ["joined", "excluded", "measured"].map(key => ({ act: "assertion", expression: ref(key) })), domains: [domain],
       measurements: [{ key: "count", subject: entity("Mira", "mira"), owner: "measured", population: "people",
         metric: "headcount", unit: "person", context: "observed", value: "12", support: atom("12") }] } };
     const received = receive(value);
