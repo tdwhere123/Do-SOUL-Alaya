@@ -88,7 +88,8 @@ it.each(["caller", "deadline"] as const)("cancels a native proxied header wait a
         .toMatchObject({ kind: mode === "caller" ? "aborted" : "timeout", httpStatus: null });
       await vi.waitFor(() => expect(observed.disconnected).toBe(1));
       expect(observed.calls).toBe(1);
-      expect(observed.tunnels).toBe(1);
+      // The inherited pool may replace a cancelled connection; CONNECT is not a provider request.
+      expect(observed.tunnels).toBeGreaterThanOrEqual(1);
     } finally { if (timer !== undefined) clearTimeout(timer); }
   });
 });
