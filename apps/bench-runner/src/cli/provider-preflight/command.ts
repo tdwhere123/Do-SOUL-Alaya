@@ -1,5 +1,5 @@
 import process from "node:process";
-import { isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { isInternProviderRequestProfile } from "@do-soul/alaya-protocol";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -112,14 +112,16 @@ async function runProbe(
   }
   const model = resolveProbeModel(args);
   requireProviderBinding(model);
+  const requestProfile = optional(args, "--request-profile");
   const receipt = await probeProviderProtocol({
     providerUrl: required(args, "--provider-route"),
     apiKey,
     model,
+    ...(requestProfile === undefined ? {} : { requestProfile }),
     framing,
     fetchImpl: fetch
   });
-  if (isInternSemanticRequestProfile(receipt.profile)) {
+  if (isInternProviderRequestProfile(receipt.profile)) {
     process.stdout.write(`${JSON.stringify(receipt)}\n`);
     return receipt.failure === undefined && receipt.json_schema_valid === true ? 0 : 2;
   }

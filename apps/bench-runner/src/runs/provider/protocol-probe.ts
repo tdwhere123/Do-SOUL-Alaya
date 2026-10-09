@@ -1,6 +1,7 @@
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import { createHash } from "node:crypto";
-import { isChatSemanticRequestProfile, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, isInternProviderRequestProfile,
+  type InternProtocolProbeProfile } from "@do-soul/alaya-protocol";
 import { buildProviderChatRequestBody, executeProviderChatCompletion, ProviderChatCompletionError,
   providerChatCompletionsUrl, type ProviderChatCompletionRequest, type ProviderHttpResponseEvidence,
   type ProviderRequestProfile, type ProviderUsage } from "@do-soul/alaya-engine-gateway";
@@ -13,12 +14,13 @@ export interface ProviderProtocolProbeInput {
   readonly providerUrl: string;
   readonly apiKey: string;
   readonly model: string;
+  readonly requestProfile?: string;
   readonly framing?: "json" | "sse";
   readonly fetchImpl: typeof fetch;
 }
 
 export interface ProviderProtocolProbeReceipt {
-  readonly profile: ExtractionRequestProfile;
+  readonly profile: ExtractionRequestProfile | InternProtocolProbeProfile;
   readonly model: string;
   readonly framing: "json" | "sse";
   readonly physical_calls: number;
@@ -43,6 +45,10 @@ export async function probeProviderProtocol(
     throw new Error("provider protocol probe refuses an empty API key");
   }
   const binding = requireProviderBinding(input.model);
+  const profile = input.requestProfile === undefined || input.requestProfile === binding.requestProfile
+    ? binding.requestProfile
+    : binding.supportedProbeRequestProfiles?.find(value => value === input.requestProfile);
+  if (profile === undefined) throw new Error("provider protocol probe profile is not supported by its model binding");
   let physicalCalls = 0;
   const fetchImpl: typeof fetch = async (url, init) => {
     physicalCalls += 1;
@@ -55,35 +61,35 @@ export async function probeProviderProtocol(
   };
   const model = resolveVendorModel(input.model);
   const framing = input.framing ?? "json";
-  const intern = isInternSemanticRequestProfile(binding.requestProfile);
+  const intern = isInternProviderRequestProfile(profile);
   if (intern && framing !== "json") throw new Error("Intern protocol probe supports JSON framing only");
   const timeoutMs = intern ? 180_000 : 20_000;
   const maxOutputTokens = intern ? 8192 : 256;
-  if (isNativeGeminiRequestProfile(binding.requestProfile)) {
+  if (isNativeGeminiRequestProfile(profile)) {
     if (framing !== "json") throw new Error("Gemini protocol probe supports JSON framing only");
     const response = await createGeminiHttpExtractor({
       providerUrl: input.providerUrl, apiKey: input.apiKey, model,
-      requestProfile: binding.requestProfile
+      requestProfile: profile
     }, fetchImpl).extract({
       systemPrompt: "Return JSON only.", userPrompt: "{\"probe\":true}",
       timeoutMs: 20_000, maxOutputTokens: 256, outputTokenField: "maxOutputTokens",
       retryMode: "disabled", validateRawJson: (raw) => { JSON.parse(raw); }
     });
     return {
-      profile: binding.requestProfile, model, framing, physical_calls: physicalCalls,
+      profile, model, framing, physical_calls: physicalCalls,
       json_object: response.rawJson.trim().startsWith("{"),
       usage_present: response.usage !== undefined,
       finish_reason: response.responseMetadata?.finishReason ?? null, f3_seal_current: true
     };
   }
-  return probeChatCompletion(input, binding.requestProfile, model, framing, fetchImpl,
+  return probeChatCompletion(input, profile, model, framing, fetchImpl,
     () => physicalCalls, timeoutMs, maxOutputTokens);
 }
 
 async function probeChatCompletion(input: ProviderProtocolProbeInput, profile: ProviderRequestProfile,
   model: string, framing: "json" | "sse", fetchImpl: typeof fetch, physicalCalls: () => number,
   timeoutMs: number, maxOutputTokens: number): Promise<ProviderProtocolProbeReceipt> {
-  const intern = isInternSemanticRequestProfile(profile);
+  const intern = isInternProviderRequestProfile(profile);
   const request: ProviderChatCompletionRequest = {
     providerUrl: input.providerUrl,
     apiKey: input.apiKey,
@@ -92,8 +98,8 @@ async function probeChatCompletion(input: ProviderProtocolProbeInput, profile: P
     userPrompt: "{\"probe\":true}",
     profile,
     mode: framing,
-    ...(isChatSemanticRequestProfile(profile) ? { retainHttpResponseEvidence: true as const } : {}),
-    ...(isChatSemanticRequestProfile(profile)
+    ...(isChatSemanticRequestProfile(profile) || intern ? { retainHttpResponseEvidence: true as const } : {}),
+    ...(isChatSemanticRequestProfile(profile) || intern
       ? { jsonSchema: { name: "provider_protocol_probe", schema: {
         type: "object", properties: { probe: { type: "boolean" } },
         required: ["probe"], additionalProperties: false

@@ -1,6 +1,6 @@
 import { ProviderChatCompletionError } from "./errors.js";
 import { getGlobalDispatcher } from "undici";
-import { AlayaError, isChatSemanticRequestProfile, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { AlayaError, isChatSemanticRequestProfile, isInternProviderRequestProfile } from "@do-soul/alaya-protocol";
 import {
   PROVIDER_FAILURE_BODY_DIGEST_BYTES,
   providerFailureIdentityFromBody,
@@ -66,11 +66,11 @@ async function runProviderChatRequest(
 ): Promise<ProviderChatCompletionResult> {
   const response = await postChatCompletion(request, signal);
   observeStatus(response.status);
-  if (isChatSemanticRequestProfile(request.profile)) {
+  if (isChatSemanticRequestProfile(request.profile) || isInternProviderRequestProfile(request.profile)) {
     let bodyText: string;
     let evidence: ProviderHttpResponseEvidence;
     const boundedError = !response.ok;
-    const intern = isInternSemanticRequestProfile(request.profile);
+    const intern = isInternProviderRequestProfile(request.profile);
     const failureCap = intern ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : PROVIDER_FAILURE_BODY_DIGEST_BYTES;
     ({ bodyText, evidence } = await readProviderResponseWithEvidence(
       response, observeResponse,
@@ -119,8 +119,8 @@ async function postChatCompletion(
   // The runtime owns the underlying dispatcher and its proxy policy/pools. This
   // request-local composition owns no clients and must never close that dispatcher.
   const timeoutMs = Math.ceil(resolveProviderChatTimeoutMs(request.timeoutMs));
-  const dispatcher = isChatSemanticRequestProfile(request.profile) &&
-    (isInternSemanticRequestProfile(request.profile) || request.retainHttpResponseEvidence === true)
+  const dispatcher = (isInternProviderRequestProfile(request.profile) ||
+    isChatSemanticRequestProfile(request.profile) && request.retainHttpResponseEvidence === true)
     ? getGlobalDispatcher().compose(dispatch => (options, handler) => dispatch({
       ...options, headersTimeout: timeoutMs, bodyTimeout: timeoutMs
     }, handler)) : undefined;
@@ -171,7 +171,7 @@ function inspectBody(
     const result = inspectProviderChatCompletionResponse(bodyText, contentType, httpStatus, {
       sseCompletionPolicy: request.sseCompletionPolicy
     });
-    if (isInternSemanticRequestProfile(request.profile) && result.completion?.mode !== "json") {
+    if (isInternProviderRequestProfile(request.profile) && result.completion?.mode !== "json") {
       throw new ProviderResponseInspectionError("Intern JSON profile received unexpected streaming framing", "schema");
     }
     return evidence === undefined ? result : { ...result, httpResponse: evidence };

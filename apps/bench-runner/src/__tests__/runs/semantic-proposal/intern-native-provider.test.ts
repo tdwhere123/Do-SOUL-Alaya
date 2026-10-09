@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as MODEL, INTERN_SEMANTIC_REQUEST_PROFILE as PROFILE,
-  INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT } from "@do-soul/alaya-protocol";
+  INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT, isChatSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import { buildProviderChatRequestBody, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { probeProviderProtocol } from "../../../runs/provider/protocol-probe.js";
 import { runProviderPreflightCommand } from "../../../cli/provider-preflight/command.js";
@@ -22,6 +22,10 @@ import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/at
 import { inspectPopulationAttemptScopes } from "../../../runs/longmemeval-semantic/population-attempts.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
+import { isExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";
+import { supportsProviderRequestProfile } from "../../../runs/provider/catalog.js";
+
+const probeProfiles = [PROFILE, "intern-agents-a1-probe-json-object-v1", "intern-agents-a1-probe-json-schema-v1"] as const;
 
 const roots: string[] = [];
 afterEach(() => {
@@ -59,26 +63,32 @@ async function localHttp<T>(content: string | null, finish: string | null, statu
   finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 }
 
-it.each([
+it.each(probeProfiles.flatMap(profile => [
   { content: '{"probe":true}', finish: "stop", valid: true },
   { content: "{invalid", finish: "stop", valid: false },
   { content: '{"probe":true,"extra":1}', finish: "stop", valid: false },
   { content: '{"probe":true}', finish: "length", valid: false },
   { content: null, finish: "stop", valid: false }
-])("parses probe final content and retains $finish evidence for $content", async ({ content, finish, valid }) => {
+].map(row => ({ ...row, profile }))))("parses $profile final content and retains $finish evidence for $content", async ({ content, finish, valid, profile }) => {
   await localHttp(content, finish, 200, async (fetchImpl, calls, wire) => {
     const receipt = await probeProviderProtocol({ providerUrl: ENDPOINT, apiKey: "loopback-only",
-      model: MODEL, fetchImpl });
+      model: MODEL, ...(profile === PROFILE ? {} : { requestProfile: profile }), fetchImpl });
     expect(calls).toHaveLength(1);
-    expect(Object.keys(calls[0]!).sort()).toEqual(["max_tokens", "messages", "model"]);
+    expect(Object.keys(calls[0]!).sort()).toEqual(profile === PROFILE
+      ? ["max_tokens", "messages", "model"] : ["max_tokens", "messages", "model", "response_format"]);
     expect(calls[0]).toMatchObject({ model: MODEL, max_tokens: 8192 });
     const schemaPayload = '{"type":"object","properties":{"probe":{"type":"boolean"}},"required":["probe"],"additionalProperties":false}';
+    expect(calls[0]!.response_format).toEqual(profile === PROFILE ? undefined :
+      profile === "intern-agents-a1-probe-json-object-v1" ? { type: "json_object" } : {
+        type: "json_schema", json_schema: { name: "provider_protocol_probe", strict: true,
+          schema: JSON.parse(schemaPayload) }
+      });
     expect(calls[0]!.messages).toEqual([
       { role: "system", content: 'Return JSON only.\n\nSchema identifier (metadata): "provider_protocol_probe"\n' +
         "Return only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n" + schemaPayload },
       { role: "user", content: '{"probe":true}' }
     ]);
-    expect(receipt).toMatchObject({ json_schema_valid: valid, physical_calls: 1, profile: PROFILE,
+    expect(receipt).toMatchObject({ json_schema_valid: valid, physical_calls: 1, profile,
       provider_url: ENDPOINT, usage_present: false, declared_bounds: {
         max_output_tokens: 8192, timeout_ms: 180000, maximum_attempts: 1 },
       http_response: { bodyBase64: Buffer.from(wire).toString("base64"), bodyComplete: true } });
@@ -86,29 +96,59 @@ it.each([
       .update(JSON.stringify([`${ENDPOINT}/chat/completions`, JSON.stringify(calls[0])])).digest("hex"));
     expect(receipt.usage).toBeUndefined();
     const request = { providerUrl: ENDPOINT, apiKey: "loopback-only", model: MODEL,
-      profile: PROFILE, systemPrompt: "s", userPrompt: "u", maxOutputTokens: 8192,
+      profile, systemPrompt: "s", userPrompt: "u", maxOutputTokens: 8192,
       jsonSchema: { name: "named", schema: { type: "object" } } };
     for (const invalid of [{ ...request, providerUrl: "https://chat.intern-ai.org.cn/v1" },
       { ...request, model: "intern-s2" }, { ...request, mode: "sse" as const },
       { ...request, maxOutputTokens: undefined }, { ...request, jsonSchema: undefined }]) {
-      expect(() => buildProviderChatRequestBody(invalid)).toThrow(/Intern semantic profile/u);
+      expect(() => buildProviderChatRequestBody(invalid)).toThrow(/Intern provider profile/u);
     }
   });
 });
 
-it("retains one quota failure and emits the native CLI receipt with nonzero status", async () => {
+it.each(probeProfiles)("retains one quota failure for %s and emits the native CLI receipt with nonzero status", async profile => {
   await localHttp(null, null, 429, async (fetchImpl, calls, wire) => {
     vi.stubEnv("OFFICIAL_API_GARDEN_API_KEY", "loopback-only");
     vi.stubGlobal("fetch", fetchImpl);
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     expect(await runProviderPreflightCommand(["--mode", "probe", "--model", MODEL,
-      "--provider-route", ENDPOINT])).toBe(2);
+      "--provider-route", ENDPOINT, "--request-profile", profile])).toBe(2);
     const receipt = JSON.parse(String(output.mock.calls[0]![0]));
-    expect(receipt).toMatchObject({ physical_calls: 1, json_schema_valid: false, usage_present: false,
+    expect(receipt).toMatchObject({ profile, physical_calls: 1, json_schema_valid: false, usage_present: false,
       failure: { kind: "http_error", http_status: 429, provider_code: "quota_exceeded" },
       http_response: { bodyBase64: Buffer.from(wire).toString("base64"), bodyComplete: true } });
     expect(calls).toHaveLength(1);
   });
+});
+
+it.each(probeProfiles.slice(1))("denies mismatched %s probe bindings without dispatch or semantic admission", async profile => {
+  const fetchImpl = vi.fn<typeof fetch>();
+  const input = { providerUrl: ENDPOINT, apiKey: "loopback-only", model: MODEL,
+    requestProfile: profile, fetchImpl };
+  for (const invalid of [{ ...input, model: "mimo-v2.5" },
+    { ...input, requestProfile: "unknown-profile" },
+    { ...input, framing: "sse" as const },
+    { ...input, providerUrl: "https://chat.intern-ai.org.cn/v1" }]) {
+    await expect(probeProviderProtocol(invalid)).rejects.toThrow();
+  }
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(isChatSemanticRequestProfile(profile)).toBe(false);
+  expect(isExtractionRequestProfile(profile)).toBe(false);
+  expect(supportsProviderRequestProfile(MODEL, profile)).toBe(false);
+  expect(() => parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: profile, provider_url: ENDPOINT,
+    items: [{ original_query: "Who sent the parcel?" }] })).toThrow();
+});
+
+it.each(probeProfiles.slice(1))("retains reported usage and exact malformed final bytes for %s without repair", async profile => {
+  await localHttp('```json\n{"probe":true}\n```', "stop", 200, async (fetchImpl, calls, wire) => {
+    const receipt = await probeProviderProtocol({ providerUrl: ENDPOINT, apiKey: "loopback-only",
+      model: MODEL, requestProfile: profile, fetchImpl });
+    expect(receipt).toMatchObject({ profile, physical_calls: 1, json_object: false, json_schema_valid: false,
+      usage_present: true, usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 },
+      http_response: { bodyComplete: true, bodyBase64: Buffer.from(wire).toString("base64") } });
+    expect(calls).toHaveLength(1);
+  }, { usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } });
 });
 
 it.each([{ content: '{"contract":"source-semantic-query-response-v8","outcome":{"status":"abstained"}}', finish: "stop" },

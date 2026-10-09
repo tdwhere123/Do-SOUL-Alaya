@@ -46,7 +46,8 @@ Usage:
   alaya-bench-runner diagnostic-loop --work-root <dir> --request-manifest <json> [--mode smoke|run|cache-only|report-only] [--from-phase <phase>] [--snapshot <db>] [--snapshot-out <db>] [--embedding-cache-overlay <receipt.json>] [--canary-unlock <3q-work-root>] [--history-root <path>]
     One resumable cache-only campaign: preflight → authority/cache → extraction proof → snapshot → control/treatment recall → miss ledger → report. Smoke uses the same path including host_worker. Report-only never reruns extraction or recall.
   alaya-bench-runner provider-preflight --mode replay --request-manifest <json>
-  alaya-bench-runner provider-preflight --mode probe|probe-sse --provider-route <url> [--model <id>]
+  alaya-bench-runner provider-preflight --mode probe|probe-sse --provider-route <url> [--model <id>] [--request-profile <probe-profile>]
+    Explicit Intern format profiles are diagnostic only; provider support and enforcement are unverified.
   alaya-bench-runner provider-preflight --mode retire-obsolete --extraction-cache-root <dir> --expected-path <dir> --profile <profile> [--confirm-retire]
     Replay requires the canonical sealed request manifest and a credentialless environment. Probe requires credentials and a catalog binding. Retire-obsolete is a path/lock preflight and does not delete.
   alaya-bench-runner semantic-proposal-fill --kind query|semantic_correspondence --action prepare|authorize|fill --workset <json> --cache-root <dir> [--max-output-tokens N]
