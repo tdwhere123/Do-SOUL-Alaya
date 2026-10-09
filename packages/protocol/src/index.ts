@@ -270,6 +270,11 @@ export {
 
 export * from "./garden/source-interpretation-profile.js";
 export * from "./garden/source-semantic-draft.js";
+export { SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT,
+  SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts,
+  sourceSemanticInlineJsonSchema, type SourceSemanticGenerationSchemaContract
+} from "./garden/source-semantic-table-shape.js";
+export { materializeSourceSemanticInlineProposal } from "./garden/source-semantic-inline-proposal.js";
 export { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
   SourceSemanticTableValidationError, sourceSemanticTableJsonSchema,
   materializeSourceSemanticTableProposal } from "./garden/source-semantic-table-proposal.js";

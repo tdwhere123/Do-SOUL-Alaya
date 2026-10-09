@@ -3,8 +3,8 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as MODEL, INTERN_SEMANTIC_REQUEST_PROFILE as PROFILE,
-  INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, type SourceSemanticRequest } from "@do-soul/alaya-soul";
+  INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
+import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, type SourceSemanticRequest } from "@do-soul/alaya-soul";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
@@ -20,7 +20,9 @@ import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/
 import { requestEnvelopeDigest } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/attempt-ledger/outcome.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
-import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
+import { tableCompletedResponse, inlineCompletedResponse } from "./source-semantic-table-response.test-support.js";
+import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
+import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
 
 let roots: { cacheRoot: string; dataDir: string; pinnedMetaRoot: string };
 const writeDataset = registerExtractionFillHooks(value => { roots = value; }, "longmemeval_s");
@@ -34,15 +36,16 @@ afterEach(async () => {
   }
 });
 
-async function scenario(projected = false) {
+async function scenario(projected = false, profile: typeof PROFILE | "intern-agents-a1-json-schema-v1" = PROFILE, inline = false) {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", profile);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", ENDPOINT);
   await writeDataset([buildExtractionFillQuestion("completed", "I completed alpha.", "I completed decoy.")]);
   const options = { ...roots, variant: "longmemeval_s" as const, sourcePacking: "complete-source" as const,
     openSemantics: { ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
-      ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } : {}) }, concurrency: 1, log: () => undefined };
+      ...(projected ? { generation_view_contract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT } : {}),
+      ...(inline ? { generation_schema_contract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } : {}) }, concurrency: 1, log: () => undefined };
   const inspection = await inspectExtractionAuthority({ ...options, action: "sample",
     revision: readCurrentExtractionAuthorityRevision() });
   const selected = inspection.missingKeys.slice(0, 1);
@@ -60,7 +63,7 @@ async function scenario(projected = false) {
 }
 
 async function listen(finish: "stop" | "length", valid = true,
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) {
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }, inline = false) {
   const calls: { body: Record<string, unknown>; wire: string }[] = [];
   server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -68,7 +71,7 @@ async function listen(finish: "stop" | "length", valid = true,
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     const source: { source_request: Pick<SourceSemanticRequest["source_request"], "source_assertions"> } = JSON.parse(body.messages[1].content);
     const assertion = source.source_request.source_assertions.find(row => row.text.includes("completed"))!;
-    const content = valid ? JSON.stringify(tableCompletedResponse(assertion.assertion_id,
+    const content = valid ? JSON.stringify((inline ? inlineCompletedResponse : tableCompletedResponse)(assertion.assertion_id,
       assertion.text.includes("alpha") ? "alpha" : "decoy")) : "{bad JSON";
     const wire = JSON.stringify({ choices: [{ message: { content, reasoning_content: "reasoning only" }, finish_reason: finish }],
       ...(usage === undefined ? {} : { usage }) });
@@ -107,8 +110,9 @@ it.each([{ prompt_tokens: 10, completion_tokens: 2, total_tokens: 13 },
     expect(inspectCachedSourceSemantic(roots.cacheRoot, raw.cache_key, MODEL, PROFILE).status).not.toBe("hit");
   });
 
-it("binds free complete-source H to exact JSON wire, finite resource limits and retained unknown usage", async () => {
-  const fixture = await scenario();
+it.each([PROFILE, "intern-agents-a1-json-schema-v1"] as const)(
+  "binds %s free complete-source H to exact JSON wire, finite resource limits and retained unknown usage", async profile => {
+  const fixture = await scenario(false, profile);
   expect(fixture.preflight.quote_basis).toMatchObject(INTERN_DISCOVERY_QUOTE_BASIS);
   expect(fixture.preflight.cost_bound_usd).toBe(0);
   expect(fixture.preflight.input_token_bound).toBeGreaterThan(0);
@@ -118,15 +122,29 @@ it("binds free complete-source H to exact JSON wire, finite resource limits and 
   const filled = await runExtractionFill(fixture.options);
   expect(filled.newlyExtracted).toBe(1);
   expect(calls).toHaveLength(1);
-  expect(Object.keys(calls[0]!.body).sort()).toEqual(["max_tokens", "messages", "model"]);
+  expect(Object.keys(calls[0]!.body).sort()).toEqual(profile === PROFILE
+    ? ["max_tokens", "messages", "model"] : ["max_tokens", "messages", "model", "response_format"]);
   expect(calls[0]!.body).toMatchObject({ model: MODEL, max_tokens: 8192 });
+  const line = fixture.preflight.planned_requests[0]!;
+  const schema = sourceSemanticResponseJsonSchema(parseSourceSemanticRequest(JSON.parse(line.userPrompt)));
+  expect(calls[0]!.body.response_format).toEqual(profile === PROFILE ? undefined : {
+    type: "json_schema", json_schema: { name: "source_semantic", strict: true, schema }
+  });
+  expect(calls[0]!.body.messages).toEqual([
+    { role: "system", content: `${line.systemPrompt}\n\nSchema identifier (metadata): "source_semantic"\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(schema)}` },
+    { role: "user", content: line.userPrompt }
+  ]);
+  const otherProfile = profile === PROFILE ? "intern-agents-a1-json-schema-v1" : PROFILE;
+  expect(computeCacheKey(MODEL, otherProfile, line.systemPrompt, line.userPrompt)).not.toBe(line.key);
+  expect(() => parseSourceSemanticInteractivePreflight({ ...fixture.preflight,
+    config: { ...fixture.preflight.config, requestProfile: otherProfile } })).toThrow();
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
-  expect(raw).toMatchObject({ request_profile: PROFILE, finish_reason: "stop", usage: null, usage_known: false,
+  expect(raw).toMatchObject({ request_profile: profile, finish_reason: "stop", usage: null, usage_known: false,
     request_digest: fixture.preflight.planned_requests[0]!.request_digest,
     http_response: { bodyBase64: Buffer.from(calls[0]!.wire).toString("base64"), bodyComplete: true } });
-  const cached = readCachedEntry(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE);
+  const cached = readCachedEntry(roots.cacheRoot, fixture.selected[0]!, MODEL, profile);
   expect(cached.status === "hit" && cached.entry.source_semantic?.kind).toBe("intern_chat_completion");
-  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, profile).status).toBe("hit");
   const reopened = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot);
   expect(reopened.snapshot()?.telemetry).toMatchObject({ usageUnknownAttempts: 1 });
   await expect(reopened.reserveAttemptOrdinal!(fixture.selected[0]!)).rejects.toThrow(/per-key attempt ceiling/u);
@@ -134,6 +152,23 @@ it("binds free complete-source H to exact JSON wire, finite resource limits and 
   expect(calls).toHaveLength(1);
   expect(() => parseSourceSemanticInteractivePreflight({ ...fixture.preflight,
     max_output_tokens: 4096 })).toThrow(/encoded wire/u);
+});
+
+it("denies the strict semantic profile at Batch preflight and fill without dispatch", async () => {
+  const fixture = await scenario(false, "intern-agents-a1-json-schema-v1");
+  const calls = await listen("stop");
+  const fetchSpy = vi.spyOn(globalThis, "fetch");
+  const batch = { operation: "prepare" as const, limits: {
+    maxJobs: 1, maxRequestsPerJob: 1, maxFileBytes: 1_000_000,
+    maxInputTokensPerJob: 1_000_000, maxEnqueuedTokens: 1_000_000, maxOutputTokens: 8192,
+    maxUsd: 0, inputUsdPerMillion: 0, outputUsdPerMillion: 0,
+    deadlineMs: 60_000, requestTimeoutMs: 5_000, maxPolls: 1
+  } };
+  const { authorityReceiptPath: _authorityReceiptPath, ...dry } = fixture.options;
+  await expect(preflightExtractionBatch({ ...dry, batch })).rejects.toThrow(/unsupported Batch request profile/u);
+  await expect(runExtractionFill({ ...fixture.options, batch })).rejects.toThrow();
+  expect(fetchSpy).not.toHaveBeenCalled();
+  expect(calls).toHaveLength(0);
 });
 
 it("sends the independently expected view through preflight, actual HTTP, retained raw and reopened cache", async () => {
@@ -180,3 +215,32 @@ it.each([{ finish: "length", valid: true }, { finish: "stop", valid: false }] as
     await expect(runExtractionFill(fixture.options)).rejects.toThrow();
     expect(calls).toHaveLength(1);
   });
+
+it("binds opt-in inline H schema to actual native HTTP and retains the unmodified producer JSON on reopen", async () => {
+  const fixture = await scenario(true, PROFILE, true);
+  const calls = await listen("stop", true, undefined, true);
+  const filled = await runExtractionFill(fixture.options);
+  expect(filled.newlyExtracted).toBe(1);
+  expect(calls).toHaveLength(1);
+  const line = fixture.preflight.planned_requests[0]!;
+  const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+  expect(request.source_request.proposal_contract).toBe("source-semantic-proposal-v9");
+  expect(request.source_request.generation_schema_contract).toBe("host-owned-inline-entity-use-schema-v1");
+  const messages = calls[0]!.body.messages as { role: string; content: string }[];
+  expect(messages[0]!.content).toContain('"source-semantic-proposal-v9"');
+  expect(messages[0]!.content).not.toContain('"semantic_key"');
+  expect(messages[1]!.content).toBe(JSON.stringify({ contract: "source-semantic-generation-view-v1", source_request: {
+    source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
+    attribution_context: { contract: "utterance-attribution-v1", status: "unknown" },
+    source_assertions: request.source_request.source_assertions
+  } }));
+  const original = JSON.parse(calls[0]!.wire).choices[0].message.content;
+  const assertion = request.source_request.source_assertions.find(row => row.text.includes("completed"))!;
+  expect(JSON.parse(original)).toEqual(inlineCompletedResponse(assertion.assertion_id, assertion.text.includes("alpha") ? "alpha" : "decoy"));
+  const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
+  expect(raw.decoded_text).toBe(original);
+  expect(raw.http_response?.bodyBase64).toBe(Buffer.from(calls[0]!.wire).toString("base64"));
+  expect(inspectCachedSourceSemantic(roots.cacheRoot, fixture.selected[0]!, MODEL, PROFILE).status).toBe("hit");
+  await runExtractionFill(fixture.options);
+  expect(calls).toHaveLength(1);
+});

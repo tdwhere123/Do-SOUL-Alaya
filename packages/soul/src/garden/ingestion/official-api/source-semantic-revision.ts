@@ -1,10 +1,10 @@
+import { materializeSourceSemanticPresentation } from "./source-semantic-presentation.js";
 import { z } from "zod";
 import {
   AlayaError, SourceAssertionIdSchema, SourceSemanticDiagnosticsSchema, SourceSemanticTableValidationError,
-  materializeSourceSemanticTableProposal,
   sourceSemanticValidationDiagnostics
 } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, sourceSemanticRequestCatalog, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
+import { parseSourceSemanticRequest, semanticSha256, type SourceSemanticRequest } from "./source-semantic-request.js";
 
 const instruction = "Revise the previous proposal against the unchanged original source. Structural diagnostics describe rejected graph construction. Source review is an explicit reviewer interpretation, not an established fact; verify it against the source. Correct all supported content and scope, including omissions, without inventing facts. Return a complete new proposal, not a patch. The host will apply the same strict admission. Previous failures remain retained.";
 const completedInstruction = "Revise the retained complete producer response against the unchanged original source. Diagnostics describe JSON syntax or rejected graph construction; transport completion does not imply valid JSON or faithful meaning. Source review is an explicit reviewer interpretation, not an established fact; verify it against the source. Return one complete JSON proposal matching the response schema, not a patch, while correcting supported content and scope without inventing facts. The host applies unchanged strict admission. Previous failures remain retained.";
@@ -100,7 +100,7 @@ function structuralDiagnostics(raw: string, request: SourceSemanticRequest, comp
     return [{ code: "invalid_json", path: [], message: "The retained complete response is not valid JSON. Return one complete JSON proposal matching the response schema while preserving source content and scope." }];
   }
   try {
-    materializeSourceSemanticTableProposal(previous, { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 });
+    materializeSourceSemanticPresentation(previous, request);
   }
   catch (error) {
     if (!(error instanceof z.ZodError)) {

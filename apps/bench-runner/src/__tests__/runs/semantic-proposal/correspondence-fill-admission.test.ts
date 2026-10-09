@@ -230,11 +230,13 @@ it.each([
   { profile: "step-3.5-2603-low-json-schema-v1", invalid: false },
   { profile: "step-3.5-2603-high-json-schema-v1", invalid: false },
   { profile: INTERN_SEMANTIC_REQUEST_PROFILE, invalid: false },
+  { profile: "intern-agents-a1-json-schema-v1", invalid: false },
   { profile: "step-3.5-2603-low-json-schema-v1", invalid: true },
-  { profile: INTERN_SEMANTIC_REQUEST_PROFILE, invalid: true }
+  { profile: INTERN_SEMANTIC_REQUEST_PROFILE, invalid: true },
+  { profile: "intern-agents-a1-json-schema-v1", invalid: true }
 ] as const)(
   "sends $profile correspondence through its pinned route and reopens invalid-accounting=$invalid raw", async ({ profile, invalid }) => {
-  const intern = profile === INTERN_SEMANTIC_REQUEST_PROFILE;
+  const intern = profile === INTERN_SEMANTIC_REQUEST_PROFILE || profile === "intern-agents-a1-json-schema-v1";
   const basis = intern ? INTERN_DISCOVERY_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const prepared = parseSemanticProposalWorkset({
     ...correspondenceWorkset(), contract: "source-semantic-proposal-workset-v4",
@@ -275,8 +277,10 @@ it.each([
       expect(selected.href).toBe(`${basis.selected_provider_url}/chat/completions`);
       return nativeFetch(new URL(selected.pathname, localOrigin), init);
     };
-    const otherProfile = profile === "step-3.5-2603-low-json-schema-v1"
-      ? "step-3.5-2603-high-json-schema-v1" : "step-3.5-2603-low-json-schema-v1";
+    const otherProfile = intern ? profile === INTERN_SEMANTIC_REQUEST_PROFILE
+      ? "intern-agents-a1-json-schema-v1" : INTERN_SEMANTIC_REQUEST_PROFILE
+      : profile === "step-3.5-2603-low-json-schema-v1"
+        ? "step-3.5-2603-high-json-schema-v1" : "step-3.5-2603-low-json-schema-v1";
     await expect(executeSemanticProposalFill({
       workset: parseSemanticProposalWorkset({ ...prepared, request_profile: otherProfile }), cacheRoot, authority,
       config: { ...config, requestProfile: otherProfile }
@@ -304,8 +308,15 @@ it.each([
     expect(seen).toHaveLength(1);
     if (intern) {
       expect(seen[0]?.path).toBe("/v1/chat/completions");
-      expect(Object.keys(seen[0]!.body).sort()).toEqual(["max_tokens", "messages", "model"]);
-      expect((seen[0]!.body.messages as {content: string}[])[0]!.content).toContain(JSON.stringify(line.responseJsonSchema));
+      expect(Object.keys(seen[0]!.body).sort()).toEqual(profile === INTERN_SEMANTIC_REQUEST_PROFILE
+        ? ["max_tokens", "messages", "model"] : ["max_tokens", "messages", "model", "response_format"]);
+      expect(seen[0]!.body.response_format).toEqual(profile === INTERN_SEMANTIC_REQUEST_PROFILE ? undefined : {
+        type: "json_schema", json_schema: { name: "source_semantic_proposal", strict: true, schema: line.responseJsonSchema }
+      });
+      expect(seen[0]!.body.messages).toEqual([
+        { role: "system", content: `${line.systemPrompt}\n\nSchema identifier (metadata): "source_semantic_proposal"\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(line.responseJsonSchema)}` },
+        { role: "user", content: line.userPrompt }
+      ]);
     } else expect(seen[0]).toMatchObject({ path: "/step_plan/v1/chat/completions",
       body: { reasoning_effort: profile === "step-3.5-2603-low-json-schema-v1" ? "low" : "high",
         max_tokens: 4096, response_format: { type: "json_schema" } } });

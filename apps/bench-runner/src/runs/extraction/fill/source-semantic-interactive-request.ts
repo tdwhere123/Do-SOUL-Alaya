@@ -1,4 +1,4 @@
-import { isChatSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, sourceSemanticResponseJsonSchema, sourceSemanticGenerationInput } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { prepareSemanticProviderRequest } from
@@ -28,8 +28,9 @@ export function prepareSourceSemanticRequestWire(
 export function sourceSemanticRequestWireDigest(
   config: CompileSeedExtractionConfig, line: SourceRequestLine, maxOutputTokens: number
 ): string {
-  if (!isChatSemanticRequestProfile(config.requestProfile) &&
-      parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request.generation_view_contract === undefined) {
+  const selected = parseSourceSemanticRequest(JSON.parse(line.userPrompt)).source_request;
+  if (!isChatSemanticRequestProfile(config.requestProfile) && selected.generation_view_contract === undefined &&
+      selected.generation_schema_contract === SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT) {
     return requestEnvelopeDigest(line.userPrompt);
   }
   return sourceSemanticInteractiveWireSha256(config, line, maxOutputTokens);

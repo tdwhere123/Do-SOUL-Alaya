@@ -1,118 +1,15 @@
-import { z } from "zod";
 import { AlayaError } from "../shared/alaya-error.js";
-import {
-  SOURCE_SEMANTIC_GAP_KINDS, SOURCE_SEMANTIC_MAX_DEPTH, SOURCE_SEMANTIC_SOURCE_ACTS,
-  SourceSemanticDraftSchema, SourceSemanticFrameSchema, SourceSemanticReadingSchema,
-  SourceSemanticReferentSchema
-} from "./source-semantic-draft.js";
-import {
-  SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND, SourceSemanticSelectionContentShape,
-  SourceSemanticSelectionOutcomeShape, compileSourceSemanticSelection
-} from "./source-semantic-selection-lowering.js";
-import { SourceAssertionIdSchema, SourceOccurrenceSchema } from "../evidence/source-selection.js";
+import { SOURCE_SEMANTIC_MAX_DEPTH } from "./source-semantic-draft.js";
+import { compileSourceSemanticSelection } from "./source-semantic-selection-lowering.js";
 import { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
-import { SourceSemanticInterpretationSchema } from "./source-semantic-interpretation.js";
 import type { SourceReferenceCatalog } from "../evidence/source-reference.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
-
-/** Finite producer syntax; native selection and graph owners retain canonical meaning. */
-export const SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT = "source-semantic-proposal-v8" as const;
-export const SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT = "host-owned-table-schema-v1" as const;
-const SelectionContent = SourceSemanticSelectionContentShape.unwrap().shape;
-const NativeDomain = SelectionContent.domains.unwrap().unwrap().element.unwrap();
-const NativeMeasurement = SelectionContent.measurements.unwrap().unwrap().element.unwrap();
-const NativeDomainMember = NativeDomain.shape.members.unwrap().element.unwrap();
-const NativeDomainExclusion = NativeDomain.shape.exclusions.unwrap().element.unwrap();
-const NativeGraph = SourceSemanticDraftSchema.unwrap().shape;
-const NativeInterpretation = SourceSemanticInterpretationSchema.unwrap().shape;
-function maxItems(schema: z.ZodType): number {
-  const value = (z.toJSONSchema(schema, { io: "output" }) as { maxItems?: number }).maxItems;
-  if (value === undefined || !Number.isSafeInteger(value)) throw new AlayaError("VALIDATION", "Protocol array bound is missing");
-  return value;
-}
-const LIMIT = {
-  roots: Math.min(maxItems(SelectionContent.roots), maxItems(NativeInterpretation.entry_roots)),
-  entities: maxItems(NativeGraph.referents),
-  frames: maxItems(NativeGraph.frames), operators: maxItems(NativeGraph.operators),
-  domains: maxItems(SelectionContent.domains.unwrap()),
-  measurements: maxItems(SelectionContent.measurements.unwrap()),
-  gaps: maxItems(SelectionContent.gaps.unwrap()),
-  arguments: maxItems(SourceSemanticFrameSchema.unwrap().shape.slots),
-  mentions: maxItems(SourceSemanticReferentSchema.unwrap().shape.mentions),
-  domainMembers: maxItems(NativeDomain.shape.members),
-  domainExclusions: maxItems(NativeDomain.shape.exclusions),
-  gapAffected: maxItems(SelectionContent.gaps.unwrap().unwrap().element.unwrap().shape.affected.unwrap())
-} as const;
-const Key = NativeDomain.shape.key;
-const Atom = z.object({ assertion_id: SourceAssertionIdSchema,
-  text: z.string().min(1).max(65536), occurrence: SourceOccurrenceSchema.optional() }).strict().readonly();
-const Support = z.union([Atom, z.array(Atom).min(1).max(SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND).readonly()]);
-const EntityRef = z.object({ kind: z.literal("entity_ref"), key: Key }).strict().readonly();
-const ContentRef = z.object({ kind: z.literal("content_ref"), key: Key }).strict().readonly();
-const OccurrenceRef = z.object({ kind: z.literal("occurrence_ref"), key: Key }).strict().readonly();
-const NativeContentRef = z.object({ kind: z.literal("content_reference"), key: Key }).strict().readonly();
-const Target = z.discriminatedUnion("kind", [EntityRef, ContentRef, OccurrenceRef, NativeContentRef,
-  z.object({ kind: z.literal("unresolved") }).strict().readonly(),
-  z.object({ kind: z.literal("bound_variable"), quantifier: Key }).strict().readonly()]);
-const Operand = z.union([ContentRef, NativeContentRef]);
-const Entity = z.discriminatedUnion("form", [
-  z.object({ form: z.literal("selection"), key: Key, semantic_key: Key.optional(), selection: Atom }).strict().readonly(),
-  z.object({ form: z.literal("entity"), key: Key, semantic_key: Key.optional(),
-    referent_kind: SourceSemanticReferentSchema.unwrap().shape.referent_kind.optional(),
-    mentions: z.array(Atom).min(1).max(LIMIT.mentions).readonly() }).strict().readonly()
-]);
-const Argument = z.object({ role: SourceSemanticReadingSchema, target: Target,
-  support: Support.optional() }).strict().readonly();
-const Qualification = Argument.unwrap().extend({ support: Support }).strict().readonly();
-const Predicate = z.object({ kind: z.enum(["explicit", "implicit"]),
-  reading: SourceSemanticReadingSchema, support: Support }).strict().readonly();
-const Statement = z.object({ kind: z.literal("statement"), key: Key,
-  predicate: Predicate, arguments: z.array(Argument).max(LIMIT.arguments).readonly(),
-  qualifications: z.array(Qualification).max(LIMIT.arguments).readonly() }).strict().readonly();
-const OperatorBase = { key: Key, support: Support };
-const Nodes = z.discriminatedUnion("kind", [Statement,
-  z.object({ kind: z.literal("not"), ...OperatorBase, content: Operand }).strict().readonly(),
-  z.object({ kind: z.literal("possible"), ...OperatorBase, content: Operand }).strict().readonly(),
-  z.object({ kind: z.literal("reported"), ...OperatorBase, content: Operand,
-    reporter: EntityRef.optional() }).strict().readonly(),
-  z.object({ kind: z.literal("conditional"), ...OperatorBase, antecedent: Operand,
-    consequent: Operand }).strict().readonly(),
-  z.object({ kind: z.literal("opaque"), ...OperatorBase,
-    operands: z.array(Operand).min(1).max(LIMIT.arguments).readonly() }).strict().readonly(),
-  z.object({ kind: z.literal("forall"), ...OperatorBase, domain: Key,
-    restriction: Operand.nullable(), content: Operand }).strict().readonly()
-]);
-const Domain = NativeDomain.extend({
-  members: z.array(NativeDomainMember.extend({ referent: EntityRef }).readonly()).max(LIMIT.domainMembers).readonly(),
-  exclusions: z.array(NativeDomainExclusion.extend({ referent: EntityRef }).readonly()).max(LIMIT.domainExclusions).readonly()
-}).readonly();
-const Measurement = NativeMeasurement.extend({ subject: EntityRef }).readonly();
-const GapTarget = z.discriminatedUnion("kind", [EntityRef, OccurrenceRef]);
-const SourceSemanticTableProposalSchema = z.object({ contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
-  outcome: SourceSemanticSelectionOutcomeShape,
-  content: z.object({ nodes: z.array(Nodes).max(LIMIT.frames + LIMIT.operators).readonly(),
-    entities: z.array(Entity).max(LIMIT.entities).readonly(),
-    roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS),
-    expression: ContentRef }).strict().readonly()).max(LIMIT.roots).readonly(),
-    domains: z.array(Domain).max(LIMIT.domains).readonly().optional(),
-    measurements: z.array(Measurement).max(LIMIT.measurements).readonly().optional(),
-    gaps: z.array(z.object({ affected: z.array(GapTarget).max(LIMIT.gapAffected).readonly(),
-      kind: z.enum(SOURCE_SEMANTIC_GAP_KINDS), support: Support,
-      description: z.string().min(1).max(1024).optional() }).strict().readonly()).max(LIMIT.gaps).readonly()
-  }).strict().readonly().optional()
-}).strict().readonly();
-type SourceSemanticTableProposal = z.infer<typeof SourceSemanticTableProposalSchema>;
-type Content = NonNullable<SourceSemanticTableProposal["content"]>;
-type Node = Content["nodes"][number];
-type TargetValue = z.infer<typeof Target>;
-type OperandValue = z.infer<typeof Operand>;
-
-export function sourceSemanticTableJsonSchema(): object {
-  return z.toJSONSchema(SourceSemanticTableProposalSchema, { io: "output", reused: "ref",
-    override: ({ jsonSchema }) => {
-      if (jsonSchema.const !== undefined) { jsonSchema.enum = [jsonSchema.const]; delete jsonSchema.const; }
-    } });
-}
+import { SourceSemanticTableProposalSchema, SOURCE_SEMANTIC_TABLE_LIMIT as LIMIT,
+  type SourceSemanticTableContent as Content, type SourceSemanticTableNode as Node,
+  type SourceSemanticTableTarget as TargetValue, type SourceSemanticTableOperand as OperandValue
+} from "./source-semantic-table-shape.js";
+export { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
+  sourceSemanticTableJsonSchema } from "./source-semantic-table-shape.js";
 
 /** A producer-authored table violates the table ownership contract. */
 export class SourceSemanticTableValidationError extends AlayaError {

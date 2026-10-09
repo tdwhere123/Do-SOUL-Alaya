@@ -8,9 +8,23 @@ Current recall algorithm (UGAF target vs live degenerate projection) is
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 13.9.0, engine gateway 1.0.0
+## Unreleased — protocol 13.10.0, engine gateway 1.0.0
 
 `@do-soul/alaya-engine-gateway` is `1.0.0`; app packages remain `0.3.11`.
+
+Protocol 13.10.0 also adds an opt-in source proposal v9 presentation with inline
+entity-use constructors and one model identity token. It preserves local mention
+groups, derives metered evidence rows through the existing table/selection
+lowerers, and binds request, guidance, schema, cache and native receive identity.
+Default v8 requests and admission remain unchanged; model effectiveness is unverified.
+
+Protocol 13.10.0 adds the opt-in `intern-agents-a1-json-schema-v1` semantic
+profile and shared semantic profile set under invariant §25 (minor: additive
+exports). It preserves full guidance and adds a strict named schema format to
+existing native Q/H/C requests and their bound authority/cache identities.
+Existing guidance/defaults and diagnostic-only profiles remain unchanged;
+Gemini Batch remains unavailable for Intern. Natural schema acceptance and
+semantic success are unverified.
 
 Protocol 13.9.0 adds two explicit Intern protocol-probe profiles under invariant
 §25 (minor: additive exports). They preserve current guidance and add only a JSON

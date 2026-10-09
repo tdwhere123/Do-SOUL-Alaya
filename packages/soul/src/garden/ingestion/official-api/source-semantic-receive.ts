@@ -1,3 +1,4 @@
+import { materializeSourceSemanticPresentation } from "./source-semantic-presentation.js";
 import { z } from "zod";
 import {
   AlayaError, SOURCE_SEMANTIC_PACKET_CONTRACT,
@@ -129,8 +130,7 @@ function decodeSourceSemantics(
   });
   let envelope: ReturnType<typeof materializeSourceSemanticTableProposal>;
   try {
-    envelope = materializeSourceSemanticTableProposal(parsed.value,
-      { catalog: sourceSemanticRequestCatalog(request), sha256: semanticSha256 }, meter);
+    envelope = materializeSourceSemanticPresentation(parsed.value, request, meter);
   } catch (error) {
     if (error instanceof SourceSemanticResourceExhausted) return { ...attempt, outcome: { status: "resource_exhausted" } };
     return { ...attempt, outcome: invalidProposalOutcome(error) };

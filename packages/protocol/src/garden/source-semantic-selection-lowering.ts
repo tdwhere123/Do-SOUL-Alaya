@@ -16,15 +16,20 @@ export const SOURCE_SEMANTIC_SELECTION_SUPPORT_BOUND = 8 as const;
 export const SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND = 64 as const;
 
 const Key = z.string().min(1).max(64);
-const SupportAtom = z.object({ assertion_id: SourceAssertionIdSchema,
-  text: z.string().min(1).max(65536), occurrence: SourceOccurrenceSchema.optional() }).strict().readonly();
+/** Fresh schema instances preserve historical presentation reference topology. */
+export function sourceSemanticSelectionAtomSchema() {
+  return z.object({ assertion_id: SourceAssertionIdSchema,
+    text: z.string().min(1).max(65536), occurrence: SourceOccurrenceSchema.optional() }).strict().readonly();
+}
+const SupportAtom = sourceSemanticSelectionAtomSchema();
 const SupportList = z.array(SupportAtom).min(1).max(SOURCE_SEMANTIC_SELECTION_SUPPORT_LIST_BOUND).readonly();
 const Support = z.union([SupportAtom, SupportList]);
 const ReferentKind = z.enum(["grouped", "unresolved", "unexpressed", "ambiguous"]);
-const Entity = z.object({
+export const SourceSemanticSelectionEntitySchema = z.object({
   kind: z.literal("entity"), key: Key.optional(), referent_kind: ReferentKind.optional(),
   mentions: z.array(SupportAtom).min(1).max(64).readonly()
 }).strict().readonly();
+const Entity = SourceSemanticSelectionEntitySchema;
 const ContentReference = z.object({ kind: z.literal("content_reference"), key: Key }).strict().readonly();
 const Occurrence = z.object({ kind: z.literal("occurrence"), key: Key }).strict().readonly();
 const OperatorFields = { key: Key.optional(), support: Support };

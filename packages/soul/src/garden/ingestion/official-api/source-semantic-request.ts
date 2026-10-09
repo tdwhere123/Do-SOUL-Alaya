@@ -3,8 +3,11 @@ import { z } from "zod";
 import {
   AlayaError, BoundedIdSchema, SourceAssertionIdSchema, SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, sourceSemanticInterpretationIdentity,
   SourceSemanticQuerySchema, SourceSemanticRequestEnvelopeSchema,
-  SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
-  sourceSemanticTableJsonSchema,
+  SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
+  sourceSemanticTableJsonSchema, sourceSemanticInlineJsonSchema,
+  SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT,
+  SourceSemanticGenerationSchemaContractSchema, sourceSemanticPresentationContracts,
+  type SourceSemanticGenerationSchemaContract,
   SOURCE_SEMANTIC_ENVELOPE_SCHEMA_VERSION, SOURCE_SEMANTIC_K_VERSION,
   SOURCE_SEMANTIC_NORMALIZER_VERSION, SOURCE_SEMANTIC_PACKET_CONTRACT,
   SourceSemanticQueryCarrierBodySchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH, SourceSemanticCorrespondenceAssessmentSchema,
@@ -21,11 +24,12 @@ import {
 import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { sourceSemanticQueryExamples, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
 export { SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT } from "./source-semantic-query-examples.js";
-import { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
+import { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 import { assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
 import { sourceSemanticCorrespondenceGenerationResponseJsonSchema } from "./source-semantic-query-provenance.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
+export { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
@@ -51,13 +55,20 @@ const ProducerCapability = z.object({
   proposes: z.literal("draft_semantics")
 }).strict().readonly();
 
+function validatePresentation(request: { proposal_contract: string; generation_schema_contract: SourceSemanticGenerationSchemaContract },
+  context: z.RefinementCtx): void {
+  if (request.proposal_contract !== sourceSemanticPresentationContracts(request.generation_schema_contract).proposal_contract) {
+    context.addIssue({ code: "custom", message: "source proposal and generation schema contracts differ" });
+  }
+}
+
 const SourceSemanticOpenRequestBodySchema = z.object({
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
-  proposal_contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
+  proposal_contract: z.enum([SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT]),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT),
   source_scope: z.literal("complete-source").optional(),
-  generation_schema_contract: z.literal(SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT),
+  generation_schema_contract: SourceSemanticGenerationSchemaContractSchema,
   generation_view_contract: SourceSemanticGenerationViewContractSchema.optional(),
   revision: SourceSemanticRevisionSchema.optional(),
   producer_capability: ProducerCapability,
@@ -68,6 +79,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
     assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"])
   }).strict().readonly()).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly()
 }).strict().superRefine((request, context) => {
+  validatePresentation(request, context);
   if (request.source_scope === undefined && (request.source_assertions.length > 8 || request.assertion_locations.length > 8)) {
     context.addIssue({ code: "custom", message: "partial source requests permit at most eight source units" });
   }
@@ -102,6 +114,7 @@ export type SourceSemanticProposalInput = Readonly<{
   assertionIds: readonly number[];
   sourceScope?: SourceSemanticOpenRequestBody["source_scope"];
   generationViewContract?: SourceSemanticGenerationViewContract;
+  generationSchemaContract?: SourceSemanticGenerationSchemaContract;
   source_id: string;
   source_version: string;
   producer_id: string;
@@ -120,11 +133,11 @@ export const SourceSemanticUnsupportedSourceSchema = z.object({
   interpretation_contract: z.literal(SOURCE_SEMANTIC_PACKET_CONTRACT),
   k_version: z.literal(SOURCE_SEMANTIC_K_VERSION),
   normalizer_version: z.literal(SOURCE_SEMANTIC_NORMALIZER_VERSION),
-  proposal_contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
-  generation_schema_contract: z.literal(SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT),
+  proposal_contract: z.enum([SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT]),
+  generation_schema_contract: SourceSemanticGenerationSchemaContractSchema,
   assertion_count: z.number().int().positive(),
   reason: SourceReferenceCapacityReasonSchema
-}).strict().readonly();
+}).strict().superRefine(validatePresentation).readonly();
 export type SourceSemanticHostPreparation = Readonly<{ status: "ready"; request: SourceSemanticRequest }>
   | z.infer<typeof SourceSemanticUnsupportedSourceSchema>;
 
@@ -240,6 +253,7 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     source_digest: sourceDigest, ...(input.profile === undefined ? {} : { profile: input.profile }) });
   if (input.revision !== undefined) SourceSemanticRevisionSchema.parse(input.revision);
   if (input.generationViewContract !== undefined) SourceSemanticGenerationViewContractSchema.parse(input.generationViewContract);
+  const presentation = sourceSemanticPresentationContracts(input.generationSchemaContract);
   const capacity = sourceReferenceCapacityReason(units);
   if (capacity !== null) {
     if (input.sourceScope !== "complete-source") throw new SourceReferenceCapacityExceeded(capacity);
@@ -248,17 +262,17 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
       source_scope: "complete-source", source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
       interpretation_contract: SOURCE_SEMANTIC_PACKET_CONTRACT,
       k_version: SOURCE_SEMANTIC_K_VERSION, normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-      proposal_contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
-      generation_schema_contract: SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
+      proposal_contract: presentation.proposal_contract,
+      generation_schema_contract: presentation.generation_schema_contract,
       assertion_count: units.length, reason: capacity });
   }
   const source_request = SourceSemanticOpenRequestBodySchema.parse({
     k_version: SOURCE_SEMANTIC_K_VERSION,
     normalizer_version: SOURCE_SEMANTIC_NORMALIZER_VERSION,
-    proposal_contract: SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT,
+    proposal_contract: presentation.proposal_contract,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
-    generation_schema_contract: SOURCE_SEMANTIC_TABLE_GENERATION_CONTRACT,
+    generation_schema_contract: presentation.generation_schema_contract,
     ...(input.generationViewContract === undefined ? {} : { generation_view_contract: input.generationViewContract }),
     producer_capability: producer,
     resource_limits: limits,
@@ -359,8 +373,8 @@ export function buildSourceSemanticCorrespondenceRequest(
 
 /** Current table generation schema, without profile enums. */
 export function sourceSemanticResponseJsonSchema(request?: SourceSemanticRequest): object {
-  if (request !== undefined) parseSourceSemanticRequest(request);
-  return sourceSemanticTableJsonSchema();
+  const selected = request === undefined ? undefined : parseSourceSemanticRequest(request).source_request.generation_schema_contract;
+  return selected === SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT ? sourceSemanticInlineJsonSchema() : sourceSemanticTableJsonSchema();
 }
 
 const QueryCorrespondenceGenerationOutcomeSchema = z.discriminatedUnion("status", [
@@ -529,8 +543,7 @@ export function sourceSemanticCorrespondenceResponseJsonSchema(
 
 /** Current source-table prompt bytes are owned by the table guidance. */
 export function sourceSemanticSystemPrompt(request: SourceSemanticRequest): string {
-  parseSourceSemanticRequest(request);
-  return SOURCE_SEMANTIC_SYSTEM_PROMPT;
+  return sourceSemanticGenerationSystemPrompt(parseSourceSemanticRequest(request).source_request.generation_schema_contract);
 }
 
 export const SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT = [

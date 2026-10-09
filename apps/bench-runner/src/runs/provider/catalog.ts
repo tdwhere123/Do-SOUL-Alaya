@@ -1,6 +1,6 @@
 import type { ExtractionRequestProfile } from "../extraction/request-profile.js";
 import { STEP_SEMANTIC_REQUEST_PROFILE, STEP_PREVIEW_REQUEST_PROFILE,
-  INTERN_SEMANTIC_REQUEST_MODEL, INTERN_SEMANTIC_REQUEST_PROFILE, INTERN_PROTOCOL_PROBE_PROFILES,
+  INTERN_SEMANTIC_REQUEST_MODEL, INTERN_SEMANTIC_REQUEST_PROFILE, INTERN_SEMANTIC_REQUEST_PROFILES, INTERN_PROTOCOL_PROBE_PROFILES,
   type InternProtocolProbeProfile,
   STEP_SEMANTIC_REQUEST_PROFILES, stepSemanticRequestModel } from "@do-soul/alaya-protocol";
 
@@ -24,7 +24,7 @@ export const PROVIDER_BINDINGS: readonly ProviderBinding[] = [
     id: INTERN_SEMANTIC_REQUEST_MODEL,
     aliases: [],
     requestProfile: INTERN_SEMANTIC_REQUEST_PROFILE,
-    supportedRequestProfiles: [INTERN_SEMANTIC_REQUEST_PROFILE],
+    supportedRequestProfiles: INTERN_SEMANTIC_REQUEST_PROFILES,
     supportedProbeRequestProfiles: INTERN_PROTOCOL_PROBE_PROFILES.map(row => row.profile),
     probeCallCeiling: 1
   },

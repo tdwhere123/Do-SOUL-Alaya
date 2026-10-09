@@ -2,8 +2,12 @@ import { isStepSemanticRequestProfile, type StepSemanticRequestProfile } from ".
 
 export const INTERN_SEMANTIC_REQUEST_MODEL = "Agents-A1" as const;
 export const INTERN_SEMANTIC_REQUEST_PROFILE = "intern-agents-a1-json-guidance-v1" as const;
+const INTERN_STRICT_SCHEMA_REQUEST_PROFILE = "intern-agents-a1-json-schema-v1" as const;
+export const INTERN_SEMANTIC_REQUEST_PROFILES = [
+  INTERN_SEMANTIC_REQUEST_PROFILE, INTERN_STRICT_SCHEMA_REQUEST_PROFILE
+] as const;
 export const INTERN_SEMANTIC_PROVIDER_URL = "https://discovery-api.intern-ai.org.cn/v1" as const;
-export type InternSemanticRequestProfile = typeof INTERN_SEMANTIC_REQUEST_PROFILE;
+export type InternSemanticRequestProfile = (typeof INTERN_SEMANTIC_REQUEST_PROFILES)[number];
 
 /** Diagnostic requests only: provider acceptance and enforcement are unverified. */
 export const INTERN_PROTOCOL_PROBE_PROFILES = [
@@ -17,11 +21,12 @@ export function isInternProviderRequestProfile(value: unknown): value is InternS
 }
 
 export function internProviderResponseFormat(profile: InternSemanticRequestProfile | InternProtocolProbeProfile) {
+  if (profile === INTERN_STRICT_SCHEMA_REQUEST_PROFILE) return "json_schema" as const;
   return INTERN_PROTOCOL_PROBE_PROFILES.find(row => row.profile === profile)?.responseFormat;
 }
 
 export function isInternSemanticRequestProfile(value: unknown): value is InternSemanticRequestProfile {
-  return value === INTERN_SEMANTIC_REQUEST_PROFILE;
+  return INTERN_SEMANTIC_REQUEST_PROFILES.some(profile => profile === value);
 }
 
 /** These native chat profiles share named schemas, inclusive usage and retained HTTP evidence. */

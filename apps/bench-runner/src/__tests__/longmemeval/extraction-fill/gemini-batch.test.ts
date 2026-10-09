@@ -1,3 +1,4 @@
+import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +25,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { prepareSourceSemanticRequestLine } from "../../../runs/extraction/request-artifact.js";
 import { receiveSourceSemanticBatchLine } from "../../../runs/extraction/fill/batch/source-semantic-interpretation.js";
-import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
+import { tableCompletedResponse, inlineCompletedResponse } from "./source-semantic-table-response.test-support.js";
 import { createGardenHttpExtractor } from "../../../runs/compile-seed/compile-seed-http.js";
 import {
   ExtractionResponseAdmissionError,
@@ -194,16 +195,17 @@ describe("durable Gemini Batch HTTP extraction", () => {
     expect(creates).toBe(1);
   });
 
-  it("uploads the exact projected source view over HTTP and receives the complete logical request after reopen", async () => {
+  it.each([false, true])("uploads the exact projected source view over HTTP and receives the complete logical request after reopen, inline %s", async inline => {
     const proposal = { sourceCorpus: "User: I completed alpha.", assertionIds: [1], sourceScope: "complete-source" as const,
       generationViewContract: SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
+      ...(inline ? { generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } : {}),
       source_id: "source", source_version: "1", producer_id: "producer", producer_version: "1" };
     const base = plan();
     const line = prepareSourceSemanticRequestLine(buildSourceSemanticRequest(proposal), ["unit"],
       { model: base.model, requestProfile: base.requestProfile });
     const sourcePlan = { ...base, lines: [line], limits: { ...base.limits,
       maxInputTokensPerJob: 100_000, maxEnqueuedTokens: 100_000 } };
-    const rawJson = JSON.stringify(tableCompletedResponse(1, "alpha"));
+    const rawJson = JSON.stringify((inline ? inlineCompletedResponse : tableCompletedResponse)(1, "alpha"));
     output = JSON.stringify({ key: line.key, response: { candidates: [{ finishReason: "STOP",
       content: { parts: [{ text: rawJson }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 7, totalTokenCount: 17 } } }) + "\n";
     importer.mockImplementation(async result => {
@@ -212,6 +214,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
         line: result.line, rawJson: result.rawJson, sourceCorpus: proposal.sourceCorpus, proposal,
         retained: { plan: sourcePlan, provenance: result.provenance } });
       expect(received.outcome.status).toBe("interpreted");
+      expect(received.rawJson).toBe(rawJson);
       admitted.add(result.line.key);
     });
     await run("prepare", { plan: sourcePlan });
@@ -224,6 +227,8 @@ describe("durable Gemini Batch HTTP extraction", () => {
         attribution_context: { contract: "utterance-attribution-v1", status: "unknown" },
         source_assertions: [{ assertion_id: 1, text: "User: I completed alpha.", source_role: "user" }] } }));
     expect(wire.request.generationConfig.responseJsonSchema).toBeDefined();
+    expect(JSON.stringify(wire.request.generationConfig.responseJsonSchema)).toContain(
+      inline ? "source-semantic-proposal-v9" : "source-semantic-proposal-v8");
     state = "BATCH_STATE_SUCCEEDED";
     const resumed = await run("resume", { plan: sourcePlan });
     expect(resumed.jobs[0]!.status).toBe("succeeded");

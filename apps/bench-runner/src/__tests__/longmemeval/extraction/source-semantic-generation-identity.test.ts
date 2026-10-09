@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as soul from "@do-soul/alaya-soul";
+import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { computeCacheKey, EXTRACTION_CACHE_KEY_GOLDEN_VECTOR } from "../../../runs/compile-seed/cache/cache-key.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration,
   prepareSourceSemanticRequestLine, parseSourceSemanticRequestLine, sourceSemanticArtifactPreparations
@@ -25,6 +26,38 @@ const expectedView = JSON.stringify({ contract: "source-semantic-generation-view
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic retained and physical generation identities", () => {
+  it("binds opt-in codec, manifest generation and schema preimage while preserving the exact input view", () => {
+    const legacy = request();
+    const selected = parseExtractionOpenSemanticsGeneration({ ...EXTRACTION_OPEN_SEMANTICS_GENERATION,
+      generation_view_contract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
+      generation_schema_contract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT });
+    const host = soul.buildSourceSemanticRequest({ ...input,
+      generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
+      generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT });
+    const line = prepareSourceSemanticRequestLine(host, ["unit"], config);
+    const schema = JSON.stringify(soul.sourceSemanticResponseJsonSchema(host));
+    const identity = JSON.stringify({ contract: "source-semantic-generation-view-v1", host_request_json: line.userPrompt,
+      model_input_json: expectedView });
+    expect(line.key).toBe(createHash("sha256").update([config.model, config.requestProfile, line.systemPrompt,
+      identity, geminiGenerationSchemaCacheMaterial(schema)].join("\0")).digest("hex"));
+    expect(soul.sourceSemanticGenerationInput(host)).toBe(expectedView);
+    expect(line.key).not.toBe(prepareSourceSemanticRequestLine(legacy, ["unit"], config).key);
+    expect(parseSourceSemanticRequestLine(line, { ...config, openSemantics: selected })).toEqual(line);
+    expect(() => parseSourceSemanticRequestLine(line, { ...config, openSemantics: {
+      ...EXTRACTION_OPEN_SEMANTICS_GENERATION, generation_view_contract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT
+    } })).toThrow(/schema differs/u);
+    const [prepared] = sourceSemanticArtifactPreparations(input.sourceCorpus, "complete-source", selected);
+    expect(prepared?.status).toBe("ready");
+    if (prepared?.status !== "ready") throw new Error("fixture source must prepare");
+    expect(prepared.semantic.source_request.proposal_contract).toBe("source-semantic-proposal-v9");
+    const wire = prepareSourceSemanticRequestWire(config, line, 4096);
+    expect(JSON.parse(wire.body)).toEqual(encodeGeminiGenerateContent(line, {
+      model: config.model, requestProfile: config.requestProfile, maxOutputTokens: 4096 }));
+    expect(JSON.stringify(JSON.parse(wire.body).generationConfig.responseJsonSchema)).toContain("source-semantic-proposal-v9");
+    const unprojected = prepareSourceSemanticRequestLine(soul.buildSourceSemanticRequest({ ...input,
+      generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT }), ["unit"], config);
+    expect(sourceSemanticRequestWireDigest(config, unprojected, 4096)).not.toBe(requestEnvelopeDigest(unprojected.userPrompt));
+  });
   it("preserves historical golden bytes and binds full host plus exact model view plus response schema", () => {
     const golden = EXTRACTION_CACHE_KEY_GOLDEN_VECTOR;
     expect(computeCacheKey(golden.model, golden.requestProfile, golden.systemPrompt, golden.extractionRequest))

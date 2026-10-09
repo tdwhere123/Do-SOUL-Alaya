@@ -151,11 +151,13 @@ it.each(probeProfiles.slice(1))("retains reported usage and exact malformed fina
   }, { usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } });
 });
 
-it.each([{ content: '{"contract":"source-semantic-query-response-v8","outcome":{"status":"abstained"}}', finish: "stop" },
-  { content: "{malformed", finish: "stop" }, { content: "partial", finish: "length" }])(
-  "retains one Q $finish attempt and its terminal or abstained result on reopen", async ({ content, finish }) => {
+it.each(([PROFILE, "intern-agents-a1-json-schema-v1"] as const).flatMap(profile => [
+  { content: '{"contract":"source-semantic-query-response-v8","outcome":{"status":"abstained"}}', finish: "stop" },
+  { content: "{malformed", finish: "stop" }, { content: "partial", finish: "length" }
+].map(row => ({ ...row, profile }))))(
+  "retains one $profile Q $finish attempt and its terminal or abstained result on reopen", async ({ content, finish, profile }) => {
     const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
-      model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT,
+      model: MODEL, request_profile: profile, provider_url: ENDPOINT,
       items: [{ original_query: "Who sent the parcel?" }] });
     const cacheRoot = root(), preflight = prepareSemanticProposal(workset, cacheRoot, 8192);
     expect(preflight).toMatchObject({ maximum_attempts: 1, maximum_attempts_per_key: 1,
@@ -167,7 +169,7 @@ it.each([{ content: '{"contract":"source-semantic-query-response-v8","outcome":{
       outputUsdPerMillion: 0, spendCeilingUsd: 0 });
     expect(authority.price.estimated_upper_usd).toBe(0);
     expect(authority.price.maximum_input_tokens_per_attempt).toBeGreaterThan(0);
-    const config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+    const config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: profile, apiKey: "loopback-only" };
     await localHttp(content, finish, 200, async (fetchImpl, calls, wire) => {
       const run = () => executeSemanticProposalFill({ workset, cacheRoot, authority, config,
         extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
@@ -175,7 +177,21 @@ it.each([{ content: '{"contract":"source-semantic-query-response-v8","outcome":{
       else if (content === "{malformed") await expect(run()).rejects.toThrow(/stopped after retryable/u);
       else await run();
       const line = materializeSemanticProposalLines(workset, 8192)[0]!;
-      expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({ request_profile: PROFILE,
+      expect(calls[0]!.response_format).toEqual(profile === PROFILE ? undefined : {
+        type: "json_schema", json_schema: { name: "source_semantic_proposal", strict: true, schema: line.responseJsonSchema }
+      });
+      expect(calls[0]!.messages).toEqual([
+        { role: "system", content: `${line.systemPrompt}\n\nSchema identifier (metadata): "source_semantic_proposal"\nReturn only a JSON object conforming to this complete JSON Schema. Preserve every required field and constraint; the receiver validates the result.\n${JSON.stringify(line.responseJsonSchema)}` },
+        { role: "user", content: line.userPrompt }
+      ]);
+      const other = materializeSemanticProposalLines(parseSemanticProposalWorkset({ ...workset,
+        request_profile: profile === PROFILE ? "intern-agents-a1-json-schema-v1" : PROFILE }), 8192)[0]!;
+      expect(other.systemPrompt).toBe(line.systemPrompt);
+      expect(other.userPrompt).toBe(line.userPrompt);
+      expect(other.responseJsonSchema).toEqual(line.responseJsonSchema);
+      expect(other.key).not.toBe(line.key);
+      expect(other.requestDigest).not.toBe(line.requestDigest);
+      expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({ request_profile: profile,
         request_digest: line.requestDigest, decoded_text: content, usage_known: false, usage: null,
         http_response: { bodyBase64: Buffer.from(wire).toString("base64"), bodyComplete: true } });
       if (finish === "length") await expect(run()).rejects.toThrow(/retained incomplete/u);

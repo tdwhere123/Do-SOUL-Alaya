@@ -1,0 +1,53 @@
+import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT,
+  sourceSemanticPresentationContracts, type SourceSemanticGenerationSchemaContract } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_RELATION_GUIDANCE,
+  SOURCE_SEMANTIC_ROOT_GUIDANCE } from "./source-semantic-table-guidance.js";
+import { SOURCE_SEMANTIC_PRESERVATION_GUIDANCE, SOURCE_SEMANTIC_OPERATOR_GUIDANCE,
+  SOURCE_SEMANTIC_SCOPE_GUIDANCE, SOURCE_SEMANTIC_DOMAIN_GUIDANCE,
+  SOURCE_SEMANTIC_ATTRIBUTION_GUIDANCE } from "./source-semantic-shared-guidance.js";
+
+const support = (assertion_id: number, text: string) => ({ assertion_id, text });
+const entity = (key: string | undefined, assertion_id: number, text: string) => ({ kind: "entity",
+  ...(key === undefined ? {} : { key }), mentions: [support(assertion_id, text)] });
+const content = (key: string) => ({ kind: "content_ref", key });
+export const SOURCE_SEMANTIC_INLINE_EXAMPLE = {
+  contract: SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, outcome: { status: "interpreted" },
+  content: {
+    nodes: [
+      { kind: "statement", key: "first_validity", predicate: { kind: "explicit", reading: "valid", support: support(1, "valid") },
+        arguments: [{ role: "subject", target: entity("permit", 1, "permit") }],
+        qualifications: [{ role: "exclusive applicability day", support: support(1, "Tuesday only"), target: entity(undefined, 1, "Tuesday") }] },
+      { kind: "statement", key: "later_validity", predicate: { kind: "explicit", reading: "valid", support: support(2, "valid") },
+        arguments: [{ role: "subject", target: entity("permit", 2, "permit") }, { role: "applicability day", target: entity(undefined, 2, "Thursday") }], qualifications: [] },
+      { kind: "statement", key: "knowledge", predicate: { kind: "explicit", reading: "know whether", support: support(2, "know whether") },
+        arguments: [{ role: "knower", target: entity(undefined, 2, "The clerk") },
+          { role: "proposition whose truth is unknown", support: support(2, "whether"), target: content("later_validity") }], qualifications: [] },
+      { kind: "not", key: "unknown_validity", support: support(2, "does not"), content: content("knowledge") }
+    ], roots: [{ act: "assertion", expression: content("first_validity") },
+      { act: "assertion", expression: content("unknown_validity") }], gaps: []
+  }
+} as const;
+
+const inlinePrompt = [
+  "Interpret every supplied source unit locally and return compact strict JSON matching the finite source occurrence table with inline entity uses, with no indentation or formatting line breaks. Use short occurrence keys and exact references. Preserve full evidence selections, predicate and role meanings, qualifications, scope and gaps; compact serialization must not omit source meaning.",
+  `Use {"contract":"${SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT}","outcome":{"status":"interpreted"},"content":CONTENT}; legal non-interpreted outcomes omit content.`,
+  SOURCE_SEMANTIC_PRESERVATION_GUIDANCE,
+  SOURCE_SEMANTIC_RELATION_GUIDANCE,
+  "Construct occurrence nodes with their complete arguments, qualifications and scope. At each materializing entity use emit {kind:\"entity\",mentions:[SELECTION,...]} with optional key and referent_kind. The optional key is your sole semantic identity token: use the same key only when the source supports the same referent, even across roots. Keep each use's local mention group separate; do not accumulate identity-wide mentions in every use. Distinct overlapping mention groups remain separate. The host derives evidence-row addresses mechanically; do not emit an entities table or semantic_key field. Do not invent participants from transport labels.",
+  SOURCE_SEMANTIC_ROOT_GUIDANCE,
+  "A statement has an explicit or implicit predicate, ordered arguments and qualifications, sharing the native eight-slot limit. Entity constructors occur in arguments, qualifications, reporters, domain members/exclusions and measurement subjects. Ordinary argument support may be omitted: the host then uses that constructor's local mentions. Explicit argument support wins; qualification support is required. Other target kinds remain content_ref, occurrence_ref, content_reference, bound_variable and unresolved; absent support on those targets retains its empty fallback. Use unresolved plus supported evidence and a gap when the participant is unresolved.",
+  'Select exact original text as {assertion_id,text}, adding a zero-based occurrence only when multiple catalog-eligible exact matches exist in that assertion. Eligible matches start and end at complete ASCII-word or Unicode-scalar boundaries; overlapping matches count in start order. Missing, ambiguous, out-of-range or word-internal selections are rejected. Select a full contiguous phrase in one object; use a list for discontinuous support. This selection form applies to predicates, arguments, operators, local mentions, gaps, domains, measurements and no-proposition context_support. Never invent offsets or segment IDs. Optional referent_kind retains grouped, unresolved, unexpressed or ambiguous meaning; absent kind retains native behavior.',
+  SOURCE_SEMANTIC_OPERATOR_GUIDANCE,
+  SOURCE_SEMANTIC_SCOPE_GUIDANCE,
+  SOURCE_SEMANTIC_DOMAIN_GUIDANCE,
+  'A gap has exact support and affected typed entity_ref or occurrence_ref entries. In an entity_ref gap, key names the semantic identity token of a real materializing inline use; a gap alone cannot create an entity. An unkeyed use cannot be named by an entity gap. Multiple affected entries retain multiple incidents; [] is source-local residual support. Do not infer attachment from key spelling or nearby text. Leave domain and measurement arrays absent when unsupported; retain their native evidence, context, member, exclusion, restriction, closure, owner, population and value fields when used.',
+  SOURCE_SEMANTIC_ATTRIBUTION_GUIDANCE,
+  "Neutral example: assertion 1 is The permit is valid on Tuesday only. Assertion 2 is The clerk does not know whether the permit is valid on Thursday. The two permit uses share one identity token and retain separate local mentions. Tuesday's restriction belongs to the first validity statement; unknown truth still has explicit Thursday content. Use your supplied assertion IDs and exact text.",
+  `Example response:\n${JSON.stringify(SOURCE_SEMANTIC_INLINE_EXAMPLE)}`
+].join("\n");
+
+/** Guidance and schema are selected by the same explicit presentation contract. */
+export function sourceSemanticGenerationSystemPrompt(contract?: SourceSemanticGenerationSchemaContract): string {
+  return sourceSemanticPresentationContracts(contract).generation_schema_contract === SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT
+    ? inlinePrompt : SOURCE_SEMANTIC_SYSTEM_PROMPT;
+}
