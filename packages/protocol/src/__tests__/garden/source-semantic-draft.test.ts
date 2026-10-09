@@ -39,6 +39,14 @@ it("rejects duplicate node handles and unknown cross-references", () => {
   })).success).toBe(false);
 });
 
+it("rejects a graph without frame or operator occurrences", () => {
+  const empty = SourceSemanticDraftSchema.safeParse(draft({ frames: [], operators: [] }));
+  expect(empty.success).toBe(false);
+  if (!empty.success) expect(empty.error.issues).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: "custom", message: "graph requires at least one occurrence" })
+  ]));
+});
+
 it.each([
   ["rBob", true, true], ["fSend", true, true], ["opNot", true, true],
   ["mSent", false, true], ["agent", false, false], ["a1s0", false, false], ["missing", false, false]

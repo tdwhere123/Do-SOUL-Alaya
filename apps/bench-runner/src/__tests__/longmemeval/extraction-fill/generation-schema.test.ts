@@ -48,6 +48,9 @@ describe("Gemini complete generation schema guidance", () => {
       if ("faithful" in row) {
         expect(projected.schema).toBeDefined();
         expect(validate(row.faithful)).toBe(true);
+        const emptyContent = { nodes: [], roots: [], gaps: [],
+          ...(row.contract === SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT ? { entities: [] } : {}) };
+        expect(validate({ contract: row.contract, outcome: { status: "interpreted" }, content: emptyContent })).toBe(false);
         expect(validate({ ...row.faithful, outcome: { status: "abstained" } })).toBe(false);
       }
     }

@@ -1,4 +1,5 @@
 import { sourceSemanticProducerEnvelopeJsonSchema } from "./source-semantic-producer-envelope.js";
+import { SOURCE_SEMANTIC_MIN_OCCURRENCES } from "./source-semantic-structure.js";
 import { z } from "zod";
 import { AlayaError } from "../shared/alaya-error.js";
 import { SOURCE_SEMANTIC_GAP_KINDS, SOURCE_SEMANTIC_SOURCE_ACTS, SourceSemanticDraftSchema,
@@ -92,7 +93,8 @@ const Measurement = NativeMeasurement.extend({ subject: EntityRef }).readonly();
 const GapTarget = z.discriminatedUnion("kind", [EntityRef, OccurrenceRef]);
 export const SourceSemanticTableProposalSchema = z.object({ contract: z.literal(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT),
   outcome: SourceSemanticSelectionOutcomeShape,
-  content: z.object({ nodes: z.array(Nodes).max(SOURCE_SEMANTIC_TABLE_LIMIT.frames + SOURCE_SEMANTIC_TABLE_LIMIT.operators).readonly(),
+  content: z.object({ nodes: z.array(Nodes).min(SOURCE_SEMANTIC_MIN_OCCURRENCES)
+    .max(SOURCE_SEMANTIC_TABLE_LIMIT.frames + SOURCE_SEMANTIC_TABLE_LIMIT.operators).readonly(),
     entities: z.array(Entity).max(SOURCE_SEMANTIC_TABLE_LIMIT.entities).readonly(),
     roots: z.array(z.object({ act: z.enum(SOURCE_SEMANTIC_SOURCE_ACTS),
     expression: ContentRef }).strict().readonly()).max(SOURCE_SEMANTIC_TABLE_LIMIT.roots).readonly(),
@@ -141,7 +143,8 @@ const TableContent = SourceSemanticTableProposalSchema.unwrap().shape.content.un
 export const SourceSemanticInlineProposalSchema = SourceSemanticTableProposalSchema.unwrap().extend({
   contract: z.literal(SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT),
   content: TableContent.omit({ entities: true }).extend({
-    nodes: z.array(InlineNodes).max(SOURCE_SEMANTIC_TABLE_LIMIT.frames + SOURCE_SEMANTIC_TABLE_LIMIT.operators).readonly(),
+    nodes: z.array(InlineNodes).min(SOURCE_SEMANTIC_MIN_OCCURRENCES)
+      .max(SOURCE_SEMANTIC_TABLE_LIMIT.frames + SOURCE_SEMANTIC_TABLE_LIMIT.operators).readonly(),
     domains: z.array(InlineDomain).max(SOURCE_SEMANTIC_TABLE_LIMIT.domains).readonly().optional(),
     measurements: z.array(InlineMeasurement).max(SOURCE_SEMANTIC_TABLE_LIMIT.measurements).readonly().optional()
   }).readonly().optional()

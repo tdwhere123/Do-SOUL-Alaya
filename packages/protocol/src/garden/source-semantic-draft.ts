@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { sourceSemanticOwnershipProblems, sourceSemanticStructuralEdges } from "./source-semantic-structure.js";
+import { SOURCE_SEMANTIC_MIN_OCCURRENCES, sourceSemanticOwnershipProblems,
+  sourceSemanticStructuralEdges } from "./source-semantic-structure.js";
 import { SourceAssertionIdSchema } from "../evidence/source-selection.js";
 import { SourceReferenceSchema } from "../evidence/source-reference.js";
 import { refineSourceSemanticQuantification } from "./source-semantic-quantified-validation.js";
@@ -170,7 +171,7 @@ export function refineSourceSemanticGraph(graph: SourceSemanticGraph, context: I
   const occurrenceIds = [...frameIds, ...operatorIds];
   const nodeIds = [...mentionIds, ...referentIds, ...occurrenceIds];
   if (new Set(nodeIds).size !== nodeIds.length) problem("duplicate handles rejected");
-  if (graph.frames.length + graph.operators.length === 0) problem("graph requires at least one occurrence");
+  if (graph.frames.length + graph.operators.length < SOURCE_SEMANTIC_MIN_OCCURRENCES) problem("graph requires at least one occurrence");
   const mentions = new Set(mentionIds);
   const referents = new Set(referentIds);
   const frames = new Set(frameIds);

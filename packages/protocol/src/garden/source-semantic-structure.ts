@@ -1,5 +1,8 @@
 import type { SourceSemanticGraph, SourceSemanticContextOwner } from "./source-semantic-draft.js";
 
+/** An interpreted graph contains at least one frame or operator occurrence. */
+export const SOURCE_SEMANTIC_MIN_OCCURRENCES = 1;
+
 export type SourceSemanticStructuralEdge = Readonly<{
   kind: "embedding" | "operator_operand";
   from: string;

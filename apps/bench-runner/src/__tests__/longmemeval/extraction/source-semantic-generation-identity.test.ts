@@ -27,6 +27,30 @@ const expectedView = JSON.stringify({ contract: "source-semantic-generation-view
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic retained and physical generation identities", () => {
+  it.each([{}, { generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT },
+    { generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
+      generationSchemaContract: SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT }])(
+    "binds the nonempty occurrence grammar into cache and physical Gemini identities for %j", selectors => {
+      const host = soul.buildSourceSemanticRequest({ ...input, ...selectors });
+      const line = prepareSourceSemanticRequestLine(host, ["unit"], config);
+      const schema = JSON.parse(soul.officialApiExtractionResponseSchemaPreimage(line.userPrompt));
+      expect(schema.properties.content.properties.nodes.minItems).toBe(1);
+      const wire = prepareSourceSemanticRequestWire(config, line, 4096);
+      const wireDigest = sourceSemanticRequestWireDigest(config, line, 4096);
+      delete schema.properties.content.properties.nodes.minItems;
+      vi.spyOn(soul, "officialApiExtractionResponseSchemaPreimage").mockReturnValue(JSON.stringify(schema));
+      vi.spyOn(soul, "sourceSemanticResponseJsonSchema").mockReturnValue(schema);
+      expect(computeCacheKey(config.model, config.requestProfile, line.systemPrompt, line.userPrompt)).not.toBe(line.key);
+      const oldWire = prepareSourceSemanticRequestWire(config, line, 4096);
+      expect(oldWire.body).not.toBe(wire.body);
+      if ("generationViewContract" in selectors) {
+        expect(sourceSemanticRequestWireDigest(config, line, 4096)).not.toBe(wireDigest);
+      } else {
+        expect(sourceSemanticRequestWireDigest(config, line, 4096)).toBe(wireDigest);
+        expect(wireDigest).toBe(requestEnvelopeDigest(line.userPrompt));
+      }
+      expect(soul.sourceSemanticGenerationInput(host)).toBe("generationViewContract" in selectors ? expectedView : line.userPrompt);
+    });
   it("changes native H cache identity when only the producer envelope schema guard changes", () => {
     const native = { model: INTERN_SEMANTIC_REQUEST_MODEL, requestProfile: INTERN_SEMANTIC_REQUEST_PROFILE,
       modelFamily: INTERN_SEMANTIC_REQUEST_MODEL, providerUrl: INTERN_SEMANTIC_PROVIDER_URL, apiKey: null };
