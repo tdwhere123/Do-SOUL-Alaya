@@ -256,11 +256,12 @@ it.each([
   const content = assessmentBody(line.request as SourceSemanticCorrespondenceRequest);
   const projected = projectGeminiGenerationSchema(line.responseJsonSchema);
   const schema = projected.schema ?? JSON.parse(projected.instruction!.slice(projected.instruction!.indexOf("{")));
-  const validate = new Ajv2020({ strict: false }).compile(schema);
-  const envelope = JSON.parse(content);
-  expect(validate(envelope)).toBe(true);
-  expect(validate({ contract: envelope.contract, outcome: { status: "interpreted" } })).toBe(false);
-  expect(validate({ ...envelope, outcome: { status: "abstained" } })).toBe(true);
+  const validate = new Ajv2020({ strict: false, inlineRefs: false }).compile(schema);
+  const generationEnvelope = { contract: CORRESPONDENCE_GENERATION_RESPONSE_V5, outcome: { status: "interpreted" },
+    semantic_correspondence: JSON.parse(content).semantic_correspondence };
+  expect(validate(generationEnvelope)).toBe(true);
+  expect(validate({ contract: CORRESPONDENCE_GENERATION_RESPONSE_V5, outcome: { status: "interpreted" } })).toBe(false);
+  expect(validate({ ...generationEnvelope, outcome: { status: "abstained" } })).toBe(true);
   const usage = { prompt_tokens: 21, completion_tokens: 8, total_tokens: invalid ? 30 : 29 };
   const wire = intern ? JSON.stringify({ choices: [{ message: { content, reasoning_content: "separate reasoning" },
     finish_reason: "stop" }], usage }) : `data: ${JSON.stringify({ choices: [{

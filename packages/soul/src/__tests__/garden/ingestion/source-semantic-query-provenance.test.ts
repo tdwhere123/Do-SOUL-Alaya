@@ -449,7 +449,13 @@ describe("query provenance generation completion", () => {
     expect(validate(negativeWithPayload)).toBe(true);
     expect(proposeCorrespondenceSemantics(input(), { rawJson: JSON.stringify(negativeWithPayload) }).outcome)
       .toEqual({ status: "abstained" });
-    expect(validateRetained({ ...negativeWithPayload, contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT })).toBe(true);
+    const retainedNegative = { ...negativeWithPayload, contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+      semantic_correspondence: { ...negativeWithPayload.semantic_correspondence,
+        assessments: negativeWithPayload.semantic_correspondence.assessments.map(row => ({ ...row,
+          query_excerpt: row.query_excerpt ?? (row.query === referent.handle || row.query === agent.handle ? "Maya" : "the coat") })) } };
+    expect(validateRetained(retainedNegative)).toBe(true);
+    expect(proposeCorrespondenceSemantics(input(), { rawJson: JSON.stringify(retainedNegative) }).outcome)
+      .toEqual({ status: "abstained" });
     const supported = (query: string) => ({ query, status: "supported", equivalents: [{
       source: handles().frame.handle, grounding: "The relation is explicit in the source.",
       source_semantic_support: [{ kind: "lexical", mentions: ["mMend"] }]

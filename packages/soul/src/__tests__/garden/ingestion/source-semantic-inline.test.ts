@@ -246,7 +246,10 @@ describe.each([false, true])("emitted source envelope policy, inline %s", inline
     }
     const empty = { contract, outcome: { status: "interpreted" }, content: { nodes: [], roots: [], gaps: [],
       ...(inline ? {} : { entities: [] }) } };
-    expect(validate(empty)).toBe(true);
-    expect(receiveSourceSemantics(JSON.stringify(empty), request, input).outcome.status).toBe("interpreted");
+    const emptyRaw = JSON.stringify(empty);
+    const rejectedEmpty = receiveSourceSemantics(emptyRaw, request, input);
+    expect(rejectedEmpty.outcome).toMatchObject({ status: "invalid", reason: "malformed_response",
+      diagnostics: [{ code: "custom", path: ["draft"], message: "graph requires at least one occurrence" }] });
+    expect(rejectedEmpty.rawJson).toBe(emptyRaw);
   });
 });
