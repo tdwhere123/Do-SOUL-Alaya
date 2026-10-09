@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, sourceSemanticInterpretationIdentity } from "@do-soul/alaya-protocol";
-import { buildSourceSemanticRequest, semanticSha256, sourceSemanticSystemPrompt, type SourceSemanticProposalInput } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { buildSourceSemanticRequest, parseSourceSemanticRequest, semanticSha256, sourceSemanticSystemPrompt, type SourceSemanticProposalInput } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { prepareSourceSemanticRevision } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
 
@@ -17,6 +17,28 @@ const raw = { contract: SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT, outcome: { sta
     arguments: [{ role: "subject", target: { kind: "entity", mentions: [selection("Mira")] } }], qualifications: [] }],
   roots: [{ act: "assertion", expression: { kind: "content_ref", key: "arrival" } }], gaps: [] } };
 const receive = (value: unknown, selected: SourceSemanticProposalInput = input) => receiveSourceSemantics(JSON.stringify(value), buildSourceSemanticRequest(selected), selected);
+
+it("rejects incomplete task context and original text whose catalog or locations changed", () => {
+  const request = buildSourceSemanticRequest(input), body = request.source_request;
+  for (const changed of [{ ...body, original_source: undefined }, { ...body, generation_task: undefined }]) {
+    expect(() => parseSourceSemanticRequest({ ...request, source_request: changed })).toThrow(/appear together/u);
+  }
+  expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...body, source_scope: undefined } }))
+    .toThrow(/exact complete original source/u);
+  const changedUnits = [
+    [...body.source_assertions].reverse(),
+    body.source_assertions.map((unit, index) => index === 0 ? { ...unit, text: "Mira departed." } : unit),
+    body.source_assertions.map((unit, index) => index === 0 ? { ...unit, source_role: "assistant" } : unit)
+  ];
+  for (const source_assertions of changedUnits) {
+    expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...body, source_assertions } }))
+      .toThrow(/source units or locations/u);
+  }
+  const assertion_locations = body.assertion_locations.map((location, index) => index === 0
+    ? { ...location, source_utf8_span: [1, location.source_utf8_span[1]] } : location);
+  expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...body, assertion_locations } }))
+    .toThrow(/source units or locations/u);
+});
 
 it.each([undefined, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT])("scopes exhaustive guidance to the declared task for %s", generationSchemaContract => {
   const scoped = buildSourceSemanticRequest({ ...input, generationSchemaContract });

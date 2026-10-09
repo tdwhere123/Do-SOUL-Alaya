@@ -5,8 +5,8 @@ import {
   createSourceSemanticInterpretationPublication, deriveAddressableSpanViews, EvidenceService,
   fieldContractSha256, type FieldFormationStores
 } from "@do-soul/alaya-core";
-import { sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
-  type SourceSemanticHostPreparation } from "@do-soul/alaya-soul";
+import { sourceSemanticBaseRequestDigest, sourceSemanticRequestCatalog, SourceSemanticUnsupportedSourceSchema,
+  type SourceSemanticHostPreparation, type SourceSemanticRequest } from "@do-soul/alaya-soul";
 import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson,
   sourceSemanticInterpretationIdentity,
   SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
@@ -203,14 +203,14 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
       nativePopulation.nativeSnapshotPath === undefined)) {
     throw new AlayaError("VALIDATION", "native source publication requires one complete source population");
   }
-  const preparations = prepareCensusSources(census, input.populations);
+  const { preparations, requests } = prepareCensusSources(census, input.populations);
   const descriptorExport = new Set(input.descriptorExportSourceIds ?? []);
   if (descriptorExport.size !== (input.descriptorExportSourceIds?.length ?? 0) || descriptorExport.size > 10 ||
       [...descriptorExport].some(id => !census.some(row => row.records.some(source => source.source_id === id)))) {
     throw new AlayaError("VALIDATION", "publication descriptor export must select at most ten current sources");
   }
   // Validate and inspect associations before creating any database or source record.
-  const retained = indexRetainedSemantics(census, input.populations, preparations);
+  const retained = indexRetainedSemantics(census, input.populations, preparations, requests);
   return withSnapshotPublishLock(snapshotPath, () => withSnapshotPublishLock(join(dataDirRoot, "source-semantic-publication"), async () => {
     bindIsolatedSnapshot(dataDirRoot, snapshotPath);
     const dispositions = nativePopulation === undefined
@@ -230,8 +230,9 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   }));
 }
 
-function prepareCensusSources(census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]): ReadonlyMap<string, HostPreparation> {
+function prepareCensusSources(census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]) {
   const preparations = new Map<string, HostPreparation>();
+  const requests = new Map<string, SourceSemanticRequest>();
   for (const population of census) {
     const config = populations.find(row => row.name === population.population)?.openSemantics;
     const generation = config ?? EXTRACTION_OPEN_SEMANTICS_GENERATION;
@@ -239,9 +240,10 @@ function prepareCensusSources(census: readonly SourceCensus[], populations: read
       const [prepared] = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
       if (prepared === undefined) throw new AlayaError("CONFLICT", "complete source publication has no host preparation");
       preparations.set(source.source_id, prepared.status === "ready" ? { status: "ready" } : prepared.disposition);
+      if (prepared.status === "ready") requests.set(source.source_id, prepared.semantic);
     }
   }
-  return preparations;
+  return { preparations, requests };
 }
 
 async function loadCensus(populations: readonly SourcePublicationPopulation[]): Promise<readonly SourceCensus[]> {
@@ -436,7 +438,7 @@ type RetainedSemantics =
 
 function indexRetainedSemantics(
   census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[],
-  preparations: ReadonlyMap<string, HostPreparation>
+  preparations: ReadonlyMap<string, HostPreparation>, requests: ReadonlyMap<string, SourceSemanticRequest>
 ): { joined: Map<string, RetainedSemantics>; unbound: UnboundSourceInterpretationArtifact[] } {
   const joined = new Map<string, RetainedSemantics>();
   const unbound: UnboundSourceInterpretationArtifact[] = [];
@@ -485,6 +487,12 @@ function indexRetainedSemantics(
         }
         for (const binding of matched) {
           const source = sources.get(binding.source_id)!;
+          if (native.status === "hit" && (population.openSemantics !== undefined ||
+              native.admitted.request.source_request.generation_task !== undefined) &&
+              sourceSemanticBaseRequestDigest(native.admitted.request) !==
+                sourceSemanticBaseRequestDigest(requests.get(source.source_id)!)) {
+            throw new AlayaError("CONFLICT", "retained source interpretation differs from declared generation");
+          }
           const valid = native.status === "hit" &&
             sourceSemanticRequestCatalog(native.admitted.request).source_digest === source.corpus_digest &&
             native.requestDigest === binding.request_digest;
