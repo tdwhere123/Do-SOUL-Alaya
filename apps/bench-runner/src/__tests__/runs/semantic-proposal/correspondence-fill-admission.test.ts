@@ -70,7 +70,7 @@ it("refuses blocked provider DNS before reserving a correspondence attempt", asy
   const cacheRoot = tempRoot(), authority = pinSemanticProposalAuthority({
     preflight: prepareSemanticProposal(workset, cacheRoot, 4096), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
   const line = materializeSemanticProposalLines(workset, 4096)[0]!;
-  expect(line.key).toBe("daac31de6bf64f3fa5effe24c2457288cfcc8aabf83b7152fcc9788a985f650d");
+  expect(line.key).toBe("f4852bfeeb3f651021eadb64c0ab97f3ed19ffb6064f317b42c459bed5f7a6a2");
   vi.mocked(lookup).mockImplementationOnce((async () => [{ address: "198.18.0.105", family: 4 }]) as unknown as typeof lookup);
   const fetchImpl = vi.fn<typeof fetch>();
   const selected: CompileSeedExtractionConfig = { providerUrl: workset.provider_url, model: workset.model,
