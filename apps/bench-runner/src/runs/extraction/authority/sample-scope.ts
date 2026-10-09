@@ -16,8 +16,8 @@ const SampleScopeSchema = z.object({
 
 export type ExtractionSampleScope = z.infer<typeof SampleScopeSchema>;
 
-/** Step interactive uses the sample's exact key set with one reserved attempt per key. */
-export function isStepInteractiveSampleReceipt(receipt: ExtractionAuthorityReceipt): boolean {
+/** Native chat interactive uses the sample's exact key set with one reserved attempt per key. */
+export function isNativeChatInteractiveSampleReceipt(receipt: ExtractionAuthorityReceipt): boolean {
   return receipt.action === "sample" &&
     isChatSemanticRequestProfile(receipt.observation.extraction.requestProfile) &&
     receipt.observation.extraction.sourcePacking === "complete-source";
@@ -26,7 +26,7 @@ export function isStepInteractiveSampleReceipt(receipt: ExtractionAuthorityRecei
 /** Gemini Batch remains distinct; an interactive sample carries a retained native preflight proof. */
 export function isInteractiveSourceSampleReceipt(receipt: ExtractionAuthorityReceipt): boolean {
   return receipt.action === "sample" && receipt.observation.extraction.sourcePacking === "complete-source" &&
-    (isStepInteractiveSampleReceipt(receipt) ||
+    (isNativeChatInteractiveSampleReceipt(receipt) ||
       isNativeGeminiRequestProfile(receipt.observation.extraction.requestProfile) &&
       receipt.source_preflight_digest !== undefined);
 }
@@ -81,7 +81,7 @@ export function assertSampleReceipt(receipt: ExtractionAuthorityReceipt): void {
       receipt.direct_spend !== undefined || receipt.repair_scope !== undefined ||
       receipt.catalog_refill !== undefined || receipt.continuation !== undefined ||
       receipt.probe_key !== undefined ||
-      (isStepInteractiveSampleReceipt(receipt) && receipt.source_preflight_digest === undefined) ||
+      (isNativeChatInteractiveSampleReceipt(receipt) && receipt.source_preflight_digest === undefined) ||
       (receipt.source_preflight_digest !== undefined && !isInteractiveSourceSampleReceipt(receipt)) ||
       receipt.observation.inventory.invalidTurns !== 0 ||
       count > receipt.observation.inventory.missingTurns ||

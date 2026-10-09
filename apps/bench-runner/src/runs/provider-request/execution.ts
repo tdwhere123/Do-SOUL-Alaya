@@ -1,10 +1,9 @@
-import { assertNativeChatReportedUsage } from "../extraction/authority/native-chat-quote.js";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { readGeminiFailureResponse } from "../compile-seed/http/gemini-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../compile-seed/http/gemini-http.js";
-import { readStepFailureResponse } from "../compile-seed/http/semantic-provider-http.js";
+import { readNativeChatFailureResponse } from "../compile-seed/http/semantic-provider-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../compile-seed/http/output-token-retry.js";
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import type { ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
@@ -13,7 +12,8 @@ import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import {
   listProviderRawAttempts, readProviderRawAttempt, writeProviderRawAttempt,
-  retainedFailureOutcome, providerRawSuccessEvidenceState, type ProviderRawAttempt, type RawAttemptOwner
+  retainedFailureOutcome, providerRawSuccessEvidenceState, providerRawInvalidUsageOutcome,
+  type ProviderRawAttempt, type RawAttemptOwner
 } from "../extraction/fill/provider-raw-attempt.js";
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
 
@@ -130,7 +130,7 @@ export async function executeProviderRequestLine(
       appendFileSync(join(context.cacheRoot, "interactive-extract-errors.log"),
         `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
       const settled = persistFailedProviderRequest(context, line, transport, ordinal, used,
-        readGeminiFailureResponse(cause), readStepFailureResponse(cause), lastAttempt);
+        readGeminiFailureResponse(cause), readNativeChatFailureResponse(cause), lastAttempt);
       if (settled.classified !== "retryable" || lastAttempt) return settled;
       continue;
     }
@@ -220,7 +220,13 @@ function replayPersistedProviderRequestRaw(
   lastAttempt: boolean
 ): { classified: ProviderRequestAttemptClass; admitted: boolean } {
   context.assertReservation(raw);
-  assertNativeChatReportedUsage(context.requestProfile, raw.usage, context.maxOutputTokens);
+  const invalidUsage = providerRawInvalidUsageOutcome(raw, context.maxOutputTokens);
+  if (invalidUsage !== undefined) {
+    publishPhysicalFailure(context, line, raw, { status: "invalid", reason: "invalid_usage" }, false, false);
+    context.ledger.recordTransportOutcome(line.key, invalidUsage, raw.attempt_ordinal);
+    context.ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return { classified: "terminal", admitted: false };
+  }
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     if (raw.failure_retryable !== true || lastAttempt) {
@@ -284,7 +290,7 @@ function persistFailedProviderRequest(
   ordinal: number,
   used: number,
   response: ReturnType<typeof readGeminiFailureResponse>,
-  stepResponse: ReturnType<typeof readStepFailureResponse>,
+  nativeChatResponse: ReturnType<typeof readNativeChatFailureResponse>,
   lastAttempt: boolean
 ): { classified: ProviderRequestAttemptClass; admitted: boolean; attempts: number } {
   const usage = transport.usage;
@@ -293,7 +299,7 @@ function persistFailedProviderRequest(
     decodedText: "",
     finishReason: response?.finishReason ?? null,
     ...(response === undefined ? {} : { responseBody: response.rawBody }),
-    ...(stepResponse === undefined ? {} : { httpResponse: stepResponse }),
+    ...(nativeChatResponse === undefined ? {} : { httpResponse: nativeChatResponse }),
     ...(transport.transportFailures[0] === undefined ? {} : { transportFailure: transport.transportFailures[0] }),
     failureRetryable: !isCompletedNonRetryableResponse(transport),
     ...(transport.terminalRetryClassification === undefined ? {} : { failureClassification: transport.terminalRetryClassification }),
@@ -325,10 +331,11 @@ function publishPhysicalFailure(
   line: ProviderRequestLine,
   raw: ProviderRawAttempt,
   outcome: unknown,
-  admitted: boolean
+  admitted: boolean,
+  usageTrusted = true
 ): void {
   context.publishArtifact({
-    line, rawJson: raw.decoded_text, usage: baseReportedUsage(raw.usage), outcome, admitted,
+    line, rawJson: raw.decoded_text, ...(usageTrusted ? { usage: baseReportedUsage(raw.usage) } : {}), outcome, admitted,
     attemptOrdinal: raw.attempt_ordinal, finishReason: raw.finish_reason
   });
 }

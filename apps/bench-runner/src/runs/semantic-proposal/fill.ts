@@ -99,13 +99,14 @@ export async function executeSemanticProposalFill(input: Readonly<{
   const retainedLines: SemanticProposalLine[] = [];
   let cacheHits = 0;
   for (const line of lines) {
-    const existing = readSemanticProposalAttemptState(
+    const state = readSemanticProposalAttemptState(
       input.cacheRoot, line.key, semanticProposalLookup(input.workset, line, maxOutputTokens)
-    ).shard;
+    );
+    const existing = state.shard;
     if (existing !== undefined) {
       const prior = replayCachedProposalShard(line, existing);
       if (isChatSemanticRequestProfile(input.workset.request_profile) &&
-          prior !== "interpreted" && prior !== "abstained") {
+          prior !== "interpreted" && prior !== "abstained" && state.status !== "pending") {
         throw new AlayaError("CONFLICT", `native chat proposal fill stopped after retained ${prior} for ${line.key}`);
       }
       cacheHits += 1;
@@ -173,12 +174,13 @@ function summarize(
   const count = (...statuses: readonly string[]) => rows.filter(row => statuses.includes(row.status)).length;
   return {
     requested: rows.length, cache_hits: cacheHits, newly_admitted: newlyAdmitted,
-    terminal_failures: count("transport_failure"), resource_exhausted: count("resource_exhausted"),
+    terminal_failures: count("transport_failure", "accounting_invalid"), resource_exhausted: count("resource_exhausted"),
+    accounting_invalid: count("accounting_invalid"),
     attempts, interpreted: count("interpreted"),
     abstained: count("abstained"), cached_invalid: rows.filter(row => row.shard !== undefined &&
-      ["invalid", "core_rejected", "incomplete", "transport_failure"].includes(row.status)).length,
+      ["invalid", "core_rejected", "incomplete", "transport_failure", "accounting_invalid"].includes(row.status)).length,
     unattempted: count("unattempted"), unknown: count("unknown"), pending: count("pending"),
-    incomplete: count("incomplete"), rejected: count("invalid", "core_rejected")
+    incomplete: count("incomplete"), rejected: count("invalid", "core_rejected", "accounting_invalid")
   };
 }
 

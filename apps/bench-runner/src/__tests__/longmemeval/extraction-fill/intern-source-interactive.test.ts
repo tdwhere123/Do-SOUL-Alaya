@@ -18,6 +18,7 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/r
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
 import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
 import { requestEnvelopeDigest } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/attempt-ledger/outcome.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
@@ -58,7 +59,8 @@ async function scenario(projected = false) {
   return { options: { ...options, authorityReceiptPath: receiptPath }, selected, preflight, receipt };
 }
 
-async function listen(finish: "stop" | "length", valid = true) {
+async function listen(finish: "stop" | "length", valid = true,
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) {
   const calls: { body: Record<string, unknown>; wire: string }[] = [];
   server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -68,10 +70,30 @@ async function listen(finish: "stop" | "length", valid = true) {
     const assertion = source.source_request.source_assertions.find(row => row.text.includes("completed"))!;
     const content = valid ? JSON.stringify(tableCompletedResponse(assertion.assertion_id,
       assertion.text.includes("alpha") ? "alpha" : "decoy")) : "{bad JSON";
-    const wire = JSON.stringify({ choices: [{ message: { content, reasoning_content: "reasoning only" }, finish_reason: finish }] });
+    const wire = JSON.stringify({ choices: [{ message: { content, reasoning_content: "reasoning only" }, finish_reason: finish }],
+      ...(usage === undefined ? {} : { usage }) });
     calls.push({ body, wire });
     response.writeHead(200, { "content-type": "application/json" });
     response.end(wire);
+  });
+
+it.each([{ prompt_tokens: 10, completion_tokens: 2, total_tokens: 13 },
+  { prompt_tokens: 10, completion_tokens: 8193, total_tokens: 8203 }])(
+  "closes contradictory H usage with immutable reported values and accounting-invalid quarantine", async usage => {
+    const fixture = await scenario();
+    const calls = await listen("stop", true, usage);
+    await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+    const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;
+    expect(raw).toMatchObject({ usage_known: true, usage: { inputTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens, totalTokens: usage.total_tokens }, http_response: { bodyComplete: true } });
+    const reopened = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot);
+    expect(reopened.snapshot()).toMatchObject({ unresolvedAttempts: [], pendingKeys: [], successfulShards: 0,
+      settledAttempts: [{ attemptOrdinal: 1, usageAccounting: "invalid", usageSha256: settledAttemptUsageDigest(raw.usage) }],
+      telemetry: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageUnknownAttempts: 1, usageInvalidAttempts: 1 } });
+    await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
+    await expect(reopened.reserveAttemptOrdinal!(raw.cache_key)).rejects.toThrow(/per-key attempt ceiling/u);
+    expect(calls).toHaveLength(1);
+    expect(inspectCachedSourceSemantic(roots.cacheRoot, raw.cache_key, MODEL, PROFILE).status).not.toBe("hit");
   });
   await new Promise<void>(resolve => server!.listen(0, "127.0.0.1", resolve));
   const localOrigin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

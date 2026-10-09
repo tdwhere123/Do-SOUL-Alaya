@@ -20,6 +20,7 @@ export interface ExtractionLiveTransportOutcome {
   readonly terminalRetryClassification?: BenchTerminalRetryClassification;
   readonly transportFailures: readonly BenchTransportFailureAttempt[];
   readonly usage?: BenchProviderUsage;
+  readonly invalidReportedUsage?: BenchProviderUsage;
   readonly attemptUsages?: readonly (BenchProviderUsage | null)[];
   readonly attemptResponses?: readonly (BenchTransportResponseWitness | null)[];
 }

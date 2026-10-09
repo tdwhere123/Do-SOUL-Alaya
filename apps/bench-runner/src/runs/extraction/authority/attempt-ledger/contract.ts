@@ -37,6 +37,8 @@ export interface ExtractionAttemptSettlementRecord extends ExtractionAttemptRese
   readonly usage_sha256?: string;
   readonly response_sha256?: string;
   readonly aggregate_usage_sha256?: string;
+  /** Reported values remain witnessed, but cannot contribute trusted metering. */
+  readonly usage_accounting?: "invalid";
 }
 
 export interface ExtractionTransportFailureRecord {
@@ -181,6 +183,11 @@ export function assertStoredAttemptLedgerRecord(record: ExtractionAttemptLedgerR
       hasOrdinalOverlap(reservations, settled) || settled.length + reservations.length > record.attempts ||
       settled.some(attempt => attempt.usage_sha256 !== undefined && !isDigest(attempt.usage_sha256)) ||
       settled.some(attempt => attempt.response_sha256 !== undefined && !isDigest(attempt.response_sha256)) ||
+      settled.some(attempt => attempt.usage_accounting !== undefined &&
+        (attempt.usage_accounting !== "invalid" || attempt.usage_sha256 === undefined ||
+          !failures.some(failure => failure.attempt_ordinal === attempt.attempt_ordinal &&
+            failure.cache_key === attempt.cache_key))) ||
+      settled.filter(attempt => attempt.usage_accounting === "invalid").length > record.telemetry.usage_unavailable_requests ||
       failures.some(failure => settled.some(attempt => attempt.attempt_ordinal === failure.attempt_ordinal &&
         attempt.cache_key !== failure.cache_key))) {
     throw new Error("extraction attempt ledger exceeds its recorded authority");
@@ -332,10 +339,12 @@ function isSettlements(value: unknown): value is readonly ExtractionAttemptSettl
     ["attempt_ordinal", "cache_key", ...(Object.hasOwn(entry, "usage_sha256") ? ["usage_sha256"] : []),
       ...(Object.hasOwn(entry, "response_sha256") ? ["response_sha256"] : []),
       ...(Object.hasOwn(entry, "aggregate_usage_sha256") ? ["aggregate_usage_sha256"] : [])]
+      .concat(Object.hasOwn(entry, "usage_accounting") ? ["usage_accounting"] : [])
   ) && isPositiveSafeInteger(entry.attempt_ordinal) && isDigest(entry.cache_key) &&
     (entry.usage_sha256 === undefined || isDigest(entry.usage_sha256)) &&
     (entry.response_sha256 === undefined || isDigest(entry.response_sha256)) &&
-    (entry.aggregate_usage_sha256 === undefined || isDigest(entry.aggregate_usage_sha256)));
+    (entry.aggregate_usage_sha256 === undefined || isDigest(entry.aggregate_usage_sha256)) &&
+    (entry.usage_accounting === undefined || entry.usage_accounting === "invalid" && isDigest(entry.usage_sha256)));
 }
 
 function isFailures(value: unknown): value is readonly ExtractionTransportFailureRecord[] {

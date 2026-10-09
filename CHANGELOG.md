@@ -20,6 +20,13 @@ model, wire, one-attempt limits and a dated limited-time zero ink price into
 existing preflight, authority and cache owners. Missing usage remains unknown.
 Ordinary defaults, historical provider profiles and semantic admission are unchanged.
 
+Native full-evidence responses now enforce the finite HTTP read-byte ceiling and
+cancel oversized bodies before parsing. Contradictory native usage settles the
+exact completed attempt as non-admissible accounting-invalid evidence, retaining
+the reported-value witness without trusting its counts. Missing and invalid usage
+remain unavailable metering; invalid attempts have an explicit subtype and cannot
+reopen dispatch or pass successful-admission closure.
+
 Protocol 13.7.0 adds an explicit Step 5 Preview JSON Mode profile and the shared
 wire-format lookup under invariant §25 (minor: additive exports). Gateway places
 the complete named schema in system guidance while requesting JSON Object output.

@@ -99,16 +99,16 @@ export function createSemanticProviderHttpExtractor(
               ? "failure_non_retryable_4xx" : "failure_non_retryable_response",
         0, 0, failure === undefined ? [] : [failure]);
       if (cause instanceof ProviderChatCompletionError && cause.httpResponse !== undefined) {
-        stepResponseEvidence.set(wrapped, cause.httpResponse);
+        nativeChatResponseEvidence.set(wrapped, cause.httpResponse);
       }
       throw wrapped;
     }
   } };
 }
 
-const stepResponseEvidence = new WeakMap<object, ProviderHttpResponseEvidence>();
-export function readStepFailureResponse(error: unknown): ProviderHttpResponseEvidence | undefined {
-  return typeof error === "object" && error !== null ? stepResponseEvidence.get(error) : undefined;
+const nativeChatResponseEvidence = new WeakMap<object, ProviderHttpResponseEvidence>();
+export function readNativeChatFailureResponse(error: unknown): ProviderHttpResponseEvidence | undefined {
+  return typeof error === "object" && error !== null ? nativeChatResponseEvidence.get(error) : undefined;
 }
 
 export function isCompleteSemanticFinish(profile: string, finishReason: string | null | undefined): boolean {

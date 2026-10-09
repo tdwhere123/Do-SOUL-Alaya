@@ -1561,6 +1561,16 @@ unattempted or a terminal failure. Completed incomplete output, rejected output,
 transport failure, abstention, and interpreted output remain distinct. Missing
 usage is accounting uncertainty and does not make completed output unknown.
 
+Contradictory native-chat reported usage is completed accounting-invalid output,
+never pending or ordinary absent usage. The exact settlement keeps the original
+reported-value digest and an additive invalid-accounting marker; trusted token
+totals exclude those values. Aggregate unavailable/unknown metering includes
+invalid attempts, with a separate invalid subtype. Recovery verifies the marker
+against immutable raw, profile and authorized output cap, and cannot admit or
+redispatch the rejected attempt. Marker-absent historical ledger digests remain
+unchanged. Full-evidence HTTP readers cancel at their finite received-byte bound;
+retained incomplete prefixes cannot establish successful completion.
+
 Source Interpretation interactive recovery and both proposal producers share the
 raw/reservation outcome check before publication. Retained output cannot
 contradict an already settled transport failure. Source admission rejection of

@@ -88,6 +88,7 @@ async function readOrFreezeCutoff(root: string, input: z.infer<typeof Observatio
           const frozen = admitNativeFreeze(member, population);
           scopes.push({ layer: "query", cacheRoot: frozen.config.query_cache_root,
             model: frozen.config.model, requestProfile: frozen.config.request_profile,
+            maxOutputTokens: frozen.config.max_output_tokens,
             keys: [frozen.selected[0]!.query_key] });
         }
         if (readChainArtifact(join(member.lazy_root, "window.json")) !== undefined) {
@@ -95,6 +96,7 @@ async function readOrFreezeCutoff(root: string, input: z.infer<typeof Observatio
           scopes.push({ layer: "source", cacheRoot: member.source_cache_root,
             model: window.config.source_population.model,
             requestProfile: window.config.source_population.requestProfile,
+            maxOutputTokens: window.config.source_preparation.output_token_cap,
             keys: window.selected_missing_keys });
         }
         if (readChainArtifact(join(member.lazy_root, "final.json")) !== undefined) {
@@ -103,6 +105,7 @@ async function readOrFreezeCutoff(root: string, input: z.infer<typeof Observatio
             cacheRoot: plan.config.correspondence_cache_root,
             model: plan.correspondence_workset?.model ?? plan.config.query_workset.model,
             requestProfile: plan.correspondence_workset?.request_profile ?? plan.config.query_workset.request_profile,
+            maxOutputTokens: plan.config.correspondence_generation?.max_output_tokens ?? plan.config.max_output_tokens,
             keys: plan.correspondence_workset === null ? [] : materializeSemanticProposalLines(
               plan.correspondence_workset, plan.config.max_output_tokens).map(line => line.key) });
         }

@@ -1,19 +1,24 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { INTERN_SEMANTIC_REQUEST_MODEL as MODEL, INTERN_SEMANTIC_REQUEST_PROFILE as PROFILE,
   INTERN_SEMANTIC_PROVIDER_URL as ENDPOINT } from "@do-soul/alaya-protocol";
-import { buildProviderChatRequestBody } from "@do-soul/alaya-engine-gateway";
+import { buildProviderChatRequestBody, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { probeProviderProtocol } from "../../../runs/provider/protocol-probe.js";
 import { runProviderPreflightCommand } from "../../../cli/provider-preflight/command.js";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { parseSemanticProposalWorkset, materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
+import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, semanticProposalLookup } from "../../../runs/semantic-proposal/attempt.js";
+import * as proposalAttempts from "../../../runs/semantic-proposal/attempt.js";
+import { readSemanticProposalShard } from "../../../runs/semantic-proposal/artifact.js";
+import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
+import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/attempt-ledger/outcome.js";
+import { inspectPopulationAttemptScopes } from "../../../runs/longmemeval-semantic/population-attempts.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
 
@@ -27,9 +32,12 @@ function root() {
 }
 
 async function localHttp<T>(content: string | null, finish: string | null, status: number,
-  run: (fetchImpl: typeof fetch, calls: Record<string, unknown>[], wire: string) => Promise<T>): Promise<T> {
+  run: (fetchImpl: typeof fetch, calls: Record<string, unknown>[], wire: string) => Promise<T>,
+  extra?: { usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }; oversized?: boolean }): Promise<T> {
   const wire = status === 200 ? JSON.stringify({ choices: [{ message: {
-    content, reasoning_content: '{"probe":true}' }, finish_reason: finish }] })
+    content, reasoning_content: '{"probe":true}' }, finish_reason: finish }],
+      ...(extra?.usage === undefined ? {} : { usage: extra.usage }) }) +
+      (extra?.oversized ? " ".repeat(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES + 1024) : "")
     : JSON.stringify({ error: { code: "quota_exceeded", message: "fixture quota" } });
   const calls: Record<string, unknown>[] = [];
   const server = createServer(async (request, response) => {
@@ -129,3 +137,78 @@ it.each([{ content: '{"contract":"source-semantic-query-response-v8","outcome":{
       expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().attempts).toBe(1);
     });
   });
+
+it.each([
+  { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 13 }, crash: false },
+  { usage: { prompt_tokens: 10, completion_tokens: 8193, total_tokens: 8203 }, crash: false },
+  { usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 13 }, crash: true }
+])("settles invalid Q metering and recovers publication-before-settlement crash=$crash without dispatch", async ({ usage, crash }) => {
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT, items: [{ original_query: "Who sent the parcel?" }] });
+  const cacheRoot = root(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+  const config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+  const content = '{"contract":"source-semantic-query-response-v8","outcome":{"status":"abstained"}}';
+  await localHttp(content, "stop", 200, async (fetchImpl, calls) => {
+    const run = () => executeSemanticProposalFill({ workset, cacheRoot, authority, config,
+      extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
+    if (crash) {
+      const original = proposalAttempts.openSemanticProposalAttemptLedger;
+      const spy = vi.spyOn(proposalAttempts, "openSemanticProposalAttemptLedger").mockImplementation(input => {
+        const ledger = original(input);
+        return { ...ledger, recordTransportOutcome: () => { throw new Error("injected before settlement"); } };
+      });
+      await expect(run()).rejects.toThrow(/injected before settlement/u);
+      expect(readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, 8192)).status).toBe("pending");
+      expect(readSemanticProposalShard(cacheRoot, line.key)).toMatchObject({ outcome: { reason: "invalid_usage" }, admitted: false });
+      spy.mockRestore();
+    }
+    await expect(run()).rejects.toThrow(/stopped after (retained )?terminal/u);
+    const raw = readProviderRawAttempt(cacheRoot, line.key, 1)!;
+    expect(raw).toMatchObject({ usage_known: true, usage: { inputTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens, totalTokens: usage.total_tokens }, http_response: { bodyComplete: true } });
+    expect(readSemanticProposalShard(cacheRoot, line.key)?.usage).toBeUndefined();
+    const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" });
+    expect(ledger.snapshot()).toMatchObject({ unresolvedAttempts: [], pendingKeys: [], successfulShards: 0,
+      settledAttempts: [{ usageAccounting: "invalid", usageSha256: settledAttemptUsageDigest(raw.usage) }],
+      telemetry: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageUnknownAttempts: 1, usageInvalidAttempts: 1 } });
+    expect(readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, 8192)).status).toBe("accounting_invalid");
+    await expect(run()).rejects.toThrow(/retained terminal/u);
+    expect(() => ledger.reserveAttemptOrdinal(line.key)).toThrow(/per-key attempt ceiling/u);
+    expect(calls).toHaveLength(1);
+    expect(inspectPopulationAttemptScopes([{ layer: "query", cacheRoot, model: MODEL,
+      requestProfile: PROFILE, keys: [line.key], maxOutputTokens: 8192 }])).toMatchObject({
+      observed_known_usage_attempts: 0, observed_invalid_usage_attempts: 1, scoped_unknown_usage_attempts: 1,
+      actual_spend: null, attempts: [{ usage: null, usage_accounting: "invalid" }] });
+    const path = ledgerPath(cacheRoot, authority.attempt_lineage_digest);
+    const stored = JSON.parse(readFileSync(path, "utf8"));
+    delete stored.settled_attempts[0].usage_accounting;
+    writeFileSync(path, JSON.stringify(stored));
+    expect(() => readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, 8192)))
+      .toThrow(/lacks its invalid-accounting settlement/u);
+  }, { usage });
+});
+
+it("rejects an oversized successful Q envelope, retaining partial bytes and terminal reopen without dispatch", async () => {
+  const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",
+    model: MODEL, request_profile: PROFILE, provider_url: ENDPOINT, items: [{ original_query: "Who sent the parcel?" }] });
+  const cacheRoot = root(), authority = pinSemanticProposalAuthority({
+    preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
+  const line = materializeSemanticProposalLines(workset, 8192)[0]!;
+  const config = { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: "loopback-only" };
+  await localHttp('{"contract":"source-semantic-query-response-v8","outcome":{"status":"abstained"}}', "stop", 200,
+    async (fetchImpl, calls) => {
+      const run = () => executeSemanticProposalFill({ workset, cacheRoot, authority, config,
+        extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
+      await expect(run()).rejects.toThrow(/stopped after terminal/u);
+      const raw = readProviderRawAttempt(cacheRoot, line.key, 1)!;
+      expect(raw.http_response?.bodyComplete).toBe(false);
+      expect(Buffer.from(raw.http_response!.bodyBase64, "base64")).toHaveLength(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
+      expect(raw.decoded_text).toBe("");
+      expect(raw.transport_failure?.kind).toBe("response_schema_error");
+      expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot().unresolvedAttempts).toEqual([]);
+      await expect(run()).rejects.toThrow(/retained terminal/u);
+      expect(calls).toHaveLength(1);
+    }, { oversized: true });
+});

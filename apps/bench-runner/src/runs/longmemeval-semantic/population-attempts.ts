@@ -6,32 +6,34 @@ import { inspectExtractionAttemptLedger, listExtractionAttemptLedgerRecords } fr
 import { listProviderRawAttempts, verifyProviderRawReservation } from
   "../extraction/fill/provider-raw-attempt.js";
 import { chainIdentity } from "../semantic-chain/contract.js";
+import { inspectNativeChatReportedUsage } from "../extraction/authority/native-chat-quote.js";
 
 export type PopulationProducerLayer = "query" | "source" | "correspondence";
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const PopulationAttemptScopeSchema = z.object({ layer: z.enum(["query", "source", "correspondence"]),
   cacheRoot: z.string().min(1), model: z.string().min(1), requestProfile: z.string().min(1),
-  keys: z.array(Digest) }).strict();
+  keys: z.array(Digest), maxOutputTokens: z.number().int().positive().optional() }).strict();
 export const PopulationAttemptEvidenceSchema = z.object({
   inspected_scope_history_complete: z.boolean(), scoped_authorized_attempts: z.number().int().nonnegative().nullable(),
   observed_raw_receipts: z.number().int().nonnegative(), observed_known_usage_attempts: z.number().int().nonnegative(),
   scoped_unknown_usage_attempts: z.number().int().nonnegative().nullable(),
+  observed_invalid_usage_attempts: z.number().int().nonnegative().optional(),
   scoped_reported_input_tokens: z.number().int().nonnegative().nullable(),
   scoped_reported_output_tokens: z.number().int().nonnegative().nullable(), actual_spend: z.null(),
   attempts: z.array(z.object({ layer: z.enum(["query", "source", "correspondence"]),
     cache_root: z.string(), cache_key: Digest, attempt_ordinal: z.number().int().positive(),
-    ledger_lineages: z.array(Digest), raw_identity: Digest.nullable(),
+    ledger_lineages: z.array(Digest), raw_identity: Digest.nullable(), usage_accounting: z.literal("invalid").optional(),
     usage: z.object({ input_tokens: z.number().int().nonnegative(),
       output_tokens: z.number().int().nonnegative() }).strict().nullable() }).strict())
 }).strict();
 export type PopulationAttemptScope = Readonly<{ layer: PopulationProducerLayer; cacheRoot: string;
-  model: string; requestProfile: string; keys: readonly string[] }>;
+  model: string; requestProfile: string; keys: readonly string[]; maxOutputTokens?: number }>;
 
 /** Physical-root and reserved-ordinal projection of native ledgers, never a second spend ledger. */
 export function inspectPopulationAttemptScopes(scopes: readonly PopulationAttemptScope[]) {
   const attempts = new Map<string, { layer: PopulationProducerLayer; cache_root: string; cache_key: string;
     attempt_ordinal: number; ledger_lineages: string[]; raw_identity: string | null;
-    usage: { input_tokens: number; output_tokens: number } | null }>();
+    usage: { input_tokens: number; output_tokens: number } | null; usage_accounting?: "invalid" }>();
   let complete = scopes.length > 0;
   for (const scope of scopes) {
     if (scope.keys.length === 0) continue;
@@ -58,21 +60,24 @@ export function inspectPopulationAttemptScopes(scopes: readonly PopulationAttemp
             throw new AlayaError("CONFLICT", "population raw attempt differs from selected producer scope");
           }
           // This projection counts retained attempts; it does not admit their output.
-          verifyProviderRawReservation(raw, snapshot, "accounting");
+          verifyProviderRawReservation(raw, snapshot, "accounting", scope.maxOutputTokens);
         }
         const rawIdentity = raw === undefined ? null : chainIdentity(raw);
-        const usage = raw?.usage_known && raw.usage !== null ?
+        const invalid = raw !== undefined && scope.maxOutputTokens !== undefined &&
+          inspectNativeChatReportedUsage(raw.request_profile, raw.usage, scope.maxOutputTokens) === "invalid";
+        const usage = !invalid && raw?.usage_known && raw.usage !== null ?
           { input_tokens: raw.usage.inputTokens, output_tokens: raw.usage.outputTokens } : null;
         const existing = attempts.get(id);
         if (existing !== undefined) {
           if (existing.raw_identity !== rawIdentity ||
-              JSON.stringify(existing.usage) !== JSON.stringify(usage)) {
+              JSON.stringify(existing.usage) !== JSON.stringify(usage) ||
+              existing.usage_accounting !== (invalid ? "invalid" : undefined)) {
             throw new AlayaError("CONFLICT", "copied attempt ordinal has contradictory raw evidence");
           }
           if (!existing.ledger_lineages.includes(record.lineage_digest)) existing.ledger_lineages.push(record.lineage_digest);
         } else attempts.set(id, { layer: scope.layer, cache_root: root, cache_key: reservation.cacheKey,
           attempt_ordinal: reservation.attemptOrdinal, ledger_lineages: [record.lineage_digest],
-          raw_identity: rawIdentity, usage });
+          raw_identity: rawIdentity, usage, ...(invalid ? { usage_accounting: "invalid" as const } : {}) });
       }
     }
     for (const key of keys) {
@@ -90,6 +95,7 @@ export function inspectPopulationAttemptScopes(scopes: readonly PopulationAttemp
     scoped_authorized_attempts: complete ? rows.length : null,
     observed_raw_receipts: rows.filter(row => row.raw_identity !== null).length,
     observed_known_usage_attempts: rows.filter(row => row.usage !== null).length,
+    observed_invalid_usage_attempts: rows.filter(row => row.usage_accounting === "invalid").length,
     scoped_unknown_usage_attempts: complete ? rows.filter(row => row.usage === null).length : null,
     scoped_reported_input_tokens: complete ? rows.reduce((sum, row) => sum + (row.usage?.input_tokens ?? 0), 0) : null,
     scoped_reported_output_tokens: complete ? rows.reduce((sum, row) => sum + (row.usage?.output_tokens ?? 0), 0) : null,

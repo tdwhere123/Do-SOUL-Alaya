@@ -18,7 +18,7 @@ vi.mock("../../../runs/extraction/cache/extraction-cache-manifest.js", async imp
 }));
 vi.mock("../../../runs/compile-seed/http/semantic-provider-http.js", () => ({
   createSemanticProviderHttpExtractor: () => vi.fn(() => { throw new Error("dispatch forbidden"); }),
-  isCompleteSemanticFinish: () => false, readStepFailureResponse: () => undefined
+  isCompleteSemanticFinish: () => false, readNativeChatFailureResponse: () => undefined
 }));
 const { EXTRACTION_OPEN_SEMANTICS_GENERATION } = await import("../../../runs/extraction/request-artifact.js");
 const { preflightSourceSemanticInteractive, parseSourceSemanticInteractivePreflight } = await import("../../../runs/extraction/fill/source-semantic-interactive-preflight.js");

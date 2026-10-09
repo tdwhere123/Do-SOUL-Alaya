@@ -184,6 +184,7 @@ function renderAuthorityTelemetry(
     `usage_output_tokens=${telemetry.telemetry.outputTokens} ` +
     `usage_total_tokens=${telemetry.telemetry.totalTokens} ` +
     `usage_unavailable=${telemetry.telemetry.usageUnavailableRequests} ` +
+    `usage_invalid=${telemetry.telemetry.usageInvalidAttempts} ` +
     `usage_unresolved=${telemetry.telemetry.unresolvedTransportAttempts} ` +
     `usage_unknown=${telemetry.telemetry.usageUnknownAttempts} `;
 }

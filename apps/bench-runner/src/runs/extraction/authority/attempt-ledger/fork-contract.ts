@@ -60,6 +60,7 @@ function hasMonotonicTelemetry(
     current.outputTokens >= inherited.outputTokens &&
     current.totalTokens >= inherited.totalTokens &&
     current.usageUnavailableRequests >= inherited.usageUnavailableRequests &&
+    current.usageInvalidAttempts >= inherited.usageInvalidAttempts &&
     Object.keys(inherited.terminalRetryClassifications).every((key) =>
       current.terminalRetryClassifications[
         key as keyof typeof current.terminalRetryClassifications

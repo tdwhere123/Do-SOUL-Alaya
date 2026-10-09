@@ -1,12 +1,11 @@
 import { interactiveSourceTransportBinding } from "../request-profile.js";
-import { assertNativeChatReportedUsage } from "../authority/native-chat-quote.js";
 import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
 import { readLiveTransportFailure } from "../cache/cache-live-delegate.js";
 import { readGeminiFailureResponse } from "../../compile-seed/http/gemini-http.js";
-import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish, readStepFailureResponse } from "../../compile-seed/http/semantic-provider-http.js";
+import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish, readNativeChatFailureResponse } from "../../compile-seed/http/semantic-provider-http.js";
 import { GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS } from "../../compile-seed/http/gemini-http.js";
 import { resolveExtractionRequestTimeoutMs } from "../../compile-seed/http/output-token-retry.js";
 import { inspectCachedExtractionArtifact } from "../../compile-seed/cache/cache-shard.js";
@@ -30,6 +29,7 @@ import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { baseReportedUsage } from "../authority/step-quote.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, requestEnvelopeDigest,
+  providerRawInvalidUsageOutcome,
   writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation,
   providerRawSuccessEvidenceState, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
@@ -192,9 +192,15 @@ function importInteractiveFromRaw(
     authorityLineageDigest: input.authority!.receipt.lineage_digest,
     sourceRequestSha256: line.requestSha256
   });
-  if (verifyProviderRawReservation(raw, input.authority!.snapshot()) === "rejected") return "quarantined";
-  assertNativeChatReportedUsage(input.prepared.config.requestProfile, raw.usage,
-    input.authority!.receipt.limits.max_output_tokens);
+  if (verifyProviderRawReservation(raw, input.authority!.snapshot(), "executable",
+    input.authority!.receipt.limits.max_output_tokens) !== undefined) return "quarantined";
+  const invalidUsage = providerRawInvalidUsageOutcome(raw, input.authority!.receipt.limits.max_output_tokens);
+  if (invalidUsage !== undefined) {
+    appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"), `${line.key}\tinvalid_usage\n`);
+    input.authority!.recordTransportOutcome(line.key, invalidUsage, raw.attempt_ordinal);
+    input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
+    return "quarantined";
+  }
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
@@ -268,7 +274,7 @@ async function dispatchInteractiveLine(
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
     const response = readGeminiFailureResponse(cause);
-    const stepResponse = readStepFailureResponse(cause);
+    const nativeChatResponse = readNativeChatFailureResponse(cause);
     const raw = writeProviderRawAttempt({
       root: input.cacheRoot, cacheKey: line.key, attemptOrdinal, kind: "source_semantic",
       model: input.prepared.config.model, requestProfile: input.prepared.config.requestProfile,
@@ -280,7 +286,7 @@ async function dispatchInteractiveLine(
       failureRetryable: input.options.signal?.aborted === true ? false : !isCompletedNonRetryableResponse(outcome),
       failureClassification: outcome.terminalRetryClassification,
       ...(response === undefined ? {} : { responseBody: response.rawBody }),
-      ...(stepResponse === undefined ? {} : { httpResponse: stepResponse }),
+      ...(nativeChatResponse === undefined ? {} : { httpResponse: nativeChatResponse }),
       ...(outcome.transportFailures[0] === undefined ? {} : { transportFailure: outcome.transportFailures[0] }),
       ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
       ...(outcome.transportFailures[0]?.phase === undefined

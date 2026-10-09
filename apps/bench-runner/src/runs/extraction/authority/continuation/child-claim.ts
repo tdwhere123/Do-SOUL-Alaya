@@ -42,6 +42,7 @@ export interface ExtractionContinuationChildClaim {
     readonly output_tokens: number;
     readonly total_tokens: number;
     readonly usage_unavailable_requests: number;
+    readonly usage_invalid_attempts?: number;
   };
   readonly successor: {
     readonly target_selection_digest: string;
@@ -82,7 +83,10 @@ export function createExtractionContinuationChildClaim(input: {
       output_tokens: input.predecessorLedger.telemetry.outputTokens,
       total_tokens: input.predecessorLedger.telemetry.totalTokens,
       usage_unavailable_requests:
-        input.predecessorLedger.telemetry.usageUnavailableRequests
+        input.predecessorLedger.telemetry.usageUnavailableRequests,
+      ...((input.predecessorLedger.telemetry.usageInvalidAttempts ?? 0) === 0 ? {} : {
+        usage_invalid_attempts: input.predecessorLedger.telemetry.usageInvalidAttempts
+      })
     },
     successor: {
       target_selection_digest: targetSelectionDigest,
@@ -270,7 +274,8 @@ export function assertExtractionContinuationChildClaim(
         "successful_shard_ceiling", "attempts", "successful_shards",
         "pending_shards", "unresolved_attempts", "transport_failures",
         "retry_successes", "rate_limit_retries", "input_tokens", "output_tokens",
-        "total_tokens", "usage_unavailable_requests"
+        "total_tokens", "usage_unavailable_requests",
+        ...(claim.predecessor.usage_invalid_attempts === undefined ? [] : ["usage_invalid_attempts"])
       ]) || !hasExactKeys(claim.successor, [
         "target_selection_digest", "lineage_digest", "receipt_digest"
       ]) || !claimDigestsValid(claim) || !claimCountersValid(claim) ||
@@ -357,6 +362,10 @@ function claimCountersValid(claim: ExtractionContinuationChildClaim): boolean {
     claim.predecessor.total_tokens, claim.predecessor.usage_unavailable_requests
   ];
   return values.every((value) => Number.isSafeInteger(value) && value >= 0) &&
+    (claim.predecessor.usage_invalid_attempts === undefined ||
+      Number.isSafeInteger(claim.predecessor.usage_invalid_attempts) &&
+      claim.predecessor.usage_invalid_attempts > 0 &&
+      claim.predecessor.usage_invalid_attempts <= claim.predecessor.usage_unavailable_requests) &&
     claim.predecessor.attempts <= claim.predecessor.maximum_attempts &&
     claim.predecessor.successful_shards <= claim.predecessor.successful_shard_ceiling &&
     claim.predecessor.pending_shards === 0 &&

@@ -27,6 +27,8 @@ export interface ExtractionTransportOutcome {
   readonly terminalRetryClassification?: BenchTerminalRetryClassification;
   readonly transportFailures?: readonly BenchTransportFailureAttempt[];
   readonly usage?: BenchProviderUsage;
+  /** Exact reported values rejected as metering, kept only for their settlement witness. */
+  readonly invalidReportedUsage?: BenchProviderUsage;
   /** Undefined is an unresolved historical outcome; null is an observed unavailable usage. */
   readonly attemptUsages?: readonly (BenchProviderUsage | null | undefined)[];
   readonly attemptResponses?: readonly (BenchTransportResponseWitness | null)[];
@@ -190,7 +192,10 @@ function applySettledOutcome(
     ...current,
     settled_attempts: [...(current.settled_attempts ?? []), ...unresolved.map((reservation, index) => ({
       ...reservation,
-      ...(input.attemptUsages !== undefined && input.attemptUsages[index] !== undefined ? {
+      ...(input.invalidReportedUsage === undefined ? {} : { usage_accounting: "invalid" as const }),
+      ...(input.invalidReportedUsage !== undefined ? {
+        usage_sha256: settledAttemptUsageDigest(input.invalidReportedUsage)
+      } : input.attemptUsages !== undefined && input.attemptUsages[index] !== undefined ? {
         usage_sha256: settledAttemptUsageDigest(input.attemptUsages[index])
       } : exactAttempt && unresolved.length === 1 ? {
         usage_sha256: settledAttemptUsageDigest(input.usage)
@@ -269,7 +274,13 @@ function assertOutcome(input: ExtractionTransportOutcome): void {
       outputTokens: total.outputTokens + usage.outputTokens,
       totalTokens: total.totalTokens + usage.totalTokens
     }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
-  if (!isNonNegativeSafeInteger(input.retryCount) ||
+  if (input.invalidReportedUsage !== undefined &&
+      (!terminal || input.retryCount !== 0 || successfulRequestCount !== 0 || unknownRequestCount !== 0 ||
+        input.usage !== undefined || usageRequestCount !== 0 || input.attemptUsages !== undefined ||
+        !isNonNegativeSafeInteger(input.invalidReportedUsage.inputTokens) ||
+        !isNonNegativeSafeInteger(input.invalidReportedUsage.outputTokens) ||
+        !isNonNegativeSafeInteger(input.invalidReportedUsage.totalTokens)) ||
+      !isNonNegativeSafeInteger(input.retryCount) ||
       !isNonNegativeSafeInteger(input.rateLimitRetries) ||
       !isNonNegativeSafeInteger(successfulRequestCount) ||
       !isNonNegativeSafeInteger(unknownRequestCount) ||

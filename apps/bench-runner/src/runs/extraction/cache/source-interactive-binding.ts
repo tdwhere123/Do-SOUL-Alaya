@@ -50,7 +50,9 @@ export function readCompleteRetainedSourceResponse(input: Readonly<{
     cacheIdentity: { model: preflight.config.model, requestProfile: preflight.config.requestProfile } });
   // A complete quarantined response can parent a revision, but it still needs
   // the same exact settlement witness as an admitted executable response.
-  verifyProviderRawReservation(raw, ledger, "executable");
+  if (verifyProviderRawReservation(raw, ledger, "executable", receipt.limits.max_output_tokens) === "accounting_invalid") {
+    throw new AlayaError("CONFLICT", "source revision parent has invalid accounting");
+  }
   if (!ledger?.historyComplete || !ledger.settledAttempts.some(row =>
       row.cacheKey === line.key && row.attemptOrdinal === raw.attempt_ordinal) ||
       raw.transport_failure !== undefined || !raw.full_replay_possible ||
@@ -185,7 +187,8 @@ export function inspectInteractiveTransportEvidence(
   if (ledger === undefined || ledger.startingMissing !== receipt.limits.starting_missing ||
       ledger.maximumAttempts !== receipt.limits.maximum_attempts ||
       ledger.successfulShardCeiling !== receipt.limits.successful_shard_ceiling ||
-      verifyProviderRawReservation(raw, ledger, requestBinding === "unbound" ? "accounting" : "executable") === "rejected") {
+      verifyProviderRawReservation(raw, ledger, requestBinding === "unbound" ? "accounting" : "executable",
+        receipt.limits.max_output_tokens) !== undefined) {
     throw new AlayaError("CONFLICT", "typed source semantic raw attempt has no admissible reservation");
   }
   const successful = ledger.successfulEntries.find((shard) => shard.cacheKey === entry.cache_key);

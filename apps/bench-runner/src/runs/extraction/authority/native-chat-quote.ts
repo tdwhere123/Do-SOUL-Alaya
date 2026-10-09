@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { AlayaError, canonicalJson, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, isChatSemanticRequestProfile, isInternSemanticRequestProfile } from "@do-soul/alaya-protocol";
 import type { ProviderUsage } from "@do-soul/alaya-engine-gateway";
 import { InternQuoteBasisSchema, internQuoteBasisForDigest } from "./intern-quote.js";
-import { StepQuoteBasisSchema, stepQuoteBasisForDigest, assertStepQuoteBasis, assertStepQuoteRates, assertStepReportedUsage } from "./step-quote.js";
+import { StepQuoteBasisSchema, stepQuoteBasisForDigest, assertStepQuoteBasis, assertStepQuoteRates } from "./step-quote.js";
 
 export const NativeChatQuoteBasisSchema = z.union([StepQuoteBasisSchema, InternQuoteBasisSchema]);
 export type NativeChatQuoteBasis = z.infer<typeof NativeChatQuoteBasisSchema>;
@@ -40,15 +40,24 @@ export function assertNativeChatQuoteRates(profile: string, inputRate: number, o
   }
 }
 
-export function assertNativeChatReportedUsage(profile: string, usage: ProviderUsage | null | undefined, outputCap: number): void {
-  if (!isInternSemanticRequestProfile(profile)) {
-    assertStepReportedUsage(profile, usage, outputCap);
-    return;
+/** Inclusive output includes reasoning once; known contradictions are not absent usage. */
+export function inspectNativeChatReportedUsage(profile: string, usage: ProviderUsage | null | undefined,
+  outputCap: number): "absent" | "valid" | "invalid" {
+  if (usage === null || usage === undefined) return "absent";
+  if (!isChatSemanticRequestProfile(profile)) return "valid";
+  if (!Number.isSafeInteger(outputCap) || outputCap <= 0) {
+    throw new AlayaError("CONFLICT", "native chat usage validation requires its authorized output cap");
   }
-  if (usage === null || usage === undefined) return;
   if (usage.outputTokens > outputCap || usage.totalTokens !== usage.inputTokens + usage.outputTokens ||
       usage.cachedInputTokens !== undefined && usage.cachedInputTokens > usage.inputTokens ||
       usage.reasoningOutputTokens !== undefined && usage.reasoningOutputTokens > usage.outputTokens) {
-    throw new AlayaError("CONFLICT", "Intern reported usage contradicts its output cap or inclusive totals");
+    return "invalid";
+  }
+  return "valid";
+}
+
+export function assertNativeChatReportedUsage(profile: string, usage: ProviderUsage | null | undefined, outputCap: number): void {
+  if (inspectNativeChatReportedUsage(profile, usage, outputCap) === "invalid") {
+    throw new AlayaError("CONFLICT", "native chat reported usage contradicts its authorized output cap or inclusive totals");
   }
 }

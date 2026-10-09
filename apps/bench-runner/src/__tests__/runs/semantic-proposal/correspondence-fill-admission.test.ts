@@ -22,7 +22,7 @@ import {
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, sourceSemanticCorrespondenceResponseJsonSchema
 } from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
+import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, semanticProposalLookup } from "../../../runs/semantic-proposal/attempt.js";
 import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
 import {
   inspectSemanticProposalShard, hasAdmittedProposalOutcome
@@ -226,8 +226,14 @@ function generationBody(request: SourceSemanticCorrespondenceRequest): string {
   });
 }
 
-it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1", INTERN_SEMANTIC_REQUEST_PROFILE] as const)(
-  "sends %s correspondence through its pinned route and reopens admitted raw", async profile => {
+it.each([
+  { profile: "step-3.5-2603-low-json-schema-v1", invalid: false },
+  { profile: "step-3.5-2603-high-json-schema-v1", invalid: false },
+  { profile: INTERN_SEMANTIC_REQUEST_PROFILE, invalid: false },
+  { profile: "step-3.5-2603-low-json-schema-v1", invalid: true },
+  { profile: INTERN_SEMANTIC_REQUEST_PROFILE, invalid: true }
+] as const)(
+  "sends $profile correspondence through its pinned route and reopens invalid-accounting=$invalid raw", async ({ profile, invalid }) => {
   const intern = profile === INTERN_SEMANTIC_REQUEST_PROFILE;
   const basis = intern ? INTERN_DISCOVERY_QUOTE_BASIS : STEP_PLAN_QUOTE_BASIS;
   const prepared = parseSemanticProposalWorkset({
@@ -244,11 +250,12 @@ it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"
   });
   const line = materializeSemanticProposalLines(prepared, 4096)[0]!;
   const content = assessmentBody(line.request as SourceSemanticCorrespondenceRequest);
+  const usage = { prompt_tokens: 21, completion_tokens: 8, total_tokens: invalid ? 30 : 29 };
   const wire = intern ? JSON.stringify({ choices: [{ message: { content, reasoning_content: "separate reasoning" },
-    finish_reason: "stop" }], usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 } }) : `data: ${JSON.stringify({ choices: [{
+    finish_reason: "stop" }], usage }) : `data: ${JSON.stringify({ choices: [{
     delta: { content: assessmentBody(line.request as SourceSemanticCorrespondenceRequest) },
     finish_reason: "stop"
-  }], usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 } })}\n\ndata: [DONE]\n\n`;
+  }], usage })}\n\ndata: [DONE]\n\n`;
   const seen: { path: string | undefined; body: Record<string, unknown> }[] = [];
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -275,8 +282,24 @@ it.each(["step-3.5-2603-low-json-schema-v1", "step-3.5-2603-high-json-schema-v1"
       config: { ...config, requestProfile: otherProfile }
     })).rejects.toThrow();
     expect(seen).toHaveLength(0);
-    const result = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
+    const run = () => executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
       config, extractor: createSemanticProviderHttpExtractor(config, "source_semantic_proposal", fetchImpl) });
+    if (invalid) {
+      await expect(run()).rejects.toThrow(/stopped after terminal/u);
+      expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({
+        usage_known: true, usage: { inputTokens: 21, outputTokens: 8, totalTokens: 30 } });
+      expect(readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(prepared, line, 4096)).status).toBe("accounting_invalid");
+      const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "semantic_correspondence" });
+      expect(ledger.snapshot()).toMatchObject({ unresolvedAttempts: [], pendingKeys: [], successfulShards: 0,
+        telemetry: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageInvalidAttempts: 1, usageUnknownAttempts: 1 } });
+      if (intern) expect(authority.price.estimated_upper_usd).toBe(0);
+      else expect(authority.price.estimated_upper_usd).toBeGreaterThan(0);
+      await expect(run()).rejects.toThrow(/retained terminal/u);
+      expect(() => ledger.reserveAttemptOrdinal(line.key)).toThrow(/per-key attempt ceiling/u);
+      expect(seen).toHaveLength(1);
+      return;
+    }
+    const result = await run();
     expect(result).toMatchObject({ interpreted: 1, newly_admitted: 1, attempts: 1 });
     expect(seen).toHaveLength(1);
     if (intern) {

@@ -16,7 +16,7 @@ import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts,
-  providerRawSuccessEvidenceState, readProviderRawAttempt, verifyProviderRawReservation,
+  providerRawSuccessEvidenceState, readProviderRawAttempt, verifyProviderRawReservation, providerRawArtifactUsageMatches,
   type ProviderRawAttempt
 } from "../extraction/fill/provider-raw-attempt.js";
 import {
@@ -295,7 +295,7 @@ export function assertPreservationRawReservation(
     requestDigest: expected.request_digest ?? raw.request_digest,
     attemptLineageDigest: expected.attempt_lineage_digest
   });
-  verifyProviderRawReservation(raw, ledger);
+  verifyProviderRawReservation(raw, ledger, "executable", expected.max_output_tokens);
 }
 
 export function openSourceEvidencePreservationAttemptLedger(input: Readonly<{
@@ -348,7 +348,7 @@ export function openSourceEvidencePreservationAttemptLedger(input: Readonly<{
         model: identity.model,
         request_profile: identity.requestProfile,
         request_digest: shard.request_digest,
-        attempt_lineage_digest: lineage
+        attempt_lineage_digest: lineage, max_output_tokens: authority.limits.max_output_tokens
       }, cacheKey);
       assertPreservationShardRaw(shard, raw);
       return {
@@ -372,7 +372,7 @@ function assertPreservationShardRaw(
       raw.request_digest !== shard.request_digest ||
       raw.decoded_text !== shard.raw_json || raw.finish_reason !== shard.finish_reason ||
       raw.completion_witness !== shard.completion_witness ||
-      canonicalJson(baseReportedUsage(raw.usage) ?? null) !== canonicalJson(shard.usage ?? null) ||
+      !providerRawArtifactUsageMatches(raw, shard) ||
       hasAdmittedPreservationOutcome(shard) && (!raw.full_replay_possible || raw.decoded_text_digest !== shard.raw_digest ||
         raw.transport_failure !== undefined || providerRawSuccessEvidenceState(raw) !== "bound")) {
     throw new SourceEvidencePreservationIdentityError(

@@ -76,7 +76,8 @@ async function runProviderChatRequest(
       boundedError ? failureCap
         : intern || request.retainHttpResponseEvidence === true ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined,
       // Cancellation threshold only. Received bytes beyond the retained prefix stay in the digest.
-      boundedError ? failureCap : undefined
+      boundedError ? failureCap : intern || request.retainHttpResponseEvidence === true
+        ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined
     ));
     if (!response.ok) {
       throw new ProviderChatCompletionError(
@@ -85,17 +86,26 @@ async function runProviderChatRequest(
         { identity: providerFailureIdentityFromBody(bodyText), httpResponse: evidence }
       );
     }
+    assertCompleteResponseEvidence(evidence, response.status);
     return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
   }
   await throwIfHttpError(response);
   if (request.retainHttpResponseEvidence === true) {
     const { bodyText, evidence } = await readProviderResponseWithEvidence(
-      response, observeResponse, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
+      response, observeResponse, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
     );
+    assertCompleteResponseEvidence(evidence, response.status);
     return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
   }
   const bodyText = await readBody(response);
   return inspectBody(request, bodyText, response.headers.get("content-type"), response.status);
+}
+
+function assertCompleteResponseEvidence(evidence: ProviderHttpResponseEvidence, httpStatus: number): void {
+  if (!evidence.bodyComplete) {
+    throw new ProviderChatCompletionError("provider response exceeds its finite read-byte limit",
+      "response_parse_error", httpStatus, { inspectionReason: "schema", httpResponse: evidence });
+  }
 }
 
 async function postChatCompletion(

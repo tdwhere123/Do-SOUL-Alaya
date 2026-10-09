@@ -124,7 +124,7 @@ export interface ExtractionAttemptLedgerSnapshot {
   }>[];
   readonly settledAttempts: readonly Readonly<{
     attemptOrdinal: number; cacheKey: string; usageSha256?: string; responseSha256?: string;
-    aggregateUsageSha256?: string
+    aggregateUsageSha256?: string; usageAccounting?: "invalid"
   }>[];
   readonly transportFailures: readonly Readonly<{
     readonly attemptOrdinal: number;
@@ -141,7 +141,9 @@ export interface ExtractionAttemptLedgerSnapshot {
     readonly inputTokens: number;
     readonly outputTokens: number;
     readonly totalTokens: number;
+    /** Aggregate unavailable trusted metering, including explicitly invalid reported values. */
     readonly usageUnavailableRequests: number;
+    readonly usageInvalidAttempts: number;
     readonly unresolvedTransportAttempts: number;
     readonly usageUnknownAttempts: number;
   }>;
@@ -489,6 +491,7 @@ function shardAttemptBelongsToLedger(
     (record.settled_attempts ?? []).some((attempt) =>
       attempt.cache_key === shard.cacheKey && attempt.attempt_ordinal === shard.attemptOrdinal &&
       attempt.usage_sha256 !== undefined && attempt.usage_sha256 === shard.usageSha256 &&
+      attempt.usage_accounting === undefined &&
       (shard.responseSha256 === undefined ? attempt.response_sha256 === undefined :
         attempt.response_sha256 === shard.responseSha256) &&
       (shard.aggregateUsageSha256 === undefined ? attempt.aggregate_usage_sha256 === undefined :
@@ -566,6 +569,7 @@ function toSnapshot(
     settledAttempts: Object.freeze((record.settled_attempts ?? []).map(attempt => Object.freeze({
       attemptOrdinal: attempt.attempt_ordinal, cacheKey: attempt.cache_key,
       ...(attempt.usage_sha256 === undefined ? {} : { usageSha256: attempt.usage_sha256 }),
+      ...(attempt.usage_accounting === undefined ? {} : { usageAccounting: attempt.usage_accounting }),
       ...(attempt.response_sha256 === undefined ? {} : { responseSha256: attempt.response_sha256 }),
       ...(attempt.aggregate_usage_sha256 === undefined ? {} : {
         aggregateUsageSha256: attempt.aggregate_usage_sha256
@@ -589,6 +593,7 @@ function toSnapshot(
       outputTokens: record.telemetry.output_tokens,
       totalTokens: record.telemetry.total_tokens,
       usageUnavailableRequests: record.telemetry.usage_unavailable_requests,
+      usageInvalidAttempts: (record.settled_attempts ?? []).filter(attempt => attempt.usage_accounting === "invalid").length,
       unresolvedTransportAttempts: unresolved,
       usageUnknownAttempts: record.telemetry.usage_unavailable_requests + unresolved
     })
@@ -625,6 +630,7 @@ function canonicalLedgerRecord(record: ExtractionAttemptLedgerRecord) {
     ...(record.settled_attempts === undefined ? {} : { settled_attempts: record.settled_attempts.map(attempt => ({
       attempt_ordinal: attempt.attempt_ordinal, cache_key: attempt.cache_key,
       ...(attempt.usage_sha256 === undefined ? {} : { usage_sha256: attempt.usage_sha256 }),
+      ...(attempt.usage_accounting === undefined ? {} : { usage_accounting: attempt.usage_accounting }),
       ...(attempt.response_sha256 === undefined ? {} : { response_sha256: attempt.response_sha256 }),
       ...(attempt.aggregate_usage_sha256 === undefined ? {} : {
         aggregate_usage_sha256: attempt.aggregate_usage_sha256

@@ -10,6 +10,7 @@ import { materializeSemanticProposalLines, type SemanticProposalKind, type Seman
   type SemanticProposalWorkset } from "./workset.js";
 import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
   providerRawAttemptInputPaths, providerRawSuccessEvidenceState,
+  providerRawArtifactUsageMatches,
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import { dirname } from "node:path";
@@ -73,7 +74,7 @@ export function readSemanticProposalAttemptState(
   const unresolved = ledger?.unresolvedAttempts.filter(attempt => attempt.cacheKey === cacheKey) ?? [];
   const settled = [...(ledger?.settledAttempts ?? []), ...(ledger?.transportFailures ?? [])]
     .filter(attempt => attempt.cacheKey === cacheKey).sort((left, right) => right.attemptOrdinal - left.attemptOrdinal)[0];
-  let status: "unknown" | "pending" | "transport_failure" | "incomplete" | "settled" = "settled";
+  let status: "unknown" | "pending" | "transport_failure" | "incomplete" | "accounting_invalid" | "settled" = "settled";
   if (ledger !== undefined && !ledger.historyComplete) status = "incomplete";
   else if (unresolved.some(attempt => !raws.some(raw => raw.attempt_ordinal === attempt.attemptOrdinal))) status = "unknown";
   else if (unresolved.length > 0 || shard === undefined && raws.length > 0) status = "pending";
@@ -81,6 +82,8 @@ export function readSemanticProposalAttemptState(
     status = ledger?.transportFailures.some(attempt => attempt.attemptOrdinal === settled.attemptOrdinal)
       ? "transport_failure" : "incomplete";
   } else if (ledger?.pendingKeys.includes(cacheKey)) status = "pending";
+  if (unresolved.length === 0 && ledger?.settledAttempts.some(attempt =>
+    attempt.cacheKey === cacheKey && attempt.usageAccounting === "invalid")) status = "accounting_invalid";
   if (shard !== undefined && hasAdmittedProposalOutcome(shard) && status === "settled") {
     const success = ledger?.successfulEntries.find(entry => entry.cacheKey === cacheKey);
     if (success?.successKind !== "provider" || success.rawJsonSha256 !== shard.raw_digest ||
@@ -101,7 +104,7 @@ export function assertProposalRawReservation(
   bindProviderRawAttempt(raw, { cacheKey, kind: expected.kind, model: expected.model,
     requestProfile: expected.request_profile, requestDigest: expected.request_digest ?? raw.request_digest,
     attemptLineageDigest: expected.attempt_lineage_digest });
-  verifyProviderRawReservation(raw, ledger);
+  verifyProviderRawReservation(raw, ledger, "executable", expected.max_output_tokens);
 }
 
 function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAttempt): void {
@@ -110,7 +113,7 @@ function assertProposalShardRaw(shard: SemanticProposalShard, raw: ProviderRawAt
       raw.request_digest !== shard.request_digest ||
       raw.decoded_text !== shard.raw_json || raw.finish_reason !== shard.finish_reason ||
       raw.completion_witness !== shard.completion_witness ||
-      canonicalJson(baseReportedUsage(raw.usage) ?? null) !== canonicalJson(shard.usage ?? null) ||
+      !providerRawArtifactUsageMatches(raw, shard) ||
       hasAdmittedProposalOutcome(shard) && (!raw.full_replay_possible || raw.decoded_text_digest !== shard.raw_digest ||
         raw.transport_failure !== undefined || providerRawSuccessEvidenceState(raw) !== "bound")) {
     throw new SemanticProposalIdentityError("proposal success differs from its reserved raw attempt");
@@ -163,7 +166,8 @@ export function openSemanticProposalAttemptLedger(input: Readonly<{
       if (raw === undefined) throw new AlayaError("CONFLICT", "proposal success lacks its reserved raw attempt");
       assertProposalRawReservation(raw, inspectExtractionAttemptLedger({ cacheRoot, lineageDigest: lineage,
         cacheIdentity: identity }), { kind: input.kind, model: identity.model, request_profile: identity.requestProfile,
-        request_digest: shard.request_digest, attempt_lineage_digest: lineage }, cacheKey);
+        request_digest: shard.request_digest, attempt_lineage_digest: lineage,
+        max_output_tokens: authority.limits.max_output_tokens }, cacheKey);
       assertProposalShardRaw(shard, raw);
       return {
         cacheKey,

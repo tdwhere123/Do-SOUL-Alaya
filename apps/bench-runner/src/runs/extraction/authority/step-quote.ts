@@ -147,19 +147,6 @@ export function assertStepQuoteRates(
   }
 }
 
-/** Output includes reasoning; it must never be charged or capped a second time. */
-export function assertStepReportedUsage(
-  profile: string, usage: ProviderUsage | null | undefined, outputCap: number
-): void {
-  if (!isStepSemanticRequestProfile(profile) || usage === null || usage === undefined) return;
-  if (usage.outputTokens > outputCap ||
-      usage.cachedInputTokens !== undefined && usage.cachedInputTokens > usage.inputTokens ||
-      usage.reasoningOutputTokens !== undefined && usage.reasoningOutputTokens > usage.outputTokens ||
-      usage.totalTokens !== usage.inputTokens + usage.outputTokens) {
-    throw new AlayaError("CONFLICT", "Step reported usage contradicts the frozen output cap or inclusive totals");
-  }
-}
-
 /** Legacy ledger and cache accounting consume the inclusive base totals. */
 export function baseReportedUsage(usage: ProviderUsage | null | undefined):
   { inputTokens: number; outputTokens: number; totalTokens: number } | undefined {

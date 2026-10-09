@@ -27,8 +27,8 @@ import { assertExtractionAuthorityReceipt, createExtractionAuthorityReceipt, wri
   "../../../runs/extraction/authority/receipt.js";
 import { createExtractionExecutionAuthority } from "../../../runs/extraction/fill/execution-authority.js";
 import { assertInteractiveSourcePreflightReceipt } from "../../../runs/extraction/authority/source-preflight-binding.js";
-import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS, STEP_PREVIEW_OPENAPI_QUOTE_BASIS,
-  assertStepReportedUsage } from "../../../runs/extraction/authority/step-quote.js";
+import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS, STEP_PREVIEW_OPENAPI_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
+import { assertNativeChatReportedUsage } from "../../../runs/extraction/authority/native-chat-quote.js";
 import { inspectCachedSourceSemantic } from
   "../../../runs/extraction/cache/source-semantic-artifact.js";
 import { inspectInteractiveTransportEvidence } from "../../../runs/extraction/cache/source-interactive-binding.js";
@@ -432,21 +432,25 @@ it.each([null, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE
       preflightOutputTokenCap: cap as unknown as number })).rejects.toThrow();
   });
 
-it("retains contradictory Step usage before refusing settlement or another request", async () => {
+it("settles contradictory Step usage as accounting-invalid quarantine without trusting counts or reopening a request", async () => {
   const fixture = await scenario(4);
   const http = await listen(body => ({
     text: responseFor((body.messages as { content: string }[])[1]!.content), finish: "stop",
     usage: { prompt_tokens: 11, completion_tokens: 4097, total_tokens: 4108 }
   }));
-  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/reported usage contradicts/u);
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
   expect(http.calls).toHaveLength(1);
   const raw = fixture.selected.flatMap(key => listProviderRawAttempts(roots.cacheRoot, key))[0]!;
   expect(raw).toMatchObject({ usage: { inputTokens: 11, outputTokens: 4097, totalTokens: 4108 },
     http_response: { bodyComplete: true } });
   const reopened = createExtractionExecutionAuthority(fixture.receipt, roots.cacheRoot);
-  expect(reopened.snapshot()?.unresolvedAttempts).toContainEqual({
-    cacheKey: raw.cache_key, attemptOrdinal: 1
-  });
+  expect(reopened.snapshot()?.unresolvedAttempts).toEqual([]);
+  expect(reopened.snapshot()?.settledAttempts).toContainEqual(expect.objectContaining({
+    cacheKey: raw.cache_key, attemptOrdinal: 1, usageAccounting: "invalid"
+  }));
+  expect(reopened.snapshot()?.telemetry).toMatchObject({ inputTokens: 0, outputTokens: 0,
+    totalTokens: 0, usageInvalidAttempts: 1, usageUnavailableRequests: 1, usageUnknownAttempts: 1 });
+  await expect(runExtractionFill(fixture.options)).rejects.toThrow(/stopped after quarantined/u);
   await expect(reopened.reserveAttemptOrdinal!(raw.cache_key)).rejects.toThrow(/per-key attempt ceiling/u);
   expect(http.calls).toHaveLength(1);
 });
@@ -456,7 +460,7 @@ it.each([
   { inputTokens: 8, outputTokens: 3, totalTokens: 11, reasoningOutputTokens: 4 },
   { inputTokens: 8, outputTokens: 3, totalTokens: 12 }
 ])("rejects contradictory inclusive usage dimensions", usage => {
-  expect(() => assertStepReportedUsage(PROFILE, usage, 4096)).toThrow(/reported usage contradicts/u);
+  expect(() => assertNativeChatReportedUsage(PROFILE, usage, 4096)).toThrow(/reported usage contradicts/u);
 });
 
 it("reopens a successful Step source interpretation without a second HTTP request", async () => {

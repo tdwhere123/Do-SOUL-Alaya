@@ -1,4 +1,7 @@
 import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { inspectNativeChatReportedUsage } from "../authority/native-chat-quote.js";
+import { baseReportedUsage } from "../authority/step-quote.js";
+import type { ExtractionTransportOutcome } from "../authority/attempt-ledger/outcome.js";
 import { createHash } from "node:crypto";
 import { mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -42,7 +45,7 @@ const MAX_STEP_RECORD_BYTES = 6 * (MAX_RETAINED_RAW_BYTES + 2)
   + 4 * Math.ceil(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES / 3) + MAX_RECORD_ENVELOPE_BYTES;
 
 function maxRawRecordBytes(raw: ProviderRawAttempt): number {
-  return isStepRawAttemptContract(raw.contract) ? MAX_STEP_RECORD_BYTES : MAX_RECORD_BYTES;
+  return isNativeChatRawAttemptContract(raw.contract) ? MAX_STEP_RECORD_BYTES : MAX_RECORD_BYTES;
 }
 
 const UsageSchema = z.object({
@@ -223,7 +226,7 @@ export type RawAttemptOwner =
     authorityReceiptDigest?: string; authorityLineageDigest?: string; sourceRequestSha256?: string }
   | { kind: "query" | "semantic_correspondence" | "source_evidence_selection" | "source_evidence_preservation" | "page_support_comparison"; attemptLineageDigest: string };
 
-function isStepRawAttemptContract(contract: string): boolean {
+function isNativeChatRawAttemptContract(contract: string): boolean {
   return contract === STEP_PROVIDER_RAW_ATTEMPT_CONTRACT ||
     contract === STEP_PROPOSAL_RAW_ATTEMPT_CONTRACT ||
     contract === STEP_EVIDENCE_SELECTION_RAW_ATTEMPT_CONTRACT ||
@@ -259,7 +262,7 @@ export function bindProviderRawAttempt(
 ): ProviderRawAttempt {
   assertProviderRawIntegrity(raw);
   const chat = isChatSemanticRequestProfile(expected.requestProfile);
-  if (chat !== isStepRawAttemptContract(raw.contract)) {
+  if (chat !== isNativeChatRawAttemptContract(raw.contract)) {
     throw new ProviderRawAttemptIdentityError(`provider raw attempt contract/profile mismatch: ${expected.cacheKey}`);
   }
   if (raw.cache_key !== expected.cacheKey || raw.kind !== expected.kind ||
@@ -280,8 +283,9 @@ export function bindProviderRawAttempt(
 /** A settled source rejection remains final even if admission is attempted again. */
 export function verifyProviderRawReservation(
   raw: ProviderRawAttempt, ledger: ExtractionAttemptLedgerSnapshot | undefined,
-  purpose: "executable" | "accounting" = "executable"
-): "rejected" | undefined {
+  purpose: "executable" | "accounting" = "executable",
+  maxOutputTokens?: number
+): "rejected" | "accounting_invalid" | undefined {
   assertExtractionAttemptReservation(ledger, raw.cache_key, raw.attempt_ordinal);
   if (purpose === "executable" && !ledger?.historyComplete) {
     throw new ProviderRawAttemptIdentityError("provider raw attempt history is incomplete");
@@ -289,9 +293,18 @@ export function verifyProviderRawReservation(
   const failure = ledger?.transportFailures.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
   const settlement = ledger?.settledAttempts.find(attempt => attempt.attemptOrdinal === raw.attempt_ordinal);
   const settled = settlement !== undefined;
+  const accountingInvalid = settlement?.usageAccounting === "invalid";
+  if (accountingInvalid && (maxOutputTokens === undefined ||
+      inspectNativeChatReportedUsage(raw.request_profile, raw.usage, maxOutputTokens) !== "invalid")) {
+    throw new ProviderRawAttemptIdentityError("provider raw contradicts its invalid-accounting settlement");
+  }
+  if (settled && !accountingInvalid && maxOutputTokens !== undefined &&
+      inspectNativeChatReportedUsage(raw.request_profile, raw.usage, maxOutputTokens) === "invalid") {
+    throw new ProviderRawAttemptIdentityError("contradictory provider usage lacks its invalid-accounting settlement");
+  }
   // Source admission records a completed but rejected response with its raw digest.
   // It is not a failed HTTP response and must remain replayable as quarantine.
-  const sourceRejection = raw.kind === "source_semantic" && raw.transport_failure === undefined &&
+  const sourceRejection = (raw.kind === "source_semantic" || accountingInvalid) && raw.transport_failure === undefined &&
     failure?.kind === "response_schema_error" && failure.phase === "response_schema" &&
     failure.httpStatus === null && failure.fingerprint === raw.decoded_text_digest;
   if (failure !== undefined && !sourceRejection && (raw.transport_failure === undefined ||
@@ -311,7 +324,32 @@ export function verifyProviderRawReservation(
       providerRawSuccessEvidenceState(raw) === "bound") {
     throw new ProviderRawAttemptIdentityError("provider raw lacks its exact settled usage witness");
   }
-  return sourceRejection ? "rejected" : undefined;
+  return accountingInvalid ? "accounting_invalid" : sourceRejection ? "rejected" : undefined;
+}
+
+/** Rejected reported usage settles one completed attempt without trusting its token counts. */
+export function providerRawInvalidUsageOutcome(raw: ProviderRawAttempt, maxOutputTokens: number) {
+  if (inspectNativeChatReportedUsage(raw.request_profile, raw.usage, maxOutputTokens) !== "invalid" || raw.usage === null) return undefined;
+  return {
+    retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 0, usageRequestCount: 0,
+    terminalRetryClassification: "failure_non_retryable_response",
+    invalidReportedUsage: raw.usage,
+    transportFailures: [raw.transport_failure ?? { attempt: 1, kind: "response_schema_error",
+      phase: "response_schema", httpStatus: null, fingerprint: raw.decoded_text_digest }]
+  } satisfies ExtractionTransportOutcome;
+}
+
+/** Artifact usage is trusted metering; the raw is always the reported-value witness. */
+export function providerRawArtifactUsageMatches(raw: ProviderRawAttempt, artifact: Readonly<{
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
+  outcome: unknown; admitted: boolean; max_output_tokens?: number;
+}>): boolean {
+  const outcome = artifact.outcome as { status?: unknown; reason?: unknown } | null;
+  const rejected = outcome?.status === "invalid" && outcome.reason === "invalid_usage";
+  const invalid = artifact.max_output_tokens !== undefined &&
+    inspectNativeChatReportedUsage(raw.request_profile, raw.usage, artifact.max_output_tokens) === "invalid";
+  if (invalid || rejected) return invalid && rejected && !artifact.admitted && artifact.usage === undefined;
+  return canonicalJson(baseReportedUsage(raw.usage) ?? null) === canonicalJson(artifact.usage ?? null);
 }
 
 /** Retained raw remains readable for accounting even when no complete response can be executed. */
@@ -379,7 +417,7 @@ function assertProviderRawIntegrity(raw: ProviderRawAttempt): void {
         !http.bodyTruncated && (httpBytes.length !== http.bodyByteLength ||
           createHash("sha256").update(httpBytes).digest("hex") !== http.bodySha256)) ||
       isChatSemanticRequestProfile(raw.request_profile) &&
-        (!isStepRawAttemptContract(raw.contract) ||
+        (!isNativeChatRawAttemptContract(raw.contract) ||
          body !== undefined || raw.transport_failure === undefined &&
            (http === undefined || !http.bodyComplete)) ||
       !isChatSemanticRequestProfile(raw.request_profile) && http !== undefined) {
