@@ -25,10 +25,10 @@ export function projectGeminiGenerationSchema(schema: object): { schema?: object
   const properties = record(root.properties);
   const contract = record(properties?.contract);
   const values = Array.isArray(contract?.enum) ? contract.enum : [contract?.const];
-  // Request-specific correspondence versions come from Soul's schema owner.
-  const correspondenceEnvelope = record(properties?.semantic_correspondence) !== undefined
-    && record(properties?.outcome) !== undefined;
-  const envelope = correspondenceEnvelope || values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
+  // Request-specific query and correspondence versions come from Soul's schema owner.
+  const producerEnvelope = record(properties?.outcome) !== undefined
+    && (record(properties?.query) !== undefined || record(properties?.semantic_correspondence) !== undefined);
+  const envelope = producerEnvelope || values.some(value => value === SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
     || value === SOURCE_SEMANTIC_QUERY_NESTED_RESPONSE_CONTRACT
     || value === SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT);
   const instruction = envelope ? ENVELOPE_SCHEMA_INSTRUCTION : SOURCE_SCHEMA_INSTRUCTION;

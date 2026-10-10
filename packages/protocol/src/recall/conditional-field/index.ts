@@ -308,6 +308,10 @@ export {
 } from "./semantic-query-meaning.js";
 export { expandSourceSemanticQueryCarrier, encodeSourceSemanticQueryCarrier } from "./semantic-query-carrier.js";
 export {
+  SOURCE_SEMANTIC_QUERY_REFERENT_KINDS,
+  encodeSourceSemanticQueryReferentConstraints, decodeSourceSemanticQueryReferentConstraints
+} from "./semantic-query-referent-presentation.js";
+export {
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_RELATION,
   SOURCE_SEMANTIC_CORRESPONDENCE_DESCRIPTOR_HANDLE,

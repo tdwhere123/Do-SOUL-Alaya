@@ -839,7 +839,14 @@ condition/operand positions carry serialization tokens. Explicit
 `nested-meaning-v1` selects request v10/response v9 and supplies the current nested
 expressions directly to the same meaning compiler. The captured request contract
 selects generation and receive; body shape cannot select a decoder or reuse a
-different presentation's cache identity. Protocol derives both wire schemas from
+different presentation's cache identity. Opt-in `nested-referent-constraints-v1`
+selects request v11/response v10 with the same nested grammar. Its producer labels
+`query_referent_constraint` and `no_referent_constraint` map exactly to canonical
+`named` and `free`; local `reference` uses are unchanged. The adapter preserves
+explicit choices, including wrong ones, without inferring identity from excerpts
+or keys. Its vocabulary copy uses the shared depth, byte and resource bounds;
+mixed old/new labels are rejected. This does not change the default presentation
+or establish producer fidelity. Protocol derives the wire schemas from
 one expression authority. Flat receive checks references, cycles, reachability
 and expansion bounds; nested receive checks depth before recursive serialization
 and parsing, retaining the shared byte and resource limits. Earlier recursive

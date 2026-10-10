@@ -1,8 +1,9 @@
-import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrier,
+import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrier, encodeSourceSemanticQueryReferentConstraints,
   type SourceSemanticQueryMeaningBody } from "@do-soul/alaya-protocol";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT = "source-semantic-query-response-v8" as const;
 export const SOURCE_SEMANTIC_QUERY_NESTED_RESPONSE_CONTRACT = "source-semantic-query-response-v9" as const;
+export const SOURCE_SEMANTIC_QUERY_REFERENT_RESPONSE_CONTRACT = "source-semantic-query-response-v10" as const;
 
 const propertyAndTaskExamples = [
   {
@@ -510,3 +511,10 @@ export const sourceSemanticQueryNestedExamples = nestedSourceSemanticQueryExampl
     query: { contract, entities, ...meaning }
   } };
 });
+
+export const sourceSemanticQueryReferentExamples = sourceSemanticQueryNestedExamples.map(example => ({
+  ...example, response: {
+    ...example.response, contract: SOURCE_SEMANTIC_QUERY_REFERENT_RESPONSE_CONTRACT,
+    query: encodeSourceSemanticQueryReferentConstraints(example.response.query)
+  }
+}));

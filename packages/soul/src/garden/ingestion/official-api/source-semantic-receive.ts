@@ -9,7 +9,7 @@ import {
   SourceSemanticGapSchema,
   SourceSemanticQueryGapSchema, SourceSemanticQueryOutcomeGapBindingSchema,
   SourceSemanticQuerySchema, SourceSemanticCorrespondenceAssessmentSchema, materializeSourceSemanticQueryMeaning,
-  expandSourceSemanticQueryCarrier,
+  expandSourceSemanticQueryCarrier, decodeSourceSemanticQueryReferentConstraints,
   materializeSourceSemanticCorrespondenceAssessment, sourceSemanticCorrespondenceCoverage,
   type SourceSemanticCorrespondenceCoverage,
   SourceSemanticOutcomeGapBindingSchema, sourceSemanticValidationDiagnostics,
@@ -434,10 +434,10 @@ function materializeQuery(
     approved_fixed_context: request.approved_fixed_context ?? null,
     attribution_context: request.attribution_context
   };
-  return materializeSourceSemanticQueryMeaning(
-    sourceSemanticQueryPresentation(request) === "nested-meaning-v1"
-      ? record : expandSourceSemanticQueryCarrier(record, request.resource_limits, meter), envelope, meter
-  );
+  const presentation = sourceSemanticQueryPresentation(request);
+  const meaning = presentation === "flat-carrier-v1" ? expandSourceSemanticQueryCarrier(record, request.resource_limits, meter)
+    : presentation === "nested-referent-constraints-v1" ? decodeSourceSemanticQueryReferentConstraints(record, meter) : record;
+  return materializeSourceSemanticQueryMeaning(meaning, envelope, meter);
 }
 
 function materializeCorrespondence(body: unknown, request: SourceSemanticCorrespondenceRequest,
