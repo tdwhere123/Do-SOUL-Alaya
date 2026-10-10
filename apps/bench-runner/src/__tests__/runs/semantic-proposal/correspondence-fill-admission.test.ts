@@ -20,9 +20,10 @@ import {
   UNKNOWN_UTTERANCE_ATTRIBUTION, sourceSemanticCorrespondenceGenerationPolicies
 } from "@do-soul/alaya-protocol";
 import {
-  buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics, type SourceSemanticCorrespondenceRequest,
+  buildSourceSemanticCorrespondenceRequest, type SourceSemanticCorrespondenceRequest,
   SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT, sourceSemanticCorrespondenceResponseJsonSchema
 } from "@do-soul/alaya-soul";
+import * as semanticProposals from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, semanticProposalLookup } from "../../../runs/semantic-proposal/attempt.js";
 import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
@@ -343,6 +344,12 @@ it.each([
       expect(readProviderRawAttempt(cacheRoot, line.key, 1)).toMatchObject({
         usage_known: true, usage: { inputTokens: 21, outputTokens: 8, totalTokens: 30 } });
       expect(readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(prepared, line, 4096)).status).toBe("accounting_invalid");
+      const observer = vi.spyOn(semanticProposals, "proposeCorrespondenceSemantics");
+      const cached = readSemanticProposalResults(prepared, cacheRoot, 4096)[0]!;
+      expect(cached.status).toBe("accounting_invalid");
+      expect(cached).not.toHaveProperty("received");
+      expect(observer).not.toHaveBeenCalled();
+      observer.mockRestore();
       const ledger = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "semantic_correspondence" });
       expect(ledger.snapshot()).toMatchObject({ unresolvedAttempts: [], pendingKeys: [], successfulShards: 0,
         telemetry: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageInvalidAttempts: 1, usageUnknownAttempts: 1 } });
@@ -510,7 +517,7 @@ async function fillCorrespondence(inventedSupport = false) {
   const line = materializeSemanticProposalLines(prepared, 128)[0]!;
   const request = line.request as SourceSemanticCorrespondenceRequest;
   const body = assessmentBody(request, inventedSupport);
-  const received = proposeCorrespondenceSemantics({ original_query: request.original_query,
+  const received = semanticProposals.proposeCorrespondenceSemantics({ original_query: request.original_query,
     admitted_query_semantics: request.admitted_query_semantics,
     source_interpretation_descriptors: request.source_interpretation_descriptors,
     producer_id: request.producer_capability.producer_id,
@@ -589,7 +596,7 @@ it("binds correspondence generation schema per request and completes omitted eli
   expect(line.key).not.toBe(proposalCacheKey(MODEL, PROFILE, SOURCE_SEMANTIC_CORRESPONDENCE_SYSTEM_PROMPT,
     line.userPrompt, sourceSemanticCorrespondenceResponseJsonSchema(), 128, "http://127.0.0.1:9"));
   const body = generationBody(request);
-  const received = proposeCorrespondenceSemantics({
+  const received = semanticProposals.proposeCorrespondenceSemantics({
     original_query: request.original_query, admitted_query_semantics: request.admitted_query_semantics,
     source_interpretation_descriptors: request.source_interpretation_descriptors,
     producer_id: request.producer_capability.producer_id, producer_version: request.producer_capability.producer_version
@@ -624,6 +631,19 @@ it("admits an semantic_correspondence shard only after Core admission", async ()
   expect(result.interpreted).toBe(1);
   expect(shard?.admitted).toBe(true);
   expect(hasAdmittedProposalOutcome(shard!)).toBe(true);
+  const observer = vi.spyOn(semanticProposals, "proposeCorrespondenceSemantics");
+  const cached = readSemanticProposalResults(prepared, cacheRoot, 128)[0]!;
+  expect(observer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ original_query: ORIGINAL }),
+    { rawJson: shard!.raw_json });
+  expect(cached.status).toBe("interpreted");
+  expect(cached.received).toBe(observer.mock.results[0]!.value);
+  expect(cached.received).toEqual(received);
+  observer.mockClear();
+  const next = readSemanticProposalResults(prepared, cacheRoot, 128)[0]!;
+  expect(observer).toHaveBeenCalledTimes(1);
+  expect(next).toEqual(cached);
+  expect(next.received).not.toBe(cached.received);
+  observer.mockRestore();
   const second = extractor(["should-not-run"]);
   const replayed = await executeSemanticProposalFill({
     workset: prepared, cacheRoot, authority, config: config(), extractor: second
@@ -721,7 +741,12 @@ it("retains a Core-invalid interpreted semantic_correspondence as non-executable
   expect(shard?.admitted).toBe(false);
   expect(shard?.outcome).toMatchObject({ status: "interpreted" });
   expect(shard?.finish_reason).toBe("STOP");
-  expect(readSemanticProposalResults(prepared, cacheRoot, 128)[0]?.status).toBe("core_rejected");
+  const observer = vi.spyOn(semanticProposals, "proposeCorrespondenceSemantics");
+  const cached = readSemanticProposalResults(prepared, cacheRoot, 128)[0]!;
+  expect(cached.status).toBe("core_rejected");
+  expect(cached).not.toHaveProperty("received");
+  expect(observer).toHaveBeenCalledTimes(1);
+  observer.mockRestore();
   expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
   const second = extractor(["should-not-run"]);

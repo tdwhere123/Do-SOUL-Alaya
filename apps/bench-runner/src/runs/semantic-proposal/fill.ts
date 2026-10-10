@@ -104,7 +104,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
     );
     const existing = state.shard;
     if (existing !== undefined) {
-      const prior = replayCachedProposalShard(line, existing);
+      const prior = replayCachedProposalShard(line, existing).classified;
       if (isChatSemanticRequestProfile(input.workset.request_profile) &&
           prior !== "interpreted" && prior !== "abstained" && state.status !== "pending") {
         throw new AlayaError("CONFLICT", `native chat proposal fill stopped after retained ${prior} for ${line.key}`);
@@ -210,7 +210,7 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
     const shard = state.shard;
     if (state.status !== "settled") return { line, shard, status: state.status };
     if (shard === undefined) return { line, status: "unattempted" as const };
-    replayCachedProposalShard(line, shard);
+    const replay = replayCachedProposalShard(line, shard);
     if (!hasAdmittedProposalOutcome(shard)) {
       const outcome = proposalOutcomeStatus(shard);
       // Witnessed non-complete finish is incomplete only when the reserved raw is a
@@ -234,9 +234,10 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
         : hasVerifiedProposalCompletion(shard) ? "core_rejected" : "incomplete";
       return { line, shard, status };
     }
-    const received = receiveLine(line, shard.raw_json);
-    if (!isCoreAdmittedProposal(line, received)) throw new SemanticProposalIdentityError("cached proposal no longer admits");
-    return { line, shard, received, status: "interpreted" as const };
+    if (replay.state !== "parsed" || !isCoreAdmittedProposal(line, replay.received)) {
+      throw new SemanticProposalIdentityError("cached proposal no longer admits");
+    }
+    return { line, shard, received: replay.received, status: "interpreted" as const };
   });
 }
 
@@ -359,31 +360,35 @@ function interpretProposalDecoded(
   };
 }
 
+type CachedProposalReplay =
+  | Readonly<{ state: "unparsed"; classified: "terminal" | "incomplete" | "empty" }>
+  | Readonly<{ state: "parsed"; classified: ProposalAttemptClass; received: ReturnType<typeof receiveLine> }>;
+
 function replayCachedProposalShard(
   line: SemanticProposalLine, shard: SemanticProposalShard
-): ProposalAttemptClass | "empty" {
+): CachedProposalReplay {
   // Raw/reservation inspection has already verified this accounting rejection;
   // semantic parsing must not reinterpret it into admitted output or abstention.
   if (typeof shard.outcome === "object" && shard.outcome !== null && "reason" in shard.outcome &&
       "status" in shard.outcome && shard.outcome.status === "invalid" &&
-      shard.outcome.reason === "invalid_usage") return "terminal";
+      shard.outcome.reason === "invalid_usage") return { state: "unparsed", classified: "terminal" };
   if (typeof shard.outcome === "object" && shard.outcome !== null && "reason" in shard.outcome &&
       ["missing_response_body", "truncated_response_body", "unsupported_response_body"]
-        .includes(String(shard.outcome.reason))) return "incomplete";
+        .includes(String(shard.outcome.reason))) return { state: "unparsed", classified: "incomplete" };
   if (typeof shard.finish_reason === "string" && shard.finish_reason.length > 0 &&
       !isCompleteSemanticFinish(shard.request_profile, shard.finish_reason)) {
     if (shard.admitted) {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);
     }
-    return "incomplete";
+    return { state: "unparsed", classified: "incomplete" };
   }
   if (shard.raw_json.length === 0) {
     if (shard.admitted || proposalOutcomeStatus(shard) === "interpreted") {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);
     }
-    return "empty";
+    return { state: "unparsed", classified: "empty" };
   }
-  const receivedOutcome = receiveLine(line, shard.raw_json).outcome;
+  const received = receiveLine(line, shard.raw_json), receivedOutcome = received.outcome;
   const recordedStatus = proposalOutcomeStatus(shard);
   if ((recordedStatus === "resource_exhausted" || receivedOutcome.status === "resource_exhausted") &&
       recordedStatus !== receivedOutcome.status) {
@@ -396,18 +401,18 @@ function replayCachedProposalShard(
     if (shard.admitted) {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);
     }
-    return classified;
+    return { state: "parsed", classified, received };
   }
   if (shard.admitted || proposalOutcomeStatus(shard) === "interpreted") {
     if (classified !== "interpreted") {
       throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);
     }
-    return classified;
+    return { state: "parsed", classified, received };
   }
   if (proposalOutcomeStatus(shard) === "abstained" && classified !== "abstained") {
     throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${shard.cache_key}`);
   }
-  return classified;
+  return { state: "parsed", classified, received };
 }
 
 function receiveLine(line: SemanticProposalLine, rawJson: string) {

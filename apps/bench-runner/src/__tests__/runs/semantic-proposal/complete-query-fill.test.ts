@@ -4,10 +4,10 @@ import type { AddressInfo } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { encodeSourceSemanticQueryCarrier } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticQuery, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
-import { proposeQuerySemantics } from "@do-soul/alaya-soul";
+import * as semanticProposals from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import {
   inspectSemanticProposalShard, hasAdmittedProposalOutcome, semanticProposalShardPath
@@ -32,6 +32,7 @@ const roots: string[] = [];
 proposalRecoveryCases({ workset: () => queryWorkset(MIRA_QUERY), body: () => meaningBody("sample"), config });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -143,6 +144,36 @@ it("commits a complete STOP query after settling the reserved attempt", async ()
   expect(replayed.cache_hits).toBe(1);
   expect(replayed.newly_admitted).toBe(0);
   expect(replayed.interpreted).toBe(1);
+});
+
+it("receives each cached query presentation once per read and retains no receive across invocations", async () => {
+  const cacheRoot = join(tempRoot(), "cache");
+  const workset = parseSemanticProposalWorkset({ ...queryWorkset(MIRA_QUERY), items: [
+    { original_query: MIRA_QUERY }, { original_query: MIRA_QUERY, generation_presentation: "nested-meaning-v1" }
+  ] });
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 128),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const raws = [meaningBody("sample"), nestedMeaningBody()], provider = extractor(raws);
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: provider });
+  const observer = vi.spyOn(semanticProposals, "proposeQuerySemantics");
+  const first = readSemanticProposalResults(workset, cacheRoot, 128);
+  expect(observer).toHaveBeenCalledTimes(2);
+  expect(observer.mock.calls.map(([, injected]) => injected?.rawJson)).toEqual(raws);
+  for (const [index, cached] of first.entries()) {
+    expect(cached.status).toBe("interpreted");
+    expect(cached.received).toBe(observer.mock.results[index]!.value);
+    expect(cached.shard?.raw_json).toBe(raws[index]);
+    expect(admitSourceSemanticQuery(cached.received !== undefined && "query" in cached.received
+      ? cached.received.query : undefined, MIRA_QUERY).kind).toBe("admitted");
+  }
+  expect(observer.mock.calls.map(([selected]) => selected.generation_presentation))
+    .toEqual(["flat-carrier-v1", "nested-meaning-v1"]);
+  observer.mockClear();
+  const second = readSemanticProposalResults(workset, cacheRoot, 128);
+  expect(observer).toHaveBeenCalledTimes(2);
+  expect(second).toEqual(first);
+  for (const [index, cached] of second.entries()) expect(cached.received).not.toBe(first[index]!.received);
+  expect(provider.calls).toHaveLength(2);
 });
 
 it("admits one Q child only with its complete retained physical parent in a separate stage root", async () => {
@@ -292,7 +323,7 @@ it.each([
 
 it("does not treat a Core-invalid receive as an executable cache hit", async () => {
   const invalidBody = meaningBody("parcel");
-  const received = proposeQuerySemantics({
+  const received = semanticProposals.proposeQuerySemantics({
     original_query: MIRA_QUERY,
     producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
     producer_version: "1"
@@ -358,7 +389,12 @@ it("persists native query resource exhaustion and refuses a conflicting cached o
   expect(shard?.outcome).toEqual({ status: "resource_exhausted" });
   expect(shard?.admitted).toBe(false);
   expect(readProviderRawAttempt(cacheRoot, key, 1)?.decoded_text).toBe(rawJson);
-  expect(readSemanticProposalResults(workset, cacheRoot, 128)[0]?.status).toBe("resource_exhausted");
+  const observer = vi.spyOn(semanticProposals, "proposeQuerySemantics");
+  const cached = readSemanticProposalResults(workset, cacheRoot, 128)[0]!;
+  expect(cached.status).toBe("resource_exhausted");
+  expect(cached).not.toHaveProperty("received");
+  expect(observer).toHaveBeenCalledTimes(1);
+  observer.mockRestore();
   const second = extractor(["must not run"]);
   await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: second });
   expect(second.calls).toEqual([]);
@@ -398,6 +434,12 @@ it("replays interpreted JSON with a missing finish as cached incomplete", async 
   expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(raw?.finish_reason).toBeNull();
   expect(raw?.completion_witness).toBeNull();
+  const observer = vi.spyOn(semanticProposals, "proposeQuerySemantics");
+  const cached = readSemanticProposalResults(prepared, cacheRoot, 128)[0]!;
+  expect(cached.status).toBe("incomplete");
+  expect(cached).not.toHaveProperty("received");
+  expect(observer).toHaveBeenCalledTimes(1);
+  observer.mockRestore();
   expect(ledger.snapshot().unresolvedAttempts).toEqual([]);
   expect(ledger.snapshot().successfulKeys).toEqual([]);
   expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
@@ -426,6 +468,12 @@ it("replays interpreted JSON with MAX_TOKENS as cached incomplete", async () => 
   expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(raw?.finish_reason).toBe("MAX_TOKENS");
   expect(raw?.completion_witness).toBe("finish_reason");
+  const observer = vi.spyOn(semanticProposals, "proposeQuerySemantics");
+  const cached = readSemanticProposalResults(prepared, cacheRoot, 128)[0]!;
+  expect(cached.status).toBe("incomplete");
+  expect(cached).not.toHaveProperty("received");
+  expect(observer).not.toHaveBeenCalled();
+  observer.mockRestore();
   expect(() => prepareSemanticProposal(prepared, cacheRoot, 128)).not.toThrow();
   const second = extractor(["should-not-run"]);
   const replayed = await executeSemanticProposalFill({
