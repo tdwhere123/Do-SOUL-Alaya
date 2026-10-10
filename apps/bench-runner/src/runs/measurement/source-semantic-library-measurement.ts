@@ -107,6 +107,9 @@ export interface SourceSemanticLibraryMeasurementInput {
   readonly sourceRecords?: readonly SourceRecordIdentity[];
 }
 
+type LibraryAdmissionInput = Pick<SourceSemanticLibraryMeasurementInput,
+  "recallResult" | "firstExposurePage" | "requestBudget">;
+
 interface LibraryRecall {
   readonly delivery_id: string;
   readonly index: InformationIndex;
@@ -127,6 +130,12 @@ export function measureSourceSemanticLibraryResponse(
   input: SourceSemanticLibraryMeasurementInput
 ): SourceSemanticLibraryEvaluation {
   return measureLibraryDelivery(input, isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null);
+}
+
+/** Whole delivered-page admission only. Callers own fresh proof verification and its cumulative allowance. */
+export function admitSourceSemanticLibraryResponse(input: LibraryAdmissionInput) {
+  return admitLibraryMeasurement(input, isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null,
+    SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
 }
 
 function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
@@ -233,7 +242,7 @@ function unavailableEvaluation(measurement: SourceSemanticLibraryMeasurement | n
 }
 
 function admitLibraryMeasurement(
-  input: SourceSemanticLibraryMeasurementInput, recalled: LibraryRecall | "invalid" | null, pageBudget: number
+  input: LibraryAdmissionInput, recalled: LibraryRecall | "invalid" | null, pageBudget: number
 ): {
   readonly status: "admitted";
   readonly budget: RequestBudget;

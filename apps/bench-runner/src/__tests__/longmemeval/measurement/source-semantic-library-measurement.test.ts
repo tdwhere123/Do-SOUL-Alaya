@@ -15,7 +15,8 @@ import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeP
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import {
-  measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement, readmitHistoricalSourceOnlyLibraryMeasurement
+  admitSourceSemanticLibraryResponse, measureSourceSemanticLibraryResponse,
+  readmitSourceSemanticLibraryMeasurement, readmitHistoricalSourceOnlyLibraryMeasurement
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import {
   scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure
@@ -32,6 +33,19 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("source semantic library measurement", () => {
+  it("admits a new reader exposure without spending a proof verification allowance", () => {
+    const { response } = nativeProofResponseFixture();
+    const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
+    const input = { recallResult: response, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST };
+    expect(admitSourceSemanticLibraryResponse(input)).toMatchObject({ status: "admitted", index: response.index,
+      proofs: response.proofs, exposure: input.firstExposurePage });
+    expect(admitSourceSemanticLibraryResponse({ ...input, requestBudget: { ...REQUEST, work_units: 1 } }))
+      .toMatchObject({ status: "invalid", reason: "request_budget_mismatch" });
+    expect(admitSourceSemanticLibraryResponse({ ...input, firstExposurePage: { ...input.firstExposurePage,
+      commitment: "0".repeat(64) } })).toMatchObject({ status: "invalid", reason: "missing_first_exposure" });
+    expect(verify).not.toHaveBeenCalled();
+  });
+
   it.each(["source", "interpretation", "computation"] as const)("keeps an unvisited or unfinished %s negative unavailable in worker and public measurement", kind => {
     const result = workerRecall(assemble([sourceOnly("other")], []));
     const discovery = { ...result.discovery, ...(kind === "computation" ? { open_residuals: true } : { access: {
@@ -293,6 +307,8 @@ describe("source semantic library measurement", () => {
         return;
       }
       const firstExposurePage = recordSourceSemanticLibraryFirstExposure(response);
+      expect(admitSourceSemanticLibraryResponse({ recallResult: response, firstExposurePage, requestBudget: REQUEST }))
+        .toMatchObject({ status: "invalid" });
       expect(measureSourceSemanticLibraryResponse({ recallResult: response, firstExposurePage, requestBudget: REQUEST, goldSourceUnits: [GOLD] }))
         .toMatchObject({ measurement: { status: "invalid" }, sourceBearingUnion: null,
           evaluator_usage: { proof_slots_checked: 0, work_units: 0, logical_memory_bytes: 0 } });
