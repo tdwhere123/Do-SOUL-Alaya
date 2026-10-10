@@ -180,9 +180,36 @@ function improveCoverage(selected: SourceSemanticLibraryPackage[], input: Select
       selected.splice(0, selected.length, ...delivered); changed = true; break exchange;
     }
     if (!changed && proofsByRoot !== undefined) {
-      changed = exchangeTwoRoots(selected, candidates, input, supports, score, before, rootKey, proofsByRoot);
+      changed = selected.length === 1
+        ? exchangeSingleton(selected, candidates, input, supports, score, before, rootKey, proofsByRoot)
+        : exchangeTwoRoots(selected, candidates, input, supports, score, before, rootKey, proofsByRoot);
     }
   }
+}
+
+function exchangeSingleton(selected: SourceSemanticLibraryPackage[], candidates: readonly SourceSemanticLibraryPackage[],
+  input: SelectionInput, supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>,
+  score: PageScore, before: readonly number[], rootKey: (row: SourceSemanticLibraryPackage) => string,
+  proofsByRoot: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>): boolean {
+  const retained = rootKey(selected[0]!);
+  for (let first = 0; first < candidates.length; first++) for (let second = first + 1; second < candidates.length; second++) {
+    input.meter.charge(1, 0, "evidence singleton pair enumeration");
+    const left = candidates[first]!, right = candidates[second]!;
+    const leftRoot = rootKey(left), rightRoot = rootKey(right);
+    if (leftRoot === rightRoot || leftRoot === retained || rightRoot === retained) continue;
+    input.meter.charge(2, 32, "evidence singleton page copy");
+    const page = [left, right];
+    if (compareScores(score(page), before) >= 0) continue;
+    if (rawProofReserved(left, 0, input, supports, proofsByRoot.get(leftRoot))
+      || rawProofReserved(right, 1, input, supports, proofsByRoot.get(rightRoot))) continue;
+    input.meter.charge(2, 32, "evidence singleton selection reasons");
+    const delivered = selectionReasons(page, supports);
+    if (!input.fits(delivered)) continue;
+    input.meter.charge(2, 16, "evidence singleton accepted membership");
+    selected.splice(0, selected.length, ...delivered);
+    return true;
+  }
+  return false;
 }
 
 function exchangeTwoRoots(selected: SourceSemanticLibraryPackage[], candidates: readonly SourceSemanticLibraryPackage[],

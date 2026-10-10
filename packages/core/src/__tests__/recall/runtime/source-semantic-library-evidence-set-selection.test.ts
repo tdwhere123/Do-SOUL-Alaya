@@ -13,6 +13,8 @@ const budget = () => new SourceSemanticResourceLedger(selectionExecutionBudget);
 const coverage = coverageSelectionFixture(selectionExecutionBudget);
 const alternatives = alternativeSelectionFixture(selectionExecutionBudget);
 const twoRoots = (rows: readonly SourceSemanticLibraryPackage[]) => rows.length <= 2;
+const rootUnits = new Map(alternatives.sources.map(source => [root(source.package), source.inputs.length]));
+const singletonCapacity = (rows: readonly SourceSemanticLibraryPackage[]) => rows.reduce((sum, row) => sum + rootUnits.get(root(row))!, 0) <= 2;
 const select = selectSourceSemanticLibraryPageWithEvidenceSetCoverage;
 
 it("escapes a strict one-root local maximum using the same finite source-sentence reference", () => {
@@ -32,15 +34,19 @@ it("escapes a strict one-root local maximum using the same finite source-sentenc
   expect(memberships[2]).toEqual(memberships[0]);
 });
 
-it("selects a potentially sufficient alternative without turning separate local proofs into a joint answer", () => {
+it.each([{ capacity: "two roots", fits: twoRoots, baselineInputs: [3, 4, 5, 6] },
+  { capacity: "a stalled singleton", fits: singletonCapacity, baselineInputs: [3, 4] }])(
+  "selects a potentially sufficient alternative from $capacity without turning local proofs into a joint answer", ({ fits, baselineInputs }) => {
   const pool = alternatives.pool.slice(0, 4);
-  const optimum = Math.max(...feasibleSubsets(pool, twoRoots).map(rows => compatibleTaskSupport(alternatives, rows).complete_alternatives));
-  const baseline = selectSourceSemanticLibraryPage({ candidates: pool, meter: budget(), fits: twoRoots });
-  expect(deliveredInputNumbers(alternatives, baseline)).toEqual([3, 4, 5, 6]);
+  const optimum = Math.max(...feasibleSubsets(pool, fits).map(rows => compatibleTaskSupport(alternatives, rows).complete_alternatives));
+  const baseline = selectSourceSemanticLibraryPage({ candidates: pool, meter: budget(), fits });
+  expect(deliveredInputNumbers(alternatives, baseline)).toEqual(baselineInputs);
   expect(compatibleTaskSupport(alternatives, baseline).complete_alternatives).toBe(0);
-  for (const candidates of [pool, [...pool].reverse(), [...pool.slice(1), pool[0]!]]) {
-    const selected = select({ candidates, meter: budget(), fits: twoRoots });
+  for (const candidates of [pool, [...pool].reverse(), [...pool.slice(1), pool[0]!], [...pool, pool[0]!, rawSourceTwin(pool[0]!)]]) {
+    const selected = select({ candidates, meter: budget(), fits });
     expect(deliveredInputNumbers(alternatives, selected)).toEqual([1, 2]);
+    expect(new Set(selected.map(root)).size).toBe(2);
+    expect(fits(selected)).toBe(true);
     expect(compatibleTaskSupport(alternatives, selected).complete_alternatives).toBe(optimum);
     expect(optimum).toBe(1);
     const unknown = new Map(selected.map(row => [root(row), null]));
@@ -53,6 +59,18 @@ it("selects a potentially sufficient alternative without turning separate local 
         .toMatchObject({ answer: "unrepresented", operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
     }
   }
+});
+
+it("keeps the reserved singleton when every improving pair fails the complete page fit", () => {
+  const pool = alternatives.pool.slice(0, 4), fits = vi.fn((rows: readonly SourceSemanticLibraryPackage[]) => rows.length <= 1);
+  const selected = select({ candidates: pool, meter: budget(), fits });
+  expect(deliveredInputNumbers(alternatives, selected)).toEqual([3, 4]);
+  expect(selected).toHaveLength(1);
+  const replacementPairs = fits.mock.calls.map(([rows]) => rows)
+    .filter(rows => rows.length === 2 && rows.every(row => root(row) !== root(selected[0]!)));
+  expect(replacementPairs).toHaveLength(3);
+  expect(replacementPairs.every(rows => new Set(rows.map(root)).size === 2)).toBe(true);
+  expect(new Set(replacementPairs.map(rows => rows.map(root).sort().join("|"))).size).toBe(3);
 });
 
 it("does not count an unrepresented evidence-input alternative as a completed evidence set", () => {
@@ -152,12 +170,16 @@ it("preserves source-access page order and ledger use through the existing selec
   expect(experimentalBudget.spentBytes).toBe(originalBudget.spentBytes);
 });
 
-it.each(["work", "bytes"] as const)("retains the accepted page when a later pair fit exhausts %s", resource => {
+it.each([
+  { capacity: "two roots", fixture: coverage, fits: twoRoots, targetInputs: 12, retainedInputs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12] },
+  { capacity: "a singleton", fixture: alternatives, fits: singletonCapacity, targetInputs: 2, retainedInputs: [3, 4] }
+].flatMap(row => (["work", "bytes"] as const).map(resource => ({ ...row, resource }))))(
+  "retains $capacity when a later pair fit exhausts $resource", ({ fixture, fits, targetInputs, retainedInputs, resource }) => {
   const meter = budget();
   let exhausted = false;
-  const selected = select({ candidates: coverage.pool, meter, fits: rows => {
-    if (!twoRoots(rows)) return false;
-    if (deliveredInputNumbers(coverage, rows).length === 12) {
+  const selected = select({ candidates: fixture.pool.slice(0, 4), meter, fits: rows => {
+    if (!fits(rows)) return false;
+    if (rows.length === 2 && deliveredInputNumbers(fixture, rows).length === targetInputs) {
       exhausted = true;
       meter.charge(resource === "work" ? meter.work + 1 : 0, resource === "bytes" ? meter.bytes + 1 : 0,
         "actual candidate page encoding");
@@ -165,7 +187,6 @@ it.each(["work", "bytes"] as const)("retains the accepted page when a later pair
     return true;
   } });
   expect(exhausted).toBe(true);
-  expect(selected).toHaveLength(2);
-  expect(deliveredInputNumbers(coverage, selected)).toHaveLength(11);
-  expect(new Set(selected.map(root)).size).toBe(2);
+  expect(deliveredInputNumbers(fixture, selected)).toEqual(retainedInputs);
+  expect(new Set(selected.map(root)).size).toBe(selected.length);
 });
