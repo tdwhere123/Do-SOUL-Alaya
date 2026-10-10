@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { SourceSemanticPublishedInterpretationSchema, sourceReferenceResolver, sourceSemanticCorrespondenceIdentity,
   sourceSemanticQueryIdentity, type SourceReferenceCatalog, type SourceSemanticDraft, type SourceSemanticInterpretation,
   type SourceSemanticCorrespondence, type SourceSemanticReasoningResult, type SourceSemanticAccessReceipt,
-  type SoulInterpretationResponse } from "@do-soul/alaya-protocol";
+  type SoulInterpretationResponse, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { accessQuery, type AccessFixtureSource } from
   "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-access.test-support.js";
@@ -52,7 +52,7 @@ export type Delivery = Extract<SoulInterpretationResponse, { operation: "recall"
 export type Descriptor = Preparation["candidates"][number];
 export type ManifestSource = { source_id: string; record_id: string; source_version: string; content_digest: string; source_body: string;
   recorded_at: string; event_time: string | null; scope_class: string };
-export type Action = { frame: "dispatch" | "examine"; alternative: 0; obligation: "context"; access_hint: string;
+export type Action = { frame: string; alternative: 0; obligation: "context"; access_hint: string;
   support: { source_id: string; source_version: string; content_digest: string; quote: string; utf8_span: [number, number] } };
 
 function budget(work_units: number, memory_bytes: number) {
@@ -198,14 +198,14 @@ export type Decision = { status: "covered_reported_pair" | "reported_but_ineligi
   | "feedback_truncated" | "no_unique_action"; reason: string; selected: Action | null };
 /** Only an exact eligible pair in actual public attention may control an action. */
 export function selectAction(result: SourceSemanticReasoningResult | undefined, descriptor: Descriptor,
-  c: SourceSemanticCorrespondence, candidates: readonly Action[]): Decision {
+  c: SourceSemanticCorrespondence, candidates: readonly Action[], query: SourceSemanticQuery = QUERY): Decision {
   const stop = (status: Decision["status"], reason: string): Decision => ({ status, reason, selected: null });
   const attention = result?.attention;
   if (attention === undefined) return stop("feedback_omitted", "public reason did not report attention");
   if (attention.kind !== "computed") return stop("reported_but_ineligible", "preparation is not computed feedback");
   if (attention.truncated) return stop("feedback_truncated", "bounded feedback omitted entries");
   const expected = { conditional_computation_id: result!.conditional_computation_id,
-    source_interpretation_id: descriptor.interpretation_id, query_semantics_id: sourceSemanticQueryIdentity(QUERY, fieldContractSha256),
+    source_interpretation_id: descriptor.interpretation_id, query_semantics_id: sourceSemanticQueryIdentity(query, fieldContractSha256),
     semantic_correspondence_id: sourceSemanticCorrespondenceIdentity(c, fieldContractSha256),
     source_id: descriptor.source_id, source_version: descriptor.source_version, content_digest: descriptor.content_digest };
   if (Object.entries(expected).some(([key, value]) => value === undefined || attention[key as keyof typeof attention] !== value)
