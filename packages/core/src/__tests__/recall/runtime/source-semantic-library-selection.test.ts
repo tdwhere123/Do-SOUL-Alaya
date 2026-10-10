@@ -1,9 +1,12 @@
 import { expect, it } from "vitest";
-import { SourceSemanticResourceLedger, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
 import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
+import { alternativeSelectionFixture, compatibleTaskSupport, coverageSelectionFixture, deliveredInputNumbers,
+  deploymentStatement, executedInputNumbers, feasibleSubsets, physicalRoot as root, rawSourceTwin, selectionExecutionBudget
+} from "./source-semantic-selection-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
 const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = {
@@ -48,20 +51,10 @@ function demandWitnesses() {
   };
 }
 
-function root(row: SourceSemanticLibraryPackage): string {
-  if (row.entry.target.kind !== "source_evidence") throw new Error("source root expected");
-  return sourceGoldRootIdentity(row.entry.target);
-}
-
 it("matches a tiny exhaustive eligibility oracle after demand saturation without claiming distinct people", () => {
   const pool = [raw("unrelated"), ...qualified, qualified[0]!];
   // Independent subset oracle: root uniqueness, five slots, one demand, qualified exposure.
-  let best = 0;
-  for (let mask = 0; mask < 1 << pool.length; mask++) {
-    const subset = pool.filter((_, index) => mask & 1 << index);
-    if (subset.length > 5 || new Set(subset.map(row => JSON.stringify(row.entry.target))).size !== subset.length) continue;
-    best = Math.max(best, subset.filter(row => row !== pool[0]).length);
-  }
+  const best = Math.max(...feasibleSubsets(pool, () => true).map(subset => subset.filter(row => row !== pool[0]).length));
   for (const candidates of [pool, [...pool].reverse(), [...pool.slice(3), ...pool.slice(0, 3)]]) {
     const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 5 });
     expect(selected.filter(row => row.proofs.length > 0)).toHaveLength(best);
@@ -130,11 +123,7 @@ it("repairs the greedy overlapping-demand choice by one root exchange against ex
   const pool = [make("overlap", [0, 1, 2, 3]), make("left", [0, 1, 4]), make("right", [2, 3, 5])];
   const coverage = (rows: readonly SourceSemanticLibraryPackage[]) => new Set(rows.flatMap(row => row.proofs.flatMap(proof =>
     proof.binding_results?.flatMap(binding => binding.kind === "evidence" ? [binding.input] : []) ?? []))).size;
-  let optimum = 0;
-  for (let mask = 0; mask < 1 << pool.length; mask++) {
-    const rows = pool.filter((_, index) => mask & 1 << index);
-    if (rows.length <= 2) optimum = Math.max(optimum, coverage(rows));
-  }
+  const optimum = Math.max(...feasibleSubsets(pool, () => true, 2).map(coverage));
   expect(coverage([pool[0]!, pool[1]!])).toBe(5);
   const selected = selectSourceSemanticLibraryPage({ candidates: pool, meter: budget(), fits: rows => rows.length <= 2 });
   expect(coverage(selected)).toBe(optimum);
@@ -234,4 +223,140 @@ it("keeps reserved slots when later selection work exhausts", () => {
   } });
   expect(selected.map(row => row.entry.target)).toEqual([pool[0]!.entry.target]);
   expect(meter.spentWork).toBe(13);
+});
+
+const coverageTask = coverageSelectionFixture(selectionExecutionBudget);
+const alternativeTask = alternativeSelectionFixture(selectionExecutionBudget);
+
+it("retains a nonempty open input prefix when source-local execution exhausts its original work allowance", () => {
+  const original = coverageSelectionFixture(), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
+  const proof = partial.proofs[0]!;
+  expect(original.execution_budget).toMatchObject({ work_units: 200_000, memory_bytes: 20_000_000,
+    page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
+  expect(root(partial)).toBe(root(complete));
+  expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
+  expect(proof.query_semantics_id).toBe(complete.proofs[0]!.query_semantics_id);
+  expect(proof.semantic_correspondence_id).toBe(complete.proofs[0]!.semantic_correspondence_id);
+  expect(proof.outcome).toEqual({ status: "resource_exhausted" });
+  expect(proof.completeness).toMatchObject({ logical_index: "partial", observed_coverage: "open", order_coverage: "partial" });
+  const executed = executedInputNumbers(partial);
+  expect(executed.length).toBeGreaterThanOrEqual(4);
+  expect(executed.length).toBeLessThan(7);
+  expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7].slice(0, executed.length));
+  expect(deliveredInputNumbers(original, [partial])).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  expect(proof.resource_usage!.work_units).toBeLessThanOrEqual(original.execution_budget.work_units);
+  expect(proof.resource_usage!.memory_bytes).toBeLessThan(original.execution_budget.memory_bytes);
+  expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []).evidence_inputs.map(row => row.status))
+    .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
+});
+
+it("executes only the distinct source-bound deployment inputs without claiming task completion", () => {
+  const readiness = [coverageTask, alternativeTask].flatMap(fixture => fixture.sources.map(authored => ({
+    source_id: authored.id, declared_inputs: authored.inputs, executed_inputs: executedInputNumbers(authored.package),
+    budget: fixture.execution_budget, outcome: authored.package.proofs[0]!.outcome,
+    completeness: authored.package.proofs[0]!.completeness, resource_usage: authored.package.proofs[0]!.resource_usage,
+    budget_rejections: authored.budget_rejections
+  })));
+  expect(readiness, `Native fixture readiness: ${JSON.stringify(readiness, null, 2)}`).toMatchObject(
+    readiness.map(row => ({ source_id: row.source_id, executed_inputs: row.declared_inputs, outcome: { status: "interpreted" } }))
+  );
+  for (const fixture of [coverageTask, alternativeTask]) {
+    expect(new Set(fixture.sources.map(row => root(row.package))).size).toBe(fixture.sources.length);
+    for (const authored of fixture.sources) {
+      const proof = authored.package.proofs[0]!;
+      expect(authored.body).toBe(authored.inputs.map(deploymentStatement).join("\n"));
+      expect(proof.interpretation.source.content_digest).toBe(`sha256:${fieldContractSha256(authored.body)}`);
+      expect(proof.original_query).toBe(fixture.original);
+      expect(new Set(proof.interpretation.frames.map(frame => frame.predicate_support.reading)).size).toBe(authored.inputs.length);
+      for (const mention of proof.interpretation.mentions) {
+        expect(mention.span_space).toBe("source_utf8");
+        expect(Buffer.from(authored.body).subarray(...mention.utf8_span).toString("utf8")).toBe(mention.text);
+      }
+      expect(executedInputNumbers(authored.package)).toEqual(authored.inputs);
+      expect(deliveredInputNumbers(fixture, [authored.package])).toEqual(authored.inputs);
+      expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? [])).toMatchObject({
+        answer: "unrepresented", operation: "not_executed", compatibility: "unknown", distinctness: "unknown"
+      });
+      expect(proof.binding_results?.every(binding => binding.kind === "evidence")).toBe(true);
+    }
+  }
+});
+
+it("retains a strict one-exchange local maximum below the finite two-root coverage optimum", () => {
+  const { pool } = coverageTask;
+  const coverage = (rows: readonly SourceSemanticLibraryPackage[]) => deliveredInputNumbers(coverageTask, rows).length;
+  expect(pool.map(row => coverage([row]))).toEqual([7, 4, 6, 6]);
+  expect([pool[1]!, pool[2]!, pool[3]!].map(row => coverage([pool[0]!, row]) - 7)).toEqual([4, 3, 3]);
+  const subsets = feasibleSubsets(pool, () => true, 2), pairs = subsets.filter(rows => rows.length === 2);
+  expect(pairs.map(coverage)).toEqual([11, 10, 8, 10, 8, 12]);
+  const optimum = Math.max(...subsets.map(coverage));
+  expect(optimum).toBe(12);
+  expect(subsets.every(rows => compatibleTaskSupport(coverageTask, rows).complete_alternatives === 0)).toBe(true);
+  for (const candidates of [pool, [...pool].reverse(), [...pool.slice(1), pool[0]!]]) {
+    const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
+    expect(selected.map(root)).toEqual([root(pool[0]!), root(pool[1]!)]);
+    expect(selected.map(row => row.selection_basis)).toEqual(["new_input", "new_input"]);
+    expect(coverage(selected)).toBe(11);
+    expect(new Set(selected.flatMap(executedInputNumbers)).size).toBe(11);
+    for (const replacement of [pool[2]!, pool[3]!]) {
+      expect(coverage([selected[0]!, replacement])).toBeLessThan(11);
+      expect(coverage([replacement, selected[1]!])).toBeLessThan(11);
+    }
+    expect(compatibleTaskSupport(coverageTask, selected).complete_alternatives).toBe(0);
+  }
+});
+
+it("prefers four partial inputs even though a two-input page supplies one complete task alternative", () => {
+  const pool = alternativeTask.pool.slice(0, 4);
+  const reference = feasibleSubsets(pool, () => true, 2).map(rows => ({ rows, support: compatibleTaskSupport(alternativeTask, rows) }));
+  const maximumInputCount = Math.max(...reference.map(row => row.support.supported_inputs.length));
+  expect(maximumInputCount).toBe(4);
+  expect(reference.filter(row => row.support.supported_inputs.length === maximumInputCount)
+    .every(row => row.support.complete_alternatives === 0)).toBe(true);
+  const sufficient = reference.filter(row => row.support.complete_alternatives === 1);
+  expect(sufficient).toHaveLength(1);
+  expect(sufficient[0]!.rows.map(root)).toEqual(pool.slice(0, 2).map(root));
+  expect(sufficient[0]!.support.supported_inputs).toEqual([1, 2]);
+  for (const candidates of [pool, [...pool].reverse()]) {
+    const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
+    expect(selected.map(root).sort()).toEqual(pool.slice(2).map(root).sort());
+    expect(new Set(selected.flatMap(executedInputNumbers)).size).toBe(4);
+    expect(compatibleTaskSupport(alternativeTask, selected)).toMatchObject({
+      supported_inputs: [3, 4, 5, 6], complete_alternatives: 0, alternatives: ["incomplete", "incomplete"]
+    });
+  }
+});
+
+it("keeps exclusive and unknown evaluator environments separate from native source-local proofs", () => {
+  const [permission, backup, , , compatibleBackup] = alternativeTask.pool;
+  const pair = [permission!, backup!];
+  const exclusive = new Map([[root(permission!), "h"], [root(backup!), "h-prime"]]);
+  expect(compatibleTaskSupport(alternativeTask, pair, exclusive)).toMatchObject({
+    supported_inputs: [1, 2], complete_alternatives: 0, alternatives: ["incomplete", "incomplete"]
+  });
+  expect(compatibleTaskSupport(alternativeTask, pair, new Map([[root(backup!), null]]))).toMatchObject({
+    supported_inputs: [1, 2], complete_alternatives: 0, alternatives: ["unknown", "incomplete"], unresolved_qualifiers: ["environment"]
+  });
+  expect(compatibleTaskSupport(alternativeTask, [permission!, backup!, compatibleBackup!], exclusive)).toMatchObject({
+    supported_inputs: [1, 2], complete_alternatives: 1, alternatives: ["complete", "incomplete"], unresolved_qualifiers: []
+  });
+  expect(compatibleTaskSupport(alternativeTask, [permission!, compatibleBackup!], exclusive).complete_alternatives).toBe(1);
+  expect(new Set(pair.flatMap(executedInputNumbers)).size).toBe(2);
+  expect(pair.every(row => row.proofs[0]!.binding_results?.every(binding => binding.kind === "evidence"))).toBe(true);
+});
+
+it("charges a raw and proof twin as one physical root and requires the supporting source text", () => {
+  const proof = coverageTask.pool[0]!, twin = rawSourceTwin(proof);
+  const subsets = feasibleSubsets([proof, twin, ...coverageTask.pool.slice(1)], () => true, 2);
+  expect(subsets.every(rows => new Set(rows.map(root)).size === rows.length)).toBe(true);
+  expect(subsets.some(rows => rows.includes(proof) && rows.includes(twin))).toBe(false);
+  expect(deliveredInputNumbers(coverageTask, [twin])).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  expect(executedInputNumbers(twin)).toEqual([]);
+  const selected = selectSourceSemanticLibraryPage({ candidates: [twin, proof], meter: budget(), fits: rows => rows.length <= 1 });
+  expect(selected).toHaveLength(1);
+  expect(selected[0]!.proofs).toEqual(proof.proofs);
+  expect(deliveredInputNumbers(coverageTask, selected)).toHaveLength(7);
+  const missingText = { ...proof, preview: proof.preview.replace(deploymentStatement(1), "") };
+  expect(deliveredInputNumbers(coverageTask, [missingText])).toEqual([2, 3, 4, 5, 6, 7]);
+  expect(executedInputNumbers(missingText)).toHaveLength(7);
 });

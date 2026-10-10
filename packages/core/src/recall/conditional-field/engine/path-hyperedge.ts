@@ -321,9 +321,8 @@ function* walkCompiledPremise(
     const env = parseBindingContext(node.binding_context, input.bindingContexts);
     for (const variable of automaton.localVariables.get(node.program_state) ?? []) env.delete(variable);
     const here = { ...node, binding_context: encodeBindingContext(env, input.bindingContexts) };
-    for (const advance of automaton.advances) {
+    for (const advance of automaton.advancesByState.get(node.program_state) ?? []) {
       yield { kind: "work" };
-      if (advance.from !== node.program_state) continue;
       const physicalKinds = input.physicalKindSet ?? new Set<string>();
       for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
         yield { kind: "work" };

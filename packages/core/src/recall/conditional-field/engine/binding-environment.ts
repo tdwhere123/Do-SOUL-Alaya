@@ -78,8 +78,7 @@ export function alignOutgoingBinding(
 ): string | undefined {
   let env = new Map(parseBindingContext(binding, bindingContexts));
   for (const variable of automaton.localVariables.get(programState) ?? []) env.delete(variable);
-  for (const advance of automaton.advances) {
-    if (advance.from !== programState) continue;
+  for (const advance of automaton.advancesByState.get(programState) ?? []) {
     const next = unifyBinding(env, advance.relation.source_variable, objectId);
     if (next === undefined) return undefined;
     env = next;

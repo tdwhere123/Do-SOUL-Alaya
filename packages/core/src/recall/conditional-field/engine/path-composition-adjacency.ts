@@ -157,9 +157,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
     const endpoint = productEndpointId(from), bucket = statesByEndpoint.get(endpoint);
-    for (const advance of automaton.advances) {
+    for (const advance of automaton.advancesByState.get(from.program_state) ?? []) {
       yield { kind: "work" };
-      if (advance.from !== from.program_state) continue;
       for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
         yield { kind: "work" };
         if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;

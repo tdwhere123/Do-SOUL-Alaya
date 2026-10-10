@@ -1,9 +1,12 @@
 import { canonicalJson, compareCodeUnits, SourceSemanticResourceExhausted, sameSourceEvidenceRoot, sourceEvidenceRootTarget,
-  projectSourceSemanticQuerySupport,
+  projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity,
   type Derivation, type IndexEntry, type SourceSemanticLibraryProof, type SourceSemanticBindingResult,
   type SourceSemanticQuerySupport, type SourceSemanticResourceLedger, type SourceSemanticLibrarySlotQualifier,
-  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, type SourceDisclosure, type InterpretationNodeCoordinate } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, type SourceDisclosure, type InterpretationNodeCoordinate,
+  type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
+import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { CoreError } from "../../shared/errors.js";
 
 /** A root's complete executed witness forests and necessary source bytes are indivisible. */
 export type SourceSemanticLibraryPackage = Readonly<{
@@ -28,6 +31,9 @@ type SelectionInput = Readonly<{
   order?: "field" | "source_access";
 }>;
 type TupleIndex = ReadonlyMap<IndexEntry, ReadonlySet<string>>;
+type PageScore = (page: readonly SourceSemanticLibraryPackage[]) => readonly number[];
+type EvidenceSetContext = Readonly<{ alternatives: readonly (readonly string[])[];
+  roots: ReadonlyMap<IndexEntry, string> }>;
 
 /**
  * Greedy demand coverage, then additional qualified local witnesses, then native
@@ -49,7 +55,18 @@ export function selectSourceSemanticLibraryPageWithReturnedTupleNovelty(
   return selectLibraryPage(input, true);
 }
 
-function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly SourceSemanticLibraryPackage[] {
+/**
+ * Experimental potential evidence-set coverage for one admitted Q; never a joint proof.
+ * Named consumers: bounded evidence-set tests and the native full-response diagnostic.
+ * Remove after that decision or replace with the reviewed policy; the default stays unchanged.
+ */
+export function selectSourceSemanticLibraryPageWithEvidenceSetCoverage(
+  input: SelectionInput
+): readonly SourceSemanticLibraryPackage[] {
+  return selectLibraryPage(input, false, input.order !== "source_access");
+}
+
+function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets = false): readonly SourceSemanticLibraryPackage[] {
   const selected: SourceSemanticLibraryPackage[] = [];
   const covered = new Set<string>();
   const coveredTuples = new Set<string>();
@@ -58,25 +75,33 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly So
   const supports = new Map<IndexEntry, SourceSemanticQuerySupport | undefined>();
   try {
     const tuples = indexReturnedTuples(input, novelty);
+    const evidence = evidenceSets ? indexEvidenceSets(input) : undefined;
+    const rootKey = (row: SourceSemanticLibraryPackage) => evidence?.roots.get(row.entry) ?? root(row);
     for (const row of input.candidates) {
       const bindings = row.proofs.reduce((count, proof) => count + (proof.binding_results?.length ?? 0), 0);
       const inputs = row.proofs[0]?.query.alternatives.reduce((count, alternative) => count + (alternative.evidence_inputs?.length ?? 0), 0) ?? 0;
       input.meter.charge((bindings + 1) * (inputs + 1), inputs * 64 + bindings * 8, "selection support projection");
       supports.set(row.entry, support(row));
     }
+    const score = pageScore(input, supports, tuples, evidence);
     const proofsByRoot = new Map<string, SourceSemanticLibraryPackage[]>();
     for (const row of input.candidates) {
       if (row.proofs.length === 0) continue;
       input.meter.charge(1, 8, "proof root reservation reference");
-      const key = root(row), proofs = proofsByRoot.get(key) ?? [];
+      const key = rootKey(row), proofs = proofsByRoot.get(key) ?? [];
       proofs.push(row); proofsByRoot.set(key, proofs);
     }
     while (selected.length < SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET && remaining.size > 0) {
       input.meter.charge(remaining.size, remaining.size * 16, "evidence selection candidates");
       const novelGain = tupleGains(remaining, tuples, coveredTuples, input.meter);
+      const evidenceScores = evidence === undefined ? undefined
+        : new Map([...remaining].map(row => [row.entry, score([...selected, row])]));
       const ranked = [...remaining].sort((left, right) => {
         if (input.order === "source_access") return left.access_position - right.access_position;
         const a = supports.get(left.entry), b = supports.get(right.entry);
+        if (evidenceScores !== undefined) return compareScores(evidenceScores.get(left.entry)!, evidenceScores.get(right.entry)!)
+          || (qualified(a) ? compareCodeUnits(rootKey(left), rootKey(right))
+            : left.access_position - right.access_position || compareCodeUnits(rootKey(left), rootKey(right)));
         const answer = answered ? 0 : Number(b?.answer === "supported") - Number(a?.answer === "supported");
         const gain = demands(b).filter(id => !covered.has(id)).length - demands(a).filter(id => !covered.has(id)).length;
         const witness = Number(qualified(b)) - Number(qualified(a));
@@ -91,15 +116,11 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly So
         const selection_basis = !answered && support?.answer === "supported" ? "direct_answer"
           : demands(support).some(id => !covered.has(id)) ? "new_input" : qualified(support) ? "additional_witness" : "source_access";
         const delivered: SourceSemanticLibraryPackage = { ...candidate, selection_basis };
-        if (candidate.proofs.length === 0 && (proofsByRoot.get(root(candidate)) ?? []).some(proof => {
-          input.meter.charge(1, 0, "standalone proof reservation");
-          const standalone = selectionReasons([proof], supports)[0]!;
-          return input.fitsStandalone?.(standalone, selected.length) ?? input.fits([standalone]);
-        })) continue;
+        if (rawProofReserved(candidate, selected.length, input, supports, proofsByRoot.get(rootKey(candidate)))) continue;
         if (!input.fits([...selected, delivered])) continue;
         selected.push(delivered);
         answered ||= support?.answer === "supported";
-        for (const row of remaining) if (root(row) === root(candidate)) remaining.delete(row);
+        for (const row of remaining) if (rootKey(row) === rootKey(candidate)) remaining.delete(row);
         for (const demand of demands(support)) covered.add(demand);
         rememberTuples(candidate.entry, tuples, coveredTuples, input.meter);
         accepted = true;
@@ -107,7 +128,8 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly So
       }
       if (!accepted) break;
     }
-    if (input.order !== "source_access") improveCoverage(selected, input, supports, tuples);
+    if (input.order !== "source_access") improveCoverage(selected, input, supports, score, rootKey,
+      evidence === undefined ? undefined : proofsByRoot);
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     // A later candidate or continuation cannot revoke an already reserved page.
@@ -115,13 +137,19 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly So
   return selectionReasons(selected, supports);
 }
 
-/** A bounded one-root exchange repairs greedy demand overlap; no identity inference or numeric relevance weight. */
-function improveCoverage(selected: SourceSemanticLibraryPackage[], input: SelectionInput,
-  supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>, tuples: TupleIndex | undefined): void {
-  const score = (page: readonly SourceSemanticLibraryPackage[]) => {
+function pageScore(input: SelectionInput, supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>,
+  tuples: TupleIndex | undefined, evidence: EvidenceSetContext | undefined): PageScore {
+  const alternatives = evidence?.alternatives;
+  const requirementCount = alternatives?.reduce((count, row) => count + row.length, 0) ?? 0;
+  return (page: readonly SourceSemanticLibraryPackage[]) => {
     const values = page.map(row => supports.get(row.entry));
-    input.meter.charge(page.length + values.reduce((count, row) => count + (row?.evidence_inputs.length ?? 0), 0), page.length * 16, "evidence coverage comparison");
-    const base = [Number(values.some(row => row?.answer === "supported")), new Set(values.flatMap(demands)).size, values.filter(qualified).length];
+    const inputs = values.reduce((count, row) => count + (row?.evidence_inputs.length ?? 0), 0);
+    input.meter.charge(page.length + inputs + requirementCount,
+      page.length * 16 + (alternatives === undefined ? 0 : inputs * 64), "evidence coverage comparison");
+    const covered = new Set(values.flatMap(demands));
+    const base = [Number(values.some(row => row?.answer === "supported")),
+      ...(alternatives === undefined ? [] : [Number(alternatives.some(row => row.every(id => covered.has(id))))]),
+      covered.size, values.filter(qualified).length];
     if (tuples === undefined) return base;
     input.meter.charge(page.length, page.length * 16, "returned tuple coverage comparison");
     const union = new Set<string>();
@@ -130,22 +158,106 @@ function improveCoverage(selected: SourceSemanticLibraryPackage[], input: Select
     }
     return [...base, union.size];
   };
+}
+
+/** Strict local exchanges retain the existing fit owner and never infer cross-source identity. */
+function improveCoverage(selected: SourceSemanticLibraryPackage[], input: SelectionInput,
+  supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>, score: PageScore,
+  rootKey: (row: SourceSemanticLibraryPackage) => string,
+  proofsByRoot?: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>): void {
   let changed = true;
-  const candidates = [...input.candidates].sort((left, right) => compareCodeUnits(root(left), root(right)));
+  const candidates = [...input.candidates].sort((left, right) => compareCodeUnits(rootKey(left), rootKey(right)));
   while (changed) {
     changed = false;
     const before = score(selected);
     exchange: for (const candidate of candidates) for (let position = 0; position < selected.length; position++) {
       input.meter.charge(1, 0, "evidence coverage exchange");
       const page = selected.map((row, index) => index === position ? candidate : row);
-      if (new Set(page.map(root)).size !== page.length) continue;
-      const after = score(page), different = after.findIndex((value, index) => value !== before[index]);
-      if (different < 0 || after[different]! < before[different]!) continue;
+      if (new Set(page.map(rootKey)).size !== page.length || compareScores(score(page), before) >= 0) continue;
+      if (proofsByRoot !== undefined && rawProofReserved(candidate, position, input, supports, proofsByRoot.get(rootKey(candidate)))) continue;
       const delivered = selectionReasons(page, supports);
       if (!input.fits(delivered)) continue;
       selected.splice(0, selected.length, ...delivered); changed = true; break exchange;
     }
+    if (!changed && proofsByRoot !== undefined) {
+      changed = exchangeTwoRoots(selected, candidates, input, supports, score, before, rootKey, proofsByRoot);
+    }
   }
+}
+
+function exchangeTwoRoots(selected: SourceSemanticLibraryPackage[], candidates: readonly SourceSemanticLibraryPackage[],
+  input: SelectionInput, supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>,
+  score: PageScore, before: readonly number[], rootKey: (row: SourceSemanticLibraryPackage) => string,
+  proofsByRoot: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>): boolean {
+  for (let first = 0; first < candidates.length; first++) for (let second = first + 1; second < candidates.length; second++) {
+    input.meter.charge(1, 0, "evidence pair enumeration");
+    const left = candidates[first]!, right = candidates[second]!;
+    if (rootKey(left) === rootKey(right)) continue;
+    for (let a = 0; a < selected.length; a++) for (let b = a + 1; b < selected.length; b++) {
+      input.meter.charge(selected.length, selected.length * 16, "evidence two-root exchange");
+      const page = selected.map((row, index) => index === a ? left : index === b ? right : row);
+      if (new Set(page.map(rootKey)).size !== page.length || compareScores(score(page), before) >= 0) continue;
+      if (rawProofReserved(left, a, input, supports, proofsByRoot.get(rootKey(left)))
+        || rawProofReserved(right, b, input, supports, proofsByRoot.get(rootKey(right)))) continue;
+      const delivered = selectionReasons(page, supports);
+      if (!input.fits(delivered)) continue;
+      selected.splice(0, selected.length, ...delivered);
+      return true;
+    }
+  }
+  return false;
+}
+
+function compareScores(left: readonly number[], right: readonly number[]): number {
+  const different = left.findIndex((value, index) => value !== right[index]);
+  return different < 0 ? 0 : right[different]! - left[different]!;
+}
+
+function rawProofReserved(candidate: SourceSemanticLibraryPackage, precedingSlots: number, input: SelectionInput,
+  supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>, proofs: readonly SourceSemanticLibraryPackage[] = []): boolean {
+  return candidate.proofs.length === 0 && proofs.some(proof => {
+    input.meter.charge(1, 0, "standalone proof reservation");
+    const standalone = selectionReasons([proof], supports)[0]!;
+    return input.fitsStandalone?.(standalone, precedingSlots) ?? input.fits([standalone]);
+  });
+}
+
+/** The experimental objective only combines execution-owned inputs from one common admitted Q. */
+function indexEvidenceSets(input: SelectionInput): EvidenceSetContext {
+  const queries = new Map<SourceSemanticQuery, string>();
+  const roots = new Map<IndexEntry, string>();
+  let query: SourceSemanticQuery | undefined, queryId: string | undefined;
+  const bind = (value: unknown, phase: string): void => {
+    const before = input.meter.spentBytes;
+    input.meter.retain(value, phase);
+    const size = input.meter.spentBytes - before;
+    input.meter.charge(size, size, phase);
+  };
+  for (const row of input.candidates) {
+    input.meter.charge(1 + row.proofs.length, 64, "evidence-set candidate identities");
+    if (!roots.has(row.entry)) {
+      bind(row.entry.target, "evidence-set root identity");
+      roots.set(row.entry, root(row));
+    }
+    for (const proof of row.proofs) {
+      let identity = queries.get(proof.query);
+      if (identity === undefined) {
+        bind(proof.query, "evidence-set query identity");
+        identity = sourceSemanticQueryIdentity(proof.query, fieldContractSha256);
+        queries.set(proof.query, identity);
+      }
+      if (identity !== proof.query_semantics_id || queryId !== undefined && identity !== queryId) {
+        throw new CoreError("VALIDATION", "evidence-set selection requires one common bound query");
+      }
+      query = proof.query; queryId = identity;
+    }
+  }
+  const alternatives = (query?.alternatives ?? []).flatMap((row, alternative) => {
+    const count = row.evidence_inputs?.length ?? 0;
+    input.meter.charge(1 + count, count * 64, "evidence-set alternative requirements");
+    return count === 0 ? [] : [Array.from({ length: count }, (_, index) => `${alternative}:${index}`)];
+  });
+  return { alternatives, roots };
 }
 
 function selectionReasons(page: readonly SourceSemanticLibraryPackage[], supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>): SourceSemanticLibraryPackage[] {

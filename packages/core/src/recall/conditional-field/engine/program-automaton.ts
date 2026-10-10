@@ -20,6 +20,7 @@ export type HyperedgeAdvance = Readonly<{
 export type ProgramAutomaton = Readonly<{
   readonly start: readonly string[];
   readonly advances: readonly AutomatonAdvance[];
+  readonly advancesByState: ReadonlyMap<string, readonly AutomatonAdvance[]>;
   readonly hyperedgeAdvances: readonly HyperedgeAdvance[];
   readonly sourceVariables: ReadonlyMap<string, readonly string[]>;
   readonly localVariables: ReadonlyMap<string, readonly string[]>;
@@ -33,8 +34,11 @@ export type ProgramAutomatonCost = Readonly<{ work_units: number; retained_bytes
 export function programAutomatonCost(program: QueryProgram): ProgramAutomatonCost {
   const size = expandedSize(program);
   const closedEntries = size.edges * Math.max(1, size.states);
-  const workUnits = size.states + size.edges + closedEntries;
-  const retainedBytes = 256 + size.states * 96 + size.edges * 128 + closedEntries * 16;
+  // Epsilon closure expands each advance's targets, not the advance count.
+  // Index insertion and bucket freezing each visit at most one entry per edge.
+  const workUnits = size.states + size.edges + closedEntries + size.edges * 2;
+  const retainedBytes = 256 + size.states * 96 + size.edges * 128 + closedEntries * 16
+    + 64 + size.edges * 144;
   if (!Number.isSafeInteger(workUnits) || !Number.isSafeInteger(retainedBytes)) {
     throw new ProgramAutomatonResourceError("program automaton expansion exceeds representable resource accounting");
   }
@@ -95,6 +99,7 @@ export function compileProgramAutomaton(program: QueryProgram): ProgramAutomaton
   return {
     start,
     advances,
+    advancesByState: indexAdvances(advances),
     hyperedgeAdvances,
     sourceVariables: sourceVariablesFrom(advances, hyperedgeAdvances),
     localVariables: builder.locals
@@ -106,15 +111,25 @@ export function advancesFor(
   fromState: string,
   matches: (relation: QueryRelation) => boolean
 ): readonly AutomatonAdvance[] {
-  return automaton.advances.filter((advance) =>
-    advance.from === fromState && matches(advance.relation)
-  );
+  return (automaton.advancesByState.get(fromState) ?? []).filter((advance) => matches(advance.relation));
+}
+
+function indexAdvances(advances: readonly AutomatonAdvance[]): ReadonlyMap<string, readonly AutomatonAdvance[]> {
+  const byState = new Map<string, AutomatonAdvance[]>();
+  for (const advance of advances) {
+    const bucket = byState.get(advance.from);
+    if (bucket === undefined) byState.set(advance.from, [advance]);
+    else bucket.push(advance);
+  }
+  for (const bucket of byState.values()) Object.freeze(bucket);
+  return byState;
 }
 
 function emptyAutomaton(): ProgramAutomaton {
   return {
     start: [],
     advances: [],
+    advancesByState: new Map(),
     hyperedgeAdvances: [],
     sourceVariables: new Map(),
     localVariables: new Map()
@@ -125,6 +140,7 @@ function epsilonAutomaton(): ProgramAutomaton {
   return {
     start: [ACCEPTING_PROGRAM_STATE],
     advances: [],
+    advancesByState: new Map(),
     hyperedgeAdvances: [],
     sourceVariables: new Map(),
     localVariables: new Map()
