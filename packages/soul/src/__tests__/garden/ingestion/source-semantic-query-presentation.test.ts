@@ -55,6 +55,28 @@ function parity(body: SourceSemanticQueryMeaningBody, selected = input()) {
   return nested.query;
 }
 
+function scopedInputs(kind: "conditional" | "reported", independentFirst: boolean) {
+  const governed = { kind: "statement" as const, key: "governed", predicate: "leave",
+    arguments: [role("agent", "mira", "Mira")] };
+  const scope: QueryMeaning = kind === "conditional"
+    ? { kind, key: "scope", antecedent: statement("invited", [role("agent", "mira", "Mira")]), consequent: governed }
+    : { kind, key: "scope", reporter: reference("mira"), content: governed };
+  const independent: QueryMeaning = { ...governed, key: "independent", obligation: "asserted_at_source" };
+  const roots = independentFirst ? [independent, scope] : [scope, independent];
+  return meaning([], {
+    entities: [{ kind: "named", key: "mira", excerpt: "Mira" }],
+    requested_operation: { reading: "compare departures", support: { kind: "query_text", excerpt: "Compare" } },
+    alternatives: [{ conditions: [], evidence_inputs: [
+      ...roots.map(root => ({ conditions: [root] })), { conditions: [{ kind: "occurrence", key: "governed" }] }
+    ] }]
+  });
+}
+
+const scopedQuestions = {
+  conditional: "Compare Mira's departure if she was invited with an independently asserted departure by Mira.",
+  reported: "Compare Mira's departure as reported by Mira with an independently asserted departure by Mira."
+};
+
 it("selects a fresh nested contract while retaining the omitted-selector flat request and prompt", () => {
   const omitted = buildSourceSemanticQueryRequest(input());
   const flat = buildSourceSemanticQueryRequest({ ...input(), generation_presentation: "flat-carrier-v1" });
@@ -124,6 +146,73 @@ it("preserves forward role references and the governing scope of an explicitly r
   expect(sourceSemanticQueryBranchViews(reused.alternatives[0]!)[1]!.alternative.frames.map(frame => frame.id))
     .toEqual(["condition", "invited", "spoke"]);
   expect(reused.alternatives[0]!.evidence_inputs).toEqual([{ frames: ["spoke"] }]);
+});
+
+it.each(["conditional", "reported"] as const)("keeps %s occurrence reuse distinct from an explicitly asserted input in either root order", kind => {
+  const selected = input(scopedQuestions[kind]);
+  const scopedFrames = kind === "conditional" ? ["scope", "invited", "governed"] : ["scope", "governed"];
+  const scopedObligations = [
+    { frame: "scope", kind: "asserted_at_source" },
+    ...(kind === "conditional" ? [{ frame: "invited", kind: "explicit_embedded_structure", incidence: {
+      kind: "operator_operand", other_frame: "scope", role: "antecedent"
+    } }] : []),
+    { frame: "governed", kind: "explicit_embedded_structure", incidence: {
+      kind: "operator_operand", other_frame: "scope", role: kind === "conditional" ? "consequent" : "content"
+    } }
+  ];
+  const asserted = { frame: "independent", kind: "asserted_at_source" };
+  for (const independentFirst of [false, true]) {
+    const body = scopedInputs(kind, independentFirst);
+    const query = parity(body, selected);
+    const wire = encodeSourceSemanticQueryCarrier(body);
+    const reversed = receive({ ...wire, nodes: [...wire.nodes].reverse() }, "flat-carrier-v1", selected);
+    expect(reversed.outcome).toEqual({ status: "interpreted", gaps: [] });
+    expect(reversed.query).toEqual(query);
+    const alternative = query.alternatives[0]!;
+    expect(alternative.answer_frames).toEqual([]);
+    expect(alternative.evidence_inputs).toEqual([
+      { frames: [independentFirst ? "independent" : "scope"] },
+      { frames: [independentFirst ? "scope" : "independent"] }, { frames: ["governed"] }
+    ]);
+    expect(alternative.context_obligations)
+      .toEqual(independentFirst ? [asserted, ...scopedObligations] : [...scopedObligations, asserted]);
+    const branches = sourceSemanticQueryBranchViews(alternative);
+    expect(branches).toHaveLength(4);
+    expect(branches[0]!.alternative).toEqual({ frames: [], context_obligations: [] });
+    for (const branch of [branches[independentFirst ? 2 : 1]!, branches[3]!]) {
+      expect(branch.alternative.frames.map(frame => frame.id)).toEqual(scopedFrames);
+      expect(branch.alternative.context_obligations).toEqual(scopedObligations);
+    }
+    const independent = branches[independentFirst ? 1 : 2]!.alternative;
+    expect(independent.frames.map(frame => frame.id)).toEqual(["independent"]);
+    expect(independent.context_obligations).toEqual([asserted]);
+    expect(alternative.frames.filter(frame => frame.predicate_reading === "leave").map(frame => frame.id))
+      .toEqual(independentFirst ? ["independent", "governed"] : ["governed", "independent"]);
+  }
+});
+
+it.each(["conditional", "reported"] as const)("rejects an added assertion or a forward occurrence of a %s child", kind => {
+  const selected = input(scopedQuestions[kind]);
+  const body = scopedInputs(kind, false);
+  const wire = encodeSourceSemanticQueryCarrier(body);
+  const inputs = body.alternatives[0]!.evidence_inputs!;
+  const tokens = wire.alternatives[0]!.evidence_inputs!;
+  const assertedNested = { ...body, alternatives: [{ conditions: [], evidence_inputs: [
+    ...inputs.slice(0, 2), { conditions: [{ kind: "occurrence", key: "governed", obligation: "asserted_at_source" }] }
+  ] }] };
+  const assertedFlat = { ...wire, nodes: wire.nodes.map(node => node.kind === "occurrence"
+    ? { ...node, obligation: "asserted_at_source" } : node) };
+  for (const result of [receive(assertedNested, "nested-meaning-v1", selected), receive(assertedFlat, "flat-carrier-v1", selected)]) {
+    expect(result.outcome).toMatchObject({ status: "invalid", reason: "malformed_response" });
+    expect(result.query).toBeUndefined();
+  }
+  const forwardNested = { ...body, alternatives: [{ conditions: [], evidence_inputs: [inputs[2]!, ...inputs.slice(0, 2)] }] };
+  const forwardFlat = { ...wire, alternatives: [{ conditions: [], evidence_inputs: [tokens[2]!, ...tokens.slice(0, 2)] }] };
+  for (const result of [receive(forwardNested, "nested-meaning-v1", selected), receive(forwardFlat, "flat-carrier-v1", selected)]) {
+    expect(result.outcome).toMatchObject({ status: "invalid", reason: "malformed_response",
+      diagnostics: expect.arrayContaining([expect.objectContaining({ message: "undeclared local reference" })]) });
+    expect(result.query).toBeUndefined();
+  }
 });
 
 it("keeps shared entities distinct from separate equal-surface entities and occurrences", () => {
