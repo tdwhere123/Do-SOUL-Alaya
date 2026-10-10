@@ -394,7 +394,7 @@ it("replays interpreted JSON with a missing finish as cached incomplete", async 
   expect(result).toMatchObject({ terminal_failures: 0, incomplete: 1, unknown: 0 });
   expect(shard?.admitted).toBe(false);
   expect(shard?.finish_reason).toBeNull();
-  expect(shard?.outcome).toMatchObject({ status: "interpreted" });
+  expect(shard?.outcome).toMatchObject({ status: "incomplete" });
   expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(raw?.finish_reason).toBeNull();
   expect(raw?.completion_witness).toBeNull();
@@ -422,7 +422,7 @@ it("replays interpreted JSON with MAX_TOKENS as cached incomplete", async () => 
   expect(result.newly_admitted).toBe(0);
   expect(shard?.admitted).toBe(false);
   expect(shard?.finish_reason).toBe("MAX_TOKENS");
-  expect(shard?.outcome).toMatchObject({ status: "interpreted" });
+  expect(shard?.outcome).toMatchObject({ status: "incomplete" });
   expect(hasAdmittedProposalOutcome(shard!)).toBe(false);
   expect(raw?.finish_reason).toBe("MAX_TOKENS");
   expect(raw?.completion_witness).toBe("finish_reason");

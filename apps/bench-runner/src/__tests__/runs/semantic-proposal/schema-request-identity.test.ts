@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  encodeSourceSemanticQueryCarrier, sourceSemanticInterpretationIdentity
+  encodeSourceSemanticQueryCarrier, isChatSemanticRequestProfile, sourceSemanticInterpretationIdentity
 } from "@do-soul/alaya-protocol";
 import {
   buildSourceSemanticCorrespondenceRequest, proposeQuerySemantics, proposeSourceSemantics,
@@ -99,7 +99,9 @@ describe("semantic proposal rendered schema identity", () => {
     expect(flat!.request).toHaveProperty("contract", "source-semantic-query-request-v9");
     const wire = prepareSemanticProviderRequest({ ...settings, apiKey: null }, {
       systemPrompt: nested!.systemPrompt, userPrompt: nested!.userPrompt, responseJsonSchema: nested!.responseJsonSchema,
-      maxOutputTokens: 4096, outputTokenField: "max_tokens", retryMode: "disabled"
+      maxOutputTokens: 4096,
+      outputTokenField: isChatSemanticRequestProfile(settings.requestProfile) ? "max_tokens" : "maxOutputTokens",
+      retryMode: "disabled"
     }, "source_semantic_proposal");
     const body = JSON.parse(wire.body);
     if (settings.requestProfile === profile) {

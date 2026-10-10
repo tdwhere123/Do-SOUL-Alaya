@@ -133,8 +133,10 @@ it("keeps shared entities distinct from separate equal-surface entities and occu
     statement("leave", [role("agent", "first", "Mira")])], { entities }));
   expect(query.variables.filter(variable => variable.sort === "entity").map(variable => variable.id)).toEqual(["first", "second"]);
   expect(query.alternatives[0]!.frames[1]!.role_requirements[0]!.target_variable).toBe("first");
-  const repeated = parity(meaning([{ kind: "statement", predicate: "ring", arguments: [] },
-    { kind: "statement", predicate: "ring", arguments: [] }]));
+  const repeated = parity(meaning([
+    { kind: "statement", predicate: "ring", arguments: [role("theme", "bell", "the bell")] },
+    { kind: "statement", predicate: "ring", arguments: [role("theme", "bell", "the bell")] }
+  ], { entities: [{ kind: "named", key: "bell", excerpt: "the bell" }] }), input("Did the bell ring twice?"));
   expect(repeated.alternatives[0]!.frames).toHaveLength(2);
   expect(new Set(repeated.alternatives[0]!.frames.map(frame => frame.id)).size).toBe(2);
   const explicit = parity(meaning([statement("ring"), { kind: "occurrence", key: "ring" }]));
@@ -181,6 +183,9 @@ it("retains four independently qualified evidence inputs and a genuine unresolve
 });
 
 it.each([
+  { name: "disconnected equal occurrences", body: meaning([
+    { kind: "statement", predicate: "ring", arguments: [] }, { kind: "statement", predicate: "ring", arguments: [] }
+  ]) },
   { name: "undeclared reference", body: meaning([statement("ring", [role("agent", "foreign", "Who")])]) },
   { name: "duplicate occurrence", body: meaning([statement("ring"), statement("ring")]) },
   { name: "forward occurrence", body: meaning([{ kind: "occurrence", key: "ring" }, statement("ring")]) },
@@ -248,7 +253,12 @@ it("derives the recursive generation schema with entity references, role support
   for (const query of [missingEntities, withoutRoleSupport, inlineEntity, unboundInputs, sourceSemanticQueryExamples[0]!.response.query]) {
     expect(validate(response(query))).toBe(false);
   }
-  expect(validate(response(sentBody, { status: "abstained" }))).toBe(false);
+  const abstainedWithPayload = response(sentBody, { status: "abstained" });
+  expect(validate(abstainedWithPayload)).toBe(true);
+  const abstained = proposeQuerySemantics({ ...input(), generation_presentation: "nested-meaning-v1" },
+    { rawJson: JSON.stringify(abstainedWithPayload) });
+  expect(abstained.outcome).toEqual({ status: "abstained" });
+  expect(abstained.query).toBeUndefined();
   expect(validate({ contract: "source-semantic-query-response-v9", outcome: { status: "abstained" } })).toBe(true);
   for (const status of ["invalid", "truncated", "resource_exhausted", "unexercised"]) {
     expect(validate({ contract: "source-semantic-query-response-v9", outcome: { status } })).toBe(false);

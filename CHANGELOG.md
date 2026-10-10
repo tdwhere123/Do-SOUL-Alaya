@@ -26,6 +26,15 @@ replacement cannot reactivate invalidated support. Engine gateway 1.2.0 document
 these operations; the host tool advertises its state-changing invalidation.
 Neither change adds provider calls to Recall or promotes a new default policy.
 
+The same unreleased 14.1.0 includes additive query-producer API under invariant
+§25: Protocol exports `SourceSemanticQueryPresentationSchema` and
+`SourceSemanticQueryPresentation`; SOUL exports `sourceSemanticQueryPresentation`,
+`sourceSemanticQuerySystemPrompt`, and `SOURCE_SEMANTIC_QUERY_NESTED_RESPONSE_CONTRACT`.
+Explicit `nested-meaning-v1` selects request v10/response v9 and sends the current
+meaning grammar to the existing host compiler. Omitted or `flat-carrier-v1`
+selection preserves request v9/response v8 and their request identities. MCP,
+EventLog, runtime config, canonical query semantics and the default stay unchanged.
+
 Protocol 14.0.0 changes semantic-library `slot_qualifiers` under invariant §25
 (major: a source slot can expose multiple independent proof qualifiers). Consumers
 must join each qualifier using its explicit `index` and full Q/H/C/computation

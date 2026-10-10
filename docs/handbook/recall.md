@@ -832,19 +832,25 @@ delivered source records.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Current query request v9 and response v8 serialize expression occurrences
-in a bounded acyclic `nodes` table; condition and operand positions carry separate
-serialization tokens. Protocol derives this wire schema from the same expression
-authority used by local receive admission. The host checks references, cycles,
-reachability, depth, expanded work and bytes before expanding into that unchanged
-meaning compiler. Historical recursive responses retain their recorded wire and
-cache identities and cannot enter current execution. Nested
+operation. Q proposal inputs and native query workset items may select
+`generation_presentation`. Omitted or `flat-carrier-v1` selection keeps request v9
+and response v8: expression occurrences use a bounded acyclic `nodes` table, and
+condition/operand positions carry serialization tokens. Explicit
+`nested-meaning-v1` selects request v10/response v9 and supplies the current nested
+expressions directly to the same meaning compiler. The captured request contract
+selects generation and receive; body shape cannot select a decoder or reuse a
+different presentation's cache identity. Protocol derives both wire schemas from
+one expression authority. Flat receive checks references, cycles, reachability
+and expansion bounds; nested receive checks depth before recursive serialization
+and parsing, retaining the shared byte and resource limits. Earlier recursive
+wire contracts remain historical and cannot enter current execution. Nested
 `forall` is rejected; explicit top-level universal evaluation remains supported.
 The outgoing generation schema requires one entity declaration table and explicit
 role excerpts. Argument and reporter targets use local references; examples and
-schema present entities and nodes before branch roots. Historical current-wire
-inline declarations and unambiguous entity-support inheritance still use the
-same receiver. Generation shape does not certify reference closure or fidelity.
+schema present entities before branches, with nodes before roots in flat output.
+Historical current-wire inline declarations and unambiguous entity-support
+inheritance still use the same receiver. Generation shape does not certify
+reference closure or fidelity.
 The canonical query also binds the complete host-approved fixed context
 (`null` when none was supplied) and one `utterance-attribution-v1` value. Its
 identity changes when those consumed fields change, even if the query text and
