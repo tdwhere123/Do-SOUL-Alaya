@@ -5,10 +5,11 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_SYSTEM_PROMPT, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, buildSourceSemanticRequest,
-  buildSourceSemanticQueryRequest, officialApiExtractionResponseSchemaPreimage,
+  buildSourceSemanticQueryRequest, sourceSemanticQuerySystemPrompt, officialApiExtractionResponseSchemaPreimage,
   receiveSourceSemantics, sourceSemanticQueryResponseJsonSchema,
   sourceSemanticResponseJsonSchema,
   sourceSemanticCorrespondenceResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_QUERY_NESTED_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT } from "@do-soul/alaya-soul";
 import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch/native-codec.js";
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial,
@@ -31,6 +32,8 @@ describe("Gemini complete generation schema guidance", () => {
     });
     const envelopes = [...cases,
       { schema: sourceSemanticQueryResponseJsonSchema(), field: "query", contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT },
+      { schema: sourceSemanticQueryResponseJsonSchema({ contract: "source-semantic-query-request-v10" }),
+        field: "query", contract: SOURCE_SEMANTIC_QUERY_NESTED_RESPONSE_CONTRACT },
       { schema: sourceSemanticCorrespondenceResponseJsonSchema(), field: "semantic_correspondence",
         contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT }];
     for (const row of envelopes) {
@@ -214,6 +217,28 @@ describe("Gemini complete generation schema guidance", () => {
       expect(schema).toEqual(before);
       expect(projectGeminiGenerationSchema(schema)).toEqual(projected);
     }
+  });
+
+  it("binds the selected nested query to complete envelope guidance through the native Gemini codec", () => {
+    const request = buildSourceSemanticQueryRequest({ original_query: "Who left?", producer_id: "authored",
+      producer_version: "1", generation_presentation: "nested-meaning-v1" });
+    const schema = sourceSemanticQueryResponseJsonSchema(request), before = structuredClone(schema);
+    const projected = projectGeminiGenerationSchema(schema);
+    expect(projected.recursive).toBe(true);
+    expect(projected.schema).toBeUndefined();
+    expect(projected.instruction).toContain("complete response envelope including its contract, outcome and body");
+    expect(projected.instruction).toContain(JSON.stringify(before));
+    expect(schema).toEqual(before);
+    const line = { systemPrompt: sourceSemanticQuerySystemPrompt(request), userPrompt: JSON.stringify(request) };
+    const body = encodeGeminiGenerateContent(line, { model: "gemini-3.1-flash-lite",
+      requestProfile: "gemini-3.1-minimal-v1", maxOutputTokens: 4096, responseJsonSchema: schema });
+    expect(body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
+      systemInstruction: { parts: [{ text: line.systemPrompt }, { text: projected.instruction }] } });
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect(JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema)))).toEqual({
+      contract: "gemini-recursive-generation-schema-v3", source_schema: schema,
+      response_schema: null, instruction: projected.instruction
+    });
   });
 
   it("sends the complete structured query schema through an actual local SSE socket", async () => {

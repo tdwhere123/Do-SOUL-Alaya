@@ -15,6 +15,8 @@ import {
 export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v5" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
 export const SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES = 8192;
+export const SourceSemanticQueryPresentationSchema = z.enum(["flat-carrier-v1", "nested-meaning-v1"]);
+export type SourceSemanticQueryPresentation = z.infer<typeof SourceSemanticQueryPresentationSchema>;
 
 const Key = SourceSemanticHandleSchema;
 const Reading = SourceSemanticReadingSchema;
@@ -254,9 +256,6 @@ export function materializeSourceSemanticQueryMeaning(
 }
 
 function preflight(value: unknown): void {
-  if (new TextEncoder().encode(JSON.stringify(value)).length > SOURCE_SEMANTIC_MAX_BYTES) {
-    fail([], "source semantic query exceeds its byte bound");
-  }
   const stack: { value: unknown; depth: number; meaningDepth: number; path: Path }[] = [
     { value, depth: 0, meaningDepth: 0, path: [] }
   ];
@@ -278,6 +277,9 @@ function preflight(value: unknown): void {
         path: [...row.path, Array.isArray(row.value) ? Number(key) : key]
       });
     }
+  }
+  if (new TextEncoder().encode(JSON.stringify(value)).length > SOURCE_SEMANTIC_MAX_BYTES) {
+    fail([], "source semantic query exceeds its byte bound");
   }
 }
 

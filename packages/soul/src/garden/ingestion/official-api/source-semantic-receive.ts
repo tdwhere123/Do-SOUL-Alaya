@@ -24,9 +24,9 @@ import {
   type SourceSemanticQueryOutcome
 } from "@do-soul/alaya-protocol";
 import {
-  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT,
-  SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
+  sourceSemanticQueryPresentation,
   sourceSemanticCorrespondenceSystemPrompt,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest, buildSourceSemanticRequest,
   parseSourceSemanticRequest, parseSourceSemanticCorrespondenceRequest, sourceSemanticRequestCatalog, semanticSha256, rejectForbiddenProposalInput,
@@ -34,6 +34,7 @@ import {
   type SourceInterpretationDescriptor, type SourceSemanticProposalInput, type SourceSemanticQueryProposalInput,
   type SourceSemanticQueryRequest, type SourceSemanticRequest
 } from "./source-semantic-request.js";
+import { sourceSemanticQuerySystemPrompt, sourceSemanticQueryResponseContract } from "./source-semantic-query-presentation.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT,
@@ -157,11 +158,11 @@ export function proposeQuerySemantics(
   parseQuery: ParseSourceSemanticQueryProposal = parseSourceSemanticQueryProposal
 ): SourceSemanticQueryProposalResult {
   const request = buildSourceSemanticQueryRequest(input);
+  const system_prompt = sourceSemanticQuerySystemPrompt(request);
   if (injected === undefined) {
-    return { outcome: { status: "unexercised" }, provider_attempts: 0, request,
-      system_prompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT };
+    return { outcome: { status: "unexercised" }, provider_attempts: 0, request, system_prompt };
   }
-  return { ...receiveQuerySemantics(injected.rawJson, request, parseQuery), system_prompt: SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT };
+  return { ...receiveQuerySemantics(injected.rawJson, request, parseQuery), system_prompt };
 }
 
 function receiveQuerySemantics(
@@ -174,7 +175,7 @@ function receiveQuerySemantics(
   if (parsed.status !== "ok") return parsed.result;
   const claimed = sourceSemanticProducerClaimedEnvelopeViolation("query", parsed.value);
   if (claimed !== undefined) return { ...attempt, outcome: { status: "invalid", reason: claimed } };
-  const envelope = QueryMeaningResponseSchema.safeParse(parsed.value);
+  const envelope = queryMeaningResponseSchema(request).safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
@@ -434,7 +435,8 @@ function materializeQuery(
     attribution_context: request.attribution_context
   };
   return materializeSourceSemanticQueryMeaning(
-    expandSourceSemanticQueryCarrier(record, request.resource_limits, meter), envelope, meter
+    sourceSemanticQueryPresentation(request) === "nested-meaning-v1"
+      ? record : expandSourceSemanticQueryCarrier(record, request.resource_limits, meter), envelope, meter
   );
 }
 
@@ -497,11 +499,13 @@ const QueryResponseOutcomeSchema = z.discriminatedUnion("status", [
   SourceSemanticProducerAbstainedOutcomeSchema
 ]);
 
-const QueryMeaningResponseSchema = z.object({
-  contract: z.literal(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT),
-  outcome: QueryResponseOutcomeSchema,
-  query: z.unknown().optional()
-}).strict().readonly();
+function queryMeaningResponseSchema(request: SourceSemanticQueryRequest) {
+  return z.object({
+    contract: z.literal(sourceSemanticQueryResponseContract(request)),
+    outcome: QueryResponseOutcomeSchema,
+    query: z.unknown().optional()
+  }).strict().readonly();
+}
 const CorrespondenceAssessmentResponseSchema = z.object({
   contract: z.literal(SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT),
   outcome: ProducerResponseOutcomeSchema,

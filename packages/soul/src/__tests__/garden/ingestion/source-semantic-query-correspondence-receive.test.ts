@@ -7,8 +7,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "../../../garden/triage/grounding/source-locator.js";
 import {
-  semanticSha256, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
+  semanticSha256
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-query-presentation.js";
 import {
   proposeCorrespondenceSemantics, proposeQuerySemantics as receiveQuerySemantics, proposeSourceSemantics
 } from "../../../garden/ingestion/official-api/source-semantic-receive.js";

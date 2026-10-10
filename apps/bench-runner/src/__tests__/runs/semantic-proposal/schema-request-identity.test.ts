@@ -83,6 +83,39 @@ describe("semantic proposal rendered schema identity", () => {
   it.each([
     { model: config.model, requestProfile: profile, providerUrl: config.providerUrl },
     { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" as const, providerUrl: "http://127.0.0.1:9" }
+  ])("binds the selected Q presentation to native identity and decoding: $requestProfile", settings => {
+    const lines = materializeSemanticProposalLines(parseSemanticProposalWorkset({
+      contract: settings.requestProfile === profile ? "source-semantic-proposal-workset-v4" : "source-semantic-proposal-workset-v3",
+      kind: "query", model: settings.model,
+      provider_url: settings.providerUrl, request_profile: settings.requestProfile,
+      items: [{ original_query }, { original_query, generation_presentation: "flat-carrier-v1" },
+        { original_query, generation_presentation: "nested-meaning-v1" }]
+    }), 4096);
+    const [implicit, flat, nested] = lines;
+    expect(flat).toEqual(implicit);
+    expect(nested!.key).not.toBe(flat!.key);
+    expect(nested!.requestDigest).not.toBe(flat!.requestDigest);
+    expect(nested!.request).toHaveProperty("contract", "source-semantic-query-request-v10");
+    expect(flat!.request).toHaveProperty("contract", "source-semantic-query-request-v9");
+    const wire = prepareSemanticProviderRequest({ ...settings, apiKey: null }, {
+      systemPrompt: nested!.systemPrompt, userPrompt: nested!.userPrompt, responseJsonSchema: nested!.responseJsonSchema,
+      maxOutputTokens: 4096, outputTokenField: "max_tokens", retryMode: "disabled"
+    }, "source_semantic_proposal");
+    const body = JSON.parse(wire.body);
+    if (settings.requestProfile === profile) {
+      expect(body.response_format.json_schema.schema).toEqual(nested!.responseJsonSchema);
+      expect(JSON.parse(body.messages[1].content).contract).toBe("source-semantic-query-request-v10");
+    } else {
+      expect(body.generationConfig.responseMimeType).toBe("application/json");
+      expect(body.generationConfig).not.toHaveProperty("responseJsonSchema");
+      expect(body.systemInstruction.parts[1].text).toContain("complete response envelope including its contract, outcome and body");
+      expect(body.systemInstruction.parts[1].text).toContain(JSON.stringify(nested!.responseJsonSchema));
+    }
+  });
+
+  it.each([
+    { model: config.model, requestProfile: profile, providerUrl: config.providerUrl },
+    { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" as const, providerUrl: "http://127.0.0.1:9" }
   ])("changes the Q cache key and native request digest for prompt bytes alone: $requestProfile", settings => {
     const current = line("query", { original_query });
     const changedPrompt = `${current.systemPrompt} Retain the stated unit.`;

@@ -9,11 +9,11 @@ import { buildOfficialApiSourceCorpus, indexOfficialApiSourceAssertions } from "
 import { parseOfficialApiSourcePacketRequest } from "../../../garden/ingestion/official-api/source-packet-request.js";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
-  SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
   buildSourceSemanticRequest, buildSourceSemanticQueryRequest, semanticSha256,
   sourceSemanticResponseJsonSchema, sourceSemanticRequestCatalog, parseSourceSemanticRequest,
   sourceSemanticSystemPrompt
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT } from "../../../garden/ingestion/official-api/source-semantic-query-presentation.js";
 import {
   MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, proposeCorrespondenceSemantics, proposeQuerySemantics,
   proposeSourceSemantics

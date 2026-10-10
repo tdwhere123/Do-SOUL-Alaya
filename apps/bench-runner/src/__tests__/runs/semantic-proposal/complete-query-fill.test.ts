@@ -94,6 +94,19 @@ function meaningBody(themeExcerpt: string): string {
   });
 }
 
+function nestedMeaningBody(): string {
+  return JSON.stringify({ contract: "source-semantic-query-response-v9", outcome: { status: "interpreted" }, query: {
+    contract: "source-semantic-query-meaning-v5",
+    entities: [{ kind: "free", key: "sender", excerpt: "Who", return: true },
+      { kind: "named", key: "sample", excerpt: "sample" }, { kind: "named", key: "mira", excerpt: "Mira" }],
+    alternatives: [{ conditions: [{ kind: "statement", key: "send", predicate: "send", arguments: [
+      { role: "sender", target: { kind: "reference", key: "sender" }, excerpt: "Who" },
+      { role: "theme", target: { kind: "reference", key: "sample" }, excerpt: "sample" },
+      { role: "recipient", target: { kind: "reference", key: "mira" }, excerpt: "Mira" }
+    ] }] }], gaps: []
+  } });
+}
+
 it("commits a complete STOP query after settling the reserved attempt", async () => {
   const cacheRoot = join(tempRoot(), "cache");
   const prepared = queryWorkset(MIRA_QUERY);
@@ -165,7 +178,8 @@ it("refuses a Q child after an incomplete physical parent spent its attempt", as
     parentCacheRoot: parentRoot, maxOutputTokens: 128, itemIndex: 0 })).toThrow(/complete physical parent/u);
 });
 
-it("sends the pinned Step query body through localhost HTTP and reopens the exact raw response", async () => {
+it.each(["flat-carrier-v1", "nested-meaning-v1"] as const)(
+  "sends the pinned %s Step query through localhost HTTP and reopens the exact raw response", async generation_presentation => {
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -174,7 +188,8 @@ it("sends the pinned Step query body through localhost HTTP and reopens the exac
     response.end(wire);
   });
   const wires: { path: string | undefined; body: Record<string, unknown> }[] = [];
-  const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: meaningBody("sample") },
+  const rawJson = generation_presentation === "nested-meaning-v1" ? nestedMeaningBody() : meaningBody("sample");
+  const wire = `data: ${JSON.stringify({ choices: [{ delta: { content: rawJson },
     finish_reason: "stop" }], usage: { prompt_tokens: 17, completion_tokens: 12,
     total_tokens: 29, completion_tokens_details: { reasoning_tokens: 4 } } })}\n\ndata: [DONE]\n\n`;
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -183,7 +198,7 @@ it("sends the pinned Step query body through localhost HTTP and reopens the exac
       contract: "source-semantic-proposal-workset-v4", provider_url: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
       kind: "query", model: STEP_PLAN_QUOTE_BASIS.selected_model,
       request_profile: "step-3.5-2603-low-json-schema-v1",
-      items: [{ original_query: MIRA_QUERY }]
+      items: [{ original_query: MIRA_QUERY, generation_presentation }]
     });
     const cacheRoot = join(tempRoot(), "cache");
     const preflight = prepareSemanticProposal(prepared, cacheRoot, 4096, 1);
@@ -215,6 +230,9 @@ it("sends the pinned Step query body through localhost HTTP and reopens the exac
       http_response: { bodyBase64: Buffer.from(wire).toString("base64"),
         bodyByteLength: Buffer.byteLength(wire), bodySha256: createHash("sha256").update(wire).digest("hex"),
         bodyComplete: true } });
+    expect(inspectSemanticProposalShard(cacheRoot, authority.keys[0]!, {
+      kind: "query", model: stepConfig.model, request_profile: stepConfig.requestProfile
+    })?.raw_json).toBe(rawJson);
     expect(readSemanticProposalResults(prepared, cacheRoot, 4096)[0]?.status).toBe("interpreted");
     const repeated = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
       config: { ...stepConfig, apiKey: null } });
@@ -224,6 +242,28 @@ it("sends the pinned Step query body through localhost HTTP and reopens the exac
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
+});
+
+it("isolates a rejected nested response from the admitted flat key and preserves both raw attempts on replay", async () => {
+  const workset = parseSemanticProposalWorkset({ ...queryWorkset(MIRA_QUERY), items: [
+    { original_query: MIRA_QUERY }, { original_query: MIRA_QUERY, generation_presentation: "nested-meaning-v1" }
+  ] });
+  const cacheRoot = join(tempRoot(), "cache");
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 4096),
+    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  const flatRaw = meaningBody("sample");
+  const first = extractor([flatRaw, flatRaw]);
+  const result = await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: first });
+  expect(authority.keys).toHaveLength(2);
+  expect(new Set(authority.keys).size).toBe(2);
+  expect(result).toMatchObject({ attempts: 2, interpreted: 1, newly_admitted: 1 });
+  const retained = readSemanticProposalResults(workset, cacheRoot, 4096);
+  expect(retained.map(row => row.status)).toEqual(["interpreted", "invalid"]);
+  expect(retained.map(row => row.shard?.raw_json)).toEqual([flatRaw, flatRaw]);
+  const replay = extractor([nestedMeaningBody()]);
+  await executeSemanticProposalFill({ workset, cacheRoot, authority, config: config(), extractor: replay });
+  expect(replay.calls).toHaveLength(0);
+  expect(readSemanticProposalResults(workset, cacheRoot, 4096)).toEqual(retained);
 });
 
 it.each([

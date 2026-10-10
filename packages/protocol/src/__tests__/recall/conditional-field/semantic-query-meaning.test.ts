@@ -455,6 +455,16 @@ it("uses recursive meaning while rejecting a ten-node nesting path before materi
   expect(() => compiled(node)).toThrow(/query meaning nesting exceeds its bound/u);
 });
 
+it("rejects excessive object nesting before invoking recursive serialization", () => {
+  let value: unknown = null;
+  for (let depth = 0; depth < 10000; depth += 1) value = { child: value };
+  let serialized = false;
+  const body = { ...meaning(statement("ring", [])), extra: value,
+    toJSON: () => { serialized = true; throw new Error("recursive serialization reached"); } };
+  expect(() => materializeSourceSemanticQueryMeaning(body, envelope)).toThrow(/query meaning nesting exceeds its bound/u);
+  expect(serialized).toBe(false);
+});
+
 it("refuses cyclic, undeclared, and kind-conflicting references instead of repairing them", () => {
   expect(() => compiled({ kind: "occurrence", key: "missing" })).toThrow(/undeclared local reference/u);
   expect(() => compiled(statement("loop", [], { key: "loop", content: { kind: "occurrence", key: "loop" } })))

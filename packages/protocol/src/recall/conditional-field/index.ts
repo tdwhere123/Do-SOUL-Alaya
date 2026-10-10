@@ -299,9 +299,11 @@ export {
   SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES,
   SourceSemanticQueryMeaningBodySchema,
   SourceSemanticQueryCarrierBodySchema,
+  SourceSemanticQueryPresentationSchema,
   materializeSourceSemanticQueryMeaning,
   type QueryMeaning,
   type SourceSemanticQueryMeaningBody,
+  type SourceSemanticQueryPresentation,
   type SourceSemanticQueryMeaningEnvelope
 } from "./semantic-query-meaning.js";
 export { expandSourceSemanticQueryCarrier, encodeSourceSemanticQueryCarrier } from "./semantic-query-carrier.js";

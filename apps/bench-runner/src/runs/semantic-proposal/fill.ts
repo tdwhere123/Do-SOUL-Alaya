@@ -4,7 +4,7 @@ import {
 } from "@do-soul/alaya-core";
 import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import {
-  prepareSourceSemanticProposalRevision, proposeCorrespondenceSemantics, proposeQuerySemantics,
+  prepareSourceSemanticProposalRevision, proposeCorrespondenceSemantics, proposeQuerySemantics, sourceSemanticQueryPresentation,
   type SourceSemanticProposalRevision,
   type SourceSemanticCorrespondenceRequest, type SourceSemanticQueryRequest
 } from "@do-soul/alaya-soul";
@@ -418,6 +418,7 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
       producer_id: request.producer_capability.producer_id,
       producer_version: request.producer_capability.producer_version,
       resource_limits: request.resource_limits,
+      generation_presentation: sourceSemanticQueryPresentation(request),
       ...(request.approved_fixed_context === undefined ? {} : { approved_fixed_context: request.approved_fixed_context }),
       attribution_context: request.attribution_context,
       ...(request.revision === undefined ? {} : { revision: request.revision })

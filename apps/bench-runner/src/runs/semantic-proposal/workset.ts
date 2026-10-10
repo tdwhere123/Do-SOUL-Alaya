@@ -1,10 +1,10 @@
 import {
   isChatSemanticRequestProfile, AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
-  UNKNOWN_UTTERANCE_ATTRIBUTION, SourceSemanticCorrespondenceGenerationPolicySchema
+  UNKNOWN_UTTERANCE_ATTRIBUTION, SourceSemanticCorrespondenceGenerationPolicySchema, SourceSemanticQueryPresentationSchema
 } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import {
-  sourceSemanticCorrespondenceSystemPrompt, SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT,
+  sourceSemanticCorrespondenceSystemPrompt, sourceSemanticQuerySystemPrompt,
   SourceSemanticProposalRevisionSchema,
   buildSourceSemanticCorrespondenceRequest, buildSourceSemanticQueryRequest,
   sourceSemanticCorrespondenceResponseJsonSchema, sourceSemanticQueryResponseJsonSchema,
@@ -33,6 +33,7 @@ const QueryItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
   approved_fixed_context: ApprovedSemanticContextSchema.optional(),
   attribution_context: UtteranceAttributionSchema.optional(),
+  generation_presentation: SourceSemanticQueryPresentationSchema.optional(),
   revision: SourceSemanticProposalRevisionSchema.optional()
 }).strict();
 
@@ -94,16 +95,16 @@ export function materializeSemanticProposalLines(
   if (workset.kind === "query") {
     const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID;
     const producer_version = workset.producer_version ?? "1";
-    const schema = sourceSemanticQueryResponseJsonSchema();
     return workset.items.map((item) => {
       const parsed = QueryItemSchema.parse(item);
       const request = buildSourceSemanticQueryRequest({
         original_query: parsed.original_query, producer_id, producer_version,
         ...(parsed.approved_fixed_context === undefined ? {} : { approved_fixed_context: parsed.approved_fixed_context }),
         attribution_context: parsed.attribution_context ?? UNKNOWN_UTTERANCE_ATTRIBUTION,
+        ...(parsed.generation_presentation === undefined ? {} : { generation_presentation: parsed.generation_presentation }),
         ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
       });
-      return bindLine(workset, "query", SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema,
+      return bindLine(workset, "query", sourceSemanticQuerySystemPrompt(request), request, sourceSemanticQueryResponseJsonSchema(request),
         parsed.original_query, maxOutputTokens);
     });
   }

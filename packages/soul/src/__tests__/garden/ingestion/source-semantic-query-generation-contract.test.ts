@@ -5,9 +5,10 @@ import {
   SourceSemanticQueryCarrierBodySchema, sourceSemanticQueryIdentity, type SourceSemanticQueryMeaningBody
 } from "@do-soul/alaya-protocol";
 import {
-  semanticSha256, sourceSemanticQueryResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
-  SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT
+  semanticSha256, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
+import { sourceSemanticQueryResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT }
+  from "../../../garden/ingestion/official-api/source-semantic-query-presentation.js";
 import { proposeQuerySemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { sourceSemanticQueryExamples } from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
 
