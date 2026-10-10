@@ -135,7 +135,8 @@ export function candidateDiscovery(initial: ObservedRound, second?: ObservedRoun
 }
 
 export function compareCandidateDiscovery(arms: readonly Readonly<{ arm: Arm["name"];
-  candidate_newly_observed: DiscoveryAssessment; candidate_explicitly_observed_initially: boolean }>[]): DiscoveryAssessment {
+  candidate_newly_observed: DiscoveryAssessment; candidate_explicitly_observed_initially: boolean;
+  initial_observed_identities_complete: boolean }>[]): DiscoveryAssessment {
   for (const arm of ["A", "B", "C"] as const) {
     const matches = arms.filter(row => row.arm === arm);
     if (matches.length !== 1) return { status: "unknown", value: null,
@@ -147,8 +148,10 @@ export function compareCandidateDiscovery(arms: readonly Readonly<{ arm: Arm["na
   if (!c.candidate_newly_observed.value) return { status: "known", value: false, reason: "C_has_no_new_candidate_discovery" };
   const baseline = arms.find(row => row.arm !== "C"
     && (row.candidate_explicitly_observed_initially || row.candidate_newly_observed.value));
-  return baseline === undefined ? { status: "known", value: true, reason: "C_discovers_candidate_both_baselines_do_not" }
-    : { status: "known", value: false, reason: `${baseline.arm}_also_observed_candidate` };
+  if (baseline !== undefined) return { status: "known", value: false, reason: `${baseline.arm}_also_observed_candidate` };
+  const omittedBaseline = arms.find(row => row.arm !== "C" && !row.initial_observed_identities_complete);
+  return omittedBaseline === undefined ? { status: "known", value: true, reason: "C_discovers_candidate_both_baselines_do_not" }
+    : { status: "unknown", value: null, reason: `${omittedBaseline.arm}_initial_observed_identities_omitted` };
 }
 
 export function publicSources(delivery: Delivery | undefined, manifest: readonly ManifestSource[]) {

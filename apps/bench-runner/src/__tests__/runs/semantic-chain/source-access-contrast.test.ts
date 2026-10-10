@@ -154,6 +154,7 @@ async function observeArm(root: string, arm: Arm, handler: Handler, fixture: Acc
       : terminal ? "terminal_initial_no_result" : "visible_raw_evidence_already_sufficient",
     candidate_newly_observed: candidateNewlyObserved,
     candidate_explicitly_observed_initially: candidateInitiallyObserved,
+    initial_observed_identities_complete: initialReport.observed_identity_summary.unrepresented_observed_source_identities === 0,
     later_observed_ids_absent_from_explicit_initial_rows: laterIds.filter(id => !firstIds.has(id)),
     cumulative_explicit_native_read_source_ids: [...new Set([...firstIds, ...laterIds])],
     cumulative_task_evidence: evidenceChecklist(fixture, [fixture.initial, ...initialTexts,
@@ -293,6 +294,7 @@ it("distinguishes a repeated source from a confirmed first observation without r
 
 it.each(["A", "B", "C"] as const)("keeps an unknown %s arm unknown in the comparative outcome", unknownArm => {
   const arms = ARMS.map(({ name }) => ({ arm: name, candidate_explicitly_observed_initially: false,
+    initial_observed_identities_complete: true,
     candidate_newly_observed: name === unknownArm
       ? { status: "unknown" as const, value: null, reason: "terminal_native_failure" }
       : { status: "known" as const, value: false, reason: "candidate_not_observed_in_second_round" } }));
@@ -302,10 +304,27 @@ it.each(["A", "B", "C"] as const)("keeps an unknown %s arm unknown in the compar
 
 it("keeps missing arms unknown and observed baseline sufficiency a known negative comparison", () => {
   const arms = ARMS.map(({ name }) => ({ arm: name, candidate_explicitly_observed_initially: name !== "C",
+    initial_observed_identities_complete: true,
     candidate_newly_observed: { status: "known" as const, value: name === "C", reason: "observed" } }));
   expect(compareCandidateDiscovery(arms.slice(0, 2)))
     .toEqual({ status: "unknown", value: null, reason: "missing_arm_C" });
   expect(compareCandidateDiscovery(arms)).toEqual({ status: "known", value: false, reason: "A_also_observed_candidate" });
+});
+
+it.each(["skipped", "complete_absent"] as const)("keeps omitted initial baseline identities unknown when its second round is %s", secondState => {
+  const complete = { terminal: false,
+    identities: observationIdentitySummary(accessReceipt(["s-1"]), accessReceipt(["s-1"], 1, true)) };
+  const omitted = { terminal: false,
+    identities: observationIdentitySummary(accessReceipt(["s-1"], 2), accessReceipt(["s-1"], 2, true)) };
+  const present = { terminal: false,
+    identities: observationIdentitySummary(accessReceipt(["candidate"]), accessReceipt(["candidate"], 1, true)) };
+  const arms = ARMS.map(({ name }) => ({ arm: name, candidate_explicitly_observed_initially: false,
+    initial_observed_identities_complete: name === "C",
+    candidate_newly_observed: name === "C" ? candidateDiscovery(complete, present)
+      : candidateDiscovery(omitted, secondState === "skipped" ? undefined : complete) }));
+  expect(arms.map(row => row.candidate_newly_observed.value)).toEqual([false, false, true]);
+  expect(compareCandidateDiscovery(arms)).toEqual({ status: "unknown", value: null,
+    reason: "A_initial_observed_identities_omitted" });
 });
 
 it("labels ordinary tests unbound and admits only an exact supplied implementation revision", () => {
