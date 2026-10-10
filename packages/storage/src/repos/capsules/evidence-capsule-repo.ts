@@ -285,6 +285,14 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     );
   }
 
+  public archiveSourceInterpretationInCurrentTransaction(input: Readonly<{
+    objectId: string; workspaceId: string; expectedGist: string; sourceHash: string; updatedAt: string;
+  }>): boolean {
+    if (!this.activeConnection().inTransaction) throw new StorageError("QUERY_FAILED", "Source interpretation archive requires a transaction.");
+    return this.statements.archiveSourceInterpretationStatement.run(parseUpdatedAt(input.updatedAt), input.objectId,
+      input.workspaceId, input.expectedGist, input.sourceHash).changes === 1;
+  }
+
   public async findByArtifactRef(
     workspaceId: string,
     artifactRef: string

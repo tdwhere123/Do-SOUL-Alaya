@@ -33,6 +33,7 @@ describe("mcp memory tool catalog", () => {
     expect(byName.get("garden.complete_task")?.annotations.idempotentHint).toBe(false);
     expect(byName.get("soul.report_context_usage")?.annotations.readOnlyHint).toBe(false);
     expect(byName.get("soul.interpretation")?.annotations.readOnlyHint).toBe(false);
+    expect(byName.get("soul.interpretation")?.annotations.destructiveHint).toBe(true);
     expect(byName.get("soul.interpretation")?.annotations.idempotentHint).toBe(true);
     expect(byName.get("soul.interpretation")?.description).toContain("provider-free");
     expect(byName.get("soul.interpretation")?.description).toContain(

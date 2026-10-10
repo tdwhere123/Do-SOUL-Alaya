@@ -89,11 +89,12 @@ export function runSourceSemanticLibraryRecall(
     workspace_id: payload.workspace_id, as_of: payload.as_of, authorized_scopes: authorized,
     original_query: original, query_semantics: admission.kind === "admitted" ? admission.query : undefined,
     query_semantics_status: boundStatus, source_id: lease?.source_id,
+    ...(boundPool?.accessHint === undefined ? {} : { access_hint: boundPool.accessHint }),
     semantic_correspondences: request.semantic_correspondences ?? [], budget: request.budget,
     output_byte_limit: request.output_byte_limit, access_policy: policy
   });
   const inputId = accessInputIdentity(original, admission.kind === "admitted" ? admission.query : undefined,
-    request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents);
+    request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents, boundPool?.accessHint);
   if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
   }

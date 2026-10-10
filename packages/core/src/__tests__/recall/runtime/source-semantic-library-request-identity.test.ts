@@ -22,6 +22,7 @@ it("binds every resolved request dimension including unused correspondence input
     { authorized_scopes: ["project"] },
     { original_query: "which tools does Bob use?" },
     { source_id: "restricted-source" },
+    { access_hint: "Harbor" },
     { query_semantics: { ...semantics, return_variables: ["actor"] } },
     { query_semantics: undefined, query_semantics_status: { status: "unavailable", reason: "absent" } },
     { query_semantics: undefined, query_semantics_status: { status: "unavailable", reason: "invalid" } },
@@ -42,6 +43,10 @@ it("normalizes scope order while keeping unrestricted and empty admissions disti
     .toBe(sourceSemanticLibraryRequestIdentity(request));
   expect(sourceSemanticLibraryRequestIdentity({ ...request, source_id: undefined }))
     .toBe(sourceSemanticLibraryRequestIdentity(request));
+  expect(sourceSemanticLibraryRequestIdentity({ ...request, access_hint: undefined }))
+    .toBe(sourceSemanticLibraryRequestIdentity(request));
+  expect(sourceSemanticLibraryRequestIdentity({ ...request, access_hint: "Harbor" }))
+    .not.toBe(sourceSemanticLibraryRequestIdentity({ ...request, access_hint: "harbor" }));
   expect(sourceSemanticLibraryRequestIdentity({ ...request, authorized_scopes: [] }))
     .not.toBe(sourceSemanticLibraryRequestIdentity({ ...request, authorized_scopes: null }));
 });

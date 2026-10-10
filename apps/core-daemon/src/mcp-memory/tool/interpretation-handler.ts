@@ -1,7 +1,8 @@
 import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticInterpretation, type SoulInterpretationRequest,
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
-  type AuthorizedScopesAdmission, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+  type AuthorizedScopesAdmission, type SourceRecordIdentity, type SourceInterpretationInvalidation,
+  type SourceInterpretationInvalidationResult } from "@do-soul/alaya-protocol";
 import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { finalizeSourceSemanticReason } from "../../runtime/recall-read-worker/source-semantic-reason-finalization.js";
 import { throwIfAborted } from "@do-soul/alaya-engine-gateway";
@@ -21,6 +22,10 @@ export type SourceSemanticHostPort = Readonly<{
     principal?: string; expires_at?: string; lifetime_now?: string; request: SourceSemanticWorkerRequest }>): Promise<SourceSemanticWorkerResult>;
 }>;
 export type SourceSemanticPublicationPort = Readonly<{
+  invalidate?(input: Readonly<{ request: SourceInterpretationInvalidation; budget: RequestBudget }>): Promise<Readonly<{
+    invalidation: SourceInterpretationInvalidationResult;
+    resource_usage: Readonly<{ work_units: number; memory_bytes: number; native_work: number; native_bytes: number }>;
+  }>>;
   publish(input: Readonly<{
     workspaceId: string; runId: string; artifactKey: string; source: string; catalog: SourceReferenceCatalog;
     assertion_locations: NonNullable<SourceSemanticInterpretation["source"]["assertion_locations"]>;
@@ -39,6 +44,7 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
   return async (request, context) => {
     throwIfAborted(context.abortSignal);
     if (request.operation === "propose") return propose(input, request, context);
+    if (request.operation === "invalidate") return invalidate(input, request, context);
     if (request.operation === "reason" && request.source_interpretation_id === undefined &&
         request.semantic_correspondence === undefined) {
       return SoulInterpretationResponseSchema.parse({ operation: "reason",
@@ -71,6 +77,46 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
       throw error;
     }
   };
+}
+
+async function invalidate(input: Dependencies, request: Extract<SoulInterpretationRequest, { operation: "invalidate" }>,
+  context: McpMemoryToolCallContext): Promise<SoulInterpretationResponse> {
+  if (input.publication?.invalidate === undefined) throw new ToolUnavailableError("soul.interpretation invalidation is not wired into this daemon");
+  if (context.runId === null) throw new ToolValidationError("soul.interpretation invalidate requires a runId in the MCP call context.");
+  const authorizedScopes = request.authorized_scopes ?? { mode: "unrestricted" as const };
+  let preparedWork: SourceSemanticWorkerWork = ZERO_WORK;
+  try {
+    const prepared = await executeWorker(input, context, { kind: "validate_source", source_handle: request.source_handle,
+      budget: request.budget }, authorizedScopes);
+    if (prepared.kind !== "validate_source") throw new CoreError("OBLIGATION_VIOLATION", "worker returned the wrong preparation operation");
+    preparedWork = prepared.work;
+    throwIfAborted(context.abortSignal);
+    const usedWork = preparedWork.logical_work ?? preparedWork.native_work;
+    const remaining = { ...request.budget, work_units: request.budget.work_units - usedWork,
+      memory_bytes: request.budget.memory_bytes - preparedWork.logical_memory_bytes };
+    if (remaining.work_units < 0 || remaining.memory_bytes < 0) throw new SourceSemanticResourceExhausted("invalidation preparation");
+    const committed = await input.publication.invalidate({ budget: remaining, request: {
+      workspace_id: context.workspaceId, run_id: context.runId, source_interpretation_id: request.source_interpretation_id,
+      source: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest },
+      error_basis: request.error_basis,
+      provenance: { reporter_id: request.reporter_id, principal: context.agentTarget, preparation_handle: request.source_handle },
+      authorized_scopes: authorizedScopes } });
+    return SoulInterpretationResponseSchema.parse({ operation: "invalidate", invalidation: committed.invalidation,
+      coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, provider_attempts: 0,
+      work: { ...preparedWork, native_work: preparedWork.native_work + committed.resource_usage.native_work,
+        native_bytes: preparedWork.native_bytes + committed.resource_usage.native_bytes,
+        logical_work: usedWork + committed.resource_usage.work_units,
+        logical_memory_bytes: preparedWork.logical_memory_bytes + committed.resource_usage.memory_bytes } });
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE")) throw error;
+    const failed: SourceSemanticWorkerWork = error instanceof CoreError ? measuredFailure(error) : ZERO_WORK;
+    return SoulInterpretationResponseSchema.parse({ operation: "invalidate", outcome: { status: "resource_exhausted" },
+      coverage: IDLE, provider_attempts: 0, work: {
+        native_work: preparedWork.native_work + failed.native_work, native_bytes: preparedWork.native_bytes + failed.native_bytes,
+        logical_work: (preparedWork.logical_work ?? preparedWork.native_work) + (failed.logical_work ?? failed.native_work),
+        logical_memory_bytes: preparedWork.logical_memory_bytes + failed.logical_memory_bytes,
+        rss_bytes: Math.max(preparedWork.rss_bytes, failed.rss_bytes) } });
+  }
 }
 
 async function propose(input: Dependencies, request: Extract<SoulInterpretationRequest, { operation: "propose" }>,

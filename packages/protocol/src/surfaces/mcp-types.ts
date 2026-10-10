@@ -65,6 +65,8 @@ export {
   SoulInterpretationRecallDeliverySchema,
   SoulInterpretationPrepareSourceRequestSchema,
   SoulInterpretationProposeRequestSchema,
+  SoulInterpretationInvalidateRequestSchema,
+  SoulInterpretationInvalidateResponseSchema,
   SoulInterpretationPrepareQueryRequestSchema,
   SoulInterpretationReasonRequestSchema,
   SoulInterpretationPrepareSourceResponseSchema,

@@ -144,6 +144,22 @@ it("admits prepare and one-shot reason without a continuation token", () => {
   expect(digest.startsWith("sha256:")).toBe(true);
 });
 
+it("admits bounded navigation hints only on query-conditioned preparation on public and worker surfaces", () => {
+  const request = { original_query: "Why delayed?", budget };
+  for (const input of [{}, { access_hint: "Harbor" }, { access_hint: "x".repeat(1024) }]) {
+    expect(SoulInterpretationRequestSchema.safeParse({ operation: "prepare_query", ...request, ...input }).success).toBe(true);
+    expect(SourceSemanticWorkerRequestSchema.safeParse({ kind: "prepare_query", ...request, ...input }).success).toBe(true);
+  }
+  for (const input of [{ access_hint: "" }, { access_hint: " \n\t" }, { access_hint: "x".repeat(1025) },
+    { access_hint: "Harbor", source_handle: "source" }, { access_hint: "Harbor", access_policy: "canonical-v1" }]) {
+    expect(SoulInterpretationRequestSchema.safeParse({ operation: "prepare_query", ...request, ...input }).success).toBe(false);
+    expect(SourceSemanticWorkerRequestSchema.safeParse({ kind: "prepare_query", ...request, ...input }).success).toBe(false);
+  }
+  const recall = { ...request, access_hint: "Harbor", accepts_unreviewed_conditional_results: true, output_byte_limit: 1024 };
+  expect(SoulInterpretationRequestSchema.safeParse({ operation: "recall", ...recall }).success).toBe(false);
+  expect(SourceSemanticWorkerRequestSchema.safeParse({ kind: "recall", ...recall }).success).toBe(false);
+});
+
 function libraryDelivery() {
   return { delivery_id: "delivery", request_identity: digest, query_semantics_status: { status: "unavailable", reason: "absent" },
     protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: 0,

@@ -195,9 +195,9 @@ export * from "./governance/security/zero-day-security-layer.js";
 
 export {
   createSourceInterpretationPacketPublication, verifyPublishedSourceInterpretation, packetEvidenceId,
-  createSourceSemanticInterpretationPublication, verifyPublishedSourceSemanticInterpretation,
-  semanticInterpretationEvidenceId
+  createSourceSemanticInterpretationPublication, verifyPublishedSourceSemanticInterpretation
 } from "./memory/evidence-create/source-interpretation-packet-publication.js";
+export { semanticInterpretationEvidenceId } from "./memory/evidence-create/source-semantic-capsule.js";
 export { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "./recall/conditional-field/query/source-semantic-query-admission.js";
 export {
   SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,

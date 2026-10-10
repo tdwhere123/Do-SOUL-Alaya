@@ -1245,6 +1245,23 @@ repeated text requires explicit host locations. The unique-text compatibility
 adapter is not permission to guess an occurrence. Source revision, authorized
 scope and erasure still govern every read and audited publication.
 
+`soul.interpretation` `invalidate` is an explicit inline resolution of one
+published, unreviewed H. A current authorized source handle and the exact H
+identity bind the action. The caller supplies an error basis and reporter
+provenance; these remain an attestation, not a source-truth certificate.
+Core rechecks source binding and scope with the same bounded current-source
+authority as publication, including the effective evidence alias. EventPublisher
+owns the EventLog/CAS transaction and post-commit notification; a propagation
+failure records diagnostics without turning the committed archive into a failed
+mutation. Source validation and the archive phase share the request allowance;
+exhaustion before mutation leaves H and its audit unchanged. Source bytes,
+the archived interpretation, audit history and independent H remain intact.
+Failed supplementation does not invalidate existing support; an independently
+invalidated H cannot become active because its successor fails to publish.
+Current discovery/reasoning excludes archived H and database revision changes
+invalidate old frozen query/library handles. Pure proof-witness replay remains
+historical computation evidence; it does not certify current H eligibility.
+
 `prepare_query` returns bounded current source-interpretation descriptors and optional
 `continuation_handle` pages. Query-semantics generation is source-independent; semantic-correspondence generation
 uses these exact descriptors, including roles, bindings, mentions and contexts.
@@ -1260,6 +1277,19 @@ clock retain the existing advancing `as_of` convention.
 Query/page handles conservatively invalidate on the worker database revision;
 reprepare after changes. One-shot reasoning is supported without claiming that
 library discovery ran. There is no cross-run semantic result/coverage cache.
+
+Initial `prepare_query` may carry an optional `access_hint` of 1–1024 nonblank
+characters. It replaces only the existing single FTS navigation text; original
+query, admitted Q and final source/interpretation scoring remain unchanged.
+It is incompatible with a source handle or canonical access. Access pool and
+resolved library request identities bind the exact hint. A continuation can
+omit it to inherit the frozen value, but cannot change or introduce it and never
+resumes observation. Query-handle recall reuses that pool. The hint provides no
+semantic correspondence, fact, or durable memory. Existing FTS covers published
+interpretation capsules; raw-only sources still depend on source observation.
+Each preparation meters its own work. A task performing another preparation
+must reserve and account for both calls and delivery in its outer total budget;
+this parameter does not establish a cross-request allowance or generate clues.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. Host operations
@@ -1282,7 +1312,8 @@ and modality foils may tie or outrank a relevant interpretation without acquirin
 assertion authority. A source without an interpretation remains a raw candidate.
 Before interpretation verification, the query-conditioned policy nominates up
 to 16 inspected capsule candidates across the existing Porter/trigram FTS lanes.
-Quoted original-query tokens use resumable ascending native rowid seeks and
+Quoted navigation tokens (the hint when supplied, otherwise the original query)
+use resumable ascending native rowid seeks and
 bounded capsule metadata point reads, without BM25, body reads or a SQL sorter.
 The exact signed-64-bit cursors bind workspace and query. Empty seeks and all
 metadata/filter attempts count against the same observation ledger, including

@@ -15,7 +15,7 @@ const ALL_STOPS = ["budget", "source_limit", "interpretation_limit", "unavailabl
 type Completion = Readonly<{
   runtime: SourceSemanticReadRuntime; parent: SourceSemanticReadBudget; child: SourceSemanticReadBudget;
   records: readonly SourceRecordIdentity[]; sourcePages: number;
-  policy: SourceSemanticAccessPolicy; budget: RequestBudget;
+  policy: SourceSemanticAccessPolicy; budget: RequestBudget; accessHint?: string;
   orderCost: (count: number) => SourceSemanticResourceBudget;
   leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery;
 }>;
@@ -35,7 +35,8 @@ function planCompletion(input: Completion, planning: SourceSemanticReadBudget): 
   const receipt = sourceSemanticAccessReceiptValue(policy, DIGEST, sourceRows, [],
     WIDE_SCALAR, WIDE_SCALAR, ALL_STOPS);
   const access = { ...receipt, pool_id: DIGEST };
-  const pool = { sources: records, descriptors: [], access, sourcePages, interpretationPages: 1 };
+  const pool = { sources: records, descriptors: [], access, sourcePages, interpretationPages: 1,
+    ...(input.accessHint === undefined ? {} : { accessHint: input.accessHint }) };
   const trace = preparationAccessReceiptValue(pool, 0, 0, 0, records.length);
   // Widen numeric trace scalars; the field set comes from the delivery owner above.
   const wideTrace = { ...trace, trace: Object.fromEntries(Object.entries(trace.trace!).map(([key, value]) =>

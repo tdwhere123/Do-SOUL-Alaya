@@ -154,6 +154,29 @@ export class SqliteSourceHintReader {
       status: row === undefined ? "absent" as const : row.gist === null ? "resource_limited" as const : "complete" as const };
   }
 
+  /** Lifecycle decisions retain archived bytes and use the same scoped compatibility lookup as Recall. */
+  public readBoundInterpretationForLifecycle(workspaceId: string, objectIds: readonly string[], byteLimit: number) {
+    if (!this.db.inTransaction) throw new AlayaError("CONFLICT", "Interpretation lifecycle read requires a transaction");
+    const selected = this.readBoundInterpretationCompatible(workspaceId, objectIds, byteLimit, true);
+    if (selected.status !== "complete" || !("objectId" in selected)) return selected;
+    const allowance = boundedBytes(byteLimit) - selected.bytesRead;
+    const metadataBytes = 208;
+    if (allowance < metadataBytes) return { ...selected, status: "resource_limited" as const };
+    const row = this.db.prepare(`SELECT
+      CASE WHEN octet_length(lifecycle_state)<=64 THEN lifecycle_state ELSE NULL END AS lifecycle_state,
+      CASE WHEN octet_length(source_hash)<=128 THEN source_hash ELSE NULL END AS source_hash,
+      CASE WHEN octet_length(gist)<=? THEN gist ELSE NULL END AS gist
+      FROM evidence_capsules WHERE workspace_id=? AND object_id=? LIMIT 1`
+    ).get(allowance - metadataBytes, workspaceId, selected.objectId) as {
+      lifecycle_state: string | null; source_hash: string | null; gist: string | null;
+    } | undefined;
+    return { objectId: selected.objectId, gist: row?.gist ?? null, lifecycleState: row?.lifecycle_state ?? null,
+      sourceHash: row?.source_hash ?? null, nativeVisits: selected.nativeVisits + 1,
+      bytesRead: selected.bytesRead + metadataBytes + Buffer.byteLength(row?.gist ?? ""),
+      status: row === undefined ? "absent" as const : row.lifecycle_state === null || row.source_hash === null
+        ? "unavailable" as const : row.gist === null ? "resource_limited" as const : "complete" as const };
+  }
+
   public pageBoundInterpretations(input: Readonly<{
     workspaceId: string; limit: number; nativeLimit: number; afterCursor: string | null;
     matches?: (gist: string) => boolean; nativeByteLimit?: number;

@@ -3,6 +3,18 @@ import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitiv
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 
 export const SourceSemanticAccessPolicySchema = z.enum(["query-conditioned-v1", "canonical-v1"]);
+/** Task-local navigation text; it cannot supply query semantics or durable source meaning. */
+export const SourceSemanticAccessHintSchema = z.string().min(1).max(1024)
+  .refine(value => value.trim().length > 0, "access hint must contain text");
+
+export function refineSourceSemanticAccessHint(input: Readonly<{
+  access_hint?: string; access_policy?: z.infer<typeof SourceSemanticAccessPolicySchema>; source_handle?: string;
+}>, context: z.RefinementCtx): void {
+  if (input.access_hint !== undefined && (input.source_handle !== undefined || input.access_policy === "canonical-v1")) {
+    context.addIssue({ code: "custom", path: ["access_hint"],
+      message: "access hint requires query-conditioned preparation without a source handle" });
+  }
+}
 /** An explicit native read extent belongs to a current source tuple, not to its rank or text. */
 export const SourceSemanticPreviewExtentsSchema = z.array(z.object({
   source_id: BoundedIdSchema, source_version: BoundedIdSchema, record_id: Sha256DigestSchema,

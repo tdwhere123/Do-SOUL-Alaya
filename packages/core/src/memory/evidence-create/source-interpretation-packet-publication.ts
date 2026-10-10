@@ -17,6 +17,7 @@ import { resolveCurrentSource } from "./source-observation-currentness.js";
 import { sliceUtf8Span, sourceSpanFromCodeUnitOffsets } from "./source-span-views.js";
 import { uuidFromHex } from "./source-observation-identity.js";
 import { SOURCE_PROVENANCE_CAPSULE } from "./create-evidence.js";
+import { semanticInterpretationEvidenceId, sourceSemanticCapsuleKeys, selectSourceSemanticCapsule } from "./source-semantic-capsule.js";
 
 type PacketInput = Readonly<{
   workspaceId: string; runId: string; artifactKey: string; source: string; packet: unknown;
@@ -161,13 +162,10 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
       const activeOwner = { ...owner, meter };
       const bound = bindSemanticInterpretation(activeOwner, input);
       const objectId = semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256, input.workspaceId);
-      // Read-only compatibility until all legacy workspace-free capsule keys are explicitly retired.
       const findExisting = async () => {
-        const rows = await Promise.all([objectId, semanticInterpretationEvidenceId(bound.interpretation_id, owner.sha256)]
+        const rows = await Promise.all(sourceSemanticCapsuleKeys(bound.interpretation_id, owner.sha256, input.workspaceId)
           .map(id => owner.evidenceService.findByIdScoped(id, input.workspaceId)));
-        const found = rows.filter(row => row !== null);
-        if (found.length > 1) throw new CoreError("CONFLICT", "ambiguous workspace interpretation capsules");
-        return found[0] ?? null;
+        return selectSourceSemanticCapsule(rows, input.workspaceId);
       };
       const current = () => verifyPublishedSourceSemanticInterpretation(activeOwner, bound, input.workspaceId);
       const storedBound = (evidence: { lifecycle_state: string; gist: string }) => {
@@ -300,13 +298,6 @@ function assemblePublishedInterpretation(sha256: FieldContractSha256, stored: Re
     semantic_status: "unreviewed" as const, source_target, interpretation, provenance,
     ...(profile === undefined ? {} : { profile })
   });
-}
-
-/** Omitted workspace derives the frozen legacy key for explicit scoped compatibility reads only. */
-export function semanticInterpretationEvidenceId(interpretationId: string, sha256: FieldContractSha256, workspaceId?: string): string {
-  if (workspaceId !== undefined && workspaceId.trim().length === 0) throw new CoreError("VALIDATION", "workspace required for interpretation key");
-  return uuidFromHex(sha256(workspaceId === undefined ? `source-semantic-interpretation:${interpretationId}`
-    : canonicalJson({ contract: "workspace-source-semantic-interpretation-v1", workspace_id: workspaceId, interpretation_id: interpretationId })));
 }
 
 export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,

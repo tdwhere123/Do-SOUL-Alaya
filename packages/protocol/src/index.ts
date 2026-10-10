@@ -166,6 +166,7 @@ export * from "./events/obligation-trust-narrative.js";
 export * from "./events/runtime-governance.js";
 export * from "./events/compute-recall-garden.js";
 export * from "./events/memory-governance.js";
+export * from "./events/source-interpretation.js";
 export * from "./events/governance-resolution.js";
 export * from "./events/slot.js";
 export * from "./events/surface.js";

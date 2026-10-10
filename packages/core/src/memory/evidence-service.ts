@@ -15,6 +15,8 @@ import {
   type OpenSemanticFactorFormationAdmission,
   type OpenSemanticFactorFormationCapture,
   type SourceAdmissionPort,
+  type SourceInterpretationInvalidation,
+  type SourceInterpretationInvalidationResult,
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import type { OpenSemanticFactorExtractionPort } from
@@ -26,7 +28,9 @@ import { createFactorIncidencePort } from "./evidence-create/factor-incidence.js
 import { fieldContractSha256 } from "../shared/field-hash.js";
 import {
   appendEventLogSynchronously,
-  EventLogSyncAppendRequiredError
+  EventLogSyncAppendRequiredError,
+  bindEventPublisher,
+  type EventPublisher
 } from "../runtime/event-publisher.js";
 import { runEventLogTransaction } from "./memory-service/memory-audit-append.js";
 import {
@@ -36,6 +40,7 @@ import {
 import { createSourceAdmissionPort } from "./evidence-create/source-admission.js";
 import type { EvidenceFactFrameProposalNormalizer } from "@do-soul/alaya-protocol/node/source-frame";
 import type { SourceWriteGardenIntentPort } from "./source-write-garden-intent.js";
+import { invalidateSourceInterpretation, type SourceInterpretationLifecycleReadContext } from "./source-interpretation-lifecycle.js";
 
 const evidenceHealthTransitions: Readonly<Record<EvidenceHealthState, readonly EvidenceHealthState[]>> = {
   verified: ["questionable", "degraded", "broken"],
@@ -62,6 +67,9 @@ export interface EvidenceListPageOptions {
 }
 
 export interface EvidenceServiceEvidenceCapsuleRepoPort {
+  archiveSourceInterpretationInCurrentTransaction?(input: Readonly<{
+    objectId: string; workspaceId: string; expectedGist: string; sourceHash: string; updatedAt: string;
+  }>): boolean;
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],
@@ -136,6 +144,7 @@ export interface EvidenceServiceMemoryRefLookupPort {
 }
 
 export interface EvidenceServiceDependencies {
+  readonly eventPublisher?: EventPublisher;
   readonly evidenceCapsuleRepo: EvidenceServiceEvidenceCapsuleRepoPort;
   readonly eventLogRepo: EvidenceServiceEventLogRepoPort;
   readonly runtimeNotifier: EvidenceRuntimeNotifier;
@@ -259,6 +268,15 @@ export class EvidenceService {
       workspaceId: updated.workspace_id
     });
     return updated;
+  }
+
+  public invalidateSourceInterpretation(input: SourceInterpretationInvalidation,
+    read: SourceInterpretationLifecycleReadContext): Promise<SourceInterpretationInvalidationResult> {
+    const eventPublisher = bindEventPublisher({ purpose: "Source interpretation invalidation",
+      eventPublisher: this.dependencies.eventPublisher, eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier });
+    return invalidateSourceInterpretation({ evidenceCapsuleRepo: this.dependencies.evidenceCapsuleRepo, eventPublisher, read,
+      sha256: this.sha256, now: this.now }, input);
   }
 
   private async emitEvidenceGainIfPromoted(input: {

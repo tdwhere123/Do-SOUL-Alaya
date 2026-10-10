@@ -42,7 +42,7 @@ export function runResearchNominatedSourcePreparation(runtime: SourceSemanticRea
     throw new CoreError("VALIDATION", "research source nomination requires raw prepare-query access");
   }
   const request = payload.request;
-  if (request.query_semantics !== undefined || request.source_handle !== undefined ||
+  if (request.query_semantics !== undefined || request.source_handle !== undefined || request.access_hint !== undefined ||
       request.source_preview_extents !== undefined ||
       request.continuation_handle !== undefined && preferredSourceIds.length > 0) {
     throw new CoreError("VALIDATION", "research source nomination requires raw prepare-query access");
@@ -152,8 +152,12 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   }
   const query = admission.kind === "admitted" ? admission.query : undefined;
   const policy = request.access_policy ?? prior?.access_pool?.access.policy ?? "query-conditioned-v1";
+  const accessHint = request.access_hint ?? prior?.access_pool?.accessHint;
+  if (accessHint !== undefined && (scopeLease?.source_id !== undefined || policy === "canonical-v1")) {
+    throw new CoreError("VALIDATION", "access hint requires query-conditioned preparation without a source handle");
+  }
   const inputId = accessInputIdentity(request.original_query, query, request.budget, policy,
-    scopeLease?.source_id, request.source_preview_extents);
+    scopeLease?.source_id, request.source_preview_extents, accessHint);
   if (prior !== undefined && prior.access_pool?.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "preparation continuation access policy or budget changed", { details: { admission: "bound" } });
   }
@@ -164,7 +168,7 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
     { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
-    request.source_preview_extents, preferredSourceIds);
+    request.source_preview_extents, preferredSourceIds, accessHint);
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;

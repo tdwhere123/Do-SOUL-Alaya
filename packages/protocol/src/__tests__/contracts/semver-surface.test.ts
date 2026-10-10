@@ -23,6 +23,7 @@ import * as RecallContextEvents from "../../events/recall-context.js";
 import * as RuntimeGovernanceEvents from "../../events/runtime-governance.js";
 import * as SignalEvents from "../../events/signal.js";
 import * as SlotEvents from "../../events/slot.js";
+import * as SourceInterpretationEvents from "../../events/source-interpretation.js";
 import * as SurfaceEvents from "../../events/surface.js";
 import * as ToolWorkerEvents from "../../events/tool-worker.js";
 import * as WorkerRuntimeEvents from "../../events/worker-runtime.js";
@@ -97,6 +98,7 @@ const eventSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/events/runtime-governance.ts", exports: RuntimeGovernanceEvents },
   { module: "packages/protocol/src/events/signal.ts", exports: SignalEvents },
   { module: "packages/protocol/src/events/slot.ts", exports: SlotEvents },
+  { module: "packages/protocol/src/events/source-interpretation.ts", exports: SourceInterpretationEvents },
   { module: "packages/protocol/src/events/surface.ts", exports: SurfaceEvents },
   { module: "packages/protocol/src/events/tool-worker.ts", exports: ToolWorkerEvents },
   { module: "packages/protocol/src/events/worker-runtime.ts", exports: WorkerRuntimeEvents },

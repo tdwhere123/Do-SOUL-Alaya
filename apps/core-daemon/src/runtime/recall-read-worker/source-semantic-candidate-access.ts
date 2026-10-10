@@ -29,6 +29,7 @@ export type SourceSemanticAccessPool = Readonly<{
   sources: readonly SourceRecordIdentity[];
   descriptors: readonly SourceSemanticHandleDescriptor[];
   access: Omit<SourceSemanticAccessReceipt, "trace">;
+  accessHint?: string;
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
   sourcePages: number; interpretationPages: number;
 }>;
@@ -36,9 +37,11 @@ type EmptyCompletion = Readonly<{
   leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
-  policy: SourceSemanticAccessPolicy, sourceId?: string, sourcePreviewExtents?: SourceSemanticPreviewExtents): string {
+  policy: SourceSemanticAccessPolicy, sourceId?: string, sourcePreviewExtents?: SourceSemanticPreviewExtents,
+  accessHint?: string): string {
   return sourceSemanticAccessInputIdentity({ original_query: original, query_semantics: query,
     source_id: sourceId, budget, policy,
+    ...(accessHint === undefined ? {} : { access_hint: accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }) });
 }
 
@@ -149,11 +152,14 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
   sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents,
-  preferredSourceIds?: readonly string[]): SourceSemanticAccessPool {
+  preferredSourceIds?: readonly string[], accessHint?: string): SourceSemanticAccessPool {
   if (sourceId !== undefined && preferredSourceIds !== undefined) {
     throw new CoreError("VALIDATION", "source-scoped access cannot use source nomination");
   }
-  const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter);
+  if (sourceId !== undefined && accessHint !== undefined) {
+    throw new CoreError("VALIDATION", "source-scoped access cannot use an access hint");
+  }
+  const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter, accessHint);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, observation, authorized, preferredSourceIds)
@@ -176,7 +182,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
       sourceId, completion === undefined ? undefined : () => reserveEmptyInterpretationCompletion({
         runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
         policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
-        suppliedQuerySemantics: completion.suppliedQuerySemantics
+        suppliedQuerySemantics: completion.suppliedQuerySemantics, accessHint
       }), sourcePreviewExtents);
   } finally {
     // The navigation/header child already ran even when completion planning fails.
@@ -194,7 +200,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     .map(({ identity: _identity, ...row }) => row);
   const orderedInterpretations = policy.order(reconciled.map((row) => ({ ...row, identity: row.interpretation_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
-  const inputId = accessInputIdentity(original, query, budget, policyName, sourceId, sourcePreviewExtents);
+  const inputId = accessInputIdentity(original, query, budget, policyName, sourceId, sourcePreviewExtents, accessHint);
   const receipt = sourceSemanticAccessReceiptValue(policyName, inputId, orderedSources, orderedInterpretations,
     sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops],
     sourcePreviewExtents);
@@ -202,7 +208,8 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   const access = bindAccessPoolIdentity(runtime, payload.workspace_id, authorized, receipt);
   return { sources: orderedSources.map((row) => byId.get(row.record_id)!),
     descriptors: orderedInterpretations.map((row) => interpretations.descriptors.get(row.interpretation_id)!),
-    access, ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
+    access, ...(accessHint === undefined ? {} : { accessHint }),
+    ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
     sourcePages: sources.pages, interpretationPages: interpretations.pages };
 }
 

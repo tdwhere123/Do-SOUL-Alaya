@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
-import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "../garden/source-semantic-access.js";
+import { SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "../garden/source-semantic-access.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
@@ -19,6 +19,7 @@ import {
 } from "../garden/source-semantic-interpretation.js";
 import { MemorySearchResultSchema } from "./mcp-memory-search-types.js";
 import { SourceDisclosureSchema } from "../recall/source-disclosure.js";
+import { SourceInterpretationErrorBasisSchema, SourceInterpretationInvalidationResultSchema } from "../events/source-interpretation.js";
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
@@ -70,6 +71,7 @@ export const SoulInterpretationProposeRequestSchema = z.object({
 export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   operation: z.literal("prepare_query"),
   access_policy: SourceSemanticAccessPolicySchema.optional(),
+  access_hint: SourceSemanticAccessHintSchema.optional(),
   source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
@@ -78,7 +80,7 @@ export const SoulInterpretationPrepareQueryRequestSchema = z.object({
   continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema,
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
-}).strict().superRefine(refineSourceSemanticQueryRequest).readonly();
+}).strict().superRefine(refineSourceSemanticQueryRequest).superRefine(refineSourceSemanticAccessHint).readonly();
 
 export const SoulInterpretationReasonRequestSchema = z.object({
   operation: z.literal("reason"),
@@ -108,12 +110,23 @@ const SoulInterpretationRecallRequestSchema = z.object({
   authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
 }).strict().superRefine((request, context) => refineSourceSemanticQueryRequest(request, context, true)).readonly();
 
+export const SoulInterpretationInvalidateRequestSchema = z.object({
+  operation: z.literal("invalidate"),
+  source_handle: BoundedIdSchema,
+  source_interpretation_id: Sha256DigestSchema,
+  error_basis: SourceInterpretationErrorBasisSchema,
+  reporter_id: BoundedIdSchema,
+  budget: RequestBudgetSchema,
+  authorized_scopes: AuthorizedScopesAdmissionSchema.optional()
+}).strict().readonly();
+
 export const SoulInterpretationRequestSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceRequestSchema,
   SoulInterpretationProposeRequestSchema,
   SoulInterpretationPrepareQueryRequestSchema,
   SoulInterpretationReasonRequestSchema,
-  SoulInterpretationRecallRequestSchema
+  SoulInterpretationRecallRequestSchema,
+  SoulInterpretationInvalidateRequestSchema
 ]);
 
 export const SoulInterpretationPrepareSourceResponseSchema = z.object({
@@ -202,12 +215,24 @@ const SoulInterpretationRecallResponseSchema = z.object({
   if (!delivery.success) for (const issue of delivery.error.issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
 }).readonly();
 
+export const SoulInterpretationInvalidateResponseSchema = z.object({
+  operation: z.literal("invalidate"),
+  invalidation: SourceInterpretationInvalidationResultSchema.optional(),
+  outcome: SourceSemanticOutcomeSchema.optional(),
+  ...CoverageWork
+}).strict().superRefine((response, context) => {
+  if ((response.invalidation === undefined) === (response.outcome === undefined)) {
+    context.addIssue({ code: "custom", message: "invalidate requires a committed result or an outcome" });
+  }
+}).readonly();
+
 export const SoulInterpretationResponseSchema = z.discriminatedUnion("operation", [
   SoulInterpretationPrepareSourceResponseSchema,
   SoulInterpretationProposeResponseSchema,
   SoulInterpretationPrepareQueryResponseSchema,
   SoulInterpretationReasonResponseSchema,
-  SoulInterpretationRecallResponseSchema
+  SoulInterpretationRecallResponseSchema,
+  SoulInterpretationInvalidateResponseSchema
 ]);
 
 export type SoulInterpretationRequest = z.infer<typeof SoulInterpretationRequestSchema>;

@@ -26,11 +26,13 @@ export function sourceSemanticLibraryQueryIdentity(originalQuery: string, result
 export function sourceSemanticLibraryRequestIdentity(input: Readonly<{
   workspace_id: string; as_of: string; authorized_scopes: readonly string[] | null;
   original_query: string; query_semantics?: SourceSemanticQuery; query_semantics_status: SourceSemanticQueryStatus;
-  source_id?: string;
+  source_id?: string; access_hint?: string;
   semantic_correspondences: readonly SourceSemanticCorrespondence[];
   budget: RequestBudget; output_byte_limit: number; access_policy: SourceSemanticAccessPolicy;
 }>): string {
-  return `sha256:${fieldContractSha256(canonicalJson({ ...input, query_semantics: input.query_semantics ?? null,
+  const { access_hint, ...request } = input;
+  return `sha256:${fieldContractSha256(canonicalJson({ ...request,
+    ...(access_hint === undefined ? {} : { access_hint }), query_semantics: input.query_semantics ?? null,
     source_id: input.source_id ?? null,
     authorized_scopes: input.authorized_scopes === null ? null : [...input.authorized_scopes].sort()
   }))}`;

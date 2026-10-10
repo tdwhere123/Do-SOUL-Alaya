@@ -6,8 +6,29 @@ import { BUDGET } from "./source-semantic-proof-fixture.js";
 it("gives omitted optional access inputs the same identity as explicitly undefined inputs", () => {
   const input = { original_query: "orchid", budget: BUDGET, policy: "canonical-v1" as const };
   expect(sourceSemanticAccessInputIdentity(input)).toBe(sourceSemanticAccessInputIdentity({ ...input,
-    query_semantics: undefined, source_id: undefined }));
+    query_semantics: undefined, source_id: undefined, access_hint: undefined }));
   expect(sourceSemanticAccessInputIdentity({ ...input, source_id: "orchid-source" })).not.toBe(sourceSemanticAccessInputIdentity(input));
+  const hinted = { ...input, policy: "query-conditioned-v1" as const, access_hint: "Harbor" };
+  expect(sourceSemanticAccessInputIdentity(hinted)).not.toBe(sourceSemanticAccessInputIdentity({ ...hinted, access_hint: undefined }));
+  expect(sourceSemanticAccessInputIdentity(hinted)).not.toBe(sourceSemanticAccessInputIdentity({ ...hinted, access_hint: "harbor" }));
+});
+
+it("uses a metered task hint only for navigation while keeping original-query source scores and ordering", () => {
+  const budget = { work_units: 100_000, memory_bytes: 1_000_000 };
+  const meter = new SourceSemanticResourceLedger(budget);
+  const original = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
+  const hinted = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter, "Harbor irrigation");
+  const navigationMeter = new SourceSemanticResourceLedger(budget);
+  expect(hinted.navigationQuery(navigationMeter)).toBe("Harbor irrigation");
+  expect(navigationMeter.spentWork).toBeGreaterThan(0);
+  expect(navigationMeter.spentBytes).toBeGreaterThan(0);
+  expect(() => hinted.navigationQuery(new SourceSemanticResourceLedger({ work_units: 0, memory_bytes: 1000 })))
+    .toThrow(SourceSemanticResourceExhausted);
+  const rows = ["orchid", "Harbor irrigation"].map(identity => ({ identity, signal: hinted.source(identity, meter) }));
+  expect(rows.map(row => row.signal)).toEqual(rows.map(row => original.source(row.identity, meter)));
+  expect(hinted.order(rows, meter).map(row => row.identity)).toEqual(["orchid", "Harbor irrigation"]);
+  expect(() => createSourceSemanticAccessPolicy("orchid", undefined, "canonical-v1", meter, "Harbor"))
+    .toThrow(/canonical/u);
 });
 
 it("requires governed source scope even for unrestricted callers and preserves denied scope admission", () => {

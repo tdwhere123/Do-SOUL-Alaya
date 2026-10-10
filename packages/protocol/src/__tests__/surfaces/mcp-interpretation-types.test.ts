@@ -95,8 +95,19 @@ it("parses soul.interpretation host operations including library recall and reje
     budget: BUDGET
   }).success).toBe(false);
   expect(soulToolJsonSchemas["soul.interpretation"]).toMatchObject({
-    oneOf: [{ type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }]
+    oneOf: [{ type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }, { type: "object" }]
   });
+});
+
+it("requires an exact H and prepared source handle with bounded caller-reported invalidation grounds", () => {
+  const request = { operation: "invalidate", source_handle: "source-handle", source_interpretation_id: `sha256:${"a".repeat(64)}`,
+    error_basis: { reason: "Source says the crate was opened, not sealed.", basis_ref: "source-review" }, reporter_id: "reviewer", budget: BUDGET };
+  expect(SoulInterpretationRequestSchema.parse(request)).toEqual(request);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...request, source_handle: undefined }).success).toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...request, source_interpretation_id: undefined }).success).toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...request, error_basis: { reason: " " } }).success).toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...request, error_basis: { reason: "x".repeat(2049) } }).success).toBe(false);
+  expect(SoulInterpretationRequestSchema.safeParse({ ...request, workspace_id: "other-workspace" }).success).toBe(false);
 });
 
 it("accepts propose generation_task only as a draft sibling and advertises that field", () => {

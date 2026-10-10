@@ -2,6 +2,7 @@
 
 exports[`semver-surface > snapshots the public MCP, EventLog, and runtime config surface 1`] = `
 "[mcp.reachableModules]
+evt:source-interpretation.ts
 protocol:shared/schema-primitives.ts
 protocol:signals/candidate-memory-signal.ts
 soul:edge-proposal.ts
@@ -13,6 +14,8 @@ soul:proposal.ts
 soul:recall-candidate.ts
 soul:recall-policy.ts
 [mcp.reachableSchemas]
+evt:source-interpretation.ts#SourceInterpretationErrorBasisSchema(basis_ref,reason)#d316b8d
+evt:source-interpretation.ts#SourceInterpretationInvalidationResultSchema(evidence_object_id,source_interpretation_id,status)#f3d872e
 protocol:shared/schema-primitives.ts#BoundedContentSchema()#31a53f4
 protocol:shared/schema-primitives.ts#BoundedIdSchema()#7771057
 protocol:shared/schema-primitives.ts#BoundedJsonObjectSchema()#2b1b0ec
@@ -67,7 +70,9 @@ soul:mcp-types.ts#SoulEmitCandidateSignalRequestSchema(confidence,contradicts_re
 soul:mcp-types.ts#SoulEmitCandidateSignalResponseSchema(signal_id,status)#5767447
 soul:mcp-types.ts#SoulExploreGraphRequestSchema(direction,edge_types,memory_id)#858a293
 soul:mcp-types.ts#SoulExploreGraphResponseSchema(count,neighbors,source_memory_id)#f94ab84
-soul:mcp-types.ts#SoulInterpretationPrepareQueryRequestSchema(access_policy,authorized_scopes,budget,continuation_handle,operation,original_query,query_semantics,query_semantics_unavailable,source_handle,source_preview_extents)#b8bee6b
+soul:mcp-types.ts#SoulInterpretationInvalidateRequestSchema(authorized_scopes,budget,error_basis,operation,reporter_id,source_handle,source_interpretation_id)#7c1d158
+soul:mcp-types.ts#SoulInterpretationInvalidateResponseSchema(coverage,invalidation,operation,outcome,provider_attempts,work)#3e0f859
+soul:mcp-types.ts#SoulInterpretationPrepareQueryRequestSchema(access_hint,access_policy,authorized_scopes,budget,continuation_handle,operation,original_query,query_semantics,query_semantics_unavailable,source_handle,source_preview_extents)#0dbb57d
 soul:mcp-types.ts#SoulInterpretationPrepareQueryResponseSchema(access,candidates,continuation_handle,coverage,operation,outcome,provider_attempts,query_handle,query_semantics_id,query_semantics_status,truncated,work)#21c7e5f
 soul:mcp-types.ts#SoulInterpretationPrepareSourceRequestSchema(authorized_scopes,budget,operation,source_id)#7c4b849
 soul:mcp-types.ts#SoulInterpretationPrepareSourceResponseSchema(attribution_context,catalog,content_digest,coverage,operation,outcome,provider_attempts,source_disclosure,source_handle,source_id,source_version,work)#b65c97f
@@ -76,8 +81,8 @@ soul:mcp-types.ts#SoulInterpretationProposeResponseSchema(coverage,evidence_obje
 soul:mcp-types.ts#SoulInterpretationReasonRequestSchema(accepts_unreviewed_conditional_results,authorized_scopes,budget,operation,original_query,output_byte_limit,query_handle,query_semantics,semantic_correspondence,source_interpretation_id)#a8be70c
 soul:mcp-types.ts#SoulInterpretationReasonResponseSchema(context,coverage,interpretation,operation,outcome,provider_attempts,query,result,semantic_correspondence,source_disclosure,work)#083b6db
 soul:mcp-types.ts#SoulInterpretationRecallDeliverySchema(coverage,delivery_id,discovery,index,operation,order,outcome,page_purpose,proofs,protocol_version,provider_attempts,query_semantics_status,request_budget,request_identity,results,slot_qualifiers,source_disclosures,total_count,unproved_computations,work)#b385b6b
-soul:mcp-types.ts#SoulInterpretationRequestSchema()#6cac85a
-soul:mcp-types.ts#SoulInterpretationResponseSchema()#25858e8
+soul:mcp-types.ts#SoulInterpretationRequestSchema()#0dd4a83
+soul:mcp-types.ts#SoulInterpretationResponseSchema()#54d6480
 soul:mcp-types.ts#SoulListPendingEdgeProposalsRequestSchema(edge_type,limit,min_confidence,since,trigger_source)#797b0c8
 soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_count)#730ce68
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#766d3d9
@@ -255,6 +260,7 @@ evt:signal.ts#SoulSignalTriagedPayloadSchema(best_similarity,defer_class,defer_r
 evt:slot.ts#SoulConflictMatrixEdgeCreatedPayloadSchema(edge_type,object_id,object_kind,run_id,source_claim_id,target_claim_id,workspace_id)#f8ad4c1
 evt:slot.ts#SoulSlotCreatedPayloadSchema(claim_kind,governance_subject,object_id,object_kind,run_id,scope_class,winner_claim_id,workspace_id)#df34027
 evt:slot.ts#SoulSlotWinnerChangedPayloadSchema(caused_by,evidence_refs,from_claim_id,object_id,object_kind,occurred_at,reason_code,run_id,to_claim_id,workspace_id)#1605034
+evt:source-interpretation.ts#SourceInterpretationInvalidatedPayloadSchema(authorized_scopes,error_basis,evidence_object_id,from_state,occurred_at,provenance,run_id,semantic_status,source,source_interpretation_id,to_state,workspace_id)#ebe2720
 evt:surface.ts#SoulCrossCuttingStateChangedPayloadSchema(allowed_surfaces,from_state,object_id,occurred_at,permission_id,reason,to_state,workspace_id)#7e08f91
 evt:surface.ts#SoulSurfaceAnchorCreatedPayloadSchema(anchor_kind,anchor_value,object_id,object_kind,run_id,surface_id,workspace_id)#8996667
 evt:surface.ts#SoulSurfaceAnchorDeletedPayloadSchema(anchor_id,surface_id,workspace_id)#8b45efc

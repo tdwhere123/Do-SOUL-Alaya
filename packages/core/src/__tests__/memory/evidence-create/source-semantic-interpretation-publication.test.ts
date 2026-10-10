@@ -30,9 +30,9 @@ import { createAuditedSourceAdmission } from "../../../memory/evidence-create/au
 import { createInMemoryFieldStores } from "../../../memory/evidence-create/field-stores.js";
 import {
   createSourceSemanticInterpretationPublication,
-  semanticInterpretationEvidenceId,
   verifyPublishedSourceSemanticInterpretation
 } from "../../../memory/evidence-create/source-interpretation-packet-publication.js";
+import { semanticInterpretationEvidenceId } from "../../../memory/evidence-create/source-semantic-capsule.js";
 import { deriveAddressableSpanViews } from "../../../memory/evidence-create/source-span-views.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import {

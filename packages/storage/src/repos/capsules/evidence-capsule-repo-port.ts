@@ -19,6 +19,9 @@ export interface EvidenceSourceAnchor {
 }
 
 export interface EvidenceCapsuleRepo {
+  archiveSourceInterpretationInCurrentTransaction(input: Readonly<{
+    objectId: string; workspaceId: string; expectedGist: string; sourceHash: string; updatedAt: string;
+  }>): boolean;
   create(
     capsule: EvidenceCapsule,
     searchProjections?: readonly Readonly<EvidenceSearchProjection>[],

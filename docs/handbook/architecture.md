@@ -527,6 +527,15 @@ scoring pressure; `staged_warnings[]` → recall-time warning;
 `Proposal` / `soul.propose_memory_update` → review queue; `soul.resolve` →
 inline typed resolution.
 
+`soul.interpretation` `invalidate` also belongs to inline typed resolution,
+scoped to unreviewed source-interpretation evidence rather than memory claims.
+Core owns its exact-H/source authorization and EventLog-plus-archive CAS;
+storage supplies only mechanical persistence. The caller's error basis is
+retained as an attestation. The operation removes current premise eligibility
+without erasing source/history or admitting new truth. EventPublisher owns the
+decision transaction and post-commit propagation diagnostics. It adds no
+governance family or background learning route.
+
 ## Control Plane Discipline
 
 Offline extraction receives reusable interpretation proposals through the Soul

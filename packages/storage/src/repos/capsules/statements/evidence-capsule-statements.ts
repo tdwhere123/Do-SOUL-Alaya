@@ -9,6 +9,7 @@ export interface EvidenceCapsuleStatements {
   readonly createFactFrameFormationStatement: SqliteStatement;
   readonly createSemanticFactorFormationStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
+  readonly archiveSourceInterpretationStatement: SqliteStatement;
   readonly findByArtifactRefStatement: SqliteStatement;
   readonly findByIdsStatement: SqliteStatement;
   readonly findSourceAnchorsByIdsStatement: SqliteStatement;
@@ -40,6 +41,9 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
       CREATE_EVIDENCE_SEMANTIC_FACTOR_FORMATION_SQL
     ),
     findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
+    archiveSourceInterpretationStatement: db.connection.prepare(`UPDATE evidence_capsules
+      SET lifecycle_state = 'archived', updated_at = ?
+      WHERE object_id = ? AND workspace_id = ? AND gist = ? AND source_hash = ? AND lifecycle_state = 'active'`),
     findByArtifactRefStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL),
     findByIdsStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULES_BY_IDS_SQL),
     findSourceAnchorsByIdsStatement: db.connection.prepare(FIND_EVIDENCE_SOURCE_ANCHORS_BY_IDS_SQL),

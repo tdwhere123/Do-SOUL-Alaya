@@ -16,11 +16,12 @@ function sourceSemanticAccessOrderCost(count: number): Readonly<{ work_units: nu
 }
 
 export function sourceSemanticAccessInputIdentity(input: Readonly<{
-  original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string;
+  original_query: string; query_semantics?: SourceSemanticQuery; source_id?: string; access_hint?: string;
   budget: RequestBudget; policy: SourceSemanticAccessPolicy; source_preview_extents?: SourceSemanticPreviewExtents;
 }>): string {
   return `sha256:${fieldContractSha256(canonicalJson({ original_query: input.original_query,
     query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy,
+    ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint }),
     ...(input.source_preview_extents === undefined ? {} : { source_preview_extents: input.source_preview_extents }),
     resource_contract: SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT }))}`;
 }
@@ -34,7 +35,10 @@ export function authorizeSemanticScope(scope: string | null | undefined, authori
 
 /** One local access policy for raw sources and verified interpretations. It does not establish correspondence. */
 export function createSourceSemanticAccessPolicy(original: string, query: SourceSemanticQuery | undefined,
-  policy: SourceSemanticAccessPolicy, meter: SourceSemanticResourceLedger) {
+  policy: SourceSemanticAccessPolicy, meter: SourceSemanticResourceLedger, accessHint?: string) {
+  if (accessHint !== undefined && policy === "canonical-v1") {
+    throw new CoreError("VALIDATION", "canonical access cannot use an access hint");
+  }
   const chargeQueryFeatures = (text: string, ledger: SourceSemanticResourceLedger): void =>
     ledger.charge(64 * (text.length + 1), 128 * (text.length + 1), "access query features");
   const compile = (text: string): Readonly<RecallQueryProbes> => {
@@ -75,8 +79,9 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
     orderCost: sourceSemanticAccessOrderCost,
     navigationQuery: (ledger: SourceSemanticResourceLedger): string | null => {
       if (policy === "canonical-v1") return null;
-      chargeQueryFeatures(original, ledger);
-      return original;
+      const navigation = accessHint ?? original;
+      chargeQueryFeatures(navigation, ledger);
+      return navigation;
     },
     sourceCost: (length: number) => cost(length, originalProbes),
     source: (text: string, ledger: SourceSemanticResourceLedger): SourceSemanticAccessSignal => ({

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { SourceSemanticGenerationTaskSummarySchema, sourceSemanticGenerationTaskSummary } from "./source-semantic-generation-task.js";
-import { SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
+import { SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
@@ -118,6 +118,7 @@ const PrepareSourceRequestSchema = z.object({
 const PrepareQueryRequestSchema = z.object({
   kind: z.literal("prepare_query"),
   access_policy: SourceSemanticAccessPolicySchema.optional(),
+  access_hint: SourceSemanticAccessHintSchema.optional(),
   source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
   original_query: z.string().min(1).max(8192),
   query_semantics: SourceSemanticQuerySchema.optional(),
@@ -125,7 +126,7 @@ const PrepareQueryRequestSchema = z.object({
   source_handle: BoundedIdSchema.optional(),
   continuation_handle: BoundedIdSchema.optional(),
   budget: RequestBudgetSchema
-}).strict().superRefine(refineSourceSemanticQueryRequest).readonly();
+}).strict().superRefine(refineSourceSemanticQueryRequest).superRefine(refineSourceSemanticAccessHint).readonly();
 
 const ValidateSourceRequestSchema = z.object({
   kind: z.literal("validate_source"), source_handle: BoundedIdSchema, budget: RequestBudgetSchema

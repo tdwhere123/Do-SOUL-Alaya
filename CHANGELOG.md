@@ -8,13 +8,23 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 14.0.0, engine gateway 1.1.0
+## Unreleased — protocol 14.1.0, engine gateway 1.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 14.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 14.1.0 can move
 independently of the app semver.
+
+Protocol 14.1.0 adds optional `prepare_query.access_hint` and the explicit
+`soul.interpretation` invalidation operation/event under invariant §25 (minor,
+additive fields and action). A hint changes one metered navigation query while
+preserving original-query semantics and frozen continuations. Invalidation
+archives an exact source interpretation through a scoped, audited transaction;
+history, source text and independent interpretations remain available. A failed
+replacement cannot reactivate invalidated support. Engine gateway 1.2.0 documents
+these operations; the host tool advertises its state-changing invalidation.
+Neither change adds provider calls to Recall or promotes a new default policy.
 
 Protocol 14.0.0 changes semantic-library `slot_qualifiers` under invariant §25
 (major: a source slot can expose multiple independent proof qualifiers). Consumers
@@ -38,7 +48,7 @@ assessed/unassessed coverage, with separate H and total-C budgets. This producer
 metadata grants no proof authority. Full-catalog request identities stay stable;
 scoped results cannot satisfy another task or a full-catalog cache lookup.
 
-`@do-soul/alaya-engine-gateway` is `1.1.0`; app packages remain `0.3.11`.
+`@do-soul/alaya-engine-gateway` is `1.2.0`; app packages remain `0.3.11`.
 
 Engine gateway 1.1.0 exposes the existing resolved provider URL guard. Native chat
 Bench HTTP delegates use it before source and Q/C attempt reservation; local URL,

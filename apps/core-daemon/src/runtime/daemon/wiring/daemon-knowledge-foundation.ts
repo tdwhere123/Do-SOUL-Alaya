@@ -39,7 +39,7 @@ export function createKnowledgeFoundation(
 ) {
   const dynamicsServiceRef = createDynamicsServiceRef();
   const gardenIntentPort = new SqliteGardenTaskRepo(input.database.connection, eventPublisher);
-  const evidenceService = createEvidenceService(input, dynamicsServiceRef, gardenIntentPort);
+  const evidenceService = createEvidenceService(input, dynamicsServiceRef, gardenIntentPort, eventPublisher);
   const governanceLeaseService = new GovernanceLeaseService({
     eventLogRepo: input.eventLogRepo,
     eventPublisher,
@@ -102,9 +102,11 @@ function createDynamicsServiceRef(): {
 function createEvidenceService(
   input: DaemonServiceFoundationInput,
   dynamicsServiceRef: ReturnType<typeof createDynamicsServiceRef>,
-  gardenIntentPort: SqliteGardenTaskRepo
+  gardenIntentPort: SqliteGardenTaskRepo,
+  eventPublisher: FoundationEventPublisher
 ) {
   return new EvidenceService({
+    eventPublisher,
     evidenceCapsuleRepo: input.evidenceCapsuleRepo,
     eventLogRepo: input.eventLogRepo,
     fieldStores: input.fieldComposition.stores,
