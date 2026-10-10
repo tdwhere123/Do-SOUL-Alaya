@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import {
   SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrier, sourceSemanticQueryIdentity,
+  encodeSourceSemanticQueryReferentConstraints,
   sourceSemanticQueryBranchViews, projectSourceSemanticQuerySupport,
   type QueryMeaning, type SourceSemanticQueryMeaningBody, type SourceSemanticQueryPresentation
 } from "@do-soul/alaya-protocol";
@@ -13,7 +14,7 @@ import {
   sourceSemanticQueryResponseJsonSchema, sourceSemanticQueryResponseContract, sourceSemanticQuerySystemPrompt,
   SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT
 } from "../../../garden/ingestion/official-api/source-semantic-query-presentation.js";
-import { sourceSemanticQueryExamples, sourceSemanticQueryNestedExamples }
+import { sourceSemanticQueryExamples, sourceSemanticQueryNestedExamples, sourceSemanticQueryReferentExamples }
   from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
 import { proposeQuerySemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 
@@ -47,9 +48,12 @@ function receive(body: unknown, generation_presentation: SourceSemanticQueryPres
 function parity(body: SourceSemanticQueryMeaningBody, selected = input()) {
   const nested = receive(body, "nested-meaning-v1", selected);
   const flat = receive(encodeSourceSemanticQueryCarrier(body), "flat-carrier-v1", selected);
+  const referent = receive(encodeSourceSemanticQueryReferentConstraints(body), "nested-referent-constraints-v1", selected);
   expect(nested.outcome).toEqual({ status: "interpreted", gaps: body.gaps });
   expect(flat.outcome).toEqual(nested.outcome);
   expect(nested.query).toEqual(flat.query);
+  expect(referent.outcome).toEqual(nested.outcome);
+  expect(referent.query).toEqual(nested.query);
   if (nested.query === undefined || flat.query === undefined) throw new Error("authored meaning must materialize");
   expect(sourceSemanticQueryIdentity(nested.query, semanticSha256)).toBe(sourceSemanticQueryIdentity(flat.query, semanticSha256));
   return nested.query;
@@ -81,11 +85,17 @@ it("selects a fresh nested contract while retaining the omitted-selector flat re
   const omitted = buildSourceSemanticQueryRequest(input());
   const flat = buildSourceSemanticQueryRequest({ ...input(), generation_presentation: "flat-carrier-v1" });
   const nested = buildSourceSemanticQueryRequest({ ...input(), generation_presentation: "nested-meaning-v1" });
+  const referent = buildSourceSemanticQueryRequest({ ...input(), generation_presentation: "nested-referent-constraints-v1" });
   expect(flat).toEqual(omitted);
   expect(omitted.contract).toBe("source-semantic-query-request-v9");
   expect(nested.contract).toBe("source-semantic-query-request-v10");
+  expect(referent.contract).toBe("source-semantic-query-request-v11");
   expect(sourceSemanticQueryResponseContract(omitted)).toBe("source-semantic-query-response-v8");
   expect(sourceSemanticQueryResponseContract(nested)).toBe("source-semantic-query-response-v9");
+  expect(sourceSemanticQueryResponseContract(referent)).toBe("source-semantic-query-response-v10");
+  expect(sourceSemanticQuerySystemPrompt(referent)).toContain("query_referent_constraint");
+  expect(sourceSemanticQuerySystemPrompt(referent)).toContain("no_referent_constraint");
+  expect(sourceSemanticQuerySystemPrompt(referent)).toContain("distinct from the named object.");
   expect(sourceSemanticQueryResponseJsonSchema(flat)).toEqual(sourceSemanticQueryResponseJsonSchema());
   expect(sourceSemanticQuerySystemPrompt(omitted)).toBe(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT);
   expect(sourceSemanticQuerySystemPrompt(nested)).toContain("Write expressions directly in conditions");
@@ -230,6 +240,12 @@ it("keeps shared entities distinct from separate equal-surface entities and occu
   expect(new Set(repeated.alternatives[0]!.frames.map(frame => frame.id)).size).toBe(2);
   const explicit = parity(meaning([statement("ring"), { kind: "occurrence", key: "ring" }]));
   expect(explicit.alternatives[0]!.frames).toHaveLength(1);
+  const witnesses = parity(meaning([statement("give", [role("sender", "first", "someone"), role("recipient", "second", "someone")])], {
+    entities: [{ kind: "free", key: "first", excerpt: "someone" }, { kind: "free", key: "second", excerpt: "someone" }]
+  }), input("Did someone give a gift to someone?"));
+  expect(witnesses.variables.filter(variable => variable.sort === "entity")).toEqual([
+    { id: "first", sort: "entity" }, { id: "second", sort: "entity" }
+  ]);
 });
 
 it("retains four independently qualified evidence inputs and a genuine unresolved adjustment", () => {
@@ -281,9 +297,10 @@ it.each([
   { name: "foreign gap", body: meaning([statement("ring")], { gaps: [{ kind: "unsupported_meaning", affected_ids: ["foreign"],
     support: [{ kind: "query_text", excerpt: "Who" }] }] }) },
   { name: "conflicting entity", body: meaning([sent], { entities: [...sentBody.entities!, { kind: "free", key: "mira", excerpt: "Who" }] }) }
-])("rejects $name without reference repair in both presentations", ({ body }) => {
+])("rejects $name without reference repair in every presentation", ({ body }) => {
   expect(receive(body).outcome.status).toBe("invalid");
   expect(receive(encodeSourceSemanticQueryCarrier(body), "flat-carrier-v1").outcome.status).toBe("invalid");
+  expect(receive(encodeSourceSemanticQueryReferentConstraints(body), "nested-referent-constraints-v1").outcome.status).toBe("invalid");
 });
 
 it("rejects crossed envelopes and wrong bodies without a second decoder", () => {
@@ -352,4 +369,110 @@ it("derives the recursive generation schema with entity references, role support
   for (const status of ["invalid", "truncated", "resource_exhausted", "unexercised"]) {
     expect(validate({ contract: "source-semantic-query-response-v9", outcome: { status } })).toBe(false);
   }
+});
+
+it.each([
+  { query: "Did I arrive?", excerpt: "I", kind: "query_referent_constraint", constrained: true, returned: false },
+  { query: "Did the technician arrive?", excerpt: "the technician", kind: "query_referent_constraint", constrained: true, returned: false },
+  { query: "Did someone arrive?", excerpt: "someone", kind: "no_referent_constraint", constrained: false, returned: false },
+  { query: "Who arrived?", excerpt: "Who", kind: "no_referent_constraint", constrained: false, returned: true },
+  { query: "Did I arrive?", excerpt: "I", kind: "no_referent_constraint", constrained: false, returned: false },
+  { query: "Who arrived?", excerpt: "Who", kind: "query_referent_constraint", constrained: true, returned: true }
+])("preserves the explicit $kind choice for $excerpt without inference", ({ query, excerpt, kind, constrained, returned }) => {
+  const result = receive({
+    contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+    entities: [{ kind, key: "speaker", excerpt, return: returned }], gaps: [],
+    alternatives: [{ conditions: [statement("arrive", [role("agent", "speaker", excerpt)])] }]
+  }, "nested-referent-constraints-v1", input(query));
+  expect(result.outcome).toEqual({ status: "interpreted", gaps: [] });
+  expect(result.query!.variables.find(variable => variable.id === "speaker")).toEqual({
+    id: "speaker", sort: "entity", ...(constrained ? { reference: { kind: "query_text", excerpt } } : {})
+  });
+  expect(result.query!.return_variables).toEqual(returned ? ["speaker"] : []);
+});
+
+it("keeps separate equal-surface first-person bindings under their reporters", () => {
+  const result = receive({
+    contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    entities: [
+      { kind: "query_referent_constraint", key: "first", excerpt: "I" },
+      { kind: "query_referent_constraint", key: "second", excerpt: "I" },
+      { kind: "query_referent_constraint", key: "nia", excerpt: "Nia" },
+      { kind: "query_referent_constraint", key: "teo", excerpt: "Teo" }
+    ],
+    requested_operation: { reading: "compare arrivals", support: { kind: "query_text", excerpt: "Compare" } },
+    alternatives: [{ conditions: [], evidence_inputs: [
+      { conditions: [{ kind: "reported", key: "firstReport", reporter: reference("nia"),
+        content: statement("firstArrival", [role("agent", "first", "I")]) }] },
+      { conditions: [{ kind: "reported", key: "secondReport", reporter: reference("teo"),
+        content: statement("secondArrival", [role("agent", "second", "I")]) }] }
+    ] }]
+  }, "nested-referent-constraints-v1", input('Compare Nia saying "I arrived" with Teo saying "I arrived".'));
+  expect(result.outcome).toEqual({ status: "interpreted", gaps: [] });
+  expect(result.query!.variables.filter(variable => variable.sort === "entity")).toEqual([
+    { id: "first", sort: "entity", reference: { kind: "query_text", excerpt: "I" } },
+    { id: "second", sort: "entity", reference: { kind: "query_text", excerpt: "I" } },
+    { id: "nia", sort: "entity", reference: { kind: "query_text", excerpt: "Nia" } },
+    { id: "teo", sort: "entity", reference: { kind: "query_text", excerpt: "Teo" } }
+  ]);
+  expect(result.query!.return_variables).toEqual([]);
+  expect(result.query!.alternatives[0]!.evidence_inputs).toEqual([{ frames: ["firstReport"] }, { frames: ["secondReport"] }]);
+  expect(result.query!.alternatives[0]!.frames.filter(frame => frame.predicate_reading.endsWith("Arrival"))
+    .map(frame => frame.role_requirements[0]!.target_variable)).toEqual(["first", "second"]);
+});
+
+it("derives the explicit referent generation schema and rejects mixed labels and crossed envelopes", () => {
+  const selected = { ...input(), generation_presentation: "nested-referent-constraints-v1" as const };
+  const schema = sourceSemanticQueryResponseJsonSchema(buildSourceSemanticQueryRequest(selected));
+  const ajv = new Ajv2020({ strict: false, allErrors: true, validateSchema: true });
+  expect(ajv.validateSchema(schema)).toBe(true);
+  const validate = ajv.compile(schema);
+  for (const example of sourceSemanticQueryReferentExamples) {
+    expect(validate(example.response), ajv.errorsText(validate.errors)).toBe(true);
+  }
+  const body = { ...sentBody, entities: [
+    { kind: "no_referent_constraint", key: "answer", excerpt: "Who", return: true },
+    { kind: "query_referent_constraint", key: "sample", excerpt: "the sample" },
+    { kind: "query_referent_constraint", key: "mira", excerpt: "Mira" }
+  ] };
+  const envelope = (query: unknown, contract = "source-semantic-query-response-v10", status = "interpreted") => ({
+    contract, outcome: { status }, query
+  });
+  const mixed = { ...body, entities: [sentBody.entities![0], ...body.entities.slice(1)] };
+  for (const query of [sentBody, mixed, encodeSourceSemanticQueryCarrier(sentBody)]) {
+    expect(validate(envelope(query))).toBe(false);
+    expect(receive(query, "nested-referent-constraints-v1").outcome.status).toBe("invalid");
+  }
+  const inline = { ...body, alternatives: [{ conditions: [{ kind: "statement", predicate: "send", arguments: [
+    { role: "sender", target: body.entities[0], excerpt: "Who" }
+  ] }] }] };
+  expect(validate(envelope(inline))).toBe(false);
+  const noExcerpt = { ...body, entities: [{ kind: "no_referent_constraint", key: "answer" }, ...body.entities.slice(1)] };
+  expect(validate(envelope(noExcerpt))).toBe(false);
+  for (const contract of ["source-semantic-query-response-v8", "source-semantic-query-response-v9"]) {
+    expect(proposeQuerySemantics(selected, { rawJson: JSON.stringify(envelope(body, contract)) }).outcome.status).toBe("invalid");
+  }
+  for (const presentation of ["flat-carrier-v1", "nested-meaning-v1"] as const) {
+    expect(receive(body, presentation).outcome.status).toBe("invalid");
+  }
+  const abstained = proposeQuerySemantics(selected, { rawJson: JSON.stringify(envelope(body, undefined, "abstained")) });
+  expect(abstained.outcome).toEqual({ status: "abstained" });
+  expect(abstained.query).toBeUndefined();
+});
+
+it("bounds the referent adapter before copying deeply nested or oversized output", () => {
+  const selected = { ...input(), generation_presentation: "nested-referent-constraints-v1" as const };
+  const rawPrefix = '{"contract":"source-semantic-query-response-v10","outcome":{"status":"interpreted"},"query":';
+  const rawJson = `${rawPrefix}${'{"child":'.repeat(10000)}null${'}'.repeat(10000)}}`;
+  expect(proposeQuerySemantics(selected, { rawJson }).outcome).toMatchObject({ status: "invalid" });
+  const body = encodeSourceSemanticQueryReferentConstraints(sentBody);
+  for (const resource_limits of [{ work_units: 0 }, { work_units: 1 }, { memory_bytes: 0 }, { memory_bytes: 128 }]) {
+    expect(receive(body, "nested-referent-constraints-v1", { ...input(), resource_limits }).outcome)
+      .toEqual({ status: "resource_exhausted" });
+  }
+  expect(receive({ ...sentBody, extra: "a".repeat(262144) }, "nested-referent-constraints-v1").outcome)
+    .toMatchObject({ status: "invalid" });
+  expect(proposeQuerySemantics({ ...selected, resource_limits: { output_byte_limit: 1024 } },
+    { rawJson: " ".repeat(1025) }).outcome).toEqual({ status: "truncated" });
+  expect(proposeQuerySemantics(selected, { rawJson: "{" }).outcome).toEqual({ status: "invalid", reason: "malformed_json" });
 });

@@ -15,7 +15,9 @@ import {
 export const SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT = "source-semantic-query-meaning-v5" as const;
 export const SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH = Math.min(8, SOURCE_SEMANTIC_MAX_DEPTH);
 export const SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES = 8192;
-export const SourceSemanticQueryPresentationSchema = z.enum(["flat-carrier-v1", "nested-meaning-v1"]);
+export const SourceSemanticQueryPresentationSchema = z.enum([
+  "flat-carrier-v1", "nested-meaning-v1", "nested-referent-constraints-v1"
+]);
 export type SourceSemanticQueryPresentation = z.infer<typeof SourceSemanticQueryPresentationSchema>;
 
 const Key = SourceSemanticHandleSchema;
@@ -225,7 +227,7 @@ export function materializeSourceSemanticQueryMeaning(
   body: unknown, envelope: SourceSemanticQueryMeaningEnvelope, meter?: SourceSemanticResourceLedger
 ): SourceSemanticQuery {
   meter?.retain(body, "query meaning materialization");
-  preflight(body);
+  assertSourceSemanticQueryMeaningBounds(body);
   if (typeof envelope.original_query !== "string" || envelope.original_query.length === 0) {
     fail(["original_query"], "query meaning requires original query text");
   }
@@ -255,7 +257,8 @@ export function materializeSourceSemanticQueryMeaning(
   return query;
 }
 
-function preflight(value: unknown): void {
+/** Shared structural bound before recursive parsing or presentation copies. */
+export function assertSourceSemanticQueryMeaningBounds(value: unknown): void {
   const stack: { value: unknown; depth: number; meaningDepth: number; path: Path }[] = [
     { value, depth: 0, meaningDepth: 0, path: [] }
   ];

@@ -44,6 +44,7 @@ export { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-g
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
 export const SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT = "source-semantic-query-request-v10" as const;
+const SOURCE_SEMANTIC_QUERY_REFERENT_REQUEST_CONTRACT = "source-semantic-query-request-v11" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v8" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v9" as const;
@@ -181,7 +182,8 @@ export type SourceSemanticCorrespondenceProposalInput = Readonly<{
 }>;
 
 export type SourceSemanticQueryRequest = Readonly<{
-  contract: typeof SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT;
+  contract: typeof SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT | typeof SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT
+    | typeof SOURCE_SEMANTIC_QUERY_REFERENT_REQUEST_CONTRACT;
   k_version: typeof SOURCE_SEMANTIC_K_VERSION;
   original_query: string;
   original_query_digest: string;
@@ -365,7 +367,8 @@ export function buildSourceSemanticQueryRequest(input: SourceSemanticQueryPropos
   const presentation = SourceSemanticQueryPresentationSchema.parse(
     input.generation_presentation === undefined ? "flat-carrier-v1" : input.generation_presentation);
   const base: SourceSemanticQueryRequest = {
-    contract: presentation === "nested-meaning-v1" ? SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT
+    contract: presentation === "nested-referent-constraints-v1" ? SOURCE_SEMANTIC_QUERY_REFERENT_REQUEST_CONTRACT
+      : presentation === "nested-meaning-v1" ? SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT
       : SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT,
     k_version: SOURCE_SEMANTIC_K_VERSION,
     original_query,
@@ -390,6 +393,7 @@ export function sourceSemanticQueryPresentation(request?: Pick<SourceSemanticQue
   switch (request === undefined ? SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT : request.contract) {
     case SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT: return "flat-carrier-v1";
     case SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT: return "nested-meaning-v1";
+    case SOURCE_SEMANTIC_QUERY_REFERENT_REQUEST_CONTRACT: return "nested-referent-constraints-v1";
     default: throw new AlayaError("VALIDATION", "unsupported query request contract");
   }
 }

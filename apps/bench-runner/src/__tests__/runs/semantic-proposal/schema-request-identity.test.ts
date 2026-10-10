@@ -89,29 +89,35 @@ describe("semantic proposal rendered schema identity", () => {
       kind: "query", model: settings.model,
       provider_url: settings.providerUrl, request_profile: settings.requestProfile,
       items: [{ original_query }, { original_query, generation_presentation: "flat-carrier-v1" },
-        { original_query, generation_presentation: "nested-meaning-v1" }]
+        { original_query, generation_presentation: "nested-meaning-v1" },
+        { original_query, generation_presentation: "nested-referent-constraints-v1" }]
     }), 4096);
-    const [implicit, flat, nested] = lines;
+    const [implicit, flat, nested, referent] = lines;
     expect(flat).toEqual(implicit);
     expect(nested!.key).not.toBe(flat!.key);
     expect(nested!.requestDigest).not.toBe(flat!.requestDigest);
     expect(nested!.request).toHaveProperty("contract", "source-semantic-query-request-v10");
+    expect(referent!.request).toHaveProperty("contract", "source-semantic-query-request-v11");
+    expect(new Set([flat!.key, nested!.key, referent!.key]).size).toBe(3);
+    expect(new Set([flat!.requestDigest, nested!.requestDigest, referent!.requestDigest]).size).toBe(3);
     expect(flat!.request).toHaveProperty("contract", "source-semantic-query-request-v9");
-    const wire = prepareSemanticProviderRequest({ ...settings, apiKey: null }, {
-      systemPrompt: nested!.systemPrompt, userPrompt: nested!.userPrompt, responseJsonSchema: nested!.responseJsonSchema,
-      maxOutputTokens: 4096,
-      outputTokenField: isChatSemanticRequestProfile(settings.requestProfile) ? "max_tokens" : "maxOutputTokens",
-      retryMode: "disabled"
-    }, "source_semantic_proposal");
-    const body = JSON.parse(wire.body);
-    if (settings.requestProfile === profile) {
-      expect(body.response_format.json_schema.schema).toEqual(nested!.responseJsonSchema);
-      expect(JSON.parse(body.messages[1].content).contract).toBe("source-semantic-query-request-v10");
-    } else {
-      expect(body.generationConfig.responseMimeType).toBe("application/json");
-      expect(body.generationConfig).not.toHaveProperty("responseJsonSchema");
-      expect(body.systemInstruction.parts[1].text).toContain("complete response envelope including its contract, outcome and body");
-      expect(body.systemInstruction.parts[1].text).toContain(JSON.stringify(nested!.responseJsonSchema));
+    for (const current of [nested!, referent!]) {
+      const wire = prepareSemanticProviderRequest({ ...settings, apiKey: null }, {
+        systemPrompt: current.systemPrompt, userPrompt: current.userPrompt, responseJsonSchema: current.responseJsonSchema,
+        maxOutputTokens: 4096,
+        outputTokenField: isChatSemanticRequestProfile(settings.requestProfile) ? "max_tokens" : "maxOutputTokens",
+        retryMode: "disabled"
+      }, "source_semantic_proposal");
+      const body = JSON.parse(wire.body);
+      if (settings.requestProfile === profile) {
+        expect(body.response_format.json_schema.schema).toEqual(current.responseJsonSchema);
+        expect(JSON.parse(body.messages[1].content).contract).toBe(current.request.contract);
+      } else {
+        expect(body.generationConfig.responseMimeType).toBe("application/json");
+        expect(body.generationConfig).not.toHaveProperty("responseJsonSchema");
+        expect(body.systemInstruction.parts[1].text).toContain("complete response envelope including its contract, outcome and body");
+        expect(body.systemInstruction.parts[1].text).toContain(JSON.stringify(current.responseJsonSchema));
+      }
     }
   });
 
