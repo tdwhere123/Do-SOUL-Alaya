@@ -1,16 +1,166 @@
 import { expect, it, vi } from "vitest";
-import { closeCachedDatabase, SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
-import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
+import { closeCachedDatabase, SqliteEventLogRepo, SqliteFieldSourceRecordRepo, SqliteSourceHintReader,
+  type StorageDatabase } from "@do-soul/alaya-storage";
+import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
+  SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
+import { SOURCE_SEMANTIC_PUBLISHED_CONTRACT, type SourceSemanticCorrespondence,
+  type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
+import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
+import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
+import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
 
 const orchid = "orchid irrigation", jasmine = "jasmine pruning";
 const prepare = (original: string) => ({ kind: "prepare_query" as const, original_query: original,
   query_semantics: accessQuery(original), budget: ACCESS_BUDGET });
+
+function traceSourceObservation(database: StorageDatabase, sourceId: string, previews?: SourceSemanticPreviewExtents) {
+  const current = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findCurrentBounded");
+  const bodies = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+  const capsules = vi.spyOn(SqliteSourceHintReader.prototype, "readBoundInterpretation");
+  const headers = vi.spyOn(SqliteSourceHintReader.prototype, "pageBoundInterpretationHeaders");
+  try {
+    const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
+    const pool = database.connection.transaction(() => observeSourceSemanticAccess({ database },
+      { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: prepare(orchid) },
+      ["project"], meter, orchid, accessQuery(orchid), "query-conditioned-v1", ACCESS_BUDGET, sourceId, undefined, previews))();
+    return { pool, work: { native_work: meter.nativeWork, native_bytes: meter.nativeBytes,
+      logical_work: meter.spentWork, logical_memory_bytes: meter.spentBytes }, reads: {
+      current: current.mock.calls.map(([, source]) => source),
+      bodies: bodies.mock.calls.map(([, identity, maxBytes, offset], index) => {
+        const result = bodies.mock.results[index];
+        return { identity, maxBytes, offset: offset ?? 0,
+          source: result?.type === "return" ? result.value?.record?.source_id ?? null : null };
+      }), capsules: capsules.mock.calls.map(([, identity]) => identity), headers: headers.mock.calls.length
+    } };
+  } finally { current.mockRestore(); bodies.mockRestore(); capsules.mockRestore(); headers.mockRestore(); }
+}
+
+async function reviseSource(database: StorageDatabase, sourceId: string, scope: "project" | "global_core" = "project") {
+  const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
+  const admission = createAuditedSourceAdmission({ stores, eventLogRepo: new SqliteEventLogRepo(database),
+    runtimeNotifier: { notifyEntry: async () => undefined }, sha256: fieldContractSha256 });
+  const content = `User: Revised ${sourceId} source.`;
+  await admission.admit({ workspace_id: WS, source_id: sourceId, source_version: "2", content_bytes: content,
+    evidence_object_id: null, recorded_at: "2026-09-19T00:00:00.000Z", event_time: null,
+    valid_from: null, valid_to: null, speaker: "user", scope_class: scope, spans: deriveAddressableSpanViews(content) }, { workspaceId: WS });
+}
+
+it("excludes unrelated source reads during source-scoped observation while retaining worker proof and raw delivery", async () => {
+  await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },
+    { id: "unrelated", text: "Granite walls.", reading: "surround" }], async ({ filename, execute, ids }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    try {
+      const trace = traceSourceObservation(database, "known");
+      const source = await accessCall(execute, { kind: "prepare_source", source_id: "known", budget: ACCESS_BUDGET });
+      const prepared = await accessCall(execute, { ...prepare(orchid), source_handle: source.source_handle });
+      const raw = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+      const correspondence: SourceSemanticCorrespondence = { contract: "source-semantic-correspondence-v3",
+        source_interpretation_id: ids.get("known")![0]!, query_semantics_id: prepared.query_semantics_id!,
+        producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1", contract_version: "source-semantic-correspondence-v3",
+        correspondences: [{ relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: "qStatement" },
+          source_endpoint: { kind: "frame", frame: "fStatement" }, query_support: { kind: "query_text", excerpt: orchid },
+          source_semantic_support: [{ kind: "lexical", mentions: ["mStatement"] }] }] };
+      const proved = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle!, semantic_correspondences: [correspondence], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+      const { rss_bytes: _sourceRss, ...sourceWork } = source.work;
+      const { rss_bytes: _queryRss, ...queryWork } = prepared.work;
+      console.info(JSON.stringify({ observation: "source-scoped", reads: trace.reads, work: trace.work,
+        worker: { source: sourceWork, query: queryWork } }));
+      expect(trace.pool.descriptors.map(row => row.interpretation_id)).toEqual(ids.get("known"));
+      expect(trace.pool.access).toMatchObject({ observed_source_count: 1, observed_interpretation_count: 1,
+        unvisited_sources: false, unvisited_interpretations: false, stopping_reasons: [] });
+      expect(trace.reads.capsules).toHaveLength(2);
+      expect(trace.reads.headers).toBeGreaterThan(0);
+      expect(prepared.candidates.map(row => row.source_id)).toEqual(["known"]);
+      expect(prepared.candidates.map(row => row.interpretation_id)).toEqual(ids.get("known"));
+      expect(prepared.coverage).toMatchObject({ discovery: "complete", semantic_correspondence: "unexercised", conditional_computation: "unexercised" });
+      expect(raw.proofs ?? []).toEqual([]);
+      expect(raw.index.entries).toHaveLength(1);
+      expect(Object.values(raw.previews ?? {})).toContain("User: Orchid irrigation.");
+      expect(raw.slot_qualifiers[0]?.evidence_kind).toBe("source_evidence");
+      expect(proved.proofs?.map(proof => proof.source_interpretation_id)).toEqual(ids.get("known"));
+      expect(proved.slot_qualifiers[0]?.evidence_kind).toBe("semantic_proof");
+      expect(trace.work.native_work).toBeGreaterThan(0);
+      expect(trace.work.native_bytes).toBeGreaterThan(0);
+      expect(trace.work.logical_work).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
+      expect(trace.work.logical_memory_bytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
+      expect(trace.reads.current).toContain("known");
+      expect(trace.reads.bodies.map(row => row.source)).toContain("known");
+      expect(trace.reads.current).not.toContain("unrelated");
+      expect(trace.reads.bodies.map(row => row.source)).not.toContain("unrelated");
+    } finally { database.close(); closeCachedDatabase(filename); }
+  });
+});
+
+it.each(["unrelated stale", "matching stale", "matching unauthorized", "unrelated malformed"] as const)
+("preserves source-scoped verification and unknown states for %s interpretations", async state => {
+  await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },
+    { id: "unrelated", text: "Granite walls.", reading: "surround" }], async ({ filename, execute, ids }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    try {
+      if (state === "unrelated malformed") {
+        // A separate storage-corruption control has no usable source identity.
+        database.connection.prepare("UPDATE evidence_capsules SET gist=? WHERE json_extract(gist,'$.interpretation.source.source_id')=?")
+          .run(JSON.stringify({ contract: SOURCE_SEMANTIC_PUBLISHED_CONTRACT }), "unrelated");
+      } else {
+        await reviseSource(database, state === "unrelated stale" ? "unrelated" : "known",
+          state === "matching unauthorized" ? "global_core" : "project");
+      }
+      if (state === "matching unauthorized") {
+        expect(() => traceSourceObservation(database, "known")).toThrow(/scope/u);
+        await expect(accessCall(execute, { kind: "prepare_source", source_id: "known", budget: ACCESS_BUDGET })).rejects.toThrow(/scope/u);
+        return;
+      }
+      const trace = traceSourceObservation(database, "known");
+      const source = await accessCall(execute, { kind: "prepare_source", source_id: "known", budget: ACCESS_BUDGET });
+      const prepared = await accessCall(execute, { ...prepare(orchid), source_handle: source.source_handle });
+      console.info(JSON.stringify({ observation: state, reads: trace.reads, work: trace.work }));
+      const unknown = state === "unrelated malformed";
+      expect(trace.pool.descriptors.map(row => row.interpretation_id)).toEqual(state === "matching stale" ? [] : ids.get("known"));
+      expect(trace.pool.access).toMatchObject({ observed_source_count: 1, unvisited_sources: false,
+        unvisited_interpretations: unknown, stopping_reasons: unknown ? ["unavailable"] : [] });
+      expect(prepared.candidates.map(row => row.interpretation_id)).toEqual(state === "matching stale" ? [] : ids.get("known"));
+      expect(prepared.coverage.discovery).toBe(unknown ? "truncated" : "complete");
+      expect(prepared.coverage.conditional_computation).toBe("unexercised");
+      expect(trace.reads.capsules).toHaveLength(2);
+      expect(trace.reads.current).toContain("known");
+      if (state === "matching stale") expect(trace.reads.current.filter(source => source === "known").length).toBeGreaterThan(1);
+      expect(trace.reads.current).not.toContain("unrelated");
+      expect(trace.reads.bodies.map(row => row.source)).not.toContain("unrelated");
+    } finally { database.close(); closeCachedDatabase(filename); }
+  });
+});
+
+it("retains a scoped preview boundary without treating a parsed unrelated interpretation as an open tail", async () => {
+  await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },
+    { id: "unrelated", text: "Granite walls.", reading: "surround" }], async ({ filename, ids }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    try {
+      const current = new SqliteFieldSourceRecordRepo(database, fieldContractSha256).findCurrentBounded(WS, "known", 1)?.record;
+      if (current == null) throw new Error("known source must be admitted");
+      const bodyBytes = Buffer.byteLength("User: Orchid irrigation.");
+      for (const byte_extent of [8, bodyBytes]) {
+        const trace = traceSourceObservation(database, "known", [{ source_id: "known", source_version: current.source_version,
+          record_id: current.record_id, byte_extent }]);
+        const complete = byte_extent === bodyBytes;
+        expect(trace.pool.access.source_candidates).toEqual([expect.objectContaining({ source_id: "known",
+          read_bytes: byte_extent, body_bytes: bodyBytes, complete })]);
+        expect(trace.pool.descriptors.map(row => row.interpretation_id)).toEqual(complete ? ids.get("known") : []);
+        expect(trace.pool.access).toMatchObject({ unvisited_sources: !complete, unvisited_interpretations: !complete });
+        expect(trace.reads.current).not.toContain("unrelated");
+        expect(trace.reads.bodies.map(row => row.source)).not.toContain("unrelated");
+        if (!complete) expect(trace.reads.bodies.every(row => row.offset + row.maxBytes <= byte_extent)).toBe(true);
+      }
+    } finally { database.close(); closeCachedDatabase(filename); }
+  });
+});
 
 it("interleaves actual source, header and verification work before freezing reconciled source signals", async () => {
   await withAccessLibrary(Array.from({ length: 50 }, (_, index) => ({ id: `source-${String(index).padStart(3, "0")}`,

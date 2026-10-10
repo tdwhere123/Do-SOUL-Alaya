@@ -335,7 +335,12 @@ function observeInterpretation(runtime: SourceSemanticReadRuntime, workspace: st
   records: SourceRecordIdentity[], byId: Map<string, SourceRecordIdentity>, sources: Map<string, SourceObservation>, sourceId?: string,
   sourcePreviewExtents?: SourceSemanticPreviewExtents, onDeferred?: () => void) {
   const checked = loadVerified(runtime, workspace, { evidence_object_id: row.object_id }, authorized, meter,
-    sourcePreviewExtents === undefined ? undefined : bound => {
+    sourceId === undefined && sourcePreviewExtents === undefined ? undefined : bound => {
+      if (sourceId !== undefined) {
+        meter.charge(1, 0, "access interpretation source membership");
+        if (bound.interpretation.source.source_id !== sourceId) return false;
+      }
+      if (sourcePreviewExtents === undefined) return true;
       let current: SourceRecordIdentity | undefined;
       for (const record of records) {
         meter.charge(1, 0, "access preview verification tuple");
@@ -347,7 +352,6 @@ function observeInterpretation(runtime: SourceSemanticReadRuntime, workspace: st
     });
   if (checked === null) return null;
   const record = checked.stored.record, interpretation = checked.bound.interpretation;
-  if (sourceId !== undefined && record.source_id !== sourceId) return null;
   if (sourcePreviewExtents !== undefined) previewExtent(record, sourcePreviewExtents);
   if (!byId.has(record.identity)) {
     meter.retain(record, "access discovered current source");
