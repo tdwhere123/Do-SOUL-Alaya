@@ -234,6 +234,32 @@ it("reads a retained workspace-free key only in its workspace and fails closed o
 });
 
 describe("source semantic interpretation publication", () => {
+  it("rejects retired or inconsistent interpretations before a source read decision", async () => {
+    const fixture = await openFixture();
+    await admitSource(fixture);
+    const { bound } = await fixture.publication.publish(publicationInput(catalogFor(ASSERTION)));
+    const current = vi.spyOn(fixture.stores, "getCurrentRecord");
+    const body = vi.spyOn(fixture.stores, "getStoredRecord");
+    const beforeSourceRead = vi.fn(() => false);
+    try {
+      expect(verifyPublishedSourceSemanticInterpretation(fixture.owner, bound, REAL_SQLITE_TEST_WORKSPACE_ID, beforeSourceRead))
+        .toBeNull();
+      expect(beforeSourceRead).toHaveBeenCalledOnce();
+      beforeSourceRead.mockClear();
+      const inconsistent = { ...bound, interpretation: { ...bound.interpretation,
+        source: { ...bound.interpretation.source, source_id: "another-source" } } };
+      expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, inconsistent,
+        REAL_SQLITE_TEST_WORKSPACE_ID, beforeSourceRead)).toThrow(/interpretation identity mismatch/u);
+      const retired = { ...bound, interpretation: { ...bound.interpretation,
+        normalizer_version: "source-semantic-normalizer-v3" } };
+      expect(() => verifyPublishedSourceSemanticInterpretation(fixture.owner, retired,
+        REAL_SQLITE_TEST_WORKSPACE_ID, beforeSourceRead)).toThrow(/retired source interpretation/u);
+      expect(beforeSourceRead).not.toHaveBeenCalled();
+      expect(current).not.toHaveBeenCalled();
+      expect(body).not.toHaveBeenCalled();
+    } finally { current.mockRestore(); body.mockRestore(); }
+  });
+
   it("persists structural gaps across SQLite reopen and rejects normalized inputs that erase them", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-accounting-"));
     const filename = join(directory, "memory.sqlite");

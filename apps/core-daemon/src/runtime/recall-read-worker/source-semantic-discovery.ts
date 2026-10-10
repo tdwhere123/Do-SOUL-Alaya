@@ -14,7 +14,7 @@ export const IDLE: SourceSemanticCoverage = {
   semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete"
 };
 
-type VerifiedInterpretation = ReturnType<typeof verifyPublishedSourceSemanticInterpretation>;
+type VerifiedInterpretation = NonNullable<ReturnType<typeof verifyPublishedSourceSemanticInterpretation>>;
 export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: string,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget): VerifiedInterpretation;
 export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: string, identity: Readonly<{ evidence_object_id: string }>,
@@ -63,12 +63,9 @@ export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: stri
         { details: { admission: "unavailable", unavailable: compatible.status } });
     }
   }
-  // A bounded initial preview cannot verify source locations by reading hidden bytes.
-  // The caller may defer this candidate; it enters the pool only after full verification.
-  if (beforeSourceRead !== undefined && !beforeSourceRead(bound)) return null;
   const stores = sourceSemanticReadStores(runtime.database, workspace, bound.interpretation.source.source_id, meter, authorized);
   meter.retain(bound, "interpretation verification");
-  return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256, meter }, bound, workspace);
+  return verifyPublishedSourceSemanticInterpretation({ stores, sha256: fieldContractSha256, meter }, bound, workspace, beforeSourceRead);
 }
 
 export function workOf(meter: SourceSemanticReadBudget) {

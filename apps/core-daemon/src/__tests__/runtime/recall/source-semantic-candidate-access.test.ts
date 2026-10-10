@@ -99,6 +99,40 @@ it("excludes unrelated source reads during source-scoped observation while retai
   });
 });
 
+it("keeps a corrupted interpretation source identity unknown before source-scoped exclusion", async () => {
+  await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },
+    { id: "unrelated", text: "Orchid irrigation.", reading: orchid }], async ({ filename, execute, ids }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    try {
+      // Equal source text prevents a different digest from rejecting the corruption first.
+      // Keep the published interpretation and capsule identities while changing only source membership.
+      const corrupted = database.connection.prepare("UPDATE evidence_capsules SET gist=json_set(gist,'$.interpretation.source.source_id',?) WHERE json_extract(gist,'$.interpretation_id')=?")
+        .run("unrelated", ids.get("known")![0]!);
+      expect(corrupted.changes).toBe(1);
+      const trace = traceSourceObservation(database, "known");
+      const source = await accessCall(execute, { kind: "prepare_source", source_id: "known", budget: ACCESS_BUDGET });
+      const prepared = await accessCall(execute, { ...prepare(orchid), source_handle: source.source_handle });
+      const raw = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+      console.info(JSON.stringify({ observation: "corrupted source identity", reads: trace.reads, work: trace.work,
+        discovery: prepared.coverage.discovery, access: trace.pool.access }));
+      expect(trace.pool.descriptors).toEqual([]);
+      expect(prepared.candidates).toEqual([]);
+      expect(raw.proofs ?? []).toEqual([]);
+      expect(raw.index.entries).toHaveLength(1);
+      expect(Object.values(raw.previews ?? {})).toContain("User: Orchid irrigation.");
+      expect(raw.slot_qualifiers[0]?.evidence_kind).toBe("source_evidence");
+      expect(trace.reads.capsules).toHaveLength(2);
+      expect(trace.reads.current).not.toContain("unrelated");
+      expect(trace.reads.bodies.map(row => row.source)).not.toContain("unrelated");
+      expect(trace.pool.access).toMatchObject({ observed_source_count: 1, observed_interpretation_count: 0,
+        unvisited_sources: false, unvisited_interpretations: true, stopping_reasons: ["unavailable"] });
+      expect(prepared.coverage.discovery).toBe("truncated");
+      expect(prepared.coverage.conditional_computation).toBe("unexercised");
+    } finally { database.close(); closeCachedDatabase(filename); }
+  });
+});
+
 it.each(["unrelated stale", "matching stale", "matching unauthorized", "unrelated malformed"] as const)
 ("preserves source-scoped verification and unknown states for %s interpretations", async state => {
   await withAccessLibrary([{ id: "known", text: "Orchid irrigation.", reading: orchid },

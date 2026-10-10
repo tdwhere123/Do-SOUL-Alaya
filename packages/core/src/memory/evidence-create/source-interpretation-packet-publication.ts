@@ -301,12 +301,22 @@ function assemblePublishedInterpretation(sha256: FieldContractSha256, stored: Re
 }
 
 export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
-  value: unknown, workspaceId: string) {
+  value: unknown, workspaceId: string): ReturnType<typeof verifyStoredSourceSemanticInterpretation>;
+export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
+  value: unknown, workspaceId: string, beforeSourceRead?: (bound: SourceSemanticPublishedInterpretation) => boolean):
+  ReturnType<typeof verifyStoredSourceSemanticInterpretation> | null;
+export function verifyPublishedSourceSemanticInterpretation(owner: Pick<Owner, "stores" | "sha256" | "meter">,
+  value: unknown, workspaceId: string, beforeSourceRead?: (bound: SourceSemanticPublishedInterpretation) => boolean) {
   const bound = SourceSemanticPublishedInterpretationSchema.parse(value);
   if (bound.interpretation.normalizer_version !== SOURCE_SEMANTIC_NORMALIZER_VERSION) {
     throw new CoreError("VALIDATION", "retired source interpretation is ineligible for current execution",
       { details: { admission: "filtered", reason: "retired_interpretation" } });
   }
+  if (sourceSemanticInterpretationIdentity(bound.interpretation, owner.sha256) !== bound.interpretation_id) {
+    throw new CoreError("VALIDATION", "interpretation identity mismatch");
+  }
+  // Source membership and preview deferral may trust only a self-consistent interpretation.
+  if (beforeSourceRead !== undefined && !beforeSourceRead(bound)) return null;
   return verifyStoredSourceSemanticInterpretation(owner, bound, workspaceId);
 }
 
@@ -321,9 +331,6 @@ function verifyStoredSourceSemanticInterpretation(owner: Pick<Owner, "stores" | 
 
 function verifyLocatedSourceSemanticInterpretation(owner: Pick<Owner, "sha256" | "meter">,
   bound: SourceSemanticPublishedInterpretation, workspaceId: string, stored: StoredSourceRecord) {
-  if (sourceSemanticInterpretationIdentity(bound.interpretation, owner.sha256) !== bound.interpretation_id) {
-    throw new CoreError("VALIDATION", "interpretation identity mismatch");
-  }
   verifySourceSemanticSourceBinding(bound.interpretation, bound.source_target, stored.record, owner.sha256);
   const located = verifySourceSemanticLocations(stored.content_bytes, bound.interpretation, owner.sha256, owner.meter);
   const rebound = assemblePublishedInterpretation(owner.sha256, stored, workspaceId,
