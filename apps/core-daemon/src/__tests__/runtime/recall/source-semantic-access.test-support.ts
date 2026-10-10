@@ -36,6 +36,12 @@ type SetupSnapshot = { filename: string; ids: ReadonlyMap<string, readonly strin
   publicationUsage: ReadonlyMap<string, readonly SourceSemanticResourceBudget[]>; setup: AccessFixtureSetup };
 type PublicationProgress = { ids: Map<string, string[]>; publicationUsage: Map<string, SourceSemanticResourceBudget[]>;
   admittedSourceIds: string[]; sourceId: string; publicationIndex: number };
+type Published = Awaited<ReturnType<ReturnType<typeof createSourceSemanticInterpretationPublication>["publish"]>>;
+export type PublicationBoundary = Readonly<{
+  source_id: string; publication_index: number; meter: SourceSemanticResourceLedger | undefined;
+} & ({ kind: "begin" } | { kind: "end"; usage: SourceSemanticResourceBudget;
+  outcome: { status: "published"; result: Published } | { status: "failed"; error: unknown } })>;
+type PublicationObserver = (event: PublicationBoundary) => void;
 
 export function accessQuery(original: string, reading = original): SourceSemanticQuery {
   return { contract: "source-semantic-query-v4", original_query_digest: digestOriginalQuery(original),
@@ -56,6 +62,7 @@ export async function accessCall<K extends SourceSemanticWorkerRequest["kind"]>(
 export async function withAccessLibrary(sources: readonly AccessFixtureSource[], body: (input: SetupSnapshot & {
   execute: Execute;
 }) => Promise<void>, options?: { publicationBudget: SourceSemanticResourceBudget;
+  onPublicationBoundary?: PublicationObserver;
   onSetupExhausted?: (input: SetupSnapshot) => Promise<void> }): Promise<AccessFixtureSetup> {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-access-")), filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -82,7 +89,8 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
     try {
       for (const fixture of sources) {
         publicationClock = fixture.publicationAt ?? CLOCK;
-        await admitAndPublishFixture(fixture, { admission, publication, meter }, progress);
+        await admitAndPublishFixture(fixture, { admission, publication, meter,
+          onPublicationBoundary: options?.onPublicationBoundary }, progress);
       }
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted) || meter === undefined) throw error;
@@ -105,6 +113,7 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
 async function admitAndPublishFixture(fixture: AccessFixtureSource, owners: {
   admission: ReturnType<typeof createAuditedSourceAdmission>; publication: ReturnType<typeof createSourceSemanticInterpretationPublication>;
   meter: SourceSemanticResourceLedger | undefined;
+  onPublicationBoundary: PublicationObserver | undefined;
 }, progress: PublicationProgress) {
   progress.sourceId = fixture.id; progress.publicationIndex = 0;
   const publishedIds: string[] = [], usages: SourceSemanticResourceBudget[] = [];
@@ -134,6 +143,9 @@ async function admitAndPublishFixture(fixture: AccessFixtureSource, owners: {
     const authored = fixture.authoredDraft?.(catalog);
     if (fixture.authoredDraft !== undefined && authored === undefined) throw new Error("authored source fixture returned no draft");
     const before = { work_units: owners.meter?.spentWork ?? 0, memory_bytes: owners.meter?.spentBytes ?? 0 };
+    const boundary = { source_id: fixture.id, publication_index: index, meter: owners.meter };
+    let outcome: Extract<PublicationBoundary, { kind: "end" }>["outcome"] | undefined;
+    owners.onPublicationBoundary?.({ ...boundary, kind: "begin" });
     try {
       const published = await owners.publication.publish({
         workspaceId: WS, runId: RUN, artifactKey: fixture.id, source, catalog,
@@ -156,11 +168,19 @@ async function admitAndPublishFixture(fixture: AccessFixtureSource, owners: {
           operators: [], gaps: []
         }
       });
+      outcome = { status: "published", result: published };
       publishedIds.push(published.bound.interpretation_id);
       if (owners.meter === undefined) usages.push(published.resource_usage);
+    } catch (error) {
+      outcome = { status: "failed", error };
+      throw error;
     } finally {
       if (owners.meter !== undefined) usages.push({ work_units: owners.meter.spentWork - before.work_units,
         memory_bytes: owners.meter.spentBytes - before.memory_bytes });
+      if (outcome !== undefined) {
+        try { owners.onPublicationBoundary?.({ ...boundary, kind: "end", outcome, usage: usages.at(-1)! }); }
+        catch (error) { if (outcome.status !== "failed") throw error; }
+      }
     }
   }
 }

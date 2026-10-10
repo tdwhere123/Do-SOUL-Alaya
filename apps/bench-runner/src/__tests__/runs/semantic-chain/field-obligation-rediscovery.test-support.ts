@@ -66,7 +66,7 @@ export function executionBinding(revision: string | undefined) {
 }
 
 /** Authored source semantics, independent of the access policy and every native result. */
-function eventDraft(catalog: SourceReferenceCatalog, retainCoverage = false): SourceSemanticDraft {
+export function eventDraft(catalog: SourceReferenceCatalog, retainCoverage = false): SourceSemanticDraft {
   const resolver = sourceReferenceResolver(catalog, fieldContractSha256);
   const mentions: SourceSemanticDraft["mentions"][number][] = [], frames: SourceSemanticDraft["frames"][number][] = [];
   const referents = new Map<string, string[]>(), gaps: SourceSemanticDraft["gaps"][number][] = [];
