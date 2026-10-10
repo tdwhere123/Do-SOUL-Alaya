@@ -25,6 +25,7 @@ it.each([
   ["forum-final", "count", "four"], ["personnel-summary", "duration", "twelve"]
 ] as const)("proves the fully qualified direct answer in %s without requiring operand events", (name, kind, value) => {
   const { proof, index, entry, qualifier, record } = fixture(name, kind);
+  expect(proof.query.gaps).toEqual([]);
   expect(proof.binding_results).toHaveLength(1);
   const binding = proof.binding_results![0]!;
   expect(binding).toMatchObject({ kind: "answer", query_complete: true });
@@ -96,8 +97,21 @@ it("retains two dates as individually supported inputs with unknown cross-source
   expect(combined).toEqual({ answer: "open", evidence_inputs: [{ alternative: 0, input: 0, status: "supported" },
     { alternative: 0, input: 1, status: "supported" }], operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
   expect(joining.proof.binding_results![0]!.bindings.employee).not.toEqual(promotion.proof.binding_results![0]!.bindings.employee);
-  const inputOnly = fixture("joining-note", "duration", false);
-  expect(inputOnly.qualifier.support!.answer).toBe("unrepresented");
+}, 90_000);
+
+it.each([["forum-notebook", "count"], ["joining-note", "duration"]] as const)
+("keeps gap-free %s inputs unrepresented as answers through native library verification", (name, kind) => {
+  const { proof, index, entry, qualifier, record } = fixture(name, kind, false);
+  expect(proof.query.gaps).toEqual([]);
+  expect(proof.query.alternatives[0]!.answer_frames).toEqual([]);
+  expect(proof.query.requested_operation).toBeDefined();
+  expect(proof.binding_results!.length).toBeGreaterThan(0);
+  expect(proof.binding_results!.every(binding => binding.kind === "evidence" && binding.query_complete === false)).toBe(true);
+  expect(qualifier.support).toEqual({ answer: "unrepresented", evidence_inputs: kind === "count"
+    ? [{ alternative: 0, input: 0, status: "supported" }]
+    : [{ alternative: 0, input: 0, status: "supported" }, { alternative: 0, input: 1, status: "open" }],
+    operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
+  expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [proof], record, BUDGET).verified_proofs).toEqual([proof]);
 }, 90_000);
 
 it("leaves a past-use question open against an assertion of future use when past meaning is a located gap", () => {

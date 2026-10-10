@@ -50,7 +50,8 @@ export type Preparation = Extract<SoulInterpretationResponse, { operation: "prep
 export type SourcePreparation = Extract<SoulInterpretationResponse, { operation: "prepare_source" }>;
 export type Delivery = Extract<SoulInterpretationResponse, { operation: "recall" }>;
 export type Descriptor = Preparation["candidates"][number];
-export type ManifestSource = { source_id: string; record_id: string; source_version: string; content_digest: string; source_body: string };
+export type ManifestSource = { source_id: string; record_id: string; source_version: string; content_digest: string; source_body: string;
+  recorded_at: string; event_time: string | null; scope_class: string };
 export type Action = { frame: "dispatch" | "examine"; alternative: 0; obligation: "context"; access_hint: string;
   support: { source_id: string; source_version: string; content_digest: string; quote: string; utf8_span: [number, number] } };
 
@@ -65,7 +66,7 @@ export function executionBinding(revision: string | undefined) {
 }
 
 /** Authored source semantics, independent of the access policy and every native result. */
-function eventDraft(catalog: SourceReferenceCatalog): SourceSemanticDraft {
+function eventDraft(catalog: SourceReferenceCatalog, retainCoverage = false): SourceSemanticDraft {
   const resolver = sourceReferenceResolver(catalog, fieldContractSha256);
   const mentions: SourceSemanticDraft["mentions"][number][] = [], frames: SourceSemanticDraft["frames"][number][] = [];
   const referents = new Map<string, string[]>(), gaps: SourceSemanticDraft["gaps"][number][] = [];
@@ -77,13 +78,25 @@ function eventDraft(catalog: SourceReferenceCatalog): SourceSemanticDraft {
   };
   for (const assertion of catalog.assertions) {
     const text = assertion.segments.map(segment => segment.text).join(""), id = assertion.assertion_id;
+    const title = retainCoverage ? /^(Cedar|Harbor|Birch|Estuary):/u.exec(text)?.[1] : undefined;
+    if (title !== undefined) {
+      const m = mention(id, text, title, `title${id}`);
+      gaps.push({ kind: "uninterpreted_clause", affected_ids: [m], support: [{ kind: "lexical", mentions: [m] }],
+        description: "The source-supported navigation title is retained without event or identity meaning." });
+    }
     if (text.includes("records are under")) {
       const m = mention(id, text, text, `navigation${id}`);
       gaps.push({ kind: "uninterpreted_clause", affected_ids: [m], support: [{ kind: "lexical", mentions: [m] }],
         description: "The raw navigation clue is retained but does not assert a dispatch or inspection event." });
       continue;
     }
-    const match = /\b(J9|K4|K5)\b/u.exec(text);
+    const match = (retainCoverage ? /\b(J9|K4|K5|P\d{2})\b/u : /\b(J9|K4|K5)\b/u).exec(text);
+    if (match === null && retainCoverage) {
+      const m = mention(id, text, text, `unmodeled${id}`);
+      gaps.push({ kind: "uninterpreted_clause", affected_ids: [m], support: [{ kind: "lexical", mentions: [m] }],
+        description: "Ancillary manifest metadata and unknown inspection status remain unmodeled." });
+      continue;
+    }
     if (match === null) throw new Error("missing authored cargo identity");
     const promised = text.includes("promised"), frame = /\b(sent|send)\b/u.test(text) ? "send" : "inspect";
     const word = frame === "send" ? (promised ? "send" : "sent") : (promised ? "inspect" : "inspected");
@@ -118,10 +131,27 @@ export function fixtureSources(fixture: Fixture): readonly AccessFixtureSource[]
     semantic(fixture.hints[0].toLowerCase(), fixture.dispatch), semantic(fixture.hints[1].toLowerCase(), fixture.examine)];
 }
 
+export function boundedSourceIds(fixture: Fixture) {
+  const collection = `collection-${String(CASES.findIndex(row => row.name === fixture.name) + 1).padStart(2, "0")}`;
+  return Array.from({ length: 34 }, (_, ordinal) => `${collection}/document-${String(ordinal).padStart(2, "0")}`);
+}
+
+export function boundedFixtureSources(fixture: Fixture): readonly AccessFixtureSource[] {
+  const ids = boundedSourceIds(fixture);
+  const template = "Manifest R01. Cargo P01 was sent. Carrier: Westline. Origin: North Quay. Destination: East Yard. Container: CT01. Seal: SL01. The outbound desk signed after loading. This record contains no inspection result. Inspection status remains unknown.";
+  const bodies = [fixture.initial, ...Array.from({ length: 31 }, (_, index) =>
+    template.replaceAll("01", String(index + 1).padStart(2, "0"))), fixture.dispatch, fixture.examine];
+  return bodies.map((text, ordinal) => {
+    const at = new Date(Date.parse("2026-09-17T23:59:00.000Z") + ordinal * 1_000).toISOString();
+    return { id: ids[ordinal]!, text, verbatim: true, recordedAt: at, publicationAt: at,
+      authoredDraft: (catalog: SourceReferenceCatalog) => eventDraft(catalog, true) };
+  });
+}
+
 export function readHealthyManifest(filename: string) {
   const db = new DatabaseSync(filename, { readOnly: true });
   try {
-    const sources = db.prepare("SELECT source_id, record_id, source_version, content_digest, source_body FROM source_records ORDER BY rowid").all() as ManifestSource[];
+    const sources = db.prepare("SELECT source_id, record_id, source_version, content_digest, source_body, recorded_at, event_time, scope_class FROM source_records ORDER BY rowid").all() as ManifestSource[];
     const publications = db.prepare("SELECT gist FROM evidence_capsules ORDER BY created_at, object_id").all()
       .map(row => SourceSemanticPublishedInterpretationSchema.parse(JSON.parse(String(row.gist))));
     const capsule_metadata = db.prepare("SELECT object_id, source_hash, created_at, lifecycle_state FROM evidence_capsules ORDER BY created_at, object_id").all();
@@ -235,7 +265,9 @@ export function finiteReference(fixture: Fixture) {
 }
 
 export function expectedBindings(fixture: Fixture, h: SourceSemanticInterpretation) {
-  return fixture.expected_positive !== null && h.source.source_id === `${fixture.name}/${fixture.expected_positive}`
+  const boundedPositive = fixture.expected_positive === null ? null
+    : boundedSourceIds(fixture)[fixture.name === "inspection-known" ? 32 : 33];
+  return fixture.expected_positive !== null && [boundedPositive, `${fixture.name}/${fixture.expected_positive}`].includes(h.source.source_id)
     ? [{ item: "itemJ9", sentEvent: "send", inspectedEvent: "inspect" }] : [];
 }
 

@@ -40,11 +40,6 @@ const temporalGap = {
   support: [{ kind: "query_text" as const, excerpt: "last quarter" }],
   description: "The temporal restriction is not encoded by the retained predicates; no cutoff is invented."
 };
-const countGap = {
-  kind: "aggregate" as const, affected_ids: [] as string[],
-  support: [{ kind: "query_text" as const, excerpt: "How many" }],
-  description: "The requested count remains an unexecuted operation."
-};
 
 function independentMeaning(): SourceSemanticQueryMeaningBody {
   return {
@@ -64,7 +59,7 @@ function independentMeaning(): SourceSemanticQueryMeaningBody {
         { conditions: [action("sell", "sell"), objectKind("sell_kind")] }
       ]
     }],
-    gaps: [temporalGap, countGap]
+    gaps: [temporalGap]
   };
 }
 
@@ -115,7 +110,8 @@ describe("independent action inputs through query receive and branch planning", 
     if (admission.kind !== "admitted") return;
     expect(admission.producer.producer_id).toBe(SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID);
     const query = admission.query;
-    expect(query.gaps).toEqual([temporalGap, countGap]);
+    expect(query.gaps).toEqual([temporalGap]);
+    expect(received.outcome).toEqual({ status: "interpreted", gaps: [temporalGap] });
     expect(query.return_variables).toEqual(["object"]);
     expect(query.variables.find(row => row.id === "speaker")?.reference?.excerpt).toBe("I");
     expect(query.variables.find(row => row.id === "object")?.reference).toBeUndefined();
@@ -150,13 +146,10 @@ describe("independent action inputs through query receive and branch planning", 
     ]);
 
     const support = projectSourceSemanticQuerySupport(query, []);
-    expect(support.answer).toBe("unrepresented");
-    expect(support.evidence_inputs).toEqual([
+    expect(support).toEqual({ answer: "unrepresented", evidence_inputs: [
       { alternative: 0, input: 0, status: "open" },
       { alternative: 0, input: 1, status: "open" }
-    ]);
-    expect(support.operation).toBe("not_executed");
-    expect(query.gaps.map(gap => gap.kind)).toEqual(["unsupported_meaning", "aggregate"]);
+    ], operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
 
     const conjunction = receive(encodeSourceSemanticQueryCarrier({
       ...independentMeaning(),
@@ -213,12 +206,11 @@ describe("independent action class evidence through native Q/H/C and Field", () 
       expect(binding.query_complete).toBe(false);
     }
     const support = projectSourceSemanticQuerySupport(query, result.binding_results ?? []);
-    expect(support.operation).toBe("not_executed");
-    expect(support.evidence_inputs).toEqual([
+    expect(support).toEqual({ answer: "unrepresented", evidence_inputs: [
       { alternative: 0, input: 0, status: "supported" },
       { alternative: 0, input: 1, status: "supported" }
-    ]);
-    expect(query.gaps.map(gap => gap.kind)).toEqual(["unsupported_meaning", "aggregate"]);
+    ], operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
+    expect(query.gaps).toEqual([temporalGap]);
     // Located H time gaps do not block evidence-input supported; that is not original-question proof.
     expect(timeGaps).not.toEqual([]);
   });
@@ -301,6 +293,6 @@ describe("independent action class evidence through native Q/H/C and Field", () 
       ]));
     expect(query.variables.find(row => row.id === "speaker")?.reference?.excerpt).toBe("I");
     expect(query.variables.find(row => row.id === "object")?.reference).toBeUndefined();
-    expect(query.gaps.map(gap => gap.kind)).toEqual(["unsupported_meaning", "aggregate"]);
+    expect(query.gaps).toEqual([temporalGap]);
   });
 });

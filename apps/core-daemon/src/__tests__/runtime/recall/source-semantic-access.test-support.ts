@@ -22,7 +22,7 @@ export const ACCESS_BUDGET = { schema_version: 1 as const, work_units: 10_000_00
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
 export type AccessFixtureSource = Readonly<{ id: string; text: string; reading?: string; person?: string;
   count?: number; scope?: "project" | "global_core"; verbatim?: boolean;
-  recordedAt?: string; eventTime?: string;
+  recordedAt?: string; eventTime?: string; publicationAt?: string;
   authoredDraft?: (catalog: ReturnType<typeof buildSourceReferenceCatalog>) => unknown }>;
 type Execute = NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>["execute"];
 
@@ -44,16 +44,20 @@ export async function accessCall<K extends SourceSemanticWorkerRequest["kind"]>(
 
 export async function withAccessLibrary(sources: readonly AccessFixtureSource[], body: (input: {
   execute: Execute; filename: string; ids: ReadonlyMap<string, readonly string[]>;
+  publicationUsage: ReadonlyMap<string, readonly { work_units: number; memory_bytes: number }[]>;
 }) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-access-")), filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
   const eventLogRepo = new SqliteEventLogRepo(database), runtimeNotifier = { notifyEntry: async () => undefined };
   const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
+  let publicationClock = CLOCK;
   const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
-    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
+    evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => publicationClock });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
   const ids = new Map<string, string[]>();
+  const publicationUsage = new Map<string, { work_units: number; memory_bytes: number }[]>();
   for (const fixture of sources) {
+    publicationClock = fixture.publicationAt ?? CLOCK;
     if (fixture.authoredDraft !== undefined && fixture.verbatim !== true) {
       throw new Error("authored native source fixtures require verbatim original text");
     }
@@ -74,6 +78,7 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
     const personRef = fixture.person === undefined || fixture.authoredDraft !== undefined ? undefined
       : resolver.referenceForSpan(1, [personStart, personStart + fixture.person.length]);
     const publishedIds: string[] = [];
+    const usages: { work_units: number; memory_bytes: number }[] = [];
     for (let index = 0; index < (fixture.count ?? 1); index += 1) {
       const authored = fixture.authoredDraft?.(catalog);
       if (fixture.authoredDraft !== undefined && authored === undefined) throw new Error("authored source fixture returned no draft");
@@ -98,11 +103,13 @@ export async function withAccessLibrary(sources: readonly AccessFixtureSource[],
         }
       });
       publishedIds.push(published.bound.interpretation_id);
+      usages.push(published.resource_usage);
     }
     ids.set(fixture.id, publishedIds);
+    publicationUsage.set(fixture.id, usages);
   }
   database.close(); closeCachedDatabase(filename);
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
-  try { await client.ready(); await body({ execute: (input) => client.sourceSemanticsPort!.execute(input), filename, ids }); }
+  try { await client.ready(); await body({ execute: (input) => client.sourceSemanticsPort!.execute(input), filename, ids, publicationUsage }); }
   finally { await client.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true }); }
 }

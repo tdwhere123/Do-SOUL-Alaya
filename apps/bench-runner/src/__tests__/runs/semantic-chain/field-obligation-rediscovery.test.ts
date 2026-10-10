@@ -19,7 +19,7 @@ import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurem
 import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { ALLOWANCE, ARMS, BUDGETS, CASES, ORIGINAL_QUERY, QUERY, SCHEDULE, allowanceLedger,
   readHealthyManifest, correspondence, executionBinding, expectedBindings, finiteReference, fixtureSources,
-  initialObservations, selectAction, selectFinalDescriptor, sourceActions,
+  initialObservations, selectAction, selectFinalDescriptor, sourceActions, boundedFixtureSources, boundedSourceIds,
   type Action, type Arm, type Decision, type Descriptor, type Fixture, type Preparation, type Delivery,
   type SourcePreparation } from "./field-obligation-rediscovery.test-support.js";
 
@@ -153,15 +153,22 @@ function adapterControls(invocation: Invocation | undefined, descriptor: Descrip
     descriptor, c, candidates).status };
 }
 
-async function runArm(root: string, fixture: Fixture, arm: Arm, handler: Handler, manifest: Manifest, candidates: Action[]) {
-  const initial = await observe(root, "initial", handler, BUDGETS.common, { initial_source_id: `${fixture.name}/initial` });
+async function runArm(root: string, fixture: Fixture, arm: Arm, handler: Handler, manifest: Manifest, candidates: Action[], bounded = false) {
+  const initialSourceId = bounded ? boundedSourceIds(fixture)[0]! : `${fixture.name}/initial`;
+  const initial = await observe(root, "initial", handler, BUDGETS.common, { initial_source_id: initialSourceId });
   const initiallyObserved = observations(initial), initialIds = new Set(initiallyObserved.read_sources.map(row => row.source_id));
-  const initialH = initial.prepare?.candidates.find(row => row.source_id === `${fixture.name}/initial` && row.interpretation !== undefined);
+  const initialH = initial.prepare?.candidates.find(row => row.source_id === initialSourceId && row.interpretation !== undefined);
+  const initialRecord = manifest.sources.find(row => row.source_id === initialSourceId)!;
+  const rawInitialDelivered = initial.delivery?.results?.some(row => row.target.kind === "source_evidence"
+    && row.target.root_id === initialRecord.record_id && row.content_preview === initialRecord.source_body) === true;
+  const initialReady = !initial.terminal && initiallyObserved.complete && initialH !== undefined && initialIds.has(initialH.source_id)
+    && initial.source?.source_id === initialSourceId && rawInitialDelivered
+    && initial.prepare?.query_semantics_id === sourceSemanticQueryIdentity(QUERY, fieldContractSha256);
   let initialReason: Invocation | undefined, finalReason: Invocation | undefined, second: Round | undefined;
   let decision: Decision | undefined, selectedHint: string | undefined, stop = "initial_source_or_complete_receipts_unavailable";
   let finalH: Descriptor | undefined, finalC: SourceSemanticCorrespondence | undefined;
   const initialC = initialH === undefined ? undefined : correspondence(initialH);
-  if (!initial.terminal && initiallyObserved.complete && initialH !== undefined && initialIds.has(initialH.source_id)) {
+  if (initialReady && initialH !== undefined) {
     if (arm === "F") initialReason = await reason(root, "initial-reason", initialH, initialC!, handler);
     reserveRecoveryRead(root, "source-bound candidate input and attention selection");
     if (arm === "F") decision = selectAction(initialReason?.response?.operation === "reason" ? initialReason.response.result : undefined,
@@ -191,14 +198,27 @@ async function runArm(root: string, fixture: Fixture, arm: Arm, handler: Handler
   const discovery = finalH === undefined ? { status: "unknown", reason: stop, newly_observed: null }
     : !initiallyObserved.complete || initial.terminal ? { status: "unknown", reason: "initial_receipts_incomplete", newly_observed: null }
     : secondObserved?.read_sources.some(row => row.source_id === finalH!.source_id)
-      ? { status: "known", reason: initialIds.has(finalH.source_id) ? "final_H_source_was_already_observed"
-        : "final_H_source_body_first_read_in_second_observation", newly_observed: !initialIds.has(finalH.source_id) }
+      ? { status: "known", reason: initialIds.has(finalH.source_id) ? "final_H_source_was_already_receipt_visible"
+        : "final_H_source_new_to_public_receipts", newly_observed: !initialIds.has(finalH.source_id) }
       : { status: "unknown", reason: "final_H_has_no_explicit_second_body_read", newly_observed: null };
   reserveRecoveryHostEffect(root, "result-output", chainIdentity({ fixture: fixture.name, arm }), false);
   const ledger = allowanceLedger(join(root, "recovery-allowance.sqlite"));
   const calls = [...initial.calls, ...(initialReason === undefined ? [] : [initialReason]), ...(second?.calls ?? []),
     ...(finalReason === undefined ? [] : [finalReason])];
-  return { arm, stop, selected_hint: selectedHint ?? null, decision: decision ?? null, adapter_controls: controls,
+  const extentRows = [second?.prepare?.access, second?.delivery?.discovery?.access].flatMap(row => row?.source_candidates ?? []);
+  const firstBatch = manifest.sources.slice(0, 16).map(source => {
+    const extents = extentRows.filter(row => row.record_id === source.record_id);
+    return { source_id: source.source_id, complete: extents.length === 0 ? null : extents.some(row => row.complete) };
+  });
+  return { arm, stop, initial_source_id: initialSourceId, selected_hint: selectedHint ?? null, decision: decision ?? null, adapter_controls: controls,
+    readiness: { initial: initialReady, initial_raw_delivered: rawInitialDelivered,
+      field_selection: arm === "F" ? decision?.selected == null ? "unready" : "ready" : "not_exercised",
+      initial_bindings: arm === "F" ? initialProof?.status === "compared" ? "compared" : "unknown" : "not_exercised",
+      final_bindings: finalProof?.status === "compared" ? "compared" : "unknown" },
+    access_boundary: { first_batch: firstBatch,
+      first_batch_complete: firstBatch.every(row => row.complete === true) ? true : firstBatch.some(row => row.complete === false) ? false : null,
+      returned_navigation_H: second?.prepare?.candidates.filter(row => manifest.sources.slice(-2).some(source => source.source_id === row.source_id)) ?? [],
+      physical_first_read_novelty: "unknown_no_worker_IO_trace", receipt_visibility_is_not_physical_IO: true },
     initial: describeRound(initial),
     initial_correspondence: initialC ?? null, initial_reason: initialReason ?? null, initial_proof: initialProof,
     second: describeRound(second), final_H: finalH ?? null, final_correspondence: finalC ?? null,
@@ -218,14 +238,17 @@ async function runArm(root: string, fixture: Fixture, arm: Arm, handler: Handler
     native_subtotal_complete: calls.every(row => row.failure === undefined),
     encoded_response_bytes: calls.reduce((sum, row) => sum + (row.encoded_response_bytes ?? 0), 0),
     setup_actual_cost: "unknown", semantic_input_authoring_actual_cost: "unknown", total_lifecycle_cost: "unknown",
-    consumer_accuracy: "not_exercised", consumer_cost: "not_exercised", catalog: "healthy_authored_three_source_fixture" };
+    consumer_accuracy: "not_exercised", consumer_cost: "not_exercised",
+    catalog: bounded ? "healthy_authored_bounded_population" : "healthy_authored_three_source_fixture" };
 }
 
-function checkReport(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>>) {
+function checkReport(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>>, bounded = false) {
   expect(report.allowance.work_reserved).toBeLessThanOrEqual(ALLOWANCE.total_work_units);
   expect(report.allowance.memory_reserved).toBeLessThanOrEqual(ALLOWANCE.total_memory_bytes);
-  expect(report.initial?.prepare?.candidates.some(row => row.source_id === `${fixture.name}/initial`)).toBe(true);
-  expect(report.final_reason?.response?.operation).toBe("reason");
+  if (!bounded) {
+    expect(report.initial?.prepare?.candidates.some(row => row.source_id === report.initial_source_id)).toBe(true);
+    expect(report.final_reason?.response?.operation).toBe("reason");
+  }
   for (const round of [report.initial, report.second]) if (round !== null) {
     if (round.prepare?.query_semantics_id !== undefined) expect(round.prepare.query_semantics_id).toBe(sourceSemanticQueryIdentity(QUERY, fieldContractSha256));
     for (const invocation of round.calls) if (invocation.response !== undefined) expect(invocation.response.provider_attempts).toBe(0);
@@ -235,7 +258,7 @@ function checkReport(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>
       expect(Buffer.byteLength(JSON.stringify(round.delivery))).toBeLessThanOrEqual(1_000_000);
     }
   }
-  if (report.arm === "F") {
+  if (report.arm === "F" && (!bounded || report.decision?.selected != null)) {
     expect(report.decision?.status).toBe("covered_reported_pair");
     expect(report.selected_hint).toBe(fixture.expected_hint);
     expect(report.adapter_controls).toMatchObject({ omitted: "feedback_omitted", empty: "no_unique_action",
@@ -245,21 +268,31 @@ function checkReport(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>
   const requiredProofs = report.arm === "F" ? [report.final_proof, report.initial_proof] : [report.final_proof];
   for (const [index, proof] of requiredProofs.entries()) {
     const phase = index === 0 ? "final" : "initial";
-    expect(proof?.status, `${report.arm} ${phase} proof must compare actual bindings`).toBe("compared");
-    expect(proof?.exact_assignments).toBe(true); expect(proof?.exact_proof_leaves).toBe(true); expect(proof?.necessary_leaves).toBe(true);
+    if (bounded && proof?.status !== "compared") {
+      expect(phase === "final" ? report.readiness.final_bindings : report.readiness.initial_bindings).toBe("unknown");
+      expect(proof?.actual ?? null).toBeNull();
+      continue;
+    }
+    checkComparedProof(proof, `${report.arm} ${phase}`);
   }
-  if (fixture.name === "split-item") expect(report.final_proof!.actual).toEqual([]);
+  if (fixture.name === "split-item" && (!bounded || report.final_proof?.status === "compared")) expect(report.final_proof!.actual).toEqual([]);
+}
+
+function checkComparedProof(proof: ReturnType<typeof oracleCheck> | null, phase: string) {
+  expect(proof?.status, `${phase} proof must compare actual bindings`).toBe("compared");
+  expect(proof?.exact_assignments).toBe(true); expect(proof?.exact_proof_leaves).toBe(true); expect(proof?.necessary_leaves).toBe(true);
 }
 
 /** Corrupt only captured native output; absent bindings must not pass as an empty result. */
-function checkMissingBindingsRejected(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>>) {
+function checkMissingBindingsRejected(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>>, bounded = false) {
   const phases = report.arm === "F" ? ["final", "initial"] as const : ["final"] as const;
   for (const phase of phases) {
     const invocation = phase === "final" ? report.final_reason : report.initial_reason;
     const response = invocation?.response;
     const descriptor = phase === "final" ? report.final_H
-      : report.initial?.prepare?.candidates.find(row => row.source_id === `${fixture.name}/initial`);
+      : report.initial?.prepare?.candidates.find(row => row.source_id === report.initial_source_id);
     const c = phase === "final" ? report.final_correspondence : report.initial_correspondence;
+    if (bounded && (response?.operation !== "reason" || response.result?.binding_results === undefined)) continue;
     if (invocation === null || response?.operation !== "reason" || descriptor == null || c === null) {
       throw new Error("missing-binding controls require an actual captured reasoning response and its H/C");
     }
@@ -274,52 +307,120 @@ function checkMissingBindingsRejected(fixture: Fixture, report: Awaited<ReturnTy
     expect(proof.actual).toBeNull();
     const corruptedReport = phase === "final" ? { ...report, final_reason: corrupted, final_proof: proof }
       : { ...report, initial_reason: corrupted, initial_proof: proof };
-    expect(() => checkReport(fixture, corruptedReport)).toThrow(`${report.arm} ${phase} proof must compare actual bindings`);
+    if (bounded) {
+      expect(proof.actual).not.toEqual([]);
+      expect(() => checkComparedProof(proof, `${report.arm} ${phase}`)).toThrow(`${report.arm} ${phase} proof must compare actual bindings`);
+    } else expect(() => checkReport(fixture, corruptedReport)).toThrow(`${report.arm} ${phase} proof must compare actual bindings`);
   }
 }
 
-it.each(CASES)("records healthy source-bound Field feedback and rediscovery without requiring a win: $name", async fixture => {
+function checkBoundedManifest(fixture: Fixture, manifest: Manifest) {
+  const sources = boundedFixtureSources(fixture);
+  expect(manifest.sources.map(row => row.source_id)).toEqual(boundedSourceIds(fixture));
+  expect(manifest.sources.map(row => row.recorded_at)).toEqual(sources.map(row => row.recordedAt));
+  expect(manifest.sources.every(row => row.source_version === "1" && row.event_time === null && row.scope_class === "project")).toBe(true);
+  expect(manifest.sources.slice(1, 32).every(row => Buffer.byteLength(row.source_body) === 243)).toBe(true);
+  expect(manifest.capsule_metadata.map(row => row.created_at)).toEqual(sources.map(row => row.publicationAt));
+  expect(manifest.capsule_metadata.every(row => row.lifecycle_state === "active")).toBe(true);
+  for (const source of sources.slice(1, 32)) {
+    const h = manifest.publications.find(row => row.interpretation.source.source_id === source.id)!.interpretation;
+    expect(h.frames.map(frame => frame.id)).toEqual(["send"]);
+    expect(h.mentions.some(row => row.text === "Inspection status remains unknown.")).toBe(true);
+  }
+  for (const [index, title] of fixture.hints.entries()) {
+    const h = manifest.publications.find(row => row.interpretation.source.source_id === sources[32 + index]!.id)!.interpretation;
+    const titleMention = h.mentions.find(row => row.text === title);
+    expect(titleMention).toBeDefined();
+    expect(h.gaps.some(gap => gap.kind === "uninterpreted_clause" && gap.affected_ids.includes(titleMention!.id))).toBe(true);
+    expect(h.frames.flatMap(frame => frame.predicate_support.kind === "explicit" ? frame.predicate_support.mentions : [])).not.toContain(titleMention!.id);
+  }
+}
+
+function compareBoundedAccess(fixture: Fixture, reports: readonly Awaited<ReturnType<typeof runArm>>[]) {
+  const ids = boundedSourceIds(fixture), ledgers = [fixture.dispatch, fixture.examine];
+  const arms = reports.map(report => ({ arm: report.arm,
+    complete_public_ledger_delivery: ledgers.map((text, index) => report.delivered_sources.some(row => row.source_id === ids[32 + index] && row.content_preview === text)),
+    returned_ledger_H: ids.slice(32).map(id => report.second?.prepare?.candidates.some(row => row.source_id === id) ?? false),
+    actual_binding_count: report.final_proof?.actual?.length ?? null,
+    field_first_batch_ready: report.arm === "F" ? report.access_boundary.first_batch_complete : null,
+    second_budget_stopped: [report.second?.prepare?.access, report.second?.delivery?.discovery?.access]
+      .some(access => access?.stopping_reasons.includes("budget") === true) }));
+  const f = arms.find(row => row.arm === "F"), baselines = arms.filter(row => row.arm !== "F");
+  const positiveOrdinal = fixture.expected_positive === null ? null : fixture.name === "inspection-known" ? 0 : 1;
+  const sufficient = (row: typeof arms[number]) => positiveOrdinal === null ? null : row.complete_public_ledger_delivery[positiveOrdinal];
+  const ready = reports.length === 4 && reports.every(row => row.readiness.initial && row.second !== null && !row.second.terminal)
+    && reports.find(row => row.arm === "F")?.readiness.field_selection === "ready";
+  const status = !ready ? "unready" : arms.every(row => row.complete_public_ledger_delivery.every(Boolean)) ? "no_relative_gain"
+    : f?.field_first_batch_ready !== true && f?.second_budget_stopped ? "unready_at_F_first_batch_cap"
+    : f !== undefined && sufficient(f) && baselines.every(row => sufficient(row) === false) ? "bounded_public_raw_delivery_gain"
+    : f !== undefined && !sufficient(f) && baselines.some(row => sufficient(row)) ? "baseline_public_raw_delivery_advantage"
+    : f?.actual_binding_count === 1 && baselines.some(row => sufficient(row) && row.actual_binding_count === 0)
+      ? "semantic_preparation_difference_without_new_evidence" : "partial_access_without_established_relative_gain";
+  return { status, arms, physical_first_read_novelty: "unknown", task_utility: "not_exercised" };
+}
+
+async function runFixture(fixture: Fixture, bounded = false) {
   const execution = executionBinding(process.env.ALAYA_FIELD_REDISCOVERY_IMPLEMENTATION_REVISION);
   const directory = mkdtempSync(join(tmpdir(), "field-obligation-rediscovery-")); roots.push(directory);
-  const sources = fixtureSources(fixture), input = join(directory, "frozen-input.json");
-  writeFileSync(input, JSON.stringify({ protocol: "healthy_known_initial_source", fixture,
+  const sources = bounded ? boundedFixtureSources(fixture) : fixtureSources(fixture), input = join(directory, "frozen-input.json");
+  const protocol = bounded ? "healthy_bounded_access_discriminator" : "healthy_known_initial_source";
+  const initialSourceId = sources[0]!.id;
+  writeFileSync(input, JSON.stringify({ protocol, fixture,
     sources: sources.map(({ authoredDraft: _draft, ...row }) => row),
     original_query: ORIGINAL_QUERY, query: QUERY, arms: ARMS, budgets: BUDGETS, schedule: SCHEDULE, allowance: ALLOWANCE, ...execution }));
   const reports: Awaited<ReturnType<typeof runArm>>[] = [];
+  const setups: { arm: Arm; publication_usage: unknown; known_publication_subtotal: { work_units: number; memory_bytes: number }; status: string }[] = [];
   for (const arm of ARMS) {
     const root = join(directory, arm);
     freezeRecoveryAllowance(root, chainIdentity({ fixture, arm, ...execution }), ALLOWANCE, input);
     reserveRecoveryRead(root, "common frozen input including the already available initial source");
     reserveRecoveryAction(root, "source-H-setup", chainIdentity(sources.map(source => source.text)), 200_000, 8_000_000, false);
     const start = performance.now();
-    await withAccessLibrary(sources, async ({ execute, filename, ids }) => {
+    await withAccessLibrary(sources, async ({ execute, filename, ids, publicationUsage }) => {
       reserveRecoveryRead(root, "native source and publication manifest", [filename]);
       const manifest = readHealthyManifest(filename), setupElapsed = performance.now() - start;
       reserveRecoveryAction(root, "frozen-Q-H-C-and-reference", chainIdentity({ query: QUERY, fixture }), 50_000, 2_000_000, false);
       const semantics = manifest.publications.map(row => ({ ...row, correspondence: correspondence(row) }));
       for (const row of semantics) expect(oracleSourceSemanticJoin(row.interpretation, QUERY, row.correspondence).assignments
         .map(assignment => assignment.bindings)).toEqual(expectedBindings(fixture, row.interpretation));
-      const candidates = sourceActions(fixture, manifest.sources.find(source => source.source_id === `${fixture.name}/initial`)!);
+      const candidates = sourceActions(fixture, manifest.sources.find(source => source.source_id === initialSourceId)!);
       expect(manifest.sources.map(row => row.source_body)).toEqual(sources.map(row => row.text));
-      expect([...ids.values()].flat()).toHaveLength(3);
+      expect([...ids.values()].flat()).toHaveLength(sources.length);
+      const subtotal = [...publicationUsage.values()].flat().reduce((sum, row) => ({ work_units: sum.work_units + row.work_units,
+        memory_bytes: sum.memory_bytes + row.memory_bytes }), { work_units: 0, memory_bytes: 0 });
+      const setupReady = subtotal.work_units <= 200_000 && subtotal.memory_bytes <= 8_000_000;
+      if (bounded && !setupReady) reserveRecoveryHostEffect(root, "result-output", chainIdentity({ fixture: fixture.name, arm }), false);
+      setups.push({ arm, publication_usage: [...publicationUsage], known_publication_subtotal: subtotal,
+        status: setupReady ? "known_publication_subtotal_within_reservation_remaining_setup_unknown" : "unready_known_publication_subtotal_exceeds_setup_reservation" });
+      if (bounded) checkBoundedManifest(fixture, manifest);
       console.info("FIELD_REDISCOVERY_MANIFEST " + JSON.stringify({ fixture: fixture.name, arm, ...execution,
-        protocol: "healthy_known_initial_source", conditioning: manifest.conditioning,
+        protocol, conditioning: manifest.conditioning,
         sources: manifest.sources, semantics, capsule_metadata: manifest.capsule_metadata,
-        known_initial_source_id: `${fixture.name}/initial`, query: QUERY, original_query: ORIGINAL_QUERY, candidates,
+        known_initial_source_id: initialSourceId, query: QUERY, original_query: ORIGINAL_QUERY, candidates,
         finite_reference: finiteReference(fixture), budgets: BUDGETS, schedule: SCHEDULE, allowance: ALLOWANCE,
         worker_isolation: "fresh_database_and_worker_per_arm", setup_elapsed_ms: setupElapsed,
+        setup: setups.at(-1), source_admission_and_authoring_actual_cost: "unknown",
+        allowance_before_access: allowanceLedger(join(root, "recovery-allowance.sqlite")),
         setup_actual_native_work: "unknown", setup_reservation_is_accounting_charge: true }));
+      if (bounded && !setupReady) return;
       const handler = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
-      reports.push(await runArm(root, fixture, arm, handler, manifest, candidates));
+      reports.push(await runArm(root, fixture, arm, handler, manifest, candidates, bounded));
     });
+    if (bounded && setups.at(-1)?.status.startsWith("unready")) break;
   }
   console.info("FIELD_REDISCOVERY_REPORT " + JSON.stringify({ fixture: fixture.name, ...execution, arms: reports,
-    finite_reference: finiteReference(fixture), protocol: "healthy_known_initial_source", source_count: 3,
+    finite_reference: finiteReference(fixture), protocol, source_count: sources.length, setups,
+    comparison: bounded ? compareBoundedAccess(fixture, reports) : null,
     native_provider_calls: 0, automatic_clue_generation: "not_exercised", natural_source_utility: "not_exercised",
     general_algorithm_acceptance: "not_claimed", independent_review_required_for_acceptance: true }));
-  for (const report of reports) checkReport(fixture, report);
-  for (const report of reports) checkMissingBindingsRejected(fixture, report);
-}, 120_000);
+  for (const report of reports) checkReport(fixture, report, bounded);
+  for (const report of reports) checkMissingBindingsRejected(fixture, report, bounded);
+}
+
+it.each(CASES)("records healthy source-bound Field feedback and rediscovery without requiring a win: $name",
+  fixture => runFixture(fixture), 120_000);
+it.each(CASES)("records bounded healthy source access without requiring relative Field gain: $name",
+  fixture => runFixture(fixture, true), 120_000);
 
 it.each(["duplicate", "exhausted"] as const)("refuses %s reservations before native work", async kind => {
   const root = mkdtempSync(join(tmpdir(), "field-rediscovery-reservation-")); roots.push(root);

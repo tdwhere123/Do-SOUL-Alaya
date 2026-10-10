@@ -298,11 +298,12 @@ describe("query meaning receive and semantic_correspondence assessment", () => {
     }
   });
 
-  it("keeps a free tool class as a connected predicate and leaves an unexecuted tool count as inputs", () => {
-    const counted = proposeQuerySemantics({
+  it("retains count inputs and their temporal gap without duplicating the host's execution status", () => {
+    const received = proposeQuerySemantics({
       original_query: sourceSemanticQueryExamples[11]!.original_query,
       producer_id: "query-producer", producer_version: "1"
-    }, { rawJson: JSON.stringify(sourceSemanticQueryExamples[11]!.response) }).query!;
+    }, { rawJson: JSON.stringify(sourceSemanticQueryExamples[11]!.response) });
+    const counted = received.query!;
     const alternative = counted.alternatives[0]!;
     expect(counted.requested_operation).toEqual(sourceSemanticQueryExamples[11]!.response.query.requested_operation);
     expect(counted.return_variables).toEqual([]);
@@ -331,10 +332,10 @@ describe("query meaning receive and semantic_correspondence assessment", () => {
       [{ kind: "evidence", input: 0 }, ["borrow", "borrow_kind"]],
       [{ kind: "evidence", input: 1 }, ["return", "return_kind"]]
     ]);
-    expect(counted.gaps).toMatchObject([
-      { kind: "unsupported_meaning", affected_ids: ["borrow", "return"] },
-      { kind: "aggregate", affected_ids: [] }
-    ]);
+    expect(counted.gaps).toEqual([{ kind: "unsupported_meaning", affected_ids: ["borrow", "return"],
+      support: [{ kind: "query_text", excerpt: "did the clerk borrow or return" }],
+      description: "The borrow and return events' past tense is not encoded by the retained predicates." }]);
+    expect(received.outcome).toEqual({ status: "interpreted", gaps: counted.gaps });
     expect(alternative.frames.some(frame => /count/iu.test(frame.predicate_reading))).toBe(false);
     expect(counted.variables.some(row => /count/iu.test(row.id))).toBe(false);
   });

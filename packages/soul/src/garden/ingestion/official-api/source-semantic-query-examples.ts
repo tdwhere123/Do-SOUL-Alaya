@@ -481,10 +481,7 @@ const nestedSourceSemanticQueryExamples = [
         gaps: [
           { kind: "unsupported_meaning", affected_ids: ["borrow", "return"],
             support: [{ kind: "query_text", excerpt: "did the clerk borrow or return" }],
-            description: "The borrow and return events' past tense is not encoded by the retained predicates." },
-          { kind: "aggregate", affected_ids: [],
-            support: [{ kind: "query_text", excerpt: "How many" }],
-            description: "The requested count remains an unexecuted operation." }
+            description: "The borrow and return events' past tense is not encoded by the retained predicates." }
         ]
       }
     }

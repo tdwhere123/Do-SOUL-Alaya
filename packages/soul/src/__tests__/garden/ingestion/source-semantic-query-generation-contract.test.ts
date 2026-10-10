@@ -149,7 +149,8 @@ describe("query generation contract", () => {
   });
 
   it.each(["My oak cabinet needs a brighter finish. Any advice?", "Who asked for advice about a brighter finish on cabinet C?",
-    "What is the name of the oak cabinet in hall H?", "How many days a week does Nia attend pottery classes?"])
+    "What is the name of the oak cabinet in hall H?", "How many days a week does Nia attend pottery classes?",
+    "How many tools did the clerk borrow or return?"])
   ("accepts the neutral contrast through generation and receipt: %s", original => {
     const example = sourceSemanticQueryExamples.find(row => row.original_query === original)!;
     expect(draft2020(schema, [{ id: original, instance: example.response }])).toEqual({ [original]: true });
