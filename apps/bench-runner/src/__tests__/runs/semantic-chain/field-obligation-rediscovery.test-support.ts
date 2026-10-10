@@ -236,6 +236,45 @@ export function initialObservations(receipts: readonly (SourceSemanticAccessRece
     receipt_extents: rows.map(row => ({ pool_id: row.pool_id, observed_source_count: row.observed_source_count, trace: row.trace })) };
 }
 
+export function sourceBatchCompletion(sources: readonly Pick<ManifestSource, "source_id" | "record_id">[],
+  receipts: readonly (SourceSemanticAccessReceipt | undefined)[]) {
+  const extentRows = receipts.flatMap(row => row?.source_candidates ?? []);
+  const first_batch = sources.slice(0, 16).map(source => {
+    const extents = extentRows.filter(row => row.record_id === source.record_id);
+    return { source_id: source.source_id, complete: extents.length === 0 ? null : extents.some(row => row.complete) };
+  });
+  return { first_batch, first_batch_complete: first_batch.length === 0 ? null
+    : first_batch.every(row => row.complete === true) ? true : first_batch.some(row => row.complete === false) ? false : null };
+}
+
+type AccessComparisonReport = Readonly<{ arm: Arm; delivered_sources: readonly { source_id: string | null; content_preview: string }[];
+  second: { prepare?: Preparation; delivery?: Delivery; terminal: boolean } | null;
+  final_proof: { actual: readonly Readonly<Record<string, string>>[] | null } | null;
+  readiness: { initial: boolean; field_selection: string }; access_boundary: { first_batch_complete: boolean | null } }>;
+
+export function compareBoundedAccess(fixture: Fixture, reports: readonly AccessComparisonReport[]) {
+  const ids = boundedSourceIds(fixture), ledgers = [fixture.dispatch, fixture.examine];
+  const arms = reports.map(report => ({ arm: report.arm,
+    complete_public_ledger_delivery: ledgers.map((text, index) => report.delivered_sources.some(row => row.source_id === ids[32 + index] && row.content_preview === text)),
+    returned_ledger_H: ids.slice(32).map(id => report.second?.prepare?.candidates.some(row => row.source_id === id) ?? false),
+    actual_binding_count: report.final_proof?.actual?.length ?? null,
+    field_first_batch_ready: report.arm === "F" ? report.access_boundary.first_batch_complete : null,
+    second_budget_stopped: [report.second?.prepare?.access, report.second?.delivery?.discovery?.access]
+      .some(access => access?.stopping_reasons.includes("budget") === true) }));
+  const f = arms.find(row => row.arm === "F"), baselines = arms.filter(row => row.arm !== "F");
+  const positiveOrdinal = fixture.expected_positive === null ? null : fixture.name === "inspection-known" ? 0 : 1;
+  const sufficient = (row: typeof arms[number]) => positiveOrdinal === null ? null : row.complete_public_ledger_delivery[positiveOrdinal];
+  const ready = reports.length === 4 && reports.every(row => row.readiness.initial && row.second !== null && !row.second.terminal)
+    && reports.find(row => row.arm === "F")?.readiness.field_selection === "ready";
+  const status = !ready ? "unready" : arms.every(row => row.complete_public_ledger_delivery.every(Boolean)) ? "no_relative_gain"
+    : f?.field_first_batch_ready === false && f.second_budget_stopped ? "unready_at_F_first_batch_cap"
+    : f !== undefined && sufficient(f) && baselines.every(row => sufficient(row) === false) ? "bounded_public_raw_delivery_gain"
+    : f !== undefined && !sufficient(f) && baselines.some(row => sufficient(row)) ? "baseline_public_raw_delivery_advantage"
+    : f?.actual_binding_count === 1 && baselines.some(row => sufficient(row) && row.actual_binding_count === 0)
+      ? "semantic_preparation_difference_without_new_evidence" : "partial_access_without_established_relative_gain";
+  return { status, arms, physical_first_read_novelty: "unknown", task_utility: "not_exercised" };
+}
+
 export function selectFinalDescriptor(candidates: readonly Descriptor[], initialInterpretationId: string) {
   const eligible = candidates.filter(row => row.interpretation_id !== initialInterpretationId
     && row.interpretation?.frames.some(frame => frame.id === "send" || frame.id === "inspect"));

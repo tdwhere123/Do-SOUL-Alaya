@@ -52,9 +52,7 @@ const propertyAndTaskExamples = [
             { role: "venue", target: { kind: "reference", key: "hall" }, excerpt: "hall H" }
           ] }
         ] }],
-        gaps: [{ kind: "unsupported_meaning", affected_ids: [],
-          support: [{ kind: "query_text", excerpt: "Please recommend" }],
-          description: "The requested recommendation remains an unexecuted operation; candidate suitability does not perform it." }]
+        gaps: []
       }
     }
   },
@@ -74,9 +72,7 @@ const propertyAndTaskExamples = [
           { role: "advice", target: { kind: "reference", key: "advice" }, excerpt: "Any advice" },
           { role: "object", target: { kind: "reference", key: "cabinet" }, excerpt: "My oak cabinet" }
         ] }] }],
-        gaps: [{ kind: "unsupported_meaning", affected_ids: [],
-          support: [{ kind: "query_text", excerpt: "Any advice?" }],
-          description: "Providing advice remains an unexecuted operation; relevant advice evidence does not perform it." }]
+        gaps: []
       }
     }
   },
@@ -124,14 +120,13 @@ const propertyAndTaskExamples = [
           { kind: "named", key: "nia", excerpt: "Nia" },
           { kind: "free", key: "days", excerpt: "How many days a week", return: true }
         ],
-        requested_operation: { reading: "Count distinct pottery-class attendance days per week for Nia.",
+        requested_operation: { reading: "Count distinct pottery-class attendance days per week for Nia; several classes on one day contribute one attendance day.",
           support: { kind: "query_text", excerpt: "How many days a week" } },
         alternatives: [{ conditions: [{ kind: "statement", predicate: "has distinct pottery-class attendance days per week", arguments: [
           { role: "attendee", target: { kind: "reference", key: "nia" }, excerpt: "Nia" },
           { role: "distinct days per week", target: { kind: "reference", key: "days" }, excerpt: "How many days a week" }
         ] }] }],
-        gaps: [{ kind: "aggregate", affected_ids: [], support: [{ kind: "query_text", excerpt: "How many days a week" }],
-          description: "Counting distinct days remains unexecuted; several classes on one day contribute one attendance day." }]
+        gaps: []
       }
     }
   },

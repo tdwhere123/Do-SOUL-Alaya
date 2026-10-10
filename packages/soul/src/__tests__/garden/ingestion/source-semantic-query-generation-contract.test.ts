@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import {
-  canonicalJson, encodeSourceSemanticQueryCarrier, expandSourceSemanticQueryCarrier,
+  canonicalJson, encodeSourceSemanticQueryCarrier, expandSourceSemanticQueryCarrier, projectSourceSemanticQuerySupport,
   SourceSemanticQueryCarrierBodySchema, sourceSemanticQueryIdentity, type SourceSemanticQueryMeaningBody
 } from "@do-soul/alaya-protocol";
 import {
@@ -112,7 +112,9 @@ describe("query generation contract", () => {
     }
     expect(frames.find((frame) => frame.predicate_reading === "has venue")?.role_requirements)
       .toEqual(expect.arrayContaining([expect.objectContaining({ target_variable: "hall" })]));
-    expect(query.gaps).toMatchObject([{ kind: "unsupported_meaning", support: [{ excerpt: "Please recommend" }] }]);
+    expect(frames.find(frame => frame.predicate_reading === "is a camera")?.role_requirements).toMatchObject([{ target_variable: "camera" }]);
+    expect(query.gaps).toEqual([]);
+    expect(projectSourceSemanticQuerySupport(query, [])).toMatchObject({ answer: "open", operation: "not_executed" });
   });
 
   it("distinguishes current advice from evidence of a past advice request", () => {
@@ -124,6 +126,8 @@ describe("query generation contract", () => {
     expect(advice.requested_operation).toBeDefined();
     expect(advice.alternatives[0]!.frames.map(frame => frame.predicate_reading))
       .toEqual(["is advice for achieving a brighter finish on"]);
+    expect(advice.gaps).toEqual([]);
+    expect(projectSourceSemanticQuerySupport(advice, [])).toMatchObject({ answer: "open", operation: "not_executed" });
     expect(request.return_variables).toEqual(["requester"]);
     expect(request.requested_operation).toBeUndefined();
     expect(request.alternatives[0]!.frames.map(frame => frame.predicate_reading))
@@ -146,11 +150,17 @@ describe("query generation contract", () => {
       predicate_reading: "has distinct pottery-class attendance days per week",
       role_requirements: [{ target_variable: "nia" }, { role_reading: "distinct days per week", target_variable: "days" }]
     });
+    expect(attendance.requested_operation).toEqual({
+      reading: "Count distinct pottery-class attendance days per week for Nia; several classes on one day contribute one attendance day.",
+      support: { kind: "query_text", excerpt: "How many days a week" }
+    });
+    expect(attendance.gaps).toEqual([]);
+    expect(projectSourceSemanticQuerySupport(attendance, [])).toMatchObject({ answer: "open", operation: "not_executed" });
   });
 
   it.each(["My oak cabinet needs a brighter finish. Any advice?", "Who asked for advice about a brighter finish on cabinet C?",
     "What is the name of the oak cabinet in hall H?", "How many days a week does Nia attend pottery classes?",
-    "How many tools did the clerk borrow or return?"])
+    "How many tools did the clerk borrow or return?", "Please recommend a camera for recording the upcoming rehearsal in hall H."])
   ("accepts the neutral contrast through generation and receipt: %s", original => {
     const example = sourceSemanticQueryExamples.find(row => row.original_query === original)!;
     expect(draft2020(schema, [{ id: original, instance: example.response }])).toEqual({ [original]: true });

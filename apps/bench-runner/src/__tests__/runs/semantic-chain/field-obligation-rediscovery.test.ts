@@ -8,8 +8,9 @@ import { SoulInterpretationRequestSchema, SourceSemanticWorkerWorkSchema, source
   type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../../../core-daemon/src/mcp-memory/tool/interpretation-handler.js";
-import { CLOCK, WS, withAccessLibrary } from
+import { CLOCK, WS, withAccessLibrary, type AccessFixtureSetup } from
   "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-access.test-support.js";
+import * as workerClient from "../../../../../core-daemon/src/runtime/recall/recall-read-worker-client.js";
 import { decodeEngineBindings, oracleBindingsMatchEngine, oracleNecessaryLeavesHeld, oracleProofsMatchEngine,
   oracleSourceSemanticJoin } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-relational-oracle.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
@@ -20,6 +21,7 @@ import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/
 import { ALLOWANCE, ARMS, BUDGETS, CASES, ORIGINAL_QUERY, QUERY, SCHEDULE, allowanceLedger,
   readHealthyManifest, correspondence, executionBinding, expectedBindings, finiteReference, fixtureSources,
   initialObservations, selectAction, selectFinalDescriptor, sourceActions, boundedFixtureSources, boundedSourceIds,
+  sourceBatchCompletion, compareBoundedAccess,
   type Action, type Arm, type Decision, type Descriptor, type Fixture, type Preparation, type Delivery,
   type SourcePreparation } from "./field-obligation-rediscovery.test-support.js";
 
@@ -205,18 +207,12 @@ async function runArm(root: string, fixture: Fixture, arm: Arm, handler: Handler
   const ledger = allowanceLedger(join(root, "recovery-allowance.sqlite"));
   const calls = [...initial.calls, ...(initialReason === undefined ? [] : [initialReason]), ...(second?.calls ?? []),
     ...(finalReason === undefined ? [] : [finalReason])];
-  const extentRows = [second?.prepare?.access, second?.delivery?.discovery?.access].flatMap(row => row?.source_candidates ?? []);
-  const firstBatch = manifest.sources.slice(0, 16).map(source => {
-    const extents = extentRows.filter(row => row.record_id === source.record_id);
-    return { source_id: source.source_id, complete: extents.length === 0 ? null : extents.some(row => row.complete) };
-  });
   return { arm, stop, initial_source_id: initialSourceId, selected_hint: selectedHint ?? null, decision: decision ?? null, adapter_controls: controls,
     readiness: { initial: initialReady, initial_raw_delivered: rawInitialDelivered,
       field_selection: arm === "F" ? decision?.selected == null ? "unready" : "ready" : "not_exercised",
       initial_bindings: arm === "F" ? initialProof?.status === "compared" ? "compared" : "unknown" : "not_exercised",
       final_bindings: finalProof?.status === "compared" ? "compared" : "unknown" },
-    access_boundary: { first_batch: firstBatch,
-      first_batch_complete: firstBatch.every(row => row.complete === true) ? true : firstBatch.some(row => row.complete === false) ? false : null,
+    access_boundary: { ...sourceBatchCompletion(manifest.sources, [second?.prepare?.access, second?.delivery?.discovery?.access]),
       returned_navigation_H: second?.prepare?.candidates.filter(row => manifest.sources.slice(-2).some(source => source.source_id === row.source_id)) ?? [],
       physical_first_read_novelty: "unknown_no_worker_IO_trace", receipt_visibility_is_not_physical_IO: true },
     initial: describeRound(initial),
@@ -336,27 +332,21 @@ function checkBoundedManifest(fixture: Fixture, manifest: Manifest) {
   }
 }
 
-function compareBoundedAccess(fixture: Fixture, reports: readonly Awaited<ReturnType<typeof runArm>>[]) {
-  const ids = boundedSourceIds(fixture), ledgers = [fixture.dispatch, fixture.examine];
-  const arms = reports.map(report => ({ arm: report.arm,
-    complete_public_ledger_delivery: ledgers.map((text, index) => report.delivered_sources.some(row => row.source_id === ids[32 + index] && row.content_preview === text)),
-    returned_ledger_H: ids.slice(32).map(id => report.second?.prepare?.candidates.some(row => row.source_id === id) ?? false),
-    actual_binding_count: report.final_proof?.actual?.length ?? null,
-    field_first_batch_ready: report.arm === "F" ? report.access_boundary.first_batch_complete : null,
-    second_budget_stopped: [report.second?.prepare?.access, report.second?.delivery?.discovery?.access]
-      .some(access => access?.stopping_reasons.includes("budget") === true) }));
-  const f = arms.find(row => row.arm === "F"), baselines = arms.filter(row => row.arm !== "F");
-  const positiveOrdinal = fixture.expected_positive === null ? null : fixture.name === "inspection-known" ? 0 : 1;
-  const sufficient = (row: typeof arms[number]) => positiveOrdinal === null ? null : row.complete_public_ledger_delivery[positiveOrdinal];
-  const ready = reports.length === 4 && reports.every(row => row.readiness.initial && row.second !== null && !row.second.terminal)
-    && reports.find(row => row.arm === "F")?.readiness.field_selection === "ready";
-  const status = !ready ? "unready" : arms.every(row => row.complete_public_ledger_delivery.every(Boolean)) ? "no_relative_gain"
-    : f?.field_first_batch_ready !== true && f?.second_budget_stopped ? "unready_at_F_first_batch_cap"
-    : f !== undefined && sufficient(f) && baselines.every(row => sufficient(row) === false) ? "bounded_public_raw_delivery_gain"
-    : f !== undefined && !sufficient(f) && baselines.some(row => sufficient(row)) ? "baseline_public_raw_delivery_advantage"
-    : f?.actual_binding_count === 1 && baselines.some(row => sufficient(row) && row.actual_binding_count === 0)
-      ? "semantic_preparation_difference_without_new_evidence" : "partial_access_without_established_relative_gain";
-  return { status, arms, physical_first_read_novelty: "unknown", task_utility: "not_exercised" };
+/** Omit captured extents while retaining an explicit budget stop; omission cannot locate exhaustion. */
+function checkCapturedReceiptOmission(fixture: Fixture, reports: readonly Awaited<ReturnType<typeof runArm>>[]) {
+  const f = reports.find(row => row.arm === "F"), prepare = f?.second?.prepare, access = prepare?.access;
+  if (f === undefined || prepare === undefined || access === undefined) throw new Error("receipt controls require captured F preparation");
+  const omitted = { ...access, source_candidates: [], stopping_reasons: ["budget" as const],
+    trace: { ...access.trace, omitted_source_count: access.observed_source_count } };
+  const boundary = sourceBatchCompletion(access.source_candidates, [omitted]);
+  expect(boundary.first_batch_complete).toBeNull();
+  const projected = reports.map(row => row.arm === "F" ? { ...row, delivered_sources: [], access_boundary: boundary,
+    second: { terminal: false, prepare: { ...prepare, access: omitted } } } : { ...row, delivered_sources: [] });
+  const comparison = compareBoundedAccess(fixture, projected);
+  expect(comparison.arms.find(row => row.arm === "F")).toMatchObject({ field_first_batch_ready: null, second_budget_stopped: true });
+  expect(comparison.status).not.toBe("unready_at_F_first_batch_cap");
+  expect(compareBoundedAccess(fixture, projected.map(row => row.arm === "F" ? { ...row,
+    access_boundary: { first_batch_complete: false } } : row)).status).toBe("unready_at_F_first_batch_cap");
 }
 
 async function runFixture(fixture: Fixture, bounded = false) {
@@ -369,14 +359,14 @@ async function runFixture(fixture: Fixture, bounded = false) {
     sources: sources.map(({ authoredDraft: _draft, ...row }) => row),
     original_query: ORIGINAL_QUERY, query: QUERY, arms: ARMS, budgets: BUDGETS, schedule: SCHEDULE, allowance: ALLOWANCE, ...execution }));
   const reports: Awaited<ReturnType<typeof runArm>>[] = [];
-  const setups: { arm: Arm; publication_usage: unknown; known_publication_subtotal: { work_units: number; memory_bytes: number }; status: string }[] = [];
+  const setups: (AccessFixtureSetup & { arm: Arm; publication_usage: unknown })[] = [];
   for (const arm of ARMS) {
     const root = join(directory, arm);
     freezeRecoveryAllowance(root, chainIdentity({ fixture, arm, ...execution }), ALLOWANCE, input);
     reserveRecoveryRead(root, "common frozen input including the already available initial source");
     reserveRecoveryAction(root, "source-H-setup", chainIdentity(sources.map(source => source.text)), 200_000, 8_000_000, false);
     const start = performance.now();
-    await withAccessLibrary(sources, async ({ execute, filename, ids, publicationUsage }) => {
+    await withAccessLibrary(sources, async ({ execute, filename, ids, publicationUsage, setup }) => {
       reserveRecoveryRead(root, "native source and publication manifest", [filename]);
       const manifest = readHealthyManifest(filename), setupElapsed = performance.now() - start;
       reserveRecoveryAction(root, "frozen-Q-H-C-and-reference", chainIdentity({ query: QUERY, fixture }), 50_000, 2_000_000, false);
@@ -386,12 +376,7 @@ async function runFixture(fixture: Fixture, bounded = false) {
       const candidates = sourceActions(fixture, manifest.sources.find(source => source.source_id === initialSourceId)!);
       expect(manifest.sources.map(row => row.source_body)).toEqual(sources.map(row => row.text));
       expect([...ids.values()].flat()).toHaveLength(sources.length);
-      const subtotal = [...publicationUsage.values()].flat().reduce((sum, row) => ({ work_units: sum.work_units + row.work_units,
-        memory_bytes: sum.memory_bytes + row.memory_bytes }), { work_units: 0, memory_bytes: 0 });
-      const setupReady = subtotal.work_units <= 200_000 && subtotal.memory_bytes <= 8_000_000;
-      if (bounded && !setupReady) reserveRecoveryHostEffect(root, "result-output", chainIdentity({ fixture: fixture.name, arm }), false);
-      setups.push({ arm, publication_usage: [...publicationUsage], known_publication_subtotal: subtotal,
-        status: setupReady ? "known_publication_subtotal_within_reservation_remaining_setup_unknown" : "unready_known_publication_subtotal_exceeds_setup_reservation" });
+      setups.push({ arm, publication_usage: [...publicationUsage], ...setup });
       if (bounded) checkBoundedManifest(fixture, manifest);
       console.info("FIELD_REDISCOVERY_MANIFEST " + JSON.stringify({ fixture: fixture.name, arm, ...execution,
         protocol, conditioning: manifest.conditioning,
@@ -402,11 +387,19 @@ async function runFixture(fixture: Fixture, bounded = false) {
         setup: setups.at(-1), source_admission_and_authoring_actual_cost: "unknown",
         allowance_before_access: allowanceLedger(join(root, "recovery-allowance.sqlite")),
         setup_actual_native_work: "unknown", setup_reservation_is_accounting_charge: true }));
-      if (bounded && !setupReady) return;
       const handler = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
       reports.push(await runArm(root, fixture, arm, handler, manifest, candidates, bounded));
-    });
-    if (bounded && setups.at(-1)?.status.startsWith("unready")) break;
+    }, bounded ? { publicationBudget: { work_units: 200_000, memory_bytes: 8_000_000 },
+      onSetupExhausted: async ({ filename, ids, publicationUsage, setup }) => {
+        reserveRecoveryRead(root, "partial source and publication manifest after setup exhaustion", [filename]);
+        reserveRecoveryHostEffect(root, "result-output", chainIdentity({ fixture: fixture.name, arm }), false);
+        setups.push({ arm, publication_usage: [...publicationUsage], ...setup });
+        console.info("FIELD_REDISCOVERY_SETUP " + JSON.stringify({ fixture: fixture.name, arm, ...execution, protocol,
+          setup: setups.at(-1), acknowledged_publications: [...ids], partial_manifest: readHealthyManifest(filename),
+          allowance: allowanceLedger(join(root, "recovery-allowance.sqlite")), worker_started: false, native_access_calls: 0,
+          source_admission_and_authoring_actual_cost: "unknown", total_lifecycle_cost: "unknown" }));
+      } } : undefined);
+    if (setups.at(-1)?.status === "resource_exhausted") break;
   }
   console.info("FIELD_REDISCOVERY_REPORT " + JSON.stringify({ fixture: fixture.name, ...execution, arms: reports,
     finite_reference: finiteReference(fixture), protocol, source_count: sources.length, setups,
@@ -415,12 +408,44 @@ async function runFixture(fixture: Fixture, bounded = false) {
     general_algorithm_acceptance: "not_claimed", independent_review_required_for_acceptance: true }));
   for (const report of reports) checkReport(fixture, report, bounded);
   for (const report of reports) checkMissingBindingsRejected(fixture, report, bounded);
+  if (!bounded) checkCapturedReceiptOmission(fixture, reports);
 }
 
 it.each(CASES)("records healthy source-bound Field feedback and rediscovery without requiring a win: $name",
   fixture => runFixture(fixture), 120_000);
 it.each(CASES)("records bounded healthy source access without requiring relative Field gain: $name",
   fixture => runFixture(fixture, true), 120_000);
+
+it("stops shared publication setup before the next source and worker after aggregate exhaustion", async () => {
+  const first = { id: "publication-first", text: "Cargo J9 was sent.", reading: "send", verbatim: true };
+  let singleUsage: AccessFixtureSetup["known_publication_subtotal"] | undefined;
+  await withAccessLibrary([first], async ({ setup }) => { singleUsage = setup.known_publication_subtotal; });
+  const budget = { work_units: singleUsage!.work_units + 1, memory_bytes: singleUsage!.memory_bytes + 64 };
+  const startWorker = vi.spyOn(workerClient, "createRecallReadWorkerClient"), body = vi.fn(async () => undefined);
+  let partialObserved = false;
+  try {
+    const setup = await withAccessLibrary([first, { ...first, id: "publication-second" }, { ...first, id: "publication-last" }], body,
+      { publicationBudget: budget, onSetupExhausted: async ({ filename, ids, publicationUsage, setup: partial }) => {
+        partialObserved = true;
+        const manifest = readHealthyManifest(filename);
+        expect(manifest.sources.map(row => row.source_id)).toEqual([first.id, "publication-second"]);
+        expect(manifest.publications).toHaveLength(1);
+        expect(ids.get(first.id)).toHaveLength(1); expect(ids.get("publication-second")).toEqual([]);
+        expect(publicationUsage.get(first.id)).toEqual([singleUsage]);
+        const failedUsage = publicationUsage.get("publication-second")![0]!;
+        expect(failedUsage.work_units).toBeGreaterThan(0);
+        expect(partial.known_publication_subtotal).toEqual({ work_units: singleUsage!.work_units + failedUsage.work_units,
+          memory_bytes: singleUsage!.memory_bytes + failedUsage.memory_bytes });
+        expect(partial.known_publication_subtotal.work_units).toBeLessThanOrEqual(budget.work_units);
+        expect(partial.known_publication_subtotal.memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
+        expect(startWorker).not.toHaveBeenCalled();
+      } });
+    expect(partialObserved).toBe(true);
+    expect(setup).toMatchObject({ status: "resource_exhausted", admitted_source_ids: [first.id, "publication-second"],
+      exhausted: { source_id: "publication-second", publication_index: 0 } });
+    expect(body).not.toHaveBeenCalled(); expect(startWorker).not.toHaveBeenCalled();
+  } finally { startWorker.mockRestore(); }
+}, 30_000);
 
 it.each(["duplicate", "exhausted"] as const)("refuses %s reservations before native work", async kind => {
   const root = mkdtempSync(join(tmpdir(), "field-rediscovery-reservation-")); roots.push(root);
