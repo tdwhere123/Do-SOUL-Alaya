@@ -1,5 +1,6 @@
-import { canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
-import { fieldContractSha256, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
+import { canonicalJson, indexEntryCacheKey, SoulInterpretationRecallDeliverySchema, sourceSemanticQueryIdentity,
+  type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
+import { authorizedScopesFromAdmission, fieldContractSha256, preparedDeliveryId, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { CLOCK, WS } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-access.test-support.js";
 import { initialObservations, type Delivery } from "./field-obligation-rediscovery.test-support.js";
 import { accessBudget, allowance, COMMON_RESERVATION, ORIGINAL_QUERY, postForkReservation, QUERY, SCOPES,
@@ -138,28 +139,69 @@ export function assessSlot(report: NativeReport, frozen: FrozenCell) {
 }
 export type Assessment = ReturnType<typeof assessSlot>;
 
-/** Worker capabilities and RSS differ across fresh instances; every semantic binding and logical receipt remains compared. */
-function commonComparable(report: NativeReport): unknown {
+/** Validate each fresh capability chain before excluding its two derived delivery identities. */
+function commonComparable(report: NativeReport): { value: unknown; problem: string | null } {
+  const calls = report.calls.filter(row => row.name.startsWith("common-")), [source, prepare, delivery] = calls;
+  const invalid = (problem: string) => ({ value: null, problem });
+  if (calls.length !== 3 || source?.name !== "common-source" || prepare?.name !== "common-prepare"
+    || delivery?.name !== "common-delivery" || source.request.operation !== "prepare_source"
+    || prepare.request.operation !== "prepare_query" || delivery.request.operation !== "recall"
+    || source.response?.operation !== "prepare_source" || prepare.response?.operation !== "prepare_query"
+    || delivery.response?.operation !== "recall") return invalid("missing_or_reordered_common_chain");
+  if (calls.some(call => !call.capture_complete || call.error !== undefined || call.meter_error !== undefined
+    || call.response?.work == null)) return invalid("incomplete_common_capture");
+  if (canonicalJson([source.response, prepare.response, delivery.response])
+    !== canonicalJson([report.common.source, report.common.prepare, report.common.delivery])) return invalid("common_capture_alias_mismatch");
+  if (source.response.source_handle === undefined || prepare.response.query_handle === undefined
+    || prepare.request.source_handle !== source.response.source_handle || delivery.request.query_handle !== prepare.response.query_handle
+    || source.response.source_id !== source.request.source_id) return invalid("common_predecessor_binding_mismatch");
+  if (source.response.outcome !== undefined || prepare.response.outcome !== undefined || delivery.response.outcome !== undefined
+    || prepare.request.continuation_handle !== undefined || prepare.response.continuation_handle !== undefined
+    || delivery.request.continuation !== undefined || delivery.response.index?.continuation !== null
+    || canonicalJson(delivery.request.semantic_correspondences) !== canonicalJson([])) return invalid("unexpected_common_shape");
+  const complete = SoulInterpretationRecallDeliverySchema.safeParse(delivery.response);
+  const scopes = authorizedScopesFromAdmission(delivery.request.authorized_scopes).authorized_scopes;
+  if (!complete.success || scopes === undefined || prepare.request.query_semantics === undefined
+    || canonicalJson(source.request.authorized_scopes) !== canonicalJson(prepare.request.authorized_scopes)
+    || canonicalJson(prepare.request.authorized_scopes) !== canonicalJson(delivery.request.authorized_scopes)
+    || canonicalJson(prepare.response.query_semantics_status) !== canonicalJson(delivery.response.query_semantics_status)) {
+    return invalid("inconsistent_common_request_binding");
+  }
+  const response = complete.data, originalDelivery = delivery.response;
+  const identity = sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK, authorized_scopes: scopes,
+    original_query: prepare.request.original_query, query_semantics: prepare.request.query_semantics,
+    query_semantics_status: prepare.response.query_semantics_status, source_id: source.response.source_id,
+    access_policy: delivery.request.access_policy ?? prepare.request.access_policy ?? "query-conditioned-v1",
+    ...(prepare.request.access_hint === undefined ? {} : { access_hint: prepare.request.access_hint }),
+    semantic_correspondences: delivery.request.semantic_correspondences!, budget: delivery.request.budget,
+    output_byte_limit: delivery.request.output_byte_limit });
+  if (response.request_identity !== identity || response.delivery_id !== preparedDeliveryId(identity, originalDelivery.index!)) {
+    return invalid("common_delivery_identity_mismatch");
+  }
   const omitEphemeral = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(omitEphemeral);
     if (value === null || typeof value !== "object") return value;
     return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "rss_bytes").map(([key, child]) => [key,
       ["source_handle", "query_handle", "continuation_handle"].includes(key) ? "present_process_local_capability" : omitEphemeral(child)]));
   };
-  return { manifest: report.manifest, setup: report.setup,
+  return { problem: null, value: { manifest: report.manifest, setup: report.setup,
     publication_receipts: report.publication_receipts,
-    native_calls: report.calls.filter(row => row.name.startsWith("common-")).map(row => ({ name: row.name,
-      request: omitEphemeral(row.request), response: omitEphemeral(row.response), error: omitEphemeral(row.error) })) };
+    native_calls: calls.map(row => ({ name: row.name, request: omitEphemeral(row.request),
+      response: omitEphemeral(row === delivery ? { ...originalDelivery, delivery_id: "verified_process_local_delivery",
+        index: { ...originalDelivery.index, snapshot_id: "process_local_snapshot" } } : row.response), error: omitEphemeral(row.error) })) } };
 }
 
 export function compareCellCommon(reports: readonly NativeReport[]) {
-  const ready = reports.filter(row => row.common.ready), reference = ready[0];
-  const divergent = reference === undefined ? [] : ready.filter(row =>
-    canonicalJson(commonComparable(row)) !== canonicalJson(commonComparable(reference))).map(row => row.slot.id);
-  return { status: reference === undefined ? "no_ready_reference" : divergent.length > 0 ? "diverged" : "matched",
-    reference_slot: reference?.slot.id ?? null, compared_slots: ready.map(row => row.slot.id), divergent_slots: divergent,
+  const ready = reports.filter(row => row.common.ready).map(report => ({ report, ...commonComparable(report) }));
+  const reference = ready.find(row => row.problem === null);
+  const divergent = ready.filter(row => row.problem !== null || canonicalJson(row.value) !== canonicalJson(reference?.value));
+  return { status: ready.length === 0 ? "no_ready_reference" : divergent.length > 0 ? "diverged" : "matched",
+    reference_slot: reference?.report.slot.id ?? null, compared_slots: ready.map(row => row.report.slot.id),
+    divergent_slots: divergent.map(row => row.report.slot.id),
+    invalid_slots: ready.filter(row => row.problem !== null).map(row => ({ slot: row.report.slot.id, reason: row.problem })),
     unready_slots: reports.filter(row => !row.common.ready).map(row => row.slot.id),
-    excludes: ["fresh_process_capability_strings", "RSS", "elapsed_time"] };
+    excludes: ["fresh_process_capability_strings", "RSS", "elapsed_time",
+      "common-delivery.response.index.snapshot_id", "common-delivery.response.delivery_id"] };
 }
 
 export function comparePoint(reports: readonly NativeReport[], assessments: readonly Assessment[], cellCommon: ReturnType<typeof compareCellCommon>,
