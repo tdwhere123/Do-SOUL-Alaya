@@ -76,7 +76,7 @@ it.each(["count", "tense"] as const)("retains %s partials as conditional evidenc
 });
 
 it.each(["source_interpretation_id", "semantic_correspondence_id", "conditional_computation_id", "witnesses", "support"] as const)(
-  "keeps an unmatched %s proof unverified without borrowing another proof at the same root", field => {
+  "rejects an unmatched %s proof without borrowing another proof at the same root", field => {
     const fixture = nativeMultiProofResponseFixture();
     const recallResult = structuredClone(fixture.response);
     const qualifier = recallResult.slot_qualifiers![1]!;
@@ -85,24 +85,19 @@ it.each(["source_interpretation_id", "semantic_correspondence_id", "conditional_
     else Object.assign(qualifier, { [field]: `sha256:${"0".repeat(64)}` });
     const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
     const evaluated = measureSourceSemanticLibraryResponse({ recallResult,
-      firstExposurePage: recordSourceSemanticLibraryFirstExposure(recallResult), requestBudget: REQUEST,
+      firstExposurePage: recordSourceSemanticLibraryFirstExposure(fixture.response), requestBudget: REQUEST,
       goldSourceUnits: fixture.gold, sourceRecords: fixture.records });
-    expect(verify).toHaveBeenCalledTimes(4);
-    expect(verify.mock.results[1]).toMatchObject({ type: "return", value: { proof: undefined, verified_proofs: [] } });
-    expect(evaluated.validatedProofRanks).toEqual([1, 3]);
-    expect(evaluated.measurement).toMatchObject({ status: "validated", metrics: {
-      proof_conditioned_first_exposure: { any_at_5: { status: "unavailable" } },
-      delivered_slot_union: { joined_unit_count: 3, any_at_5: { status: "hit" } }
-    } });
+    expect(evaluated.measurement?.status).toBe("invalid");
+    expect(evaluated.sourceBearingUnion).toBeNull();
+    expect(evaluated.validatedProofRanks).toEqual([]);
+    expect(verify).not.toHaveBeenCalled();
   });
 
 it("keeps an unverified later gold root unknown even when an earlier root has multiple validated proofs", () => {
   const fixture = nativeMultiProofResponseFixture();
-  const recallResult = structuredClone(fixture.response);
-  Object.assign(recallResult.slot_qualifiers!.at(-1)!, { semantic_correspondence_id: `sha256:${"0".repeat(64)}` });
-  const evaluated = measureSourceSemanticLibraryResponse({ recallResult,
-    firstExposurePage: recordSourceSemanticLibraryFirstExposure(recallResult), requestBudget: REQUEST,
-    goldSourceUnits: [fixture.gold[2]!], sourceRecords: fixture.records });
+  const evaluated = measureSourceSemanticLibraryResponse({ recallResult: fixture.response,
+    firstExposurePage: recordSourceSemanticLibraryFirstExposure(fixture.response), requestBudget: REQUEST,
+    goldSourceUnits: [fixture.gold[2]!], sourceRecords: [fixture.records[0]!] });
   expect(evaluated.measurement?.status).toBe("validated");
   expect(evaluated.validatedProofRanks).toEqual([1]);
   expect(evaluated.sourceBearingUnion).toMatchObject({ joined_unit_count: 0,

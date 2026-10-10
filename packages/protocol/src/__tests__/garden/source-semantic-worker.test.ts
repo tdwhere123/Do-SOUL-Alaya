@@ -3,14 +3,16 @@ import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attr
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
 import { SourceSemanticAccessReceiptSchema } from "../../garden/source-semantic-access.js";
-import { InformationIndexSchema, sourceIndexEntry, indexEntryCacheKey } from "../../recall/conditional-field/index-view.js";
+import { InformationIndexSchema, IndexEntrySchema, sourceIndexEntry, indexEntryCacheKey,
+  memoryIndexEntry } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import { SourceDisclosureSchema } from "../../recall/source-disclosure.js";
 import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
-  SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema,
-  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
+  SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema, SourceSemanticLibraryProofSchema,
+  SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
+  sourceSemanticProofQualifier
 } from "../../garden/source-semantic-worker.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
@@ -157,6 +159,69 @@ function libraryDelivery() {
     slot_qualifiers: [], source_disclosures: {}, coverage, work };
 }
 
+const otherDigest = `sha256:${"b".repeat(64)}`;
+const secondCorrespondence = `sha256:${"c".repeat(64)}`;
+function sourceEntry(explanationIds: readonly string[] = []) {
+  return sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "record",
+    source_version: "v1", content_digest: digest, evidence_object_id: null,
+    hypothesis_id: digest, output_binding: "binding", role: "requested", association_milligrades: 0,
+    claim: "unknown", explanation_ids: explanationIds });
+}
+function proofBearingEntry() {
+  return IndexEntrySchema.parse({
+    ...sourceEntry(["e1"]),
+    interpretation_node: { packet_id: digest, hypothesis_id: digest, node_id: "n1" }
+  });
+}
+function libraryProof(input: { correspondenceId?: string; rootId?: string } = {}) {
+  const correspondenceId = input.correspondenceId ?? digest;
+  const rootId = input.rootId ?? "record";
+  const node = { packet_id: digest, hypothesis_id: digest, node_id: "n1" };
+  return SourceSemanticLibraryProofSchema.parse({
+    contract: "source-interpretation-reasoning-v5", outcome: { status: "interpreted", gaps: [] },
+    conditional_computation_id: digest, source_interpretation_id: digest, query_semantics_id: digest,
+    semantic_correspondence_id: correspondenceId, consumed_leaves: [],
+    binding_results: [{ kind: "answer", binding_id: "binding", alternative: 0, bindings: { actor: node },
+      returned: { actor: node }, explanation_ids: ["e1"], query_complete: true }],
+    source_target: { kind: "source_evidence", workspace_id: "workspace", root_kind: "source_record", root_id: rootId,
+      source_version: "v1", content_digest: digest, evidence_object_id: null },
+    semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation", world_claim: "unknown",
+    original_query: "Alice uses tools?",
+    source_record: {
+      producer: "span", consumer: "projection_generation", identity: digest, replay_rule: "idempotent_same_identity",
+      failure_disposition: "fail_closed", governance_effect: "none", deletion_behavior: "retain_identity",
+      schema_version: 1, workspace_id: "workspace", source_id: "src", source_version: "v1", content_digest: digest,
+      evidence_object_id: null, recorded_at: "2026-09-25T00:00:00Z", event_time: null, valid_from: null, valid_to: null,
+      operator_id: "span"
+    },
+    interpretation: {
+      contract: "source-interpretation-v4", k_version: "k1", normalizer_version: "n1",
+      source: { source_id: "src", source_version: "v1", content_digest: digest,
+        attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION },
+      producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
+      mentions: [{ id: "mUse", assertion_id: 1, source_ref: { first: "a1s0", last: "a1s0" }, text: "use", utf8_span: [0, 3] }],
+      referents: [{ id: "rActor", referent_kind: "grouped", mentions: ["mUse"] }],
+      frames: [{ id: "fUse", assertion_ids: [1], context_owner: { kind: "source_act", source_act: "assertion" },
+        additional_support: [], predicate_support: { kind: "explicit", reading: "use", mentions: ["mUse"] },
+        slots: [{ id: "agent", role_reading: "agent", support: [{ kind: "lexical", mentions: ["mUse"] }] }],
+        bindings: [{ slot_id: "agent", target: { kind: "node", id: "rActor" }, support: [] }] }],
+      operators: [], gaps: [], entry_roots: ["fUse"], asserted_at_scope: ["fUse"]
+    },
+    query: validQuery,
+    semantic_correspondence: {
+      contract: "source-semantic-correspondence-v3", source_interpretation_id: digest, query_semantics_id: digest,
+      producer_id: "ap", producer_version: "1", contract_version: "source-semantic-correspondence-v3",
+      correspondences: [{ relation: "contextual_equivalence",
+        query_endpoint: { kind: "predicate", alternative: 0, frame: "qUse" },
+        source_endpoint: { kind: "frame", frame: "fUse" },
+        query_support: { kind: "query_text", excerpt: "use" },
+        source_semantic_support: [{ kind: "lexical", mentions: ["mUse"] }] }]
+    },
+    context: { contract: "source-semantic-context-v3", source_interpretation_id: digest, query_semantics_id: digest,
+      semantic_correspondence_id: correspondenceId, k_version: "k1", lowering_version: "l1" }
+  });
+}
+
 it("shares current delivery version, membership and page budget admission between worker and public surfaces", () => {
   const delivery = libraryDelivery();
   const accepts = (value: unknown) => [
@@ -194,7 +259,7 @@ it("binds availability, semantic coverage and qualified slots on both delivery s
   expect(SourceSemanticLibraryDeliverySchema.safeParse(baseDelivery).success).toBe(true);
   expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...baseDelivery, slot_qualifiers: [proofSlot] }).success).toBe(false);
   expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest },
-    coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot] })).toEqual([true, true]);
+    coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot] })).toEqual([false, false]);
   expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: `sha256:${"b".repeat(64)}` },
     coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot] })).toEqual([false, false]);
 });
@@ -215,6 +280,94 @@ it("requires a disclosure for each delivered source and rejects metadata for an 
   expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...delivery, source_disclosures: {} }).success).toBe(false);
   expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...delivery,
     source_disclosures: { ...delivery.source_disclosures, extra: disclosure } }).success).toBe(false);
+});
+
+it("requires each semantic proof qualifier to occupy a delivered source slot", () => {
+  const delivery = libraryDelivery();
+  const accepts = (value: Record<string, unknown>) => [
+    SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
+    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+  ];
+  const proofSlot = (index: number, correspondenceId = digest) => ({
+    index, evidence_kind: "semantic_proof", source_interpretation_id: digest,
+    query_semantics_id: digest, semantic_correspondence_id: correspondenceId, conditional_computation_id: digest,
+    witnesses: [{ conditional_computation_id: digest, binding_id: "binding" }],
+    support: { answer: "open", evidence_inputs: [], operation: "not_requested", compatibility: "unknown", distinctness: "unknown" }
+  });
+  const entry = sourceEntry();
+  const key = indexEntryCacheKey(entry);
+  const occupied = {
+    ...delivery, total_count: 1,
+    query_semantics_status: { status: "admitted", query_semantics_id: digest },
+    coverage: { ...coverage, query_semantics: "complete" },
+    index: { ...delivery.index, entries: [entry] }
+  };
+  const sourceOnlyDisclosure = { ...disclosure, material_kind: "original_body" };
+  const proofDisclosure = { ...sourceOnlyDisclosure,
+    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
+  const memory = memoryIndexEntry({ workspace_id: "workspace", object_id: "memory", source_revision: "v1",
+    association_milligrades: 0 });
+  expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest },
+    coverage: { ...coverage, query_semantics: "complete" }, slot_qualifiers: [proofSlot(0)] })).toEqual([false, false]);
+  expect(accepts({ ...occupied, slot_qualifiers: [proofSlot(1)],
+    source_disclosures: { [key]: sourceOnlyDisclosure } })).toEqual([false, false]);
+  expect(accepts({
+    ...occupied, index: { ...occupied.index, entries: [memory] },
+    slot_qualifiers: [proofSlot(0)],
+    source_disclosures: { [indexEntryCacheKey(memory)]: proofDisclosure }
+  })).toEqual([false, false]);
+  expect(accepts({ ...occupied,
+    slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }, proofSlot(0)],
+    source_disclosures: { [key]: sourceOnlyDisclosure } })).toEqual([false, false]);
+  expect(accepts({ ...occupied,
+    slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }, proofSlot(0)],
+    source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
+  expect(accepts({ ...occupied, slot_qualifiers: [proofSlot(0)],
+    source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
+  expect(accepts({ ...occupied, slot_qualifiers: [proofSlot(0), proofSlot(0, secondCorrespondence)],
+    source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
+  expect(accepts({ ...occupied, slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
+    source_disclosures: { [key]: sourceOnlyDisclosure } })).toEqual([true, true]);
+});
+
+it("requires proof qualifiers to bind delivered proof premises on a proof-bearing source slot", () => {
+  const delivery = libraryDelivery();
+  const accepts = (value: Record<string, unknown>) => [
+    SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
+    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+  ];
+  const entry = proofBearingEntry();
+  const key = indexEntryCacheKey(entry);
+  const proof = libraryProof();
+  const second = libraryProof({ correspondenceId: secondCorrespondence });
+  const occupied = {
+    ...delivery, total_count: 1,
+    query_semantics_status: { status: "admitted", query_semantics_id: digest },
+    coverage: { ...coverage, query_semantics: "complete" },
+    index: { ...delivery.index, entries: [entry] }
+  };
+  const proofDisclosure = { ...disclosure, material_kind: "original_body",
+    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
+  const bound = { ...occupied, proofs: [proof], source_disclosures: { [key]: proofDisclosure } };
+  const qualifier = sourceSemanticProofQualifier(proof, 0);
+  expect(accepts({ ...bound, slot_qualifiers: [qualifier] })).toEqual([true, true]);
+  expect(accepts({ ...bound, slot_qualifiers: [{ ...qualifier, payload_support: "available",
+    selection_basis: "direct_answer" }] })).toEqual([true, true]);
+  expect(accepts({ ...occupied, proofs: [proof, second], slot_qualifiers: [
+    sourceSemanticProofQualifier(proof, 0), sourceSemanticProofQualifier(second, 0)
+  ], source_disclosures: { [key]: proofDisclosure } })).toEqual([true, true]);
+  expect(accepts({ ...occupied, slot_qualifiers: [qualifier],
+    source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
+  expect(accepts({ ...bound, slot_qualifiers: [{ ...qualifier, source_interpretation_id: otherDigest }] })).toEqual([false, false]);
+  expect(accepts({ ...bound, slot_qualifiers: [{ ...qualifier,
+    witnesses: [{ conditional_computation_id: digest, binding_id: "forged" }] }] })).toEqual([false, false]);
+  expect(accepts({ ...bound, slot_qualifiers: [{ ...qualifier,
+    support: { ...qualifier.support!, answer: "open" } }] })).toEqual([false, false]);
+  expect(accepts({ ...occupied, proofs: [libraryProof({ rootId: "other" })], slot_qualifiers: [
+    sourceSemanticProofQualifier(libraryProof({ rootId: "other" }), 0)
+  ], source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
+  expect(accepts({ ...occupied, proofs: [proof], slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
+    source_disclosures: { [key]: { ...disclosure, material_kind: "original_body" } } })).toEqual([true, true]);
 });
 
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {

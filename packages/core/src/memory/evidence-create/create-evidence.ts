@@ -34,8 +34,13 @@ import {
   type SourceWriteGardenIntentPort
 } from "../source-write-garden-intent.js";
 
+// Core-private capability: derived provenance excerpts are not new source bodies.
+// Keep this out of the package-root exports and all serialized contracts.
+export const SOURCE_PROVENANCE_CAPSULE = Symbol("source provenance capsule");
+
 export async function createEvidenceCapsule(input: Readonly<{
   readonly assertSourceCurrent?: () => void;
+  readonly sourceFieldFormation?: typeof SOURCE_PROVENANCE_CAPSULE;
   readonly capsuleInput: Omit<
     EvidenceCapsule,
     "object_id" | "object_kind" | "schema_version" | "lifecycle_state" | "created_at" | "updated_at"
@@ -95,7 +100,9 @@ export async function createEvidenceCapsule(input: Readonly<{
     );
   }
   const { event, created } = persistCreatedEvidence(input, evidence, formation, enqueueEnrichment);
-  await admitOptionalFieldFormation(input, created, formation);
+  if (input.sourceFieldFormation !== SOURCE_PROVENANCE_CAPSULE) {
+    await admitOptionalFieldFormation(input, created, formation);
+  }
   await input.runtimeNotifier.notifyEntry(event);
   return created;
 }

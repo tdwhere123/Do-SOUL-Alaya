@@ -10,14 +10,14 @@ vi.hoisted(() => {
 import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";
-import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, proofEntry, assemble, workerRecall, nativeProofResponseFixture } from "./source-semantic-library-measurement-fixture.js";
+import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeProofResponseFixture,
+  nativeSourceHitWithUnverifiedProofFixture } from "./source-semantic-library-measurement-fixture.js";
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import {
   measureSourceSemanticLibraryResponse, readmitSourceSemanticLibraryMeasurement, readmitHistoricalSourceOnlyLibraryMeasurement
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import {
-  PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT,
   scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure
 } from "../../../runs/measurement/source-gold-join.js";
 
@@ -82,6 +82,48 @@ describe("source semantic library measurement", () => {
     expect(index.continuation).not.toBeNull();
     expect(index.completeness.logical_index).toBe("partial");
     const evaluated = measureOf(workerRecall(index));
+    expect(evaluated.sourceBearingUnion?.any_at_5).toEqual({ status: "miss", value: false });
+  });
+
+  it.each([
+    { name: "access is absent", mutate: (result: ReturnType<typeof workerRecall>) => {
+      const { access: _access, ...discovery } = result.discovery;
+      return { ...result, discovery };
+    } },
+    { name: "conditional computation is open", mutate: (result: ReturnType<typeof workerRecall>) => ({
+      ...result, coverage: { ...result.coverage, conditional_computation: "open" as const }
+    }) },
+    { name: "conditional computation is truncated", mutate: (result: ReturnType<typeof workerRecall>) => ({
+      ...result, coverage: { ...result.coverage, conditional_computation: "truncated" as const }
+    }) }
+  ])("keeps a negative unavailable when $name", ({ mutate }) => {
+    const evaluated = measureOf(mutate(workerRecall(assemble([sourceOnly("other")], []))));
+    expect(evaluated.sourceBearingUnion?.any_at_5).toMatchObject({ status: "unavailable", value: null,
+      reason: "native access or computation remains unresolved" });
+    expect(evaluated.measurement).toMatchObject({ status: "validated",
+      metrics: { delivered_slot_union: { any_at_5: { status: "miss" } } } });
+  });
+
+  it.each([
+    { name: "access is absent", mutate: (result: ReturnType<typeof workerRecall>) => {
+      const { access: _access, ...discovery } = result.discovery;
+      return { ...result, discovery };
+    } },
+    { name: "conditional computation is open", mutate: (result: ReturnType<typeof workerRecall>) => ({
+      ...result, coverage: { ...result.coverage, conditional_computation: "open" as const }
+    }) }
+  ])("preserves an observed hit when $name", ({ mutate }) => {
+    expect(measureOf(mutate(workerRecall(assemble([sourceOnly("gold")], [])))).sourceBearingUnion?.any_at_5.status)
+      .toBe("hit");
+  });
+
+  it("retains a miss when unavailable-query source-only computation is unexercised and access is closed", () => {
+    const result = workerRecall(assemble([sourceOnly("other")], []));
+    const evaluated = measureOf({
+      ...result, query_semantics_status: { status: "unavailable", reason: "absent" },
+      coverage: { ...result.coverage, query_semantics: "unexercised", semantic_correspondence: "unexercised",
+        conditional_computation: "unexercised" }
+    });
     expect(evaluated.sourceBearingUnion?.any_at_5).toEqual({ status: "miss", value: false });
   });
 
@@ -257,13 +299,13 @@ describe("source semantic library measurement", () => {
     });
 
   it("rejects a self-consistent stored exposure and metric for a root absent from the native index", () => {
-    const response = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("other")], [proofEntry("unverified")])));
+    const response = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("other")], [])));
     if (response.operation !== "recall" || response.results === undefined) throw new Error("native public recall expected");
     const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
       firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: REQUEST, goldSourceUnits: [GOLD] }).measurement;
     if (measured?.status !== "validated") throw new Error("native source measurement expected");
     expect(measured.metrics.mixed_kind_first_exposure.any_at_5.status).toBe("miss");
-    expect(measured.metrics.proof_conditioned_first_exposure.any_at_5.status).toBe("unavailable");
+    expect(measured.metrics.proof_conditioned_first_exposure.any_at_5.status).toBe("miss");
     const forged = structuredClone(response);
     Object.assign(forged.results!.find((result) => result.object_kind === "source_evidence")!, { target: GOLD_TARGET });
     const first_exposure_page = recordSourceSemanticLibraryFirstExposure(forged);
@@ -289,7 +331,7 @@ describe("source semantic library measurement", () => {
   });
 
   it("retains a native source hit when a different delivered proof remains unverified", () => {
-    const evaluated = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("other")])));
+    const evaluated = measureOf(nativeSourceHitWithUnverifiedProofFixture());
     const measured = evaluated.measurement;
     expect(measured).toMatchObject({ status: "validated", metrics: {
       mixed_kind_first_exposure: { any_at_5: { status: "hit" } },
@@ -302,21 +344,8 @@ describe("source semantic library measurement", () => {
   });
 
   it("scores mixed source retrieval but rejects label-only proof claims", () => {
-    const evaluated = measureOf(workerRecall(assemble([sourceOnly("gold")], [proofEntry("gold")])));
-    const withProof = evaluated.measurement;
-    const withoutProof = measureOf(workerRecall(assemble([sourceOnly("gold")], []))).measurement;
-    expect(withProof).toMatchObject({
-      status: "validated", provider_calls: 0,
-      request: { budget: { page_budget: REQUEST.page_budget } },
-      metrics: {
-        mixed_kind_first_exposure: { any_at_10: { status: "miss", value: false } },
-        proof_conditioned_first_exposure: {
-          contract: PROOF_CONDITIONED_FIRST_EXPOSURE_CONTRACT,
-          any_at_10: { status: "unavailable", value: null }
-        }
-      }
-    });
-    expect(withoutProof).toMatchObject({
+    const withoutProof = measureOf(workerRecall(assemble([sourceOnly("gold")], [])));
+    expect(withoutProof.measurement).toMatchObject({
       status: "validated", provider_calls: 0,
       request: { budget: { page_budget: REQUEST.page_budget } },
       metrics: {
@@ -324,18 +353,24 @@ describe("source semantic library measurement", () => {
         proof_conditioned_first_exposure: { any_at_10: { status: "miss", value: false } }
       }
     });
-    expect(withProof && "request" in withProof ? "execution_receipt" in withProof.request : true).toBe(false);
-    if (withProof?.status !== "validated") throw new Error("native measurement must retain unavailable proof status");
-    expect(evaluated.validatedProofRanks).toEqual([]);
-    expect(evaluated.sourceBearingUnion?.any_at_5.status).toBe("unavailable");
+    expect(withoutProof.measurement && "request" in withoutProof.measurement
+      ? "execution_receipt" in withoutProof.measurement.request : true).toBe(false);
     expect(REQUEST.page_budget).not.toBe(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
-    expect(withoutProof && "metrics" in withoutProof
-      ? withoutProof.metrics.mixed_kind_first_exposure.any_at_10
-      : null).not.toEqual(withoutProof && "metrics" in withoutProof
-      ? withoutProof.metrics.proof_conditioned_first_exposure.any_at_10
+    expect(withoutProof.measurement && "metrics" in withoutProof.measurement
+      ? withoutProof.measurement.metrics.mixed_kind_first_exposure.any_at_10
+      : null).not.toEqual(withoutProof.measurement && "metrics" in withoutProof.measurement
+      ? withoutProof.measurement.metrics.proof_conditioned_first_exposure.any_at_10
       : undefined);
-    const recalled = workerRecall(assemble([sourceOnly("gold")], [proofEntry("gold")]));
-    expect(measureConditionalFieldResponse({ recallResult: recalled, deliveredResults: [] })?.status)
+    const { response } = nativeProofResponseFixture();
+    const labelOnly = { ...response, proofs: [] };
+    const rejected = measureSourceSemanticLibraryResponse({
+      recallResult: labelOnly, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response),
+      requestBudget: REQUEST, goldSourceUnits: [GOLD]
+    });
+    expect(rejected).toMatchObject({
+      measurement: { status: "invalid" }, sourceBearingUnion: null, validatedProofRanks: []
+    });
+    expect(measureConditionalFieldResponse({ recallResult: labelOnly, deliveredResults: [] })?.status)
       .not.toBe("validated");
   });
 

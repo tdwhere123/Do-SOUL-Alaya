@@ -300,7 +300,8 @@ export {
   SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
   SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
   SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
-  SourceSemanticWorkerResultSchema
+  SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
+  proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier
 } from "./garden/source-semantic-worker.js";
 export type {
   SourceSemanticQueryUnavailableReason, SourceSemanticQueryStatus, SourceSemanticQuerySupport,

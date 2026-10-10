@@ -161,12 +161,16 @@ function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
 }
 
 /** A delivered positive is observed; a negative cannot close native unvisited or unfinished work.
- * Index pagination and unsupported client computation alone do not imply unvisited access. */
+ * Index pagination and unexercised source-only computation alone do not imply unvisited access. */
 function resolveNativeUnion(metric: SourceBearingUnionFirstExposureMetric,
   observation: Pick<z.infer<typeof ValidatedMeasurementRecord>["native_observation"], "discovery" | "coverage">): SourceBearingUnionFirstExposureMetric {
   const { discovery, coverage } = observation;
-  if (!discovery.open_residuals && !discovery.truncated && coverage.discovery === "complete"
-    && !discovery.access?.unvisited_sources && !discovery.access?.unvisited_interpretations) return metric;
+  const access = discovery.access;
+  const discoveryFinished = !discovery.open_residuals && !discovery.truncated && coverage.discovery === "complete";
+  const accessClosed = access !== undefined && !access.unvisited_sources && !access.unvisited_interpretations;
+  const computationFinished = coverage.conditional_computation === "complete"
+    || coverage.conditional_computation === "unexercised";
+  if (discoveryFinished && accessClosed && computationFinished) return metric;
   const resolve = (value: SourceBearingUnionFirstExposureMetric["any_at_5"]) => value.status !== "miss" ? value
     : { status: "unavailable" as const, value: null, reason: "native access or computation remains unresolved" };
   return { ...metric, any_at_1: resolve(metric.any_at_1), any_at_5: resolve(metric.any_at_5), any_at_10: resolve(metric.any_at_10) };

@@ -286,12 +286,9 @@ describe("provider chat completion", () => {
   });
 
   it("classifies a successful-status body-read failure separately from HTTP status", async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      headers: new Headers({ "content-type": "application/json" }),
-      text: vi.fn().mockRejectedValue(new Error("body failed"))
-    } as unknown as Response));
+    const fetchImpl = vi.fn(async () => new Response(new ReadableStream({
+      start(controller) { controller.error(new Error("body failed")); }
+    }), { status: 200, headers: { "content-type": "application/json" } }));
     await expect(fetchProviderChatCompletion({
       ...CHAT_REQUEST,
       fetchImpl: fetchImpl as unknown as typeof fetch

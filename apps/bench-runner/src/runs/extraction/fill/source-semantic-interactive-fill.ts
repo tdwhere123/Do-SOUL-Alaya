@@ -217,6 +217,16 @@ function importInteractiveFromRaw(
     appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
       `${line.key}\tphysical_response_${physicalEvidence}\n`);
     input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
+    if (physicalEvidence === "truncated" && raw.full_replay_possible) {
+      // Complete decoded text with a truncated physical witness. Settle without
+      // relabeling that host truncation as a model schema error or opening a retry.
+      input.authority!.recordTransportOutcome(line.key, {
+        retryCount: 0, rateLimitRetries: 0, successfulRequestCount: 1,
+        usageRequestCount: extracted.usage === undefined ? 0 : 1, transportFailures: [],
+        ...(extracted.usage === undefined ? {} : { usage: extracted.usage })
+      }, raw.attempt_ordinal);
+      return "quarantined";
+    }
     recordInteractiveOutcome(input.authority!, line.key, raw.attempt_ordinal,
       extracted, "quarantined", raw.decoded_text_digest);
     return "quarantined";

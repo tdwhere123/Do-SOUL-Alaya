@@ -14,7 +14,7 @@ import {
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import {
-  prepareSourceSemanticLibrary, proposeQuerySemantics, proposeSourceSemantics,
+  MAX_SOURCE_SEMANTIC_RESPONSE_BYTES, prepareSourceSemanticLibrary, proposeQuerySemantics, proposeSourceSemantics,
   sourceSemanticLibraryCorrespondenceCacheKey
 } from "@do-soul/alaya-soul";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
@@ -280,17 +280,41 @@ it("prepares bounded semantic correspondences from discovered source interpretat
         expect(prepared.outcomes.some((row) => row.status === "interpreted")).toBe(true);
         expect(prepared.outcomes.some((row) => row.status === "no_correspondence")).toBe(true);
         expect(prepared.semantic_correspondences).toHaveLength(1);
-        const failureKinds = ["abstained", "truncated", "resource_exhausted", "invalid"] as const;
-        for (const status of failureKinds) {
-          const rawJson = JSON.stringify({ contract: "source-semantic-correspondence-response-v4",
-            outcome: status === "invalid" ? { status, reason: "rejected" } : { status } });
-          const result = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: semantics,
-            source_interpretation_descriptors: descriptors, produce: () => ({ rawJson }),
-            producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" });
-          expect(result.outcomes).toHaveLength(descriptors.length);
-          expect(result.outcomes[0]).toMatchObject({ status: status === "abstained" ? "no_correspondence" : status === "invalid" ? "invalid" : "failed",
-            outcome: { status }, rawJson });
-        }
+        const scopedFailure = {
+          original_query: ORIGINAL, admitted_query_semantics: semantics,
+          source_interpretation_descriptors: descriptors,
+          producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1",
+          correspondence_demand: { kind: "query_branches" as const, maximum_demands_per_interpretation: 1 },
+          correspondence_cap: descriptors.length
+        };
+        const abstainedJson = JSON.stringify({ decision: "abstain", assessments: [] });
+        const abstained = prepareSourceSemanticLibrary({ ...scopedFailure, produce: () => ({ rawJson: abstainedJson }) });
+        expect(abstained.outcomes).toHaveLength(descriptors.length);
+        expect(abstained.outcomes[0]).toMatchObject({
+          status: "no_correspondence", outcome: { status: "abstained" }, rawJson: abstainedJson
+        });
+        expect(abstained.semantic_correspondences).toEqual([]);
+        const oversized = "x".repeat(MAX_SOURCE_SEMANTIC_RESPONSE_BYTES + 1);
+        const truncated = prepareSourceSemanticLibrary({ ...scopedFailure, produce: () => ({ rawJson: oversized }) });
+        expect(truncated.outcomes[0]).toMatchObject({ status: "failed", outcome: { status: "truncated" } });
+        expect(truncated.outcomes[0]?.raw_truncated).toBe(true);
+        expect(truncated.outcomes[0]?.outcome).not.toMatchObject({ status: "invalid" });
+        const invalidJson = JSON.stringify({ decision: "assess" });
+        const invalid = prepareSourceSemanticLibrary({ ...scopedFailure, produce: () => ({ rawJson: invalidJson }) });
+        expect(invalid.outcomes[0]).toMatchObject({ status: "invalid", rawJson: invalidJson });
+        expect(invalid.outcomes[0]?.outcome?.status).toBe("invalid");
+        const claimedHostJson = JSON.stringify({
+          contract: "source-semantic-correspondence-response-v4", outcome: { status: "truncated" }
+        });
+        const claimedHost = prepareSourceSemanticLibrary({ ...scopedFailure, produce: () => ({ rawJson: claimedHostJson }) });
+        expect(claimedHost.outcomes[0]?.status).toBe("invalid");
+        expect(claimedHost.outcomes[0]?.outcome).not.toMatchObject({ status: "truncated" });
+        const claimedExhaustedJson = JSON.stringify({ decision: "resource_exhausted", assessments: [] });
+        const claimedExhausted = prepareSourceSemanticLibrary({
+          ...scopedFailure, produce: () => ({ rawJson: claimedExhaustedJson })
+        });
+        expect(claimedExhausted.outcomes[0]?.status).toBe("invalid");
+        expect(claimedExhausted.outcomes[0]?.outcome).not.toMatchObject({ status: "resource_exhausted" });
         let attempts = 0;
         const thrown = prepareSourceSemanticLibrary({ original_query: ORIGINAL, admitted_query_semantics: semantics,
           source_interpretation_descriptors: descriptors, produce: () => { attempts += 1; throw new Error("transport down"); }, cap: 1,

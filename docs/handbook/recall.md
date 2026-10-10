@@ -874,9 +874,12 @@ are never repaired. Pair choice, source support, context and unresolved meaning
 remain producer responsibilities. This mechanical completion does not certify
 semantic correspondence. Benchmark request identities include the new schema
 and prompt; retained raw v4 responses and Q/H-keyed library caches are not upgraded.
-Scoped request v9 uses the flat response v7: the model returns `decision`
+Scoped request v9 uses a flat draft with no `contract` field: the model returns `decision`
 (`assess` or `abstain`), required `assessments`, and optional domain/membership
-arrays. The host binds the internal assessment contract, outcome and sole H
+arrays. Strict generation and receive reject both `source-semantic-correspondence-response-v7`
+and `source-semantic-correspondence-assessment-v1` on that draft; the exported flat-response
+constant is not admission authority. The host binds
+`source-semantic-correspondence-assessment-v1`, the outcome and the sole H
 handle from the captured request. A scoped v9 request requires exactly one
 identity-validated H descriptor. Abstention cannot carry assessments or domain
 payload; optional absence is preserved and `null` is rejected. Captured v8

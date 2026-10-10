@@ -1,8 +1,8 @@
 import { canonicalJson, compareCodeUnits, SourceSemanticResourceExhausted, sameSourceEvidenceRoot, sourceEvidenceRootTarget,
+  projectSourceSemanticQuerySupport,
   type Derivation, type IndexEntry, type SourceSemanticLibraryProof, type SourceSemanticBindingResult,
   type SourceSemanticQuerySupport, type SourceSemanticResourceLedger, type SourceSemanticLibrarySlotQualifier,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, type SourceDisclosure, type InterpretationNodeCoordinate } from "@do-soul/alaya-protocol";
-import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
 import { sourceGoldRootIdentity } from "./source-semantic-library-recall.js";
 
 /** A root's complete executed witness forests and necessary source bytes are indivisible. */
@@ -18,6 +18,12 @@ export type SourceSemanticLibraryPackage = Readonly<{
 type SelectionInput = Readonly<{
   candidates: readonly SourceSemanticLibraryPackage[];
   fits: (page: readonly SourceSemanticLibraryPackage[]) => boolean;
+  /**
+   * The freeze owner checks a reachable singleton, including its continuation
+   * overhead and any already reserved final-page membership. A hypothetical
+   * continuation-free envelope alone does not establish another final page.
+   */
+  fitsStandalone?: (candidate: SourceSemanticLibraryPackage, precedingSlots: number) => boolean;
   meter: SourceSemanticResourceLedger;
   order?: "field" | "source_access";
 }>;
@@ -58,6 +64,13 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly So
       input.meter.charge((bindings + 1) * (inputs + 1), inputs * 64 + bindings * 8, "selection support projection");
       supports.set(row.entry, support(row));
     }
+    const proofsByRoot = new Map<string, SourceSemanticLibraryPackage[]>();
+    for (const row of input.candidates) {
+      if (row.proofs.length === 0) continue;
+      input.meter.charge(1, 8, "proof root reservation reference");
+      const key = root(row), proofs = proofsByRoot.get(key) ?? [];
+      proofs.push(row); proofsByRoot.set(key, proofs);
+    }
     while (selected.length < SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET && remaining.size > 0) {
       input.meter.charge(remaining.size, remaining.size * 16, "evidence selection candidates");
       const novelGain = tupleGains(remaining, tuples, coveredTuples, input.meter);
@@ -78,6 +91,11 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean): readonly So
         const selection_basis = !answered && support?.answer === "supported" ? "direct_answer"
           : demands(support).some(id => !covered.has(id)) ? "new_input" : qualified(support) ? "additional_witness" : "source_access";
         const delivered: SourceSemanticLibraryPackage = { ...candidate, selection_basis };
+        if (candidate.proofs.length === 0 && (proofsByRoot.get(root(candidate)) ?? []).some(proof => {
+          input.meter.charge(1, 0, "standalone proof reservation");
+          const standalone = selectionReasons([proof], supports)[0]!;
+          return input.fitsStandalone?.(standalone, selected.length) ?? input.fits([standalone]);
+        })) continue;
         if (!input.fits([...selected, delivered])) continue;
         selected.push(delivered);
         answered ||= support?.answer === "supported";

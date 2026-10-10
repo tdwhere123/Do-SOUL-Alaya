@@ -1,7 +1,7 @@
 import { FirstExposureSession, initialScoringSlots } from "../../../runs/measurement/first-exposure-session.js";
 import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
-import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
+import { compileConditionalFieldQuery, interpretationIdentity, projectSourceDisclosure } from "@do-soul/alaya-core";
 import {
   InformationIndexSchema,
   sourceProductStateKey,
@@ -71,7 +71,9 @@ function fixture(targets: readonly RecallTargetRef[]) {
     program_state: entry.program_state, time_state: entry.time_state,
     source_channels: ["conditional_field"], score_factors: { activation: 0.85, relevance: 0.85 },
     budget_state: { token_estimate: 1, max_entries: 10, max_total_tokens: 2000,
-      remaining_entries: 0, remaining_tokens: 0, within_budget: true }
+      remaining_entries: 0, remaining_tokens: 0, within_budget: true },
+    ...(entry.target.kind === "source_evidence" ? { source_disclosure: projectSourceDisclosure({
+      material_kind: "original_body", evaluated_as_of: NOW }) } : {})
   }));
   const recallResult = { delivery_id: "delivery", protocol_version: 1, index, results,
     total_count: results.length, provider_calls: 0, garden_enqueue: 0, request_budget: BUDGET, execution_receipt };
@@ -87,8 +89,14 @@ function fixture(targets: readonly RecallTargetRef[]) {
 
 describe("source gold join and mixed-kind first-exposure", () => {
   it("joins record-only source gold and does not treat an extracted memory twin as the source key", () => {
+    const sourcePage = fixture([sourceTarget()]);
+    expect(sourcePage.recallResult.results[0]?.source_disclosure).toMatchObject({
+      source_binding: "unbound", source_time: { kind: "unknown", reason: "unbound" },
+      validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
+      proof_use: { kind: "source_only" }
+    });
     const recordOnly = measureConditionalFieldResponse({
-      ...fixture([sourceTarget()]), goldSourceUnits: [SOURCE_GOLD], goldMemoryIds: ["rec-1"]
+      ...sourcePage, goldSourceUnits: [SOURCE_GOLD], goldMemoryIds: ["rec-1"]
     });
     expect(recordOnly).toMatchObject({
       status: "validated",

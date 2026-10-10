@@ -203,6 +203,30 @@ describe("source observation publication", () => {
     expect(rebound.source_target.evidence_object_id).toBe(sourceAlias);
   });
 
+  it("retains ordinary source field admission for source observations with a currentness guard", async () => {
+    const fixture = await openFixture();
+    const original = await admitSource(fixture);
+    const evidenceService = new EvidenceService({
+      evidenceCapsuleRepo: fixture.evidenceCapsuleRepo, eventLogRepo: fixture.eventLogRepo,
+      runtimeNotifier: fixture.notify, fieldStores: fixture.stores
+    });
+    const publication = createSourceObservationPublication({
+      deriveTemporalProjection: () => ({}), stores: fixture.stores,
+      sourceAdmission: fixture.sourceAdmission, evidenceService,
+      memoryService: fixture.memoryService, sha256: fieldContractSha256
+    });
+    const published = await publication.publish({
+      signal: observationSignal(locatedInterpretation()), sourceEventAnchor: null
+    });
+    const admitted = fixture.stores.getCurrentRecord(REAL_SQLITE_TEST_WORKSPACE_ID, original.record.content_digest);
+    expect(admitted?.evidence_object_id).toBe(published.evidence.object_id);
+    expect(fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, admitted!.identity)?.content_bytes)
+      .toBe(ASSERTION);
+    expect(fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, original.record.identity)?.content_bytes)
+      .toBe(SOURCE);
+    expect(published.bound.source_target.root_id).toBe(original.record.identity);
+  });
+
   it("converts UTF-16 locators to UTF-8 durable spans", async () => {
     const source = "A café sent mail.";
     const fixture = await openFixture();

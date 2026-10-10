@@ -9,13 +9,16 @@ import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../sh
 import { SourceReferenceCatalogSchema, SOURCE_REFERENCE_MAX_ASSERTIONS } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
-import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
+import { SourceSemanticQuerySchema, type SourceSemanticQuery } from "../recall/conditional-field/semantic-query.js";
+import { sourceSemanticQueryBranchViews } from "../recall/conditional-field/semantic-query-branches.js";
 import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/semantic-correspondence.js";
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
 import { ContinuationSchema, InformationIndexSchema, SOURCE_SEMANTIC_PROOF_OBJECT_KIND,
-  indexEntryCacheKey } from "../recall/conditional-field/index-view.js";
+  indexEntryCacheKey, indexEntryObjectKind, type IndexEntry } from "../recall/conditional-field/index-view.js";
+import { type SourceEvidenceTarget } from "../recall/conditional-field/product-identity.js";
 import {
-  SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema
+  SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema,
+  type SourceSemanticBindingResult, type SourceSemanticReasoningResult
 } from "./source-semantic-interpretation.js";
 
 /** Native evidence selection occupies roots and reserves their complete support packages. */
@@ -203,6 +206,31 @@ export const SourceSemanticQuerySupportSchema = z.object({
 }).strict().readonly();
 export type SourceSemanticQuerySupport = z.infer<typeof SourceSemanticQuerySupportSchema>;
 
+/** Call only with execution-owned or verified bindings from this original query semantics. Input coverage never executes its operation. */
+export function projectSourceSemanticQuerySupport(query: SourceSemanticQuery,
+  bindings: readonly SourceSemanticBindingResult[]): SourceSemanticQuerySupport {
+  const represented = query.evaluation !== undefined || query.alternatives.some(alternative =>
+    sourceSemanticQueryBranchViews(alternative)[0]!.alternative.frames.length > 0);
+  return {
+    answer: bindings.some(binding => binding.kind === "answer" && binding.query_complete) ? "supported"
+      : represented ? "open" : "unrepresented",
+    evidence_inputs: query.alternatives.flatMap((alternative, index) => (alternative.evidence_inputs ?? []).map((_input, input) => ({
+      alternative: index, input, status: bindings.some(binding => binding.kind === "evidence"
+        && binding.alternative === index && binding.input === input) ? "supported" as const : "open" as const
+    }))),
+    operation: query.requested_operation === undefined ? "not_requested" : "not_executed",
+    compatibility: "unknown", distinctness: "unknown"
+  };
+}
+
+/** Gold-join occupancy key. Omits evidence_object_id, hypothesis, binding, and interpretation node. */
+export function sourceGoldRootIdentity(target: SourceEvidenceTarget): string {
+  return canonicalJson({
+    workspace_id: target.workspace_id, root_kind: target.root_kind, root_id: target.root_id,
+    source_version: target.source_version, content_digest: target.content_digest
+  });
+}
+
 export const SourceSemanticLibrarySlotQualifierSchema = z.object({
   index: NonNegativeIntSchema,
   evidence_kind: z.enum(["semantic_proof", "source_evidence"]),
@@ -241,6 +269,39 @@ export const SourceSemanticLibraryProofSchema = SourceSemanticReasoningResultSch
   context: SourceSemanticEvaluationContextSchema
 }).strict().readonly();
 export type SourceSemanticLibraryProof = z.infer<typeof SourceSemanticLibraryProofSchema>;
+
+export function proofForLibraryEntry<T extends SourceSemanticReasoningResult>(
+  entry: IndexEntry, proofs: readonly T[]
+): T | undefined {
+  if (entry.interpretation_node === undefined || entry.explanation_ids.length === 0) return undefined;
+  return proofs.find((row) => row.source_interpretation_id === entry.interpretation_node!.packet_id
+    && row.conditional_computation_id === entry.hypothesis_id
+    && (row.binding_results ?? []).some((answer) => answer.binding_id === entry.output_binding
+      && canonicalJson(answer.explanation_ids) === canonicalJson(entry.explanation_ids)));
+}
+
+export function sourceSemanticProofQualifier(proof: SourceSemanticLibraryProof, index: number): SourceSemanticLibrarySlotQualifier {
+  return {
+    index, evidence_kind: "semantic_proof",
+    ...(proof.source_interpretation_id === undefined ? {} : { source_interpretation_id: proof.source_interpretation_id }),
+    ...(proof.query_semantics_id === undefined ? {} : { query_semantics_id: proof.query_semantics_id }),
+    ...(proof.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: proof.semantic_correspondence_id }),
+    ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id }),
+    witnesses: (proof.binding_results ?? []).map(binding => ({
+      conditional_computation_id: proof.conditional_computation_id!, binding_id: binding.binding_id })),
+    support: projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? [])
+  };
+}
+
+/** A source slot can carry independent Q/H/C premises; its position never identifies a proof. */
+export function proofForLibraryQualifier(
+  entry: IndexEntry, qualifier: SourceSemanticLibrarySlotQualifier, proofs: readonly SourceSemanticLibraryProof[]
+): SourceSemanticLibraryProof | undefined {
+  const { payload_support: _payload, selection_basis: _selection, ...semantic } = qualifier;
+  return proofs.find(proof => proof.source_target !== undefined && entry.target.kind === "source_evidence"
+    && sourceGoldRootIdentity(proof.source_target) === sourceGoldRootIdentity(entry.target)
+    && canonicalJson(semantic) === canonicalJson(sourceSemanticProofQualifier(proof, qualifier.index)));
+}
 
 /** Current, completed computation without a binding; this is control evidence, not a proof or source fact. */
 const SourceRecordFields = SourceRecordIdentitySchema.unwrap().shape;
@@ -288,11 +349,26 @@ type DeliveryRefinementContext = { addIssue(issue: { code: "custom"; path?: (str
 
 /** Availability and proof claims share one admission rule across worker and public deliveries. */
 export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsistency, context: DeliveryRefinementContext): void {
+  for (const [position, slot] of value.slot_qualifiers.entries()) {
+    if (slot.evidence_kind !== "semantic_proof") continue;
+    const entry = value.index.entries[slot.index];
+    const proofs = value.proofs ?? [];
+    if (entry === undefined || indexEntryObjectKind(entry) !== SOURCE_SEMANTIC_PROOF_OBJECT_KIND) {
+      context.addIssue({ code: "custom", path: ["slot_qualifiers", position],
+        message: "semantic proof qualifier must reference a delivered source slot" });
+      continue;
+    }
+    if (proofForLibraryEntry(entry, proofs) === undefined || proofForLibraryQualifier(entry, slot, proofs) === undefined) {
+      context.addIssue({ code: "custom", path: ["slot_qualifiers", position],
+        message: "semantic proof qualifier must bind the delivered proof" });
+    }
+  }
   if (value.source_disclosures !== undefined) {
     const keys = new Set(value.index.entries.map(indexEntryCacheKey));
     for (const [position, entry] of value.index.entries.entries()) {
       const disclosure = value.source_disclosures[indexEntryCacheKey(entry)];
-      const expected = value.slot_qualifiers.find(row => row.index === position)?.evidence_kind === "semantic_proof"
+      // Any independent proof at this explicit slot governs disclosure; array order is not occupancy.
+      const expected = value.slot_qualifiers.some(row => row.index === position && row.evidence_kind === "semantic_proof")
         ? "conditional_support" : "source_only";
       if (disclosure === undefined || disclosure.proof_use.kind !== expected) {
         context.addIssue({ code: "custom", path: ["source_disclosures", indexEntryCacheKey(entry)],

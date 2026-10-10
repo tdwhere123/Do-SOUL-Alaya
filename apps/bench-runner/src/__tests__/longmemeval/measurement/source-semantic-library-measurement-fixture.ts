@@ -1,5 +1,5 @@
-import { IndexEntrySchema, indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  SourceSemanticWorkerResultSchema, type IndexEntry, type InformationIndex } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+  SourceSemanticWorkerResultSchema, type IndexEntry, type InformationIndex, type SourceSemanticLibraryProof } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, projectSourceDisclosure,
   sourceSemanticLibrarySourceEntry, sourceGoldRootIdentity, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
 import { deliveredProofFixture, source, query, correspondenceFor } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
@@ -25,15 +25,6 @@ export function sourceOnly(root: string, workspaceId = "ws"): IndexEntry {
   });
 }
 
-export function proofEntry(root: string): IndexEntry {
-  const base = sourceOnly(root);
-  return IndexEntrySchema.parse({
-    ...base,
-    explanation_ids: ["ex-1"],
-    interpretation_node: { packet_id: "packet-1", hypothesis_id: base.hypothesis_id, node_id: "n1" }
-  });
-}
-
 export function assemble(entries: readonly IndexEntry[], proofs: readonly IndexEntry[]) {
   return assembleSourceSemanticLibraryIndex({
     query_id: "library-query", snapshot_id: SNAPSHOT, interpretation_id: "library-interpretation",
@@ -42,44 +33,43 @@ export function assemble(entries: readonly IndexEntry[], proofs: readonly IndexE
   }).index;
 }
 
-export function workerRecall(index: InformationIndex) {
-  const slot_qualifiers = index.entries.map((entry, offset) => ({
-    index: offset,
-    ...(entry.interpretation_node !== undefined && entry.explanation_ids.length > 0
-      ? { evidence_kind: "semantic_proof" as const, source_interpretation_id: DIGEST, query_semantics_id: DIGEST,
-        semantic_correspondence_id: DIGEST, conditional_computation_id: DIGEST,
-        witnesses: [{ conditional_computation_id: DIGEST, binding_id: entry.output_binding }],
-        support: { answer: "open", evidence_inputs: [], operation: "not_requested", compatibility: "unknown", distinctness: "unknown" } }
-      : { evidence_kind: "source_evidence" as const })
-  }));
+export function workerRecall(index: InformationIndex, proofs: readonly SourceSemanticLibraryProof[] = []) {
+  const slot_qualifiers = slotQualifiersFor(index, proofs);
+  const proved = slot_qualifiers.some((qualifier) => qualifier.evidence_kind === "semantic_proof");
+  const query_semantics_id = proofs.find((proof) => proof.query_semantics_id !== undefined)?.query_semantics_id ?? DIGEST;
   const source_disclosures = Object.fromEntries(index.entries.map((entry, offset) => [indexEntryCacheKey(entry),
     projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: index.as_of ?? CLOCK,
-      proof_use: slot_qualifiers.find(qualifier => qualifier.index === offset)?.evidence_kind === "semantic_proof" ? "conditional_support" : "source_only" })]));
+      proof_use: slot_qualifiers.some((qualifier) => qualifier.index === offset && qualifier.evidence_kind === "semantic_proof")
+        ? "conditional_support" : "source_only" })]));
   const result = SourceSemanticWorkerResultSchema.parse({
     kind: "recall", request_budget: REQUEST, delivery_id: "delivery", request_identity: `sha256:${"c".repeat(64)}`,
-    query_semantics_status: { status: "admitted", query_semantics_id: DIGEST },
+    query_semantics_status: { status: "admitted", query_semantics_id },
     protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, total_count: index.entries.length,
     index, page_purpose: "membership",
     discovery: {
+      access: {
+        contract: "source-semantic-access-v1", policy: "canonical-v1", input_id: DIGEST, pool_id: DIGEST,
+        observed_source_count: index.entries.length, observed_interpretation_count: 0,
+        source_candidates: [], interpretation_candidates: [],
+        trace: { kind: "library_selection", omitted_source_count: index.entries.length, omitted_interpretation_count: 0 },
+        unvisited_sources: false, unvisited_interpretations: false, stopping_reasons: []
+      },
       eligible_source_count: index.entries.length, visited_source_pages: 1, visited_source_interpretation_pages: 1,
-      visited_source_interpretation_descriptors: proofsPresent(index) ? 1 : 0, candidate_prefix: [],
+      visited_source_interpretation_descriptors: proved ? 1 : 0, candidate_prefix: [],
       examined_source_interpretation_ids: [], unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0,
       examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, open_residuals: false, truncated: false
     },
     order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers, source_disclosures,
+    ...(proofs.length === 0 ? {} : { proofs }),
     coverage: {
-      discovery: "complete", source_interpretation: proofsPresent(index) ? "open" : "unexercised",
-      query_semantics: "complete", semantic_correspondence: proofsPresent(index) ? "open" : "unexercised",
-      conditional_computation: proofsPresent(index) ? "complete" : "open", payload: "complete"
+      discovery: "complete", source_interpretation: proved ? "open" : "unexercised",
+      query_semantics: "complete", semantic_correspondence: proved ? "open" : "unexercised",
+      conditional_computation: proved ? "complete" : "unexercised", payload: "complete"
     },
     work: { native_work: 0, native_bytes: 0, logical_memory_bytes: 0, rss_bytes: 0 }
   });
   if (result.kind !== "recall") throw new Error("recall expected");
   return result;
-}
-
-function proofsPresent(index: InformationIndex): boolean {
-  return index.entries.some((entry) => entry.interpretation_node !== undefined && entry.explanation_ids.length > 0);
 }
 
 /** Actual execution/delivery witnesses. An optional first proof lacks independent publication admission. */
@@ -92,13 +82,31 @@ export function nativeProofResponseFixture(unverifiedFirst = false, workspaceId 
   const index = assembleSourceSemanticLibraryIndex({ query_id: first.index.query_id, snapshot_id: first.index.snapshot_id,
     interpretation_id: "library-interpretation", as_of: CLOCK, source_entries: [], truncated: false, open_residuals: false,
     proof_groups: fixtures.map((fixture) => ({ entries: fixture.index.entries, explanations: fixture.index.explanations })) }).index;
-  const response = encodeSourceSemanticLibraryResponse({ ...workerRecall(index), proofs, slot_qualifiers: slotQualifiersFor(index, proofs),
+  const response = encodeSourceSemanticLibraryResponse({ ...workerRecall(index, proofs), proofs, slot_qualifiers: slotQualifiersFor(index, proofs),
     query_semantics_status: { status: "admitted", query_semantics_id: first.proof.query_semantics_id! } });
   if (response.operation !== "recall") throw new Error("native proof response expected");
   const target = index.entries[unverifiedFirst ? 1 : 0]!.target;
   if (target.kind !== "source_evidence") throw new Error("native source root expected");
   const record = fixtures.find((fixture) => fixture.record.identity === target.root_id)!.record;
   return { response, record, gold: sourceGoldUnitFromPublishedRoot(target) };
+}
+
+/** Gold source occupancy plus a different root's executed proof, measured without that proof's publication record. */
+export function nativeSourceHitWithUnverifiedProofFixture() {
+  const other = deliveredProofFixture({ library: true });
+  const goldEntry = sourceOnly("gold");
+  const index = assembleSourceSemanticLibraryIndex({
+    query_id: other.index.query_id, snapshot_id: other.index.snapshot_id,
+    interpretation_id: "library-interpretation", as_of: CLOCK,
+    source_entries: [goldEntry], truncated: false, open_residuals: false,
+    proof_groups: [{ entries: other.index.entries, explanations: other.index.explanations }],
+    selected_entries: [goldEntry, other.entry],
+    root_order: [goldEntry.target, other.target].map((target) => {
+      if (target.kind !== "source_evidence") throw new Error("source root expected");
+      return sourceGoldRootIdentity(target);
+    })
+  }).index;
+  return workerRecall(index, [other.proof]);
 }
 
 /** Independent H/C proofs share a root; a raw slot separates it from another proof root. */
@@ -131,7 +139,7 @@ export function nativeMultiProofResponseFixture(partial?: "count" | "tense") {
       if (target.kind !== "source_evidence") throw new Error("source root expected");
       return sourceGoldRootIdentity(target);
     }) }).index;
-  const worker = { ...workerRecall(index), proofs, slot_qualifiers: slotQualifiersFor(index, proofs),
+  const worker = { ...workerRecall(index, proofs), proofs, slot_qualifiers: slotQualifiersFor(index, proofs),
     query_semantics_status: { status: "admitted" as const, query_semantics_id: first.proof.query_semantics_id! } };
   const response = encodeSourceSemanticLibraryResponse(worker);
   if (response.operation !== "recall") throw new Error("native proof response expected");

@@ -214,7 +214,7 @@ export {
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
 export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
-export { projectSourceSemanticQuerySupport } from "./recall/runtime/source-semantic-query-support.js";
+export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
 export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
 export { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {

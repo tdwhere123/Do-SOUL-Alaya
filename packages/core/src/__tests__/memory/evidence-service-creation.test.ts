@@ -7,14 +7,20 @@ import {
 import { RULE_BASED_EVIDENCE_FACT_FRAME_PROPOSAL_NORMALIZER } from "@do-soul/alaya-protocol/node/source-frame";
 import { FACT_FRAME_CANONICAL_OSF_PRODUCER_OPERATOR_ID } from
   "../../memory/evidence-create/evidence-semantic-completeness.js";
+import { SOURCE_PROVENANCE_CAPSULE } from "../../memory/evidence-create/create-evidence.js";
+import { createInMemoryFieldStores } from "../../memory/evidence-create/field-stores.js";
 import {
   createCreationHarness,
   createEvidenceInput
 } from "./evidence-service-fixture.js";
 
 describe("EvidenceService creation", () => {
-  it("materializes a source-bound FactFrame through the canonical projection owner", async () => {
-    const { service, create } = createCreationHarness();
+  it.each([
+    { kind: "ordinary source evidence", selection: undefined, sourceRecords: 1 },
+    { kind: "source provenance capsule", selection: SOURCE_PROVENANCE_CAPSULE, sourceRecords: 0 }
+  ] as const)("materializes canonical capsule views for $kind", async ({ selection, sourceRecords }) => {
+    const stores = createInMemoryFieldStores();
+    const { service, create } = createCreationHarness({ fieldStores: stores });
     const assertion = "I use Atlas for research.";
 
     await service.create(
@@ -39,7 +45,10 @@ describe("EvidenceService creation", () => {
         producer_operator_id: "structured_open_semantic_factor_v1",
         source_text: assertion,
         graph: semanticGraph(assertion)
-      }
+      },
+      undefined,
+      undefined,
+      selection
     );
 
     expect(create).toHaveBeenCalledWith(
@@ -63,6 +72,21 @@ describe("EvidenceService creation", () => {
       }) })
     );
     expect(create.mock.calls[0]?.[1]).toHaveLength(5);
+    expect(stores.listRecords("workspace-1")).toHaveLength(sourceRecords);
+  });
+
+  it("keeps validation and the transactional source guard on provenance capsule creation", async () => {
+    const { service, create, append } = createCreationHarness();
+    const assertSourceCurrent = vi.fn(() => { throw new Error("source is no longer current"); });
+    await expect(service.create(createEvidenceInput({ evidence_kind: "invalid" as never }), [],
+      undefined, undefined, undefined, assertSourceCurrent, SOURCE_PROVENANCE_CAPSULE))
+      .rejects.toMatchObject({ code: "VALIDATION" });
+    expect(assertSourceCurrent).not.toHaveBeenCalled();
+    await expect(service.create(createEvidenceInput(), [], undefined, undefined, undefined,
+      assertSourceCurrent, SOURCE_PROVENANCE_CAPSULE)).rejects.toThrow("source is no longer current");
+    expect(assertSourceCurrent).toHaveBeenCalledOnce();
+    expect(append).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("persists explicit rejected semantic formation without a graph", async () => {

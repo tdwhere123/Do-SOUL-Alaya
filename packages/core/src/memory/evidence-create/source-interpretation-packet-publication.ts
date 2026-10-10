@@ -16,6 +16,7 @@ import type { EvidenceService } from "../evidence-service.js";
 import { resolveCurrentSource } from "./source-observation-currentness.js";
 import { sliceUtf8Span, sourceSpanFromCodeUnitOffsets } from "./source-span-views.js";
 import { uuidFromHex } from "./source-observation-identity.js";
+import { SOURCE_PROVENANCE_CAPSULE } from "./create-evidence.js";
 
 type PacketInput = Readonly<{
   workspaceId: string; runId: string; artifactKey: string; source: string; packet: unknown;
@@ -49,7 +50,7 @@ export function createSourceInterpretationPacketPublication(owner: Owner) {
         evidence_health_state: "questionable", gist: JSON.stringify(bound),
         excerpt: bound.assertions.map((row) => row.text).join("\n"), source_hash: bound.source_target.content_digest,
         run_id: input.runId, workspace_id: input.workspaceId, surface_id: null
-      }, [], undefined, undefined, undefined, current);
+      }, [], undefined, undefined, undefined, current, SOURCE_PROVENANCE_CAPSULE);
       } catch (error) {
         const raced = await owner.evidenceService.findByIdScoped(objectId, input.workspaceId);
         if (raced === null || raced.lifecycle_state !== "active" || canonicalJson(JSON.parse(raced.gist)) !== canonicalJson(bound)) throw error;
@@ -193,7 +194,7 @@ export function createSourceSemanticInterpretationPublication(owner: Owner) {
         excerpt: bound.interpretation.mentions.map((row) => row.text).join("\n"),
         source_hash: bound.source_target.content_digest,
         run_id: input.runId, workspace_id: input.workspaceId, surface_id: null
-      }, [], undefined, undefined, undefined, current);
+      }, [], undefined, undefined, undefined, current, SOURCE_PROVENANCE_CAPSULE);
       } catch (error) {
         const raced = await findExisting();
         if (raced === null) throw error;

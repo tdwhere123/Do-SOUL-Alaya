@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SourceSemanticResourceLedger, encodeSourceSemanticQueryCarrier, sourceSemanticQueryBranchViews,
+  SourceSemanticResourceLedger, encodeSourceSemanticQueryCarrier, sourceSemanticQueryBranchViews, projectSourceSemanticQuerySupport,
   type SourceSemanticCorrespondence, type SourceSemanticQueryMeaningBody
 } from "@do-soul/alaya-protocol";
 import {
@@ -10,7 +10,6 @@ import {
 import { admitSourceSemanticQuery } from "../../../../recall/conditional-field/query/source-semantic-query-admission.js";
 import { SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
 import { planSourceSemanticBranches } from "../../../../recall/runtime/source-semantic-branch-plan.js";
-import { projectSourceSemanticQuerySupport } from "../../../../recall/runtime/source-semantic-query-support.js";
 import {
   CLASS_SOURCE, NONCLASS_SOURCE, admitNominalClassCorrespondence, actionFrameIds, classSourceTexts,
   lastQuarterGaps, receiveNominalClassInterpretation, reasonNominalClass
@@ -93,8 +92,8 @@ function emptyCorrespondence(): SourceSemanticCorrespondence {
 
 describe("independent action inputs through query receive and branch planning", () => {
   it("admits semantic-key gap targets, rejects carrier node tokens, and keeps action inputs independent", () => {
-    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("Node tokens such as n1 only serialize expressions and are never gap targets");
-    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("Listed alternative operand actions belong in separate evidence_inputs, not extra conjuncts of that operation");
+    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("serialization tokens are not gap targets");
+    expect(SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT).toContain("Separate alternative input actions instead of joining all actions into the answer");
 
     const wire = encodeSourceSemanticQueryCarrier(independentMeaning());
     const received = receive(wire);

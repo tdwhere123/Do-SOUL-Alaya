@@ -1,9 +1,109 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { SourceSemanticInterpretationSchema, SourceSemanticQuerySchema, canonicalSourceSemanticDecimal,
-  compareSourceSemanticDecimals, sourceSemanticCorrespondenceIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+  compareSourceSemanticDecimals, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity,
+  SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { finiteSource, finiteQuery, finiteCorrespondence, reasonFinite, FINITE_QUERY } from "./source-semantic-finite-fixture.js";
-import { reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
+import { executeSourceSemanticInterpretation, reasonSourceSemanticInterpretation } from "../../../recall/runtime/source-semantic-reasoning.js";
+import { CLOCK, ORIGINAL, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
+
+function groupedExecutionInput() {
+  const interpretation = source(), original = query();
+  const frames = [0, 1].map(index => ({ ...original.alternatives[0]!.frames[0]!, id: `qUse${index}`, variable: `use${index}` }));
+  const semantics: SourceSemanticQuery = { ...original,
+    requested_operation: { reading: "collect tools", support: { kind: "query_text", excerpt: "tools" } },
+    variables: [...original.variables.filter(row => row.id !== "use"), ...frames.map(row => ({ id: row.variable, sort: "proposition" as const }))],
+    alternatives: [{ frames, context_obligations: frames.map(row => ({ frame: row.id, kind: "asserted_at_source" })),
+      answer_frames: [], evidence_inputs: frames.map(row => ({ frames: [row.id] })) }] };
+  const originalCorrespondence = correspondenceFor(interpretation, original);
+  const correspondence = { ...originalCorrespondence, query_semantics_id: sourceSemanticQueryIdentity(semantics, fieldContractSha256),
+    correspondences: originalCorrespondence.correspondences.flatMap(row => row.query_endpoint.kind === "referent" ? [row]
+      : frames.map(frame => ({ ...row, query_endpoint: { ...row.query_endpoint, frame: frame.id } }))) };
+  return { source_interpretation: interpretation, query_semantics: semantics, semantic_correspondence: correspondence,
+    original_query: ORIGINAL, workspaceId: "ws", scope: "project", authorizedScopes: ["project"], asOf: CLOCK };
+}
+
+it("preserves completed group bindings and their index when later proof projection exhausts", () => {
+  const input = groupedExecutionInput(), complete = executeSourceSemanticInterpretation(input);
+  expect(complete.result.outcome.status).toBe("interpreted");
+  expect(complete.result.binding_results?.map(row => row.kind === "evidence" ? row.input : -1)).toEqual([0, 1]);
+  const retain = SourceSemanticResourceLedger.prototype.retain;
+  let projections = 0;
+  const exhausted = vi.spyOn(SourceSemanticResourceLedger.prototype, "retain").mockImplementation(function (this: SourceSemanticResourceLedger, value, phase) {
+    if (phase === "proof encoding" && ++projections === 2) throw new SourceSemanticResourceExhausted(phase);
+    return retain.call(this, value, phase);
+  });
+  try {
+    const partial = executeSourceSemanticInterpretation(input);
+    expect(projections).toBe(2);
+    expect(partial.result.outcome.status).toBe("resource_exhausted");
+    expect(partial.result.binding_results).toEqual(complete.result.binding_results!.slice(0, 1));
+    expect(partial.result.consumed_leaves.length).toBeGreaterThan(0);
+    expect(partial.result.completeness).toMatchObject({ logical_index: "partial", observed_coverage: "open", order_coverage: "partial" });
+    expect(partial.index?.entries.map(row => row.output_binding)).toEqual(partial.result.binding_results!.map(row => row.binding_id));
+    expect(partial.index?.order_status).toBe("open");
+    expect(partial.source_dependencies?.length).toBeGreaterThan(0);
+  } finally { exhausted.mockRestore(); }
+});
+
+it("does not invent partial bindings or completeness when no group finishes projection", () => {
+  const retain = SourceSemanticResourceLedger.prototype.retain;
+  const exhausted = vi.spyOn(SourceSemanticResourceLedger.prototype, "retain").mockImplementation(function (this: SourceSemanticResourceLedger, value, phase) {
+    if (phase === "proof encoding") throw new SourceSemanticResourceExhausted(phase);
+    return retain.call(this, value, phase);
+  });
+  try {
+    const empty = executeSourceSemanticInterpretation(groupedExecutionInput());
+    expect(empty.result.outcome.status).toBe("resource_exhausted");
+    expect(empty.result.binding_results).toBeUndefined();
+    expect(empty.result.consumed_leaves).toEqual([]);
+    expect(empty.result.completeness).toBeUndefined();
+    expect(empty.index).toBeNull();
+    expect(empty.source_dependencies).toBeUndefined();
+  } finally { exhausted.mockRestore(); }
+});
+
+it("retains the merged body but withholds the delivery index when source dependency traversal exhausts", () => {
+  const input = groupedExecutionInput(), complete = executeSourceSemanticInterpretation(input);
+  const charge = SourceSemanticResourceLedger.prototype.charge;
+  let dependencies = 0;
+  const exhausted = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(function (this: SourceSemanticResourceLedger, work, bytes, phase) {
+    if (phase === "proof source dependency" && ++dependencies === 2) throw new SourceSemanticResourceExhausted(phase);
+    return charge.call(this, work, bytes, phase);
+  });
+  try {
+    const partial = executeSourceSemanticInterpretation(input);
+    expect(dependencies).toBe(2);
+    expect(partial.result.outcome.status).toBe("resource_exhausted");
+    expect(partial.result.binding_results).toEqual(complete.result.binding_results);
+    expect(partial.result.derivations).toEqual(complete.result.derivations);
+    expect(partial.result.consumed_leaves).toEqual(complete.result.consumed_leaves);
+    expect(partial.result.completeness?.logical_index).toBe("partial");
+    expect(partial.source_dependencies).toBeUndefined();
+    // Library admission uses this gate; an unfinished dependency set is not valid-empty support.
+    expect(partial.index).toBeNull();
+  } finally { exhausted.mockRestore(); }
+});
+
+it("does not erase a merged proof when optional attention accounting exhausts", () => {
+  const input = groupedExecutionInput(), complete = executeSourceSemanticInterpretation(input);
+  const charge = SourceSemanticResourceLedger.prototype.charge;
+  let attempted = false;
+  const exhausted = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(function (this: SourceSemanticResourceLedger, work, bytes, phase) {
+    if (phase === "optional semantic attention") { attempted = true; throw new SourceSemanticResourceExhausted(phase); }
+    return charge.call(this, work, bytes, phase);
+  });
+  try {
+    const retained = executeSourceSemanticInterpretation(input);
+    expect(attempted).toBe(true);
+    expect(retained.result.binding_results).toEqual(complete.result.binding_results);
+    expect(retained.result.derivations).toEqual(complete.result.derivations);
+    expect(retained.source_dependencies).toEqual(complete.source_dependencies);
+    expect(retained.index).toEqual(complete.index);
+    expect(retained.result.outcome.status).toBe("interpreted");
+    expect(retained.result.attention).toBeUndefined();
+  } finally { exhausted.mockRestore(); }
+});
 
 it("instantiates declared members with rule, membership, binding and semantic_correspondence leaves", () => {
   const result = reasonFinite(finiteSource());

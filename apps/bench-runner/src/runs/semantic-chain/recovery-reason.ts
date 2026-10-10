@@ -15,7 +15,7 @@ import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/boun
 import { admitInitialQualified, initialSourcePhysicalOwner } from "./recovery-publication.js";
 import { reserveRecoveryEffect } from "./recovery-window.js";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
-import { readCompleteRetainedSourceResponse } from "../extraction/cache/source-interactive-binding.js";
+import { inspectOptionalCompleteSourceResponse } from "../extraction/cache/source-interactive-binding.js";
 import { reserveRecoveryRead, reserveRecoveryAction, reserveRecoveryHostEffect,
   recordRecoveryNativeWork } from "./recovery-allowance.js";
 
@@ -112,26 +112,34 @@ export function selectRecoveryNomination(window: readonly RecoveryWindowSource[]
     nomination: nominated === undefined ? "frozen_window_after_unbound_reason" : "initial_reason_attention" };
 }
 
-function recoveryNomination(root: string, reason: RecoveryReasonRound) {
-  const { window, settled } = admitInitialQualified(root);
+type RecoveryQualified = ReturnType<typeof admitInitialQualified>["settled"];
+
+/** Physical-parent eligibility then frozen-window policy. Verified absence is ineligible; reads stay errors. */
+export function nominateRecoverySource(window: readonly RecoveryWindowSource[], settled: RecoveryQualified,
+  reason: RecoveryReasonRound) {
   if (reason.qualified_snapshot_identity !== settled.publication_identity || !Array.isArray(reason.results)) {
     throw new AlayaError("CONFLICT", "source nomination lacks the settled initial reasoning round");
   }
-  const eligible = window.window.filter(source => {
+  const eligible = window.filter(source => {
     if (settled.descriptor_export.some(row => row.source_id === source.source_id &&
         row.source_version === source.source_version && row.record_id === source.record_id)) return true;
-    try {
-      if (source.initial_key === null) return false;
-      const physical = initialSourcePhysicalOwner(settled, source.initial_key);
-      const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
-        path: physical.preflightPath, maxBytes: 32 * 1024 * 1024, label: "initial H parent preflight" })));
-      const parent = preflight.ready_requests.find(row => row.key === source.initial_key);
-      if (parent === undefined) return false;
-      readCompleteRetainedSourceResponse({ cacheRoot: physical.cacheRoot, preflight, line: parent });
-      return true;
-    } catch { return false; }
+    if (source.initial_key === null || !settled.source_owners.some(row => row.key === source.initial_key)) {
+      return false;
+    }
+    const physical = initialSourcePhysicalOwner(settled, source.initial_key);
+    const preflight = parseSourceSemanticInteractivePreflight(JSON.parse(readBoundedCanonicalUtf8Artifact({
+      path: physical.preflightPath, maxBytes: 32 * 1024 * 1024, label: "initial H parent preflight" })));
+    const parent = preflight.ready_requests.find(row => row.key === source.initial_key);
+    if (parent === undefined) return false;
+    return inspectOptionalCompleteSourceResponse({ cacheRoot: physical.cacheRoot, preflight, line: parent })
+      .status === "complete";
   });
-  return selectRecoveryNomination(window.window, settled.publication_identity, reason, eligible);
+  return selectRecoveryNomination(window, settled.publication_identity, reason, eligible);
+}
+
+function recoveryNomination(root: string, reason: RecoveryReasonRound) {
+  const { window, settled } = admitInitialQualified(root);
+  return nominateRecoverySource(window.window, settled, reason);
 }
 
 export function admitRecoveryNomination(rootInput: string) {

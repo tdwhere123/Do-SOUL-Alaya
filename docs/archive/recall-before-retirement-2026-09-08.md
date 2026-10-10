@@ -681,13 +681,16 @@ root before the credentialless 1Q -> 3Q -> 100Q diagnostic ladder can begin.
 
 ## Related authority
 
+Maintained handbook and bench-history pages. Readiness labels and engineering-issue
+prose in this archive are retired historical receipts; they do not resurrect
+`runtime-snapshot.md`, `backlog.md`, or a live plan.
+
 | Need | File |
 | --- | --- |
-| Numbered truth, governance, and EventLog rules | [`invariants.md`](invariants.md) |
-| Packages, surfaces, write model, and ownership | [`architecture.md`](architecture.md) |
-| Current dated readiness posture | [`runtime-snapshot.md`](runtime-snapshot.md) |
-| Open engineering issues outside recall closure | [`backlog.md`](backlog.md) |
-| Dated full-dataset KPI archives | [`../bench-history/README.md`](../bench-history/README.md) |
+| Numbered truth, governance, and EventLog rules | [`invariants.md`](../handbook/invariants.md) |
+| Packages, surfaces, write model, and ownership | [`architecture.md`](../handbook/architecture.md) |
+| Current recall route and readiness vocabulary | [`recall.md`](../handbook/recall.md) |
+| Dated full-dataset KPI archives | [`bench-history/README.md`](../bench-history/README.md) |
 
 
 ### Historical revision-2 repair clarifications (superseded)

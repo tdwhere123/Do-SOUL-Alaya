@@ -707,32 +707,65 @@ it("retains both semantic correspondence witnesses within one occupied source wh
     expect(admittedFirst.semantic_correspondence_id).not.toBe(admittedSecond.semantic_correspondence_id);
     const forward = await workerRecall(session, semantics, [firstCorrespondence, secondCorrespondence]);
     const swapped = await workerRecall(session, semantics, [secondCorrespondence, firstCorrespondence]);
-    const forwardSlot = forward.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof");
-    const swappedSlot = swapped.slot_qualifiers.find((row) => row.evidence_kind === "semantic_proof");
-    expect(forward.discovery.omitted_duplicate_bindings).toBeGreaterThan(0);
-    expect(forwardSlot?.semantic_correspondence_id).toBeDefined();
-    expect(forwardSlot?.conditional_computation_id).toBeDefined();
-    expect(forwardSlot?.semantic_correspondence_id).toBe(swappedSlot?.semantic_correspondence_id);
-    expect(forwardSlot?.conditional_computation_id).toBe(swappedSlot?.conditional_computation_id);
     const ids = [admittedFirst.semantic_correspondence_id, admittedSecond.semantic_correspondence_id];
-    expect(ids).toContain(forwardSlot?.semantic_correspondence_id);
-    const unselected = ids.find((id) => id !== forwardSlot?.semantic_correspondence_id);
-    expect(unselected).toBeDefined();
-    expect((forward.proofs ?? []).some((row) => row.semantic_correspondence_id === unselected)).toBe(true);
-    expect((swapped.proofs ?? []).some((row) => row.semantic_correspondence_id === unselected)).toBe(true);
-    expect(forwardSlot?.witnesses).toHaveLength(2);
-    expect(swappedSlot?.witnesses).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    const proofQualifiers = (recalled: typeof forward) => recalled.slot_qualifiers.filter((row) => row.evidence_kind === "semantic_proof");
+    const forwardProofs = proofQualifiers(forward);
+    const swappedProofs = proofQualifiers(swapped);
+    expect(forwardProofs).toHaveLength(2);
+    expect(swappedProofs).toHaveLength(2);
+    const forwardSlots = new Set(forwardProofs.map((row) => row.index));
+    const swappedSlots = new Set(swappedProofs.map((row) => row.index));
+    expect(forwardSlots.size).toBe(1);
+    expect(swappedSlots.size).toBe(1);
+    expect(new Set(forwardProofs.map((row) => row.semantic_correspondence_id))).toEqual(new Set(ids));
+    expect(new Set(swappedProofs.map((row) => row.semantic_correspondence_id))).toEqual(new Set(ids));
+    expect(new Set((forward.proofs ?? []).map((row) => row.semantic_correspondence_id))).toEqual(new Set(ids));
+    expect(new Set((swapped.proofs ?? []).map((row) => row.semantic_correspondence_id))).toEqual(new Set(ids));
+    const occupied = [...forwardSlots][0]!;
+    const swappedOccupied = [...swappedSlots][0]!;
+    const records = listEligibleSemanticSources(session.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
+    const entry = forward.index.entries[occupied]!;
+    const swappedEntry = swapped.index.entries[swappedOccupied]!;
+    const record = records.sources.find((row) => row.identity === published.source_target.root_id)!;
+    expect(entry).toBeDefined();
+    expect(swappedEntry).toBeDefined();
+    if (entry.target.kind !== "source_evidence" || swappedEntry.target.kind !== "source_evidence") {
+      throw new Error("both correspondence orders must occupy the original source");
+    }
+    expect(sourceGoldRootIdentity(entry.target)).toBe(sourceGoldRootIdentity(swappedEntry.target));
+    expect((forward.proofs ?? []).some((row) => row.conditional_computation_id === entry.hypothesis_id)).toBe(true);
+    for (const qualifier of [...forwardProofs, ...swappedProofs]) {
+      expect(qualifier.semantic_correspondence_id).toBeDefined();
+      expect(qualifier.conditional_computation_id).toBeDefined();
+      expect(qualifier.witnesses?.length).toBeGreaterThan(0);
+    }
+    for (const qualifier of forwardProofs) {
+      const verified = core.deliveredSourceSemanticLibraryProof(forward.index, entry, qualifier, forward.proofs!, record, BUDGET);
+      expect(verified.proof?.semantic_correspondence_id).toBe(qualifier.semantic_correspondence_id);
+      expect(verified.verified_proofs).toEqual([verified.proof]);
+    }
+    for (const qualifier of swappedProofs) {
+      const verified = core.deliveredSourceSemanticLibraryProof(swapped.index, swappedEntry, qualifier, swapped.proofs!, record, BUDGET);
+      expect(verified.proof?.semantic_correspondence_id).toBe(qualifier.semantic_correspondence_id);
+      expect(verified.verified_proofs).toEqual([verified.proof]);
+    }
+    const selected = forwardProofs.find(row => row.conditional_computation_id === entry.hypothesis_id)!;
+    const sibling = forwardProofs.find(row => row.conditional_computation_id !== entry.hypothesis_id)!;
+    expect(selected).toBeDefined();
+    expect(sibling).toBeDefined();
+    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, { ...selected, witnesses: sibling.witnesses },
+      forward.proofs!, record, BUDGET).proof).toBeUndefined();
+    const forged = structuredClone(forward.proofs!);
+    const forgedSibling = forged.find(row => row.conditional_computation_id === sibling.conditional_computation_id)!;
+    Object.assign(forgedSibling.binding_results![0]!, { alternative: 999 });
+    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, sibling, forged, record, BUDGET).verified_proofs)
+      .toEqual([]);
+    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, selected, forged, record, BUDGET).proof?.conditional_computation_id)
+      .toBe(selected.conditional_computation_id);
     for (const proof of forward.proofs ?? []) for (const binding of proof.binding_results ?? []) {
       expect(binding.explanation_ids.every(id => forward.index.explanations?.some(row => row.derivation_id === id))).toBe(true);
     }
-    const records = listEligibleSemanticSources(session.database, WS, new SourceSemanticReadBudget(BUDGET), ["project"]);
-    const entry = forward.index.entries[forwardSlot!.index]!, record = records.sources.find(row => row.identity === published.source_target.root_id)!;
-    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, forwardSlot!, forward.proofs!, record, BUDGET).verified_proofs).toHaveLength(2);
-    const forged = structuredClone(forward.proofs!);
-    const sibling = forged.find(row => row.semantic_correspondence_id === unselected)!;
-    Object.assign(sibling.binding_results![0]!, { alternative: 999 });
-    expect(core.deliveredSourceSemanticLibraryProof(forward.index, entry, forwardSlot!, forged, record, BUDGET).verified_proofs).toEqual([]);
-    expect(forward.index.entries[forwardSlot!.index]?.hypothesis_id).toBe(forwardSlot?.conditional_computation_id);
   });
 }, 60000);
 

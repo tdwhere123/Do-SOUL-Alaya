@@ -94,8 +94,7 @@ export function recordSourceRootFacts(
       evidence_object_id: target.evidence_object_id,
       ...(row?.evidence_verified === true ? { evidence_verified: true } : {}),
       ...(observation.observed_at === undefined ? {} : {
-        observed_at: observation.observed_at,
-        event_time: observation.observed_at
+        observed_at: observation.observed_at
       }),
       ...(row?.content === undefined ? {} : { content: row.content }),
       content_complete: row?.content_complete === true,
@@ -106,9 +105,7 @@ export function recordSourceRootFacts(
       ...(row?.content_start === undefined ? {} : { content_start: row.content_start }),
       ...(row?.literal_verdicts === undefined ? {} : { literal_verdicts: row.literal_verdicts }),
       ...(row?.role === undefined ? {} : { role: row.role }),
-      ...(row?.event_time === undefined || row.event_time === null
-        ? {}
-        : { event_time: row.event_time }),
+      ...(row?.event_time === undefined ? {} : { event_time: row.event_time }),
       ...(row?.scope_class === undefined ? {} : { scope_class: row.scope_class })
     });
   }

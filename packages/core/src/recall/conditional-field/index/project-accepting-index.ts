@@ -222,10 +222,10 @@ function admitSelectedInterpretation(input: AcceptingProjectionInput): Accepting
   const count = ids.length;
   const work = count + input.snapshot.seeds.length + input.snapshot.values.length + 2 * input.snapshot.retained_transitions.length + 1;
   const allowance = input.remaining_reserve ?? input.budget.finalization_reserve;
-  if (work > allowance || count * 128 > (input.remaining_memory_bytes ?? input.budget.memory_bytes)) return null;
   if (semantic === undefined ? packetId !== hypothesisId : sourceSemanticInterpretationIdentity(semantic.source_interpretation, fieldContractSha256) !== packetId) {
     throw new CoreError("VALIDATION", "selected interpretation identity mismatch");
   }
+  if (work > allowance || count * 128 > (input.remaining_memory_bytes ?? input.budget.memory_bytes)) return null;
   const nodes = new Set(ids);
   const check = (product: ProductStateKey) => {
     const node = product.interpretation_node;

@@ -2,7 +2,7 @@ import { buildLongMemEvalQualityMetrics } from "../../../diagnostics/diagnostics
 import { FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
 import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
-import { compileConditionalFieldQuery, interpretationIdentity } from "@do-soul/alaya-core";
+import { compileConditionalFieldQuery, interpretationIdentity, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { InformationIndexSchema, type MemorySearchResult } from "@do-soul/alaya-protocol";
 import { measureConditionalFieldResponse, ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
 import { buildQuestionDiagnostic } from "../../../diagnostics/diagnostics-question.js";
@@ -139,7 +139,11 @@ describe("conditional target measurement evidence", () => {
       hypothesis_id: result.hypothesis_id, output_binding: result.output_binding, program_state: result.program_state, time_state: result.time_state };
     const input = { ...base, deliveredResults: [delivered], recallResult: { ...base.recallResult,
       index: { ...base.recallResult.index, entries: [{ ...entry, target }] },
-      results: [{ ...result, object_kind: "source_evidence", target }] } };
+      results: [{ ...result, object_kind: "source_evidence", target,
+        source_disclosure: projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: NOW }) }] } };
+    expect(input.recallResult.results[0]?.source_disclosure).toMatchObject({
+      source_binding: "unbound", source_time: { kind: "unknown", reason: "unbound" },
+      validity: { kind: "unknown", reason: "unbound" } });
     input.recallResult = initialPage(input.recallResult);
     const diagnostic = buildQuestionDiagnostic({ ...input, questionId: "source", goldMemoryIds: ["gold"], answerSessionIds: ["session"],
       hitAt1: false, hitAt5: false, hitAt10: false, degradationReason: null, embeddingMode: "disabled" });
@@ -396,7 +400,8 @@ describe("conditional target measurement evidence", () => {
       ...input.recallResult.results[0]!,
       object_id: undefined,
       object_kind: "source_evidence",
-      target
+      target,
+      source_disclosure: projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: NOW })
     };
     const recallResult = {
       ...input.recallResult,

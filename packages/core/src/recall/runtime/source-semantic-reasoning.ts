@@ -20,7 +20,7 @@ import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody
 import { sourceSemanticProofDependencies } from "./source-semantic-delivery.js";
 import { unexecutedGroupAttention } from "./source-semantic-attention.js";
 import {
-  attachOptionalAttention, groupedOptionalAttention, runOptionalAttention, singleOptionalAttention,
+  attachOptionalAttention, groupedOptionalAttention, singleOptionalAttention,
   type OptionalAttentionCompute
 } from "./source-semantic-optional-attention.js";
 
@@ -42,6 +42,14 @@ type Prepared = Readonly<{
   body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace;
   finalizeOptional?: OptionalAttentionCompute;
 }>;
+type CorrespondenceGroupRun = Readonly<{
+  state: FieldEngineState; query: ReturnType<typeof compileConditionalFieldQuery>;
+  execution: SourceSemanticExecutionPlan; remaining: import("@do-soul/alaya-protocol").RequestBudget;
+  phase: SourceSemanticGroupPhase;
+}>;
+type ProjectedCorrespondenceGroup = Prepared & Readonly<{
+  state: FieldEngineState; execution: SourceSemanticExecutionPlan; acceptedBranchIndices: ReadonlySet<number>;
+}>;
 export type SourceSemanticInterpretationExecution = Readonly<{
   result: SourceSemanticReasoningResult; index: InformationIndex | null;
   /** Source coordinates from actual selected binding closures, for native support hydration only. */
@@ -59,7 +67,7 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
   const request = input.request === undefined ? undefined : SourceSemanticReasoningRequestSchema.parse(input.request);
   const budget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET, meter = new SourceSemanticResourceLedger(budget);
   const original = request?.original_query ?? input.original_query;
-  let body: ResultBody;
+  let body: ResultBody = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
   let index: InformationIndex | null = null;
   let withdrawalTrace: SourceSemanticWithdrawalTrace | undefined;
   let sourceDependencies: readonly string[] | undefined;
@@ -80,13 +88,16 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
       withdrawalTrace = prepared.withdrawal_trace;
       if ((body.binding_results?.length ?? 0) > 0) sourceDependencies = sourceSemanticProofDependencies(body, meter);
       if (prepared.finalizeOptional !== undefined) {
-        const attention = runOptionalAttention(meter, budget, prepared.finalizeOptional);
-        if (attention !== undefined) body = { ...body, attention };
+        try { body = attachOptionalAttention(body, meter, budget, prepared.finalizeOptional); }
+        catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; }
       }
     }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-    body = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] }; index = null;
+    body = exhaustedBody(body);
+    // Both library production and verification gate on the index. An unfinished
+    // dependency traversal must not become valid-empty source support via ?? [].
+    if ((body.binding_results?.length ?? 0) > 0 && sourceDependencies === undefined) index = null;
   }
   const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
   return { result, index: result.outcome.status === "truncated"
@@ -190,11 +201,7 @@ function observeCorrespondenceGroups(input: Readonly<{
   sourceTarget: SourceEvidenceTarget;
 }>): Prepared {
   const { request, meter, original, admission, population, snapshot, qualified, sourceTarget } = input;
-  type PhaseRun = Readonly<{
-    state: FieldEngineState; query: ReturnType<typeof compileConditionalFieldQuery>;
-    execution: SourceSemanticExecutionPlan; remaining: typeof input.remaining; phase: SourceSemanticGroupPhase;
-  }>;
-  const runs: PhaseRun[] = [];
+  const runs: CorrespondenceGroupRun[] = [];
   let remaining = input.remaining;
   for (const phase of input.phases) {
     if (remaining.work_units < remaining.finalization_reserve + remaining.min_envelope) break;
@@ -225,20 +232,20 @@ function observeCorrespondenceGroups(input: Readonly<{
     finalizeOptional: (child) => unexecutedGroupAttention(admission, unprojected, child)
   };
   const prefixWork = meter.spentWork, prefixBytes = meter.spentBytes;
-  const projected = runs.map((run, index) => {
-    const result = projectSourceSemanticState({
-      state: run.state, meter, remaining: run.remaining, query: run.query, snapshot, admission, population,
-      execution: run.execution, sourceTarget, qualified
-    });
-    const prefix = `g${index}:`;
-    return {
-      ...result, body: prefixGroupBody(result.body, prefix), index: prefixGroupIndex(result.index, prefix),
-      state: run.state, execution: run.execution,
-      acceptedBranchIndices: result.acceptedBranchIndices ?? new Set<number>()
-    };
-  });
-  const incomplete = runs.length !== input.phases.length || projected.some(row => row.body.outcome.status !== "interpreted");
-  const finalizeOptional = groupedOptionalAttention(admission, projected, unprojected, incomplete);
+  const projected = projectCorrespondenceGroups(runs, run => projectSourceSemanticState({
+    state: run.state, meter, remaining: run.remaining, query: run.query, snapshot, admission, population,
+    execution: run.execution, sourceTarget, qualified
+  }));
+  if (projected.length === 0) return {
+    body: { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] }, index: null
+  };
+  const incomplete = projected.length !== input.phases.length || projected.some(row => row.body.outcome.status !== "interpreted");
+  const finalizeOptional: OptionalAttentionCompute = child => {
+    const missed = runs.length - projected.length;
+    child.charge(missed, missed * 8, "unprojected semantic group reference");
+    return groupedOptionalAttention(admission, projected,
+      [...unprojected, ...runs.slice(projected.length).map(run => run.phase)], incomplete)(child);
+  };
   const baseline = {
     body: mergeGroupBodies(qualified, projected.map((row) => row.body), incomplete),
     index: mergeGroupIndexes(projected.map((row) => row.index).filter((row): row is NonNullable<typeof row> => row !== null), incomplete),
@@ -277,6 +284,25 @@ function observeCorrespondenceGroups(input: Readonly<{
       }
     } });
   return { ...baseline, withdrawal_trace };
+}
+
+/** Only a fully projected group joins the retained body/index; later exhaustion cannot revoke it. */
+function projectCorrespondenceGroups(runs: readonly CorrespondenceGroupRun[],
+  project: (run: CorrespondenceGroupRun) => ReturnType<typeof projectSourceSemanticState>): ProjectedCorrespondenceGroup[] {
+  const projected: ProjectedCorrespondenceGroup[] = [];
+  for (const [index, run] of runs.entries()) {
+    try {
+      const result = project(run), prefix = `g${index}:`;
+      projected.push({ ...result,
+        body: prefixGroupBody(result.body, prefix), index: prefixGroupIndex(result.index, prefix),
+        state: run.state, execution: run.execution, acceptedBranchIndices: result.acceptedBranchIndices ?? new Set<number>()
+      });
+    } catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      break;
+    }
+  }
+  return projected;
 }
 
 function executionForPhase(phase: SourceSemanticGroupPhase): SourceSemanticExecutionPlan {
@@ -337,6 +363,12 @@ function mergeGroupIndexes(indexes: InformationIndex[], incomplete = false): Inf
       order_coverage: "partial" as const }, order_status: "open" as const } : {}) };
 }
 
+
+function exhaustedBody(body: ResultBody): ResultBody {
+  return { ...body, outcome: { status: "resource_exhausted" },
+    ...(body.completeness === undefined ? {} : { completeness: { ...body.completeness,
+      logical_index: "partial", observed_coverage: "open", order_coverage: "partial" } }) };
+}
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }
 function finish(result: ResultBody, outputLimit = 1_000_000): SourceSemanticReasoningResult {

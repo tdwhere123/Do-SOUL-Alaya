@@ -4,11 +4,17 @@ All notable changes to Do-SOUL Alaya are recorded here. This file is
 the chronological index. Historical per-release trees under
 docs/archive were deleted on 2026-08-24 (commit 2b23da6f2).
 
-Current recall algorithm (UGAF target vs live degenerate projection) is
+Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
 ## Unreleased — protocol 14.0.0, engine gateway 1.1.0
+
+This section is **not a release tag**. App packages remain `0.3.11`
+until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
+A GitHub release tag must match the latest published `## vX.Y.Z`
+heading (currently `## v0.3.11` below). Protocol 14.0.0 can move
+independently of the app semver.
 
 Protocol 14.0.0 changes semantic-library `slot_qualifiers` under invariant §25
 (major: a source slot can expose multiple independent proof qualifiers). Consumers
@@ -18,6 +24,14 @@ owns only its proof's witnesses and partial support. Source occupancy remains
 one slot per root; exact-C withdrawal leaves other independent proofs intact.
 Existing single-proof/source-only shapes still parse, but consumers must adopt
 the new multiplicity before using this version. No release is performed here.
+
+The same unreleased protocol surface adds five pure shared exports:
+`projectSourceSemanticQuerySupport`, `sourceGoldRootIdentity`,
+`proofForLibraryEntry`, `sourceSemanticProofQualifier`, and
+`proofForLibraryQualifier`. This additive API change is included in the existing
+14.0.0 major under invariant §25. Core production and delivery admission reuse
+this authority rather than independently defining proof-slot binding and support.
+It adds no MCP payload field, persisted format, or live-provider operation.
 
 Native scoped C requests additionally bind a query-branch demand and explicit
 assessed/unassessed coverage, with separate H and total-C budgets. This producer
@@ -36,6 +50,15 @@ DNS releases the fill lease on caller cancellation or its finite request budget,
 without reservation or provider raw. Readiness and later transport each receive
 their own budget; this does not establish an end-to-end deadline. Request/schema
 bytes and semantic cache key definitions remain unchanged.
+
+### Historical development notes (not current)
+
+The following notes record earlier unreleased development versions, not
+current package, library, or query identities. Live ordinary recall is the
+conditional-field route. Live semantic-library identity is protocol 7 /
+library v6; current query serialization is request v9 / response v8.
+Present-tense version names below are chronological facts from those
+development steps; they are not the live contract.
 
 Protocol 13.12.0 adds an opt-in source generation task for a single original-query
 family. Complete original source text and the unchanged source catalog are supplied

@@ -4,17 +4,18 @@ import {
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SOURCE_SEMANTIC_LIBRARY_TIE_POLICY, sourceIndexEntry, indexEntryCacheKey, indexEntryObjectKind,
   indexMemoryObjectId, type Continuation, type Derivation, type IndexEntry, type InformationIndex, type MemorySearchResult,
-  type SourceEvidenceTarget, type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
+  type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
   SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
-  type SourceDisclosure
+  type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { makeTokenEstimator } from "./recall-service-port-helpers.js";
-import { projectSourceSemanticQuerySupport } from "./source-semantic-query-support.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+
+export { sourceGoldRootIdentity, proofForLibraryEntry, proofForLibraryQualifier } from "@do-soul/alaya-protocol";
 
 /** Offline evidence binds its recorded result contract; live requests use the current version. */
 export function sourceSemanticLibraryQueryIdentity(originalQuery: string, resultVersion: string = SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION): string {
@@ -48,14 +49,6 @@ export const SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS = 2_000;
 export function sourceSemanticLibraryRawPreview(text: string, occupiedRoots: number): string {
   return previewWithinTokens(text, Math.floor(SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS
     / Math.max(1, Math.min(occupiedRoots, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET))), makeTokenEstimator());
-}
-
-/** Gold-join occupancy key. Omits evidence_object_id, hypothesis, binding, and interpretation node. */
-export function sourceGoldRootIdentity(target: SourceEvidenceTarget): string {
-  return canonicalJson({
-    workspace_id: target.workspace_id, root_kind: target.root_kind, root_id: target.root_id,
-    source_version: target.source_version, content_digest: target.content_digest
-  });
 }
 
 export function sourceSemanticLibrarySourceEntry(input: Readonly<{
@@ -299,16 +292,6 @@ export function encodeSourceSemanticLibraryResponse(
     coverage: { ...coverage, payload: omitted ? "truncated" : coverage.payload } });
 }
 
-export function proofForLibraryEntry<T extends SourceSemanticReasoningResult>(
-  entry: IndexEntry, proofs: readonly T[]
-): T | undefined {
-  if (entry.interpretation_node === undefined || entry.explanation_ids.length === 0) return undefined;
-  return proofs.find((row) => row.source_interpretation_id === entry.interpretation_node!.packet_id
-    && row.conditional_computation_id === entry.hypothesis_id
-    && (row.binding_results ?? []).some((answer) => answer.binding_id === entry.output_binding
-      && canonicalJson(answer.explanation_ids) === canonicalJson(entry.explanation_ids)));
-}
-
 export function slotQualifiersFor(
   index: InformationIndex, proofs: readonly SourceSemanticLibraryProof[]
 ): SourceSemanticLibrarySlotQualifier[] {
@@ -318,29 +301,6 @@ export function slotQualifiersFor(
       && sourceGoldRootIdentity(row.source_target) === sourceGoldRootIdentity(entry.target))
       .map(proof => sourceSemanticProofQualifier(proof, offset));
   });
-}
-
-/** A source slot can carry independent Q/H/C premises; its position never identifies a proof. */
-export function proofForLibraryQualifier(
-  entry: IndexEntry, qualifier: SourceSemanticLibrarySlotQualifier, proofs: readonly SourceSemanticLibraryProof[]
-): SourceSemanticLibraryProof | undefined {
-  const { payload_support: _payload, selection_basis: _selection, ...semantic } = qualifier;
-  return proofs.find(proof => proof.source_target !== undefined && entry.target.kind === "source_evidence"
-    && sourceGoldRootIdentity(proof.source_target) === sourceGoldRootIdentity(entry.target)
-    && canonicalJson(semantic) === canonicalJson(sourceSemanticProofQualifier(proof, qualifier.index)));
-}
-
-function sourceSemanticProofQualifier(proof: SourceSemanticLibraryProof, index: number): SourceSemanticLibrarySlotQualifier {
-  return {
-    index, evidence_kind: "semantic_proof",
-    ...(proof.source_interpretation_id === undefined ? {} : { source_interpretation_id: proof.source_interpretation_id }),
-    ...(proof.query_semantics_id === undefined ? {} : { query_semantics_id: proof.query_semantics_id }),
-    ...(proof.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: proof.semantic_correspondence_id }),
-    ...(proof.conditional_computation_id === undefined ? {} : { conditional_computation_id: proof.conditional_computation_id }),
-    witnesses: (proof.binding_results ?? []).map(binding => ({
-      conditional_computation_id: proof.conditional_computation_id!, binding_id: binding.binding_id })),
-    support: projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? [])
-  };
 }
 
 function mergeProofGroups(

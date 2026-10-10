@@ -23,17 +23,21 @@ import { assertInteractiveSourcePreflightReceipt } from "../authority/source-pre
 import type { SourceRequestLine } from "../request-artifact.js";
 import { parseExtractionOpenSemanticsGeneration } from "../request-artifact.js";
 
-/** A complete rejected response is still a physical parent, while its rejection stays settled. */
-export function readCompleteRetainedSourceResponse(input: Readonly<{
+export type OptionalCompleteRetainedSourceResponse =
+  | { readonly status: "complete"; readonly text: string }
+  | { readonly status: "unavailable"; readonly reason: "missing_raw" | "incomplete" };
+
+/** Bench-only: missing raw and validated incomplete parents are unavailable, not I/O failure. */
+export function inspectOptionalCompleteSourceResponse(input: Readonly<{
   cacheRoot: string; preflight: SourceSemanticInteractivePreflight; line: SourceRequestLine;
-}>): string {
+}>): OptionalCompleteRetainedSourceResponse {
   const { cacheRoot, preflight, line } = input;
   const planned = preflight.planned_requests.find(row => row.key === line.key);
   if (planned === undefined || !preflight.ready_requests.some(row => canonicalJson(row) === canonicalJson(line))) {
     throw new AlayaError("CONFLICT", "source revision parent is outside its selected physical preparation");
   }
   const raw = readSingleSourceRawAttempt(cacheRoot, line.key);
-  if (raw === undefined) throw new AlayaError("CONFLICT", "source revision requires one retained physical response for this request");
+  if (raw === undefined) return { status: "unavailable", reason: "missing_raw" };
   if (raw.kind !== "source_semantic" || raw.authority_receipt_digest === undefined ||
       raw.authority_lineage_digest === undefined) {
     throw new AlayaError("CONFLICT", "source revision parent has no retained source authority");
@@ -58,9 +62,20 @@ export function readCompleteRetainedSourceResponse(input: Readonly<{
       raw.transport_failure !== undefined || !raw.full_replay_possible ||
       providerRawSuccessEvidenceState(raw) !== "bound" ||
       !isCompleteSemanticFinish(preflight.config.requestProfile, raw.finish_reason)) {
-    throw new AlayaError("CONFLICT", "source revision parent has no complete settled physical response");
+    return { status: "unavailable", reason: "incomplete" };
   }
-  return raw.decoded_text;
+  return { status: "complete", text: raw.decoded_text };
+}
+
+/** A complete rejected response is still a physical parent, while its rejection stays settled. */
+export function readCompleteRetainedSourceResponse(input: Readonly<{
+  cacheRoot: string; preflight: SourceSemanticInteractivePreflight; line: SourceRequestLine;
+}>): string {
+  const inspected = inspectOptionalCompleteSourceResponse(input);
+  if (inspected.status === "complete") return inspected.text;
+  throw new AlayaError("CONFLICT", inspected.reason === "missing_raw"
+    ? "source revision requires one retained physical response for this request"
+    : "source revision parent has no complete settled physical response");
 }
 
 /** One complete physical response may serve a new verified occurrence only when its full wire is unchanged. */

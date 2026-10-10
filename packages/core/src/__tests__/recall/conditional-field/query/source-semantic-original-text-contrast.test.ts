@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrier,
+  SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, encodeSourceSemanticQueryCarrier, projectSourceSemanticQuerySupport,
   type SourceSemanticQuery, type SourceSemanticQueryMeaningBody
 } from "@do-soul/alaya-protocol";
 import { buildSourceSemanticRequest, proposeQuerySemantics, receiveSourceSemantics } from "@do-soul/alaya-soul";
 import { admitSourceSemanticQuery } from "../../../../recall/conditional-field/query/source-semantic-query-admission.js";
 import { SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "../../../../recall/conditional-field/query/source-semantic-query-producer-registry.js";
-import { projectSourceSemanticQuerySupport } from "../../../../recall/runtime/source-semantic-query-support.js";
 import {
   NONCLASS_SOURCE, admitNominalClassCorrespondence, lastQuarterGaps,
   receiveNominalClassInterpretation, reasonNominalClass

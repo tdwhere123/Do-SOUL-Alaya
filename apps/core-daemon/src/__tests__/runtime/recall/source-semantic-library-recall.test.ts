@@ -546,25 +546,28 @@ it("scores mixed-kind retrieval and proof-conditioned Any@K from one published s
       }
     });
     const changedDigest = `sha256:${"ef".repeat(32)}`;
-    const tampered = [
+    const rejectedAtAdmission = [
       { ...withCorrespondence, proofs: [] },
-      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, outcome: { status: "invalid" as const, reason: "rejected" } })) },
-      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, evidence_leaves: row.evidence_leaves?.slice(1) })) },
-      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, consumed_leaves: [] })) },
-      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, context: { ...row.context, semantic_correspondence_id: changedDigest } })) },
       { ...withCorrespondence, slot_qualifiers: withCorrespondence.slot_qualifiers.map((row) => row.evidence_kind === "semantic_proof" ? { ...row, conditional_computation_id: changedDigest } : row) },
-      { ...withCorrespondence, index: { ...withCorrespondence.index, query_id: changedDigest } },
       { ...withCorrespondence, index: { ...withCorrespondence.index, entries: withCorrespondence.index.entries.map((entry) => entry.interpretation_node === undefined ? entry
         : { ...entry, target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } }) },
         proofs: withCorrespondence.proofs?.map((row) => ({ ...row, source_target: { ...sourceTarget, source_version: "2", content_digest: changedDigest } })) }
     ];
-    for (const [tamperIndex, response] of tampered.entries()) {
+    const admittedUnverified = [
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, outcome: { status: "invalid" as const, reason: "rejected" } })) },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, evidence_leaves: row.evidence_leaves?.slice(1) })) },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, consumed_leaves: [] })) },
+      { ...withCorrespondence, proofs: withCorrespondence.proofs?.map((row) => ({ ...row, context: { ...row.context, semantic_correspondence_id: changedDigest } })) },
+      { ...withCorrespondence, index: { ...withCorrespondence.index, query_id: changedDigest } }
+    ];
+    for (const response of rejectedAtAdmission) {
+      const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
+        firstExposurePage: recordSourceSemanticLibraryFirstExposure(withCorrespondence), requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources }).measurement;
+      expect(measured).toMatchObject({ status: "invalid", reason: "invalid_response" });
+    }
+    for (const response of admittedUnverified) {
       const measured = measureSourceSemanticLibraryResponse({ recallResult: response,
         firstExposurePage: recordSourceSemanticLibraryFirstExposure(response), requestBudget: BUDGET, goldSourceUnits: [gold], sourceRecords: current.sources }).measurement;
-      if (tamperIndex === 7) {
-        expect(measured).toMatchObject({ status: "invalid", reason: "invalid_response" });
-        continue;
-      }
       expect(measured).toMatchObject({ status: "validated",
         metrics: { proof_conditioned_first_exposure: { any_at_10: { status: "unavailable", value: null } } } });
       if (measured?.status !== "validated") throw new Error("mixed source measurement missing");

@@ -1,9 +1,16 @@
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
+
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, expect, it, vi } from "vitest";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { runCli } from "../../../cli/cli.js";
@@ -22,6 +29,7 @@ const ABSTAINED = JSON.stringify({ contract: "source-semantic-proposal-v8", outc
 const OVERSIZED = ABSTAINED + "\n".repeat(1024 * 1024);
 const FULL_DIGEST = createHash("sha256").update(OVERSIZED).digest("hex");
 const execFileAsync = promisify(execFile);
+const CLI_BOOTSTRAP = fileURLToPath(new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url));
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks(roots => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), "longmemeval_s");
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -67,8 +75,10 @@ function ledger() {
 }
 
 async function restartCli(args: string[]) {
-  await execFileAsync(process.execPath, ["--use-env-proxy", resolve("apps/bench-runner/bin/alaya-bench-runner.mjs"), ...args],
-    { cwd: process.cwd(), env: process.env, timeout: 30_000 });
+  await execFileAsync(process.execPath, [
+    "--use-env-proxy", "--import", CLI_BOOTSTRAP,
+    resolve("apps/bench-runner/bin/alaya-bench-runner.mjs"), ...args
+  ], { cwd: process.cwd(), env: process.env, timeout: 30_000 });
 }
 
 function expectSettledQuarantine(keys: readonly string[], usageKnown: boolean, fingerprint: string) {
@@ -153,6 +163,9 @@ it.each([true, false])("quarantines an escaped response whose physical body exce
   const fixture = await setup(usageKnown, response);
   expect(await runCli(fixture.args)).toBe(0);
   const digest = createHash("sha256").update(response).digest("hex");
+  const expectedUsage = usageKnown ? { inputTokens: 10, outputTokens: 20, totalTokens: 30 } : null;
+  const expectedUsageSha256 = createHash("sha256").update(canonicalJson(expectedUsage)).digest("hex");
+  const errors = readFileSync(join(cacheRoot, "interactive-extract-errors.log"), "utf8");
   for (const key of fixture.keys) {
     const raw = rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]!;
     expect(raw).toMatchObject({ decoded_text: response, decoded_text_truncated: false,
@@ -160,11 +173,41 @@ it.each([true, false])("quarantines an escaped response whose physical body exce
       decoded_text_digest: digest, usage_known: usageKnown,
       response_body: { truncated: true, original_byte_length: expect.any(Number) } });
     expect(raw.response_body!.original_byte_length).toBeGreaterThan(MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES);
+    expect(raw.transport_failure).toBeUndefined();
+    expect(errors).toContain(`${key}\tphysical_response_truncated`);
+    expect(sourceArtifacts.inspectCachedSourceSemantic(cacheRoot, key, MODEL, REQUEST_PROFILE).status).not.toBe("hit");
+    expect(existsSync(cacheFilePath(cacheRoot, key))).toBe(false);
   }
-  const settled = expectSettledQuarantine(fixture.keys, usageKnown, digest);
+  const settled = ledger();
+  expect(settled.attempts).toBe(fixture.keys.length);
+  expect(settled.unresolved_attempts).toEqual([]);
+  expect(settled.pending_keys).toEqual([]);
+  expect(settled.successful_shards).toEqual([]);
+  expect(settled.transport_failures).toEqual([]);
+  expect(settled.settled_attempts).toHaveLength(fixture.keys.length);
+  for (const key of fixture.keys) {
+    const raw = rawAttempts.listProviderRawAttempts(cacheRoot, key)[0]!;
+    expect(settled.settled_attempts).toContainEqual({
+      cache_key: key, attempt_ordinal: raw.attempt_ordinal, usage_sha256: expectedUsageSha256
+    });
+  }
+  expect(settled.telemetry).toMatchObject({
+    input_tokens: usageKnown ? 10 * fixture.keys.length : 0,
+    output_tokens: usageKnown ? 20 * fixture.keys.length : 0,
+    total_tokens: usageKnown ? 30 * fixture.keys.length : 0,
+    usage_unavailable_requests: usageKnown ? 0 : fixture.keys.length,
+    terminal: { failure_non_retryable_response: 0 }
+  });
+  const fetchCount = fixture.fetchMock.mock.calls.length;
+  expect(fetchCount).toBe(fixture.keys.length);
+  for (let replay = 0; replay < 2; replay += 1) {
+    expect(await runCli(fixture.args)).toBe(0);
+    expect(ledger()).toEqual(settled);
+    expect(fixture.fetchMock).toHaveBeenCalledTimes(fetchCount);
+  }
   await restartCli(fixture.args);
   expect(ledger()).toEqual(settled);
-  expect(fixture.fetchMock).toHaveBeenCalledTimes(fixture.keys.length);
+  expect(fixture.fetchMock).toHaveBeenCalledTimes(fetchCount);
 }, 60000);
 
 it.each([true, false])("recovers a complete escaped source response below both retention limits with usageKnown=%s", async usageKnown => {

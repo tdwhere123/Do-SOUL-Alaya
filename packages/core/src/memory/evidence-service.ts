@@ -21,7 +21,7 @@ import type { OpenSemanticFactorExtractionPort } from
   "../semantic/open-semantic-factor-extraction-port.js";
 import { CoreError } from "../shared/errors.js";
 import { parseObjectId } from "../shared/validators.js";
-import { createEvidenceCapsule } from "./evidence-create/create-evidence.js";
+import { createEvidenceCapsule, SOURCE_PROVENANCE_CAPSULE } from "./evidence-create/create-evidence.js";
 import { createFactorIncidencePort } from "./evidence-create/factor-incidence.js";
 import { fieldContractSha256 } from "../shared/field-hash.js";
 import {
@@ -190,10 +190,12 @@ export class EvidenceService {
       readonly runId: string | null;
       readonly sourceSignalId: string | null;
     },
-    assertSourceCurrent?: () => void
+    assertSourceCurrent?: () => void,
+    sourceFieldFormation?: typeof SOURCE_PROVENANCE_CAPSULE
   ): Promise<Readonly<EvidenceCapsule>> {
     return await createEvidenceCapsule({
       capsuleInput: input,
+      sourceFieldFormation,
       ...(assertSourceCurrent === undefined ? {} : { assertSourceCurrent }),
       searchProjections,
       factFrameProposal,

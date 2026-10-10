@@ -161,6 +161,71 @@ it("leaves one of six necessary source-local inputs outside the fixed first five
   expect([0, 1, 2, 3, 4, 5].filter(input => !covered.has(input))).toHaveLength(1);
 });
 
+it("defers a proof root instead of consuming its smaller raw twin on a crowded page", () => {
+  const answer = witnessed("answer", query()), proof = qualified[0]!;
+  const rawTwin = { ...proof, proofs: [], entries: [proof.entry], explanations: [], preview: "raw",
+    payload_support: "envelope_budget" as const };
+  const unrelated = raw("unrelated");
+  const cost = (row: SourceSemanticLibraryPackage) => row.proofs.length > 0 ? 6 : 1;
+  const fits = (rows: readonly SourceSemanticLibraryPackage[]) => rows.reduce((sum, row) => sum + cost(row), 0) <= 8;
+  const first = selectSourceSemanticLibraryPage({ candidates: [answer, proof, rawTwin, unrelated], meter: budget(), fits });
+  expect(first.map(root)).toEqual([root(answer), root(unrelated)]);
+  expect(first.some(row => root(row) === root(proof))).toBe(false);
+  const next = selectSourceSemanticLibraryPage({ candidates: [proof, rawTwin], meter: budget(), fits });
+  expect(next).toHaveLength(1);
+  expect(next[0]!.proofs).toEqual(proof.proofs);
+});
+
+it("uses raw support only when the indivisible proof cannot fit an empty page", () => {
+  const proof = qualified[0]!;
+  const rawTwin = { ...proof, proofs: [], entries: [proof.entry], explanations: [], preview: "raw",
+    payload_support: "envelope_budget" as const };
+  const selected = selectSourceSemanticLibraryPage({ candidates: [proof, rawTwin], meter: budget(),
+    fits: rows => rows.every(row => row.proofs.length === 0) });
+  expect(selected).toHaveLength(1);
+  expect(selected[0]!.proofs).toEqual([]);
+  expect(selected[0]!.selection_basis).toBe("source_access");
+});
+
+it("honors a reachable final singleton instead of taking its raw twin before an earlier root", () => {
+  const proof = witnessed("a-first", query()), earlier = raw("b-earlier");
+  const rawTwin = { ...proof, proofs: [], entries: [proof.entry], explanations: [],
+    payload_support: "envelope_budget" as const };
+  const first = selectSourceSemanticLibraryPage({ candidates: [proof, rawTwin, earlier], meter: budget(),
+    fits: rows => rows.every(row => row.proofs.length === 0) && rows.length === 1,
+    fitsStandalone: candidate => candidate === proof || candidate.entry === proof.entry });
+  expect(first.map(root)).toEqual([root(earlier)]);
+  const final = selectSourceSemanticLibraryPage({ candidates: [proof, rawTwin], meter: budget(), fits: rows => rows.length === 1 });
+  expect(final[0]?.proofs).toEqual(proof.proofs);
+  expect(new Set([...first, ...final].map(root)).size).toBe(2);
+});
+
+it("checks every same-root proof variant before allowing raw fallback", () => {
+  const proof = qualified[0]!, smaller = { ...proof, preview: "fitting proof" };
+  const rawTwin = { ...proof, proofs: [], entries: [proof.entry], explanations: [],
+    payload_support: "envelope_budget" as const };
+  const earlier = raw("earlier");
+  const probes: string[] = [];
+  const selected = selectSourceSemanticLibraryPage({ candidates: [proof, smaller, rawTwin, earlier], meter: budget(),
+    fits: rows => rows.length === 1 && rows.every(row => row.proofs.length === 0),
+    fitsStandalone: candidate => { probes.push(candidate.preview); return candidate.preview === smaller.preview; } });
+  expect(probes).toEqual([proof.preview, smaller.preview]);
+  expect(selected.map(root)).toEqual([root(earlier)]);
+});
+
+it("allows raw fallback when another frozen final root leaves no reachable proof envelope", () => {
+  const proof = qualified[0]!;
+  const rawTwin = { ...proof, proofs: [], entries: [proof.entry], explanations: [],
+    payload_support: "envelope_budget" as const };
+  const selected = selectSourceSemanticLibraryPage({ candidates: [proof, rawTwin], meter: budget(),
+    fits: rows => rows.length === 1 && rows[0]!.proofs.length === 0,
+    fitsStandalone: () => false });
+  expect(selected).toHaveLength(1);
+  expect(selected[0]?.proofs).toEqual([]);
+  expect(selectSourceSemanticLibraryPage({ candidates: [proof, rawTwin], meter: budget(),
+    fits: () => false, fitsStandalone: () => false })).toEqual([]);
+});
+
 it("keeps reserved slots when later selection work exhausts", () => {
   const meter = new SourceSemanticResourceLedger({ work_units: 14, memory_bytes: 20000 });
   const pool = [raw("first"), raw("second", 1), raw("third", 2)];

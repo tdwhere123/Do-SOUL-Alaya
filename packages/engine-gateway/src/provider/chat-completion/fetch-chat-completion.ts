@@ -15,6 +15,7 @@ import { assertAllowedProviderChatUrlResolved } from "./provider-url-guard.js";
 import { CALLER_ABORT, createProviderChatDeadline, resolveProviderChatTimeoutMs } from "./request-deadline.js";
 import {
   MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
+  MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
   readProviderResponseWithEvidence
 } from "./response-evidence.js";
 import {
@@ -63,13 +64,9 @@ async function runProviderChatRequest(
     const boundedError = !response.ok;
     const intern = isInternProviderRequestProfile(request.profile);
     const failureCap = intern ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : PROVIDER_FAILURE_BODY_DIGEST_BYTES;
+    const cap = boundedError ? failureCap : MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES;
     ({ bodyText, evidence } = await readProviderResponseWithEvidence(
-      response, observeResponse,
-      boundedError ? failureCap
-        : intern || request.retainHttpResponseEvidence === true ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined,
-      // Cancellation threshold only. Received bytes beyond the retained prefix stay in the digest.
-      boundedError ? failureCap : intern || request.retainHttpResponseEvidence === true
-        ? MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES : undefined
+      response, observeResponse, cap, cap
     ));
     if (!response.ok) {
       throw new ProviderChatCompletionError(
@@ -79,18 +76,20 @@ async function runProviderChatRequest(
       );
     }
     assertCompleteResponseEvidence(evidence, response.status);
-    return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
+    return inspectBody(
+      request, bodyText, evidence.contentType, response.status,
+      publishedSuccessEvidence(evidence, intern || request.retainHttpResponseEvidence === true)
+    );
   }
   await throwIfHttpError(response);
-  if (request.retainHttpResponseEvidence === true) {
-    const { bodyText, evidence } = await readProviderResponseWithEvidence(
-      response, observeResponse, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
-    );
-    assertCompleteResponseEvidence(evidence, response.status);
-    return inspectBody(request, bodyText, evidence.contentType, response.status, evidence);
-  }
-  const bodyText = await readBody(response);
-  return inspectBody(request, bodyText, response.headers.get("content-type"), response.status);
+  const { bodyText, evidence } = await readProviderResponseWithEvidence(
+    response, observeResponse, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES
+  );
+  assertCompleteResponseEvidence(evidence, response.status);
+  return inspectBody(
+    request, bodyText, evidence.contentType, response.status,
+    request.retainHttpResponseEvidence === true ? evidence : undefined
+  );
 }
 
 function assertCompleteResponseEvidence(evidence: ProviderHttpResponseEvidence, httpStatus: number): void {
@@ -98,6 +97,24 @@ function assertCompleteResponseEvidence(evidence: ProviderHttpResponseEvidence, 
     throw new ProviderChatCompletionError("provider response exceeds its finite read-byte limit",
       "response_parse_error", httpStatus, { inspectionReason: "schema", httpResponse: evidence });
   }
+}
+
+/** No-retain chat-semantic results still publish the 64KiB witness prefix after an 8MiB complete read. */
+function publishedSuccessEvidence(
+  evidence: ProviderHttpResponseEvidence,
+  retainFull: boolean
+): ProviderHttpResponseEvidence {
+  if (retainFull) return evidence;
+  const retained = Buffer.from(evidence.bodyBase64, "base64");
+  if (retained.byteLength <= MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES) return evidence;
+  return Object.freeze({
+    contentType: evidence.contentType,
+    bodyBase64: retained.subarray(0, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES).toString("base64"),
+    bodyByteLength: evidence.bodyByteLength,
+    bodySha256: evidence.bodySha256,
+    bodyTruncated: true,
+    bodyComplete: evidence.bodyComplete
+  });
 }
 
 async function postChatCompletion(
@@ -136,19 +153,6 @@ async function throwIfHttpError(response: Response): Promise<void> {
     response.status,
     identity === undefined ? undefined : { identity }
   );
-}
-
-async function readBody(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch (error) {
-    throw new ProviderChatCompletionError(
-      "provider chat completion body read failed",
-      "body_read_error",
-      response.status,
-      { cause: error }
-    );
-  }
 }
 
 function inspectBody(

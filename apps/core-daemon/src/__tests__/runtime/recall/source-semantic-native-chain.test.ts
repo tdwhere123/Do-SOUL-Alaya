@@ -501,7 +501,7 @@ it("preserves table source interpretation and receiver query semantics and seman
         if (compared.operation !== "recall") throw new Error("comparison recall expected");
         expect(compared.provider_attempts).toBe(0);
         expect(compared.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
-        expect(compared.coverage?.conditional_computation).toBe("open");
+        expect(compared.coverage?.conditional_computation).toBe("unexercised");
         expect(compared.coverage?.semantic_correspondence).toBe("unexercised");
 
         const withoutCorrespondence = await queryHandleRecall(reopened.handler, reopened.context, ORIGINAL, receivedQuery.query, []);

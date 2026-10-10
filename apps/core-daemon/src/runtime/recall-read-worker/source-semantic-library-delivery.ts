@@ -34,23 +34,62 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
   const pages: SourceSemanticLibraryPackage[][] = [];
   const pageAccess: SourceSemanticAccessReceipt[] = [];
   let remaining = [...candidates], offset = 0, incomplete = false;
+  const reservePage = (page: readonly SourceSemanticLibraryPackage[], emittedOffset: number, more: boolean) => {
+    const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
+      page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
+    const result = pageResult(base, page, emittedOffset, more, request, meter, true, access);
+    const encoded = encodeSourceSemanticLibraryResponse(result);
+    meter.retain(encoded, "candidate delivery encoding");
+    const bytes = Buffer.byteLength(JSON.stringify(encoded));
+    meter.charge(1, bytes * 2, "candidate delivery bytes");
+    let fits = bytes <= request.output_byte_limit && "results" in encoded
+      && encoded.results !== undefined && encoded.results.every(row => row.budget_state.within_budget);
+    // An unfittable later root marks payload truncated. Bound that field's
+    // growth cheaply, then use the shared encoder at an exact byte boundary;
+    // it also owns the resulting index payload state. Other incomplete flags
+    // and index states only shorten their encoding.
+    const payloadGrowth = Math.max(0, JSON.stringify("truncated").length - JSON.stringify(result.coverage.payload).length);
+    if (fits && bytes + payloadGrowth > request.output_byte_limit) {
+      const partial = encodeSourceSemanticLibraryResponse({ ...result, coverage: { ...result.coverage, payload: "truncated" } });
+      meter.retain(partial, "candidate partial delivery encoding");
+      const partialBytes = Buffer.byteLength(JSON.stringify(partial));
+      meter.charge(1, partialBytes * 2, "candidate partial delivery bytes");
+      fits = partialBytes <= request.output_byte_limit;
+    }
+    return { access, fits };
+  };
+  let finalPage: readonly SourceSemanticLibraryPackage[] = [], finalAccess: SourceSemanticAccessReceipt | undefined;
   while (remaining.length > 0) {
     try {
       const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
-      const selected = selectPage({ candidates: remaining, meter, order, fits: page => {
-        const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
-          page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
-        const result = pageResult(base, page, offset, true, request, meter, true, access);
-        const encoded = encodeSourceSemanticLibraryResponse(result);
-        meter.retain(encoded, "candidate delivery encoding");
-        const bytes = Buffer.byteLength(JSON.stringify(encoded));
-        meter.charge(1, bytes * 2, "candidate delivery bytes");
-        const fits = bytes <= request.output_byte_limit && "results" in encoded
-          && encoded.results !== undefined && encoded.results.every(row => row.budget_state.within_budget);
-        if (fits) accessByPage.set(pageKey(page), access);
-        return fits;
-      } });
-      if (selected.length === 0) { incomplete = true; break; }
+      meter.charge(remaining.length, remaining.length * 16, "library page root census");
+      const remainingRootCount = new Set(remaining.map(root)).size;
+      const selected = selectPage({ candidates: remaining, meter, order,
+        fitsStandalone: (candidate, precedingSlots) => {
+          if (reservePage([candidate], offset + precedingSlots,
+            finalPage.length > 0 || remainingRootCount > precedingSlots + 1).fits) return true;
+          // Until the final membership is reserved, do not consume a raw twin
+          // whose complete proof can use that smaller envelope after other roots.
+          return finalPage.length === 0 && reservePage([candidate], 0, false).fits;
+        },
+        fits: page => {
+          const reserved = reservePage(page, offset, finalPage.length > 0 || remainingRootCount > page.length);
+          if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
+          return reserved.fits;
+        }
+      });
+      if (selected.length === 0) {
+        if (finalPage.length === 0) {
+          const final = reserveFinalProofPage(remaining, meter, order, selectPage, reservePage);
+          if (final.page.length > 0) {
+            finalPage = final.page; finalAccess = final.access;
+            const roots = new Set(finalPage.map(root));
+            remaining = remaining.filter(row => !roots.has(root(row)));
+            continue;
+          }
+        }
+        incomplete = true; break;
+      }
       const access = accessByPage.get(pageKey(selected));
       if (access === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selected library page has no reserved access receipt");
       pages.push([...selected]); offset += selected.length;
@@ -62,6 +101,10 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
       incomplete = true; break;
     }
   }
+  if (finalPage.length > 0) {
+    if (finalAccess === undefined) throw new CoreError("OBLIGATION_VIOLATION", "final library page has no reserved access receipt");
+    pages.push([...finalPage]); pageAccess.push(finalAccess);
+  }
   const frozenPages = pages.length === 0 ? [[]] : pages;
   const page_access = pages.length === 0
     ? [libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids, [], meter)]
@@ -70,6 +113,37 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
   return { ...frozenBase, pages: frozenPages, page_access,
     coverage: incomplete ? { ...base.coverage, payload: "truncated" } : base.coverage,
     discovery: incomplete ? { ...base.discovery, truncated: true, open_residuals: true } : base.discovery };
+}
+
+type PageReservation = Readonly<{ access: SourceSemanticAccessReceipt; fits: boolean }>;
+
+/**
+ * A stalled page has no fitting singleton in its continuing envelope. Reserve
+ * one actual final membership, whose continuation-free encoding has no cursor
+ * or offset overhead, then give other roots only earlier continuing pages.
+ * Conflicting final-only roots may fall back to raw support or remain truncated.
+ * Earlier pages never change; at most one metered final selection breaks the
+ * stall, not a subset/permutation search or a replan of exposed membership.
+ */
+function reserveFinalProofPage(candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
+  order: "field" | "source_access", selectPage: LibraryPageSelector,
+  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => PageReservation
+): Readonly<{ page: readonly SourceSemanticLibraryPackage[]; access?: SourceSemanticAccessReceipt }> {
+  meter.charge(candidates.length, candidates.length * 8, "final proof candidates");
+  const proofs = candidates.filter(row => row.proofs.length > 0);
+  if (proofs.length === 0) return { page: [] };
+  const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
+  const selected = selectPage({ candidates: proofs, meter, order, fits: page => {
+    const reserved = reserve(page, 0, false);
+    if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
+    return reserved.fits;
+  } });
+  if (selected.length > 0) {
+    const access = accessByPage.get(pageKey(selected));
+    if (access === undefined) throw new CoreError("OBLIGATION_VIOLATION", "final proof selection has no reserved access receipt");
+    return { page: selected, access };
+  }
+  return { page: [] };
 }
 
 /** Continuations reuse the frozen plan; no source access, solver replay or re-selection occurs. */
