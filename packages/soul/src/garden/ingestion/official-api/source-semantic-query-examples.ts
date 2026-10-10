@@ -58,6 +58,83 @@ const propertyAndTaskExamples = [
       }
     }
   },
+  {
+    original_query: "My oak cabinet needs a brighter finish. Any advice?",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "named", key: "cabinet", excerpt: "My oak cabinet" },
+          { kind: "free", key: "advice", excerpt: "Any advice", return: true }
+        ],
+        requested_operation: { reading: "Provide advice for a brighter finish on the speaker's oak cabinet.",
+          support: { kind: "query_text", excerpt: "Any advice?" } },
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "is advice for achieving a brighter finish on", arguments: [
+          { role: "advice", target: { kind: "reference", key: "advice" }, excerpt: "Any advice" },
+          { role: "object", target: { kind: "reference", key: "cabinet" }, excerpt: "My oak cabinet" }
+        ] }] }],
+        gaps: [{ kind: "unsupported_meaning", affected_ids: [],
+          support: [{ kind: "query_text", excerpt: "Any advice?" }],
+          description: "Providing advice remains an unexecuted operation; relevant advice evidence does not perform it." }]
+      }
+    }
+  },
+  {
+    original_query: "Who asked for advice about a brighter finish on cabinet C?",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+        entities: [
+          { kind: "free", key: "requester", excerpt: "Who", return: true },
+          { kind: "named", key: "cabinet", excerpt: "cabinet C" }
+        ],
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "asked before the query time for advice about a brighter finish on", arguments: [
+          { role: "requester", target: { kind: "reference", key: "requester" }, excerpt: "Who" },
+          { role: "object", target: { kind: "reference", key: "cabinet" }, excerpt: "cabinet C" }
+        ] }] }]
+      }
+    }
+  },
+  {
+    original_query: "What is the name of the oak cabinet in hall H?",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+        entities: [
+          { kind: "named", key: "cabinet", excerpt: "the oak cabinet in hall H" },
+          { kind: "free", key: "value", excerpt: "What is the name", return: true }
+        ],
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "has name", arguments: [
+          { role: "bearer", target: { kind: "reference", key: "cabinet" }, excerpt: "the oak cabinet in hall H" },
+          { role: "name", target: { kind: "reference", key: "value" }, excerpt: "What is the name" }
+        ] }] }]
+      }
+    }
+  },
+  {
+    original_query: "How many days a week does Nia attend pottery classes?",
+    response: {
+      outcome: { status: "interpreted" },
+      query: {
+        contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+        entities: [
+          { kind: "named", key: "nia", excerpt: "Nia" },
+          { kind: "free", key: "days", excerpt: "How many days a week", return: true }
+        ],
+        requested_operation: { reading: "Count distinct pottery-class attendance days per week for Nia.",
+          support: { kind: "query_text", excerpt: "How many days a week" } },
+        alternatives: [{ conditions: [{ kind: "statement", predicate: "has distinct pottery-class attendance days per week", arguments: [
+          { role: "attendee", target: { kind: "reference", key: "nia" }, excerpt: "Nia" },
+          { role: "distinct days per week", target: { kind: "reference", key: "days" }, excerpt: "How many days a week" }
+        ] }] }],
+        gaps: [{ kind: "aggregate", affected_ids: [], support: [{ kind: "query_text", excerpt: "How many days a week" }],
+          description: "Counting distinct days remains unexecuted; several classes on one day contribute one attendance day." }]
+      }
+    }
+  },
 ] as const;
 
 /** Complete neutral producer examples; their admission and incidence are tested. */
@@ -328,6 +405,9 @@ const nestedSourceSemanticQueryExamples = [
                 excerpt: "Tara opening crate C on 4 March 2024" },
               { role: "hours", target: { kind: "reference", key: "elapsed_hours" }, excerpt: "What is the elapsed time in hours" }
             ] },
+            { kind: "statement", key: "crate_kind", predicate: "is a crate", arguments: [
+              { role: "theme", target: { kind: "reference", key: "crate" }, excerpt: "crate C" }
+            ] },
             { kind: "statement", key: "sealing", predicate: "seal", arguments: [
               { role: "agent", target: { kind: "reference", key: "tara" }, excerpt: "Tara" },
               { role: "theme", target: { kind: "reference", key: "crate" }, excerpt: "crate C" },
@@ -342,6 +422,7 @@ const nestedSourceSemanticQueryExamples = [
           evidence_inputs: [
             { conditions: [
               { kind: "occurrence", key: "sealing" },
+              { kind: "occurrence", key: "crate_kind" },
               { kind: "statement", key: "seal_time", predicate: "time of event", arguments: [
                 { role: "event", target: { kind: "reference", key: "sealing" },
                   excerpt: "Tara sealing crate C on 3 March 2024" },
@@ -350,6 +431,7 @@ const nestedSourceSemanticQueryExamples = [
             ] },
             { conditions: [
               { kind: "occurrence", key: "opening" },
+              { kind: "occurrence", key: "crate_kind" },
               { kind: "statement", key: "open_time", predicate: "time of event", arguments: [
                 { role: "event", target: { kind: "reference", key: "opening" },
                   excerpt: "Tara opening crate C on 4 March 2024" },
@@ -410,7 +492,16 @@ const nestedSourceSemanticQueryExamples = [
   ...propertyAndTaskExamples
 ] as const;
 
-export const sourceSemanticQueryExamples = nestedSourceSemanticQueryExamples.map(example => {
+export const sourceSemanticQueryExamples: readonly Readonly<{
+  original_query: string;
+  response: Readonly<{
+    contract: typeof SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT;
+    outcome: Readonly<{ status: "interpreted" }>;
+    query: ReturnType<typeof encodeSourceSemanticQueryCarrier> & Readonly<{
+      entities: NonNullable<ReturnType<typeof encodeSourceSemanticQueryCarrier>["entities"]>;
+    }>;
+  }>;
+}>[] = nestedSourceSemanticQueryExamples.map(example => {
   const { contract, entities = [], nodes, ...meaning } = encodeSourceSemanticQueryCarrier(
     example.response.query as SourceSemanticQueryMeaningBody);
   return { ...example, response: {

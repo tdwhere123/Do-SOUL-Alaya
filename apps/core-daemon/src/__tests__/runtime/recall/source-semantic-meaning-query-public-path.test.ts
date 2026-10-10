@@ -8,12 +8,13 @@ import {
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticDraft, type SourceSemanticPublishedInterpretation,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
-  UTTERANCE_ATTRIBUTION_CONTRACT, type UtteranceAttribution, sourceSemanticQueryIdentity
+  UTTERANCE_ATTRIBUTION_CONTRACT, type UtteranceAttribution, sourceSemanticQueryIdentity,
+  sourceSemanticQueryBranchViews
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
-  verifyPublishedSourceSemanticInterpretation
+  verifyPublishedSourceSemanticInterpretation, admitSourceSemanticQuery
 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { proposeCorrespondenceSemantics, proposeQuerySemantics, proposeSourceSemantics } from "@do-soul/alaya-soul";
@@ -27,6 +28,166 @@ import {
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
+
+function guidanceStatement(key: string, predicate: string, roles: readonly (readonly [string, string, string])[]) {
+  return { kind: "statement" as const, key, predicate, arguments: roles.map(([role, key, excerpt]) => ({
+    role, target: { kind: "reference" as const, key }, excerpt
+  })) };
+}
+
+function receiveGuidanceFixture(original_query: string, body: object) {
+  const received = proposeQuerySemantics({ original_query, producer_id: SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID,
+    producer_version: "1" }, { rawJson: queryWire(JSON.stringify({
+      outcome: { status: "interpreted" }, query: { contract: "source-semantic-query-meaning-v5", gaps: [], ...body }
+    })) });
+  expect(received.outcome.status).toBe("interpreted");
+  const admitted = admitSourceSemanticQuery(received.query, original_query);
+  expect(admitted.kind).toBe("admitted");
+  if (admitted.kind !== "admitted") throw new Error("authored guidance fixture must reach Core admission");
+  return { query: admitted.query, views: sourceSemanticQueryBranchViews(admitted.query.alternatives[0]!) };
+}
+
+// Reviewed questions stay in regression fixtures, outside producer examples.
+it("keeps current advice about cookies outside historical request-event evidence", () => {
+  const original = "I've been feeling like my chocolate chip cookies need something extra. Any advice?";
+  const { query, views } = receiveGuidanceFixture(original, {
+    entities: [{ kind: "named", key: "cookies", excerpt: "my chocolate chip cookies" },
+      { kind: "free", key: "advice", excerpt: "Any advice", return: true }],
+    requested_operation: { reading: "Provide advice on adding something extra to the speaker's chocolate chip cookies.",
+      support: { kind: "query_text", excerpt: "Any advice?" } },
+    alternatives: [{ conditions: [guidanceStatement("suitability", "is advice for adding something extra to", [
+      ["advice", "advice", "Any advice"], ["topic", "cookies", "my chocolate chip cookies"]
+    ])] }],
+    gaps: [{ kind: "unsupported_meaning", affected_ids: [], support: [{ kind: "query_text", excerpt: "Any advice?" }],
+      description: "Advice provision remains unexecuted." }]
+  });
+  expect(query.return_variables).toEqual(["advice"]);
+  expect(views[0]!.alternative.frames.map(frame => frame.predicate_reading))
+    .toEqual(["is advice for adding something extra to"]);
+  expect(views[0]!.alternative.context_obligations).toEqual([{ frame: "suitability", kind: "asserted_at_source" }]);
+});
+
+it.each([true, false])("retains an explicitly sought historical advice request for temporal query=%s", temporal => {
+  const original = temporal ? "When did I ask for advice about cabinet C?" : "Did I ask for advice about cabinet C?";
+  const conditions = [guidanceStatement("request", "asked before the query time for advice about", [
+    ["requester", "speaker", "I"], ["topic", "cabinet", "cabinet C"]
+  ])];
+  if (temporal) conditions.push(guidanceStatement("request_time", "time of event", [
+    ["event", "request", "ask for advice"], ["time", "time", "When"]
+  ]));
+  const { query, views } = receiveGuidanceFixture(original, {
+    entities: [{ kind: "named", key: "speaker", excerpt: "I" },
+      { kind: "named", key: "cabinet", excerpt: "cabinet C" },
+      ...(temporal ? [{ kind: "free", key: "time", excerpt: "When", return: true }] : [])],
+    alternatives: [{ conditions }]
+  });
+  expect(query.return_variables).toEqual(temporal ? ["time"] : []);
+  expect(query.requested_operation).toBeUndefined();
+  expect(views[0]!.alternative.frames.map(frame => frame.id)).toEqual(temporal ? ["request", "request_time"] : ["request"]);
+  expect(views[0]!.alternative.frames[0]!.predicate_reading).toBe("asked before the query time for advice about");
+  expect(views[0]!.alternative.frames.every(frame => frame.source_act === undefined)).toBe(true);
+});
+
+it("retains attendance and workshop classification in the independently sought event-time input", () => {
+  const original = "How many weeks ago did I attend a bird watching workshop at the local Audubon society?";
+  const { query, views } = receiveGuidanceFixture(original, {
+    entities: [{ kind: "named", key: "speaker", excerpt: "I" },
+      { kind: "named", key: "venue", excerpt: "the local Audubon society" },
+      { kind: "free", key: "workshop", excerpt: "a bird watching workshop" },
+      { kind: "free", key: "weeks", excerpt: "How many weeks ago", return: true },
+      { kind: "free", key: "time", excerpt: "did I attend" }],
+    requested_operation: { reading: "Calculate weeks since the qualified attendance event.",
+      support: { kind: "query_text", excerpt: "How many weeks ago" } },
+    alternatives: [{ conditions: [
+      guidanceStatement("attendance", "attend", [["attendee", "speaker", "I"],
+        ["event", "workshop", "a bird watching workshop"], ["venue", "venue", "the local Audubon society"]]),
+      guidanceStatement("workshop_kind", "is a bird watching workshop", [["theme", "workshop", "a bird watching workshop"]]),
+      guidanceStatement("elapsed", "elapsed weeks before interpretation clock", [
+        ["event", "attendance", "did I attend"], ["weeks", "weeks", "How many weeks ago"]])
+    ], evidence_inputs: [{ conditions: [{ kind: "occurrence", key: "attendance" },
+      { kind: "occurrence", key: "workshop_kind" },
+      guidanceStatement("event_time", "time of event", [["event", "attendance", "did I attend"], ["time", "time", "did I attend"]])
+    ] }] }],
+    gaps: [{ kind: "unsupported_meaning", affected_ids: ["attendance"],
+      support: [{ kind: "query_text", excerpt: "did I attend" }], description: "The bare attend predicate does not encode past tense." }]
+  });
+  expect(views.map(view => view.alternative.frames.map(frame => frame.id)))
+    .toEqual([["attendance", "workshop_kind", "elapsed"], ["attendance", "workshop_kind", "event_time"]]);
+  expect(views[1]!.alternative.frames[0]!.role_requirements.map(role => [role.target_variable, role.support.excerpt]))
+    .toEqual([["speaker", "I"], ["workshop", "a bird watching workshop"], ["venue", "the local Audubon society"]]);
+  expect(query.return_variables).toEqual(["weeks"]);
+  expect(query.alternatives[0]!.frames.every(frame => frame.source_act === undefined)).toBe(true);
+  const missingClassification = { ...query.alternatives[0]!, evidence_inputs: [{ frames: ["attendance", "event_time"] }] };
+  expect(sourceSemanticQueryBranchViews(missingClassification)[1]!.alternative.frames.map(frame => frame.id))
+    .toEqual(["attendance", "event_time"]);
+});
+
+it("projects a qualified direct percentage comparison without requiring both operand facts", () => {
+  const original = "Did I receive a higher percentage discount on my first order from HelloFresh, compared to my first UberEats order?";
+  const { query, views } = receiveGuidanceFixture(original, {
+    entities: [{ kind: "named", key: "speaker", excerpt: "I" },
+      { kind: "named", key: "left", excerpt: "my first order from HelloFresh" },
+      { kind: "named", key: "right", excerpt: "my first UberEats order" },
+      { kind: "free", key: "left_value", excerpt: "percentage discount" },
+      { kind: "free", key: "right_value", excerpt: "percentage discount" }],
+    requested_operation: { reading: "Compare the speaker's percentage discounts on the two first orders.",
+      support: { kind: "query_text", excerpt: "higher percentage discount" } },
+    alternatives: [{ conditions: [guidanceStatement("comparison", "received a higher percentage discount before the query time on than on", [
+      ["recipient", "speaker", "I"], ["higher-discount order", "left", "my first order from HelloFresh"],
+      ["lower-discount order", "right", "my first UberEats order"]
+    ])], evidence_inputs: [
+      { conditions: [guidanceStatement("left_discount", "received percentage discount before the query time on", [
+        ["recipient", "speaker", "I"], ["order", "left", "my first order from HelloFresh"],
+        ["percentage", "left_value", "percentage discount"]])] },
+      { conditions: [guidanceStatement("right_discount", "received percentage discount before the query time on", [
+        ["recipient", "speaker", "I"], ["order", "right", "my first UberEats order"],
+        ["percentage", "right_value", "percentage discount"]])] }
+    ] }]
+  });
+  expect(views.map(view => view.alternative.frames.map(frame => frame.id)))
+    .toEqual([["comparison"], ["left_discount"], ["right_discount"]]);
+  expect(views[0]!.alternative.frames[0]).toMatchObject({
+    predicate_reading: "received a higher percentage discount before the query time on than on",
+    role_requirements: [{ target_variable: "speaker" }, { target_variable: "left" }, { target_variable: "right" }]
+  });
+  expect(query.return_variables).toEqual([]);
+  expect(views.slice(1).map(view => view.alternative.frames[0]!.role_requirements.map(role => role.target_variable)))
+    .toEqual([["speaker", "left", "left_value"], ["speaker", "right", "right_value"]]);
+});
+
+it("returns the requested dish name as a property value independently of the dish referent", () => {
+  const original = "I was looking back at our previous conversation about Caribbean dishes and I was wondering, what was the name of that Jamaican dish you recommended I try with snapper that has fruit in it?";
+  const dish = "that Jamaican dish you recommended I try with snapper that has fruit in it";
+  const { query, views } = receiveGuidanceFixture(original, {
+    entities: [{ kind: "named", key: "dish", excerpt: dish },
+      { kind: "free", key: "value", excerpt: "what was the name", return: true }],
+    alternatives: [{ conditions: [guidanceStatement("name", "had name before the query time", [
+      ["bearer", "dish", dish], ["name", "value", "what was the name"]
+    ])] }]
+  });
+  expect(query.return_variables).toEqual(["value"]);
+  expect(query.variables.find(row => row.id === "dish")?.reference?.excerpt).toBe(dish);
+  expect(views[0]!.alternative.frames[0]!.role_requirements.map(role => [role.role_reading, role.target_variable]))
+    .toEqual([["bearer", "dish"], ["name", "value"]]);
+});
+
+it("retains distinct attendance days per week rather than weekly class-session frequency", () => {
+  const original = "How many days a week do I attend fitness classes?";
+  const { query, views } = receiveGuidanceFixture(original, {
+    entities: [{ kind: "named", key: "speaker", excerpt: "I" },
+      { kind: "free", key: "value", excerpt: "How many days a week", return: true }],
+    requested_operation: { reading: "Count distinct fitness-class attendance days per week.",
+      support: { kind: "query_text", excerpt: "How many days a week" } },
+    alternatives: [{ conditions: [guidanceStatement("days", "has distinct fitness-class attendance days per week", [
+      ["attendee", "speaker", "I"], ["distinct days per week", "value", "How many days a week"]
+    ])] }],
+    gaps: [{ kind: "aggregate", affected_ids: [], support: [{ kind: "query_text", excerpt: "How many days a week" }],
+      description: "Counting attendance days remains unexecuted." }]
+  });
+  expect(query.return_variables).toEqual(["value"]);
+  expect(views[0]!.alternative.frames[0]).toMatchObject({ predicate_reading: "has distinct fitness-class attendance days per week",
+    role_requirements: [{ target_variable: "speaker" }, { role_reading: "distinct days per week", target_variable: "value" }] });
+});
 
 const CLOCK = "2026-09-21T10:00:00.000Z";
 const SOURCE = "Ada can operate the lathe.";

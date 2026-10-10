@@ -350,26 +350,31 @@ describe("query meaning receive and semantic_correspondence assessment", () => {
     // Expected from the original question: both events have Tara, crate C and their own stated day;
     // the hours answer and each event-time input have different jobs.
     expect(views.map(view => view.alternative.frames.map(frame => frame.id))).toEqual([
-      ["elapsed", "sealing", "opening"], ["sealing", "seal_time"], ["opening", "open_time"]
+      ["elapsed", "crate_kind", "sealing", "opening"],
+      ["crate_kind", "sealing", "seal_time"], ["crate_kind", "opening", "open_time"]
     ]);
-    expect(views[1]!.alternative.frames[0]!.role_requirements.map(role => [role.role_reading, role.support.excerpt]))
+    expect(views[1]!.alternative.frames.find(frame => frame.id === "sealing")!.role_requirements.map(role => [role.role_reading, role.support.excerpt]))
       .toEqual([["agent", "Tara"], ["theme", "crate C"], ["date", "3 March 2024"]]);
-    expect(views[2]!.alternative.frames[0]!.role_requirements.map(role => [role.role_reading, role.support.excerpt]))
+    expect(views[2]!.alternative.frames.find(frame => frame.id === "opening")!.role_requirements.map(role => [role.role_reading, role.support.excerpt]))
       .toEqual([["agent", "Tara"], ["theme", "crate C"], ["date", "4 March 2024"]]);
+    for (const view of views) {
+      expect(view.alternative.frames.find(frame => frame.id === "crate_kind")?.role_requirements
+        .map(role => role.target_variable)).toEqual(["crate"]);
+    }
     expect(query.return_variables).toEqual(["elapsed_hours"]);
     expect(views.slice(1).flatMap(view => view.alternative.frames).map(frame => frame.id)).not.toContain("elapsed");
     expect(query.requested_operation?.reading).toBe("Calculate elapsed hours from the sealing time to the opening time.");
 
     const withoutRoleSupport = structuredClone(example.response);
-    Object.assign(inputNode(withoutRoleSupport, 0, 1).arguments[0]!, { excerpt: undefined });
+    Object.assign(inputNode(withoutRoleSupport, 0, 2).arguments[0]!, { excerpt: undefined });
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(withoutRoleSupport) }).outcome.status).toBe("invalid");
     const forgedRoleSupport = structuredClone(example.response);
-    Object.assign(inputNode(forgedRoleSupport, 0, 1).arguments[0]!, { excerpt: "invented event" });
+    Object.assign(inputNode(forgedRoleSupport, 0, 2).arguments[0]!, { excerpt: "invented event" });
     expect(proposeQuerySemantics({ original_query: example.original_query, producer_id: "query-producer", producer_version: "1" },
       { rawJson: JSON.stringify(forgedRoleSupport) }).outcome.status).toBe("invalid");
     const withoutFreeInputSupport = structuredClone(example.response);
-    const inputRole = inputNode(withoutFreeInputSupport, 1, 1).arguments[1]!;
+    const inputRole = inputNode(withoutFreeInputSupport, 1, 2).arguments[1]!;
     Object.assign(inputRole, { excerpt: undefined });
     Object.assign(withoutFreeInputSupport.query.entities.find(entity => entity.key === inputRole.target.key)!,
       { excerpt: undefined });

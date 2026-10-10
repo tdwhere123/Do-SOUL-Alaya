@@ -115,6 +115,47 @@ describe("query generation contract", () => {
     expect(query.gaps).toMatchObject([{ kind: "unsupported_meaning", support: [{ excerpt: "Please recommend" }] }]);
   });
 
+  it("distinguishes current advice from evidence of a past advice request", () => {
+    const current = sourceSemanticQueryExamples.find(row => row.original_query === "My oak cabinet needs a brighter finish. Any advice?")!;
+    const historical = sourceSemanticQueryExamples.find(row => row.original_query === "Who asked for advice about a brighter finish on cabinet C?")!;
+    const advice = receive(current.original_query, current.response).query!;
+    const request = receive(historical.original_query, historical.response).query!;
+    expect(advice.return_variables).toEqual(["advice"]);
+    expect(advice.requested_operation).toBeDefined();
+    expect(advice.alternatives[0]!.frames.map(frame => frame.predicate_reading))
+      .toEqual(["is advice for achieving a brighter finish on"]);
+    expect(request.return_variables).toEqual(["requester"]);
+    expect(request.requested_operation).toBeUndefined();
+    expect(request.alternatives[0]!.frames.map(frame => frame.predicate_reading))
+      .toEqual(["asked before the query time for advice about a brighter finish on"]);
+    expect([...advice.alternatives[0]!.frames, ...request.alternatives[0]!.frames]
+      .every(frame => frame.source_act === undefined)).toBe(true);
+  });
+
+  it("returns a name property and a distinct-days measure rather than their bearers or session counts", () => {
+    const name = sourceSemanticQueryExamples.find(row => row.original_query === "What is the name of the oak cabinet in hall H?")!;
+    const days = sourceSemanticQueryExamples.find(row => row.original_query === "How many days a week does Nia attend pottery classes?")!;
+    const named = receive(name.original_query, name.response).query!;
+    expect(named.return_variables).toEqual(["value"]);
+    expect(named.alternatives[0]!.frames[0]).toMatchObject({ predicate_reading: "has name", role_requirements: [
+      { role_reading: "bearer", target_variable: "cabinet" }, { role_reading: "name", target_variable: "value" }
+    ] });
+    const attendance = receive(days.original_query, days.response).query!;
+    expect(attendance.return_variables).toEqual(["days"]);
+    expect(attendance.alternatives[0]!.frames[0]).toMatchObject({
+      predicate_reading: "has distinct pottery-class attendance days per week",
+      role_requirements: [{ target_variable: "nia" }, { role_reading: "distinct days per week", target_variable: "days" }]
+    });
+  });
+
+  it.each(["My oak cabinet needs a brighter finish. Any advice?", "Who asked for advice about a brighter finish on cabinet C?",
+    "What is the name of the oak cabinet in hall H?", "How many days a week does Nia attend pottery classes?"])
+  ("accepts the neutral contrast through generation and receipt: %s", original => {
+    const example = sourceSemanticQueryExamples.find(row => row.original_query === original)!;
+    expect(draft2020(schema, [{ id: original, instance: example.response }])).toEqual({ [original]: true });
+    expect(receive(original, example.response).outcome.status).toBe("interpreted");
+  });
+
   it.each(["free", "named"] as const)("keeps a %s reporter grounded through its entity declaration", (kind) => {
     const excerpt = kind === "free" ? "Who" : "Pia";
     const query = encodeSourceSemanticQueryCarrier({

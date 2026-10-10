@@ -80,6 +80,25 @@ function previousRepresentation(schema: Schema): Schema {
 }
 
 describe("semantic proposal rendered schema identity", () => {
+  it.each([
+    { model: config.model, requestProfile: profile, providerUrl: config.providerUrl },
+    { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" as const, providerUrl: "http://127.0.0.1:9" }
+  ])("changes the Q cache key and native request digest for prompt bytes alone: $requestProfile", settings => {
+    const current = line("query", { original_query });
+    const changedPrompt = `${current.systemPrompt} Retain the stated unit.`;
+    const key = (systemPrompt: string) => proposalCacheKey(settings.model, settings.requestProfile,
+      systemPrompt, current.userPrompt, current.responseJsonSchema, 4096, settings.providerUrl);
+    const binding = (systemPrompt: string) => semanticProposalRequestBinding({ ...settings, apiKey: null }, {
+      systemPrompt, userPrompt: current.userPrompt, responseJsonSchema: current.responseJsonSchema, maxOutputTokens: 4096
+    });
+    expect(key(current.systemPrompt)).not.toBe(key(changedPrompt));
+    expect(binding(current.systemPrompt).requestDigest).not.toBe(binding(changedPrompt).requestDigest);
+    expect(binding(current.systemPrompt)).toEqual(semanticProposalRequestBinding({ ...settings, apiKey: null }, {
+      systemPrompt: current.systemPrompt, userPrompt: current.userPrompt,
+      responseJsonSchema: current.responseJsonSchema, maxOutputTokens: 4096
+    }));
+  });
+
   it.each(cases)("changes $name native cache key and request digest for representation alone", ({ line: current }) => {
     const schema = current.responseJsonSchema as Schema;
     const previous = previousRepresentation(schema);
