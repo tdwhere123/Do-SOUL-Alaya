@@ -64,7 +64,18 @@ function qualifiedRaw(delivery: Delivery | undefined, frozen: FrozenCell) {
 }
 
 function terminalBudget(report: NativeReport): boolean {
-  return report.access.prepare?.outcome?.status === "resource_exhausted";
+  if (report.access.prepare?.outcome?.status === "resource_exhausted") return true;
+  if (report.status !== "native_failure" || report.stop !== "public_delivery_failed") return false;
+  const calls = report.calls.filter(call => call.name === "access-delivery"), call = calls[0];
+  if (calls.length !== 1 || call === undefined || call.request.operation !== "recall"
+    || !call.capture_complete || call.response !== undefined || call.error?.work == null) return false;
+  if (call.request.query_handle === undefined || call.request.query_handle !== report.access.prepare?.query_handle
+    || canonicalJson(call.request.budget) !== canonicalJson(accessBudget(report.slot))) return false;
+  // The pinned worker wraps SourceSemanticResourceExhausted in CoreError; callNative retains String(error).
+  // The same code/subcode also covers lease capacity, whose message is not a request-budget exhaustion.
+  return call.error.code === "CONFLICT" && call.error.sub_code === "RETRYABLE_BACKPRESSURE"
+    && /^CoreError: source semantic [^\r\n]+ budget exhausted$/u.test(call.error.message)
+    && !call.error.message.includes("\n") && !call.error.message.includes("\r");
 }
 
 function acquisitionEndpoint(report: NativeReport, present: boolean, identityProblems: readonly string[], kind: "raw" | "H"): Endpoint {
