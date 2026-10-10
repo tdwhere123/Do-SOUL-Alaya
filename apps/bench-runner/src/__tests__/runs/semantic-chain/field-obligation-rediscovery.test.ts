@@ -242,10 +242,40 @@ function checkReport(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>
       duplicate: "no_unique_action", unmatched: "no_unique_action", stale_source: "reported_but_ineligible",
       truncated: "feedback_truncated", later_unobserved: "reported_but_ineligible" });
   }
-  for (const proof of [report.initial_proof, report.final_proof]) if (proof?.status === "compared") {
-    expect(proof.exact_assignments).toBe(true); expect(proof.exact_proof_leaves).toBe(true); expect(proof.necessary_leaves).toBe(true);
+  const requiredProofs = report.arm === "F" ? [report.final_proof, report.initial_proof] : [report.final_proof];
+  for (const [index, proof] of requiredProofs.entries()) {
+    const phase = index === 0 ? "final" : "initial";
+    expect(proof?.status, `${report.arm} ${phase} proof must compare actual bindings`).toBe("compared");
+    expect(proof?.exact_assignments).toBe(true); expect(proof?.exact_proof_leaves).toBe(true); expect(proof?.necessary_leaves).toBe(true);
   }
-  if (fixture.name === "split-item" && report.final_proof?.actual !== null) expect(report.final_proof?.actual ?? []).toEqual([]);
+  if (fixture.name === "split-item") expect(report.final_proof!.actual).toEqual([]);
+}
+
+/** Corrupt only captured native output; absent bindings must not pass as an empty result. */
+function checkMissingBindingsRejected(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>>) {
+  const phases = report.arm === "F" ? ["final", "initial"] as const : ["final"] as const;
+  for (const phase of phases) {
+    const invocation = phase === "final" ? report.final_reason : report.initial_reason;
+    const response = invocation?.response;
+    const descriptor = phase === "final" ? report.final_H
+      : report.initial?.prepare?.candidates.find(row => row.source_id === `${fixture.name}/initial`);
+    const c = phase === "final" ? report.final_correspondence : report.initial_correspondence;
+    if (invocation === null || response?.operation !== "reason" || descriptor == null || c === null) {
+      throw new Error("missing-binding controls require an actual captured reasoning response and its H/C");
+    }
+    if (response.result === undefined || !("binding_results" in response.result)) {
+      throw new Error("captured reasoning response must include actual bindings");
+    }
+    const { binding_results: removedBindings, ...withoutBindings } = response.result;
+    expect(removedBindings).toBeDefined();
+    const corrupted: Invocation = { ...invocation, response: { ...response, result: withoutBindings } };
+    const proof = oracleCheck(fixture, descriptor, c, corrupted);
+    expect(proof.status).toBe("actual_bindings_unavailable");
+    expect(proof.actual).toBeNull();
+    const corruptedReport = phase === "final" ? { ...report, final_reason: corrupted, final_proof: proof }
+      : { ...report, initial_reason: corrupted, initial_proof: proof };
+    expect(() => checkReport(fixture, corruptedReport)).toThrow(`${report.arm} ${phase} proof must compare actual bindings`);
+  }
 }
 
 it.each(CASES)("records healthy source-bound Field feedback and rediscovery without requiring a win: $name", async fixture => {
@@ -288,6 +318,7 @@ it.each(CASES)("records healthy source-bound Field feedback and rediscovery with
     native_provider_calls: 0, automatic_clue_generation: "not_exercised", natural_source_utility: "not_exercised",
     general_algorithm_acceptance: "not_claimed", independent_review_required_for_acceptance: true }));
   for (const report of reports) checkReport(fixture, report);
+  for (const report of reports) checkMissingBindingsRejected(fixture, report);
 }, 120_000);
 
 it.each(["duplicate", "exhausted"] as const)("refuses %s reservations before native work", async kind => {
