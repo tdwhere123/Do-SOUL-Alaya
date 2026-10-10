@@ -1,4 +1,6 @@
 import { expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   UNKNOWN_UTTERANCE_ATTRIBUTION, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
@@ -38,9 +40,12 @@ function add(target: Usage, value: SourceSemanticResourceBudget): void {
 function difference(after: Usage, before: Usage): Usage {
   return { work_units: after.work_units - before.work_units, memory_bytes: after.memory_bytes - before.memory_bytes };
 }
-function failure(error: unknown): { name?: string; message?: string; phase?: string; thrown?: string } {
+type Failure = { name?: string; message?: string; phase?: string; thrown?: string; errors?: Failure[]; cause?: Failure };
+function failure(error: unknown): Failure {
   return error instanceof Error ? { name: error.name, message: error.message,
-    ...(error instanceof SourceSemanticResourceExhausted ? { phase: error.phase } : {}) } : { thrown: String(error) };
+    ...(error instanceof SourceSemanticResourceExhausted ? { phase: error.phase } : {}),
+    ...(error instanceof AggregateError ? { errors: error.errors.map(failure),
+      ...(error.cause === undefined ? {} : { cause: failure(error.cause) }) } : {}) } : { thrown: String(error) };
 }
 
 class PublicationObserver {
@@ -267,7 +272,8 @@ it.skipIf(revision === undefined)("attributes two frozen native publications to 
       } });
   } catch (error) {
     nativeError = error;
-    if (error !== observer.dispatchStop) observer.stop("publication_failed", failure(error).message ?? "native setup failed");
+    if (error instanceof AggregateError) observer.stop("attribution_unavailable", "aggregate helper failure requires attribution");
+    else if (error !== observer.dispatchStop) observer.stop("publication_failed", failure(error).message ?? "native setup failed");
   } finally { for (const spy of spies.reverse()) spy.mockRestore(); }
   const total = observer.publications.reduce((sum, row) => { add(sum, row.leaf_debits); return sum; }, { work_units: 0, memory_bytes: 0 });
   if (observer.meter === undefined || !isDeepStrictEqual(total, spent(observer.meter))
@@ -280,7 +286,8 @@ it.skipIf(revision === undefined)("attributes two frozen native publications to 
     || helperReceipts === null || observer.manifest?.sources.length !== INPUTS.length
     || observer.manifest.publications.length !== INPUTS.length)) observer.stop("attribution_unavailable", "completion evidence unavailable");
   const report = { contract: "source-publication-cost-observation-v1", ...binding,
-    status: observer.stops[0]?.status ?? "complete", stops: observer.stops, budget: BUDGET, diagnostic_limits: LIMITS,
+    status: nativeError instanceof AggregateError ? "attribution_unavailable" : observer.stops[0]?.status ?? "complete",
+    stops: observer.stops, budget: BUDGET, diagnostic_limits: LIMITS,
     frozen_sources: INPUTS, publications: observer.publications.map(publicationReport),
     helper_setup: setup, helper_usage_receipts: helperReceipts, shared_usage: observer.meter === undefined ? null : spent(observer.meter),
     source_reads: [...observer.reads.values()], source_read_calls: observer.sourceReadCalls,
@@ -299,3 +306,47 @@ it.skipIf(revision === undefined)("attributes two frozen native publications to 
   console.log(`SOURCE_PUBLICATION_COST ${JSON.stringify(report)}`);
   expect(report.status).toBe("complete");
 }, 120_000);
+
+it("retains native publication and end-observer failures while stopping and cleaning up the actual helper", async () => {
+  const observerError = new Error("publication end observation failed"), boundaries: PublicationBoundary[] = [];
+  const filenames = new Set<string>(), appendOriginal = SqliteEventLogRepo.prototype.append;
+  const append = vi.spyOn(SqliteEventLogRepo.prototype, "append").mockImplementation(function (this: SqliteEventLogRepo, event) {
+    filenames.add(this.getStorageConnectionIdentity().filename);
+    return appendOriginal.call(this, event);
+  });
+  const body = vi.fn(async () => undefined), exhausted = vi.fn(async () => undefined);
+  let nativeError: unknown, caught: unknown;
+  try {
+    await withAccessLibrary([
+      { id: "failed-publication", text: "Alice uses X.", reading: "uses" },
+      { id: "undispatched-publication", text: "Bob uses Y.", reading: "uses" }
+    ], body, { publicationBudget: { work_units: 0, memory_bytes: 0 }, onSetupExhausted: exhausted,
+      onPublicationBoundary: event => {
+        boundaries.push(event);
+        if (event.kind === "end") {
+          if (event.outcome.status === "failed") nativeError = event.outcome.error;
+          throw observerError;
+        }
+      } });
+  } catch (error) { caught = error; }
+  finally { append.mockRestore(); }
+  expect(nativeError).toBeInstanceOf(SourceSemanticResourceExhausted);
+  expect(caught).toBeInstanceOf(AggregateError);
+  if (!(caught instanceof AggregateError)) throw new Error("paired failure must escape the helper");
+  expect(caught.errors).toHaveLength(2);
+  expect(caught.errors[0]).toBe(nativeError);
+  expect(caught.errors[1]).toBe(observerError);
+  expect(caught.cause).toBe(nativeError);
+  expect(failure(caught)).toMatchObject({ name: "AggregateError",
+    errors: [{ message: "source semantic publication input budget exhausted", phase: "publication input" },
+      { message: observerError.message }], cause: { phase: "publication input" } });
+  expect(boundaries.map(event => [event.kind, event.source_id])).toEqual([
+    ["begin", "failed-publication"], ["end", "failed-publication"]
+  ]);
+  expect(body).not.toHaveBeenCalled();
+  expect(exhausted).not.toHaveBeenCalled();
+  expect(filenames.size).toBe(1);
+  const filename = [...filenames][0]!;
+  expect(existsSync(filename)).toBe(false);
+  expect(existsSync(dirname(filename))).toBe(false);
+});

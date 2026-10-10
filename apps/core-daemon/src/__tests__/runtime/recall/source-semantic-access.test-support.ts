@@ -179,7 +179,11 @@ async function admitAndPublishFixture(fixture: AccessFixtureSource, owners: {
         memory_bytes: owners.meter.spentBytes - before.memory_bytes });
       if (outcome !== undefined) {
         try { owners.onPublicationBoundary?.({ ...boundary, kind: "end", outcome, usage: usages.at(-1)! }); }
-        catch (error) { if (outcome.status !== "failed") throw error; }
+        catch (error) {
+          if (outcome.status === "failed") throw new AggregateError([outcome.error, error],
+            "Native publication and boundary observer both failed", { cause: outcome.error });
+          throw error;
+        }
       }
     }
   }
