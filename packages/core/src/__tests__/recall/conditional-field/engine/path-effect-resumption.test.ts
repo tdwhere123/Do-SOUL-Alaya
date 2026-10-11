@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { productSubjectId, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
+import { productSubjectId, type FacetVector, type ObserverPage, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
 import { createAdjacencyEffectCursor, adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
-import { composedFacetPathId, facetBelongsToOutput } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { composedFacetPathId, facetBelongsToOutput, facetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
@@ -27,7 +27,104 @@ function setup(program: QueryProgram) {
   return { interpretation, state };
 }
 
+function preparedFrontier() {
+  const { interpretation, state } = setup({ schema_version: 1, kind: "repeat", count: 2,
+    local_variables: ["x", "y"], body: relation("p") });
+  const page: ObserverPage = { schema_version: 1, query_id: interpretation.query_id, snapshot_id: SNAPSHOT_ID,
+    cursor: { schema_version: 1, cursor_id: "adjacency", region_id: "adjacency", query_id: interpretation.query_id,
+      snapshot_id: SNAPSHOT_ID, position: null, committed_through: null },
+    observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] };
+  const rows = [row("p", "b", "old-edge"), row("p", "d", "new-edge"),
+    { ...row("p", "c", "old-downstream"), sourceObjectId: "b" },
+    { ...row("p", "e", "new-downstream"), sourceObjectId: "d" }];
+  const options = { interpretation, asOf: AS_OF, liveStates: state.seen_identities, overlay: {},
+    sourceFacts: new Map(["a", "b", "c", "d", "e"].map(object_id => [object_id, { object_id, source_revision: "rev" }])) };
+  const oldEffect = adjacencyEffectsForRows(rows.slice(0, 1), options).find(effect => effect.transition !== undefined)!;
+  const observed = applyObserverPage(state, { page, effects: [oldEffect] });
+  const input = { rows, options: { ...options, liveStates: observed.seen_identities, facets: observed.facets } };
+  const effects = adjacencyEffectsForRows(rows, input.options);
+  expect(effects[0]!.facet!.path_id).toBe(oldEffect.facet!.path_id);
+  const prepared: FieldEngineState = { ...observed, pending_path_effects: {
+    offset: 0, retained_bytes: 0, page, input,
+    preparation: { effects, next_offset: effects.length, status: "complete", effect_index: 0, stage: "start",
+      facet_scan_index: 0, facet_resume_offset: observed.seen_identities.length,
+      pair_demands: observed.pair_demands, pair_bytes: 0, source_demands: observed.source_fact_demands,
+      source_pending: observed.source_fact_pending_count, source_bytes: 0, retained_bytes: 128 + 8 * effects.length }
+  } };
+  return { prepared, oldEffect };
+}
+
+function facetLookupInput(matches: boolean, rowCount = 40) {
+  const { interpretation, state } = setup(relation("p")), from = state.seen_identities.at(0)!;
+  const selected: FacetVector[] = matches ? [
+    { schema_version: 1, path_id: facetPathId(from), coordinates: [411] },
+    { schema_version: 1, path_id: composedFacetPathId(from, "other-route"), coordinates: [877] }
+  ] : [];
+  const unrelated: FacetVector[] = Array.from({ length: 64 }, (_, index) => ({ schema_version: 1,
+    path_id: `${facetPathId(from)}-unrelated-${index}`, coordinates: [999] }));
+  const facets = Object.freeze(matches ? [selected[0]!, ...unrelated, selected[1]!] : unrelated);
+  let visits = 0;
+  const measured = new Proxy(facets, { get(target, key, receiver) {
+    if (typeof key === "string" && /^\d+$/u.test(key)) visits += 1;
+    return Reflect.get(target, key, receiver);
+  } });
+  const rows = Array.from({ length: rowCount }, (_, index) => row("p", `target-${index}`, `edge-${index}`));
+  const options = { interpretation, asOf: AS_OF, liveStates: state.seen_identities, facets: measured, overlay: {},
+    sourceFacts: new Map(rows.map(({ targetObjectId: object_id }) => [object_id, { object_id, source_revision: "rev" }])) };
+  return { rows, options, selected, from, visits: () => visits };
+}
+
 describe("bounded path effect continuation", () => {
+  it.each(["unchanged", "earlier-batch"])("keeps the %s frontier while committing useful effects beside a duplicate facet", (frontier) => {
+    const { prepared, oldEffect } = preparedFrontier();
+    const pending = prepared.pending_path_effects!, preparation = pending.preparation!;
+    const offset = frontier === "earlier-batch" ? 0 : prepared.seen_identities.length;
+    const derivation = { ...oldEffect.derivation!, derivation_id: "updated-leaf" };
+    const updated = { ...preparation.effects[0]!, observation_id: "updated-edge",
+      transition: { ...oldEffect.transition!, instance_id: "updated-edge", strength_milligrades: 400 },
+      facet: { ...oldEffect.facet!, coordinates: [400] }, derivation, derivations: [derivation] };
+    const resumed = resumePathEffects({ ...prepared, remaining_exploration: 1,
+      pending_path_effects: { ...pending, preparation: { ...preparation,
+        facet_resume_offset: offset, effects: [updated, ...preparation.effects.slice(1)] } } });
+    expect(resumed.pending_path_effects?.preparation?.effect_index).toBe(1);
+    expect(resumed.pending_path_effects?.preparation?.facet_resume_offset).toBe(offset);
+    expect(resumed.pending_path_effects?.preparation?.facet_scan_index).toBe(0);
+    const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    expect(completed.transitions.some(edge => edge.instance_id === "updated-edge" && edge.strength_milligrades === 400)).toBe(true);
+    expect(completed.derivations.some(row => row.derivation_id === "updated-leaf")).toBe(true);
+    expect(completed.facets.find(facet => facet.path_id === oldEffect.facet!.path_id)).toEqual(oldEffect.facet);
+    expect(completed.binding.kind === "bound" && completed.binding.snapshot.values.some(value =>
+      value.accepting && productSubjectId(value.state) === "e" && value.milligrades === 1000)).toBe(true);
+  });
+
+  it("rewinds for a distinct facet and carries its coordinates through an already retained row", () => {
+    const { prepared, oldEffect } = preparedFrontier();
+    const pending = prepared.pending_path_effects!, preparation = pending.preparation!;
+    const distinct = { ...preparation.effects[0]!, facet: { ...oldEffect.facet!,
+      path_id: composedFacetPathId(oldEffect.transition!.to, "late-facet"), coordinates: [321] } };
+    const resumed = resumePathEffects({ ...prepared, remaining_exploration: 3,
+      pending_path_effects: { ...pending, preparation: { ...preparation,
+        effects: [distinct, ...preparation.effects.slice(1)] } } });
+    expect(resumed.pending_path_effects?.preparation?.facet_resume_offset).toBe(1);
+    const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    const target = completed.transitions.find(edge => productSubjectId(edge.to) === "c")!.to;
+    expect(completed.facets.some(facet => facetBelongsToOutput(facet.path_id, target)
+      && facet.coordinates.includes(321))).toBe(true);
+  });
+
+  it("keeps bounded facet scanning when the optional retention index is absent", () => {
+    const { prepared } = preparedFrontier();
+    const resumed = resumePathEffects({ ...prepared, retained_index: undefined, remaining_exploration: 1 });
+    expect(resumed.pending_path_effects?.preparation?.effect_index).toBe(0);
+    expect(resumed.pending_path_effects?.preparation?.stage).toBe("facet");
+    const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    expect(completed.binding.kind === "bound" && completed.binding.snapshot.values.some(value =>
+      value.accepting && productSubjectId(value.state) === "e" && value.milligrades === 1000)).toBe(true);
+  });
+
   it("resumes facet lookup under the same small work allowance until its effect commits", () => {
     const program = relation("p");
     const interpretation = query(program);
@@ -281,5 +378,60 @@ describe("bounded path effect continuation", () => {
     expect(visits).toBe(0);
     cursor.advance(0, 1, 1000000);
     expect(visits).toBe(0);
+  });
+
+  it.each([true, false])("looks up each source facet population once under a fixed work allowance (matches: %s)", (matches) => {
+    const { rows, options, selected, visits } = facetLookupInput(matches);
+    const expected = adjacencyEffectsForRows(rows, { ...options, facets: selected });
+    const cursor = createAdjacencyEffectCursor(rows, options);
+    expect(cursor.advance(0, 0, 1_000_000).work).toBe(0);
+    expect(visits()).toBe(0);
+    const effects: Array<(typeof expected)[number]> = [];
+    let offset = 0, work = 0, complete = false;
+    while (work < 1800 && !complete) {
+      const next = cursor.advance(offset, Math.min(23, 1800 - work), 1_000_000);
+      expect(next.work).toBeGreaterThan(0);
+      expect(next.work).toBeLessThanOrEqual(23);
+      work += next.work; offset = next.offset;
+      effects.push(...next.effects); complete = next.status === "complete";
+    }
+    expect(complete).toBe(true);
+    expect(visits()).toBe(options.facets.length);
+    expect(effects).toEqual(expected);
+    expect(effects.slice(0, matches ? 2 : 1).map(effect => effect.facet!.coordinates))
+      .toEqual(matches ? [[411, 1000], [877, 1000]] : [[1000]]);
+    expect(effects.at(-1)!.derivation!.observation_ids).toEqual(["edge-39"]);
+  });
+
+  it("keeps an interrupted facet lookup on its input version when a new version adds a facet", () => {
+    const { rows, options, from } = facetLookupInput(true, 2);
+    const cursor = createAdjacencyEffectCursor(rows, options);
+    const interrupted = cursor.advance(0, 20, 1_000_000);
+    expect(interrupted.status).toBe("open");
+    const replacement = { ...options, facets: Object.freeze([...options.facets,
+      { schema_version: 1 as const, path_id: composedFacetPathId(from, "late"), coordinates: [321] }]) };
+    const later = createAdjacencyEffectCursor(rows, replacement).advance(0, 10000, 1_000_000);
+    const original = cursor.advance(interrupted.offset, 10000, 1_000_000);
+    expect(later.status).toBe("complete");
+    expect(original.status).toBe("complete");
+    expect(later.effects.filter(effect => effect.facet?.coordinates.includes(321))).toHaveLength(2);
+    expect(original.effects.some(effect => effect.facet?.coordinates.includes(321))).toBe(false);
+  });
+
+  it("retains a refused facet bucket allocation and resumes without reading the population again", () => {
+    const { rows, options, selected, visits } = facetLookupInput(true, 2);
+    const cursor = createAdjacencyEffectCursor(rows, options);
+    let progress = cursor.advance(0, 0, 1_000_000);
+    for (let turn = 0; turn < 100 && visits() === 0; turn += 1) progress = cursor.advance(0, 1, 1_000_000);
+    expect(visits()).toBe(1);
+    const refused = cursor.advance(0, 1000, progress.retained_bytes);
+    expect(refused.status).toBe("memory_exhausted");
+    const reads = visits(), waiting = cursor.advance(0, 1000, progress.retained_bytes);
+    expect(waiting.work).toBe(0);
+    expect(visits()).toBe(reads);
+    const completed = cursor.advance(0, 10000, 1_000_000);
+    expect(completed.status).toBe("complete");
+    expect(visits()).toBe(options.facets.length);
+    expect(completed.effects).toEqual(adjacencyEffectsForRows(rows, { ...options, facets: selected }));
   });
 });

@@ -108,7 +108,8 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       }
       stage = "facet";
     }
-    if (stage === "facet" && effect.facet !== undefined) {
+    // Admission keeps the first path_id, so a retained facet cannot widen the frontier.
+    if (stage === "facet" && effect.facet !== undefined && !state.retained_index?.facets.has(effect.facet.path_id)) {
       const target = effect.transition?.to ?? effect.hyperedge?.to;
       if (target === undefined) facetOffset = 0;
       else {
