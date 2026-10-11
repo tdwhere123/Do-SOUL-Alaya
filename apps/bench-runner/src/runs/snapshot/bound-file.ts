@@ -11,6 +11,7 @@ import {
   readSync,
   realpathSync,
   rmSync,
+  statSync,
   writeSync
 } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -218,6 +219,20 @@ export function openedFileDescriptorPath(
   }
   if (fallbackPath !== undefined) return fallbackPath;
   throw new Error(`descriptor-bound file copy is unsupported on ${process.platform}`);
+}
+
+/** SQLite rejects Darwin's /dev/fd character device. Admit the named path only while it is still the held file. */
+export function sqlitePathForOpenedRegularFile(openedPath: string, namedPath: string): string {
+  if (process.platform !== "darwin" && process.platform !== "freebsd") return openedPath;
+  const match = /^\/dev\/fd\/(\d+)$/u.exec(openedPath);
+  if (match === null) return openedPath;
+  const opened = openedRegularFileIdentity(Number(match[1]));
+  const real = realpathSync(namedPath);
+  const onDisk = statSync(real);
+  if (!onDisk.isFile() || !sameFileIdentity(opened, fileIdentity(onDisk))) {
+    throw new Error(`${namedPath} no longer matches the opened snapshot`);
+  }
+  return real;
 }
 
 function sameFileIdentity(left: OpenedFileIdentity, right: OpenedFileIdentity): boolean {
