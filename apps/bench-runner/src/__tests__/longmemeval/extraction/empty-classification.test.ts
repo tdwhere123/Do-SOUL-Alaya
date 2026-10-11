@@ -171,7 +171,8 @@ describe("extraction empty envelope classification", () => {
       sourceCorpus: buildOfficialApiSourceCorpus("I moved to Berlin.", [])
     });
     const cacheKey = stats.lastCacheKey!;
-    expect(inspectMaterialization(cacheRoot, cacheKey).descriptors).toHaveLength(1);
+    expect(() => inspectMaterialization(cacheRoot, cacheKey))
+      .toThrow(/requires root-local admission evidence/u);
     expect(inspectCachedExtraction(
       cacheRoot, cacheKey, "test-model", "provider-default-v1"
     ).status).toBe("hit");
