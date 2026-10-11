@@ -291,6 +291,7 @@ it.each(["absent", "complete", "open"] as const)("preserves %s query coverage wh
       ...(query === undefined ? {} : { query_semantics: query }) });
     const response = await publicReason({ operation: "reason", ...request },
       { workspaceId: WS, runId: RUN, agentTarget: "test", sessionId: "test" });
+    if (response.operation !== "reason") throw new Error("expected public reason");
     const expected = status === "absent" ? "unexercised" : status;
     expect(prepared.coverage.query_semantics).toBe(expected);
     expect(response.coverage.query_semantics).toBe(expected);
