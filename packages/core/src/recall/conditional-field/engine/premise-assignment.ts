@@ -18,7 +18,6 @@ import type { PathComputation } from "./path-effect-cursor.js";
 import {
   admitRelationRow,
   inactiveResolution,
-  observedTargetRevision,
   relationMatches,
   type AdjacencyRow,
   type NamedKindOverlay
