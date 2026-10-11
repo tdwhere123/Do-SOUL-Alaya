@@ -12,6 +12,7 @@ import {
   readSchemaMigrationLedger
 } from "../../sqlite/db.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
+import { currentSchemaVersion } from "../migrations/apply-baseline.js";
 
 interface TempContext {
   readonly directory: string;
@@ -61,7 +62,7 @@ describe("temporal cutover startup gate", () => {
         readonly status: string;
       };
 
-      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(18);
+      expect(readSchemaMigrationLedger(context.filename).at(-1)).toBe(currentSchemaVersion());
       expect(state).toEqual({
         active_projection_generation: "temporal-bootstrap-empty-v1",
         projection_count: 0,

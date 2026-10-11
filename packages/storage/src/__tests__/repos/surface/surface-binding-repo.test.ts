@@ -10,6 +10,7 @@ import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteSurfaceBindingRepo } from "../../../repos/surface/surface-binding-repo.js";
 import { SqliteSurfaceIdentityRepo } from "../../../repos/surface/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -54,7 +55,7 @@ describe("SqliteSurfaceBindingRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
   });
 
   it("creates and finds surface binding records", async () => {

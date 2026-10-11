@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 import {
   claim,
   MAX_ATTEMPTS,
@@ -32,7 +33,7 @@ describe("SqliteEnrichPendingRepo", () => {
     const applied = database.connection
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(applied?.version).toBe(18);
+    expect(applied?.version).toBe(currentSchemaVersion());
 
     const columns = (
       database.connection.prepare("PRAGMA table_info(enrich_pending)").all() as ReadonlyArray<{
@@ -57,7 +58,7 @@ describe("SqliteEnrichPendingRepo", () => {
     const applied = database.connection
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(applied?.version).toBe(18);
+    expect(applied?.version).toBe(currentSchemaVersion());
 
     const repo = new SqliteEnrichPendingRepo(database);
     repo.enqueue({

@@ -307,26 +307,19 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect(result.extractorMeta?.retryClassification).toBe("success_first_try");
   });
 
-  // invariant: body-read backstop regression. A response whose body read
-  // (`.text()`) NEVER settles and ignores abort is the post-fetch analogue of
+  // A response whose body reader never settles and ignores abort is the post-fetch analogue of
   // the stalled-socket wedge. Racing the body read against the wall-clock
   // backstop must settle the attempt as failure_timeout within budget rather
   // than hanging until the vitest timeout. Mirrors the never-settling-fetch
   // regression but for the body read. WITHOUT the body-read race this hangs.
   // see also: packages/soul/src/garden/scheduling/wall-clock-timeout.ts
   it("settles a never-resolving body read via the timeout backstop (not a hang)", async () => {
-    // A real 200 OK response whose `.text()` never resolves and ignores abort.
-    const stalledBodyResponse = {
-      ok: true,
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(new ReadableStream<Uint8Array>({
+      pull: () => new Promise<void>(() => {})
+    }), {
       status: 200,
-      statusText: "OK",
-      headers: new Headers({ "content-type": "text/event-stream" }),
-      // Never settles — the mid-stream stalled-socket shape on the body read.
-      text: () => new Promise<string>(() => {})
-    } as unknown as Response;
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(stalledBodyResponse);
+      headers: { "content-type": "text/event-stream" }
+    }));
     const sleep = vi.fn(async () => undefined);
     const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
       fetch: fetchMock,

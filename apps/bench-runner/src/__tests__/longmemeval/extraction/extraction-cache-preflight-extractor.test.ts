@@ -19,7 +19,8 @@ import {
   interpretationsEnvelope
 } from "../compile-seed/compile-seed-fixture.js";
 import {
-  providerBackedExtractionResult,
+  providerBackedResponseResult,
+  fixtureAttemptAuthority,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
@@ -28,8 +29,8 @@ import {
   EXTRACTION_CONFIG as CONFIG,
   manifestFor,
   registerCacheRootHooks,
-  writeCacheShard
 } from "./extraction-cache-preflight-fixture.js";
+import { writeSettledProviderShardFixture } from "./authority/provider-shard-fixture.js";
 
 const TURN_CONTENT = "I moved to Berlin.";
 const TURN_REQUEST = stringifyOfficialApiExtractionRequest(
@@ -52,14 +53,15 @@ describe("cache-only compile seed smoke", () => {
 
   it("reports cacheHits>0 and llmCalls=0 without calling the live extractor", async () => {
     const turnContent = "I moved to Berlin and started a new job in March 2024.";
-    writeCacheShard(
-      cacheRoot,
-      CREDENTIALLED_CONFIG.model,
-      turnContent,
-      interpretationsEnvelope([{
+    await writeSettledProviderShardFixture({
+      cacheRoot, label: "cache-only smoke", model: CREDENTIALLED_CONFIG.model,
+      requestProfile: CREDENTIALLED_CONFIG.requestProfile,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(turnContent, [])),
+      rawJson: interpretationsEnvelope([{
         matched: "I moved to Berlin and started a new job in March 2024.",
       }])
-    );
+    });
 
     const liveExtract: BenchSignalExtractor = {
       extract: vi.fn(async () => {
@@ -109,19 +111,20 @@ describe("single-source extraction model", () => {
       systemPrompt: "sys"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedExtractionResult(TURN_RESPONSE))
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, TURN_RESPONSE))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
       config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile })
     });
     await extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST });
 
     // The cache-key model component and the persisted fixture model both come
     // from the single `model` field — there is no independent re-derivation.
     const shardDirs = readdirSync(cacheRoot);
-    const shardDir = shardDirs.find((d) => d !== "manifest.json");
+    const shardDir = shardDirs.find((d) => /^[0-9a-f]{2}$/u.test(d));
     expect(shardDir).toBeDefined();
     const shardFiles = readdirSync(join(cacheRoot, shardDir as string));
     const fixturePath = join(cacheRoot, shardDir as string, shardFiles[0] as string);
@@ -138,12 +141,14 @@ describe("single-source extraction model", () => {
       systemPrompt: "sys"
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => providerBackedExtractionResult(TURN_RESPONSE))
+      extract: vi.fn(async (input) => providerBackedResponseResult(input, TURN_RESPONSE))
     };
+    const authority = fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile });
     const writer = createCachingSignalExtractor({
       delegate,
       config: { ...CONFIG, providerUrl: TEST_EXTRACTION_PROVIDER_URL },
-      cacheRoot
+      cacheRoot,
+      ...authority
     });
     await writer.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST });
     expect(delegate.extract).toHaveBeenCalledOnce();
@@ -156,7 +161,8 @@ describe("single-source extraction model", () => {
         modelFamily: "gpt-4.1-mini",
         providerUrl: TEST_EXTRACTION_PROVIDER_URL
       },
-      cacheRoot
+      cacheRoot,
+      ...authority
     });
     await expect(
       reader.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST })
@@ -174,7 +180,8 @@ describe("single-source extraction model", () => {
     const extractor = createCachingSignalExtractor({
       delegate: { extract: delegate },
       config: { ...CONFIG, requestProfile: "deepseek-v4-nonthinking-v1" },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: CONFIG.model, requestProfile: CONFIG.requestProfile })
     });
 
     await expect(extractor.extract({ systemPrompt: "sys", sourceCorpus: buildOfficialApiSourceCorpus(TURN_CONTENT, []), userPrompt: TURN_REQUEST }))

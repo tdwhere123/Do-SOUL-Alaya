@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { StorageError } from "../../shared/errors.js";
 import { initDatabase } from "../../sqlite/db.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
+import { currentSchemaVersion } from "../migrations/apply-baseline.js";
 
 const directories: string[] = [];
 const databases: Array<ReturnType<typeof initDatabase>> = [];
@@ -47,7 +48,7 @@ describe("initDatabase concurrent migration", () => {
     const maxVersion = second.connection.prepare(
       "SELECT MAX(version) AS max_version FROM schema_version"
     ).get() as { readonly max_version: number };
-    expect(maxVersion.max_version).toBe(18);
+    expect(maxVersion.max_version).toBe(currentSchemaVersion());
   });
 
   it.skipIf(!existsSync(distInitModule) || !existsSync(distBusyRetryModule))(
@@ -67,7 +68,7 @@ describe("initDatabase concurrent migration", () => {
         const maxVersion = probe.prepare(
           "SELECT MAX(version) AS max_version FROM schema_version"
         ).get() as { readonly max_version: number };
-        expect(maxVersion.max_version).toBe(18);
+        expect(maxVersion.max_version).toBe(currentSchemaVersion());
       } finally {
         probe.close();
       }
@@ -85,7 +86,7 @@ describe("initDatabase uninitialized-file probe", () => {
     const maxVersion = database.connection.prepare(
       "SELECT MAX(version) AS max_version FROM schema_version"
     ).get() as { readonly max_version: number };
-    expect(maxVersion.max_version).toBe(18);
+    expect(maxVersion.max_version).toBe(currentSchemaVersion());
   });
 
   it("keeps the runtime temporal gate on an unreadable existing file", () => {

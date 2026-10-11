@@ -9,9 +9,14 @@ import { persistedResponseMetadata } from
 import type { BenchProviderUsage } from "../../../../runs/compile-seed/compile-seed-types.js";
 import { buildExtractionTransportProvenance } from
   "../../../../runs/extraction/transport-route.js";
-import { TEST_PROVIDER_COMPLETION_METADATA } from "../extraction-cache-test-fixture.js";
+import { TEST_PROVIDER_COMPLETION_METADATA, writeExtractionCacheTestManifest } from "../extraction-cache-test-fixture.js";
 import { composePartitionedExtraction } from
   "../../../../runs/compile-seed/http/garden-http-assertion-partition.js";
+import { writeCachedExtraction } from "../../../../runs/compile-seed/cache/cache-shard.js";
+import { openExtractionAttemptLedger } from "../../../../runs/extraction/authority/attempt-ledger.js";
+import type { ExtractionRequestProfile } from "../../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { readExtractionCacheManifest, writeExtractionCacheManifest } from "../../../../runs/extraction/cache/extraction-cache-manifest.js";
+import { inspectExtractionCacheContentClosure } from "../../../../runs/extraction/fill/fill-completion.js";
 
 const model = "gpt-5.4-mini";
 const requestProfile = "provider-default-v1";
@@ -27,25 +32,90 @@ export async function providerShardFixture(input: {
   readonly lineageDigest: string;
   readonly attemptOrdinal: number;
   readonly usage?: BenchProviderUsage;
+  readonly rawJson?: string;
+  readonly userPrompt?: string;
+  readonly model?: string;
+  readonly requestProfile?: ExtractionRequestProfile;
+  readonly providerUrl?: string;
+  readonly systemPrompt?: string;
 }) {
-  const prompt = userPrompt(input.label);
-  const witness = await responseWitness(prompt, rawJson, input.usage);
+  const prompt = input.userPrompt ?? userPrompt(input.label);
+  const response = input.rawJson ?? rawJson;
+  const requestModel = input.model ?? model;
+  const profile = input.requestProfile ?? requestProfile;
+  const systemPrompt = input.systemPrompt ?? OFFICIAL_API_SYSTEM_PROMPT;
+  const witness = await responseWitness(prompt, response, input.usage);
   return {
-    model, request_profile: requestProfile,
-    cache_key: providerFixtureKey(input.label),
-    raw_json: rawJson,
-    transport_provenance: buildExtractionTransportProvenance({ providerUrl, model }),
+    model: requestModel, request_profile: profile,
+    cache_key: computeCacheKey(requestModel, profile, systemPrompt, prompt),
+    raw_json: response,
+    transport_provenance: buildExtractionTransportProvenance({
+      providerUrl: input.providerUrl ?? providerUrl, model: requestModel
+    }),
     provider_attempt: {
       kind: "interactive" as const,
       attempt_ordinal: input.attemptOrdinal,
       authority_lineage_digest: input.lineageDigest,
       last_usage: input.usage ?? null
     },
-    request_identity: { system_prompt: OFFICIAL_API_SYSTEM_PROMPT, user_prompt: prompt },
+    request_identity: { system_prompt: systemPrompt, user_prompt: prompt },
     provider_responses: [{ attempt_ordinal: input.attemptOrdinal, witness,
       usage: input.usage ?? null }],
     ...persistedResponseMetadata(TEST_PROVIDER_COMPLETION_METADATA, input.usage, true)
   };
+}
+
+/** Bind a replay fixture's raw bytes through the current physical-response and attempt owners. */
+export async function writeSettledProviderShardFixture(input:
+  Omit<Parameters<typeof providerShardFixture>[0], "lineageDigest" | "attemptOrdinal"> & {
+    readonly cacheRoot: string;
+  }
+): Promise<string> {
+  const prompt = input.userPrompt ?? userPrompt(input.label);
+  const requestModel = input.model ?? model;
+  const profile = input.requestProfile ?? requestProfile;
+  const cacheKey = computeCacheKey(requestModel, profile,
+    input.systemPrompt ?? OFFICIAL_API_SYSTEM_PROMPT, prompt);
+  const lineageDigest = sha256(`provider-shard-fixture:${cacheKey}`);
+  const ledger = openExtractionAttemptLedger({
+    cacheRoot: input.cacheRoot, lineageDigest,
+    cacheIdentity: { model: requestModel, requestProfile: profile },
+    startingMissing: 1, maximumAttempts: 1, successfulShardCeiling: 1
+  });
+  const attemptOrdinal = ledger.reserveAttemptOrdinal(cacheKey);
+  const shard = await providerShardFixture({ ...input, lineageDigest, attemptOrdinal });
+  writeCachedExtraction(input.cacheRoot, cacheKey, { ...shard, extracted_at: "2026-08-11T00:00:00.000Z" });
+  ledger.recordTransportOutcome(cacheKey, {
+    retryCount: 0, rateLimitRetries: 0,
+    attemptResponses: [shard.provider_responses[0]!.witness],
+    ...(input.usage === undefined ? {} : { usage: input.usage })
+  }, attemptOrdinal);
+  ledger.commitSuccessfulShard(cacheKey);
+  return cacheKey;
+}
+
+export async function writeCompleteProviderCacheFixture(
+  input: Parameters<typeof writeSettledProviderShardFixture>[0]
+): Promise<string> {
+  const requestModel = input.model ?? model;
+  const profile = input.requestProfile ?? requestProfile;
+  writeExtractionCacheTestManifest({ cacheRoot: input.cacheRoot, model: requestModel,
+    requestProfile: profile, providerUrl: input.providerUrl ?? providerUrl,
+    systemPrompt: input.systemPrompt ?? OFFICIAL_API_SYSTEM_PROMPT });
+  const cacheKey = await writeSettledProviderShardFixture(input);
+  const closure = inspectExtractionCacheContentClosure({ cacheRoot: input.cacheRoot,
+    model: requestModel, requestProfile: profile });
+  const manifest = readExtractionCacheManifest(input.cacheRoot);
+  if (manifest === undefined || closure.validTurns !== 1 || closure.contentClosureSha256 === null) {
+    throw new Error("completed fixture requires one admitted provider shard");
+  }
+  writeExtractionCacheManifest(input.cacheRoot, { ...manifest,
+    requested_turns: 1, cached_turns: 1, coverage: 1, fill_status: "complete",
+    window_offset: 0, window_limit: 1, expected_turns: 1,
+    expected_key_set_sha256: closure.keySetSha256,
+    content_closure_sha256: closure.contentClosureSha256
+  });
+  return cacheKey;
 }
 
 export async function providerPartitionShardFixture(input: {

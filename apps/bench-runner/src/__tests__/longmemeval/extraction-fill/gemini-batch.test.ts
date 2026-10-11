@@ -22,7 +22,7 @@ import {
   buildOfficialApiExtractionRequest,
   buildOfficialApiSourceCorpus,
   buildSourceSemanticRequest, SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT,
-  stringifyOfficialApiExtractionRequest
+  stringifyOfficialApiExtractionRequest, sourceSemanticResponseJsonSchema
 } from "@do-soul/alaya-soul";
 import { prepareSourceSemanticRequestLine } from "../../../runs/extraction/request-artifact.js";
 import { receiveSourceSemanticBatchLine } from "../../../runs/extraction/fill/batch/source-semantic-interpretation.js";
@@ -224,6 +224,7 @@ describe("durable Gemini Batch HTTP extraction", () => {
     expect(batchDigest(uploads[0]!)).toBe(submitted.jobs[0]!.inputSha256);
     const wire = JSON.parse(uploads[0]!.trim());
     expect(wire.request.contents[0].parts[0].text).toBe(JSON.stringify({ contract: "source-semantic-generation-view-v1",
+      response_schema: sourceSemanticResponseJsonSchema(buildSourceSemanticRequest(proposal)),
       source_request: { source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
         attribution_context: { contract: "utterance-attribution-v1", status: "unknown" },
         source_assertions: [{ assertion_id: 1, text: "User: I completed alpha.", source_role: "user" }] } }));

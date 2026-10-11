@@ -31,10 +31,10 @@ import {
   expectFirstExtractionShardModel as expectFirstShardModel,
   EXTRACTION_FILL_VARIANT as VARIANT,
   groundedExtractionResult,
-  providerBackedExtractionResult,
   registerExtractionFillHooks
 } from "./fixture.js";
 import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
+import { fixtureAttemptAuthority } from "../extraction/extraction-cache-test-fixture.js";
 
 // @anchor extraction-fill-contract: Layer 1 daemon-free cache fill. Drives a
 // stub extractor (no live network) over a tiny fixture dataset and asserts
@@ -80,12 +80,14 @@ describe("runExtractionFill authority", () => {
       groundedExtractionResult(input)
     );
     let interrupted = false;
+    const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
     await expect(runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
+      authorityReceiptPath,
       extractorFactory: () => ({ extract }),
       log: (message) => {
         if (!interrupted && message.includes("1/2")) {
@@ -216,7 +218,8 @@ describe("runExtractionFill live-write identity", () => {
         providerUrl: "https://provider-b.invalid/v1",
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -234,7 +237,8 @@ describe("runExtractionFill live-write identity", () => {
         providerUrl: "https://provider.invalid/v1",
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -277,7 +281,8 @@ describe("runExtractionFill delegate mutation", () => {
         providerUrl: "https://fixture-provider.invalid/v1",
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -321,7 +326,8 @@ describe("runExtractionFill delegate mutation", () => {
         providerUrl: "https://fixture-provider.invalid/v1",
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "gpt-5.4-mini", requestProfile: "provider-default-v1" })
     });
     await expect(liveWriter.extract({
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
@@ -361,6 +367,7 @@ describe("runExtractionFill finalization", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => {
           writeFileSync(
@@ -390,6 +397,7 @@ describe("runExtractionFill finalization", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => {
           writeExtractionCacheManifest(cacheRoot, {

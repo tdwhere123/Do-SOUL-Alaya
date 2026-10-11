@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { KarmaEvent } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteKarmaEventRepo } from "../../../repos/signal/karma-event-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -37,7 +38,7 @@ describe("SqliteKarmaEventRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
   });
 
   it("exposes the karma_events.run_id column", async () => {
@@ -47,7 +48,7 @@ describe("SqliteKarmaEventRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
 
     const columns = database.connection
       .prepare("PRAGMA table_info(karma_events)")

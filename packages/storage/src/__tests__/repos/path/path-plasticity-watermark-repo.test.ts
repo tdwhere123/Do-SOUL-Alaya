@@ -3,6 +3,7 @@ import { WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase, type StorageDatabase } from "../../../sqlite/db.js";
 import { SqlitePathPlasticityWatermarkRepo } from "../../../repos/path/path-plasticity-watermark-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -31,7 +32,7 @@ describe("SqlitePathPlasticityWatermarkRepo", () => {
     const migration = database.connection
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
 
     expect(repo.findByWorkspaceId("workspace-1")).toBeNull();
     const created = repo.upsert({

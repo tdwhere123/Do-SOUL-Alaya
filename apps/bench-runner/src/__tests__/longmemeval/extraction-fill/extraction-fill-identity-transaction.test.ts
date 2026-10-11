@@ -15,7 +15,7 @@ import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestio
 import {
   buildGroundedInterpretationResponse,
   groundedExtractionResult,
-  providerBackedExtractionResult
+  providerBackedResponseResult
 } from "./fixture.js";
 import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
@@ -81,12 +81,14 @@ describe("extraction-fill identity transaction", () => {
 
   it("checks pinned identity again after workers finish and before finalization", async () => {
     await writeDataset([question()]);
+    const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
     const run = runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
+      authorityReceiptPath,
       extractorFactory: () => ({
         extract: async (input) => groundedExtractionResult(input)
       }),
@@ -101,6 +103,7 @@ describe("extraction-fill identity transaction", () => {
 
   it("keeps the lease until all workers settle after a fatal invariant", async () => {
     await writeDataset([question()]);
+    const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
     let releaseBlocked!: () => void;
     let blockedStarted!: () => void;
     const blocked = new Promise<void>((resolve) => { releaseBlocked = resolve; });
@@ -113,6 +116,7 @@ describe("extraction-fill identity transaction", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 2,
+      authorityReceiptPath,
       extractorFactory: () => ({
         extract: async (input) => {
           call++;
@@ -123,7 +127,7 @@ describe("extraction-fill identity transaction", () => {
             blockedStarted();
             await blocked;
           }
-          return providerBackedExtractionResult(
+          return providerBackedResponseResult(input,
             buildGroundedInterpretationResponse(input.userPrompt)
           );
         }

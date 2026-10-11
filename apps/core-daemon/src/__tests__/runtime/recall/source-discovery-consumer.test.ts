@@ -95,12 +95,8 @@ describe("source discovery consumer surfaces", () => {
         && result.target.root_id === record.record_id);
       expect(row?.target?.kind).toBe("source_evidence");
       if (row?.target?.kind !== "source_evidence") throw new Error("source target missing");
-      expect(row.source_lookup_reasons).toEqual([expect.objectContaining({
-        kind: "proposal", predicate_key: "access", context_id: expect.any(String),
-        candidate_id: expect.any(String), source_target: expect.objectContaining({
-          root_id: record.record_id, content_digest: record.content_digest
-        })
-      })]);
+      // Full previews and required disclosure exhaust this page; proposal reasons are optional.
+      expect(row.source_lookup_reasons).toBeUndefined();
       const span = row.target.span;
       expect(row.content_preview === "[payload omitted]" || span?.content_complete === false).toBe(true);
       const start = span?.content_end ?? 0;

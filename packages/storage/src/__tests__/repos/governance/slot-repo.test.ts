@@ -10,6 +10,7 @@ import {
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteSlotRepo } from "../../../repos/governance/slot-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const SLOT_ID_1 = "11111111-1111-4111-8111-111111111111";
 const SLOT_ID_2 = "22222222-2222-4222-8222-222222222222";
@@ -54,7 +55,7 @@ describe("SqliteSlotRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
   });
 
   it("creates and finds a slot by id", async () => {

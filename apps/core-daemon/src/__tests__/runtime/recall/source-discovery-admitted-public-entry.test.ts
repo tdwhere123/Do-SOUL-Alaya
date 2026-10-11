@@ -1,10 +1,10 @@
 import { bindNativeControl } from "./source-discovery-native-control.js";
-import { aggregateAdmittedUtility, runAdmittedPublicMatrix } from "./source-discovery-admitted-matrix.js";
+import { admittedMatrixCases, aggregateAdmittedUtility, runAdmittedPublicMatrix } from "./source-discovery-admitted-matrix.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_EXTRACTION_SOURCE_PACKING } from "@do-soul/alaya-protocol";
+import { DEFAULT_EXTRACTION_SOURCE_PACKING, sourceRecallTarget } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
   buildOfficialApiSourceCorpus,
@@ -407,40 +407,74 @@ describe("admitted public consumption entry", () => {
       ...matrix.rows.slice(1)], matrix.selected.length, false).accepted).toBe(false);
     expect(matrix.rows.filter((row) => row.view !== "memory_only").every((row) =>
       typeof row.score?.primary_native_visits === "number")).toBe(true);
+    const sourceOnly = matrix.rows.filter((row) => row.view === "source_only" && row.lookup === "proposal");
+    expect(sourceOnly).toHaveLength(12);
+    expect(sourceOnly.every((row) => row.score?.first_complete_step === 0 &&
+      row.score.consumption_attribution === "hit")).toBe(true);
+    expect(matrix.utility).toMatchObject({ proposal_exposure_observed: false,
+      accepted: false, causal_benefit: "not_established" });
+    expect(fetches).toBe(0);
+  }, 120_000);
+
+  it("requires a witnessed paired benefit and complete controls in the utility evaluator", () => {
+    // These declared rows test evaluator algebra independently of measured public delivery.
+    const selected = admittedMatrixCases();
+    const rows: Parameters<typeof aggregateAdmittedUtility>[0] = selected.map((identity, index) => ({
+      ...identity, state: "completed", source_id: "evaluator-source",
+      score: {
+        first_page_includes_intended: true, first_page_position: 1, first_page_omission: false,
+        first_page_omission_attribution: "included", first_complete_step: 0,
+        primary_native_visits: 3,
+        first_complete_costs: { cumulative_native_visits: 3, cumulative_native_bytes: 100,
+          retained_bytes_current: 100, membership_page: 1, payload_expansions: 0 },
+        content: { has_full_intended: true, has_all_required_phrases: true, has_forbidden_distractor: false },
+        consumption_attribution: "hit"
+      },
+      proposal_exposure: index === 0 ? { status: "observed", witnesses: [{
+        step_index: 0, query_id: "evaluator-query", interpretation_id: "evaluator-interpretation",
+        snapshot_id: "evaluator-snapshot", request_key: null, assertion_id: 1, artifact_key: "evaluator-source",
+        reason: { kind: "proposal", predicate_key: "access", arguments: [], qualifiers: [],
+          candidate_id: "evaluator-candidate", context_id: "evaluator-context",
+          source_target: sourceRecallTarget({ workspace_id: WS, root_kind: "source_record",
+            root_id: "evaluator-source", source_version: "v1", content_digest: `sha256:${"a".repeat(64)}`,
+            evidence_object_id: null }) }
+      }] } : { status: "not_observed", witnesses: [] }
+    }));
+    const matrix = { selected, rows,
+      no_hint_controls: rows.filter((row) => row.lookup === "proposal" && row.view !== "memory_only") };
     const witnessed = matrix.rows.find((row) => row.proposal_exposure?.status === "observed");
     expect(witnessed).toBeDefined();
-    // Deliberate counters isolate the evaluator rule; these are not measured performance claims.
     const samePair = (row: typeof matrix.rows[number]) => row.cell === witnessed!.cell &&
       row.group === witnessed!.group && row.view === witnessed!.view && row.enumeration === witnessed!.enumeration;
-    const measuredRows = matrix.rows.map((row) => samePair(row)
+    const evaluatorRows = matrix.rows.map((row) => samePair(row)
       ? { ...row, score: { ...row.score!, primary_native_visits: row.lookup === "proposal" ? 1 : 2 } } : row);
     const controls = matrix.no_hint_controls.map((row) => samePair(row)
       ? { ...row, score: { ...row.score!, primary_native_visits: 3 } } : row);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, controls).accepted).toBe(true);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false).accepted).toBe(false);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, controls.slice(1)).accepted).toBe(false);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false,
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false, controls).accepted).toBe(true);
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false, controls.slice(1)).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false,
       [controls[1]!, ...controls.slice(1)]).accepted).toBe(false);
     const foreignControl = controls.map((row, index) => index === 0 ? { ...row, source_id: "foreign" } : row);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, foreignControl).no_hint_controls_complete).toBe(false);
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false, foreignControl).no_hint_controls_complete).toBe(false);
     const incompleteControl = controls.map((row, index) => index === 0
       ? { ...row, score: { ...row.score!, first_complete_step: null } } : row);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, incompleteControl).accepted).toBe(false);
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, true, controls).causal_benefit).toBe("not_established");
-    const foreignText = measuredRows.map((row) => row.lookup === "source_text" && samePair(row)
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false, incompleteControl).accepted).toBe(false);
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, true, controls).causal_benefit).toBe("not_established");
+    const foreignText = evaluatorRows.map((row) => row.lookup === "source_text" && samePair(row)
       ? { ...row, source_id: "foreign" } : row);
     expect(aggregateAdmittedUtility(foreignText, matrix.selected.length, false, controls).accepted).toBe(false);
     const noGain = controls.map((row) => ({ ...row, score: { ...row.score!, primary_native_visits: 0 } }));
-    expect(aggregateAdmittedUtility(measuredRows, matrix.selected.length, false, noGain).accepted).toBe(false);
-    const unobserved = measuredRows.map((row) => ({ ...row, proposal_exposure: undefined }));
+    expect(aggregateAdmittedUtility(evaluatorRows, matrix.selected.length, false, noGain).accepted).toBe(false);
+    const unobserved = evaluatorRows.map((row) => ({ ...row, proposal_exposure: undefined }));
     expect(aggregateAdmittedUtility(unobserved, matrix.selected.length, false, controls).accepted).toBe(false);
-    const splitGains = measuredRows.map((row) => row.lookup === "source_text" && samePair(row)
+    const splitGains = evaluatorRows.map((row) => row.lookup === "source_text" && samePair(row)
       ? { ...row, score: { ...row.score!, primary_native_visits: 0 } } : row);
     const onlyOneNetGain = controls.map((row) => samePair(row) ? row
       : { ...row, score: { ...row.score!, primary_native_visits: 0 } });
     expect(aggregateAdmittedUtility(splitGains, matrix.selected.length, false, onlyOneNetGain).accepted).toBe(false);
     expect(fetches).toBe(0);
-  }, 120_000);
+  });
 });
 
 function officialCorpus(text: string): string {

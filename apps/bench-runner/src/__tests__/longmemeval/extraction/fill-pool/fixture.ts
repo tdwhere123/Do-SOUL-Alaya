@@ -5,6 +5,7 @@ import {
 import { newFillStats } from "../../../../runs/extraction/fill/fill-stats.js";
 import {
   providerBackedExtractionResult,
+  fixtureAttemptAuthority,
   TEST_EXTRACTION_PROVIDER_URL
 } from "../extraction-cache-test-fixture.js";
 
@@ -65,7 +66,8 @@ export function cachingExtractor(
       requestProfile: "provider-default-v1"
     },
     cacheRoot,
-    stats
+    stats,
+    ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" })
   });
 }
 

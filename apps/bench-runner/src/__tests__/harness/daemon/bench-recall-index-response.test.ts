@@ -125,11 +125,21 @@ describe("bench conditional field index response", () => {
     expect(rows[0]?.evidence_pointers).toEqual(["source-capsule"]);
     expect(rows[0]?.staged_warnings).toMatchObject([{ target_object_id: "first", kind: "evidence_missing" }]);
     expect(result.index.entries[0]?.explanation_ids).toEqual([]);
+    const requiredMetadataBytes = Buffer.byteLength(JSON.stringify({
+      evidencePointers: rows[0]!.evidence_pointers, stagedWarnings: rows[0]!.staged_warnings
+    }));
     const tight = { ...policy, fine_assessment: { ...policy.fine_assessment,
-      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: 20 } } };
+      budgets: { ...policy.fine_assessment.budgets, max_total_tokens: requiredMetadataBytes } } };
     const tightRows = encodeBenchRecallResults(result, tight);
     expect(tightRows.map((row) => row.object_id)).toEqual(["first", "second"]);
     expect(tightRows.every((row) => row.content_preview === "[payload omitted]")).toBe(true);
+    expect(tightRows[0]?.evidence_pointers).toEqual(rows[0]!.evidence_pointers);
+    expect(tightRows[0]?.staged_warnings).toEqual(rows[0]!.staged_warnings);
+    const insufficient = { ...tight, fine_assessment: { ...tight.fine_assessment,
+      budgets: { ...tight.fine_assessment.budgets, max_total_tokens: requiredMetadataBytes - 1 } } };
+    const omitted = encodeBenchRecallResults(result, insufficient);
+    expect(omitted).toEqual([]);
+    expect(frameEncodedIndex(result.index, omitted).completeness.payload).toBe("omitted");
   });
 
   it.each([undefined, {}, { ...fixture().index, snapshot_id: "unbound" }])(

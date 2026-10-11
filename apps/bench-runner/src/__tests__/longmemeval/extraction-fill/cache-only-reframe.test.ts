@@ -25,6 +25,7 @@ import {
   EXTRACTION_FILL_VARIANT,
   registerExtractionFillHooks
 } from "./fixture.js";
+import { authorizedHttpExtractor, writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 let cacheRoot: string;
 let dataDir: string;
@@ -92,13 +93,15 @@ describe("cache-only extraction window reframing", () => {
 });
 
 async function seedFirstQuestion(): Promise<void> {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }, { limit: 1 });
   await runExtractionFill({
     variant: EXTRACTION_FILL_VARIANT,
     limit: 1,
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
-    extractorFactory: () => ({ extract: async () => ({ rawJson: '{"interpretations":[]}' }) }),
+    authorityReceiptPath,
+    extractorFactory: authorizedHttpExtractor({ response: () => '{"interpretations":[]}' }).factory,
     log: () => undefined
   });
 }

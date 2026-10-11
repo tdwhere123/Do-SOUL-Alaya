@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { buildOfficialApiExtractionRequest, stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
@@ -24,14 +24,15 @@ import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
 } from "../../../runs/compile-seed.js";
-import {
-  writeExtractionCacheTestManifest
-} from "../../longmemeval/extraction/extraction-cache-test-fixture.js";
+import { writeCompleteProviderCacheFixture } from "../../longmemeval/extraction/authority/provider-shard-fixture.js";
+import { buildGroundedInterpretationResponse } from "../../longmemeval/extraction-fill/fixture.js";
 import { withOpenSemanticFactorGraph } from
   "../../longmemeval/compile-seed/compile-seed-fixture.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
+const SOURCE_TURN = "I would like to spend three days in Kyoto. I prefer low-impact morning workouts.";
+const SOURCE_REQUEST = stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(SOURCE_TURN, []));
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -260,11 +261,13 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       };
       const cacheRoot = await mkdtemp(join(tmpdir(), "harness-freeform-cache-"));
       tmpRoots.push(cacheRoot);
-      writeExtractionCacheTestManifest({
+      await writeCompleteProviderCacheFixture({
         cacheRoot,
+        label: "historical freeform source", userPrompt: SOURCE_REQUEST,
+        rawJson: buildGroundedInterpretationResponse(SOURCE_REQUEST),
         model: credentialledConfig.model,
         providerUrl: credentialledConfig.providerUrl,
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+        requestProfile: credentialledConfig.requestProfile
       });
 
       // A compile()-shaped envelope: signal_kind potential_claim, a free-form
@@ -301,7 +304,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     const runner = createCompileSeedRunner({
         config: credentialledConfig,
         cacheRoot,
-        allowLiveExtraction: true,
+        requiredTurnContents: [SOURCE_TURN], requiredQuestionWindow: { offset: 0, limit: 1 },
         extractorFactory: () => ({
           extract: async () => { throw new Error("historical replay must not call the live extractor"); }
         })
@@ -368,11 +371,13 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
       const cacheRoot = await mkdtemp(join(tmpdir(), "harness-tokenecon-cache-"));
       tmpRoots.push(cacheRoot);
-      writeExtractionCacheTestManifest({
+      await writeCompleteProviderCacheFixture({
         cacheRoot,
+        label: "historical token economy source", userPrompt: SOURCE_REQUEST,
+        rawJson: buildGroundedInterpretationResponse(SOURCE_REQUEST),
         model: "test-model",
         providerUrl: "https://example.test/v1",
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+        requestProfile: "provider-default-v1"
       });
       installHistoricalSignalReplay(JSON.stringify({
               signals: [
@@ -410,7 +415,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           apiKey: "test-key"
         },
         cacheRoot,
-        allowLiveExtraction: true,
+        requiredTurnContents: [SOURCE_TURN], requiredQuestionWindow: { offset: 0, limit: 1 },
         extractorFactory: () => ({
           extract: async () => { throw new Error("historical replay must not call the live extractor"); }
         })

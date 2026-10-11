@@ -28,6 +28,7 @@ import { hydrateUtf8Chunk } from "../../../memory/evidence-create/source-utf8-hy
 import { sourceRowEligible } from "../../../recall/conditional-field/observers/observation-admission.js";
 import type { ObserveConditionalFieldInput } from "../../../recall/conditional-field/observers/observe.js";
 import { encodeRecallResult } from "../../../recall/recall-service.js";
+import { projectSourceDisclosure } from "../../../recall/runtime/source-disclosure.js";
 import {
   compileConditionalFieldQuery,
   interpretationIdentity,
@@ -478,6 +479,10 @@ function goldFixture(targets: readonly RecallTargetRef[]) {
     ...(entry.object_id === undefined ? {} : { object_id: entry.object_id }),
     object_kind: entry.target.kind === "source_evidence" ? "source_evidence" : "memory_entry",
     target: entry.target, relevance_score: 0.85, content_preview: "preview", evidence_pointers: [],
+    ...(entry.target.kind === "source_evidence" ? { source_disclosure: projectSourceDisclosure({
+      material_kind: entry.target.root_kind === "source_record" ? "original_body" : "retained_excerpt",
+      evaluated_as_of: MEASURE_NOW
+    }) } : {}),
     selection_reason: "observed association", hypothesis_id: entry.hypothesis_id,
     output_binding: entry.output_binding, program_state: entry.program_state, time_state: entry.time_state,
     source_channels: ["conditional_field"], score_factors: { activation: 0.85, relevance: 0.85 },

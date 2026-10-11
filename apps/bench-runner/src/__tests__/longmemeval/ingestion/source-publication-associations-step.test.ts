@@ -116,8 +116,8 @@ it("joins two native Step owners for a later original question and retains unsup
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
   const target = question("target", ["alpha", "beta"]);
-  const longSession = [{ role: "user" as const, content: Array(32).fill("I completed alpha.").join(" ") },
-    { role: "assistant" as const, content: [...Array(32).fill("Acknowledged."), "再次确认。"].join(" ") }];
+  const longSession = [{ role: "user" as const, content: Array(64).fill("I completed alpha.").join(" ") },
+    { role: "assistant" as const, content: [...Array(64).fill("Acknowledged."), "再次确认。"].join(" ") }];
   await writeDataset([question("alpha-owner", ["alpha"]), question("beta-owner", ["beta"]), {
     ...target, haystack_session_ids: [...target.haystack_session_ids, "long-session"],
     haystack_dates: [...target.haystack_dates, "2023-09-15"],
@@ -148,7 +148,7 @@ it("joins two native Step owners for a later original question and retains unsup
   const bindings = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${out}.associations.json`, "utf8")));
   expect(bindings).toHaveLength(3);
   expect(bindings.find((binding) => "status" in binding)).toMatchObject({ source_id: "longmemeval_s:target-s2-r0",
-    status: "unsupported_source", assertion_count: 65, provider_attempts: 0 });
+    status: "unsupported_source", assertion_count: 129, provider_attempts: 0 });
   const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot,
     questionWindow: population.questionWindow });
   const freezeRoot = join(cacheRoot, "step-native-freeze");

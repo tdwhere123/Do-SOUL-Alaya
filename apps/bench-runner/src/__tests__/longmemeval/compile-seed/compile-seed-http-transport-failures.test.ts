@@ -311,12 +311,12 @@ function jsonTextResponse(body: string): Response {
 }
 
 function rejectingBodyResponse(): Response {
-  return {
-    ok: true,
+  return new Response(new ReadableStream<Uint8Array>({
+    pull(controller) { controller.error(new Error("secret body-read failure")); }
+  }), {
     status: 200,
-    headers: new Headers({ "content-type": "application/json" }),
-    text: vi.fn().mockRejectedValue(new Error("secret body-read failure"))
-  } as unknown as Response;
+    headers: { "content-type": "application/json" }
+  });
 }
 
 async function httpFailureFingerprint(errorBody: unknown): Promise<BenchTransportFailureAttempt> {

@@ -31,7 +31,6 @@ import {
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../../harness/seeding/seed-errors.js";
 import {
-  providerBackedExtractionResult,
   providerBackedResponseResult,
   fixtureAttemptAuthority,
   TEST_EXTRACTION_PROVIDER_URL,
@@ -83,6 +82,7 @@ describe("createCachingSignalExtractor provider execution", () => {
         requestProfile: "provider-default-v1"
       },
       cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" }),
       stats
     });
 
@@ -103,8 +103,9 @@ describe("createCachingSignalExtractor provider execution", () => {
   it("rejects a provider-backed delegate result without completion authority", async () => {
     writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({
-        rawJson: interpretationsEnvelope([{ matched: "I have a dog." }])
+      extract: vi.fn(async (input) => ({
+        ...await providerBackedResponseResult(input, interpretationsEnvelope([{ matched: "I have a dog." }])),
+        responseMetadata: undefined
       }))
     };
     const extractor = createCachingSignalExtractor({
@@ -115,14 +116,15 @@ describe("createCachingSignalExtractor provider execution", () => {
         providerUrl: TEST_EXTRACTION_PROVIDER_URL,
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1" })
     });
 
     await expect(extractor.extract({
       systemPrompt: "sys",
       userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", [])
     })).rejects.toThrow("failed to persist extraction cache shard");
-    expect(readdirSync(cacheRoot)).toEqual(["manifest.json"]);
+    expect(readdirSync(cacheRoot).filter((entry) => /^[0-9a-f]{2}$/u.test(entry))).toEqual([]);
   });
 
   it("rejects deterministic empty extraction when provider backing is required", async () => {
@@ -246,8 +248,8 @@ describe("createCachingSignalExtractor identity", () => {
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce(providerBackedExtractionResult(firstRaw))
-        .mockResolvedValueOnce(providerBackedExtractionResult(secondRaw))
+        .mockImplementationOnce((input) => providerBackedResponseResult(input, firstRaw))
+        .mockImplementationOnce((input) => providerBackedResponseResult(input, secondRaw))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -257,7 +259,8 @@ describe("createCachingSignalExtractor identity", () => {
         providerUrl: TEST_EXTRACTION_PROVIDER_URL,
         requestProfile: "provider-default-v1"
       },
-      cacheRoot
+      cacheRoot,
+      ...fixtureAttemptAuthority({ cacheRoot, model: "test-model", requestProfile: "provider-default-v1", startingMissing: 2 })
     });
 
     const first = await extractor.extract({ systemPrompt: "s", userPrompt: canonicalExtractionUserPrompt("I have a dog."), sourceCorpus: buildOfficialApiSourceCorpus("I have a dog.", []) });

@@ -13,6 +13,7 @@ import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteClaimFormRepo } from "../../../repos/governance/claim-form-repo.js";
 import { SqliteConflictMatrixRepo } from "../../../repos/governance/conflict-matrix-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const WORKSPACE_ID = "workspace-1";
 const EDGE_ID_1 = "11111111-1111-4111-8111-111111111111";
@@ -79,7 +80,7 @@ describe("SqliteConflictMatrixRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
   });
 
   it("creates and finds an edge by id", async () => {

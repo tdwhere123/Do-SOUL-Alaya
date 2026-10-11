@@ -16,6 +16,10 @@ function checkout(): string {
   const bench = join(root, "apps/bench-runner");
   mkdirSync(bench, { recursive: true });
   cpSync(join(benchRoot, "dist"), join(bench, "dist"), { recursive: true });
+  const scripts = join(bench, "scripts/longmemeval-replay");
+  mkdirSync(scripts, { recursive: true });
+  cpSync(join(benchRoot, "scripts/longmemeval-replay/measurement-status.mjs"),
+    join(scripts, "measurement-status.mjs"));
   symlinkSync(join(benchRoot, "node_modules"), join(bench, "node_modules"), "dir");
   writeFileSync(join(bench, "package.json"), '{"type":"module"}\n');
   writeFileSync(join(root, ".gitignore"), "apps/bench-runner/dist/\napps/bench-runner/node_modules\n");

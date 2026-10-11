@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { BootstrappingRecord } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteBootstrappingRecordRepo, SqliteWorkspaceRepo } from "../../../index.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -26,7 +27,7 @@ describe("SqliteBootstrappingRecordRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(appliedVersion).toEqual({ version: 18 });
+    expect(appliedVersion).toEqual({ version: currentSchemaVersion() });
   });
 
   it("returns null when a workspace has no bootstrapping record", async () => {

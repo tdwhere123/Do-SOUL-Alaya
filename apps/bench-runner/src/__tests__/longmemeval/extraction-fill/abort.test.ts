@@ -16,7 +16,7 @@ import type {
 import type {
   LongMemEvalQuestion
 } from "../../../datasets/longmemeval/ingestion/dataset.js";
-import { providerBackedExtractionResult, providerBackedResponseResult,
+import { providerBackedResponseResult,
   TEST_EXTRACTION_PROVIDER_URL } from
   "../extraction/extraction-cache-test-fixture.js";
 import { writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
@@ -104,6 +104,7 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
 });
 
 it("stops peer workers on the first terminal task failure and releases the lease", async () => {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
   const peerStarted = deferred();
   const logs: string[] = [];
   let calls = 0;
@@ -129,6 +130,7 @@ it("stops peer workers on the first terminal task failure and releases the lease
     dataDir,
     pinnedMetaRoot,
     concurrency: 2,
+    authorityReceiptPath,
     extractorFactory: () => ({ extract }),
     log: (message) => logs.push(message)
   });
@@ -146,6 +148,7 @@ it("stops peer workers on the first terminal task failure and releases the lease
 });
 
 it("stops on a failing extraction without finalizing the pinned manifest", async () => {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
   const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => {
     throw new Error("simulated provider 500");
   });
@@ -156,6 +159,7 @@ it("stops on a failing extraction without finalizing the pinned manifest", async
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({ extract }),
+    authorityReceiptPath,
     log: () => undefined
   });
 
@@ -173,6 +177,7 @@ it("stops on a failing extraction without finalizing the pinned manifest", async
 });
 
 it("stops without caching a semantically invalid extraction payload", async () => {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
   const running = runExtractionFill({
     variant: VARIANT,
     cacheRoot,
@@ -180,8 +185,9 @@ it("stops without caching a semantically invalid extraction payload", async () =
     pinnedMetaRoot,
     concurrency: 1,
     extractorFactory: () => ({
-      extract: async () => providerBackedExtractionResult('{"not_signals":[]}')
+      extract: async (input) => providerBackedResponseResult(input, '{"not_signals":[]}')
     }),
+    authorityReceiptPath,
     log: () => undefined
   });
 

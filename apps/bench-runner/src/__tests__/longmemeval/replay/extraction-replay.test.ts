@@ -24,6 +24,7 @@ import {
 } from "../../../runs/extraction/cache-audit/replay.js";
 import { withOpenSemanticFactorGraph } from
   "../compile-seed/compile-seed-fixture.js";
+import { writeSettledProviderShardFixture } from "../extraction/authority/provider-shard-fixture.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
@@ -34,10 +35,9 @@ afterEach(() => {
 });
 
 describe("extraction cache replay occurrence accounting", () => {
-  it("replays each occurrence with its explicit source time even when the raw key repeats", () => {
+  it("replays each occurrence with its explicit source time even when the raw key repeats", async () => {
     const root = cacheRoot();
-    const key = "a".repeat(64);
-    writeShard(root, key, validRaw());
+    const key = await writeSettledProviderShardFixture({ cacheRoot: root, label: "a", rawJson: validRaw() });
     const seen: { source: string; created: string; signalId: string }[] = [];
     const result = replayExtractionOccurrences({
       cacheRoot: root,
@@ -117,12 +117,10 @@ describe("extraction cache replay occurrence accounting", () => {
     expect(result.closure).toMatchObject({ occurrenceCount: 1, accountedOccurrences: 1, elementCount: 0, invalid: 0 });
   });
 
-  it("binds each audited entry to its source shard and defers quarantined shards", () => {
+  it("binds each audited entry to its source shard and defers quarantined shards", async () => {
     const root = cacheRoot();
-    const first = "1".repeat(64);
-    const second = "2".repeat(64);
-    writeShard(root, first, validRaw());
-    writeShard(root, second, validRaw());
+    const first = await writeSettledProviderShardFixture({ cacheRoot: root, label: "1", rawJson: validRaw() });
+    const second = await writeSettledProviderShardFixture({ cacheRoot: root, label: "2", rawJson: validRaw() });
     const audited = replayExtractionOccurrences({
       cacheRoot: root, model, requestProfile,
       occurrences: [multiShardOccurrence("q-s0-r0", [first, second])],
@@ -155,14 +153,13 @@ describe("extraction cache replay occurrence accounting", () => {
 });
 
 describe("extraction cache replay rejection", () => {
-  it("rejects graphless raw entries under the current signal contract", () => {
+  it("rejects graphless raw entries under the current signal contract", async () => {
     const root = cacheRoot();
-    const key = "d".repeat(64);
-    writeShard(root, key, JSON.stringify({ signals: [{
+    const key = await writeSettledProviderShardFixture({ cacheRoot: root, label: "d", rawJson: JSON.stringify({ signals: [{
       object_kind: "fact",
       confidence: 0.8,
       matched_text: "source fact"
-    }] }));
+    }] }) });
 
     const result = replayExtractionOccurrences({
       cacheRoot: root,
@@ -183,10 +180,9 @@ describe("extraction cache replay rejection", () => {
     });
   });
 
-  it("commits graph projection failure for a later rejected candidate", () => {
+  it("commits graph projection failure for a later rejected candidate", async () => {
     const root = cacheRoot();
-    const key = "e".repeat(64);
-    writeShard(root, key, validRaw());
+    const key = await writeSettledProviderShardFixture({ cacheRoot: root, label: "e", rawJson: validRaw() });
     const result = replayExtractionOccurrences({
       cacheRoot: root,
       model,
@@ -213,10 +209,9 @@ describe("extraction cache replay rejection", () => {
     });
   });
 
-  it("fails closed when an admitted entry omits its formed signal", () => {
+  it("fails closed when an admitted entry omits its formed signal", async () => {
     const root = cacheRoot();
-    const key = "f".repeat(64);
-    writeShard(root, key, validRaw());
+    const key = await writeSettledProviderShardFixture({ cacheRoot: root, label: "f", rawJson: validRaw() });
 
     expect(() => replayExtractionOccurrences({
       cacheRoot: root,
@@ -260,10 +255,9 @@ describe("extraction cache replay rejection", () => {
 });
 
 describe("extraction cache replay content binding", () => {
-  it("commits the final grounded assertion and formed content", () => {
+  it("commits the final grounded assertion and formed content", async () => {
     const root = cacheRoot();
-    const key = "d".repeat(64);
-    writeShard(root, key, validRaw());
+    const key = await writeSettledProviderShardFixture({ cacheRoot: root, label: "d", rawJson: validRaw() });
     const replay = (
       assertion: string,
       fullTurnContent: string,
@@ -324,10 +318,9 @@ describe("extraction cache replay content binding", () => {
 });
 
 describe("extraction cache replay formation closure", () => {
-  it("closes every admitted signal through the production fact-frame formation states", () => {
+  it("closes every admitted signal through the production fact-frame formation states", async () => {
     const root = cacheRoot();
-    const key = "e".repeat(64);
-    writeShard(root, key, validRaw());
+    const key = await writeSettledProviderShardFixture({ cacheRoot: root, label: "e", rawJson: validRaw() });
     const result = replayExtractionOccurrences({
       cacheRoot: root,
       model,

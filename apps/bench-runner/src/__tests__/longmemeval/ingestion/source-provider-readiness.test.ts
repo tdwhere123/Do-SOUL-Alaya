@@ -46,7 +46,7 @@ async function sourceFixture() {
   const inspection = await inspectExtractionAuthority({ ...options, action: "sample", revision: readCurrentExtractionAuthorityRevision() });
   const preflight = await preflightSourceSemanticInteractive({ ...options, preflightKeys: inspection.missingKeys, preflightOutputTokenCap: 8192 });
   expect(preflight.ready_requests).toHaveLength(1);
-  expect(preflight.ready_requests[0]!.key).toBe("20646fe7f59ee28ca82179e18ac4f329a36c4f3c0bfc7a64a48dd7b271594bd4");
+  expect(preflight.ready_requests[0]!.key).toBe("cc6a7831e6a45f11c67a33e012371388b88a45ed49b787fd2f4b9726e3643682");
   const receipt = createExtractionAuthorityReceipt({ action: "sample", sourcePreflight: preflight, inspection,
     observation: inspection.observation, sampleScope: createExtractionSampleScope(inspection.missingKeys, inspection), maxConcurrency: 1,
     outputTokenCap: { field: "max_tokens", value: 8192 }, diskFloorBytes: 0,

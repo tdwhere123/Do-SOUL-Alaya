@@ -20,7 +20,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { StorageDatabase, initDatabase } from "../../sqlite/db.js";
 import { migrateLegacyPathRelationsToTemporalCandidate } from "../../sqlite/temporal-cutover-gate.js";
-import { applyBaselineSql } from "./apply-baseline.js";
+import { applyBaselineSql, currentSchemaVersion } from "./apply-baseline.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
@@ -145,7 +145,7 @@ describe("memory_entries enum CHECKs", () => {
     databases.add(migrated);
     expect(
       migrated.connection.prepare("SELECT MAX(version) AS version FROM schema_version").get()
-    ).toEqual({ version: 18 });
+    ).toEqual({ version: currentSchemaVersion() });
     const insert = migrated.connection.prepare(`
       INSERT INTO memory_entries (
         object_id, created_at, updated_at, created_by,

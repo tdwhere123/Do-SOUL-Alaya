@@ -80,4 +80,5 @@ it("attributes bounded observation cost while retaining its source-supported inp
     expect(executed.length).toBeLessThan(7);
     expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7].slice(0, executed.length));
   } finally { projected.mockRestore(); observed.mockRestore(); charged.mockRestore(); }
-});
+  // Coverage instruments the full fixture and all charge calls; semantic budgets stay fixed above.
+}, 30_000);

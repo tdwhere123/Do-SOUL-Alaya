@@ -158,6 +158,7 @@ it("preserves every shared-person conjunction binding when condition and corresp
   expect(reversed.qualifier.support).toEqual(forward.qualifier.support);
 }, 90_000);
 
+// Three complete native proof replays need a larger wall-clock allowance under V8 coverage.
 it("keeps all binding witnesses in one occupied root and rejects a forged nonrepresentative sibling", () => {
   const { proof, index: branch, record } = fixture("forum-notebook", "count");
   const { index } = assembleSourceSemanticLibraryIndex({ query_id: branch.query_id, snapshot_id: branch.snapshot_id,
@@ -172,4 +173,4 @@ it("keeps all binding witnesses in one occupied root and rejects a forged nonrep
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record, BUDGET).verified_proofs).toEqual([]);
   const missing = { ...index, explanations: index.explanations!.filter(row => !sibling.explanation_ids.includes(row.derivation_id)) };
   expect(deliveredSourceSemanticLibraryProof(missing, entry, qualifier, [proof], record, BUDGET).proof).toBeUndefined();
-}, 90_000);
+}, 180_000);

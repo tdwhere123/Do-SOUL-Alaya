@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { expect, it, vi } from "vitest";
 import {
-  createCachingSignalExtractor,
   type BenchSignalExtractor
 } from "../../../runs/compile-seed.js";
 import {
@@ -14,11 +13,10 @@ import {
 } from "../../../runs/extraction/fill/fill-pool.js";
 import { newFillStats } from "../../../runs/extraction/fill/fill-stats.js";
 import {
-  providerBackedExtractionResult,
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
-import { buildGroundedInterpretationResponse } from "../extraction-fill/fixture.js";
+import { authorizedHttpExtractor } from "../extraction-fill/authority-runtime/fixture.js";
 import {
   cachingExtractor,
   deferred,
@@ -239,10 +237,10 @@ it("reports recovered 429 pressure when accepting a completed empty result", asy
       requestProfile: "provider-default-v1",
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    const delegate: BenchSignalExtractor = {
-      extract: vi.fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce(retryResult(1))
-    };
+    const delegate = authorizedHttpExtractor({
+      response: () => '{"interpretations":[]}', rateLimitRetries: 1
+    }).factory({ model: "test-model", modelFamily: "test-model",
+      providerUrl: TEST_EXTRACTION_PROVIDER_URL, requestProfile: "provider-default-v1", apiKey: "fixture-key" });
     await runExtractionPool({
       extractor: cachingExtractor(cacheRoot, delegate, stats),
       turns: groundedTurns(),
@@ -274,30 +272,11 @@ it("reports a recovered 429 from the accepted response to adaptive concurrency",
       requestProfile: "provider-default-v1",
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
     });
-    const delegate: BenchSignalExtractor = {
-      extract: vi
-        .fn<BenchSignalExtractor["extract"]>()
-        .mockImplementationOnce(async (input) => providerBackedExtractionResult(
-          buildGroundedInterpretationResponse(input.userPrompt), {
-          extractorMeta: {
-            recoveryKind: "none",
-            retryCount: 1,
-            retryClassification: "success_after_retry",
-            rateLimitRetries: 1
-          }
-        }))
-    };
-    const extractor = createCachingSignalExtractor({
-      delegate,
-      config: {
-        model: "test-model",
-        modelFamily: "test-model",
-        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
-        requestProfile: "provider-default-v1"
-      },
-      cacheRoot,
-      stats
+    const delegate = authorizedHttpExtractor({ rateLimitRetries: 1 }).factory({
+      model: "test-model", modelFamily: "test-model", providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+      requestProfile: "provider-default-v1", apiKey: "fixture-key"
     });
+    const extractor = cachingExtractor(cacheRoot, delegate, stats);
 
     await runExtractionPool({
       extractor,

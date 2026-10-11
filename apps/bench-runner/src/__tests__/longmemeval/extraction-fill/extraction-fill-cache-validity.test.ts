@@ -18,8 +18,9 @@ import type { BenchSignalExtractor } from "../../../runs/compile-seed.js";
 import {
   buildGroundedInterpretationResponse,
   groundedExtractionResult,
-  providerBackedExtractionResult
+  providerBackedResponseResult
 } from "./fixture.js";
+import { authorizedHttpExtractor, writeAuthorizedFixtureReceipt } from "./authority-runtime/fixture.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -48,7 +49,7 @@ afterEach(async () => {
 describe("extraction-fill cache validity", () => {
   it("rejects a non-empty signals array with no valid entries", async () => {
     await writeDataset();
-    await expect(fill(() => providerBackedExtractionResult('{"signals":[42]}')))
+    await expect(fill((input) => providerBackedResponseResult(input, '{"signals":[42]}')))
       .rejects.toMatchObject({
       name: "ExtractionFillTaskError",
       retryClassification: "unknown"
@@ -94,7 +95,7 @@ describe("extraction-fill cache validity", () => {
       }]
     });
     expect(inspectExtractionRawJson(rawJson)).toMatchObject({ rawSignalCount: 2, parsedDraftCount: 1 });
-    await expect(fill(() => providerBackedExtractionResult(rawJson))).rejects.toMatchObject({ name: "ExtractionFillTaskError" });
+    await expect(fill((input) => providerBackedResponseResult(input, rawJson))).rejects.toMatchObject({ name: "ExtractionFillTaskError" });
     expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({ cached_turns: 0, coverage: 0 });
 
   });
@@ -102,11 +103,16 @@ describe("extraction-fill cache validity", () => {
   it("refuses completion for provider responses without an authorized attempt", async () => {
     await writeDataset();
     const delegate = vi.fn<BenchSignalExtractor["extract"]>(
-      async (input) => groundedExtractionResult(input)
+      // Physical response bytes exist, but this delegate never invokes the reservation hook.
+      async (input) => providerBackedResponseResult({ userPrompt: input.userPrompt },
+        buildGroundedInterpretationResponse(input.userPrompt))
     );
 
-    await expect(fill(delegate)).rejects.toThrow(/completion refused.*invalid=2/u);
-    expect(delegate).toHaveBeenCalledTimes(2);
+    await expect(fill(delegate)).rejects.toMatchObject({
+      name: "ExtractionFillTaskError",
+      cause: { code: "CONFLICT", message: "interactive provider request/response witness is missing" }
+    });
+    expect(delegate).toHaveBeenCalledTimes(1);
     expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
       fill_status: "in_progress", cached_turns: 0, coverage: 0
     });
@@ -121,11 +127,9 @@ describe("extraction-fill cache validity", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
       extractorFactory: () => ({
         extract: async (input) => {
-          const turn = JSON.parse(input.userPrompt) as {
-            source_assertions: readonly { assertion_id: number; text: string }[];
-          };
           const key = computeCacheKey(
             "fixture-model",
             "provider-default-v1",
@@ -157,34 +161,30 @@ describe("extraction-fill cache validity", () => {
     await writeDataset();
     let call = 0;
     const logs: string[] = [];
+    const recovered = authorizedHttpExtractor({ rateLimitRetries: 1 });
     const run = runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
-      extractorFactory: () => ({
-        extract: async (input) => {
-          call += 1;
-          if (call === 1) {
-            return providerBackedExtractionResult(buildGroundedInterpretationResponse(input.userPrompt), {
-              extractorMeta: {
-                recoveryKind: "none",
-                retryCount: 1,
-                retryClassification: "success_after_retry",
-                rateLimitRetries: 1
-              }
-            });
+      authorityReceiptPath: await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot }),
+      extractorFactory: (config) => {
+        const transport = recovered.factory(config);
+        return {
+          extract: async (input) => {
+            call += 1;
+            if (call === 1) return transport.extract(input);
+            const error = new Error("provider retries exhausted");
+            (error as { benchRetry?: unknown }).benchRetry = {
+              retryCount: 3,
+              retryClassification: "failure_max_retries",
+              rateLimitRetries: 2
+            };
+            throw error;
           }
-          const error = new Error("provider retries exhausted");
-          (error as { benchRetry?: unknown }).benchRetry = {
-            retryCount: 3,
-            retryClassification: "failure_max_retries",
-            rateLimitRetries: 2
-          };
-          throw error;
-        }
-      }),
+        };
+      },
       log: (message) => logs.push(message)
     });
 
@@ -216,12 +216,14 @@ describe("extraction-fill cache validity", () => {
 });
 
 async function fill(extract: BenchSignalExtractor["extract"]) {
+  const authorityReceiptPath = await writeAuthorizedFixtureReceipt({ cacheRoot, dataDir, pinnedMetaRoot });
   return runExtractionFill({
     variant: VARIANT,
     cacheRoot,
     dataDir,
     pinnedMetaRoot,
     concurrency: 1,
+    authorityReceiptPath,
     extractorFactory: () => ({ extract }),
     log: () => undefined
   });

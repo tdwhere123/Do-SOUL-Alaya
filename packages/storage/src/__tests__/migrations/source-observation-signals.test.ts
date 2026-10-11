@@ -7,7 +7,7 @@ import { CandidateMemorySignalSchema, SOURCE_INTERPRETATION_CONTRACT } from "@do
 import { initDatabase, StorageDatabase } from "../../sqlite/db.js";
 import { SqliteSignalRepo } from "../../repos/signal/signal-repo.js";
 import { migrateLegacyPathRelationsToTemporalCandidate } from "../../sqlite/temporal-cutover-gate.js";
-import { applyBaselineSql, seedWorkspaceRow, insertMemoryEntryRow } from "./apply-baseline.js";
+import { applyBaselineSql, currentSchemaVersion, seedWorkspaceRow, insertMemoryEntryRow } from "./apply-baseline.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
 const roots: string[] = [];
@@ -80,7 +80,7 @@ describe("source observation signal migration", () => {
     expect(database.connection.prepare("SELECT object_id FROM memory_content_fts WHERE memory_content_fts MATCH 'content'").all())
       .toEqual([{ object_id: "old-memory" }]);
     expect(database.connection.pragma("foreign_key_check")).toEqual([]);
-    expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: 18 });
+    expect(database.connection.prepare("SELECT max(version) AS version FROM schema_version").get()).toEqual({ version: currentSchemaVersion() });
     // File-backed upgrade-and-reopen exceeds 5s under coverage remap and on NTFS.
   }, process.platform === "win32" ? 180_000 : 60_000);
 });

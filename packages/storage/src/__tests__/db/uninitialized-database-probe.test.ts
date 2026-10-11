@@ -7,6 +7,7 @@ import { StorageError } from "../../shared/errors.js";
 import { initDatabase, isUninitializedDatabaseFile } from "../../sqlite/db.js";
 import { openSqliteConnection } from "../../sqlite/open-sqlite-connection.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
+import { currentSchemaVersion } from "../migrations/apply-baseline.js";
 
 vi.mock("../../sqlite/open-sqlite-connection.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../sqlite/open-sqlite-connection.js")>();
@@ -102,7 +103,7 @@ describe("initDatabase uninitialized-file probe retry", () => {
     const maxVersion = database.connection.prepare(
       "SELECT MAX(version) AS max_version FROM schema_version"
     ).get() as { readonly max_version: number };
-    expect(maxVersion.max_version).toBe(18);
+    expect(maxVersion.max_version).toBe(currentSchemaVersion());
     expect(mockedOpen.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 });

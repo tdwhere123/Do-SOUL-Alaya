@@ -11,6 +11,7 @@ import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteFileRepo } from "../../../repos/runtime/file-repo.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -53,7 +54,7 @@ describe("SqliteFileRepo", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_files_run_id' LIMIT 1")
       .get() as { readonly name: string } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
     expect(table?.name).toBe("files");
     expect(workspaceIndex?.name).toBe("idx_files_workspace_id");
     expect(runIndex?.name).toBe("idx_files_run_id");

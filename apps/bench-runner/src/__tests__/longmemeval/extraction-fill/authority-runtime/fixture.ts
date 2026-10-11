@@ -22,10 +22,15 @@ import { buildGroundedInterpretationResponse, EXTRACTION_FILL_VARIANT,
 export function authorizedHttpExtractor(input: {
   readonly response?: (userPrompt: string) => string;
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+  readonly rateLimitRetries?: number;
 } = {}) {
   const extract = vi.fn<BenchSignalExtractor["extract"]>();
   const factory = (config: CompileSeedExtractionConfig): BenchSignalExtractor => {
+    let remainingRateLimits = input.rateLimitRetries ?? 0;
     const transport = createGardenHttpExtractor(config, { fetch: vi.fn<typeof fetch>(async (_url, init) => {
+      if (remainingRateLimits-- > 0) {
+        return Response.json({ error: { message: "fixture rate limit" } }, { status: 429 });
+      }
       const body = JSON.parse(String(init?.body)) as { messages: readonly { content: string }[] };
       const prompt = body.messages.at(-1)?.content;
       if (typeof prompt !== "string") throw new Error("fixture transport lost the request prompt");

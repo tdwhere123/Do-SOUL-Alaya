@@ -6,7 +6,7 @@ import {
   migrateEngineBindingApiKeysToCiphertext
 } from "../../repos/control/api-key-cipher.js";
 import { initDatabase } from "../../sqlite/db.js";
-import { applyBaselineSql } from "./apply-baseline.js";
+import { applyBaselineSql, currentSchemaVersion } from "./apply-baseline.js";
 
 const openDbs = new Set<BetterSqlite3.Database>();
 
@@ -76,6 +76,6 @@ describe("engine_bindings.api_key encryption", () => {
       .prepare("SELECT MAX(version) AS max_version FROM schema_version")
       .get() as Readonly<{ readonly max_version: number | null }>;
 
-    expect(version.max_version).toBe(18);
+    expect(version.max_version).toBe(currentSchemaVersion());
   });
 });

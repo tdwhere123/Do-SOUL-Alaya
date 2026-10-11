@@ -257,9 +257,9 @@ describe("conditional-field actual request cost", () => {
     const joinPhases = Object.entries(firstActual.phases)
       .filter(([phase]) => phase !== "adjacency")
       .reduce((sum, [, phase]) => sum + phase.joins, 0);
-    // The fixed relation query compiles with five joins; pending adjacency joins have not run.
-    expect(firstActual.phases.observe.joins).toBe(5);
-    expect(joinPhases).toBe(5);
+    // Two states, one edge, two closure entries and two index visits precede adjacency work.
+    expect(firstActual.phases.observe.joins).toBe(7);
+    expect(joinPhases).toBe(7);
     if (firstActual.phases.observe.pending_work > 0) {
       expect(firstActual.phases.adjacency.joins).not.toBe(firstActual.phases.observe.pending_work);
     }

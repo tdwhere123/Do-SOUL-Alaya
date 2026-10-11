@@ -30,6 +30,7 @@ import {
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { initDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { writeSettledProviderShardFixture } from "../extraction/authority/provider-shard-fixture.js";
 
 const MODEL = "shared-inspection-model";
 const REQUEST_PROFILE = "provider-default-v1" as const;
@@ -50,7 +51,7 @@ it.each(["valid", "source-drift", "malformed-primary"] as const)("consumes bound
   try {
     daemon = await startBenchDaemon({ dataDirRoot: join(root, "consumer"),
       workspaceId: "supplement-native", runId: "supplement-native-run" });
-    const fixture = writeRuntimeFixture(primaryCacheRoot, sourceCacheRoot);
+    const fixture = await writeRuntimeFixture(primaryCacheRoot, sourceCacheRoot);
     if (mode === "source-drift") writeShard(sourceCacheRoot, fixture.cacheKey, envelope([interpretation(99, "invented")]));
     if (mode === "malformed-primary") writeShard(primaryCacheRoot, fixture.cacheKey,
       '{"interpretations":[{"assertion_id":2,"relations":[]}]}');
@@ -117,7 +118,7 @@ it.each(["valid", "source-drift", "malformed-primary"] as const)("consumes bound
   }
 });
 
-function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) {
+async function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) {
   writeManifest(primaryCacheRoot, TEST_EXTRACTION_PROVIDER_URL);
   writeManifest(sourceCacheRoot, "https://source-provider.invalid/v1");
   const primaryIdentity = requireIdentity(primaryCacheRoot);
@@ -135,8 +136,15 @@ function writeRuntimeFixture(primaryCacheRoot: string, sourceCacheRoot: string) 
     interpretation(2, "I avoid any.")
   ]);
   const sourceCorpus = buildOfficialApiSourceCorpus(TURN, TURN_MESSAGES);
-  writeShard(primaryCacheRoot, cacheKey, primaryRawJson);
-  writeShard(sourceCacheRoot, cacheKey, sourceRawJson);
+  for (const [cacheRoot, rawJson, providerUrl] of [
+    [primaryCacheRoot, primaryRawJson, TEST_EXTRACTION_PROVIDER_URL],
+    [sourceCacheRoot, sourceRawJson, "https://source-provider.invalid/v1"]
+  ] as const) {
+    expect(await writeSettledProviderShardFixture({ cacheRoot, rawJson, providerUrl,
+      label: "shared source assertions", model: MODEL, requestProfile: REQUEST_PROFILE,
+      userPrompt: stringifyOfficialApiExtractionRequest(request)
+    })).toBe(cacheKey);
+  }
   const receipt = createReceipt({
     primaryIdentity,
     sourceIdentity,

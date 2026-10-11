@@ -6,6 +6,7 @@ import { StorageError } from "../../../shared/errors.js";
 import { parseRows } from "../../../repos/shared/parse-row.js";
 import { SqliteSurfaceIdentityRepo } from "../../../repos/surface/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const SURFACE_OBJECT_ID = "11111111-1111-4111-8111-111111111111";
 const ANCHOR_OBJECT_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -46,7 +47,7 @@ describe("SqliteSurfaceAnchorRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
   });
 
   it("creates and finds anchor by id", async () => {

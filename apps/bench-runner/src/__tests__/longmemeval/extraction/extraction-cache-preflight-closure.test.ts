@@ -1,7 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, buildOfficialApiExtractionRequest,
+  stringifyOfficialApiExtractionRequest } from "@do-soul/alaya-soul";
+import { writeSettledProviderShardFixture } from "./authority/provider-shard-fixture.js";
 import { preflightExtractionCache } from "../../../runs/compile-seed.js";
 import {
   cacheFilePath,
@@ -101,7 +103,7 @@ describe("preflightExtractionCache", () => {
     })).not.toThrow();
   });
 
-  it("keeps raw closure valid when only parser draft cardinality changes", () => {
+  it("keeps raw closure valid when only parser draft cardinality changes", async () => {
     const turnContent = "parser projection changed";
     const rawJson = JSON.stringify({
       signals: [{
@@ -125,7 +127,12 @@ describe("preflightExtractionCache", () => {
       rawSignalCount: 1,
       parsedDraftCount: 0
     } as const;
-    writeCacheShard(cacheRoot, CONFIG.model, turnContent, rawJson);
+    expect(await writeSettledProviderShardFixture({
+      cacheRoot, label: "parser projection", rawJson,
+      model: CONFIG.model, requestProfile: CONFIG.requestProfile,
+      providerUrl: CONFIG.providerUrl,
+      userPrompt: stringifyOfficialApiExtractionRequest(buildOfficialApiExtractionRequest(turnContent, []))
+    })).toBe(cacheKey);
     writeExtractionCacheManifest(cacheRoot, {
       ...scopedManifestFor([turnContent], "complete"),
       content_closure_sha256: computeExtractionContentClosureSha256([historicalEntry]),

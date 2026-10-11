@@ -11,6 +11,7 @@ import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteCrossCuttingPermissionRepo } from "../../../repos/surface/cross-cutting-repo.js";
 import { SqliteSurfaceIdentityRepo } from "../../../repos/surface/surface-identity-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { currentSchemaVersion } from "../../migrations/apply-baseline.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -51,7 +52,7 @@ describe("SqliteCrossCuttingPermissionRepo", () => {
       .prepare("SELECT MAX(version) AS version FROM schema_version")
       .get() as { readonly version: number } | undefined;
 
-    expect(migration?.version).toBe(18);
+    expect(migration?.version).toBe(currentSchemaVersion());
   });
 
   it("creates and finds permission by object_id and permission_id", async () => {
