@@ -19,6 +19,8 @@ overrides:
   "@hono/node-server": 2.1.1
   # Match engines.node >=24; @types/node 26 tracks Node 26.
   "@types/node": 24.13.4
+  # Keep native fetch dispatcher declarations aligned with engine-gateway's undici runtime.
+  "@types/node>undici-types": 7.24.4
   # Optional ONNX extra only. onnxruntime-node declares adm-zip ^0.5.16; 0.6.1 is the advisory-clean line.
   adm-zip: 0.6.1
   body-parser: 2.3.0

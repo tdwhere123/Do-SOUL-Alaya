@@ -137,9 +137,7 @@ async function postChatCompletion(
   return await fetchImpl(
     url,
     { ...buildProviderChatRequestInit(request), signal, redirect: "error",
-      // Node's older undici-types compose overload differs from the supported
-      // runtime Dispatcher contract shared by Node and this direct dependency.
-      ...(dispatcher === undefined ? {} : { dispatcher: dispatcher as unknown as RequestInit["dispatcher"] }) }
+      ...(dispatcher === undefined ? {} : { dispatcher }) }
   );
 }
 

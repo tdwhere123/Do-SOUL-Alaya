@@ -124,9 +124,10 @@ function inspectShardBytes(
   }
   const identityError = cachedIdentityError(parsed, cacheKey, model, requestProfile);
   if (identityError !== undefined) return invalid(cacheKey, identityError);
-  const content = inspectCachedExtractionContent(parsed as unknown as CachedExtractionEntry);
+  const entry = parsed as unknown as CachedExtractionEntry;
+  const content = inspectCachedExtractionContent(entry);
   const retiredReason = content.status === "hit" ? retainedOnlyOrdinaryExtractionReason(
-    parsed as unknown as CachedExtractionEntry, content.rawSignalCount
+    entry, content.rawSignalCount
   ) : undefined;
   if (retiredReason !== undefined) {
     return Object.freeze({ cacheKey, status: "retired", reason: retiredReason });

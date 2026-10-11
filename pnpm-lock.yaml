@@ -126,6 +126,7 @@ catalogs:
 overrides:
   '@hono/node-server': 2.1.1
   '@types/node': 24.13.4
+  '@types/node>undici-types': 7.24.4
   adm-zip: 0.6.1
   body-parser: 2.3.0
   browserslist: 4.28.9
@@ -2562,8 +2563,8 @@ packages:
     resolution: {integrity: sha512-FoSOKV7NEofQSkAefMVHam4ZPKYMxjAydxiV72UFEDNV/YofxjGfiZ2A9pZjdL/lRJzTjcu4PABo1JYJX8N5iQ==}
     engines: {node: '>=14'}
 
-  undici-types@7.18.2:
-    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+  undici-types@7.24.4:
+    resolution: {integrity: sha512-cRaY9PagdEZoRmcwzk3tUV3SVGrVQkR6bcSilav/A0vXsfpW4Lvd0BvgRMwTEDTLLGN+QdyBTG+nnvTgJhdt6w==}
 
   undici@7.24.4:
     resolution: {integrity: sha512-BM/JzwwaRXxrLdElV2Uo6cTLEjhSb3WXboncJamZ15NgUURmvlXvxa6xkwIOILIjPNo9i8ku136ZvWV0Uly8+w==}
@@ -3166,7 +3167,7 @@ snapshots:
 
   '@types/node@24.13.4':
     dependencies:
-      undici-types: 7.18.2
+      undici-types: 7.24.4
 
   '@types/prop-types@15.7.15': {}
 
@@ -4708,7 +4709,7 @@ snapshots:
 
   unbash@4.0.11: {}
 
-  undici-types@7.18.2: {}
+  undici-types@7.24.4: {}
 
   undici@7.24.4: {}
 

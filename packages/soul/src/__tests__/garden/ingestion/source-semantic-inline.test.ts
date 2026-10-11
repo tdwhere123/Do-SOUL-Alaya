@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT,
   SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, materializeSourceSemanticInlineProposal,
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted } from "@do-soul/alaya-protocol";
@@ -33,24 +34,29 @@ function setup(text: string) {
   const receive = (value: unknown) => receiveSourceSemantics(JSON.stringify(value), request, input);
   return { input, request, receive };
 }
+const fixtureRecord = z.record(z.string(), z.unknown());
 function fixture(name: string) {
-  return JSON.parse(readFileSync(new URL(`./fixtures/source-semantic-table/${name}-conformed.json`, import.meta.url), "utf8"));
+  return z.object({ wire: fixtureRecord, interpretation: z.unknown() }).parse(
+    JSON.parse(readFileSync(new URL(`./fixtures/source-semantic-table/${name}-conformed.json`, import.meta.url), "utf8")));
 }
 /** Fixture-only presentation conversion; expected native graphs are independently retained. */
-function inlineFixture(wire: any) {
-  const entities = new Map(wire.content.entities.map((row: any) => [row.key, row]));
-  const adapt = (value: any): any => {
+function inlineFixture(wire: Record<string, unknown>) {
+  const entities = new Map(z.array(fixtureRecord).parse(fixtureRecord.parse(wire.content).entities)
+    .map(row => [row.key, row]));
+  const adapt = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(adapt);
     if (value === null || typeof value !== "object") return value;
-    if (value.kind === "entity_ref") {
-      const row = entities.get(value.key) as any;
+    const record = fixtureRecord.parse(value);
+    if (record.kind === "entity_ref") {
+      const row = entities.get(record.key);
+      if (row === undefined) throw new Error(`fixture entity is missing: ${String(record.key)}`);
       return { kind: "entity", mentions: row.form === "selection" ? [row.selection] : row.mentions,
         ...(row.semantic_key === undefined ? {} : { key: row.semantic_key }),
         ...(row.referent_kind === undefined ? {} : { referent_kind: row.referent_kind }) };
     }
-    return Object.fromEntries(Object.entries(value).filter(([key]) => key !== "entities").map(([key, value]) => [key, adapt(value)]));
+    return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "entities").map(([key, value]) => [key, adapt(value)]));
   };
-  return { ...adapt(wire), contract: SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT };
+  return { ...fixtureRecord.parse(adapt(wire)), contract: SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT };
 }
 
 describe("request-selected inline entity uses", () => {
