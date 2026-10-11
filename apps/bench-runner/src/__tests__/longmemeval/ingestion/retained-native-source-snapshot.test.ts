@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { deriveAddressableSpanViews, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { closeCachedDatabase, initDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -29,7 +29,7 @@ import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
 const root = mkdtempSync(join(tmpdir(), "retained-native-source-"));
 const retainedPath = join(root, "retained.sqlite"), workspaceId = "retained-source", runId = "publication-run";
 const content = Array.from({ length: 95 }, (_, index) => `The assistant recorded source fact ${index + 1}.`).join("\n") + "\n";
-const capturedContent = "The retained author chose a source format.\n";
+const capturedContent = "User: The retained author chose a source format.\nAssistant: The author quoted another role label.\n";
 const attribution = { contract: "utterance-attribution-v1" as const, status: "captured" as const,
   issuer_scope: "fixture-conversation", utterances: [{ occurrence_id: "retained-utterance",
     utf8_span: [0, Buffer.byteLength(capturedContent)] as const, conversation_ref: "fixture-conversation", author_ref: "fixture-author" }] };
@@ -85,6 +85,7 @@ it("copies and reopens exact retained records without inventing clocks, roles or
   expect(census.records.find(row => row.source_id === "assistant-source")).toMatchObject({ speaker: "assistant",
     source_observed_at: null, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, units: expect.any(Array) });
   expect(census.records.find(row => row.source_id === "assistant-source")?.units).toHaveLength(95);
+  expect(census.records.every(row => row.units.every(unit => unit.source_role === "assistant"))).toBe(true);
   expect(census.records.find(row => row.source_id === "captured-source")?.attribution_context).toEqual(attribution);
   const copied = path("published-copy.sqlite"); copyFileSync(snapshotPath, copied);
   expect(sealNativeSourceRecordsSnapshotCopy(snapshotPath, copied)).toMatchObject({
@@ -174,6 +175,8 @@ it("refuses a population containing a retained noncurrent revision", async () =>
 
 it.each([
   ["missing attribution", "UPDATE source_records SET attribution_context_json = NULL"],
+  ["missing speaker", "UPDATE source_records SET speaker = NULL"],
+  ["unsupported speaker", "UPDATE source_records SET speaker = 'system'"],
   ["unsupported scope", "UPDATE source_records SET scope_class = 'global_core'"],
   ["unavailable body", "UPDATE source_records SET source_body = NULL"],
   ["changed body", "UPDATE source_records SET source_body = 'changed'"],
@@ -215,16 +218,32 @@ it("preserves version 1 manifest bytes and default source request identities", a
   const [source] = censusNativeSourceRecords({ population: "legacy", snapshotPath }).records;
   const originalRequest = sourceSemanticArtifactPreparations(capturedContent, "complete-source", EXTRACTION_OPEN_SEMANTICS_GENERATION)[0]!;
   const currentRequest = sourceSemanticArtifactPreparations(source!.content_bytes, "complete-source", EXTRACTION_OPEN_SEMANTICS_GENERATION,
-    source!.attribution_context)[0]!;
+    source!.attribution_context, source!.source_role)[0]!;
   if (originalRequest.status !== "ready" || currentRequest.status !== "ready") throw new Error("ready legacy source required");
   const config = { model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1" as const };
   expect(prepareSourceSemanticRequestLine(currentRequest.semantic, [], config))
     .toEqual(prepareSourceSemanticRequestLine(originalRequest.semantic, [], config));
+  expect(currentRequest.semantic.source_request).not.toHaveProperty("source_role");
+  expect(currentRequest.semantic.source_request.source_assertions.map(unit => unit.source_role)).toEqual(["user", "assistant"]);
   expect(readFileSync(nativeSourceSnapshotManifestPath(snapshotPath))).toEqual(bytes);
 });
 
-it("carries retained attribution through preflight, one-attempt H, audited publication and public delivery", async () => {
+it("carries retained author and attribution through outgoing H, audited publication and public delivery", async () => {
   const snapshotPath = path("chain.sqlite"); await admission(snapshotPath);
+  const sourceDirectory = path("source-preparation-daemon");
+  restoreSnapshotToDataDir({ snapshotDbPath: snapshotPath, expectedSha256, dataDirRoot: sourceDirectory });
+  const sourceDaemon = await startBenchDaemon({ dataDirRoot: sourceDirectory, workspaceId, runId,
+    sourceSemanticInterpretationClock: clock, embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
+  let originalCatalog: ReturnType<typeof sourceSemanticRequestCatalog> | undefined;
+  try {
+    const source = SoulInterpretationResponseSchema.parse(await callMcpTool(sourceDaemon.mcpClient, "soul.interpretation",
+      SoulInterpretationRequestSchema.parse({ operation: "prepare_source", source_id: "captured-source", budget,
+        authorized_scopes: { mode: "named", scopes: ["project"] } })));
+    if (source.operation !== "prepare_source") throw new Error("public source preparation required");
+    originalCatalog = source.catalog;
+    expect(source.catalog?.assertions.map(row => row.segments.map(segment => segment.text).join("")))
+      .toEqual(["User: The retained author chose a source format.", "Assistant: The author quoted another role label."]);
+  } finally { await sourceDaemon.shutdown(); }
   const cacheRoot = path("cache"); mkdirSync(cacheRoot);
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-3.1-low-v1");
@@ -239,6 +258,9 @@ it("carries retained attribution through preflight, one-attempt H, audited publi
   expect(requests.find(request => request.source_request.original_source === content)?.source_request.source_assertions).toHaveLength(95);
   expect(requests.find(request => request.source_request.original_source === capturedContent)?.source_request.attribution_context).toEqual(attribution);
   expect(requests.find(request => request.source_request.original_source === content)?.source_request.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+  expect(requests.every(request => request.source_request.source_role === "assistant"
+    && request.source_request.source_assertions.every(unit => unit.source_role === "assistant"))).toBe(true);
+  expect(sourceSemanticRequestCatalog(requests.find(request => request.source_request.original_source === capturedContent)!)).toEqual(originalCatalog);
   const receipt = createExtractionAuthorityReceipt({ action: "sample", inspection, observation: inspection.observation,
     sampleScope: createExtractionSampleScope(inspection.missingKeys, inspection), sourcePreflight: preflight,
     maxConcurrency: 1, outputTokenCap: { field: "maxOutputTokens", value: 16_384 }, diskFloorBytes: 0,
@@ -247,6 +269,8 @@ it("carries retained attribution through preflight, one-attempt H, audited publi
   setExtractionCredentialFixture();
   const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
     const request = parseSourceSemanticRequest(JSON.parse(JSON.parse(String(init?.body)).contents[0].parts[0].text));
+    expect(requests).toContainEqual(request);
+    expect(request.source_request.source_assertions.every(unit => unit.source_role === "assistant")).toBe(true);
     const assertion = request.source_request.source_assertions[0]!;
     const response = JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
       content: { roots: [{ act: "assertion", expression: { kind: "content_ref", key: "statement" } }],
@@ -275,6 +299,13 @@ it("carries retained attribution through preflight, one-attempt H, audited publi
   const report = readNativeSourcePublicationReport(publishedPath, snapshotPath);
   expect(report.sources.map(row => row.source_record)).toEqual(readVerifiedNativeSourceSnapshot(snapshotPath).records.map(row => row.record));
   expect(report.sources.every(row => row.correspondence_descriptor !== undefined)).toBe(true);
+  for (const source of report.sources) {
+    const expectedContent = source.source_id === "assistant-source" ? content : capturedContent;
+    const line = preflight.ready_requests.find(row => parseSourceSemanticRequest(JSON.parse(row.userPrompt))
+      .source_request.original_source === expectedContent)!;
+    expect(source.source_interpretation_generation_key).toBe(line.key);
+    expect(source.source_interpretation_binding).toEqual({ kind: "host_publication_association", request_digest: line.requestSha256 });
+  }
   const directory = path("public-daemon");
   restoreSnapshotToDataDir({ snapshotDbPath: publishedPath, expectedSha256: publication.db_sha256, dataDirRoot: directory });
   const daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId, runId,
@@ -287,6 +318,12 @@ it("carries retained attribution through preflight, one-attempt H, audited publi
       source_version: "original", attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, provider_attempts: 0 });
     if (delivered.operation !== "prepare_source") throw new Error("public source preparation required");
     expect(delivered.catalog?.assertions).toHaveLength(95);
+    const quoted = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
+      SoulInterpretationRequestSchema.parse({ operation: "prepare_source", source_id: "captured-source", budget,
+        authorized_scopes: { mode: "named", scopes: ["project"] } })));
+    if (quoted.operation !== "prepare_source") throw new Error("public source preparation required");
+    expect(quoted.catalog).toEqual(originalCatalog);
+    expect(quoted.attribution_context).toEqual(attribution);
     const prepared = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
       SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: generation.generation_task.original_query,
         source_handle: delivered.source_handle, budget, authorized_scopes: { mode: "named", scopes: ["project"] } })));

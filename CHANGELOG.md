@@ -27,6 +27,19 @@ assertion-capacity reasons with limit 64 remain readable; current refusals use
 catalog, request and interpretation identities are preserved. No release is
 performed here.
 
+The same unreleased surface includes additive source-producer API under
+invariant §25: SOUL exports `SourceSemanticSourceRoleSchema` for the Bench
+retained-source admission consumer, and existing unit/request APIs accept an
+optional known single-source author. This permanent shared validator owns the
+supported user/assistant roles; native admission does not duplicate them.
+The optional SOUL request-body `source_role` participates in request/revision
+identity while absent fields preserve legacy bytes and keys. The opaque public
+request envelope, producer response and reference catalog schemas do not change.
+App/SOUL packages remain `0.3.11`; no additional protocol or release step is
+selected beyond the existing unreleased 15.0.0 major. Retained v2 admission
+explicitly refuses absent/null or system speakers, and quoted role markers
+cannot override a known source author.
+
 Protocol 14.1.0 adds optional `prepare_query.access_hint` and the explicit
 `soul.interpretation` invalidation operation/event under invariant §25 (minor,
 additive fields and action). A hint changes one metered navigation query while

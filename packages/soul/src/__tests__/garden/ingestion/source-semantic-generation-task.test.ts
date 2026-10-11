@@ -95,3 +95,17 @@ it("binds exact cue bytes into H and revision ancestry without changing source e
   expect(buildSourceSemanticRequest({ ...input, revision }).source_request.generation_task).toEqual(task);
   expect(() => buildSourceSemanticRequest({ ...changedInput, revision })).toThrow(/different original source/u);
 });
+
+it("binds the known source role through complete-source parsing and receive reconstruction", () => {
+  const selected = { ...input, sourceRole: "assistant" as const };
+  const request = buildSourceSemanticRequest(selected);
+  expect(request.source_request.source_assertions.map(unit => unit.source_role)).toEqual(["assistant", "assistant"]);
+  expect(parseSourceSemanticRequest(JSON.parse(JSON.stringify(request)))).toEqual(request);
+  expect(receive(raw, selected).outcome.status).toBe("interpreted");
+  expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...request.source_request,
+    source_role: undefined } })).toThrow(/source units or locations/u);
+  expect(() => parseSourceSemanticRequest({ ...request, source_request: { ...request.source_request,
+    source_assertions: request.source_request.source_assertions.map(unit => ({ ...unit, source_role: "user" })) } }))
+    .toThrow(/known source role/u);
+  expect(() => receiveSourceSemantics(JSON.stringify(raw), request, input)).toThrow(/source owner/u);
+});

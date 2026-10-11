@@ -55,4 +55,27 @@ describe("source semantic unit coverage", () => {
     expect(() => buildSourceSemanticRequest({ ...producer, sourceCorpus: corpus, assertionIds: [1, 2, 3, 4, 5, 6, 7, 8, 9] })).toThrow();
   });
 
+  it("keeps a known source author over quoted role markers without changing text or segmentation", () => {
+    const sourceCorpus = "A retained quotation follows.\nUser: Where is the atlas?\n助手： It is here.\n";
+    const legacy = indexSourceSemanticUnits(sourceCorpus);
+    expect(legacy.map(unit => unit.source_role)).toEqual(["user", "user", "assistant"]);
+    const known = indexSourceSemanticUnits(sourceCorpus, "assistant");
+    expect(known.map(unit => unit.source_role)).toEqual(["assistant", "assistant", "assistant"]);
+    expect(indexSourceSemanticUnits(sourceCorpus, "user").map(unit => unit.source_role)).toEqual(["user", "user", "user"]);
+    expect(known.map(({ source_role: _role, ...unit }) => unit)).toEqual(legacy.map(({ source_role: _role, ...unit }) => unit));
+    expect(known.map(unit => sourceCorpus.slice(unit.start, unit.end))).toEqual([
+      "A retained quotation follows.", "User: Where is the atlas?", "助手： It is here."
+    ]);
+    expect(collectSourceSemanticUnitPacks(sourceCorpus, "singleton", "assistant")
+      .every(pack => pack.source_assertions[0]?.source_role === "assistant")).toBe(true);
+    expect(sourceSemanticTransportUnits(sourceCorpus, ["source"], "revision", "assistant")[0]!.binding.occurrenceIdentity)
+      .not.toBe(sourceSemanticTransportUnits(sourceCorpus, ["source"], "revision")[0]!.binding.occurrenceIdentity);
+    const selected = { ...producer, sourceCorpus, sourceRole: "assistant" as const, assertionIds: [2] };
+    const request = buildSourceSemanticRequest(selected);
+    expect(request.source_request).toMatchObject({ source_role: "assistant", source_assertions: [
+      { assertion_id: 2, text: "User: Where is the atlas?", source_role: "assistant" }
+    ] });
+    expect(() => receiveSourceSemantics("{}", request, { ...selected, sourceRole: undefined })).toThrow(/source owner/u);
+  });
+
 });

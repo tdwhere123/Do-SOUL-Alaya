@@ -75,7 +75,7 @@ export function prepareRecoverySourceRevision(rootInput: string) {
   const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
     model: window.source_model, requestProfile: window.source_request_profile,
     sourcePacking: "complete-source", openSemantics: generation });
-  const occurrenceUnits = sourceSemanticTransportUnits(occurrence.content_bytes, [occurrenceId], census.dataset_sha256);
+  const occurrenceUnits = sourceSemanticTransportUnits(occurrence.content_bytes, [occurrenceId], census.dataset_sha256, occurrence.source_role);
   const child = inventory.requests.find(row => occurrenceUnits.every(unit =>
     row.units.some(candidate => candidate.binding.occurrenceIdentity === unit.binding.occurrenceIdentity)));
   if (child === undefined || child.line.key === parentLine.key ||

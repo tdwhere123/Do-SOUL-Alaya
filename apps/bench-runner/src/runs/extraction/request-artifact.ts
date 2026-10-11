@@ -10,7 +10,7 @@ import {
   OFFICIAL_API_SYSTEM_PROMPT, OFFICIAL_API_SOURCE_PACKET_SYSTEM_PROMPT, sourceSemanticGenerationSystemPrompt,
   buildOfficialApiSourceCorpus, collectOfficialApiExtractionCoverage, buildOfficialApiSourcePacketRequest,
   prepareSourceSemanticRequest, collectSourceSemanticUnitPacks, stringifyOfficialApiExtractionRequest, type OfficialApiExtractionRequest,
-  type OfficialApiSourcePacketRequest, type SourceSemanticRequest, type SourceSemanticHostPreparation,
+  type OfficialApiSourcePacketRequest, type SourceSemanticRequest, type SourceSemanticHostPreparation, type SourceSemanticProposalInput,
   SourceSemanticRevisionSchema, sourceSemanticBaseRequestDigest, type SourceSemanticRevision,
   SourceSemanticGenerationViewContractSchema, type SourceSemanticGenerationViewContract,
 } from "@do-soul/alaya-soul";
@@ -206,11 +206,12 @@ export function sourceSemanticArtifactRequests(sourceCorpus: string, packing: Ex
 /** The source inventory stays whole even when its interpretation has no legal request. */
 export function sourceSemanticArtifactPreparations(sourceCorpus: string, packing: ExtractionSourcePacking | undefined,
   openSemantics: ExtractionOpenSemanticsGeneration,
-  attribution?: UtteranceAttribution): readonly SourceSemanticArtifactPreparation[] {
+  attribution?: UtteranceAttribution, sourceRole?: SourceSemanticProposalInput["sourceRole"]): readonly SourceSemanticArtifactPreparation[] {
   const generation = parseExtractionOpenSemanticsGeneration(openSemantics);
-  return collectSourceSemanticUnitPacks(sourceCorpus, packing).map((source): SourceSemanticArtifactPreparation => {
+  return collectSourceSemanticUnitPacks(sourceCorpus, packing, sourceRole).map((source): SourceSemanticArtifactPreparation => {
     const proposal = {
       sourceCorpus,
+      ...(sourceRole === undefined ? {} : { sourceRole }),
       ...(generation.generation_schema_contract === undefined ? {} : { generationSchemaContract: generation.generation_schema_contract }),
       ...(generation.generation_view_contract === undefined ? {} : { generationViewContract: generation.generation_view_contract }),
       ...(generation.generation_task === undefined ? {} : { generationTask: generation.generation_task }),

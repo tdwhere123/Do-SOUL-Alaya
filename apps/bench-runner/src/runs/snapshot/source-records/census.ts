@@ -33,6 +33,7 @@ export type SourceCensusRecord = Readonly<{
   source_observed_at: string | null;
   roles: readonly ("user" | "assistant")[];
   speaker?: "user" | "assistant" | "system";
+  source_role?: SourceCensusUnit["source_role"];
   attribution_context?: UtteranceAttribution;
   units: readonly SourceCensusUnit[];
   repeated_assertion_text: boolean;
@@ -52,7 +53,7 @@ export type LongMemEvalSourceCensus = Readonly<{ population: string; dataset_sha
 export function censusNativeSourceRecords(input: Readonly<{ population: string; snapshotPath: string }>): SourceCensus {
   const native = readVerifiedNativeSourceSnapshot(input.snapshotPath);
   const records = native.records.map(row => {
-    const packs = collectSourceSemanticUnitPacks(row.content_bytes, "complete-source");
+    const packs = collectSourceSemanticUnitPacks(row.content_bytes, "complete-source", row.source_role);
     if (packs.length !== 1 || packs[0] === undefined) {
       throw new AlayaError("CONFLICT", "native complete source has no single host preparation");
     }
@@ -66,6 +67,7 @@ export function censusNativeSourceRecords(input: Readonly<{ population: string; 
       corpus_digest: fieldContractSha256(row.content_bytes),
       source_observed_at: row.source_observed_at, recorded_at: row.recorded_at,
       ...(row.record.speaker == null ? {} : { speaker: row.record.speaker }),
+      ...(row.source_role === undefined ? {} : { source_role: row.source_role }),
       ...(row.record.attribution_context == null ? {} : { attribution_context: row.record.attribution_context }),
       roles: Object.freeze([]) as readonly ("user" | "assistant")[], units,
       repeated_assertion_text: hasRepeatedAssertionText(units)

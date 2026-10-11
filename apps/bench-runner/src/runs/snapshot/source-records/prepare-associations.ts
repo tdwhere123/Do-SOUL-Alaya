@@ -173,7 +173,7 @@ function currentSourceAssociationExpectations(census: SourceCensus, generation: 
     if (selected) selectedCount++;
     const activeGeneration = selected ? revision!.generation : generation;
     const preparations = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", activeGeneration,
-      source.attribution_context);
+      source.attribution_context, source.source_role);
     if (preparations.length !== 1) throw new AlayaError("CONFLICT", "complete source association requires exactly one host preparation");
     const prepared = preparations[0]!;
     if (prepared.status === "unsupported_source") {

@@ -243,6 +243,11 @@ nullable event time, recorded time, speaker, validity, project scope and explici
 utterance attribution. Missing attribution is unavailable; explicit `unknown`
 remains valid. Original path/digest provenance is distinct from the sealer's
 candidate and publication run. Failed admission leaves an unsealed output.
+Version 2 requires a known `user` or `assistant` speaker; absent/null and system
+speakers are unavailable for this source-semantic route. Its known author is
+forwarded through the shared SOUL unit, request and transport-identity owners;
+literal role markers quoted in the body cannot override that author. Source
+bytes, assertion segmentation and catalog text remain unchanged.
 Version 1 construction and request identities remain supported. Census, source
 request preparation, retained-response association and audited publication carry
 the same attribution; publication verification compares the full source record.
@@ -1192,6 +1197,13 @@ and transport occurrence identity. Garden factual eligibility is not an input
 filter for this channel. Marker-absent requests retain their historical Garden
 assertion binding for offline replay. A source role records who supplied text;
 it does not certify the text as a fact or resolve its semantic context.
+An optional source-request `source_role` binds a known single-source author and
+all its units. It is included in request/revision identity and reconstructed
+from the retained request during admission. This additive SOUL request-body
+field keeps the existing opaque public request envelope version; absent fields
+retain legacy marker parsing and exact request bytes/keys. It changes neither
+the public source-reference catalog nor the producer response schema. New
+role-bound requests require their own exact request authority and cache key.
 
 Open extraction may explicitly select `complete-source` packing. Its request
 records that scope and binds all indexed units of the supplied source corpus

@@ -5,6 +5,7 @@ import { AlayaError, bindUtteranceAttribution, canonicalJson, hashContentDigest,
   SourceRecordIdentitySchema, verifySourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { authorizeSemanticScope, deriveAddressableSpanViews, fieldContractSha256 } from "@do-soul/alaya-core";
 import { openReadOnlyDatabase, sourceRecordFromRow, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
+import { SourceSemanticSourceRoleSchema } from "@do-soul/alaya-soul";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { readRegularFileNoFollow, hashRegularFileNoFollow } from "../bound-file.js";
 import { checkpointAndCopyBenchDb, cloneCachedSealedSnapshot } from "../freeze/db-copy.js";
@@ -167,12 +168,15 @@ function retainedSidecars(path: string) {
   });
 }
 
-function assertRetainedSourceAdmissible(source: ReturnType<typeof readNativeInventory>[number]): void {
+function assertRetainedSourceAdmissible(source: ReturnType<typeof readNativeInventory>[number]) {
   authorizeSemanticScope(source.record.scope_class, ["project"]);
   if (source.record.attribution_context == null) {
     throw new AlayaError("CONFLICT", "retained source attribution is unavailable");
   }
   bindUtteranceAttribution(source.record.attribution_context, source.content_bytes);
+  const role = SourceSemanticSourceRoleSchema.safeParse(source.record.speaker);
+  if (!role.success) throw new AlayaError("CONFLICT", "retained source speaker is unavailable or unsupported for source semantics");
+  return role.data;
 }
 
 /** Seal a published SQLite copy with unchanged native source membership and clocks.
@@ -225,10 +229,9 @@ export function readVerifiedNativeSourceSnapshot(snapshotPathInput: string) {
           member.source_observed_at !== current.record.event_time)) {
       throw new AlayaError("CONFLICT", "native source snapshot record differs from sealed original");
     }
-    if (manifest.contract === "native-source-records-snapshot-v2") {
-      assertRetainedSourceAdmissible(current);
-    }
+    const sourceRole = manifest.contract === "native-source-records-snapshot-v2" ? assertRetainedSourceAdmissible(current) : undefined;
     return { ...member, ...current, source_id: current.record.source_id, source_version: current.record.source_version,
+      ...(sourceRole === undefined ? {} : { source_role: sourceRole }),
       source_observed_at: current.record.event_time, recorded_at: current.record.recorded_at };
   });
   if (hashRegularFileNoFollow(snapshotPath) !== manifest.db_sha256) {

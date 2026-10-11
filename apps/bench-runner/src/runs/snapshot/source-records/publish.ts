@@ -235,7 +235,7 @@ function prepareCensusSources(census: readonly SourceCensus[], populations: read
     const generation = config ?? EXTRACTION_OPEN_SEMANTICS_GENERATION;
     for (const source of population.records) {
       const [prepared] = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation,
-        source.attribution_context);
+        source.attribution_context, source.source_role);
       if (prepared === undefined) throw new AlayaError("CONFLICT", "complete source publication has no host preparation");
       preparations.set(source.source_id, prepared.status === "ready" ? { status: "ready" } : prepared.disposition);
       if (prepared.status === "ready") requests.set(source.source_id, prepared.semantic);

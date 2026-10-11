@@ -219,14 +219,14 @@ export function nativeSourceRequestInventory(
   for (const source of records) {
     const occurrenceId = nativeSourceOccurrenceId(source);
     const prepared = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", config.openSemantics,
-      source.attribution_context);
+      source.attribution_context, source.source_role);
     for (const item of prepared) {
       if (item.status === "unsupported_source") {
         unsupported.push(Object.freeze({ messageIds: [occurrenceId], datasetRevision,
           disposition: item.disposition, sourceUnitCount: item.source.source_assertions.length }));
         continue;
       }
-      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrenceId], datasetRevision);
+      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrenceId], datasetRevision, source.source_role);
       const byAssertion = new Map(units.map(unit => [unit.assertionId, unit]));
       const assigned = item.source.source_assertions.map(assertion => {
         const unit = byAssertion.get(assertion.assertion_id);
