@@ -67,6 +67,16 @@ function prepare(observationRoot: string, name: string, arms: ("native_delivery"
     ledgerPath: join(root, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`) };
 }
 
+function captureWithProtocolVersion(name: string, protocolVersion: string) {
+  const root = join(base.root, name); cpSync(captures.prefix.root, root, { recursive: true });
+  const config = readJson(join(root, "config.json")); config.protocol_package_version = protocolVersion;
+  writeJson(join(root, "config.json"), config);
+  for (const path of ["preparation.json", "execution/reservation.json"]) {
+    const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
+  }
+  return { root, config };
+}
+
 it.each(["complete", "prefix", "prefix_error"] as const)("passes the exact ordered %s public envelopes through the consumer HTTP boundary", async mode => {
   const capture = captures[mode], observation = admitOrdinaryRecallObservation(capture.root);
   expect(observation.state).toBe(mode === "complete" ? "complete" : "partial");
@@ -91,6 +101,7 @@ it.each(["complete", "prefix", "prefix_error"] as const)("passes the exact order
 
 it("keeps producer provenance while binding preparation and execution to the current verifier", async () => {
   const capture = captures.prefix, producer = capture.config.implementation_revision;
+  expect(capture.config.protocol_package_version).toBe("16.0.0");
   const verifier = "b".repeat(40), next = "c".repeat(40);
   const revision = vi.spyOn(revisionOwner, "readCurrentExtractionAuthorityRevision").mockReturnValue(verifier);
   try {
@@ -104,6 +115,20 @@ it("keeps producer provenance while binding preparation and execution to the cur
     await expect(executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" })).rejects.toThrow();
     expect(hits).toBe(before); expect(readJson(join(capture.root, "config.json")).implementation_revision).toBe(producer);
   } finally { revision.mockRestore(); }
+});
+
+it.each(["14.1.0", "15.0.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
+  const { root, config } = captureWithProtocolVersion(`historical-${protocolVersion}`, protocolVersion);
+  const original = readFileSync(join(root, "config.json"), "utf8");
+  const observation = admitOrdinaryRecallObservation(root);
+  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "16.0.0",
+    producer_candidate: config.candidate, producer_revision: config.implementation_revision };
+  expect(observation.binding).toMatchObject(binding);
+  expect(observation.state).toBe("partial");
+  const run = prepare(root, `historical-consumer-${protocolVersion}`);
+  expect(run.preparation.observation_binding).toMatchObject(binding);
+  expect(admitConsumerPreparation(run.preparation.output_root).preparation).toEqual(run.preparation);
+  expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
 });
 
 it("recovers retained consumer bytes without another dispatch after interrupted result publication", async () => {
@@ -244,14 +269,9 @@ it.each([
   expect(hits).toBe(before);
 });
 
-it("refuses unsupported producer contracts even if the local configuration binding is recomputed", () => {
-  const root = join(base.root, "unsupported-producer"); cpSync(captures.prefix.root, root, { recursive: true });
-  const config = readJson(join(root, "config.json")); config.protocol_package_version = "16.0.0";
-  writeJson(join(root, "config.json"), config);
-  for (const path of ["preparation.json", "execution/reservation.json"]) {
-    const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
-  }
-  expect(() => prepare(root, "unsupported-consumer")).toThrow();
+it.each(["15.0.1", "17.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
+  const { root } = captureWithProtocolVersion(`unsupported-producer-${protocolVersion}`, protocolVersion);
+  expect(() => prepare(root, `unsupported-consumer-${protocolVersion}`)).toThrow();
 });
 
 it("rejects a replacement public source preview even when its retained MCP reply agrees", () => {

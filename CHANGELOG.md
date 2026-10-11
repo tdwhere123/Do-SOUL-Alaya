@@ -8,13 +8,32 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 15.0.0, engine gateway 1.2.0
+## Unreleased — protocol 16.0.0, engine gateway 1.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 15.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 16.0.0 can move
 independently of the app semver.
+
+Protocol 16.0.0 publishes the shared query body and comparison constraints in
+generation and public MCP schemas. Pairwise comparisons require `right` and
+comparator-matched `strict`; extrema omit `right`. These newly required/removed
+fields and narrowed values make this a major under invariant §25, even though
+canonical native admission already rejected the illegal combinations. Query
+body modes preserve ordinary answer/operation inputs, nonempty universal bodies
+and empty comparison bodies; finite evaluation cannot carry evidence inputs.
+
+Cross-major migration: consumers generating or validating query semantics must
+adopt the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
+and its comparison alternatives. Valid canonical query identities and wire
+contract IDs remain unchanged; changed generation schema/prompt bytes receive
+their own request/cache identities. Historical requests, failed attempts and
+source records are not rewritten or granted retry authority. The ordinary
+source-only Recall archive reader explicitly supports producer packages
+14.1.0, 15.0.0 and 16.0.0 while recording its current reader version separately.
+This candidate does not register 15.0.1 as a historical capture format or perform
+a release, provider run or semantic-fidelity acceptance.
 
 Protocol 15.0.0 raises source-reference catalog capacity from 64 to 128 source
 units and checks aggregate text and segment bounds before copying nested catalog
@@ -35,8 +54,8 @@ supported user/assistant roles; native admission does not duplicate them.
 The optional SOUL request-body `source_role` participates in request/revision
 identity while absent fields preserve legacy bytes and keys. The opaque public
 request envelope, producer response and reference catalog schemas do not change.
-App/SOUL packages remain `0.3.11`; no additional protocol or release step is
-selected beyond the existing unreleased 15.0.0 major. Retained v2 admission
+App/SOUL packages remain `0.3.11`; this additive API is included in the current
+unreleased major without a separate release step. Retained v2 admission
 explicitly refuses absent/null or system speakers, and quoted role markers
 cannot override a known source author.
 

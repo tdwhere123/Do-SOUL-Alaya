@@ -916,12 +916,16 @@ wire contracts remain historical and cannot enter current execution. Nested
 The outgoing generation schema requires one entity declaration table and explicit
 role excerpts. Argument and reporter targets use local references; examples and
 schema present entities before branches, with nodes before roots in flat output.
-Protocol 15.0.1 derives generation and receipt from the same structural query
+Protocol 16.0.0 derives generation and receipt from the same structural query
 body modes: ordinary alternatives need answer conditions or operation-bound
 evidence inputs; universal evaluation needs nonempty conditions; comparison
 evaluation needs empty conditions. Neither finite mode admits evidence inputs.
 Pairwise comparators require both operands and matching strictness; extrema omit
-the right operand. Domain, reference, binding and semantic checks remain native.
+the right operand. These public required/removed fields and narrowed values are
+a major under invariant §25 even though native admission already rejected the
+illegal combinations. Upgrading clients must adopt the structural alternatives;
+existing valid canonical identities and wire contract IDs remain unchanged.
+Domain, reference, binding and semantic checks remain native.
 Historical current-wire inline declarations and unambiguous entity-support
 inheritance still use the same receiver. Generation shape does not certify
 reference closure or fidelity.
@@ -1583,9 +1587,10 @@ memory nor establishes cross-task utility or benchmark acceptance.
 `ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
 episode and call reservations, physical MCP request/reply transcript, trusted
 handler context, source snapshot, first-exposure receipts and closed process.
-The supported producers and readers are protocol packages 14.1.0 and 15.0.0
-with `conditional-field-source-only-v1` semantics. The 15.0.0 semantic-library
-capacity change leaves this public contract unchanged. Producer provenance
+The current Protocol 16.0.0 reader accepts producer packages 14.1.0, 15.0.0 and
+16.0.0 with `conditional-field-source-only-v1` semantics. The semantic-library
+capacity and query-schema changes leave this public source-only contract
+unchanged. Producer provenance
 remains immutable and separate from the current
 verification and consumer execution revisions. Arbitrary ancestor commits and
 caller-authored replacement envelopes do not establish this compatibility.
