@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { chainIdentity, writeChainArtifact } from "../contract.js";
-import { admitConsumerPreparation, ConsumerPreparationSchema, TASK_CONSUMER_KIND } from "./input.js";
+import { admitConsumerPreparation, ConsumerRequestTimeoutSchema, TASK_CONSUMER_KIND } from "./input.js";
 import { readCurrentExtractionAuthorityRevision } from "../../extraction/authority/inspection.js";
 import { StepQuoteBasisSchema, assertStepQuoteRates, stepQuoteBasisForDigest } from "../../extraction/authority/step-quote.js";
 import { ExtractionTransportProvenanceSchema } from "../../extraction/transport-route.js";
@@ -24,7 +24,7 @@ export const ConsumerAuthoritySchema = z.object({
   contract: z.literal("semantic-chain-consumer-authority-v1"), kind: z.literal(TASK_CONSUMER_KIND),
   preparation_identity: Digest, attempt_lineage_digest: Digest, identity_digest: Digest,
   model: z.string().min(1), request_profile: z.string().min(1), transport_provenance: ExtractionTransportProvenanceSchema,
-  request_timeout: ConsumerPreparationSchema.shape.request_timeout,
+  request_timeout: ConsumerRequestTimeoutSchema,
   execution_scope: z.object({ preparation_root: z.string().min(1), execution_root_path: z.string().min(1),
     execution_root_binding: ExtractionTargetRootBindingSchema, implementation_revision: z.string().min(1) }).strict(),
   limits: LimitsSchema, keys: z.array(Digest).min(1).max(2),

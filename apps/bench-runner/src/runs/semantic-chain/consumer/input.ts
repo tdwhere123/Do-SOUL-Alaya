@@ -8,6 +8,9 @@ import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-
 import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "../../provider-request/request-binding.js";
 import { PROVIDER_REQUEST_TIMEOUT_POLICY, providerRequestTimeout, type ProviderRequestLine } from "../../provider-request/execution.js";
 import type { ExtractionTransportProvenance } from "../../extraction/transport-route.js";
+import { admitOrdinaryRecallObservation } from "./ordinary-recall.js";
+import { ORDINARY_RECALL_CAPTURE_CONTRACT, ORDINARY_RECALL_PUBLIC_SEMANTICS,
+  OrdinaryRecallProtocolVersionSchema } from "./ordinary-recall-contract.js";
 
 export const TASK_CONSUMER_KIND = "task_consumer" as const;
 export const TASK_CONSUMER_SCHEMA_NAME = "qualified_task_answer";
@@ -46,15 +49,28 @@ const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const SourceSchema = z.object({ chain_root: z.string().min(1), replay_path: z.string().min(1), query_key: Digest }).strict();
 const RequestIdentitySchema = z.object({ arm: ConsumerArmSchema, key: Digest, request_digest: Digest,
   input_byte_upper: z.number().int().nonnegative() }).strict();
-export const ConsumerPreparationSchema = z.object({
+export const ConsumerRequestTimeoutSchema = z.object({ policy: z.literal(PROVIDER_REQUEST_TIMEOUT_POLICY),
+  timeout_ms: z.number().int().positive() }).strict();
+const LibraryConsumerPreparationSchema = z.object({
   contract: z.literal("semantic-chain-consumer-preparation-v1"), provider_calls: z.literal(0),
   output_root: z.string().min(1), source: SourceSchema, consumer_config: ConsumerConfigSchema,
-  request_timeout: z.object({ policy: z.literal(PROVIDER_REQUEST_TIMEOUT_POLICY),
-    timeout_ms: z.number().int().positive() }).strict(),
+  request_timeout: ConsumerRequestTimeoutSchema,
   native_binding: z.object({ plan_identity: Digest, replay_identity: Digest, row_identity: Digest }).strict(),
   original_query: z.string().min(1), query_as_of: z.string().datetime(),
   requests: z.array(RequestIdentitySchema).min(1).max(2)
 }).strict();
+const OrdinaryConsumerSourceSchema = z.object({ kind: z.literal("ordinary_recall"), observation_root: z.string().min(1) }).strict();
+const OrdinaryConsumerPreparationSchema = LibraryConsumerPreparationSchema.omit({ source: true, native_binding: true }).extend({
+  contract: z.literal("ordinary-recall-consumer-preparation-v1"), source: OrdinaryConsumerSourceSchema,
+  observation_binding: z.object({ observation_identity: Digest, producer_revision: z.string().min(1),
+    producer_candidate: z.string().regex(/^[a-f0-9]{40}$/u),
+    capture_contract: z.literal(ORDINARY_RECALL_CAPTURE_CONTRACT), public_semantics: z.literal(ORDINARY_RECALL_PUBLIC_SEMANTICS),
+    protocol_package_version: OrdinaryRecallProtocolVersionSchema, reader_protocol_package_version: OrdinaryRecallProtocolVersionSchema,
+    verification_revision: z.string().min(1) }).strict()
+}).strict();
+export const ConsumerPreparationSchema = z.discriminatedUnion("contract", [
+  LibraryConsumerPreparationSchema, OrdinaryConsumerPreparationSchema
+]);
 export type ConsumerPreparation = z.infer<typeof ConsumerPreparationSchema>;
 export type ConsumerLine = ProviderRequestLine & Readonly<{
   arm: z.infer<typeof ConsumerArmSchema>; transportProvenance: ExtractionTransportProvenance;
@@ -66,7 +82,7 @@ export function consumerResponseJsonSchema(): object {
 
 export function prepareSemanticChainConsumer(input: Readonly<{
   chainRoot: string; replayPath: string; queryKey: string; consumerConfig: unknown;
-}>, outputRoot: string): ConsumerPreparation {
+}>, outputRoot: string): z.infer<typeof LibraryConsumerPreparationSchema> {
   const source = SourceSchema.parse({ chain_root: resolve(input.chainRoot),
     replay_path: resolve(input.replayPath), query_key: input.queryKey });
   const prepared = materialize(source, ConsumerConfigSchema.parse(input.consumerConfig), outputRoot);
@@ -74,10 +90,22 @@ export function prepareSemanticChainConsumer(input: Readonly<{
   return prepared.preparation;
 }
 
+/** The local operator archive remains the source; caller-authored replacement envelopes are not accepted. */
+export function prepareOrdinaryRecallConsumer(input: Readonly<{
+  observationRoot: string; consumerConfig: unknown;
+}>, outputRoot: string): z.infer<typeof OrdinaryConsumerPreparationSchema> {
+  const source = OrdinaryConsumerSourceSchema.parse({ kind: "ordinary_recall", observation_root: canonicalPath(input.observationRoot) });
+  const prepared = materializeOrdinary(source, ConsumerConfigSchema.parse(input.consumerConfig), outputRoot);
+  writeChainArtifact(join(prepared.preparation.output_root, "preparation.json"), prepared.preparation);
+  return prepared.preparation;
+}
+
 /** Re-admit the native archive; saved request summaries cannot supply replacement evidence. */
 export function admitConsumerPreparation(preparationRoot: string) {
   const preparation = ConsumerPreparationSchema.parse(readChainArtifact(join(preparationRoot, "preparation.json")));
-  const current = materialize(preparation.source, preparation.consumer_config, preparationRoot);
+  const current = preparation.contract === "semantic-chain-consumer-preparation-v1"
+    ? materialize(preparation.source, preparation.consumer_config, preparationRoot)
+    : materializeOrdinary(preparation.source, preparation.consumer_config, preparationRoot);
   if (canonicalJson(preparation) !== canonicalJson(current.preparation)) {
     throw new AlayaError("CONFLICT", "consumer preparation no longer binds its native delivery and request");
   }
@@ -97,7 +125,7 @@ function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfi
     original_query: query.original_query, query_as_of: admitted.plan.config.interpretation_clock,
     evidence: arm === "native_delivery" ? row.response : null
   }));
-  const preparation = ConsumerPreparationSchema.parse({
+  const preparation = LibraryConsumerPreparationSchema.parse({
     contract: "semantic-chain-consumer-preparation-v1", provider_calls: 0, output_root: root,
     source, consumer_config: config, original_query: query.original_query,
     request_timeout: providerRequestTimeout(config.max_output_tokens),
@@ -110,11 +138,30 @@ function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfi
   return { preparation, lines };
 }
 
+function materializeOrdinary(source: z.infer<typeof OrdinaryConsumerSourceSchema>, config: ConsumerConfig, outputRoot: string) {
+  const admitted = admitOrdinaryRecallObservation(source.observation_root);
+  const root = assertSeparateConsumerOutputRoot(outputRoot, admitted.protectedPaths);
+  const original_query = admitted.config.first_request.query;
+  const query_as_of = admitted.config.first_request.source_observed_at!;
+  const lines = config.arms.map(arm => consumerLine(config, arm, { original_query, query_as_of,
+    evidence: arm === "native_delivery" ? admitted.evidence : null }));
+  const preparation = OrdinaryConsumerPreparationSchema.parse({ contract: "ordinary-recall-consumer-preparation-v1",
+    provider_calls: 0, output_root: root, source, consumer_config: config, original_query, query_as_of,
+    request_timeout: providerRequestTimeout(config.max_output_tokens), observation_binding: admitted.binding,
+    requests: lines.map(line => ({ arm: line.arm, key: line.key, request_digest: line.requestDigest,
+      input_byte_upper: line.inputByteUpper })) });
+  return { preparation, lines };
+}
+
 function assertConsumerOutputRoot(outputRoot: string, source: z.infer<typeof SourceSchema>,
   admitted: ReturnType<typeof admitSemanticChainReplay>): string {
-  const root = canonicalPath(outputRoot);
   const protectedPaths = [source.chain_root, ...admitted.admittedInputPaths, admitted.plan.config.snapshot_path,
     ...semanticChainCacheInputPaths(admitted.plan)];
+  return assertSeparateConsumerOutputRoot(outputRoot, protectedPaths);
+}
+
+function assertSeparateConsumerOutputRoot(outputRoot: string, protectedPaths: readonly string[]): string {
+  const root = canonicalPath(outputRoot);
   if (protectedPaths.some(path => canonicalPathsOverlap(root, canonicalPath(path)))) {
     throw new AlayaError("VALIDATION", "consumer output must be separate from native replay and producer inputs");
   }

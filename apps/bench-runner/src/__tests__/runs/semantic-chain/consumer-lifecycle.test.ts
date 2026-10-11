@@ -295,7 +295,7 @@ it("protects the admitted revised query's physical parent from consumer output a
   expect(parentBytes()).toEqual(bytes); expect(parentHistory()).toEqual(history);
   const separate = join(fixture.root, "revised-query-consumer");
   expect(prepareSemanticChainConsumer(input, separate).provider_calls).toBe(0);
-  expect(admitConsumerPreparation(separate).preparation.source.query_key).toBe(queryKey);
+  expect(admitConsumerPreparation(separate).preparation.source).toMatchObject({ query_key: queryKey });
   expect(readdirSync(separate)).toEqual(["preparation.json"]);
   expect(parentBytes()).toEqual(bytes); expect(parentHistory()).toEqual(history); expect(hits).toBe(before);
 });

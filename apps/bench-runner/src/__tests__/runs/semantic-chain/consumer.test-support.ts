@@ -23,14 +23,14 @@ export const QUESTION = "Which project was mentioned?";
 export const HIDDEN_SOURCE = "ARCHIVE_ONLY_PRIVATE_END";
 export const HIDDEN_GOLD = "EVALUATOR_ONLY_GOLD";
 
-export async function nativeConsumerFixture() {
+export async function nativeConsumerFixture(sourceText = `Project Aster was mentioned. ${"Other project context. ".repeat(2000)}${HIDDEN_SOURCE}`) {
   const root = mkdtempSync(join(tmpdir(), "native-task-consumer-"));
   const data = join(root, "data"), meta = join(root, "meta"), development = join(root, "development");
   mkdirSync(data); mkdirSync(meta);
   const dataset = JSON.stringify([{ question_id: "project", question_type: "fixture", question: QUESTION,
     answer: HIDDEN_GOLD, question_date: "2023/09/13 (Wed) 00:00", haystack_session_ids: ["project-session"],
     haystack_dates: ["2023/09/12 (Tue) 00:00"], answer_session_ids: ["project-session"],
-    haystack_sessions: [[{ role: "user", content: `Project Aster was mentioned. ${"Other project context. ".repeat(2000)}${HIDDEN_SOURCE}` }]] }]);
+    haystack_sessions: [[{ role: "user", content: sourceText }]] }]);
   const digest = createHash("sha256").update(dataset).digest("hex");
   writeFileSync(join(data, "longmemeval_s.json"), dataset);
   writeFileSync(join(meta, "longmemeval_s.meta.json"), JSON.stringify({ sha256: digest,

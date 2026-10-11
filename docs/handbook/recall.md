@@ -1546,6 +1546,25 @@ reinvocation cannot dispatch again. A `complete_response` establishes physical
 completion and answer-schema validity only. The answer's `task_completion` is a
 fallible consumer claim; fidelity remains unassessed. This API neither publishes
 memory nor establishes cross-task utility or benchmark acceptance.
+`prepareOrdinaryRecallConsumer` also admits a selected, trusted local
+`ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
+episode and call reservations, physical MCP request/reply transcript, trusted
+handler context, source snapshot, first-exposure receipts and closed process.
+The supported producers and readers are protocol packages 14.1.0 and 15.0.0
+with `conditional-field-source-only-v1` semantics. The 15.0.0 semantic-library
+capacity change leaves this public contract unchanged. Producer provenance
+remains immutable and separate from the current
+verification and consumer execution revisions. Arbitrary ancestor commits and
+caller-authored replacement envelopes do not establish this compatibility.
+The consumer receives the original question and ordered public envelopes,
+including a successful prefix followed by a terminal public error. Complete
+source delivery, partial delivery, failed exposure and an unclosed/unknown
+observation remain distinct. Authority requires a closed capture and successful
+source exposure; optional internal execution diagnostics may remain unobserved.
+Private snapshot reads verify emitted bytes and disclosures without supplying
+hidden source material to the model. The existing consumer provider binding,
+quote, separate output root, ledger and raw recovery own all subsequent effects.
+Historical semantic-library consumer preparations retain their original shape.
 An opt-in offline lazy-qualification stage records one native `prepare_query`
 observation before any public recall and freezes the first ten distinct current
 raw source records in access order, or fewer when the pool is smaller. It keeps
