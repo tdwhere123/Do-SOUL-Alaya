@@ -326,6 +326,51 @@ describe("incremental relation-row join", () => {
     expect(paged.facets.some((row) => row.coordinates.length >= 2)).toBe(true);
   });
 
+  it("joins a new sequence hop with the retained hop inside an alternative premise", () => {
+    const step = (kind: string, source: string, target: string): QueryProgram => ({
+      schema_version: 1, kind: "relation", relation_kind: kind, source_variable: source, target_variable: target,
+      facet_mode: "same_path", threshold_milligrades: 0, guard: OPEN_GUARD
+    });
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps: [step("p", "x", "m"), step("q", "m", "y")] };
+    const program: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and", premises: [
+      { schema_version: 1, kind: "alternative", options: [sequence] }
+    ] };
+    const state = seeded(program);
+    const first = edge("p", "a", "b", "hop-1");
+    const second = edge("q", "b", "c", "hop-2");
+    const source = facts(["a", "b", "c"]);
+    const paged = byPages(state, [[first], [second]], source);
+    const scratch = settle(state, [first, second], source);
+    expect(paged.observation_gaps?.guards).toBe(false);
+    expect(project(paged)).toEqual(project(scratch));
+    expect(scratch.transitions.length).toBeGreaterThan(0);
+    const direct = adjacencyEffectsForRows([first, second], {
+      interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source,
+      liveStates: state.seen_identities, joinRows: [second]
+    });
+    const covered = direct.filter((effect) => effect.hyperedge !== undefined).map((effect) =>
+      new Set((effect.derivations ?? []).flatMap((row) => row.leaf_ids)));
+    expect(covered.some((ids) => ids.has("hop-1") && ids.has("hop-2"))).toBe(true);
+  });
+
+  it("keeps two hyperedges when compiled paths share an endpoint under different bindings", () => {
+    const step = (kind: string, source: string, target: string): QueryProgram => ({
+      schema_version: 1, kind: "relation", relation_kind: kind, source_variable: source, target_variable: target,
+      facet_mode: "same_path", threshold_milligrades: 0, guard: OPEN_GUARD
+    });
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps: [step("p", "x", "y"), step("q", "y", "z")] };
+    const program: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "or", premises: [sequence] };
+    const state = seeded(program);
+    const rows = [edge("p", "a", "m1", "left-p"), edge("q", "m1", "b", "left-q"), edge("p", "a", "m2", "right-p"), edge("q", "m2", "b", "right-q")];
+    const hyperedges = adjacencyEffectsForRows(rows, {
+      interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: facts(["a", "m1", "m2", "b"]),
+      liveStates: state.seen_identities
+    }).flatMap((effect) => effect.hyperedge === undefined ? [] : [effect.hyperedge]);
+    expect(hyperedges).toHaveLength(2);
+    expect(new Set(hyperedges.map((row) => row.to.binding_context)).size).toBe(2);
+    expect(new Set(hyperedges.map((row) => productSubjectId(row.to)))).toEqual(new Set(["b"]));
+  });
+
   it("does not revisit retained rows while a new-state suffix still reads them", () => {
     const program = relation("p");
     const state = seeded(program);

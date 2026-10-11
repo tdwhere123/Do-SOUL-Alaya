@@ -137,25 +137,40 @@ export function* hyperedgeEffectSteps(
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
   const deltaIds = input.joinRows === undefined ? undefined : new Set(input.joinRows.map((row) => row.assertionId));
   const emitted = new Set<string>();
-  const focuses = deltaIds === undefined ? [undefined] : program.premises.map((_, index) => index);
-  for (const focus of focuses) {
-    for (const from of input.liveStates) {
-      yield { kind: "work" };
-      const grouped: (readonly PremiseAssignment[])[] = [];
-      for (let index = 0; index < program.premises.length; index += 1) {
-        const premise = program.premises[index]!;
-        const focused = focus !== undefined && index === focus;
-        const premiseRows = focused && (premise.kind === "relation" || premise.kind === "alternative") ? input.joinRows! : rows;
-        const assignments = yield* assignmentsForPremise(premise, from, premiseRows, focused ? input : { ...input, joinRows: undefined });
-        grouped.push(yield* shareCompatibleAssignments(assignments));
-      }
-      if (program.join === "or") {
-        yield* orHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
-      } else {
-        yield* andHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
-      }
+  for (const from of input.liveStates) {
+    yield { kind: "work" };
+    const roles: { readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }[] = [];
+    for (const premise of program.premises) {
+      roles.push(yield* premiseJoinRoles(premise, from, rows, input, deltaIds));
+    }
+    const focuses = deltaIds === undefined ? [undefined] : roles.map((_, index) => index);
+    for (const focus of focuses) {
+      const grouped = roles.map((role, index) => focus !== undefined && index === focus ? role.delta : role.population);
+      if (program.join === "or") yield* orHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
+      else yield* andHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
     }
   }
+}
+
+function* premiseJoinRoles(
+  premise: QueryProgram,
+  from: ProductStateKey,
+  rows: Iterable<AdjacencyRow>,
+  input: HyperedgeInput,
+  deltaIds: ReadonlySet<string> | undefined
+): PathComputation<{ readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }> {
+  const populationInput = { ...input, joinRows: undefined };
+  if (premise.kind === "relation") {
+    const population = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, rows, populationInput));
+    if (deltaIds === undefined || input.joinRows === undefined) return { population, delta: population };
+    const delta = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, input.joinRows, input));
+    return { population, delta };
+  }
+  // An alternative or sequence reads the retained population once. A new hop stays
+  // in the delta only when this assignment's own derivation names it.
+  const population = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, rows, populationInput));
+  const delta = deltaIds === undefined ? population : population.filter((assignment) => assignmentInDelta(assignment, deltaIds));
+  return { population, delta };
 }
 
 function* shareCompatibleAssignments(assignments: readonly PremiseAssignment[]): PathComputation<readonly PremiseAssignment[]> {
@@ -199,8 +214,13 @@ function* assignmentsForPremise(
 ): PathComputation<readonly PremiseAssignment[]> {
   if (premise.kind === "alternative") {
     const assignments: PremiseAssignment[] = [];
-    for (const option of premise.options) for (const assignment of yield* assignmentsForPremise(option, from, rows, input)) {
-      yield { kind: "work", retained_bytes: 8 }; assignments.push(assignment);
+    for (const option of premise.options) {
+      // Sequences stay on the retained population. Relation options use the row delta when one is present.
+      const optionRows = option.kind === "relation" && input.joinRows !== undefined ? input.joinRows : rows;
+      const optionInput = option.kind === "relation" ? input : { ...input, joinRows: undefined };
+      for (const assignment of yield* assignmentsForPremise(option, from, optionRows, optionInput)) {
+        yield { kind: "work", retained_bytes: 8 }; assignments.push(assignment);
+      }
     }
     return assignments;
   }
@@ -353,7 +373,8 @@ function* walkCompiledPremise(
         toProgramStates: hyperedge.to,
         observedStates: observed,
         physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
-        compiledPremises: input.compiledPremises
+        compiledPremises: input.compiledPremises,
+        ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
       })) {
         if (step.kind === "work") { yield step; continue; }
         const effect = step.effect;
@@ -562,15 +583,26 @@ function* andHyperedgeEffects(
 
 function assignmentInDelta(assignment: PremiseAssignment, deltaIds: ReadonlySet<string>): boolean {
   if (deltaIds.has(assignment.leaf_id) || (assignment.instance_id !== undefined && deltaIds.has(assignment.instance_id))) return true;
-  // A compiled premise keeps the path id on the assignment and the assertion ids on its leaves.
-  for (const row of assignment.derivations) {
-    for (const leaf of row.leaf_ids) if (deltaIds.has(leaf)) return true;
+  // The shared forest is on every accepting assignment. Only this derivation's children count.
+  const nodes = new Map<string, Derivation>();
+  for (const row of assignment.derivations) nodes.set(row.derivation_id, row);
+  const pending = [assignment.derivation.derivation_id];
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = nodes.get(id) ?? (id === assignment.derivation.derivation_id ? assignment.derivation : undefined);
+    if (node === undefined) continue;
+    for (const leaf of node.leaf_ids) if (deltaIds.has(leaf)) return true;
+    for (const child of node.children) pending.push(child);
   }
   return false;
 }
 
 function claimHyperedge(emitted: Set<string>, from: ProductStateKey, premises: readonly PremiseAssignment[]): boolean {
-  const key = `${productStateNodeId(from)}\0${premises.map((premise) => premise.leaf_id).sort().join("\0")}`;
+  // Leaf ids from a compiled path omit the binding, so two endpoints can still differ.
+  const key = `${productStateNodeId(from)}\0${premises.map((premise) => `${premise.binding_context}\0${premise.derivation.derivation_id}`).sort().join("\0")}`;
   if (emitted.has(key)) return false;
   emitted.add(key);
   return true;
