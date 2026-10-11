@@ -47,7 +47,7 @@ import {
   type ProgramAutomaton
 } from "./program-automaton.js";
 import { runtimeProgram } from "./path-composition-seed.js";
-import { composedFacetPathId, extendFacets } from "./path-composition-facet.js";
+import { composedFacetPathId, extendFacets, PathFacetLookup } from "./path-composition-facet.js";
 import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
@@ -191,6 +191,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }
   }
+  yield { kind: "work", retained_bytes: 128 };
+  const facetLookup = new PathFacetLookup(input.facets ?? []);
   for (const row of rows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
@@ -202,7 +204,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         overlay: input.overlay,
         sourceFacts: input.sourceFacts,
         bindingContexts: input.bindingContexts,
-        facets: input.facets,
+        facetLookup,
         liveStates: input.liveStates
       });
     }
@@ -248,7 +250,7 @@ function* effectsForLiveRow(
     readonly query_id: string;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly facets?: RetainedRows<FacetVector>;
+    readonly facetLookup: PathFacetLookup;
     readonly liveStates: RetainedRows<ProductStateKey>;
     readonly bindingContexts?: BindingContextStore;
   }>
@@ -282,7 +284,7 @@ function* effectsForAdvance(
     readonly query_id: string;
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly facets?: RetainedRows<FacetVector>;
+    readonly facetLookup: PathFacetLookup;
     readonly liveStates: RetainedRows<ProductStateKey>;
     readonly bindingContexts?: BindingContextStore;
   }>
@@ -305,7 +307,7 @@ function* effectsForAdvance(
       binding_context: binding
     }, input.sourceFacts);
     yield* compiledEffects({ ...row, source_revision: revisionId },
-      from, to, strength, "true", input.facets ?? []);
+      from, to, strength, "true", input.facetLookup);
   }
 }
 
@@ -315,7 +317,7 @@ function* compiledEffects(
   to: ProductStateKey,
   strength: AdmittedRelationStrength,
   decision: "true" | "unresolved",
-  priorFacets: RetainedRows<FacetVector>
+  facetLookup: PathFacetLookup
 ): PathComputation<void> {
   if (row.validity === undefined) return;
   const transition: Transition = {
@@ -332,7 +334,7 @@ function* compiledEffects(
     applicable: true,
     cap_contract_id: strength.cap_contract_id
   };
-  const vectors = yield* extendFacets(priorFacets, from, to, `${from.program_state}:${to.program_state}:${row.predicate}`, strength.milligrades);
+  const vectors = yield* extendFacets(facetLookup, from, to, `${from.program_state}:${to.program_state}:${row.predicate}`, strength.milligrades);
   const derivation = leafDerivation({
     derivation_id: `leaf:${row.assertionId}:${from.program_state}:${to.program_state}`,
     observation_id: row.assertionId,
