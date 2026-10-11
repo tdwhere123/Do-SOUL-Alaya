@@ -218,7 +218,8 @@ export function nativeSourceRequestInventory(
   const unsupported: UnsupportedSourceRequest[] = [];
   for (const source of records) {
     const occurrenceId = nativeSourceOccurrenceId(source);
-    const prepared = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", config.openSemantics);
+    const prepared = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", config.openSemantics,
+      source.attribution_context);
     for (const item of prepared) {
       if (item.status === "unsupported_source") {
         unsupported.push(Object.freeze({ messageIds: [occurrenceId], datasetRevision,

@@ -1,5 +1,5 @@
 import { fieldContractSha256, retainedSourceSpeaker } from "@do-soul/alaya-core";
-import { AlayaError, hashContentDigest } from "@do-soul/alaya-protocol";
+import { AlayaError, hashContentDigest, type UtteranceAttribution } from "@do-soul/alaya-protocol";
 import {
   buildOfficialApiSourceCorpus, collectSourceSemanticUnitPacks
 } from "@do-soul/alaya-soul";
@@ -30,9 +30,10 @@ export type SourceCensusRecord = Readonly<{
   content_bytes: string;
   content_digest: string;
   corpus_digest: string;
-  source_observed_at: string;
+  source_observed_at: string | null;
   roles: readonly ("user" | "assistant")[];
   speaker?: "user" | "assistant" | "system";
+  attribution_context?: UtteranceAttribution;
   units: readonly SourceCensusUnit[];
   repeated_assertion_text: boolean;
 }>;
@@ -42,7 +43,7 @@ export type SourceCensus = Readonly<{
   dataset_sha256: string;
   records: readonly SourceCensusRecord[];
 }>;
-export type LongMemEvalSourceCensusRecord = SourceCensusRecord & Required<Pick<SourceCensusRecord,
+export type LongMemEvalSourceCensusRecord = SourceCensusRecord & { source_observed_at: string } & Required<Pick<SourceCensusRecord,
   "question_id" | "session_id" | "session_index" | "round_index">>;
 export type LongMemEvalSourceCensus = Readonly<{ population: string; dataset_sha256: string;
   records: readonly LongMemEvalSourceCensusRecord[] }>;
@@ -64,6 +65,8 @@ export function censusNativeSourceRecords(input: Readonly<{ population: string; 
       content_bytes: row.content_bytes, content_digest: row.record.content_digest,
       corpus_digest: fieldContractSha256(row.content_bytes),
       source_observed_at: row.source_observed_at, recorded_at: row.recorded_at,
+      ...(row.record.speaker == null ? {} : { speaker: row.record.speaker }),
+      ...(row.record.attribution_context == null ? {} : { attribution_context: row.record.attribution_context }),
       roles: Object.freeze([]) as readonly ("user" | "assistant")[], units,
       repeated_assertion_text: hasRepeatedAssertionText(units)
     });

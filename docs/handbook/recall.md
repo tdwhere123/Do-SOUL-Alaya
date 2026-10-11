@@ -234,6 +234,21 @@ separate from post-extraction artifacts. A known zero-byte source has an
 `[empty source]` display preview; raw bodies, span identities and source evidence
 remain unchanged, and missing payload stays distinct.
 
+Bench can admit a retained SQLite source population through
+`admitRetainedNativeSourceSnapshot`. It copies an explicitly digest-bound,
+quiescent original into a fresh output under the snapshot publication lock;
+only the copy is opened as SQLite. The version 2 native manifest derives each
+complete current workspace record and original body from that copy, preserving
+nullable event time, recorded time, speaker, validity, project scope and explicit
+utterance attribution. Missing attribution is unavailable; explicit `unknown`
+remains valid. Original path/digest provenance is distinct from the sealer's
+candidate and publication run. Failed admission leaves an unsealed output.
+Version 1 construction and request identities remain supported. Census, source
+request preparation, retained-response association and audited publication carry
+the same attribution; publication verification compares the full source record.
+This admission prepares source evidence for the existing extraction authority;
+it does not authorize a provider attempt or establish interpretation quality.
+
 Retained source bodies remain authoritative. Write transactions maintain a
 derived projection of UTF-8-aligned chunks of at most 4 KiB, with a digest bound
 to root kind, workspace, revision, original digest and offset. Migration builds

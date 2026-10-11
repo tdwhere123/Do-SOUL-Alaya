@@ -9,7 +9,7 @@ import { sourceSemanticBaseRequestDigest, sourceSemanticRequestCatalog, SourceSe
   type SourceSemanticHostPreparation, type SourceSemanticRequest } from "@do-soul/alaya-soul";
 import { AlayaError, IsoDatetimeStringSchema, SOURCE_SEMANTIC_PACKET_CONTRACT, canonicalJson,
   sourceSemanticInterpretationIdentity,
-  SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
+  SourceRecordIdentitySchema, SourceSemanticInterpretationSchema } from "@do-soul/alaya-protocol";
 import {
   closeCachedDatabase, initDatabase, sourceRecordFromRow, SqliteEvidenceCapsuleRepo, SqliteEventLogRepo,
   SqliteFieldSourceRecordRepo
@@ -136,8 +136,7 @@ const NativePublicationReportSchema = z.object({
   rejected_count: z.number().int().nonnegative(),
   sources: z.array(z.object({ source_id: z.string(), source_version: z.string(),
     content_digest: z.string(), corpus_digest: z.string(), record_id: z.string(),
-    source_record: z.object({ identity: z.string(), source_version: z.string(),
-      content_digest: z.string(), recorded_at: z.string(), event_time: z.string().nullable() }).passthrough(),
+    source_record: SourceRecordIdentitySchema,
     admission: z.enum(["admitted", "rejected"]), source_interpretation: z.string(),
     source_interpretation_generation_key: z.string().optional(),
     interpretation_id: z.string().optional(),
@@ -164,15 +163,13 @@ export function readNativeSourcePublicationReport(snapshotPathInput: string, ori
         published.source_version !== source.source_version || published.record_id !== source.record.identity ||
         published.content_digest !== source.record.content_digest ||
         published.corpus_digest !== fieldContractSha256(source.content_bytes) ||
-        published.source_record.identity !== source.record.identity ||
-        published.source_record.recorded_at !== source.recorded_at ||
-        published.source_record.event_time !== source.source_observed_at ||
+        canonicalJson(published.source_record) !== canonicalJson(source.record) ||
         published.correspondence_descriptor !== undefined &&
           (published.source_interpretation !== "interpreted" ||
             published.correspondence_descriptor.source_interpretation_id !== published.interpretation_id ||
             sourceSemanticInterpretationIdentity(published.correspondence_descriptor.interpretation,
               fieldContractSha256) !== published.interpretation_id)) {
-      throw new AlayaError("CONFLICT", "native source publication changed current membership or clocks");
+      throw new AlayaError("CONFLICT", "native source publication changed current membership or retained metadata");
     }
   }
   return report;
@@ -237,7 +234,8 @@ function prepareCensusSources(census: readonly SourceCensus[], populations: read
     const config = populations.find(row => row.name === population.population)?.openSemantics;
     const generation = config ?? EXTRACTION_OPEN_SEMANTICS_GENERATION;
     for (const source of population.records) {
-      const [prepared] = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation);
+      const [prepared] = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", generation,
+        source.attribution_context);
       if (prepared === undefined) throw new AlayaError("CONFLICT", "complete source publication has no host preparation");
       preparations.set(source.source_id, prepared.status === "ready" ? { status: "ready" } : prepared.disposition);
       if (prepared.status === "ready") requests.set(source.source_id, prepared.semantic);
