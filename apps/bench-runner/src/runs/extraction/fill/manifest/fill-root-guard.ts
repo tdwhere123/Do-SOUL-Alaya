@@ -78,8 +78,9 @@ export function acquireExtractionCacheWriteLease(
       ...publishedBinding, cacheRoot: absoluteRoot, stableRootPath
     };
     assertExtractionCacheWriteLeaseOwner(binding);
+    const lease = createWriteLease(binding);
     retainLiveDirectoryLease(rootFd, absoluteRoot);
-    return createWriteLease(binding);
+    return lease;
   } catch (cause) {
     const acquiredKernelLease = kernelLease;
     const acquiredPublishedBinding = publishedBinding;
@@ -87,6 +88,8 @@ export function acquireExtractionCacheWriteLease(
       ...(acquiredPublishedBinding === undefined
         ? []
         : [() => removeOwnedWriterLockDirectory(acquiredPublishedBinding)]),
+      // Acquire closes this fd without release(); the live-lease map must not keep the number.
+      () => releaseLiveDirectoryLease(rootFd),
       () => closeSync(rootFd),
       ...(acquiredKernelLease === undefined ? [] : [() => acquiredKernelLease.release()])
     ]);
