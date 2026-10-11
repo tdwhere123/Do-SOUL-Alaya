@@ -30,6 +30,6 @@
   },
   "dependencies": {
     "@do-soul/alaya-protocol": "workspace:*",
-    "undici": "7.24.4"
+    "undici": "7.29.1"
   }
 }

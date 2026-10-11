@@ -126,7 +126,7 @@ catalogs:
 overrides:
   '@hono/node-server': 2.1.1
   '@types/node': 24.13.4
-  '@types/node>undici-types': 7.24.4
+  '@types/node>undici-types': 7.29.1
   adm-zip: 0.6.1
   body-parser: 2.3.0
   browserslist: 4.28.9
@@ -391,8 +391,8 @@ importers:
         specifier: workspace:*
         version: link:../protocol
       undici:
-        specifier: 7.24.4
-        version: 7.24.4
+        specifier: 7.29.1
+        version: 7.29.1
 
   packages/eval:
     dependencies:
@@ -2563,11 +2563,11 @@ packages:
     resolution: {integrity: sha512-FoSOKV7NEofQSkAefMVHam4ZPKYMxjAydxiV72UFEDNV/YofxjGfiZ2A9pZjdL/lRJzTjcu4PABo1JYJX8N5iQ==}
     engines: {node: '>=14'}
 
-  undici-types@7.24.4:
-    resolution: {integrity: sha512-cRaY9PagdEZoRmcwzk3tUV3SVGrVQkR6bcSilav/A0vXsfpW4Lvd0BvgRMwTEDTLLGN+QdyBTG+nnvTgJhdt6w==}
+  undici-types@7.29.1:
+    resolution: {integrity: sha512-2xO3p6gANwOmhSFwNy2MMYISbHTtM+K3bY0bqpD1gOGpUPIe+yFXCobxbz0s2jm7E0faMxIFcZUcCKa+N6Ozlg==}
 
-  undici@7.24.4:
-    resolution: {integrity: sha512-BM/JzwwaRXxrLdElV2Uo6cTLEjhSb3WXboncJamZ15NgUURmvlXvxa6xkwIOILIjPNo9i8ku136ZvWV0Uly8+w==}
+  undici@7.29.1:
+    resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
     engines: {node: '>=20.18.1'}
 
   universalify@0.2.0:
@@ -3167,7 +3167,7 @@ snapshots:
 
   '@types/node@24.13.4':
     dependencies:
-      undici-types: 7.24.4
+      undici-types: 7.29.1
 
   '@types/prop-types@15.7.15': {}
 
@@ -4709,9 +4709,9 @@ snapshots:
 
   unbash@4.0.11: {}
 
-  undici-types@7.24.4: {}
+  undici-types@7.29.1: {}
 
-  undici@7.24.4: {}
+  undici@7.29.1: {}
 
   universalify@0.2.0: {}
 
