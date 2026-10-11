@@ -190,7 +190,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     else bucket.push(from);
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
-      // A new premise still needs retained premises; this is not the unary row delta.
+      // One focused premise reads the row delta. The others still read the retained population.
       for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
         query_id: input.interpretation.query_id,
         liveStates: [from],
@@ -199,7 +199,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         bindingContexts: input.bindingContexts,
         toProgramStates: advance.to,
         observedStates: input.liveStates,
-        physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises
+        physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
+        ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }
   }

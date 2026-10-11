@@ -79,6 +79,7 @@ type HyperedgeInput = Readonly<{
   readonly physicalKinds?: readonly string[];
   readonly physicalKindSet?: ReadonlySet<string>;
   readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
+  readonly joinRows?: readonly AdjacencyRow[];
 }>;
 
 type PremiseAssignment = HyperedgePremise & Readonly<{
@@ -134,17 +135,25 @@ export function* hyperedgeEffectSteps(
     input = { ...input, physicalKindSet: index };
   }
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
-  for (const from of input.liveStates) {
-    yield { kind: "work" };
-    const grouped: (readonly PremiseAssignment[])[] = [];
-    for (const premise of program.premises) {
-      const assignments = yield* assignmentsForPremise(premise, from, rows, input);
-      grouped.push(yield* shareCompatibleAssignments(assignments));
-    }
-    if (program.join === "or") {
-      yield* orHyperedgeEffects(from, grouped, toProgramStates, input);
-    } else {
-      yield* andHyperedgeEffects(from, grouped, toProgramStates, input);
+  const deltaIds = input.joinRows === undefined ? undefined : new Set(input.joinRows.map((row) => row.assertionId));
+  const emitted = new Set<string>();
+  const focuses = deltaIds === undefined ? [undefined] : program.premises.map((_, index) => index);
+  for (const focus of focuses) {
+    for (const from of input.liveStates) {
+      yield { kind: "work" };
+      const grouped: (readonly PremiseAssignment[])[] = [];
+      for (let index = 0; index < program.premises.length; index += 1) {
+        const premise = program.premises[index]!;
+        const focused = focus !== undefined && index === focus;
+        const premiseRows = focused && (premise.kind === "relation" || premise.kind === "alternative") ? input.joinRows! : rows;
+        const assignments = yield* assignmentsForPremise(premise, from, premiseRows, focused ? input : { ...input, joinRows: undefined });
+        grouped.push(yield* shareCompatibleAssignments(assignments));
+      }
+      if (program.join === "or") {
+        yield* orHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
+      } else {
+        yield* andHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
+      }
     }
   }
 }
@@ -244,7 +253,8 @@ function* nestedHyperedgeAssignments(
     bindingContexts: input.bindingContexts,
     observedStates: input.observedStates ?? input.liveStates,
     physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
-    compiledPremises: input.compiledPremises
+    compiledPremises: input.compiledPremises,
+    ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
   })) {
     if (step.kind === "work") { yield step; continue; }
     const effect = step.effect;
@@ -494,9 +504,13 @@ function* orHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
-  input: HyperedgeInput
+  input: HyperedgeInput,
+  deltaIds?: ReadonlySet<string>,
+  emitted?: Set<string>
 ): PathComputation<void> {
   for (const options of grouped) for (const option of options) {
+    if (deltaIds !== undefined && !assignmentInDelta(option, deltaIds)) continue;
+    if (emitted !== undefined && !claimHyperedge(emitted, from, [option])) continue;
     yield { kind: "work", retained_bytes: completionReservation([option]) };
     for (const effect of yield* completionEffects(from, [option], {
     target: option.target_object_id,
@@ -516,10 +530,14 @@ function* andHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
-  input: HyperedgeInput
+  input: HyperedgeInput,
+  deltaIds?: ReadonlySet<string>,
+  emitted?: Set<string>
 ): PathComputation<void> {
   if (grouped.some((group) => group.length === 0)) return;
   for (const combo of cartesian(grouped)) {
+    if (deltaIds !== undefined && !combo.some((assignment) => assignmentInDelta(assignment, deltaIds))) continue;
+    if (emitted !== undefined && !claimHyperedge(emitted, from, combo)) continue;
     yield { kind: "work" };
     const merged = mergeAssignments(combo, input.bindingContexts);
     if (merged === undefined) continue;
@@ -540,6 +558,22 @@ function* andHyperedgeEffects(
       transfer_version: first.transfer_version
     }, toProgramStates, input)) yield { kind: "effect", effect };
   }
+}
+
+function assignmentInDelta(assignment: PremiseAssignment, deltaIds: ReadonlySet<string>): boolean {
+  if (deltaIds.has(assignment.leaf_id) || (assignment.instance_id !== undefined && deltaIds.has(assignment.instance_id))) return true;
+  // A compiled premise keeps the path id on the assignment and the assertion ids on its leaves.
+  for (const row of assignment.derivations) {
+    for (const leaf of row.leaf_ids) if (deltaIds.has(leaf)) return true;
+  }
+  return false;
+}
+
+function claimHyperedge(emitted: Set<string>, from: ProductStateKey, premises: readonly PremiseAssignment[]): boolean {
+  const key = `${productStateNodeId(from)}\0${premises.map((premise) => premise.leaf_id).sort().join("\0")}`;
+  if (emitted.has(key)) return false;
+  emitted.add(key);
+  return true;
 }
 
 function completionReservation(premises: readonly PremiseAssignment[]): number {

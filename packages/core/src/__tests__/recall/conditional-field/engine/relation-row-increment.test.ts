@@ -6,14 +6,23 @@ import {
   type QueryInterpretation,
   type QueryProgram
 } from "@do-soul/alaya-protocol";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import {
   adjacencyEffectsForRows,
   createAdjacencyEffectCursor,
   type AdjacencyRow
 } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
-import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import {
+  composedFacetPathId,
+  extendFacets,
+  facetBelongsToOutput,
+  PathFacetLookup,
+  samePathAccepts
+} from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { observedTargetRevision } from "../../../../recall/conditional-field/engine/path-matching.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
-import { ObservedRelations, retainRelationPage } from "../../../../recall/conditional-field/engine/observed-relations.js";
+import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../../../../recall/conditional-field/engine/observed-relations.js";
+import { RetainedSequence } from "../../../../recall/conditional-field/engine/retained-sequence.js";
 import {
   applyObserverPage,
   createConditionalField,
@@ -25,6 +34,7 @@ import { observeField } from "../../../../recall/runtime/conditional-field-obser
 import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
 import { RequestCostLedger } from "../../../../recall/runtime/request-cost-ledger.js";
 import type { ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
+import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
 
 const AS_OF = "2026-09-10T00:00:00.000Z";
@@ -139,6 +149,18 @@ function byJson(left: unknown, right: unknown): number {
 
 function counting(rows: readonly AdjacencyRow[], visits: { count: number }): Iterable<AdjacencyRow> {
   return { *[Symbol.iterator]() { for (const row of rows) { visits.count += 1; yield row; } } };
+}
+
+function storedFacts(ids: readonly string[]): PersistentStringMap<BoundSourceFacts> {
+  let stored = new PersistentStringMap<BoundSourceFacts>();
+  for (const object_id of ids) stored = stored.with(object_id, { object_id, source_revision: "rev" });
+  return stored;
+}
+
+function drain<T>(steps: Generator<unknown, T>): T {
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
 }
 
 describe("incremental relation-row join", () => {
@@ -329,14 +351,120 @@ describe("incremental relation-row join", () => {
     expect(deltaAdvance.effects.flatMap((effect) => effect.transition === undefined ? [] : [effect.transition.instance_id])).toEqual(["late-row"]);
     const hyperedge: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and", premises: [relation("p", "y"), relation("q", "z")] };
     const hyperState = seeded(hyperedge);
-    const hyperRows = [edge("p", "a", "b", "premise-p"), edge("q", "a", "c", "premise-q")];
+    const oldP = edge("p", "a", "b", "old-p");
+    const oldQ = edge("q", "a", "c", "old-q");
+    const newQ = edge("q", "a", "d", "new-q");
+    const hyperPopulation = [oldP, oldQ, newQ];
+    const hyperOptions = { interpretation: hyperState.interpretation, asOf: AS_OF, overlay: {},
+      liveStates: hyperState.seen_identities, sourceFacts: facts(["a", "b", "c", "d"]) };
+    const hyperLeaves = (rows: Iterable<AdjacencyRow>, joinRows?: readonly AdjacencyRow[]) => adjacencyEffectsForRows(rows, {
+      ...hyperOptions, ...(joinRows === undefined ? {} : { joinRows })
+    }).flatMap((effect) => effect.hyperedge === undefined ? [] : [[...(effect.derivations ?? []).flatMap((row) => row.leaf_ids)].sort()]);
     const hyperVisits = { count: 0 };
-    const hyperEffects = adjacencyEffectsForRows(counting(hyperRows, hyperVisits), {
-      interpretation: hyperState.interpretation, asOf: AS_OF, overlay: {}, liveStates: hyperState.seen_identities,
-      sourceFacts: facts(["a", "b", "c"]), joinRows: [hyperRows[1]!]
-    });
+    const fullLeaves = hyperLeaves(hyperPopulation);
+    const deltaLeaves = hyperLeaves(counting(hyperPopulation, hyperVisits), [newQ]);
     expect(hyperVisits.count).toBeGreaterThan(0);
-    expect(hyperEffects.some((effect) => effect.hyperedge !== undefined)).toBe(true);
+    expect(fullLeaves).toEqual(expect.arrayContaining([["old-p", "old-q"], ["new-q", "old-p"]]));
+    expect(deltaLeaves.every((ids) => ids.includes("new-q"))).toBe(true);
+    expect(deltaLeaves).toEqual(fullLeaves.filter((ids) => ids.includes("new-q")));
+  });
+
+  it("promotes an old row when a later state supplies the missing target revision", () => {
+    const program = relation("p");
+    const state = seeded(program);
+    const from = state.seen_identities.at(0)!;
+    const filler = productKey("filler", from.hypothesis_id, from.binding_context, from.program_state);
+    const witness = productKey("t", from.hypothesis_id, from.binding_context, from.program_state);
+    const oldRow = edge("p", "a", "t", "old-row");
+    const source = facts(["a"]);
+    const liveStates = [from, filler, witness];
+    const input = { interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, liveStates };
+    const oldTransitions = (effects: ReturnType<typeof adjacencyEffectsForRows>) => effects.filter((effect) => effect.transition?.instance_id === "old-row");
+    expect(oldTransitions(adjacencyEffectsForRows([oldRow], { ...input, liveStateOffset: 2 }))).toHaveLength(0);
+    expect(oldTransitions(adjacencyEffectsForRows([oldRow], input))).toHaveLength(1);
+    expect(observedTargetRevision("t", source, liveStates)).toBe("rev");
+    const missed = resumePathEffects({
+      ...state, remaining_exploration: 200_000, remaining_memory_bytes: 5_000_000, memory_exhausted: false,
+      pending_path_effects: { offset: 0, retained_bytes: 0, page: observerPage(state),
+        input: { rows: [oldRow], options: {
+          interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source,
+          liveStates: state.seen_identities, facets: state.facets, discoveries: state.discoveries,
+          bindingContexts: state.binding_contexts
+        } } }
+    });
+    expect(missed.transitions.some((row) => row.instance_id === "old-row")).toBe(false);
+    expect(missed.observation_gaps?.guards).toBe(true);
+    expect(missed.pending_path_effects?.input.options.liveStateOffset).toBe(0);
+    expect(missed.pending_path_effects?.input.options.joinRows).toBeUndefined();
+    const noise = edge("p", "z", "c", "noise-row");
+    const identities = RetainedSequence.from([...missed.seen_identities, filler, witness]);
+    const promoted = resumePathEffects({
+      ...missed, seen_identities: identities, remaining_exploration: 200_000, remaining_memory_bytes: 5_000_000,
+      memory_exhausted: false, retention_rejected: undefined,
+      pending_path_effects: { offset: 0, retained_bytes: 0, page: observerPage(missed),
+        input: { rows: [oldRow, noise], options: {
+          interpretation: missed.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, joinRows: [noise],
+          liveStates: identities, facets: missed.facets, discoveries: missed.discoveries,
+          bindingContexts: missed.binding_contexts
+        } } }
+    });
+    expect(oldTransitions(adjacencyEffectsForRows([oldRow, noise], {
+      interpretation: missed.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, liveStates: identities, joinRows: [noise]
+    }))).toHaveLength(0);
+    expect(promoted.transitions.some((row) => row.instance_id === "old-row")).toBe(true);
+  });
+
+  it("keeps two products and two facet paths for the same endpoint under different bindings", () => {
+    const state = seeded(relation("p"), [{}, { hypothesis: "h-other", binding: "other-binding" }]);
+    const joined = settle(state, [edge("p", "a", "b", "shared-endpoint")], facts(["a", "b"]));
+    if (joined.binding.kind !== "bound") throw new Error("expected a bound field");
+    const products = joined.binding.snapshot.values.filter((value) => value.accepting && productSubjectId(value.state) === "b");
+    expect(new Set(products.map((value) => productStateNodeId(value.state))).size).toBe(2);
+    const pathIds = new Set(joined.facets.flatMap((facet) => products.some((value) => facetBelongsToOutput(facet.path_id, value.state)) ? [facet.path_id] : []));
+    expect(pathIds.size).toBe(2);
+    expect(joined.transitions.filter((row) => row.instance_id === "shared-endpoint")).toHaveLength(2);
+  });
+
+  it("keeps same_path false for crossed coordinates at threshold 500 after extension", () => {
+    const from = productKey("a");
+    const left = { schema_version: 1 as const, path_id: composedFacetPathId(from, "left"),
+      obligations: [{ obligation_id: "left-axis", domain_id: "association" }, { obligation_id: "right-axis", domain_id: "association" }],
+      coordinates: [900, 100] };
+    const right = { schema_version: 1 as const, path_id: composedFacetPathId(from, "right"),
+      obligations: [{ obligation_id: "left-axis", domain_id: "association" }, { obligation_id: "far-axis", domain_id: "association" }],
+      coordinates: [100, 900] };
+    expect(samePathAccepts([left, right], 500)).toBe(false);
+    const extended = drain(extendFacets(new PathFacetLookup(RetainedSequence.from([left, right])), from, productKey("b"), "later-hop", 1000));
+    expect(extended).toHaveLength(2);
+    expect(extended.map((vector) => vector.coordinates)).toEqual([[900, 100, 1000], [100, 900, 1000]]);
+    expect(samePathAccepts(extended, 500)).toBe(false);
+  });
+
+  it("does not publish a new source-fact snapshot from a row delta", () => {
+    const oldRow = edge("p", "a", "b", "old-row");
+    const late = edge("p", "a", "c", "late-row");
+    const oldFacts = storedFacts(["a", "b"]);
+    const newFacts = storedFacts(["a", "b", "c"]);
+    const joined = settle(settle({ ...seeded(relation("p")), source_facts: oldFacts }, [oldRow], oldFacts), [oldRow], oldFacts);
+    expect(joined.path_effect_frontier?.sourceFacts).toBe(oldFacts);
+    const delta = settle({ ...joined, source_facts: newFacts }, [oldRow, late], newFacts, [late]);
+    expect(delta.path_effect_frontier?.sourceFacts).not.toBe(newFacts);
+    const published = settle(delta, [oldRow, late], newFacts);
+    expect(published.path_effect_frontier?.sourceFacts).toBe(newFacts);
+  });
+
+  it("keeps one final row when a page repeats an assertion id", () => {
+    const first = edge("p", "a", "b", "same");
+    const revised = { ...edge("p", "a", "c", "same"), validity: { kind: "open" as const, valid_from: "2026-06-01T00:00:00.000Z" } };
+    const retained = retainRelationPage(new ObservedRelations().with(edge("p", "a", "kept", "kept")), [first, revised]);
+    expect(retained.changed.map((row) => row.assertionId)).toEqual(["same"]);
+    expect(retained.changed[0]).toBe(retained.population.get("same"));
+    expect(retained.changed[0]?.targetObjectId).toBe("c");
+    expect(relationPageJoinRows(retained.population, retained.changed, false)?.map((row) => row.assertionId)).toEqual(["same"]);
+    expect(relationPageJoinRows(retained.population, retained.changed, true)).toBeUndefined();
+    const covered = retainRelationPage(new ObservedRelations(), [first, revised]);
+    expect(covered.changed).toHaveLength(1);
+    expect(relationPageJoinRows(covered.population, covered.changed, false)).toBeUndefined();
   });
 });
 
@@ -397,5 +525,40 @@ describe("observed relation pages", () => {
     expect(unrelated.state.source_facts?.has("other")).toBe(true);
     expect(unrelated.state.observation_gaps?.guards).toBe(true);
     expect(unrelated.accepted).toEqual(observed.accepted);
+  });
+
+  it("rechecks an old row when a later page learns its endpoint fact", () => {
+    const early = edge("p", "a", "b", "p-00");
+    const fillers = Array.from({ length: 15 }, (_, index) => edge("p", "a", `t-${String(index).padStart(2, "0")}`, `p-${String(index + 1).padStart(2, "0")}`));
+    const later = edge("p", "a", "x", "p-16");
+    let release = false;
+    const readers: ObserverReaders = {
+      lexical: () => ({ ids: ["a"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
+      source: ({ objectId }) => objectId === "x" && !release
+        ? { row: null, rowsRead: 0, bytesRead: 0, unavailable: true }
+        : { row: { object_id: objectId, sourceRevision: "rev", lifecycle_state: "active", scope_class: "project" },
+          rowsRead: 1, bytesRead: 32, unavailable: false },
+      relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit }) => {
+        const pool = release ? [early, ...fillers, later] : [early, ...fillers];
+        const remaining = pool.filter((row) => row.sourceObjectId === subject && row.predicate === predicate
+          && row.assertionId > (afterAssertionId ?? "")).sort((left, right) => left.assertionId.localeCompare(right.assertionId));
+        const observations = remaining.slice(0, Math.min(limit, nativeLimit));
+        const hidden = !release && subject === "a" && predicate === "p";
+        return { observations, nativeVisits: observations.length, nativeBytes: observations.length, rowsRead: observations.length,
+          bytesRead: observations.length, truncated: hidden || observations.length < remaining.length,
+          committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId };
+      }
+    };
+    const interpretation = query(program, { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+      bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] });
+    const request = { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers, authorized_scopes: null,
+      budget: defaultBudget({ work_units: 200_000, memory_bytes: 20_000_000, finalization_reserve: 0, min_envelope: 0 }) };
+    const held = observeField(interpretation, request);
+    expect(held.transitions.some((row) => row.instance_id === "p-00")).toBe(false);
+    expect(held.observation_gaps?.guards).toBe(true);
+    release = true;
+    const learned = observeField(interpretation, { ...request, resume_field: held });
+    expect(learned.transitions.some((row) => row.instance_id === "p-00")).toBe(true);
+    expect(learned.observation_gaps?.guards).toBe(false);
   });
 });

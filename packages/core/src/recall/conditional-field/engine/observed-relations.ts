@@ -36,16 +36,35 @@ export function retainRelationPage(
   population: ObservedRelations,
   captured: readonly RelationObserverRow[]
 ): Readonly<{ readonly population: ObservedRelations; readonly changed: readonly RelationObserverRow[] }> {
-  const changed: RelationObserverRow[] = [];
+  const touched: string[] = [];
+  const seen = new Set<string>();
   let next = population;
   for (const row of captured) {
     const stored = next.with(row);
     if (stored === next) continue;
     next = stored;
-    const admitted = next.get(row.assertionId);
+    if (seen.has(row.assertionId)) continue;
+    seen.add(row.assertionId);
+    touched.push(row.assertionId);
+  }
+  const changed: RelationObserverRow[] = [];
+  for (const assertionId of touched) {
+    const admitted = next.get(assertionId);
     if (admitted !== undefined) changed.push(admitted);
   }
   return { population: next, changed };
+}
+
+/** A fact change or a full id cover is a complete pass. One id is one changed row. */
+export function relationPageJoinRows(
+  population: ObservedRelations,
+  changed: readonly RelationObserverRow[],
+  factsChanged: boolean
+): readonly RelationObserverRow[] | undefined {
+  if (factsChanged) return undefined;
+  const ids = new Set(changed.map((row) => row.assertionId));
+  if (ids.size === population.length) return undefined;
+  return changed;
 }
 
 function mergeUnique(

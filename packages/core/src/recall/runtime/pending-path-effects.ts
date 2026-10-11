@@ -164,21 +164,34 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const guards = completePopulation ? guardsSeen : finished ? priorUnknown || guardsSeen : priorUnknown;
   const measurements = state.observation_gaps?.measurements === true || effects.some((effect) => effect.missing_measurement === true);
   const missingRevision = effects.some((effect) => effect.missing_target_revision === true);
-  const semanticDelta = finished && (applied.seen_identities.length > prior.liveStates.length || newFacets
-    || applied.discoveries.length > (prior.discoveries?.length ?? 0) || missingRevision);
+  const identitiesGrew = applied.seen_identities.length > prior.liveStates.length;
+  // A row delta that adds no state still skips the product a later state can promote.
+  const skippedRowsNeedRecheck = priorUnknown && prior.joinRows !== undefined && !identitiesGrew;
+  const semanticDelta = finished && (identitiesGrew || newFacets
+    || applied.discoveries.length > (prior.discoveries?.length ?? 0) || missingRevision
+    || skippedRowsNeedRecheck);
+  // A missing revision still rewinds to offset 0. An open guard plus a new
+  // state does too: the suffix never revisits the old product the revision promotes.
+  const liveStateOffset = missingRevision || skippedRowsNeedRecheck || (priorUnknown && identitiesGrew)
+    ? 0 : preparation.facet_resume_offset;
+  // A suffix after a full pass must not leave the frontier on the previous snapshot.
+  const populationChecked = completePopulation || pending.population_checked === true;
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
     bindingContexts: applied.binding_contexts,
-    liveStates: applied.seen_identities, liveStateOffset: missingRevision ? 0 : preparation.facet_resume_offset,
+    liveStates: applied.seen_identities, liveStateOffset,
     joinRows: undefined,
     facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
+    population_checked: populationChecked,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
+  const frontierFacts = populationChecked ? applied.source_facts : state.path_effect_frontier?.sourceFacts;
   return { ...applied, resume_subjects: subjects,
     pair_demands: preparation.pair_demands, pair_demand_bytes: state.pair_demand_bytes + preparation.pair_bytes,
     source_fact_demands: preparation.source_demands, source_fact_demand_bytes: state.source_fact_demand_bytes + preparation.source_bytes,
     source_fact_pending_count: preparation.source_pending,
     binding_context_bytes: finished ? applied.binding_contexts?.bytes : applied.binding_context_bytes,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
-      facets: applied.facets, discoveries: applied.discoveries.length, sourceFacts: applied.source_facts } } : {}),
+      facets: applied.facets, discoveries: applied.discoveries.length,
+      ...(frontierFacts === undefined ? {} : { sourceFacts: frontierFacts }) } } : {}),
     observation_gaps: { guards, measurements },
     pending_path_effects: finished ? next : { ...pending, preparation: undefined, guards_seen: guardsSeen,
       facet_resume_offset: preparation.facet_resume_offset,

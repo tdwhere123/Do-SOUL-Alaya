@@ -17,7 +17,7 @@ import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditiona
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
-import { ObservedRelations, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
+import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects, SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
 import {
   applyObserverPage,
@@ -177,7 +177,8 @@ function refreshPathFrontier(session: ObservationSession): boolean {
   session.state = resumePathEffects({ ...rechecking, pending_path_effects: { input: { rows: relationRows, options: {
     interpretation, asOf: input.as_of, liveStates: state.seen_identities,
     liveStateOffset: frontier === undefined || frontier.facets !== state.facets
-      || frontier.sourceFacts !== state.source_facts ? 0 : frontier.identities,
+      || frontier.sourceFacts !== state.source_facts
+      || (state.observation_gaps?.guards === true && state.seen_identities.length > frontier.identities) ? 0 : frontier.identities,
     overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries,
     bindingContexts: state.binding_contexts, physicalKinds: session.predicates,
     compiledAutomaton: state.compiled_automaton } },
@@ -242,6 +243,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     return false;
   }
   const captured: RelationObserverRow[] = [];
+  const factsBefore = sourceFacts.snapshot;
   const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
   recordObserverWork(session, "adjacency", observed);
   cursors.set(action.region_id, observed.page.cursor);
@@ -282,10 +284,10 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   }
   const retained = retainRelationPage(session.relationRows, captured);
   session.relationRows = retained.population;
-  // A proper subset is not a complete pass. The continuation clears joinRows
-  // so new states still meet the retained population.
-  const joinRows = retained.changed.length === retained.population.length ? undefined : retained.changed;
   recordObservedAt(input, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]), observedAt, sourceFacts);
+  // A new endpoint fact must be visible to retained rows. The continuation
+  // still clears joinRows so new states meet the full population.
+  const joinRows = relationPageJoinRows(retained.population, retained.changed, sourceFacts.snapshot !== factsBefore);
   for (const row of captured) if (!overlayIsRoutingOnly(RELATION_ROUTING, row.predicate)) {
     addSubjects(subjects, [row.sourceObjectId, row.targetObjectId]);
   }

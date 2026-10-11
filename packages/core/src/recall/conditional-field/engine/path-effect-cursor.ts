@@ -23,7 +23,7 @@ export type PathEffectPreparation = Readonly<{
   source_bytes: number;
   retained_bytes: number;
 }>;
-export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; guards_seen?: boolean; facet_resume_offset?: number; preparation?: PathEffectPreparation; page: ObserverPage;
+export type PendingPathEffects = Readonly<{ cursor?: PathEffectCursor; offset: number; retained_bytes: number; completed_work?: number; progress_position?: number; guards_seen?: boolean; facet_resume_offset?: number; population_checked?: boolean; preparation?: PathEffectPreparation; page: ObserverPage;
   input: Readonly<{ rows: Iterable<AdjacencyRow>; options: AdjacencyEffectsInput }> }>;
 const EFFECT_LOG_SLOT_BYTES = 64;
 
