@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { cpSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -12,11 +12,13 @@ import { OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema, OrdinaryReca
   OrdinaryRecallPreparationSchema, OrdinaryRecallRequestRecordSchema,
   OrdinaryRecallWireRecordSchema } from "../../../runs/semantic-chain/consumer/ordinary-recall-contract.js";
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
-import { admitConsumerPreparation, prepareOrdinaryRecallConsumer } from "../../../runs/semantic-chain/consumer/input.js";
+import { admitConsumerPreparation, CONSUMER_SYSTEM_PROMPT, consumerResponseJsonSchema, prepareOrdinaryRecallConsumer,
+  TASK_CONSUMER_SCHEMA_NAME } from "../../../runs/semantic-chain/consumer/input.js";
 import { pinSemanticChainConsumerAuthority } from "../../../runs/semantic-chain/consumer/authority.js";
 import { executeSemanticChainConsumer } from "../../../runs/semantic-chain/consumer/execute.js";
 import { consumerResultPath } from "../../../runs/semantic-chain/consumer/persist.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { semanticProviderRequestCacheKey } from "../../../runs/provider-request/request-binding.js";
 import { nativeConsumerFixture, CONSUMER_CONFIG, QUESTION, HIDDEN_GOLD, HIDDEN_SOURCE } from "./consumer.test-support.js";
 import { captureFailedCallFixture, captureOrdinaryFixture, readJson, writeJson } from "./ordinary-consumer.test-support.js";
 
@@ -55,11 +57,17 @@ afterAll(async () => {
   if (base !== undefined) rmSync(base.root, { recursive: true, force: true });
 });
 
-function prepare(observationRoot: string, name: string, arms: ("native_delivery" | "question_only")[] = ["native_delivery"]) {
+function prepareInput(observationRoot: string, name: string,
+  arms: ("native_delivery" | "question_only")[] = ["native_delivery"], evidenceView?: string) {
   const preparationRoot = join(base.root, name);
-  const preparation = prepareOrdinaryRecallConsumer({ observationRoot, consumerConfig: {
+  return prepareOrdinaryRecallConsumer({ observationRoot, consumerConfig: {
     model: CONSUMER_CONFIG.model, provider_url: CONSUMER_CONFIG.providerUrl, request_profile: CONSUMER_CONFIG.requestProfile,
-    max_output_tokens: 128, arms } }, preparationRoot);
+    max_output_tokens: 128, arms, ...(evidenceView === undefined ? {} : { evidence_view: evidenceView }) } }, preparationRoot);
+}
+
+function prepare(observationRoot: string, name: string,
+  arms: ("native_delivery" | "question_only")[] = ["native_delivery"], evidenceView?: string) {
+  const preparation = prepareInput(observationRoot, name, arms, evidenceView), preparationRoot = preparation.output_root;
   const authority = pinSemanticChainConsumerAuthority({ preparationRoot, inputUsdPerMillion: 0.14,
     outputUsdPerMillion: 0.42, spendCeilingUsd: 1 });
   const root = authority.execution_scope.execution_root_path;
@@ -67,14 +75,26 @@ function prepare(observationRoot: string, name: string, arms: ("native_delivery"
     ledgerPath: join(root, `extraction-attempt-ledger.${authority.attempt_lineage_digest}.json`) };
 }
 
-function captureWithProtocolVersion(name: string, protocolVersion: string) {
-  const root = join(base.root, name); cpSync(captures.prefix.root, root, { recursive: true });
+function captureWithProtocolVersion(name: string, protocolVersion: string, mode: keyof typeof captures = "prefix") {
+  const root = join(base.root, name); cpSync(captures[mode].root, root, { recursive: true });
   const config = readJson(join(root, "config.json")); config.protocol_package_version = protocolVersion;
   writeJson(join(root, "config.json"), config);
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
   return { root, config };
+}
+
+function rewriteCapturedEnvelope(root: string, ordinal: number,
+  rewrite: (value: z.infer<typeof OrdinaryRecallEnvelopeSchema>) => z.infer<typeof OrdinaryRecallEnvelopeSchema>) {
+  const path = join(root, "execution", `${String(ordinal).padStart(2, "0")}-public-envelope.json`);
+  const envelope = rewrite(OrdinaryRecallEnvelopeSchema.parse(readJson(path))); writeJson(path, envelope);
+  const wirePath = join(root, "execution/public-mcp-messages.jsonl");
+  const wire = readFileSync(wirePath, "utf8").trimEnd().split("\n").map(line => OrdinaryRecallWireRecordSchema.parse(JSON.parse(line)));
+  const reply = wire.filter(row => row.direction === "server_to_client" && row.message.result !== undefined)[ordinal - 1];
+  expect(reply).toBeDefined(); reply!.message.result = envelope;
+  writeFileSync(wirePath, `${wire.map(row => JSON.stringify(row)).join("\n")}\n`);
+  return envelope;
 }
 
 it.each(["complete", "prefix", "prefix_error"] as const)("passes the exact ordered %s public envelopes through the consumer HTTP boundary", async mode => {
@@ -276,15 +296,13 @@ it.each(["15.0.1", "17.0.0"])("refuses unsupported producer version %s even with
 
 it("rejects a replacement public source preview even when its retained MCP reply agrees", () => {
   const root = join(base.root, "replaced-public-preview"); cpSync(captures.prefix.root, root, { recursive: true });
-  const path = join(root, "execution/01-public-envelope.json"), envelope = OrdinaryRecallEnvelopeSchema.parse(readJson(path));
-  const original = z.object({ ok: z.literal(true), output: SoulMemorySearchResponseSchema }).passthrough()
-    .parse(JSON.parse(String(envelope.content[0]!.text)));
-  const payload = { ...original, output: { ...original.output, results: original.output.results.map((row, index) =>
-    index === 0 ? { ...row, content_preview: `!${row.content_preview.slice(1)}` } : row) } };
-  envelope.content[0]!.text = JSON.stringify(payload); envelope.structuredContent = payload; writeJson(path, envelope);
-  const wirePath = join(root, "execution/public-mcp-messages.jsonl");
-  const wire = readFileSync(wirePath, "utf8").trimEnd().split("\n").map(line => OrdinaryRecallWireRecordSchema.parse(JSON.parse(line)));
-  wire[1]!.message.result = envelope; writeFileSync(wirePath, `${wire.map(row => JSON.stringify(row)).join("\n")}\n`);
+  rewriteCapturedEnvelope(root, 1, envelope => {
+    const original = z.object({ ok: z.literal(true), output: SoulMemorySearchResponseSchema }).passthrough()
+      .parse(JSON.parse(String(envelope.content[0]!.text)));
+    const payload = { ...original, output: { ...original.output, results: original.output.results.map((row, index) =>
+      index === 0 ? { ...row, content_preview: `!${row.content_preview.slice(1)}` } : row) } };
+    envelope.content[0]!.text = JSON.stringify(payload); envelope.structuredContent = payload; return envelope;
+  });
   expect(() => prepare(root, "replaced-preview-consumer")).toThrow(/source|preview/u);
 });
 
@@ -296,4 +314,131 @@ it("rejects output overlap and later witness removal without touching the source
   const root = join(base.root, "removed-witness"); cpSync(capture.root, root, { recursive: true });
   const run = prepare(root, "witness-consumer"); unlinkSync(join(root, "execution/01-first-exposure.json"));
   expect(() => admitConsumerPreparation(run.preparation.output_root)).toThrow();
+});
+
+it("keeps default ordinary consumer prompt bytes and request keys unchanged", () => {
+  const capture = captures.complete, observation = admitOrdinaryRecallObservation(capture.root);
+  const preparation = prepareInput(capture.root, "default-view", ["native_delivery", "question_only"]);
+  const { lines } = admitConsumerPreparation(preparation.output_root);
+  expect(preparation.consumer_config).not.toHaveProperty("evidence_view");
+  for (const line of lines) {
+    const userPrompt = JSON.stringify({ original_query: QUESTION, query_as_of: capture.config.first_request.source_observed_at,
+      evidence: line.arm === "native_delivery" ? observation.evidence : null });
+    expect(line.userPrompt).toBe(userPrompt);
+    expect(line.key).toBe(semanticProviderRequestCacheKey({ identityPrefix: "task-consumer-request-v1",
+      model: CONSUMER_CONFIG.model, requestProfile: CONSUMER_CONFIG.requestProfile, providerUrl: CONSUMER_CONFIG.providerUrl,
+      systemPrompt: CONSUMER_SYSTEM_PROMPT, userPrompt, schema: consumerResponseJsonSchema(),
+      maxOutputTokens: 128, schemaName: TASK_CONSUMER_SCHEMA_NAME }));
+  }
+  const explicit = prepareInput(capture.root, "explicit-original-view", ["native_delivery", "question_only"], "original_public_envelopes");
+  expect(admitConsumerPreparation(explicit.output_root).lines).toEqual(lines);
+});
+
+it("removes only verified mirrors from a complete Protocol 15 archive while preserving every independent field", () => {
+  const { root, config } = captureWithProtocolVersion("mirrored-historical-complete", "15.0.0", "complete");
+  const expectedEnvelopes = Array.from({ length: captures.complete.observation.calls }, (_, index) => {
+    const ordinal = index + 1;
+    const before = { type: "resource_link", uri: `fixture:qualification:${ordinal}`, name: "Independent qualification",
+      text: "This non-text block field is independent", annotations: { audience: ["user"] } };
+    const after = { type: "image", data: "AA==", mimeType: "image/png", _meta: { sequence: ordinal } };
+    const metadata = { type: "text", annotations: { audience: ["assistant"], priority: 0.5 }, _meta: { note: "Résumé 🙂", ordinal } };
+    const envelope = rewriteCapturedEnvelope(root, ordinal, value => {
+      const text = value.content[0]!.text;
+      expect(typeof text).toBe("string");
+      const payload = JSON.parse(String(text));
+      return { ...value, _meta: { public_call: ordinal }, content: [before,
+        { ...metadata, text: JSON.stringify(Object.fromEntries(Object.entries(payload).reverse()), null, 2) }, after] };
+    });
+    return { ...envelope, content: [before, metadata, after] };
+  });
+  const paths = ["config.json", "execution/public-mcp-messages.jsonl", ...expectedEnvelopes.map((_, index) =>
+    `execution/${String(index + 1).padStart(2, "0")}-public-envelope.json`)];
+  const originals = paths.map(path => readFileSync(join(root, path), "utf8"));
+  const observation = admitOrdinaryRecallObservation(root);
+  expect(observation.state).toBe("complete");
+  const original = prepareInput(root, "original-mixed-view", ["native_delivery", "question_only"]);
+  const derived = prepareInput(root, "derived-mixed-view", ["native_delivery", "question_only"], "verified_mirror_removal");
+  const originalLines = admitConsumerPreparation(original.output_root).lines;
+  const admitted = admitConsumerPreparation(derived.output_root), line = admitted.lines[0]!;
+  expect(admitted.preparation).toEqual(derived);
+  expect(derived.consumer_config).toMatchObject({ evidence_view: "verified_mirror_removal" });
+  expect(derived.observation_binding).toEqual(original.observation_binding);
+  expect(derived.observation_binding).toMatchObject({ observation_identity: observation.binding.observation_identity,
+    protocol_package_version: "15.0.0", reader_protocol_package_version: "16.0.0", producer_candidate: config.candidate });
+  expect(line.userPrompt).toBe(JSON.stringify({ original_query: QUESTION, query_as_of: config.first_request.source_observed_at,
+    evidence: { ...observation.evidence, calls: observation.evidence.calls.map((call, index) =>
+      ({ ...call, envelope: expectedEnvelopes[index] })) } }));
+  expect(line).toMatchObject({ arm: "native_delivery", systemPrompt: originalLines[0]!.systemPrompt,
+    responseJsonSchema: originalLines[0]!.responseJsonSchema, transportProvenance: originalLines[0]!.transportProvenance });
+  expect(line.key).not.toBe(originalLines[0]!.key);
+  expect(line.requestDigest).not.toBe(originalLines[0]!.requestDigest);
+  expect(line.inputByteUpper).toBeLessThan(originalLines[0]!.inputByteUpper);
+  expect(admitted.lines[1]).toEqual(originalLines[1]);
+  expect(derived.request_timeout).toEqual(original.request_timeout);
+  expect(paths.map(path => readFileSync(join(root, path), "utf8"))).toEqual(originals);
+});
+
+it("preserves the only text payload when structuredContent is absent", () => {
+  const root = join(base.root, "text-only-capture"); cpSync(captures.prefix.root, root, { recursive: true });
+  rewriteCapturedEnvelope(root, 1, ({ structuredContent: _absent, ...envelope }) => envelope);
+  const original = prepareInput(root, "text-only-original"), derived = prepareInput(root, "text-only-derived",
+    ["native_delivery"], "verified_mirror_removal");
+  expect(admitConsumerPreparation(derived.output_root).lines).toEqual(admitConsumerPreparation(original.output_root).lines);
+});
+
+it.each([
+  { name: "non-equivalent", change: (value: z.infer<typeof OrdinaryRecallEnvelopeSchema>) =>
+    ({ ...value, structuredContent: { ok: true, output: null } }), message: /representations differ/u },
+  { name: "malformed", change: (value: z.infer<typeof OrdinaryRecallEnvelopeSchema>) =>
+    ({ ...value, content: [{ type: "text", text: "{malformed" }] }), message: /JSON|property name/u },
+  { name: "non-string", change: (value: z.infer<typeof OrdinaryRecallEnvelopeSchema>) =>
+    ({ ...value, content: [{ type: "text", text: { invalid: true } }] }), message: /exact text payload/u },
+  { name: "mixed-text", change: (value: z.infer<typeof OrdinaryRecallEnvelopeSchema>) =>
+    ({ ...value, content: [...value.content, { type: "text", text: "Independent warning" }] }), message: /exact text payload/u },
+  { name: "missing-text", change: (value: z.infer<typeof OrdinaryRecallEnvelopeSchema>) =>
+    ({ ...value, content: [{ type: "resource_link", uri: "fixture:independent", name: "Independent" }] }), message: /exact text payload/u }
+])("refuses a $name envelope before projecting the requested view", ({ name, change, message }) => {
+  const root = join(base.root, `invalid-mirror-${name}`); cpSync(captures.prefix.root, root, { recursive: true });
+  rewriteCapturedEnvelope(root, 1, change);
+  const output = `invalid-mirror-consumer-${name}`;
+  expect(() => prepareInput(root, output, ["native_delivery"], "verified_mirror_removal")).toThrow(message);
+  expect(existsSync(join(base.root, output, "preparation.json"))).toBe(false);
+});
+
+it.each(["view", "request", "archive"] as const)("refuses changed %s after derived preparation", changed => {
+  const root = join(base.root, `view-tamper-${changed}`); cpSync(captures.prefix.root, root, { recursive: true });
+  const preparation = prepareInput(root, `view-tamper-consumer-${changed}`, ["native_delivery"], "verified_mirror_removal");
+  if (changed === "archive") rewriteCapturedEnvelope(root, 1, envelope => ({ ...envelope, _meta: { new: "unbound metadata" } }));
+  else {
+    const value = readJson(join(preparation.output_root, "preparation.json"));
+    if (changed === "view") delete value.payload.consumer_config.evidence_view;
+    else value.payload.requests[0].key = "0".repeat(64);
+    value.identity = chainIdentity(value.payload);
+    writeJson(join(preparation.output_root, "preparation.json"), value);
+  }
+  expect(() => admitConsumerPreparation(preparation.output_root)).toThrow(/no longer binds/u);
+});
+
+it("sends the derived prefix and terminal error once and rejects later view substitution", async () => {
+  const run = prepare(captures.prefix_error.root, "derived-consumer-http", ["native_delivery"], "verified_mirror_removal");
+  const { lines } = admitConsumerPreparation(run.preparation.output_root);
+  ledgerPath = run.ledgerPath; const before = hits;
+  const result = await executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" });
+  expect(result).toMatchObject({ new_attempts: 1, rows: [{ status: "complete_response" }] });
+  expect(hits - before).toBe(1);
+  expect(bodies.at(-1)!.messages.find(message => message.role === "user")!.content).toBe(lines[0]!.userPrompt);
+  const evidence = JSON.parse(lines[0]!.userPrompt).evidence;
+  expect(evidence.calls.at(-1)).toMatchObject({ response_state: "public_error", envelope: { structuredContent: { ok: false } } });
+  expect(evidence.calls.every((call: { envelope: { content: Record<string, unknown>[] } }) =>
+    call.envelope.content.every(block => block.type !== "text" || !("text" in block)))).toBe(true);
+  expect(await executeSemanticChainConsumer({ authority: run.authority, mode: "execute" })).toMatchObject({ new_attempts: 0 });
+  expect(hits - before).toBe(1);
+  const original = prepareInput(captures.prefix_error.root, "substituted-original-view");
+  const changed = readJson(join(run.preparation.output_root, "preparation.json"));
+  changed.payload.consumer_config = original.consumer_config; changed.payload.requests = original.requests;
+  changed.identity = chainIdentity(changed.payload); writeJson(join(run.preparation.output_root, "preparation.json"), changed);
+  expect(admitConsumerPreparation(run.preparation.output_root).lines[0]!.key).toBe(original.requests[0]!.key);
+  await expect(executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" }))
+    .rejects.toThrow(/frozen request scope/u);
+  expect(hits - before).toBe(1);
 });

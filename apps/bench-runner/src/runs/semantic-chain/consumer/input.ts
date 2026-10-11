@@ -22,6 +22,10 @@ export const ConsumerConfigSchema = z.object({
   arms: z.array(ConsumerArmSchema).min(1).max(2).refine(arms => new Set(arms).size === arms.length)
 }).strict();
 export type ConsumerConfig = z.infer<typeof ConsumerConfigSchema>;
+const OrdinaryConsumerConfigSchema = ConsumerConfigSchema.extend({
+  evidence_view: z.enum(["original_public_envelopes", "verified_mirror_removal"]).optional()
+}).strict();
+type OrdinaryConsumerConfig = z.infer<typeof OrdinaryConsumerConfigSchema>;
 
 /** A task answer is a fallible consumer report, never memory or interpretation admission. */
 export const ConsumerAnswerSchema = z.object({
@@ -62,6 +66,7 @@ const LibraryConsumerPreparationSchema = z.object({
 const OrdinaryConsumerSourceSchema = z.object({ kind: z.literal("ordinary_recall"), observation_root: z.string().min(1) }).strict();
 const OrdinaryConsumerPreparationSchema = LibraryConsumerPreparationSchema.omit({ source: true, native_binding: true }).extend({
   contract: z.literal("ordinary-recall-consumer-preparation-v1"), source: OrdinaryConsumerSourceSchema,
+  consumer_config: OrdinaryConsumerConfigSchema,
   observation_binding: z.object({ observation_identity: Digest, producer_revision: z.string().min(1),
     producer_candidate: z.string().regex(/^[a-f0-9]{40}$/u),
     capture_contract: z.literal(ORDINARY_RECALL_CAPTURE_CONTRACT), public_semantics: z.literal(ORDINARY_RECALL_PUBLIC_SEMANTICS),
@@ -95,7 +100,7 @@ export function prepareOrdinaryRecallConsumer(input: Readonly<{
   observationRoot: string; consumerConfig: unknown;
 }>, outputRoot: string): z.infer<typeof OrdinaryConsumerPreparationSchema> {
   const source = OrdinaryConsumerSourceSchema.parse({ kind: "ordinary_recall", observation_root: canonicalPath(input.observationRoot) });
-  const prepared = materializeOrdinary(source, ConsumerConfigSchema.parse(input.consumerConfig), outputRoot);
+  const prepared = materializeOrdinary(source, OrdinaryConsumerConfigSchema.parse(input.consumerConfig), outputRoot);
   writeChainArtifact(join(prepared.preparation.output_root, "preparation.json"), prepared.preparation);
   return prepared.preparation;
 }
@@ -138,19 +143,37 @@ function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfi
   return { preparation, lines };
 }
 
-function materializeOrdinary(source: z.infer<typeof OrdinaryConsumerSourceSchema>, config: ConsumerConfig, outputRoot: string) {
+function materializeOrdinary(source: z.infer<typeof OrdinaryConsumerSourceSchema>, config: OrdinaryConsumerConfig, outputRoot: string) {
   const admitted = admitOrdinaryRecallObservation(source.observation_root);
   const root = assertSeparateConsumerOutputRoot(outputRoot, admitted.protectedPaths);
   const original_query = admitted.config.first_request.query;
   const query_as_of = admitted.config.first_request.source_observed_at!;
+  const evidence = ordinaryConsumerEvidenceView(admitted.evidence, config.evidence_view);
   const lines = config.arms.map(arm => consumerLine(config, arm, { original_query, query_as_of,
-    evidence: arm === "native_delivery" ? admitted.evidence : null }));
+    evidence: arm === "native_delivery" ? evidence : null }));
   const preparation = OrdinaryConsumerPreparationSchema.parse({ contract: "ordinary-recall-consumer-preparation-v1",
     provider_calls: 0, output_root: root, source, consumer_config: config, original_query, query_as_of,
     request_timeout: providerRequestTimeout(config.max_output_tokens), observation_binding: admitted.binding,
     requests: lines.map(line => ({ arm: line.arm, key: line.key, request_digest: line.requestDigest,
       input_byte_upper: line.inputByteUpper })) });
   return { preparation, lines };
+}
+
+/** A consumer presentation derived after archive admission; it is not another native envelope. */
+function ordinaryConsumerEvidenceView(evidence: ReturnType<typeof admitOrdinaryRecallObservation>["evidence"],
+  view: OrdinaryConsumerConfig["evidence_view"]) {
+  if (view !== "verified_mirror_removal") return evidence;
+  return { ...evidence, calls: evidence.calls.map(call => {
+    const envelope = call.envelope;
+    if (envelope === null || envelope.structuredContent === undefined) return call;
+    // Admission already verified the unique text payload against structuredContent.
+    // Keep every independent block field and its position; archived bytes stay untouched.
+    return { ...call, envelope: { ...envelope, content: envelope.content.map(block => {
+      if (block.type !== "text") return block;
+      const { text: _verifiedMirror, ...metadata } = block;
+      return metadata;
+    }) } };
+  }) };
 }
 
 function assertConsumerOutputRoot(outputRoot: string, source: z.infer<typeof SourceSchema>,
