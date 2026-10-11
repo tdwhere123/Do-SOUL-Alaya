@@ -37,13 +37,12 @@ import {
 import {
   sourceSemanticCorrespondenceFlatResponseJsonSchema, sourceSemanticCorrespondenceFlatSystemPrompt
 } from "./source-semantic-correspondence-presentation.js";
-export { SOURCE_SEMANTIC_CORRESPONDENCE_FLAT_RESPONSE_CONTRACT } from "./source-semantic-correspondence-presentation.js";
 export { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT } from "./source-semantic-query-provenance.js";
 export { SOURCE_SEMANTIC_SYSTEM_PROMPT } from "./source-semantic-table-guidance.js";
 export { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 
 export const SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT = "source-semantic-query-request-v9" as const;
-export const SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT = "source-semantic-query-request-v10" as const;
+const SOURCE_SEMANTIC_QUERY_NESTED_REQUEST_CONTRACT = "source-semantic-query-request-v10" as const;
 const SOURCE_SEMANTIC_QUERY_REFERENT_REQUEST_CONTRACT = "source-semantic-query-request-v11" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_REQUEST_CONTRACT = "source-semantic-correspondence-request-v7" as const;
 export const SOURCE_SEMANTIC_CORRESPONDENCE_LEGACY_SCOPED_REQUEST_CONTRACT = "source-semantic-correspondence-request-v8" as const;

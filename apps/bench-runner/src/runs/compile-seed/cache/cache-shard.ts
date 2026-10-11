@@ -223,12 +223,12 @@ function inspectRawExtraction(
         attempt.attempt_ordinal < 1 || !/^[a-f0-9]{64}$/u.test(attempt.authority_lineage_digest) ||
         cached.entry.transport_provenance === undefined ||
         attempt.kind !== undefined && attempt.kind !== "gemini_batch" && attempt.kind !== "interactive")) {
-      throw new Error("invalid provider attempt binding");
+      throw new AlayaError("CONFLICT", "invalid provider attempt binding");
     }
     if (cached.entry.transport_provenance !== undefined &&
         (attempt?.kind === undefined ||
          (attempt.kind === "gemini_batch") !== (cached.entry.provider_batch !== undefined))) {
-      throw new Error("provider attempt transport mode is unbound");
+      throw new AlayaError("CONFLICT", "provider attempt transport mode is unbound");
     }
     inspectCachedResponseMetadata(
       cached.entry.response_metadata,
@@ -249,7 +249,7 @@ function inspectRawExtraction(
             buildExtractionTransportProvenance(transport)) ||
           settledAttemptUsageDigest(batch.result.provenance.usage) !==
             settledAttemptUsageDigest(inspectCachedResponseMetadata(cached.entry.response_metadata, true).usage)) {
-        throw new Error("ordinary Batch retained request/response transport binding mismatch");
+        throw new AlayaError("CONFLICT", "ordinary Batch retained request/response transport binding mismatch");
       }
     } else if (attempt?.kind === "interactive") {
       const quarantine = inspectInteractiveResponseWitness(cached.entry,

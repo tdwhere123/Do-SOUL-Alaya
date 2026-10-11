@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { assertSampleReceipt } from "../sample-scope.js";
 import { assertCatalogRefillScopeMatchesReceipt } from "../catalog-refill/scope.js";
 import type { ExtractionAuthorityReceipt } from "../receipt.js";
@@ -17,7 +18,7 @@ export function assertExtractionAuthorityKeyInScope(receipt: ExtractionAuthority
       receipt.sample_scope !== undefined && !receipt.sample_scope.keys.includes(key) ||
       receipt.repair_scope !== undefined && !receipt.repair_scope.shards.some(shard => shard.cache_key === key) ||
       receipt.catalog_refill !== undefined && !receipt.catalog_refill.keys.includes(key)) {
-    throw new Error("extraction authority refused an out-of-scope request key");
+    throw new AlayaError("CONFLICT", "extraction authority refused an out-of-scope request key");
   }
 }
 

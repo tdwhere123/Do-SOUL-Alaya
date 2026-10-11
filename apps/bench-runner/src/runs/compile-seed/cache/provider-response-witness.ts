@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { decodeGeminiGenerateContent, isCompleteGeminiFinish, parseGeminiGenerateContentBody } from
   "../../extraction/fill/batch/native-codec.js";
 import { decodeBoundedResponseBytes } from "../../extraction/fill/batch/http.js";
@@ -33,7 +33,7 @@ export function inspectRetainedInteractiveResponses(input: {
   if (requestIdentity === undefined || responses === undefined || responses.length === 0 ||
       computeCacheKey(input.model, input.requestProfile,
         requestIdentity.system_prompt, requestIdentity.user_prompt) !== input.cacheKey) {
-    throw new Error("interactive provider request/response witness is missing");
+    throw new AlayaError("CONFLICT", "interactive provider request/response witness is missing");
   }
   let previousOrdinal = 0;
   let physicalFinish: string | null = null;
@@ -45,19 +45,19 @@ export function inspectRetainedInteractiveResponses(input: {
         sha256(response.witness.userPrompt) !== response.witness.requestSha256 ||
         typeof response.witness.rawJson !== "string" ||
         response.usage !== null && !validUsage(response.usage)) {
-      throw new Error("interactive provider response witness is invalid");
+      throw new AlayaError("CONFLICT", "interactive provider response witness is invalid");
     }
     previousOrdinal = response.attempt_ordinal;
     const physical = response.witness.httpResponse;
     if (physical === undefined) {
-      throw new Error("interactive physical provider response is missing");
+      throw new AlayaError("CONFLICT", "interactive physical provider response is missing");
     }
     const body = Buffer.from(physical.bodyBase64, "base64");
     if (!physical.bodyComplete || physical.bodyTruncated ||
         body.length !== physical.bodyByteLength ||
         sha256(body) !== physical.bodySha256 ||
         body.toString("base64") !== physical.bodyBase64) {
-      throw new Error("interactive provider response bytes are incomplete or changed");
+      throw new AlayaError("CONFLICT", "interactive provider response bytes are incomplete or changed");
     }
     const decoded = isNativeGeminiRequestProfile(input.requestProfile)
       ? decodeGeminiGenerateContent(parseGeminiGenerateContentBody(decodeBoundedResponseBytes(body)))
@@ -69,11 +69,11 @@ export function inspectRetainedInteractiveResponses(input: {
       ? decoded.responseMetadata.completionWitness : decoded.completion?.witness;
     if ("rawJson" in decoded ? !isCompleteGeminiFinish(physicalFinish) :
         physicalFinish === "length" || decoded.completion?.complete !== true) {
-      throw new Error("interactive physical provider response is incomplete");
+      throw new AlayaError("CONFLICT", "interactive physical provider response is incomplete");
     }
     if (rawJson !== response.witness.rawJson ||
         canonicalJson(decoded.usage ?? null) !== canonicalJson(response.usage)) {
-      throw new Error("interactive provider response decoding changed");
+      throw new AlayaError("CONFLICT", "interactive provider response decoding changed");
     }
   }
   const last = responses.at(-1)!;
@@ -82,19 +82,19 @@ export function inspectRetainedInteractiveResponses(input: {
       (responses.length === 1
         ? metadata.finish_reason !== physicalFinish || metadata.completion_witness !== physicalWitness
         : metadata.finish_reason !== null || metadata.completion_witness !== "partition_composition")) {
-    throw new Error("interactive provider completion differs from retained physical responses");
+    throw new AlayaError("CONFLICT", "interactive provider completion differs from retained physical responses");
   }
   if (last.attempt_ordinal !== input.attemptOrdinal ||
       responses.length === 1 && last.witness.userPrompt !== requestIdentity.user_prompt ||
       responses.length === 1 && last.witness.rawJson !== input.rawJson) {
-    throw new Error("interactive provider response differs from cached extraction");
+    throw new AlayaError("CONFLICT", "interactive provider response differs from cached extraction");
   }
   if (responses.length > 1) {
     const request = parseOfficialApiExtractionRequest(JSON.parse(requestIdentity.user_prompt));
     const witnesses = responses.map((response) => response.witness);
     assertRetainedPartitionedRequests(request, witnesses);
     if (composePartitionedExtraction(request, witnesses) !== input.rawJson) {
-      throw new Error("partition composition differs from retained physical responses");
+      throw new AlayaError("CONFLICT", "partition composition differs from retained physical responses");
     }
   }
   return responses;

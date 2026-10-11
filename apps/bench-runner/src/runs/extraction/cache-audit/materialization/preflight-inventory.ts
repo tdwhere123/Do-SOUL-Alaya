@@ -1,4 +1,5 @@
 import { lstatSync } from "node:fs";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from
   "../../../compile-seed/compile-seed-types.js";
@@ -84,10 +85,10 @@ function inspectShard(
   const admitted = inspectCachedRawExtraction(input.sourceRoot, cacheKey,
     input.model, input.requestProfile);
   if (admitted.status !== "hit" || admitted.rawJsonSha256 !== shard.rawJsonSha256) {
-    throw new Error(`materialization source shard ${cacheKey} is not reader-admitted`);
+    throw new AlayaError("CONFLICT", `materialization source shard ${cacheKey} is not reader-admitted`);
   }
   if (admitted.transportProvenance !== undefined) {
-    throw new Error(`provider-backed source shard ${cacheKey} requires root-local admission evidence; materialization is unsupported`);
+    throw new AlayaError("CONFLICT", `provider-backed source shard ${cacheKey} requires root-local admission evidence; materialization is unsupported`);
   }
   return {
     shard,

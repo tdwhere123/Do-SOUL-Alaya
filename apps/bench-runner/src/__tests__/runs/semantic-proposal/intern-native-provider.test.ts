@@ -236,10 +236,13 @@ it.each(probeProfiles.slice(1))("denies mismatched %s probe bindings without dis
     requestProfile: profile, fetchImpl };
   for (const invalid of [{ ...input, model: "mimo-v2.5" },
     { ...input, requestProfile: "unknown-profile" },
-    { ...input, framing: "sse" as const },
-    { ...input, providerUrl: "https://chat.intern-ai.org.cn/v1" }]) {
-    await expect(probeProviderProtocol(invalid)).rejects.toThrow();
+    { ...input, framing: "sse" as const }]) {
+    await expect(probeProviderProtocol(invalid)).rejects.toMatchObject({
+      name: "AlayaError", code: "VALIDATION"
+    });
   }
+  await expect(probeProviderProtocol({ ...input, providerUrl: "https://chat.intern-ai.org.cn/v1" }))
+    .rejects.toThrow();
   expect(fetchImpl).not.toHaveBeenCalled();
   expect(isChatSemanticRequestProfile(profile)).toBe(false);
   expect(isExtractionRequestProfile(profile)).toBe(false);

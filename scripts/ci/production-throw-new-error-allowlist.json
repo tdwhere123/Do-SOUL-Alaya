@@ -827,10 +827,6 @@
     "max": 5,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/extraction/chat-completion-response.ts": {
-    "max": 4,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/extraction/content-closure.ts": {
     "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"

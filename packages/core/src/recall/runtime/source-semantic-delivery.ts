@@ -117,7 +117,7 @@ function evaluationReport(query: SourceSemanticQuery, execution: SourceSemanticE
     counterexample_explanation_ids: [...new Set(counterexamples.flatMap((row) => row.ids))] };
 }
 
-export function closedProof(
+function closedProof(
   roots: readonly string[],
   rows: ReadonlyMap<string, NonNullable<InformationIndex["explanations"]>[number]>,
   meter: SourceSemanticResourceLedger,

@@ -1,6 +1,6 @@
 import { isNativeGeminiRequestProfile } from "../extraction/request-profile.js";
 import { createHash } from "node:crypto";
-import { isChatSemanticRequestProfile, isInternProviderRequestProfile,
+import { AlayaError, isChatSemanticRequestProfile, isInternProviderRequestProfile,
   type InternProtocolProbeProfile } from "@do-soul/alaya-protocol";
 import { buildProviderChatRequestBody, executeProviderChatCompletion, ProviderChatCompletionError,
   providerChatCompletionsUrl, type ProviderChatCompletionRequest, type ProviderHttpResponseEvidence,
@@ -48,7 +48,7 @@ export async function probeProviderProtocol(
   const profile = input.requestProfile === undefined || input.requestProfile === binding.requestProfile
     ? binding.requestProfile
     : binding.supportedProbeRequestProfiles?.find(value => value === input.requestProfile);
-  if (profile === undefined) throw new Error("provider protocol probe profile is not supported by its model binding");
+  if (profile === undefined) throw new AlayaError("VALIDATION", "provider protocol probe profile is not supported by its model binding");
   let physicalCalls = 0;
   const fetchImpl: typeof fetch = async (url, init) => {
     physicalCalls += 1;
@@ -62,7 +62,7 @@ export async function probeProviderProtocol(
   const model = resolveVendorModel(input.model);
   const framing = input.framing ?? "json";
   const intern = isInternProviderRequestProfile(profile);
-  if (intern && framing !== "json") throw new Error("Intern protocol probe supports JSON framing only");
+  if (intern && framing !== "json") throw new AlayaError("VALIDATION", "Intern protocol probe supports JSON framing only");
   const timeoutMs = intern ? 180_000 : 20_000;
   const maxOutputTokens = intern ? 8192 : 256;
   if (isNativeGeminiRequestProfile(profile)) {

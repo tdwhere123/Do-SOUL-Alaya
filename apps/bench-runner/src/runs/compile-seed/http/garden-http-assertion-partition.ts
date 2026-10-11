@@ -1,4 +1,4 @@
-import { SourceInterpretationResponseEnvelopeSchema } from "@do-soul/alaya-protocol";
+import { AlayaError, SourceInterpretationResponseEnvelopeSchema } from "@do-soul/alaya-protocol";
 import {
   parseOfficialApiExtractionRequest,
   stringifyOfficialApiExtractionRequest,
@@ -319,7 +319,7 @@ export function assertRetainedPartitionedRequests(
   results: readonly Readonly<{ userPrompt: string; rawJson: string }>[]
 ): void {
   if (request.source_assertions.length < 2 || results.length < 2) {
-    throw new Error("retained assertion partition is incomplete");
+    throw new AlayaError("CONFLICT", "retained assertion partition is incomplete");
   }
   let index = 0;
   const visit = (partition: OfficialApiExtractionRequest): void => {
@@ -331,13 +331,13 @@ export function assertRetainedPartitionedRequests(
       return;
     }
     if (partition.source_assertions.length < 2) {
-      throw new Error("retained provider request differs from its assertion partition");
+      throw new AlayaError("CONFLICT", "retained provider request differs from its assertion partition");
     }
     for (const child of splitRequest(partition)) visit(child);
   };
   for (const child of splitRequest(request)) visit(child);
   if (index !== results.length) {
-    throw new Error("retained assertion partition response count changed");
+    throw new AlayaError("CONFLICT", "retained assertion partition response count changed");
   }
 }
 

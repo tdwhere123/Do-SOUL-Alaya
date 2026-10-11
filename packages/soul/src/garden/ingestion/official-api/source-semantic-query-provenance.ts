@@ -14,7 +14,7 @@ export const SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT =
 export const SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT =
   "source-semantic-correspondence-response-v6" as const;
 
-export type SourceSemanticQueryProvenanceQuote = Readonly<{
+type SourceSemanticQueryProvenanceQuote = Readonly<{
   handle: string;
   excerpt: string;
 }>;

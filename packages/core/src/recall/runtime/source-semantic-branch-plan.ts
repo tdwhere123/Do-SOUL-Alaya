@@ -10,7 +10,7 @@ export type SourceSemanticBranchPlan = Readonly<{
   projectedVariables: readonly string[]; returnedVariables: readonly string[];
 }>;
 
-export function correspondencePredicateGroups(
+function correspondencePredicateGroups(
   correspondence: SourceSemanticCorrespondence | undefined, alternative: number, queryFrame?: string
 ): readonly string[] {
   return [...new Set((correspondence?.correspondences ?? []).flatMap(row =>

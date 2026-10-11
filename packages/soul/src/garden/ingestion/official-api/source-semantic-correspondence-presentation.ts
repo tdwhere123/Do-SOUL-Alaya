@@ -13,9 +13,6 @@ import {
   constrainSourceSemanticCorrespondenceGenerationSchema, resolveSourceSemanticQueryProvenance
 } from "./source-semantic-query-provenance.js";
 
-export const SOURCE_SEMANTIC_CORRESPONDENCE_FLAT_RESPONSE_CONTRACT =
-  "source-semantic-correspondence-response-v7" as const;
-
 // Field grammars and bounds remain owned by the internal Protocol assessment.
 const AssessmentBody = SourceSemanticCorrespondenceAssessmentSchema.unwrap()
   .omit({ contract: true, source_interpretation_handle: true });

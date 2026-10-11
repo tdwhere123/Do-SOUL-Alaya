@@ -4,6 +4,7 @@ import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { previewTokenEstimate } from "./recall-service-helpers.js";
 import { governanceManifestationCeilings, governanceManifestationFor } from "./governance-manifestation.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
+import { CoreError } from "../../shared/errors.js";
 
 export function encodeRecallResult(
   index: InformationIndex,
@@ -89,7 +90,7 @@ export function encodeRecallResult(
 
 function sourceClock(index: InformationIndex): string {
   const clock = index.as_of ?? index.continuation?.interpretation_clock;
-  if (clock === undefined) throw new Error("source disclosure requires an evaluation clock");
+  if (clock === undefined) throw new CoreError("OBLIGATION_VIOLATION", "source disclosure requires an evaluation clock");
   return clock;
 }
 

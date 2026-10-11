@@ -6,7 +6,7 @@ export type SourceSemanticQueryBranchView = Readonly<{
 }>;
 
 /** A requested occurrence retains its complete governing scope, including sibling operands. */
-export function sourceSemanticQueryScopeView(
+function sourceSemanticQueryScopeView(
   alternative: SourceSemanticQueryAlternative, requested: readonly string[]
 ): SourceSemanticQueryAlternative {
   const included = new Set(requested);

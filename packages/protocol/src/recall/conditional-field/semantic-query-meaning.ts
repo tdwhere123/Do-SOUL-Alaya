@@ -58,7 +58,7 @@ export type QueryMeaning =
   | QueryOpaqueMeaning
   | QueryOccurrenceMeaning;
 
-export type QueryStatementMeaning = Readonly<{
+type QueryStatementMeaning = Readonly<{
   readonly kind: "statement";
   readonly key?: string;
   readonly predicate: string;
@@ -68,7 +68,7 @@ export type QueryStatementMeaning = Readonly<{
   readonly required_evidence_act?: RequiredEvidenceActValue;
   readonly return?: boolean;
 }>;
-export type QueryNotMeaning = Readonly<{
+type QueryNotMeaning = Readonly<{
   readonly kind: "not";
   readonly key?: string;
   readonly return?: boolean;
@@ -76,7 +76,7 @@ export type QueryNotMeaning = Readonly<{
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
-export type QueryPossibleMeaning = Readonly<{
+type QueryPossibleMeaning = Readonly<{
   readonly kind: "possible";
   readonly key?: string;
   readonly return?: boolean;
@@ -84,7 +84,7 @@ export type QueryPossibleMeaning = Readonly<{
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
-export type QueryReportedMeaning = Readonly<{
+type QueryReportedMeaning = Readonly<{
   readonly kind: "reported";
   readonly key?: string;
   readonly return?: boolean;
@@ -93,7 +93,7 @@ export type QueryReportedMeaning = Readonly<{
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
-export type QueryConditionalMeaning = Readonly<{
+type QueryConditionalMeaning = Readonly<{
   readonly kind: "conditional";
   readonly key?: string;
   readonly return?: boolean;
@@ -102,7 +102,7 @@ export type QueryConditionalMeaning = Readonly<{
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
-export type QueryOpaqueMeaning = Readonly<{
+type QueryOpaqueMeaning = Readonly<{
   readonly kind: "opaque";
   readonly key?: string;
   readonly return?: boolean;
@@ -110,7 +110,7 @@ export type QueryOpaqueMeaning = Readonly<{
   readonly obligation?: ObligationKind;
   readonly required_evidence_act?: RequiredEvidenceActValue;
 }>;
-export type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
+type QueryOccurrenceMeaning = Readonly<{ kind: "occurrence"; readonly key: string }>;
 
 function meaningShape<Operand extends z.ZodTypeAny, const Serialized extends Record<string, z.ZodTypeAny>>(
   operand: Operand, token: Serialized

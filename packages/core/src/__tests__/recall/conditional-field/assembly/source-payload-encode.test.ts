@@ -20,6 +20,7 @@ import {
   type ObserverReaders
 } from "../../../../recall/recall-service.js";
 import { BoundedIndexPayload } from "../../../../recall/runtime/index-payload.js";
+import { encodeSourceSemanticLibraryResults } from "../../../../recall/runtime/source-semantic-library-recall.js";
 import {
   FAR_FUTURE_EXPIRY,
   INTERPRETATION_CLOCK,
@@ -40,6 +41,19 @@ const SOURCE_TARGET: SourceEvidenceTarget = {
 const OVERSIZED_BODY = `needle ${"汉".repeat(80)}`;
 
 describe("source payload encode", () => {
+  it.each([
+    ["Recall", encodeRecallResult],
+    ["semantic library", encodeSourceSemanticLibraryResults]
+  ] as const)("rejects missing %s disclosure clocks as a nonretryable obligation violation", (_name, encode) => {
+    const entry = sourceEntry();
+    const index = { ...sourceIndex([entry]), as_of: undefined };
+    expect(() => encode(index, new Map([[indexEntryCacheKey(entry), "quoted excerpt"]])))
+      .toThrowError(expect.objectContaining({
+        name: "CoreError", code: "OBLIGATION_VIOLATION", subCode: undefined,
+        message: expect.stringMatching(/source disclosure requires an evaluation clock/u)
+      }));
+  });
+
   it("encodes source_evidence without FACT/PROJECT defaults", () => {
     const entry = sourceEntry();
     const encoded = encodeRecallResult(

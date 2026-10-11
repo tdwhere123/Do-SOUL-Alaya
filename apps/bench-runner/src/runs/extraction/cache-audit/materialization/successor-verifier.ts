@@ -1,4 +1,5 @@
 import { existsSync, lstatSync } from "node:fs";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { cacheFilePath } from "../../../compile-seed/compile-seed-cache.js";
@@ -145,7 +146,7 @@ function assertOriginAdmission(
       commit.initial_target_manifest.request_profile);
     if (admitted.status !== "hit" ||
         admitted.rawJsonSha256 !== descriptor.raw_json_sha256) {
-      throw new Error(`materialized successor origin shard ${descriptor.cache_key} is not reader-admitted`);
+      throw new AlayaError("CONFLICT", `materialized successor origin shard ${descriptor.cache_key} is not reader-admitted`);
     }
   }
 }

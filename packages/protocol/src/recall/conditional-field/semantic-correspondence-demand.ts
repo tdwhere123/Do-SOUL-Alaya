@@ -6,7 +6,7 @@ import { SourceSemanticHandleSchema } from "../../garden/source-semantic-draft.j
 import { SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP } from "../../garden/source-semantic-worker.js";
 import { sourceSemanticQueryBranchViews } from "./semantic-query-branches.js";
 import {
-  SourceSemanticQueryTargetSchema, type SourceSemanticQuery, type SourceSemanticQueryTarget
+  SourceSemanticQueryTargetSchema, type SourceSemanticQuery
 } from "./semantic-query.js";
 import {
   SOURCE_SEMANTIC_QUERY_ENDPOINT_HANDLE, SourceSemanticCorrespondenceAssessmentSchema,
@@ -257,5 +257,3 @@ function endpointInDemand(
   if (endpoint.kind === "referent") return endpoint.variable !== undefined && variables.has(endpoint.variable);
   return endpoint.alternative === alternative && endpoint.frame !== undefined && frames.has(endpoint.frame);
 }
-
-export type { SourceSemanticQueryTarget };

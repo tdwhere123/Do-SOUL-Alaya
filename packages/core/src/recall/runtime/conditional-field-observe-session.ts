@@ -43,6 +43,7 @@ import {
 } from "./observe-field-residuals.js";
 import type { ObserveFieldInput } from "./conditional-field-observe.js";
 import type { RequestCostPhase } from "./request-cost-ledger.js";
+import { CoreError } from "../../shared/errors.js";
 
 const MAX_OBSERVE_ROUNDS = 4_096;
 const SEED_PAGE_SIZE = 32;
@@ -650,7 +651,7 @@ function consumeBoundSourceFact(session: ObservationSession): boolean {
   }
   const page = input.readers.source?.({ workspaceId: input.workspace_id, objectId });
   if (page !== undefined && (!Number.isSafeInteger(page.rowsRead) || page.rowsRead < 0 || page.rowsRead > 1)) {
-    throw new Error("source reader must report at most one row for one object");
+    throw new CoreError("OBLIGATION_VIOLATION", "source reader must report at most one row for one object");
   }
   const work = 2 + (page?.rowsRead ?? 0);
   input.cost?.add("observe", { native_visits: (page === undefined ? 0 : 1) + (page?.rowsRead ?? 0),

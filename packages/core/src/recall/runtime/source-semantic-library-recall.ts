@@ -12,6 +12,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
+import { CoreError } from "../../shared/errors.js";
 import { makeTokenEstimator } from "./recall-service-port-helpers.js";
 import { projectSourceDisclosure } from "./source-disclosure.js";
 
@@ -45,7 +46,7 @@ export const SOURCE_SEMANTIC_LIBRARY_ORDER: SourceSemanticLibraryOrder = {
   occupancy_prefix: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX,
   page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
 };
-export const SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS = 2_000;
+const SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS = 2_000;
 
 /** Raw fallback reserves a fair root share; semantic support may use any remaining space atomically. */
 export function sourceSemanticLibraryRawPreview(text: string, occupiedRoots: number): string {
@@ -245,7 +246,7 @@ export function encodeSourceSemanticLibraryResults(
 }
 
 function sourceClock(index: InformationIndex): string {
-  if (index.as_of === undefined) throw new Error("library source disclosure requires an evaluation clock");
+  if (index.as_of === undefined) throw new CoreError("OBLIGATION_VIOLATION", "library source disclosure requires an evaluation clock");
   return index.as_of;
 }
 

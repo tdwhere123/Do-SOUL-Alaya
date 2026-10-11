@@ -207,7 +207,7 @@ export function readSettledExtractionAttemptLedger(input: {
     throw new Error("predecessor extraction attempt ledger is not durably settled");
   }
   if (!hasCompleteAttemptHistory(current)) {
-    throw new Error("predecessor extraction attempt history is incomplete");
+    throw new AlayaError("CONFLICT", "predecessor extraction attempt history is incomplete");
   }
   assertSuccessfulShards(input.cacheRoot, current);
   return toSnapshot(current, path, envelope.rawSha256);

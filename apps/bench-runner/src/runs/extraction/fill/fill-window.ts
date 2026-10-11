@@ -1,4 +1,4 @@
-import type { ExtractionSourcePacking } from "@do-soul/alaya-protocol";
+import { AlayaError, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import type { LongMemEvalVariant } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { censusNativeSourceRecords, type SourceCensusRecord } from "../../snapshot/source-records/census.js";
 import { nativeSourceRequestInventory } from "./source-request-workset.js";
@@ -49,13 +49,13 @@ export async function prepareExtractionFillWindow(
   expansion: PreparedExpansionFillAuthority | undefined
 ): Promise<ExtractionFillWindow> {
   if (expansion !== undefined) {
-    if (options.nativeSourcePopulation !== undefined) throw new Error("native source population cannot mix expansion");
+    if (options.nativeSourcePopulation !== undefined) throw new AlayaError("VALIDATION", "native source population cannot mix expansion");
     return prepareExpansionWindow(options, expansion);
   }
   if (options.variant === "native_source_snapshot") {
     return prepareNativeWindow(options);
   }
-  if (options.nativeSourcePopulation !== undefined) throw new Error("native source population requires its own variant");
+  if (options.nativeSourcePopulation !== undefined) throw new AlayaError("VALIDATION", "native source population requires its own variant");
   return await prepareDatasetWindow(options);
 }
 
@@ -63,7 +63,7 @@ function prepareNativeWindow(options: ExtractionFillWindowOptions): ExtractionFi
   if (options.nativeSourcePopulation === undefined || options.config === undefined ||
       options.sourcePacking !== "complete-source" || !options.openSemantics ||
       options.offset !== undefined || options.limit !== undefined || options.questionBatchLimit !== undefined) {
-    throw new Error("native source window requires one complete verified snapshot and semantic generation");
+    throw new AlayaError("VALIDATION", "native source window requires one complete verified snapshot and semantic generation");
   }
   const census = censusNativeSourceRecords({ population: options.nativeSourcePopulation.name,
     snapshotPath: options.nativeSourcePopulation.snapshotPath });
@@ -108,7 +108,7 @@ function prepareExpansionWindow(
 async function prepareDatasetWindow(
   options: ExtractionFillWindowOptions
 ): Promise<ExtractionFillWindow> {
-  if (options.variant === "native_source_snapshot") throw new Error("native source snapshot requires native preparation");
+  if (options.variant === "native_source_snapshot") throw new AlayaError("VALIDATION", "native source snapshot requires native preparation");
   const dataset = await loadDatasetWithIdentity(options.variant, {
     dataDir: options.dataDir,
     pinnedMetaRoot: options.pinnedMetaRoot

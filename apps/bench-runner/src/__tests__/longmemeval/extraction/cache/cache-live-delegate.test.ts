@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, ProviderChatCompletionError } from "@do-soul/alaya-engine-gateway";
 import {
   buildOfficialApiExtractionRequest,
   stringifyOfficialApiExtractionRequest
@@ -119,7 +120,7 @@ describe("extraction live delegate atomic persistence", () => {
     });
   });
 
-  it("settles observed usage when a complete response exceeds the cache retention bound", async () => {
+  it("settles unknown usage when the native response exceeds its finite read bound", async () => {
     const responseBytes = Buffer.from(JSON.stringify({
       choices: [{ message: { content: '{"interpretations":[]}' }, finish_reason: "stop" }],
       usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
@@ -150,14 +151,31 @@ describe("extraction live delegate atomic persistence", () => {
       const request = { systemPrompt: SYSTEM_PROMPT, sourceCorpus: sourceCorpusWithAssertions(),
         userPrompt: userPromptWithAssertions() };
       const cacheKey = computeCacheKey(MODEL, REQUEST_PROFILE, request.systemPrompt, request.userPrompt);
-      await expect(extractor.extract(request)).rejects.toThrow(/physical responses/u);
+      const failure = await extractor.extract(request).catch((cause: unknown) => cause);
+      expect(failure).toMatchObject({ message: "provider response exceeds its finite read-byte limit" });
+      if (!(failure instanceof Error) || !(failure.cause instanceof ProviderChatCompletionError) ||
+          failure.cause.httpResponse === undefined) {
+        throw new Error("bounded response must preserve its native HTTP failure evidence");
+      }
+      expect(failure.cause).toMatchObject({ kind: "response_parse_error", inspectionReason: "schema", httpStatus: 200 });
+      const evidence = failure.cause.httpResponse;
+      const retained = Buffer.from(evidence.bodyBase64, "base64");
+      expect(evidence.bodyComplete).toBe(false);
+      expect(evidence.bodyByteLength).toBeGreaterThanOrEqual(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
+      expect(evidence.bodyByteLength).toBeLessThan(responseBytes.length);
+      expect(retained).toHaveLength(MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES);
+      expect(retained.equals(responseBytes.subarray(0, MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES))).toBe(true);
+      expect(evidence.bodyTruncated).toBe(evidence.bodyByteLength > retained.length);
+      expect(evidence.bodySha256).toBe(createHash("sha256")
+        .update(responseBytes.subarray(0, evidence.bodyByteLength)).digest("hex"));
       expect(requests).toBe(1);
       expect(ledger.snapshot()).toMatchObject({ attempts: 1, successfulShards: 0,
         pendingKeys: [], unresolvedAttempts: [],
-        settledAttempts: [{ attemptOrdinal: 1, cacheKey,
-          responseSha256: createHash("sha256").update(responseBytes).digest("hex") }],
-        telemetry: { inputTokens: 12, outputTokens: 8, totalTokens: 20,
-          unresolvedTransportAttempts: 0, usageUnknownAttempts: 0 } });
+        settledAttempts: [{ attemptOrdinal: 1, cacheKey }],
+        transportFailures: [{ attemptOrdinal: 1, cacheKey, kind: "response_schema_error" }],
+        telemetry: { inputTokens: 0, outputTokens: 0, totalTokens: 0,
+          usageUnavailableRequests: 1, unresolvedTransportAttempts: 0, usageUnknownAttempts: 1 } });
+      expect(ledger.snapshot().settledAttempts[0]!.responseSha256).toBeUndefined();
       expect(inspectCachedRawExtraction(cacheRoot, cacheKey, MODEL, REQUEST_PROFILE).status)
         .toBe("missing");
     });
@@ -190,7 +208,10 @@ describe("extraction live delegate atomic persistence", () => {
       onLiveProviderExtractionSucceeded: ledger.commitSuccessfulShard,
       onLiveExtractionFailed: ledger.abandonPendingShard });
 
-    await expect(extractor.extract(request)).rejects.toThrow(/physical provider response is incomplete/u);
+    await expect(extractor.extract(request)).rejects.toMatchObject({
+      name: "AlayaError", code: "CONFLICT",
+      message: expect.stringMatching(/physical provider response is incomplete/u)
+    });
     const shard = JSON.parse(readFileSync(cacheFilePath(cacheRoot, cacheKey), "utf8")) as {
       provider_responses: readonly {
       witness: { httpResponse: { bodyBase64: string } } }[] };

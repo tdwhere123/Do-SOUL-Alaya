@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { realpathSync, statSync } from "node:fs";
 import { readBoundedCanonicalUtf8Artifact } from
   "../../cache-audit/bounded-artifact-reader.js";
@@ -167,7 +168,7 @@ export function assertCatalogRefillScopeMatchesInspection(input: {
     throw new Error("catalog refill attempt ledger contains an out-of-scope success");
   }
   if (pendingKeys.some((key) => !progress.pendingKeys.includes(key))) {
-    throw new Error("catalog refill pending shard lacks its original ledger reservation");
+    throw new AlayaError("CONFLICT", "catalog refill pending shard lacks its original ledger reservation");
   }
   if (remainingKeys.length === 0) {
     assertSettledCatalogRefillInspection(input, progress);
