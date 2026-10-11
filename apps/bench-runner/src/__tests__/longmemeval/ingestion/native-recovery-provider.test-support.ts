@@ -168,7 +168,7 @@ export async function fillSource(root: string, snapshotPath: string, cacheRoot: 
 }
 
 type RetainedRecoverySource = Pick<Parameters<Awaited<ReturnType<typeof startBenchDaemon>>["importSourceRecord"]>[0],
-  "source_id" | "content_bytes" | "speaker" | "event_time" | "attribution_context">;
+  "source_id" | "content_bytes" | "speaker" | "event_time" | "attribution_context"> & { recorded_at?: string };
 
 export async function prepareRetainedRecoverySnapshot(root: string, snapshotPath: string, workspaceId: string,
   sources: readonly RetainedRecoverySource[]) {
@@ -177,7 +177,7 @@ export async function prepareRetainedRecoverySnapshot(root: string, snapshotPath
     embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
   try {
     for (const [index, source] of sources.entries()) await daemon.importSourceRecord({ ...source,
-      source_version: "1", recorded_at: new Date(Date.parse(INGESTED[0]) + index * 1000).toISOString(),
+      source_version: "1", recorded_at: source.recorded_at ?? new Date(Date.parse(INGESTED[0]) + index * 1000).toISOString(),
       valid_from: null, valid_to: null, scope_class: "project", spans: deriveAddressableSpanViews(source.content_bytes) });
     await daemon.checkpointFieldProjection();
   } finally { await daemon.shutdown(); }
@@ -191,4 +191,3 @@ export function readRetainedSourceMetadata(snapshotPath: string) {
   try { return database.prepare("SELECT source_id, event_time, speaker, recorded_at FROM source_records ORDER BY source_id").all(); }
   finally { database.close(); }
 }
-

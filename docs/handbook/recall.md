@@ -1611,8 +1611,9 @@ For retained native sources, the request inventory assigns each exact source
 occurrence to its H key. Identical text with different role or attribution can
 require distinct keys; multiple exact occurrences can share one key. Ready empty
 sources retain their deterministic key, while unsupported sources have none.
-Recovery preserves unknown source event time as null through the frozen window
-and final publication. Final H child classification uses the same role,
+Recovery reuses the source-record timestamp contract and preserves event and
+recorded time strings, including minute precision, through the frozen window
+and final publication. Unknown event time remains null. Final H child classification uses the same role,
 attribution and generation proposal reconstruction as cache admission.
 Finalization publishes the full census to a distinct sealed
 SQLite snapshot. Newly admitted interpretations may bind only the frozen

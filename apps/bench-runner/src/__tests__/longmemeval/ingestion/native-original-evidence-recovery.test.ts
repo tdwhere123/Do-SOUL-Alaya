@@ -62,7 +62,10 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of 
 
 for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", cOnly: true },
   { ...WORLDS[2], name: "retained assistant known event time", retainedClock: OBSERVED },
-  { ...WORLDS[2], name: "retained assistant unknown event time", retainedClock: null }
+  { ...WORLDS[2], name: "retained assistant unknown event time", retainedClock: null },
+  { ...WORLDS[2], name: "retained assistant minute-precision event time", retainedClock: "2026-09-22T00:00Z" },
+  { ...WORLDS[2], name: "retained assistant minute-precision recorded time with unknown event time", retainedClock: null,
+    retainedRecordedAt: ["2026-09-22T00:00Z", "2026-09-22T00:01Z"] }
 ] as const)
   it(`delivers the frozen ${world.name} distinction through the connected native recovery`, async () => {
   const cOnly = "cOnly" in world && world.cOnly;
@@ -79,9 +82,13 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const context = world.date ? DATE_CONTEXT : FORMAT_CONTEXT;
   const sourceIds = ["source-7df0", "source-b326"] as const;
   const sourceClock = "retainedClock" in world ? world.retainedClock : OBSERVED;
+  const sourceRecordedAt = "retainedRecordedAt" in world ? world.retainedRecordedAt : INGESTED;
+  const expectedSourceMetadata = sourceIds.map((source_id, index) => ({ source_id,
+    event_time: sourceClock, speaker: "assistant", recorded_at: sourceRecordedAt[index] }));
   if ("retainedClock" in world) await prepareRetainedRecoverySnapshot(root, snapshotPath, worldId,
     world.bodies.map((body, index) => ({ source_id: sourceIds[index]!, content_bytes: body,
-      event_time: sourceClock, speaker: "assistant", attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION })));
+      event_time: sourceClock, recorded_at: sourceRecordedAt[index]!, speaker: "assistant",
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION })));
   else await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
     workspaceId: worldId, runId: worldId,
     producerCommit,
@@ -90,7 +97,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
       recorded_at: INGESTED[index]! })) });
   const native = readVerifiedNativeSourceSnapshot(snapshotPath);
   expect(native.records.map(row => [row.content_bytes, row.source_observed_at, row.recorded_at]))
-    .toEqual(world.bodies.map((body, index) => [body, sourceClock, INGESTED[index]]));
+    .toEqual(world.bodies.map((body, index) => [body, sourceClock, sourceRecordedAt[index]]));
   if ("retainedClock" in world) expect(native.records.every(row => row.source_role === "assistant")).toBe(true);
   else expect(native.records.map(row => row.title)).toEqual(world.titles);
   const qCache = join(root, "q-cache");
@@ -137,9 +144,9 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     expect(await runSemanticChainLauncher(["recover-freeze", "--config", freezePath, "--root", recoveryRoot])).toBe(0);
     expect(readFileSync(join(recoveryRoot, "recovery-window.json"))).toEqual(windowBytes);
     const reopened = admitRecoveryWindow(recoveryRoot);
-    expect(reopened.window.map(row => row.source_observed_at)).toEqual([sourceClock, sourceClock]);
-    expect(readRetainedSourceMetadata(reopened.raw_snapshot_path)).toEqual(sourceIds.map((source_id, index) => ({
-      source_id, event_time: sourceClock, speaker: "assistant", recorded_at: INGESTED[index] })));
+    expect(reopened.window.map(row => [row.source_id, row.source_observed_at, row.recorded_at]).sort())
+      .toEqual(expectedSourceMetadata.map(row => [row.source_id, row.event_time, row.recorded_at]).sort());
+    expect(readRetainedSourceMetadata(reopened.raw_snapshot_path)).toEqual(expectedSourceMetadata);
   }
   if (!world.date) expect(frozen.window.find(row => row.source_id === sourceIds[0])).toMatchObject({
     read_bytes: Buffer.byteLength("Mira completed the Atlas export.\n"), complete: false });
@@ -303,8 +310,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   if ("retainedClock" in world) {
     const final = admitFinalRecoveryQualified(recoveryRoot);
     expect(final.final.source_outcome).toBe("child_published");
-    expect(readRetainedSourceMetadata(final.final.snapshot_path)).toEqual(sourceIds.map((source_id, index) => ({
-      source_id, event_time: sourceClock, speaker: "assistant", recorded_at: INGESTED[index] })));
+    expect(readRetainedSourceMetadata(final.final.snapshot_path)).toEqual(expectedSourceMetadata);
     const retainedFinal = readFileSync(join(recoveryRoot, "final-qualified.json"));
     expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
       "--source-preflight", childPreflight, "--source-cache-root", childCache])).toBe(0);

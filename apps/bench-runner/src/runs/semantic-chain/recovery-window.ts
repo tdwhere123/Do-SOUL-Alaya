@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SourceSemanticAccessReceiptSchema,
+import { AlayaError, canonicalJson, SourceRecordIdentitySchema, SourceSemanticAccessReceiptSchema,
   SourceSemanticCorrespondencePreparationOptionsSchema } from "@do-soul/alaya-protocol";
 import { censusNativeSourceRecords } from "../snapshot/source-records/census.js";
 import { readVerifiedNativeSourceSnapshot } from "../snapshot/source-records/native.js";
@@ -49,10 +49,11 @@ const RecoveryFreezeInputSchema = z.object({
   open_semantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional(),
   chain: RecoveryChainConfigSchema
 }).strict();
+const SourceRecordFields = SourceRecordIdentitySchema.unwrap().shape;
 const WindowSourceSchema = z.object({ rank: z.number().int().min(1).max(10),
   source_id: z.string(), source_version: z.string(), record_id: z.string().min(1),
-  content_digest: z.string().min(1), corpus_digest: z.string().min(1), source_observed_at: z.string().datetime().nullable(),
-  recorded_at: z.string().datetime(), body_bytes: z.number().int().nonnegative().nullable(),
+  content_digest: z.string().min(1), corpus_digest: z.string().min(1), source_observed_at: SourceRecordFields.event_time,
+  recorded_at: SourceRecordFields.recorded_at, body_bytes: z.number().int().nonnegative().nullable(),
   read_bytes: z.number().int().nonnegative(), complete: z.boolean(),
   initial_key: Digest.nullable(), initial_cache_status: z.enum(["hit", "missing", "invalid", "unsupported"])
 }).strict();
