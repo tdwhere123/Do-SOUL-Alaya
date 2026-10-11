@@ -42,6 +42,7 @@ export async function executeSemanticChainConsumer(input: Readonly<{
     }
     assertConsumerExecutionScope(authority, lease);
     return { contract: "semantic-chain-consumer-run-v1" as const, authority_identity: authority.identity_digest,
+      request_timeout: authority.request_timeout,
       new_attempts: ledger.snapshot().attempts - before, rows, ledger: ledger.snapshot(), fidelity: "unassessed" as const };
   });
 }

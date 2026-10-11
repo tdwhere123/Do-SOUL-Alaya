@@ -91,6 +91,14 @@ type ReplayProgress =
     }
   | { readonly done: false; readonly attempts: number };
 
+export const PROVIDER_REQUEST_TIMEOUT_POLICY = "output-token-cap-with-interactive-floor-v1" as const;
+
+/** Same deadline value for transport readiness and, separately, one physical request. */
+export function providerRequestTimeout(maxOutputTokens: number) {
+  return { policy: PROVIDER_REQUEST_TIMEOUT_POLICY,
+    timeout_ms: Math.max(resolveExtractionRequestTimeoutMs(maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS) };
+}
+
 export async function executeProviderRequestLine(
   context: ProviderRequestDispatchContext, line: ProviderRequestLine
 ): Promise<{ classified: ProviderRequestAttemptClass; admitted: boolean; attempts: number }> {
@@ -100,7 +108,7 @@ export async function executeProviderRequestLine(
   }
   let used = replayed.attempts;
   const attemptLimit = context.maximumAttemptsPerKey;
-  const timeoutMs = Math.max(resolveExtractionRequestTimeoutMs(context.maxOutputTokens), GEMINI_INTERACTIVE_TIMEOUT_FLOOR_MS);
+  const timeoutMs = providerRequestTimeout(context.maxOutputTokens).timeout_ms;
   while (used < attemptLimit) {
     if (remainingProviderRequestSlots(context.ledger) <= 0) {
       return { classified: "retryable", admitted: false, attempts: used };

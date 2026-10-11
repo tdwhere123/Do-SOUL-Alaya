@@ -1529,7 +1529,10 @@ instruction permits supported partial or unresolved answers and preserves source
 qualifications; it carries no task-specific answer oracle.
 `pinSemanticChainConsumerAuthority` binds the current implementation, native
 replay and request identities, quote and a separate execution root. The existing
-write lease, attempt ledger and provider-request pipeline own execution: at most
+provider-request owner also supplies the effective deadline retained in preparation,
+authority and the run report: the output-token-derived timeout with a 900,000 ms
+interactive floor. Callers cannot replace this derived deadline in retained scope.
+The existing write lease, attempt ledger and provider-request pipeline own execution: at most
 one attempt per selected arm, with retained native HTTP/raw evidence and no
 automatic retry. `executeSemanticChainConsumer` in recovery mode only settles
 retained evidence. A reserved attempt without raw remains unknown, and completed

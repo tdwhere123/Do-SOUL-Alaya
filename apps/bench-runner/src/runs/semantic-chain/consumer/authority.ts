@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { chainIdentity, writeChainArtifact } from "../contract.js";
-import { admitConsumerPreparation, TASK_CONSUMER_KIND } from "./input.js";
+import { admitConsumerPreparation, ConsumerPreparationSchema, TASK_CONSUMER_KIND } from "./input.js";
 import { readCurrentExtractionAuthorityRevision } from "../../extraction/authority/inspection.js";
 import { StepQuoteBasisSchema, assertStepQuoteRates, stepQuoteBasisForDigest } from "../../extraction/authority/step-quote.js";
 import { ExtractionTransportProvenanceSchema } from "../../extraction/transport-route.js";
@@ -24,6 +24,7 @@ export const ConsumerAuthoritySchema = z.object({
   contract: z.literal("semantic-chain-consumer-authority-v1"), kind: z.literal(TASK_CONSUMER_KIND),
   preparation_identity: Digest, attempt_lineage_digest: Digest, identity_digest: Digest,
   model: z.string().min(1), request_profile: z.string().min(1), transport_provenance: ExtractionTransportProvenanceSchema,
+  request_timeout: ConsumerPreparationSchema.shape.request_timeout,
   execution_scope: z.object({ preparation_root: z.string().min(1), execution_root_path: z.string().min(1),
     execution_root_binding: ExtractionTargetRootBindingSchema, implementation_revision: z.string().min(1) }).strict(),
   limits: LimitsSchema, keys: z.array(Digest).min(1).max(2),
@@ -55,6 +56,7 @@ export function pinSemanticChainConsumerAuthority(input: Readonly<{
     contract: "semantic-chain-consumer-authority-v1", kind: TASK_CONSUMER_KIND,
     preparation_identity: preparationIdentity, model: config.model, request_profile: config.request_profile,
     transport_provenance: transport,
+    request_timeout: preparation.request_timeout,
     attempt_lineage_digest: consumerAttemptLineage(preparationIdentity, transport),
     execution_scope: { preparation_root: preparation.output_root, execution_root_path: executionRoot,
       execution_root_binding: binding, implementation_revision: readCurrentExtractionAuthorityRevision() },
@@ -80,6 +82,7 @@ export function verifyConsumerAuthority(value: unknown, lease?: ExtractionCacheW
   const current = admitConsumerPreparation(authority.execution_scope.preparation_root);
   const { preparation, lines } = current, config = preparation.consumer_config;
   if (authority.preparation_identity !== chainIdentity(preparation) || authority.model !== config.model ||
+      canonicalJson(authority.request_timeout) !== canonicalJson(preparation.request_timeout) ||
       authority.request_profile !== config.request_profile || authority.limits.max_output_tokens !== config.max_output_tokens ||
       authority.execution_scope.execution_root_path !== canonicalExtractionTargetRoot(join(preparation.output_root, "provider")) ||
       canonicalJson(authority.keys) !== canonicalJson(lines.map(line => line.key)) ||

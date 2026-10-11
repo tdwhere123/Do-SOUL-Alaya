@@ -129,6 +129,73 @@ it("retains an HTTP failure as a single unknown-cost attempt", async () => {
   expect(hits - before).toBe(1); expect(result.ledger.attempts).toBe(1);
 });
 
+it("retains a timed-out partial HTTP body with unknown usage and never repeats its attempt", async () => {
+  const run = consumerAuthority(fixture, "partial-body-timeout"); ledgerPath = run.ledgerPath;
+  const timeout = { policy: "output-token-cap-with-interactive-floor-v1", timeout_ms: 900000 };
+  expect(run.preparation.request_timeout).toEqual(timeout); expect(run.authority.request_timeout).toEqual(timeout);
+  const prefix = 'data: {"choices":[{"delta":{"content":"partial answer"}}]}\n\n';
+  let notifyReceived!: () => void, notifyDisconnected!: () => void;
+  const received = new Promise<void>(resolve => { notifyReceived = resolve; });
+  const disconnected = new Promise<void>(resolve => { notifyDisconnected = resolve; });
+  handler = res => { res.once("close", notifyDisconnected);
+    res.setHeader("content-type", "text/event-stream"); res.write(prefix); };
+  const routedFetch = globalThis.fetch, before = hits;
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const response = await routedFetch(...args);
+    // Observe bytes from the real socket without replacing parsing or the timeout outcome.
+    return new Response(response.body!.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) { controller.enqueue(chunk); notifyReceived(); }
+    })), { status: response.status, statusText: response.statusText, headers: response.headers });
+  }) as typeof fetch;
+  const clock = controlRequestDeadline(timeout.timeout_ms);
+  try {
+    let settled = false;
+    const pending = executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" })
+      .finally(() => { settled = true; });
+    await Promise.race([received, pending.then(() => { throw new Error("consumer settled before receiving the partial body"); })]);
+    expect(settled).toBe(false);
+    clock.expire();
+    const result = await pending; await disconnected;
+    expect(result).toMatchObject({ request_timeout: timeout, new_attempts: 1,
+      rows: [{ status: "transport_failure", result: { complete_response: false,
+        outcome: { failure: { kind: "timeout", phase: "request", httpStatus: 200 } } } }],
+      ledger: { attempts: 1, telemetry: { usageUnknownAttempts: 1, unresolvedTransportAttempts: 0,
+        terminalRetryClassifications: { failure_timeout: 1 } } } });
+    expect(result.ledger.unresolvedAttempts).toEqual([]);
+    expect(result.ledger.successfulEntries).toEqual([]);
+    const raw = readProviderRawAttempt(run.root, run.key, 1)!;
+    expect(raw).toMatchObject({ usage: null, transport_failure: { kind: "timeout", httpStatus: 200 },
+      http_response: { bodyComplete: false, bodyTruncated: false, bodyByteLength: Buffer.byteLength(prefix) } });
+    expect(Buffer.from(raw.http_response!.bodyBase64, "base64").toString()).toBe(prefix);
+    for (const mode of ["execute", "recover"] as const) {
+      const replayed = await executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode });
+      expect(replayed).toMatchObject({ request_timeout: timeout, new_attempts: 0,
+        rows: [{ status: "transport_failure" }], ledger: { attempts: 1, telemetry: { usageUnknownAttempts: 1 } } });
+    }
+    expect(hits - before).toBe(1); expect(readProviderRawAttempt(run.root, run.key, 1)).toEqual(raw);
+  } finally { clock.restore(); globalThis.fetch = routedFetch; }
+});
+
+it("derives the deadline from the output cap and rejects resealed timeout changes before dispatch", async () => {
+  const run = consumerAuthority(fixture, "timeout-binding"), before = hits;
+  const large = prepareSemanticChainConsumer({ chainRoot: fixture.chainRoot, replayPath: fixture.replayPath,
+    queryKey: fixture.queryKey, consumerConfig: { ...run.preparation.consumer_config, max_output_tokens: 65536 }
+  }, join(fixture.root, "large-output-timeout"));
+  expect(large.request_timeout).toEqual({ policy: "output-token-cap-with-interactive-floor-v1", timeout_ms: 1920000 });
+  const changed = structuredClone(run.authority); changed.request_timeout.timeout_ms = 1;
+  const { identity_digest: _, ...body } = changed; changed.identity_digest = chainIdentity(body);
+  await expect(executeSemanticChainConsumer({ authority: changed, mode: "execute", config: CONSUMER_CONFIG }))
+    .rejects.toThrow(/frozen request scope/u);
+  const path = join(run.preparation.output_root, "preparation.json"), original = readFileSync(path);
+  try {
+    const envelope = JSON.parse(original.toString()); envelope.payload.request_timeout.timeout_ms = 1;
+    envelope.identity = chainIdentity(envelope.payload); writeFileSync(path, JSON.stringify(envelope));
+    await expect(executeSemanticChainConsumer({ authority: run.authority, mode: "execute", config: CONSUMER_CONFIG }))
+      .rejects.toThrow(/preparation/u);
+  } finally { writeFileSync(path, original); }
+  expect(hits).toBe(before);
+});
+
 it("leaves a reserved attempt with no raw unknown and never dispatches a replacement", async () => {
   const run = consumerAuthority(fixture, "reserved-no-raw");
   const lines = admitConsumerPreparation(run.preparation.output_root).lines;
@@ -199,3 +266,28 @@ it("refuses native-output overlap, concurrent writers and replacement of the bou
   await expect(executeSemanticChainConsumer({ authority: run.authority, mode: "execute", config: CONSUMER_CONFIG })).rejects.toThrow();
   expect(hits).toBe(before);
 });
+
+/** Advance only the selected request deadline; socket I/O and unrelated timers stay real. */
+function controlRequestDeadline(timeoutMs: number) {
+  const nativeSetTimeout = globalThis.setTimeout, nativeClearTimeout = globalThis.clearTimeout;
+  const pending = new Map<ReturnType<typeof setTimeout>, () => void>();
+  const schedule = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
+    const timer = nativeSetTimeout(callback, delay, ...args);
+    if (delay === timeoutMs) pending.set(timer, () => callback(...args));
+    return timer;
+  });
+  const clear = vi.spyOn(globalThis, "clearTimeout").mockImplementation(timer => {
+    if (typeof timer === "object" && timer !== null) pending.delete(timer);
+    nativeClearTimeout(timer);
+  });
+  return {
+    expire: () => {
+      expect(pending.size).toBe(1);
+      for (const [timer, callback] of pending) { nativeClearTimeout(timer); pending.delete(timer); callback(); }
+    },
+    restore: () => {
+      for (const timer of pending.keys()) nativeClearTimeout(timer);
+      clear.mockRestore(); schedule.mockRestore();
+    }
+  };
+}

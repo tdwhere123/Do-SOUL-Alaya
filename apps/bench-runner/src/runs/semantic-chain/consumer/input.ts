@@ -5,7 +5,7 @@ import { admitSemanticChainReplay } from "../replay.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../contract.js";
 import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-path.js";
 import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "../../provider-request/request-binding.js";
-import type { ProviderRequestLine } from "../../provider-request/execution.js";
+import { PROVIDER_REQUEST_TIMEOUT_POLICY, providerRequestTimeout, type ProviderRequestLine } from "../../provider-request/execution.js";
 import type { ExtractionTransportProvenance } from "../../extraction/transport-route.js";
 
 export const TASK_CONSUMER_KIND = "task_consumer" as const;
@@ -48,6 +48,8 @@ const RequestIdentitySchema = z.object({ arm: ConsumerArmSchema, key: Digest, re
 export const ConsumerPreparationSchema = z.object({
   contract: z.literal("semantic-chain-consumer-preparation-v1"), provider_calls: z.literal(0),
   output_root: z.string().min(1), source: SourceSchema, consumer_config: ConsumerConfigSchema,
+  request_timeout: z.object({ policy: z.literal(PROVIDER_REQUEST_TIMEOUT_POLICY),
+    timeout_ms: z.number().int().positive() }).strict(),
   native_binding: z.object({ plan_identity: Digest, replay_identity: Digest, row_identity: Digest }).strict(),
   original_query: z.string().min(1), query_as_of: z.string().datetime(),
   requests: z.array(RequestIdentitySchema).min(1).max(2)
@@ -97,6 +99,7 @@ function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfi
   const preparation = ConsumerPreparationSchema.parse({
     contract: "semantic-chain-consumer-preparation-v1", provider_calls: 0, output_root: root,
     source, consumer_config: config, original_query: query.original_query,
+    request_timeout: providerRequestTimeout(config.max_output_tokens),
     query_as_of: admitted.plan.config.interpretation_clock,
     native_binding: { plan_identity: admitted.replay.plan_identity, replay_identity: admitted.replay.identity,
       row_identity: chainIdentity({ query_key: row.query_key, response: row.response, first_exposure: row.first_exposure }) },
