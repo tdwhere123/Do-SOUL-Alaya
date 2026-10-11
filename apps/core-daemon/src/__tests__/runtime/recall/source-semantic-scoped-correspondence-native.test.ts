@@ -55,7 +55,7 @@ import { join } from "node:path";
 import {
   SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   sourceSemanticCorrespondenceGenerationPolicies, sourceSemanticCorrespondenceIdentity,
-  type SourceSemanticInterpretation, type SourceSemanticLibraryProof, type SourceSemanticQuery
+  type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticLibraryProof, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
   createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, deliveredSourceSemanticLibraryProof, EvidenceService,
@@ -73,7 +73,7 @@ import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS
 } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { builtWorkerUrl, assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
-import { authoredQuerySemantics } from "./source-semantic-producer-fixture.js";
+import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-semantic-producer-fixture.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 
 afterAll(() => isolation.restore());
@@ -84,6 +84,7 @@ const SOURCE_ID = "artifact-workshop";
 const ORIGINAL = "Give five examples of who used tools or repaired lathes.";
 const BUDGET = { schema_version: 1 as const, work_units: 200000, memory_bytes: 20000000,
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
+const WINDOW_BUDGET = { ...BUDGET, work_units: 1_000_000 };
 const SCOPES = { mode: "named" as const, scopes: ["project"] };
 const context = { workspaceId: WS, runId: RUN, agentTarget: "codex", sessionId: "scoped-correspondence-native" };
 const BRANCHES = [
@@ -133,7 +134,7 @@ async function openNativeSession(filename: string) {
 type Session = Awaited<ReturnType<typeof openNativeSession>>;
 async function publicInterpretation(session: Session, args: Record<string, unknown>) {
   const result = await callAlayaMcpMemoryTool({ memoryToolHandler: session.handler, contextProvider: () => context },
-    "soul.interpretation", SoulInterpretationRequestSchema.parse({ ...args, budget: BUDGET, authorized_scopes: SCOPES }));
+    "soul.interpretation", SoulInterpretationRequestSchema.parse({ budget: BUDGET, ...args, authorized_scopes: SCOPES }));
   expect(result.isError).not.toBe(true);
   const envelope = result.structuredContent;
   if (envelope === undefined || !("output" in envelope)) throw new Error("public MCP interpretation output required");
@@ -142,27 +143,42 @@ async function publicInterpretation(session: Session, args: Record<string, unkno
   return output;
 }
 
-async function admit(session: Session, version = "1") {
+async function admit(session: Session, version = "1", source = SOURCE) {
   await session.admission.admit({ workspace_id: WS, source_id: SOURCE_ID, source_version: version,
-    content_bytes: SOURCE, evidence_object_id: null, recorded_at: CLOCK, event_time: null,
-    valid_from: null, valid_to: null, speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE) },
+    content_bytes: source, evidence_object_id: null, recorded_at: CLOCK, event_time: null,
+    valid_from: null, valid_to: null, speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(source) },
   { workspaceId: WS });
 }
 
-async function publishWorkshop(session: Session) {
-  await admit(session);
+async function publishSource(session: Session, source: string, content: (catalog: SourceReferenceCatalog) => unknown) {
+  await admit(session, "1", source);
   const prepared = await publicInterpretation(session, { operation: "prepare_source", source_id: SOURCE_ID });
   if (prepared.operation !== "prepare_source" || prepared.source_handle === undefined || prepared.catalog === undefined) {
     throw new Error("native source handle and catalog required");
   }
-  const catalog = prepared.catalog;
-  const quote = (text: string) => {
-    expect(catalog.assertions[0]?.segments.some(row => row.text === text)).toBe(true);
-    return { assertion_id: catalog.assertions[0]!.assertion_id, text };
-  };
-  const received = proposeSourceSemantics({ sourceCorpus: SOURCE, assertionIds: [1], source_id: SOURCE_ID,
+  const received = proposeSourceSemantics({ sourceCorpus: source,
+    assertionIds: prepared.catalog.assertions.map(row => row.assertion_id), source_id: SOURCE_ID,
     source_version: "1", producer_id: "test-author", producer_version: "1" }, { rawJson: JSON.stringify({
-    contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: {
+    contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" }, content: content(prepared.catalog)
+  }) });
+  expect(received.outcome.status, JSON.stringify(received.outcome)).toBe("interpreted");
+  const proposed = await publicInterpretation(session, { operation: "propose", source_handle: prepared.source_handle,
+    draft: received.draft, producer_id: "test-author", producer_version: "1", contract_version: "source-interpretation-v4" });
+  if (proposed.operation !== "propose" || proposed.published === undefined) throw new Error("native H publication required");
+  return proposed.published;
+}
+
+function sourceQuote(catalog: SourceReferenceCatalog, text: string, alongside = text) {
+  const assertion = catalog.assertions.find(row => row.segments.some(segment => segment.text === text)
+    && row.segments.some(segment => segment.text === alongside));
+  expect(assertion).toBeDefined();
+  return { assertion_id: assertion!.assertion_id, text };
+}
+
+async function publishWorkshop(session: Session, source = SOURCE) {
+  return publishSource(session, source, catalog => {
+    const quote = (text: string) => sourceQuote(catalog, text);
+    return {
       roots: BRANCHES.map(row => ({ act: "assertion", expression: { kind: "content_ref", key: row.predicate } })),
       entities: BRANCHES.flatMap(row => [
         { form: "selection", key: row.person, selection: quote(row.person) },
@@ -172,13 +188,8 @@ async function publishWorkshop(session: Session) {
         predicate: { kind: "explicit", reading: row.predicate, support: quote(row.verb) },
         arguments: [{ role: "agent", target: { kind: "entity_ref", key: row.person } },
           { role: "theme", target: { kind: "entity_ref", key: row.thing } }], qualifications: [] })), gaps: []
-    }
-  }) });
-  expect(received.outcome.status).toBe("interpreted");
-  const proposed = await publicInterpretation(session, { operation: "propose", source_handle: prepared.source_handle,
-    draft: received.draft, producer_id: "test-author", producer_version: "1", contract_version: "source-interpretation-v4" });
-  if (proposed.operation !== "propose" || proposed.published === undefined) throw new Error("native H publication required");
-  return proposed.published;
+    };
+  });
 }
 
 function authoredScopedCorrespondences(query: SourceSemanticQuery, interpretation: SourceSemanticInterpretation, interpretationId: string) {
@@ -245,9 +256,9 @@ function expectPartialBranch(proof: SourceSemanticLibraryProof, input: number, c
   expect(proof.consumed_leaves.some(row => row.leaf_kind === "source_interpretation_binding")).toBe(true);
 }
 
-async function recall(session: Session, query: SourceSemanticQuery, semantic_correspondences: ReturnType<typeof authoredScopedCorrespondences>, original_query = ORIGINAL) {
+async function recall(session: Session, query: SourceSemanticQuery, semantic_correspondences: ReturnType<typeof authoredScopedCorrespondences>, original_query = ORIGINAL, budget = BUDGET) {
   const output = await publicInterpretation(session, { operation: "recall", accepts_unreviewed_conditional_results: true,
-    original_query, query_semantics: query, semantic_correspondences, output_byte_limit: 1_000_000 });
+    original_query, query_semantics: query, semantic_correspondences, budget, output_byte_limit: 1_000_000 });
   if (output.operation !== "recall") throw new Error("public native recall required");
   return output;
 }
@@ -312,6 +323,180 @@ it("keeps two scoped C for one Q/H as independent partial evidence proofs and wi
     expect(isolation.forbidden).toEqual([]);
   } finally {
     if (session !== undefined) { await session.client.close(); session.database.close(); closeCachedDatabase(filename); }
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("delivers an intact scoped proof when independent same-source proofs exceed one display window", async () => {
+  const source = `Alice uses tools.\n${"x".repeat(5000)}.\nBob repairs lathes.`;
+  const directory = await mkdtemp(join(tmpdir(), "scoped-proof-window-"));
+  const filename = join(directory, "alaya.db");
+  let session = await openNativeSession(filename);
+  try {
+    const published = await publishWorkshop(session, source);
+    const query = authoredQuery();
+    const scoped = authoredScopedCorrespondences(query, published.interpretation, published.interpretation_id);
+    const ids = scoped.map(row => sourceSemanticCorrespondenceIdentity(row, fieldContractSha256));
+    await session.client.close(); session.database.close(); closeCachedDatabase(filename);
+    session = await openNativeSession(filename);
+    const prepared = await publicInterpretation(session, { operation: "prepare_query", original_query: ORIGINAL,
+      query_semantics: query, budget: WINDOW_BUDGET });
+    if (prepared.operation !== "prepare_query") throw new Error("native prepare_query required");
+    expect(prepared.candidates.some(row => row.interpretation_id === published.interpretation_id), JSON.stringify(prepared)).toBe(true);
+    const sourceRecord = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
+    const expectedPreviews = ["Alice uses tools.", "Bob repairs lathes."];
+    const singles: SourceSemanticLibraryProof[] = [];
+    for (const input of [0, 1]) {
+      const single = await recall(session, query, [scoped[input]!], ORIGINAL, WINDOW_BUDGET);
+      expect(single.proofs).toHaveLength(1);
+      const proof = single.proofs![0]!;
+      expectPartialBranch(proof, input, ids[input]!);
+      const qualifier = single.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
+      const entry = single.index!.entries[qualifier.index]!;
+      expect(single.results?.[qualifier.index]?.content_preview).toBe(expectedPreviews[input]);
+      expect(entry.target).toMatchObject({ span: { content_start: source.indexOf(expectedPreviews[input]!),
+        content_end: source.indexOf(expectedPreviews[input]!) + expectedPreviews[input]!.length } });
+      expect(deliveredSourceSemanticLibraryProof(single.index!, entry, qualifier, single.proofs!, sourceRecord).proof).toBe(proof);
+      singles.push(proof);
+    }
+    const both = await recall(session, query, scoped, ORIGINAL, WINDOW_BUDGET);
+    expect(both.proofs).toHaveLength(1);
+    expect(both.index?.entries).toHaveLength(1);
+    expect(both.slot_qualifiers).toHaveLength(1);
+    expect(both.index?.continuation).toBeNull();
+    const proof = both.proofs![0]!;
+    const input = ids.indexOf(proof.semantic_correspondence_id!);
+    expect(input).toBeGreaterThanOrEqual(0);
+    expect(proof).toEqual(singles[input]);
+    const qualifier = both.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
+    expect(qualifier.support).toMatchObject({ answer: "unrepresented", operation: "not_executed",
+      compatibility: "unknown", distinctness: "unknown",
+      evidence_inputs: [0, 1].map(branch => ({ alternative: 0, input: branch, status: branch === input ? "supported" : "open" })) });
+    expect(both.results?.[qualifier.index]?.content_preview).toBe(expectedPreviews[input]);
+    expect(qualifier.witnesses?.map(row => row.binding_id)).toEqual([proof.binding_results![0]!.binding_id]);
+    expect(deliveredSourceSemanticLibraryProof(both.index!, both.index!.entries[qualifier.index]!, qualifier,
+      both.proofs!, sourceRecord).proof).toBe(proof);
+    const broad = { ...scoped[0]!, correspondences: scoped.flatMap(row => row.correspondences) };
+    const broadReason = await publicInterpretation(session, { operation: "reason", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: published.interpretation_id, original_query: ORIGINAL, query_semantics: query,
+      semantic_correspondence: broad, output_byte_limit: 1_000_000, budget: WINDOW_BUDGET });
+    if (broadReason.operation !== "reason") throw new Error("native broad correspondence required");
+    expect(broadReason.result?.binding_results).toHaveLength(2);
+    const indivisible = await recall(session, query, [broad], ORIGINAL, WINDOW_BUDGET);
+    expect(indivisible.proofs ?? []).toEqual([]);
+    expect(indivisible.slot_qualifiers).toEqual([expect.objectContaining({ evidence_kind: "source_evidence", payload_support: "display_budget" })]);
+    const mixed = await recall(session, query, [broad, scoped[0]!], ORIGINAL, WINDOW_BUDGET);
+    expect(mixed.proofs).toEqual([singles[0]]);
+    const mixedQualifier = mixed.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
+    expect(deliveredSourceSemanticLibraryProof(mixed.index!, mixed.index!.entries[mixedQualifier.index]!, mixedQualifier,
+      mixed.proofs!, sourceRecord).proof).toBe(mixed.proofs![0]);
+    const raw = await recall(session, query, [], ORIGINAL, WINDOW_BUDGET);
+    expect(raw.proofs ?? []).toEqual([]);
+    expect(raw.slot_qualifiers?.some(row => row.evidence_kind === "source_evidence")).toBe(true);
+    expect(raw.results?.[0]?.content_preview).toContain("Alice uses tools.");
+    expect(isolation.forbidden).toEqual([]);
+  } finally {
+    await session.client.close(); session.database.close(); closeCachedDatabase(filename);
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+const PARCEL_QUERY = "which parcel was sent and inspected?";
+const PARCEL_FRAMES = [
+  { query: "qSend", variable: "sendEvent", predicate: "send", verb: "sent" },
+  { query: "qInspect", variable: "inspectEvent", predicate: "inspect", verb: "inspected" }
+] as const;
+
+function parcelQuery() {
+  return authoredQuerySemantics({ original_query: PARCEL_QUERY,
+    producer_id: SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID, producer_version: "1" }, {
+    variables: [{ id: "parcel", sort: "entity" }, ...PARCEL_FRAMES.map(row => ({ id: row.variable, sort: "proposition" }))],
+    alternatives: [{ frames: PARCEL_FRAMES.map(row => ({ id: row.query, variable: row.variable,
+      predicate_reading: row.predicate, role_requirements: [{ id: "object", role_reading: "object", target_variable: "parcel",
+        support: { kind: "query_text", excerpt: "parcel" } }] })),
+      context_obligations: PARCEL_FRAMES.map(row => ({ frame: row.query, kind: "asserted_at_source" })) }],
+    return_variables: ["parcel"], gaps: []
+  }).query;
+}
+
+function publishParcel(session: Session, source: string) {
+  return publishSource(session, source, catalog => ({
+    roots: PARCEL_FRAMES.map(row => ({ act: "assertion", expression: { kind: "content_ref", key: row.predicate } })),
+    entities: [{ form: "entity", key: "parcel", referent_kind: "grouped",
+      mentions: PARCEL_FRAMES.map(row => sourceQuote(catalog, "Parcel", row.verb)) }],
+    nodes: PARCEL_FRAMES.map(row => ({ kind: "statement", key: row.predicate,
+      predicate: { kind: "explicit", reading: row.predicate, support: sourceQuote(catalog, row.verb) },
+      arguments: [{ role: "object", target: { kind: "entity_ref", key: "parcel" },
+        support: sourceQuote(catalog, "Parcel", row.verb) }], qualifications: [] })), gaps: []
+  }));
+}
+
+function parcelCorrespondence(query: SourceSemanticQuery, published: Awaited<ReturnType<typeof publishParcel>>) {
+  const received = receiveAuthoredCorrespondence({ original_query: PARCEL_QUERY, admitted_query_semantics: query,
+    source_interpretation_descriptors: [{ source_interpretation_id: published.interpretation_id, interpretation: published.interpretation }],
+    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1" }, {
+    correspondences: PARCEL_FRAMES.flatMap(row => {
+      const frame = published.interpretation.frames.find(frame => frame.predicate_support.reading === row.predicate)!;
+      if (frame.predicate_support.kind !== "explicit") throw new Error("parcel predicate requires its source mention");
+      const slot = frame.slots.find(slot => slot.role_reading === "object")!;
+      return [{ relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: row.query },
+        source_endpoint: { kind: "frame", frame: frame.id }, query_support: { kind: "query_text", excerpt: row.verb },
+        source_semantic_support: [{ kind: "lexical", mentions: frame.predicate_support.mentions }] },
+      { relation: "contextual_equivalence", query_endpoint: { kind: "slot", alternative: 0, frame: row.query, slot: "object" },
+        source_endpoint: { kind: "slot", frame: frame.id, slot: slot.id }, query_support: { kind: "query_text", excerpt: "parcel" },
+        source_semantic_support: slot.support }];
+    })
+  });
+  expect(received.outcome.status).toBe("interpreted");
+  if (received.semantic_correspondence === undefined) throw new Error("connected parcel correspondence required");
+  return received.semantic_correspondence;
+}
+
+it.each([0, 5000])("keeps both dependencies of one shared-parcel conjunction indivisible (gap %i)", async gap => {
+  const source = `Parcel sent.\n${gap === 0 ? "" : `${"x".repeat(gap)}.\n`}Parcel inspected.`;
+  const directory = await mkdtemp(join(tmpdir(), "conjunctive-proof-window-"));
+  const filename = join(directory, "alaya.db");
+  let session = await openNativeSession(filename);
+  try {
+    const published = await publishParcel(session, source);
+    const query = parcelQuery(), correspondence = parcelCorrespondence(query, published);
+    await session.client.close(); session.database.close(); closeCachedDatabase(filename);
+    session = await openNativeSession(filename);
+    const reason = await publicInterpretation(session, { operation: "reason", accepts_unreviewed_conditional_results: true,
+      source_interpretation_id: published.interpretation_id, original_query: PARCEL_QUERY, query_semantics: query,
+      semantic_correspondence: correspondence, output_byte_limit: 1_000_000, budget: WINDOW_BUDGET });
+    if (reason.operation !== "reason") throw new Error("native connected conjunction required");
+    expect(reason.result?.binding_results).toHaveLength(1);
+    expect(Object.keys(reason.result!.binding_results![0]!.returned)).toEqual(["parcel"]);
+    const full = await recall(session, query, [correspondence], PARCEL_QUERY, WINDOW_BUDGET);
+    if (gap === 0) {
+      expect(full.proofs).toHaveLength(1);
+      const qualifier = full.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
+      const entry = full.index!.entries[qualifier.index]!;
+      const sourceRecord = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
+      expect(full.results?.[qualifier.index]?.content_preview).toBe(source);
+      expect(deliveredSourceSemanticLibraryProof(full.index!, entry, qualifier, full.proofs!, sourceRecord).proof).toBe(full.proofs![0]);
+      if (entry.target.kind !== "source_evidence" || entry.target.span === undefined) throw new Error("source span required");
+      for (const span of [{ content_start: 0, content_end: "Parcel sent.".length },
+        { content_start: source.indexOf("Parcel inspected."), content_end: source.length }]) {
+        const clipped = { ...entry, target: { ...entry.target, span: { ...entry.target.span, ...span, content_complete: false } } };
+        expect(deliveredSourceSemanticLibraryProof(full.index!, clipped, qualifier, full.proofs!, sourceRecord).proof).toBeUndefined();
+      }
+    } else {
+      expect(full.proofs ?? []).toEqual([]);
+      expect(full.slot_qualifiers).toEqual([expect.objectContaining({ evidence_kind: "source_evidence", payload_support: "display_budget" })]);
+    }
+    for (const missing of PARCEL_FRAMES) {
+      const incomplete = { ...correspondence, correspondences: correspondence.correspondences.filter(row =>
+        row.query_endpoint.kind !== "predicate" || row.query_endpoint.frame !== missing.query) };
+      const withdrawn = await recall(session, query, [incomplete], PARCEL_QUERY, WINDOW_BUDGET);
+      expect(withdrawn.proofs ?? []).toEqual([]);
+      expect(withdrawn.unproved_computations).toEqual([expect.objectContaining({ kind: "complete_zero_binding" })]);
+      expect(withdrawn.slot_qualifiers?.some(row => row.evidence_kind === "source_evidence")).toBe(true);
+    }
+    expect(isolation.forbidden).toEqual([]);
+  } finally {
+    await session.client.close(); session.database.close(); closeCachedDatabase(filename);
     await rm(directory, { recursive: true, force: true });
   }
 }, 30_000);

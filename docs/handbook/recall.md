@@ -1648,8 +1648,15 @@ retained-source fallback only within the same display and resource limits;
 window availability does not imply the original source is complete. This owner
 feeds native package selection and the public encoder. Dependencies come from
 the executed binding closures and observation origins, never returned-value text
-or the consumed-leaf summary. All delivered bindings for a root share one contiguous
-window covering their represented dependencies. Delivery spans leave the original
+or the consumed-leaf summary. Packaging offers each independently executed proof
+intact and, when it fits, one combined package; it does not enumerate proof subsets.
+An oversized proof does not suppress an independently deliverable proof from the
+same source. The existing selector reserves one package per root, so same-root
+alternatives are not promised on later pages. All delivered bindings for a root
+share one contiguous window covering the selected complete computations' represented
+dependencies. Verification re-executes each exact Q/H/C computation: selecting
+fewer bindings cannot shrink its required extent, and an indispensable AND proof
+that exceeds the window remains undeliverable. Delivery spans leave the original
 execution target and proof identities intact; verification compares complete root
 identity and checks that the span contains the same required locations. It does
 not independently certify source text absent from the evaluator's trusted inputs.

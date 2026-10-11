@@ -29,8 +29,9 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
       if (retained === undefined) { incomplete = true; continue; }
       const disclosure = projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: payload.as_of,
         source: retained.record });
-      const semantic = supportPackage(entry, position, branches[0]?.source ?? retained.text, branches, meter, disclosure);
-      if (semantic.package !== undefined) packages.push(semantic.package);
+      const semantic = supportPackages(position, branches[0]?.source ?? retained.text, retained.bytes, branches, meter, disclosure);
+      packages.push(...semantic.packages);
+      incomplete ||= semantic.reason === "resource_budget";
       const chunk = hydrate(meter, retained.text, 0, DISPLAY_BYTES);
       if (chunk.status !== "chunk") { incomplete = true; continue; }
       const preview = sourceSemanticLibraryRawPreview(chunk.text, sources.length);
@@ -47,26 +48,59 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
   return { packages, incomplete };
 }
 
-function supportPackage(entry: IndexEntry, position: number, source: string, branches: readonly LibraryExecutedSupport[],
-  meter: SourceSemanticReadBudget, source_disclosure: SourceSemanticLibraryPackage["source_disclosure"]): { package?: SourceSemanticLibraryPackage; reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]> } {
-  if (branches.length === 0) return { reason: "not_applicable" };
+function supportPackages(position: number, source: string, sourceBytes: number, branches: readonly LibraryExecutedSupport[],
+  meter: SourceSemanticReadBudget, source_disclosure: SourceSemanticLibraryPackage["source_disclosure"]): {
+    packages: SourceSemanticLibraryPackage[]; reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]>
+  } {
+  const packages: SourceSemanticLibraryPackage[] = [], available: LibraryExecutedSupport[] = [];
+  let reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]> = "not_applicable";
   let start = Infinity, end = 0;
-  for (const row of branches) {
-    const window = sourceSemanticSupportWindow({ source, interpretation: row.proof.interpretation,
-      dependency_ids: row.dependencies, max_bytes: DISPLAY_BYTES, meter });
-    if (window.status !== "available") return { reason: window.reason };
-    start = Math.min(start, window.start_offset); end = Math.max(end, window.end_offset);
+  try {
+    for (const row of branches) {
+      const window = sourceSemanticSupportWindow({ source, interpretation: row.proof.interpretation,
+        dependency_ids: row.dependencies, max_bytes: DISPLAY_BYTES, meter });
+      if (window.status !== "available") {
+        reason = window.reason;
+        if (reason === "resource_budget") return { packages, reason };
+        continue;
+      }
+      const chunk = hydrate(meter, source, window.start_offset, window.end_offset - window.start_offset);
+      if (chunk.status !== "chunk" || chunk.end_offset !== window.end_offset) { reason = "location_missing"; continue; }
+      packages.push(proofPackage(position, sourceBytes, [row],
+        { text: chunk.text, start_offset: window.start_offset, end_offset: window.end_offset }, meter, source_disclosure));
+      available.push(row);
+      start = Math.min(start, window.start_offset); end = Math.max(end, window.end_offset);
+    }
+    // Each executed Q/H/C proof remains whole. At most one union and one option
+    // per execution are offered; the selector still reserves one package per root.
+    if (available.length > 1 && end - start <= DISPLAY_BYTES) {
+      const chunk = hydrate(meter, source, start, end - start);
+      if (chunk.status === "chunk" && chunk.end_offset === end) {
+        packages.unshift(proofPackage(position, sourceBytes, available,
+          { text: chunk.text, start_offset: start, end_offset: end }, meter, source_disclosure));
+      }
+    }
+    return { packages, reason: packages.length > 0 ? "envelope_budget" : reason };
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    return { packages, reason: "resource_budget" };
   }
-  if (end - start > DISPLAY_BYTES) return { reason: "display_budget" };
-  const chunk = hydrate(meter, source, start, end - start);
-  if (chunk.status !== "chunk" || chunk.end_offset !== end) return { reason: "location_missing" };
+}
+
+function proofPackage(position: number, sourceBytes: number, branches: readonly LibraryExecutedSupport[],
+  window: { text: string; start_offset: number; end_offset: number }, meter: SourceSemanticReadBudget,
+  source_disclosure: SourceSemanticLibraryPackage["source_disclosure"]): SourceSemanticLibraryPackage {
+  const entriesCount = branches.reduce((sum, row) => sum + row.group.entries.length, 0);
+  const explanationsCount = branches.reduce((sum, row) => sum + row.group.explanations.length, 0);
+  meter.charge(branches.length + explanationsCount + entriesCount * Math.max(1, Math.ceil(Math.log2(entriesCount))),
+    512 + (branches.length * 4 + entriesCount * 2 + explanationsCount) * 8, "library proof package references");
   const entries = branches.flatMap(row => row.group.entries);
   const representative = [...entries].sort((a, b) => a.hypothesis_id.localeCompare(b.hypothesis_id) || a.output_binding.localeCompare(b.output_binding))[0]!;
-  return { reason: "envelope_budget", package: {
-    entry: spanEntry(representative, start, end, Buffer.byteLength(source)), entries,
+  return {
+    entry: spanEntry(representative, window.start_offset, window.end_offset, sourceBytes), entries,
     explanations: branches.flatMap(row => row.group.explanations), proofs: branches.map(row => row.proof),
-    preview: chunk.text, access_position: position, payload_support: "available", source_disclosure
-  } };
+    preview: window.text, access_position: position, payload_support: "available", source_disclosure
+  };
 }
 
 function spanEntry(entry: IndexEntry, start: number, end: number, extent: number): IndexEntry {
