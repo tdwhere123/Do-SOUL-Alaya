@@ -22,7 +22,7 @@ export type ProviderRequestAttemptClass =
 
 export type ProviderRequestLine = Readonly<{
   key: string;
-  kind: Extract<RawAttemptOwner["kind"], "query" | "semantic_correspondence" | "source_evidence_selection" | "source_evidence_preservation" | "page_support_comparison">;
+  kind: Exclude<RawAttemptOwner["kind"], "source_semantic">;
   systemPrompt: string;
   userPrompt: string;
   responseJsonSchema: object;

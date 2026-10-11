@@ -1519,6 +1519,24 @@ freeze. Native measurement uses `longmemeval-native-semantic-measurement-v3`;
 historical artifacts retain their original declarations. Existing publication and
 generic semantic-chain owners perform preparation, snapshot reopen, discovery,
 correspondence receive, public recall and initial exposure.
+The opt-in Bench task consumer API in
+[`semantic-chain/consumer`](../../apps/bench-runner/src/runs/semantic-chain/consumer/input.ts)
+admits one retained native replay before preparing the exact original question,
+question clock and complete public recall envelope. Archive-only source bodies,
+gold and evaluator reviews are not consumer inputs. An independently selected
+question-only control withholds the envelope explicitly. Its fixed generic
+instruction permits supported partial or unresolved answers and preserves source
+qualifications; it carries no task-specific answer oracle.
+`pinSemanticChainConsumerAuthority` binds the current implementation, native
+replay and request identities, quote and a separate execution root. The existing
+write lease, attempt ledger and provider-request pipeline own execution: at most
+one attempt per selected arm, with retained native HTTP/raw evidence and no
+automatic retry. `executeSemanticChainConsumer` in recovery mode only settles
+retained evidence. A reserved attempt without raw remains unknown, and completed
+reinvocation cannot dispatch again. A `complete_response` establishes physical
+completion and answer-schema validity only. The answer's `task_completion` is a
+fallible consumer claim; fidelity remains unassessed. This API neither publishes
+memory nor establishes cross-task utility or benchmark acceptance.
 An opt-in offline lazy-qualification stage records one native `prepare_query`
 observation before any public recall and freezes the first ten distinct current
 raw source records in access order, or fewer when the pool is smaller. It keeps
