@@ -3,9 +3,8 @@ import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import * as observation from "../../../recall/runtime/conditional-field-observe.js";
 import * as projection from "../../../recall/runtime/source-semantic-projection.js";
 import { RequestCostLedger } from "../../../recall/runtime/request-cost-ledger.js";
-import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { deliveredProofFixture } from "./source-semantic-proof-fixture.js";
-import { coverageSelectionFixture, executedInputNumbers, selectionExecutionBudget } from "./source-semantic-selection-fixture.js";
+import { coverageSelectionFixture, executedInputNumbers, selectionExecutionBudget, sourcePrefixExhaustionBudget } from "./source-semantic-selection-fixture.js";
 
 it("attributes bounded observation cost while retaining its source-supported input prefix", () => {
   const complete = coverageSelectionFixture(selectionExecutionBudget).pool[0]!;
@@ -61,7 +60,7 @@ it("attributes bounded observation cost while retaining its source-supported inp
   try {
     const actual = deliveredProofFixture({ interpretation: proof.interpretation, semantics: proof.query,
       correspondence: proof.semantic_correspondence, original: proof.original_query,
-      library: true, budget: SOURCE_SEMANTIC_REASONING_BUDGET });
+      library: true, budget: sourcePrefixExhaustionBudget });
     expect(groups.length).toBeGreaterThan(0);
     expect(projections.length).toBeGreaterThan(0);
     const charges = [...ledgers].map(([ledger, value]) => {
@@ -80,5 +79,5 @@ it("attributes bounded observation cost while retaining its source-supported inp
     expect(executed.length).toBeLessThan(7);
     expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7].slice(0, executed.length));
   } finally { projected.mockRestore(); observed.mockRestore(); charged.mockRestore(); }
-  // Coverage instruments the full fixture and all charge calls; semantic budgets stay fixed above.
+  // Coverage must not put this fixture back on the production allowance, which now finishes the prefix.
 }, 30_000);

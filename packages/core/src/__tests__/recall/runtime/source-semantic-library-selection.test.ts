@@ -5,7 +5,8 @@ import { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } fr
 import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
 import { alternativeSelectionFixture, compatibleTaskSupport, coverageSelectionFixture, deliveredInputNumbers,
-  deploymentStatement, executedInputNumbers, feasibleSubsets, physicalRoot as root, rawSourceTwin, selectionExecutionBudget
+  deploymentStatement, executedInputNumbers, feasibleSubsets, physicalRoot as root, rawSourceTwin, selectionExecutionBudget,
+  sourcePrefixExhaustionBudget
 } from "./source-semantic-selection-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
@@ -229,9 +230,9 @@ const coverageTask = coverageSelectionFixture(selectionExecutionBudget);
 const alternativeTask = alternativeSelectionFixture(selectionExecutionBudget);
 
 it("retains a nonempty open input prefix when source-local execution exhausts its original work allowance", () => {
-  const original = coverageSelectionFixture(), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
+  const original = coverageSelectionFixture(sourcePrefixExhaustionBudget), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
   const proof = partial.proofs[0]!;
-  expect(original.execution_budget).toMatchObject({ work_units: 200_000, memory_bytes: 20_000_000,
+  expect(original.execution_budget).toMatchObject({ work_units: 150_000, memory_bytes: 20_000_000,
     page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
   expect(root(partial)).toBe(root(complete));
   expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
@@ -248,7 +249,7 @@ it("retains a nonempty open input prefix when source-local execution exhausts it
   expect(proof.resource_usage!.memory_bytes).toBeLessThan(original.execution_budget.memory_bytes);
   expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []).evidence_inputs.map(row => row.status))
     .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
-  // Coverage instruments the exhaustion fixture; the original work allowance stays fixed.
+  // Coverage must not put this fixture back on the production allowance, which now finishes the prefix.
 }, 30_000);
 
 it("executes only the distinct source-bound deployment inputs without claiming task completion", () => {
