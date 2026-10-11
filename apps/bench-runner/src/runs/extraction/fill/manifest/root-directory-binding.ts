@@ -6,6 +6,7 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   rmSync
@@ -30,46 +31,60 @@ export interface BoundCacheRoot {
 }
 
 const namedDirectoryAnchors = new Set<string>();
-const namedDirectoryDescriptors = new Map<string, number>();
+const liveLeasePaths = new Map<number, readonly string[]>();
 
 export function boundDirectoryAnchor(descriptor: number, namedPath: string): string {
   if (process.platform === "linux") return `/proc/self/fd/${descriptor}`;
-  if (namedPath.length > 0) {
-    namedDirectoryAnchors.add(namedPath);
-    namedDirectoryDescriptors.set(namedPath, descriptor);
-  }
+  if (namedPath.length > 0) namedDirectoryAnchors.add(namedPath);
   return namedPath;
+}
+
+/** Closed anchors reuse descriptor numbers, so only the open lease fd can prove the root. */
+export function retainLiveDirectoryLease(descriptor: number, namedPath: string): void {
+  const paths = new Set<string>([namedPath]);
+  try {
+    paths.add(realpathSync(namedPath));
+  } catch {
+    // The published path is enough when the root is already gone.
+  }
+  liveLeasePaths.set(descriptor, [...paths]);
+}
+
+export function releaseLiveDirectoryLease(descriptor: number): void {
+  liveLeasePaths.delete(descriptor);
+}
+
+function pathCoversLeaseRoot(root: string, path: string): boolean {
+  return path === root || path.startsWith(`${root}${sep}`) || path.startsWith(`${root}/`);
 }
 
 /** A renamed Darwin root keeps the fd, but the path names the replacement. */
 export function assertNamedDirectoryAnchorCurrent(path: string): void {
   if (process.platform === "linux" || process.platform === "win32") return;
-  const matches = [...namedDirectoryDescriptors.keys()]
-    .filter(root => path === root || path.startsWith(`${root}${sep}`) || path.startsWith(`${root}/`))
-    .sort((left, right) => right.length - left.length);
-  for (const root of matches) {
-    const descriptor = namedDirectoryDescriptors.get(root)!;
+  for (const [descriptor, roots] of liveLeasePaths) {
+    const covering = roots.filter(root => pathCoversLeaseRoot(root, path));
+    if (covering.length === 0) continue;
     let opened;
     try {
       opened = fstatSync(descriptor, { bigint: true });
     } catch (cause) {
-      // A closed child must not hide a live parent whose name now points elsewhere.
       if (hasErrorCode(cause, "EBADF")) continue;
       throw cause;
     }
     if (!opened.isDirectory()) {
       throw new ExtractionCacheInvariantError("extraction cache root descriptor is not a directory");
     }
-    let named;
-    try {
-      named = lstatSync(root, { bigint: true });
-    } catch {
-      throw new ExtractionCacheInvariantError("extraction cache root identity changed while leased");
+    for (const root of covering) {
+      let named;
+      try {
+        named = lstatSync(root, { bigint: true });
+      } catch {
+        throw new ExtractionCacheInvariantError("extraction cache root identity changed while leased");
+      }
+      if (!named.isDirectory() || named.isSymbolicLink() || opened.dev !== named.dev || opened.ino !== named.ino) {
+        throw new ExtractionCacheInvariantError("extraction cache root identity changed while leased");
+      }
     }
-    if (!named.isDirectory() || named.isSymbolicLink() || opened.dev !== named.dev || opened.ino !== named.ino) {
-      throw new ExtractionCacheInvariantError("extraction cache root identity changed while leased");
-    }
-    return;
   }
 }
 

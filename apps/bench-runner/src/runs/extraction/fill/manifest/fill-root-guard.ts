@@ -8,6 +8,8 @@ import {
   isBoundDirectoryAnchor,
   openExistingCacheRoot,
   openOrCreateCacheRoot,
+  releaseLiveDirectoryLease,
+  retainLiveDirectoryLease,
   type DirectoryIdentity
 } from "./root-directory-binding.js";
 import {
@@ -76,6 +78,7 @@ export function acquireExtractionCacheWriteLease(
       ...publishedBinding, cacheRoot: absoluteRoot, stableRootPath
     };
     assertExtractionCacheWriteLeaseOwner(binding);
+    retainLiveDirectoryLease(rootFd, absoluteRoot);
     return createWriteLease(binding);
   } catch (cause) {
     const acquiredKernelLease = kernelLease;
@@ -265,6 +268,7 @@ function releaseExtractionCacheWriteLease(binding: LeaseOwnerBinding): void {
     failures.push(asError(cause));
   }
   failures.push(...runCleanupActions([
+    () => releaseLiveDirectoryLease(binding.rootFd),
     () => closeSync(binding.rootFd),
     () => binding.kernelLease.release()
   ]));
