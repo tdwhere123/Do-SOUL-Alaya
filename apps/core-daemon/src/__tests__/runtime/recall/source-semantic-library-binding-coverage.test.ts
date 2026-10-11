@@ -23,9 +23,10 @@ import {
 const RECEIPT_DIRECTORY = process.env.BINDING_COVERAGE_RECEIPT && process.env.BINDING_COVERAGE_RECEIPT.length > 0
   ? (process.env.BINDING_COVERAGE_RECEIPT.endsWith(".json")
     ? dirname(process.env.BINDING_COVERAGE_RECEIPT) : process.env.BINDING_COVERAGE_RECEIPT)
-  : "/home/tdwhere/vibe/Do-SOUL-Alaya/.do-it/bench-runs/semantic-recall-20260929/qhc-responsibility-boundary/native-qualified-delivery";
+  : undefined;
 
 async function writeReceipt(name: string, body: unknown) {
+  if (RECEIPT_DIRECTORY === undefined) return;
   await mkdir(RECEIPT_DIRECTORY, { recursive: true });
   const text = typeof body === "string" ? (body.endsWith("\n") ? body : `${body}\n`) : `${JSON.stringify(body, null, 2)}\n`;
   await writeFile(join(RECEIPT_DIRECTORY, name), text);

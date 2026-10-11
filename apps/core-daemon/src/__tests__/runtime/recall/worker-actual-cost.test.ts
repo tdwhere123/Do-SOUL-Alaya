@@ -295,6 +295,7 @@ describe("native worker actual cost", () => {
       query_id: "needle",
       snapshot_id: digest,
       result_version: "v1",
+      as_of: NOW,
       entries: [memory, source],
       completeness: {
         schema_version: 1 as const, logical_index: "open" as const, observed_coverage: "open" as const,
@@ -314,6 +315,7 @@ describe("native worker actual cost", () => {
     const sourceRow = encoded.find((row) => row.object_kind === "source_evidence");
     expect(sourceRow).toBeDefined();
     expect(sourceRow?.object_id).toBeUndefined();
+    expect(sourceRow?.source_disclosure?.evaluated_as_of).toBe(NOW);
   });
 });
 

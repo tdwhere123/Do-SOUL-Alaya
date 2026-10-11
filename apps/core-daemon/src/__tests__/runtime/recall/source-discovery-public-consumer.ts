@@ -283,8 +283,10 @@ function refreshPendingAfterPayload(
 
 function incompleteSources(response: SoulMemorySearchResponse): PendingSource[] {
   const rows: PendingSource[] = [];
+  const deliveredRoots = new Set<string>();
   for (const row of response.results) {
     if (row.target?.kind !== "source_evidence") continue;
+    deliveredRoots.add(row.target.root_id);
     const omitted = row.content_preview === "[payload omitted]";
     const partial = row.target.span?.content_complete === false;
     if (!omitted && !partial) continue;
@@ -293,6 +295,17 @@ function incompleteSources(response: SoulMemorySearchResponse): PendingSource[] 
       target: sourceEvidenceRootTarget(row.target),
       start_offset: row.target.span?.content_end ?? 0
     });
+  }
+  // An issued index target can be expanded even when its result payload was omitted.
+  if (response.index?.continuation != null) {
+    for (const entry of response.index.entries) {
+      if (entry.target.kind !== "source_evidence" || deliveredRoots.has(entry.target.root_id)) continue;
+      rows.push({
+        root_id: entry.target.root_id,
+        target: sourceEvidenceRootTarget(entry.target),
+        start_offset: 0
+      });
+    }
   }
   return rows;
 }

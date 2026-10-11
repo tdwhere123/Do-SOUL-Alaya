@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
+import type { SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
 import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -199,18 +200,11 @@ describe("public source consumption comparison", () => {
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
-        const publicFirst = result.trace.first_page_identities[0];
-        const laterId = result.trace.first_page_identities.find((id) => id !== publicFirst);
+        const { publicFirst, laterId } = assertOmittedPairExposure(result, [planted.first_id, planted.second_id]);
         const bodyById: Record<string, string> = {
           [planted.first_id]: planted.first_body,
           [planted.second_id]: planted.second_body
         };
-        expect(result.trace.first_page_identities).toEqual(expect.arrayContaining([
-          planted.first_id,
-          planted.second_id
-        ]));
-        expect(publicFirst).toBeDefined();
-        expect(laterId).toBeDefined();
         expect(result.trace.termination.preview_complete[publicFirst!]).toBe(true);
         expect(result.trace.termination.source_bodies[publicFirst!]).toBe(bodyById[publicFirst!]);
         const fullScore = scoreConsumption(canary, publicFirst!, result.trace, "source_only", bodyById[publicFirst!]);
@@ -220,6 +214,9 @@ describe("public source consumption comparison", () => {
         expect(result.trace.steps[fullScore.first_complete_step!]!.preview_complete[publicFirst!]).toBe(true);
         expect((result.trace.termination.source_bodies[laterId!] ?? "").length).toBeGreaterThan(0);
         expect(payloadStepsFor(result.trace, laterId!).length).toBeGreaterThan(0);
+        expect(payloadStepsFor(result.trace, laterId!)[0]!.public_exchange.step_index)
+          .toBeGreaterThan(fullScore.first_complete_step!);
+        expect(result.settled).toHaveLength(result.trace.steps.length);
         expect(result.trace.termination.stop_reason).toMatch(/continuation_exhausted|membership_page_cap|index_invalidated|declared_turn_cap/);
         assertAssembledMatchesReconstruction(result.trace);
         return result;
@@ -239,8 +236,7 @@ describe("public source consumption comparison", () => {
       };
       const consumed = await attemptCell(identity, async () => {
         const result = await consumePairTrace(canary, handler, receipts);
-        const publicFirst = result.trace.first_page_identities[0];
-        const laterId = result.trace.first_page_identities.find((id) => id !== publicFirst);
+        const { publicFirst, laterId } = assertOmittedPairExposure(result, [planted.public_first_id, planted.later_id]);
         expect(publicFirst).toBe(planted.public_first_id);
         expect(laterId).toBe(planted.later_id);
         const cap = PUBLIC_CONSUMPTION_PROTOCOL.max_payload_expansions_per_target;
@@ -258,6 +254,8 @@ describe("public source consumption comparison", () => {
         expect(result.trace.termination.preview_complete[laterId!]).toBe(true);
         expect(result.trace.termination.source_bodies[laterId!] ?? "").toContain(COMPLETE_SOURCE_MARKER);
         expect(result.trace.termination.source_bodies[laterId!]).toBe(planted.later_body);
+        expect(payloadStepsFor(result.trace, laterId!)[0]!.public_exchange.step_index)
+          .toBeGreaterThan(firstPayload.at(-1)!.public_exchange.step_index);
         expect(result.trace.discarded_capped_incomplete_root_ids).toEqual([publicFirst]);
         expect(result.trace.cap_remainder).toBe("unread_after_cap");
         expect(result.trace.termination.discarded_capped_incomplete_root_ids).toEqual([publicFirst]);
@@ -375,16 +373,48 @@ async function consumePairTrace(
 ): Promise<Readonly<{
   readonly trace: ConsumptionTrace;
   readonly settled: import("@do-soul/alaya-core").ConditionalFieldExecutionReceipt[];
+  readonly initial: SoulMemorySearchResponse;
 }>> {
   const started = receipts.length;
+  let initial: SoulMemorySearchResponse | undefined;
   const trace = await consumePublicSources({
-    handler,
+    handler: async (request, context) => {
+      const response = await handler(request, context);
+      initial ??= response;
+      for (const row of response.results) {
+        if (row.target.kind === "source_evidence") {
+          expect(row.source_disclosure).toMatchObject({ evaluated_as_of: response.index?.as_of });
+        }
+      }
+      return response;
+    },
     context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" },
     request: publicSearchRequest(canary, "proposal", "source_only", "canonical"),
     receipts
   });
   expect(trace.steps[0]?.public_exchange.request.continuation).toBeNull();
-  return { trace, settled: receipts.slice(started) };
+  expect(initial).toBeDefined();
+  return { trace, settled: receipts.slice(started), initial: initial! };
+}
+
+function assertOmittedPairExposure(
+  result: Awaited<ReturnType<typeof consumePairTrace>>, expectedRoots: readonly string[]
+): Readonly<{ publicFirst: string; laterId: string }> {
+  const roots = result.initial.index?.entries.flatMap((entry) =>
+    entry.target.kind === "source_evidence" ? [entry.target.root_id] : []) ?? [];
+  expect(roots).toHaveLength(2);
+  expect(roots).toEqual(expect.arrayContaining([...expectedRoots]));
+  const publicFirst = roots[0]!;
+  const laterId = roots[1]!;
+  expect(result.initial.index?.completeness).toMatchObject({ transport: "partial", payload: "omitted" });
+  expect(result.initial.index?.continuation?.capability).toEqual(expect.any(String));
+  expect(result.initial.results).toHaveLength(1);
+  expect(result.trace.first_page_identities).toEqual([publicFirst]);
+  expect(result.trace.first_exposure?.initial?.slots.map((slot) =>
+    slot.target.kind === "source_evidence" ? slot.target.root_id : slot.target.object_id)).toEqual([publicFirst]);
+  expect(result.trace.steps[0]!.source_bodies[laterId]).toBeUndefined();
+  expect(payloadStepsFor(result.trace, laterId)[0]?.public_exchange.request.payload_continuation?.start_offset).toBe(0);
+  return { publicFirst, laterId };
 }
 
 function payloadStepsFor(trace: ConsumptionTrace, rootId: string): ConsumptionTrace["steps"] {

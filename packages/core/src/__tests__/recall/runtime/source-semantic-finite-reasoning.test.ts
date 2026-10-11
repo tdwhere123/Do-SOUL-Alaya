@@ -263,7 +263,7 @@ it("rejects comparison branches whose frame constraints cannot be evaluated", ()
     operation: "minimum", left: "actor", strict: false, metric: "speed", unit: "ms", context: "lab", scope: "asserted" } }).success).toBe(false);
 });
 
-it("requires measurement metadata requested by query semantics and refuses conflicting operand assignments", () => {
+function measurementComparisonInput() {
   const interpretation = finiteSource(), base = finiteQuery(true);
   const semantics: SourceSemanticQuery = { ...base, variables: [
     { id: "actor", sort: "entity", reference: { kind: "query_text", excerpt: "Alice" } },
@@ -275,13 +275,26 @@ it("requires measurement metadata requested by query semantics and refuses confl
     relation: "contextual_equivalence" as const, query_endpoint: { kind: "referent" as const, variable: variable! },
     source_endpoint: { kind: "referent" as const, referent: `r${name}` },
     query_support: { kind: "query_text" as const, excerpt: name! }, source_semantic_support: [] })) };
+  return { interpretation, semantics, correspondence };
+}
+
+it("supports requested measurement equality with both measurement witnesses", () => {
+  const { interpretation, semantics, correspondence } = measurementComparisonInput();
   const equal = reasonFinite(interpretation, semantics, correspondence);
   expect(equal.outcome.status).toBe("interpreted");
   expect(equal.evaluation?.status).toBe("supported");
   expect(equal.consumed_leaves.filter((row) => row.leaf_kind === "source_interpretation_measurement").map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
+}, 15000);
+
+it("keeps measurements incomparable when their metric differs from the query", () => {
+  const { interpretation, semantics, correspondence } = measurementComparisonInput();
   const wrongMetric = reasonFinite({ ...interpretation, measurements: interpretation.measurements!.map((row) => ({ ...row, metric: "weight" })) }, semantics, correspondence);
   expect(wrongMetric.evaluation?.status).toBe("incomparable");
   expect(wrongMetric.binding_results).toEqual([]);
+}, 15000);
+
+it("rejects conflicting values for one measurement assignment", () => {
+  const interpretation = finiteSource();
   expect(SourceSemanticInterpretationSchema.safeParse({ ...interpretation,
     measurements: [...interpretation.measurements!, { ...interpretation.measurements![0]!, id: "contradictoryValue", value: "3" }] }).success).toBe(false);
 }, 15000);

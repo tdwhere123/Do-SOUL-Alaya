@@ -152,7 +152,8 @@ it("retains source lookup witnesses from Core publication across SQLite reopen a
     planted.database.close();
     closeCachedDatabase(planted.filename);
     await awaitWorkerAfterMainSqliteClose(client);
-    const search = publicSearchRequest(canary, "proposal", "source_only", "canonical");
+    // One result leaves room for optional lookup witnesses beside required source disclosure.
+    const search = publicSearchRequest(canary, "proposal", "source_only", "canonical", 1);
     const trace = await consumePublicSources({ handler, receipts, request: search,
       context: { workspaceId: WS, runId: RUN, sessionId: RUN, agentTarget: "codex" } });
     const score = scoreConsumption(canary, planted.sourceId, trace, "source_only", sourceCorpus);
