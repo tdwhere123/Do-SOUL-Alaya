@@ -91,11 +91,17 @@ export const OrdinaryRecallObservationSchema = z.object({
   remaining_tail_bytes: Count
 }).strict();
 export const OrdinaryRecallProcessResultSchema = z.object({
-  status: z.literal("closed"), close: z.object({ code: z.number().int().nullable(), signal: z.string().nullable() }).strict(),
+  status: z.enum(["closed", "failed_or_interrupted"]),
+  close: z.object({ code: z.number().int().nullable(), signal: z.string().nullable() }).strict(),
   forced: z.boolean(), child_error: z.unknown().nullable(), process_in_flight: z.literal(false), no_retry: z.literal(true)
-}).passthrough();
+}).passthrough().superRefine((result, context) => {
+  const successfulExit = result.close.code === 0 && !result.forced && result.child_error === null;
+  if ((result.status === "closed") !== successfulExit) {
+    context.addIssue({ code: "custom", path: ["status"], message: "process status contradicts the producer exit record" });
+  }
+});
 export const OrdinaryRecallShutdownSchema = z.object({
-  at: Time, shutdown_awaited: z.literal(true), daemon_started: z.literal(true),
+  at: Time, shutdown_awaited: z.literal(true), daemon_started: z.boolean(),
   frozen_source_file_unchanged: z.literal(true), snapshot_sha256: Digest,
   failure: z.unknown().nullable(), provider_calls: z.literal(0), consumer_calls: z.literal(0)
 }).passthrough();

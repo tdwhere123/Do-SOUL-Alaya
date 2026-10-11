@@ -46,11 +46,12 @@ export function inspectOrdinaryRecallObservation(observationRoot: string) {
   const observation = observationValue === undefined ? undefined : OrdinaryRecallObservationSchema.parse(observationValue);
   const returned = archive.json("execution/observation.json", true);
   if (returned !== undefined) same(returned, observation, "returned observation differs from its final state");
-  const closure = readClosure(archive, config);
+  const closure = readClosure(archive, config, calls.length);
   if (reservation === undefined && calls.length !== 0) conflict("public calls lack their episode reservation");
   const delivery = verifyOrdinaryRecallDelivery(config, calls, observation);
-  const closed = reservation !== undefined && observation !== undefined && closure;
-  const state = !closed || calls.some(call => call.responseState === "unknown") ? "unknown" as const
+  const closed = reservation !== undefined && observation !== undefined && closure === "closed";
+  const state = closure === "failed" ? "failed" as const
+    : !closed || calls.some(call => call.responseState === "unknown") ? "unknown" as const
     : delivery.complete ? "complete" as const
       : delivery.successfulExposures > 0 ? "partial" as const
         : calls.some(call => call.responseState !== "success") ? "failed" as const : "empty" as const;
@@ -90,15 +91,21 @@ function verifyProducer(config: OrdinaryRecallCaptureConfig, preparation: z.infe
   }
 }
 
-function readClosure(archive: CaptureArchive, config: OrdinaryRecallCaptureConfig): boolean {
+function readClosure(archive: CaptureArchive, config: OrdinaryRecallCaptureConfig,
+  callCount: number): "closed" | "failed" | "unknown" {
   const resultValue = archive.json("execution/process-result.json", true);
   const shutdownValue = archive.json("execution/shutdown.json", true);
-  if (resultValue === undefined || shutdownValue === undefined) return false;
-  const result = OrdinaryRecallProcessResultSchema.parse(resultValue);
-  const shutdown = OrdinaryRecallShutdownSchema.parse(shutdownValue);
-  if (shutdown.snapshot_sha256 !== config.snapshot_sha256) conflict("shutdown changed the sealed snapshot binding");
-  // A forced process cannot certify that all observer buffers and public replies were retained.
-  return !result.forced && result.close.signal === null;
+  const result = resultValue === undefined ? undefined : OrdinaryRecallProcessResultSchema.parse(resultValue);
+  const shutdown = shutdownValue === undefined ? undefined : OrdinaryRecallShutdownSchema.parse(shutdownValue);
+  if (shutdown !== undefined) {
+    if (shutdown.snapshot_sha256 !== config.snapshot_sha256) conflict("shutdown changed the sealed snapshot binding");
+    if (!shutdown.daemon_started && callCount !== 0) conflict("captured calls contradict the daemon startup record");
+  }
+  if (result === undefined || shutdown === undefined) return "unknown";
+  // Interruption cannot certify observer flushes, even if shutdown and complete public bytes were retained.
+  if (result.forced || result.close.signal !== null) return "unknown";
+  if (result.status === "failed_or_interrupted") return "failed";
+  return shutdown.daemon_started ? "closed" : "unknown";
 }
 
 function readWire(archive: CaptureArchive): OrdinaryRecallWireRecord[] {

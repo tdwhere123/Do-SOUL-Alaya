@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { cpSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -126,6 +126,52 @@ it("keeps an unfinished reserved episode unknown and refuses authority", () => {
   unlinkSync(join(root, "execution/process-result.json"));
   expect(inspectOrdinaryRecallObservation(root)).toMatchObject({ state: "unknown", closed: false });
   expect(() => prepare(root, "unknown-consumer")).toThrow(/closed/u);
+});
+
+it.each([
+  { name: "nonzero exit", capture: "prefix", state: "failed", close: { code: 1, signal: null }, forced: false },
+  { name: "forced termination", capture: "complete", state: "unknown", close: { code: null, signal: "SIGTERM" }, forced: true },
+  { name: "signal interruption", capture: "prefix", state: "unknown", close: { code: null, signal: "SIGINT" }, forced: false }
+] as const)("inspects $name with retained shutdown evidence without authorizing its public prefix", ({ name, capture: mode, state, close, forced }) => {
+  const capture = captures[mode], root = join(base.root, `process-${name}`), before = hits;
+  cpSync(capture.root, root, { recursive: true });
+  const processResult = { status: "failed_or_interrupted", close, forced, child_error: null,
+    process_in_flight: false, no_retry: true };
+  const shutdown = { ...readJson(join(root, "execution/shutdown.json")),
+    failure: { name: "Error", message: "fixture observation failure" } };
+  writeJson(join(root, "execution/process-result.json"), processResult);
+  writeJson(join(root, "execution/shutdown.json"), shutdown);
+  const inspected = inspectOrdinaryRecallObservation(root);
+  expect(inspected).toMatchObject({ state, closed: false, successfulExposures: capture.observation.calls });
+  expect(inspected.evidence.calls.map(call => call.envelope)).toEqual(Array.from({ length: capture.observation.calls },
+    (_, index) => readJson(join(capture.execution, `${String(index + 1).padStart(2, "0")}-public-envelope.json`))));
+  expect(() => prepare(root, `consumer-${name}`)).toThrow(/closed/u);
+  expect(readJson(join(root, "execution/process-result.json"))).toEqual(processResult);
+  expect(readJson(join(root, "execution/shutdown.json"))).toEqual(shutdown);
+  expect(hits).toBe(before);
+});
+
+it("inspects a producer failure before daemon startup with its retained shutdown record", () => {
+  const root = join(base.root, "daemon-start-failed"), capture = captures.prefix;
+  cpSync(capture.root, root, { recursive: true });
+  const execution = join(root, "execution"); rmSync(execution, { recursive: true }); mkdirSync(execution);
+  writeJson(join(execution, "reservation.json"), readJson(join(capture.execution, "reservation.json")));
+  writeJson(join(execution, "process-result.json"), { status: "failed_or_interrupted", close: { code: 1, signal: null },
+    forced: false, child_error: null, process_in_flight: false, no_retry: true });
+  writeJson(join(execution, "shutdown.json"), { ...readJson(join(capture.execution, "shutdown.json")),
+    daemon_started: false, failure: { name: "Error", message: "fixture daemon startup failure" } });
+  expect(inspectOrdinaryRecallObservation(root)).toMatchObject({ state: "failed", closed: false, successfulExposures: 0 });
+  expect(() => prepare(root, "daemon-start-consumer")).toThrow(/closed/u);
+});
+
+it.each([
+  { status: "closed", close: { code: 1, signal: null } },
+  { status: "failed_or_interrupted", close: { code: 0, signal: null } }
+])("rejects a process status that contradicts its exit record: $status", ({ status, close }) => {
+  const root = join(base.root, `contradictory-process-${status}`); cpSync(captures.prefix.root, root, { recursive: true });
+  writeJson(join(root, "execution/process-result.json"), { status, close,
+    forced: false, child_error: null, process_in_flight: false, no_retry: true });
+  expect(() => inspectOrdinaryRecallObservation(root)).toThrow();
 });
 
 it.each([

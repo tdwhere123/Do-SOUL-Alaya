@@ -1561,6 +1561,11 @@ including a successful prefix followed by a terminal public error. Complete
 source delivery, partial delivery, failed exposure and an unclosed/unknown
 observation remain distinct. Authority requires a closed capture and successful
 source exposure; optional internal execution diagnostics may remain unobserved.
+Nonzero process exits with retained shutdown evidence remain failed; forced or
+signalled processes remain unknown even when public bytes and shutdown records
+were retained. Both remain unclosed for consumer authority, while inspection
+preserves any successful public prefix. Failed startup can retain a shutdown
+record with no started daemon or public calls.
 Private snapshot reads verify emitted bytes and disclosures without supplying
 hidden source material to the model. The existing consumer provider binding,
 quote, separate output root, ledger and raw recovery own all subsequent effects.
