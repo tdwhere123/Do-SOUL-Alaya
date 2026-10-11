@@ -7,8 +7,9 @@ where applicable; Alaya-specific terms are flagged.
 ## Core SOUL Vocabulary
 
 **SOUL** — Governed long-term memory kernel. Three layers: Memory
-Ontology (durable truth), Structure Registry (routing), Runtime
-Control (per-turn).
+Ontology (governed durable records), Structure Registry (routing), Runtime
+Control (per-turn). Authoritative stored state is not a claim of infallible
+source statements or model understanding.
 
 **Memory Object** — Faceted stable semantic unit forming the ontology.
 Includes `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`,
@@ -201,6 +202,30 @@ but recognition must be proven against the concrete host and version
 before the trigger is called consumable.
 
 ## Recall
+
+**Fallible interpretation** — A revisable reading of task or source meaning.
+Q represents a query interpretation; H represents a source interpretation.
+Admission checks the applicable contract, not every semantic choice. Declared
+gaps need not enumerate silent omissions.
+
+**Semantic correspondence (C)** — An explicitly bound mapping between one
+query interpretation and one source interpretation. It is not a universal
+cross-source identity authority. A useful search association does not establish
+that correspondence.
+
+**Conditional use** — Use under stated premises and retained dependencies.
+An unresolved premise can limit a conclusion without making all related source
+material unusable. Conditional validity and world truth are different claims.
+
+**Exploration hypothesis** — A tentative connection used to decide what to
+inspect or which conditional consequences to compare. This is a responsibility
+distinction, not a promise of a separate implemented storage type. Observation
+may support, refute or leave it unresolved.
+
+**Whole-chain utility** — Task benefit after observation, interpretation,
+reasoning, delivery, consumer use and any revision, including errors and total
+cost. It is not established by producer admission, proof count or source hits
+alone. See [the Recall boundary](recall.md#fallible-interpretation-and-task-use).
 
 **UGAF** — Unified Governed Associative Field. One continuous governed
 associative-memory field, not a stack of post-processors. In-repo owner:

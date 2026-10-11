@@ -24,6 +24,35 @@ Evidence owns a relation's source observation/event time.
 truth. Recall, prediction, and reminder are runtime manifestations of
 paths, not independent subsystems.
 
+Here, durable truth means the governed authoritative record and its resolution
+history. It does not promise infallible source statements, model interpretation
+or knowledge of the world. Proposed interpretations can support qualified use
+without becoming admitted `RelationAssertion` state.
+
+### Fallible interpretation and task use
+
+Original task text and authorized source records are inputs independent of
+their current Q/H interpretations. Conditional computation can add useful
+structure; it is not the universal admission route for every source read.
+The open source-semantic library supports source-only delivery and optional
+Q/H/C-conditioned results. Ordinary Recall and the opt-in semantic route keep
+their existing entry points and contracts.
+
+The intended task loop permits partial interpretation, uncertain connections,
+further observation and revision. Unknown identity may motivate exploration
+or explicitly conditional reasoning; it cannot silently become established
+equality. A condition can limit a proof while other source evidence remains
+useful. Silent omissions may be absent from both declared gaps and Field
+feedback, so that feedback is not a complete account of the original task.
+
+Core owns admission, conditional computation, source access and lifecycle
+effects. A consuming agent/caller owns its task actions and any further
+model-backed preparation; runtime recall does not autonomously invoke a model.
+The current interfaces do not by themselves establish robust final answers,
+automatic error detection or a general cross-source identity solver.
+See [Recall's implemented boundaries](recall.md#fallible-interpretation-and-task-use)
+and invariant 12d before adding a gate or claiming whole-task closure.
+
 ## Four Axes
 
 - **Object axis**: what is remembered. Objects are faceted stable

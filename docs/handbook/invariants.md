@@ -106,6 +106,17 @@ These rules always win over lower-level docs and task-card convenience.
     and unreviewed status. It cannot use the ordinary world-claim result
     projection, and source authorization, currentness, validity, and erasure
     still apply. Temporal assertion governance is unchanged.
+12d. **Fallible interpretation and scoped use.** Source records, model
+    interpretations, exploration clues, conditional conclusions and admitted
+    assertions have different authority. Structural admission, literal source
+    binding and successful derivation do not certify semantic fidelity or
+    world truth. Missing or partial interpretation is not source absence.
+    An unresolved premise limits the conclusion that depends on it; it does
+    not by itself revoke independent authorized source access or support.
+    Repetition and derived reuse do not create independent confirmation.
+    Source permissions, currentness, erasure and proof-dependency checks
+    remain mandatory. These distinctions do not guarantee that a bounded
+    query observes every useful source or repairs every model error.
 13. Evidence and governance changes must be explicit, structured, and
     auditable, including path plasticity changes (reinforcement,
     weakening, redirection, retirement).

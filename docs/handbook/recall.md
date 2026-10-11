@@ -5,6 +5,41 @@ This handbook is the in-repository authority for Recall implementation
 produces a governed information index; delivery does not establish usage or
 durable truth.
 
+## Fallible interpretation and task use
+
+Recall operates with potentially incomplete or mistaken interpretations.
+Q/H production is not assumed faithful merely because a response is valid or
+admitted. Original question/context and authorized source records retain their
+own identities; a compiled interpretation does not replace either.
+
+The goal of the conditional field is useful task support: organizing related
+evidence, computing qualified consequences, exposing represented unresolved
+conditions and preserving dependencies for revision. A missing proof is not
+proof that its source is useless. Conditions remain strict for the conclusions
+that claim them; uncertainty does not waive source permissions, currentness,
+erasure, protocol integrity or dependency validation.
+
+| Boundary | Implemented meaning | Limit |
+| --- | --- | --- |
+| Source access | Open-library raw source membership does not require H/C proof; source-only delivery is supported | Shared work/page limits may still leave useful evidence unread or undelivered |
+| Interpretation | Q/H may carry located gaps; published interpretations remain unreviewed | A gap list or complete computation cannot certify that no meaning was silently omitted |
+| Conditional computation | Selected admitted Q/H/C premises determine legal bindings and dependency-bearing results | Formal validity does not establish premise fidelity, world truth or every possible interpretation |
+| Observation feedback | Attention can identify some represented unresolved conditions; access hints can guide fresh preparation | Attention is not a complete task frontier; a frozen continuation does not perform new discovery |
+| Revision | Owned invalidation and dependency reevaluation preserve their specific lifecycle contracts | Detecting a semantic error, choosing a replacement and autonomous whole-task recovery are separate concerns |
+
+An uncertain cross-source connection can be useful as an exploration hypothesis
+or an explicitly conditional premise where the selected contract supports it.
+Search usefulness does not establish equality. Current open correspondence is
+local to one Q/H pair; it is not a general cross-H join or a schema for every
+possible identity hypothesis. Unsupported joint semantics must stay explicit.
+
+The task loop should retain opportunities to reconsider original task/source
+context independently of current Q/H and Field feedback. This is a design and
+evaluation requirement, not a claim of automatic omission repair or guaranteed
+nondegradation under a fixed budget. The caller's use, further observation and
+cost must be observed to establish whole-chain utility. Raw delivery alone does
+not establish a Field gain; producer failure alone does not establish task failure.
+
 ## Current route and ownership
 
 ```text
@@ -101,8 +136,9 @@ conditional-field delivery remain tested at their current owners.
 The field retains a tagged target (memory entry or native source evidence),
 hypothesis, program state, binding and temporal coordinates. A source-record-only
 product uses root/revision/digest identity and must not mint a memory or capsule
-id. Query compilation preserves supported ordinary-language meaning
-and exposes interpretation holes. Missing knowledge is not a zero association
+id. Query compilation preserves admitted meaning and exposes declared
+interpretation holes; it does not certify the interpretation against all
+ordinary-language meaning in the original task. Missing knowledge is not a zero association
 or a complete empty universe. Same-service bindings remain distinct from two
 services that happen to share a provider. Canonical identity order is the
 default enumeration; associative order is an explicit query-view policy over
@@ -707,7 +743,9 @@ raw ledger readers accept this checked artifact, while parsed signal readers
 reject it. Workset preparation checks the actual source/request JSON size plus
 worst-case bounded response escaping against the existing 32 MiB shard reader
 limit before reservation. The writer also checks exact serialized bytes.
-Cache admission, audited publication, and semantic fidelity are distinct gates. This is an additive qualified result
+Cache admission and audited publication enforce their own contracts. Semantic
+fidelity is a separate quality claim, not a universal prerequisite for raw-source
+use or explicitly unreviewed conditional computation. This is an additive qualified result
 capability, not a redefinition of an existing guaranteed world result or MCP
 tool. A new public MCP surface would require the separate invariant 25 review.
 On read, bounded source verification checks exact assertion and mention spans,
