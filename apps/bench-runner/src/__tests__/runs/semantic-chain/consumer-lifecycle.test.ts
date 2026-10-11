@@ -1,6 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { readFileSync, rmSync, unlinkSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { executeSemanticChainConsumer } from "../../../runs/semantic-chain/consumer/execute.js";
@@ -9,9 +9,10 @@ import { consumerResultPath, openConsumerAttemptLedger } from "../../../runs/sem
 import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
-import { nativeConsumerFixture, consumerAuthority, CONSUMER_CONFIG, QUESTION, HIDDEN_SOURCE, HIDDEN_GOLD } from "./consumer.test-support.js";
+import { nativeConsumerFixture, revisedQueryConsumerFixture, consumerAuthority, CONSUMER_CONFIG, QUESTION, HIDDEN_SOURCE, HIDDEN_GOLD } from "./consumer.test-support.js";
 
 let fixture: Awaited<ReturnType<typeof nativeConsumerFixture>>;
+let revisedFixture: Awaited<ReturnType<typeof revisedQueryConsumerFixture>>;
 let handler: (res: ServerResponse) => void;
 let hits = 0, ledgerPath = "", reserved = "";
 const bodies: unknown[] = [];
@@ -30,6 +31,7 @@ const answer = { answer: "The delivered source mentions Project Aster; coverage 
 
 beforeAll(async () => {
   fixture = await nativeConsumerFixture();
+  revisedFixture = await revisedQueryConsumerFixture(fixture);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   vi.stubEnv("ALAYA_ALLOW_PRIVATE_PROVIDER_URL", "true");
@@ -265,6 +267,35 @@ it("refuses native-output overlap, concurrent writers and replacement of the bou
   renameSync(run.root, `${run.root}.old`); mkdirSync(run.root);
   await expect(executeSemanticChainConsumer({ authority: run.authority, mode: "execute", config: CONSUMER_CONFIG })).rejects.toThrow();
   expect(hits).toBe(before);
+});
+
+it("protects the admitted revised query's physical parent from consumer output and keeps its one attempt unchanged", () => {
+  const { parentRoot, parentKey, parentHistory, admitted, chainRoot, replayPath, queryKey } = revisedFixture;
+  expect(admitted.plan.queries[0]?.status).toBe("ready");
+  expect(admitted.plan.config.query_workset.revision_parent_cache_root).toBe(parentRoot);
+  expect(admitted.plan.config.query_cache_root).not.toBe(parentRoot);
+  expect(admitted.replay.rows[0]?.status).toBe("replayed");
+  const history = parentHistory(), before = hits;
+  expect(history).toMatchObject({ attempts: 1, successfulKeys: [parentKey], unresolvedAttempts: [] });
+  const parentBytes = () => readdirSync(parentRoot, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile()).map(entry => {
+      const path = join(entry.parentPath, entry.name); return [path, readFileSync(path)] as const;
+    });
+  const bytes = parentBytes(), directoryEntries = readdirSync(parentRoot, { recursive: true });
+  const input = { chainRoot, replayPath, queryKey, consumerConfig: { model: CONSUMER_CONFIG.model,
+    provider_url: CONSUMER_CONFIG.providerUrl, request_profile: CONSUMER_CONFIG.requestProfile,
+    max_output_tokens: 128, arms: ["native_delivery"] } };
+  for (const output of [parentRoot, join(parentRoot, "consumer-output")]) {
+    expect(() => prepareSemanticChainConsumer(input, output)).toThrow(/separate from native replay and producer inputs/u);
+    expect(existsSync(join(output, "preparation.json"))).toBe(false);
+  }
+  expect(readdirSync(parentRoot, { recursive: true })).toEqual(directoryEntries);
+  expect(parentBytes()).toEqual(bytes); expect(parentHistory()).toEqual(history);
+  const separate = join(fixture.root, "revised-query-consumer");
+  expect(prepareSemanticChainConsumer(input, separate).provider_calls).toBe(0);
+  expect(admitConsumerPreparation(separate).preparation.source.query_key).toBe(queryKey);
+  expect(readdirSync(separate)).toEqual(["preparation.json"]);
+  expect(parentBytes()).toEqual(bytes); expect(parentHistory()).toEqual(history); expect(hits).toBe(before);
 });
 
 /** Advance only the selected request deadline; socket I/O and unrelated timers stay real. */

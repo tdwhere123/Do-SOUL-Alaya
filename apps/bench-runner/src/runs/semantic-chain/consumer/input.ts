@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, isStepSemanticRequestProfile, stepSemanticRequestModel } from "@do-soul/alaya-protocol";
 import { admitSemanticChainReplay } from "../replay.js";
+import { semanticChainCacheInputPaths } from "../inputs.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../contract.js";
 import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-path.js";
 import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "../../provider-request/request-binding.js";
@@ -111,10 +112,9 @@ function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfi
 
 function assertConsumerOutputRoot(outputRoot: string, source: z.infer<typeof SourceSchema>,
   admitted: ReturnType<typeof admitSemanticChainReplay>): string {
-  const root = canonicalPath(outputRoot), config = admitted.plan.config;
-  const protectedPaths = [source.chain_root, ...admitted.admittedInputPaths, config.snapshot_path,
-    config.query_cache_root, config.correspondence_cache_root,
-    ...(config.correspondence_cache_owners ?? []).map(owner => owner.cache_root)];
+  const root = canonicalPath(outputRoot);
+  const protectedPaths = [source.chain_root, ...admitted.admittedInputPaths, admitted.plan.config.snapshot_path,
+    ...semanticChainCacheInputPaths(admitted.plan)];
   if (protectedPaths.some(path => canonicalPathsOverlap(root, canonicalPath(path)))) {
     throw new AlayaError("VALIDATION", "consumer output must be separate from native replay and producer inputs");
   }
