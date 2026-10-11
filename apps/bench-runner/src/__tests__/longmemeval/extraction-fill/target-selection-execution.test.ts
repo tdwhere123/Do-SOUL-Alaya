@@ -1,9 +1,9 @@
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
+  cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
   symlinkSync, writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { buildExtractionCacheAuditReceipt } from
   "../../../runs/extraction/cache-audit/receipt.js";
@@ -85,7 +85,8 @@ it.each(["foreign canonical", "uppercase digest", "malformed digest"] as const)(
     renameSync(canonical, foreign);
     expect(() => createExtractionExecutionAuthority(receipt, cacheRoot, selection))
       .toThrow(form === "foreign canonical" ? /physical filename differs from retained lineage/u : /noncanonical filename/u);
-    expect(existsSync(canonical)).toBe(false);
+    // opendir reports the stored case; existsSync follows case-insensitive volumes.
+    expect(readdirSync(cacheRoot).includes(basename(canonical))).toBe(false);
     expect(readFileSync(foreign)).toEqual(pendingBytes);
   }
 );
