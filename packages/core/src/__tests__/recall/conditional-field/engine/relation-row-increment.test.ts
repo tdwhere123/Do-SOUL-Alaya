@@ -626,6 +626,22 @@ describe("incremental relation-row join", () => {
     expect(hyperLeaves(retracted).some((ids) => ids.has("hop-2"))).toBe(false);
   });
 
+  it("does not emit a revised hyperedge sequence hop when the other premise is the delta", () => {
+    const inner: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and", premises: [hop("p", "x", "y")] };
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps: [inner] };
+    const program: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and", premises: [sequence, hop("q", "x", "z")] };
+    const state = seeded(program);
+    const stored = edge("p", "a", "old-target", "inner-p");
+    const sibling = edge("q", "a", "c", "outer-q");
+    const source = facts(["a", "old-target", "c", "new-target"]);
+    const base = { interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, liveStates: state.seen_identities };
+    expect(hyperSubjects(adjacencyEffectsForRows([stored, sibling], base))).toContain("old-target");
+    const revised = edge("p", "a", "new-target", "inner-p");
+    const next = adjacencyEffectsForRows([revised, sibling], { ...base, joinRows: [revised, sibling] });
+    expect(hyperSubjects(next)).toContain("new-target");
+    expect(hyperSubjects(next)).not.toContain("old-target");
+  });
+
   it("does not replay a withdrawn sequence hop on the next row delta", () => {
     const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
     const automaton = compileProgramAutomaton(program);
