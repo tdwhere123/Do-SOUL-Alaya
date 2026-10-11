@@ -89,7 +89,7 @@ it.each(["blocked", "unresolved"])("refuses %s provider DNS before reserving a Q
   const cacheRoot = root(), authority = pinSemanticProposalAuthority({
     preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
   const line = materializeSemanticProposalLines(workset, 8192)[0]!;
-  expect(line.key).toBe("6d451566eacd06f10e06c97ac3442c9f20a5ac3b31afb4612a9e6d804f047e13");
+  expect(line.key).toBe("77e3ea00dd2da1f3cd8b51cb7b8b1ddbbd5223a09a8aa15efe077362c0e85063");
   if (failure === "blocked") vi.mocked(lookup).mockImplementationOnce((async () => [
     { address: "198.18.0.105", family: 4 }
   ]) as unknown as typeof lookup);
@@ -123,7 +123,7 @@ it("executes an injected offline Q delegate without DNS and preserves its exact 
       config: { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: null }, extractor }))
       .resolves.toMatchObject({ abstained: 1, attempts: 1 });
     expect(lookup).not.toHaveBeenCalled(); expect(extractor.extract).toHaveBeenCalledTimes(1);
-    expect(line.key).toBe("6d451566eacd06f10e06c97ac3442c9f20a5ac3b31afb4612a9e6d804f047e13");
+    expect(line.key).toBe("77e3ea00dd2da1f3cd8b51cb7b8b1ddbbd5223a09a8aa15efe077362c0e85063");
   } finally { vi.mocked(lookup).mockImplementation(previous); }
 });
 

@@ -22,8 +22,8 @@ import {
   type ProviderRequestDispatchContext, type ProviderRequestPhysicalContext
 } from "../provider-request/execution.js";
 import {
-  type SemanticProposalLine, type SemanticProposalWorkset,
-  materializeSemanticProposalLines, semanticProposalRequestBinding
+  type SemanticProposalLine, type SemanticProposalWorkset, type RetainedSemanticQueryParent,
+  materializeSemanticProposalLines, semanticProposalRequestBinding, resolveSemanticProposalRevisionParent
 } from "./workset.js";
 import {
   type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority,
@@ -245,13 +245,16 @@ export function readSemanticProposalResults(workset: SemanticProposalWorkset, ca
 export function prepareRetainedSemanticProposalRevision(input: Readonly<{
   workset: SemanticProposalWorkset; parentCacheRoot: string; maxOutputTokens: number; itemIndex: number;
   reviewComments?: readonly string[]; attentionRequestSha256?: string;
+  retainedParent?: RetainedSemanticQueryParent;
 }>): SourceSemanticProposalRevision {
   const item = input.workset.items[input.itemIndex];
   if (item === undefined || typeof item !== "object" || item === null || Array.isArray(item) ||
-      Object.hasOwn(item, "revision")) {
+      Object.hasOwn(item, "revision") || Object.hasOwn(item, "retained_parent")) {
     throw new AlayaError("VALIDATION", "proposal revision requires one unrevised original item");
   }
-  const parent = materializeSemanticProposalLines({ ...input.workset, items: [item] }, input.maxOutputTokens)[0]!;
+  const parent = resolveSemanticProposalRevisionParent(input.workset,
+    { ...item, ...(input.retainedParent === undefined ? {} : { retained_parent: input.retainedParent }) },
+    input.maxOutputTokens);
   const raw = completeProposalParentRaw(input.workset, input.parentCacheRoot, input.maxOutputTokens, parent);
   return prepareSourceSemanticProposalRevision({ kind: input.workset.kind,
     parent_request: parent.request, previous_response: raw,
@@ -272,12 +275,7 @@ function assertRetainedProposalRevisionParents(workset: SemanticProposalWorkset,
   for (const [index, line] of lines.entries()) {
     const revision = line.request.revision;
     if (revision === undefined) continue;
-    const item = workset.items[index];
-    if (typeof item !== "object" || item === null || Array.isArray(item)) {
-      throw new AlayaError("CONFLICT", "proposal revision lost its original workset item");
-    }
-    const { revision: _revision, ...baseItem } = item as Record<string, unknown>;
-    const parent = materializeSemanticProposalLines({ ...workset, items: [baseItem] }, maxOutputTokens)[0]!;
+    const parent = resolveSemanticProposalRevisionParent(workset, workset.items[index], maxOutputTokens);
     if (JSON.stringify(parent.request) !== revision.parent_request_json ||
         completeProposalParentRaw(workset, workset.revision_parent_cache_root!, maxOutputTokens, parent) !== revision.previous_response) {
       throw new AlayaError("CONFLICT", "proposal revision differs from its complete retained parent");

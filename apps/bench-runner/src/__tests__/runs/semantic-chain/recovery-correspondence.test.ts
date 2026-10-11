@@ -60,7 +60,7 @@ import {
   sourceSemanticInterpretationIdentity, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
-import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
+import { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT, type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { authoredQuerySemantics } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-producer-fixture.js";
 import { syntheticGeminiBody } from "../semantic-proposal/gemini-response-evidence.test-support.js";
 import { buildRecoveryCorrespondenceWorkset, applyAffectedRecoveryCorrespondencePolicy } from
@@ -162,17 +162,17 @@ async function fill(workset: NonNullable<ReturnType<typeof buildRecoveryCorrespo
   const extract = vi.fn(async ({ userPrompt }: { userPrompt: string }) => {
     const request = JSON.parse(userPrompt) as SourceSemanticCorrespondenceRequest;
     const handles = request.demand?.demanded_handles ?? request.catalog.query_endpoints.map(row => row.handle);
-    const rawJson = JSON.stringify({ contract: request.demand === undefined
-      ? "source-semantic-correspondence-response-v5" : "source-semantic-correspondence-response-v6",
-      outcome: { status: "interpreted", gaps: [] }, semantic_correspondence: {
-        contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
-        assessments: handles.map(query => {
-          const endpoint = request.catalog.query_endpoints.find(row => row.handle === query)!;
-          return !unresolved && endpoint.kind === "predicate" ? { query, status: "supported", equivalents: [{
-            source: request.catalog.source_endpoints.find(row => row.kind === "frame")!.handle,
-            query_excerpt: endpoint.frame === "qSend" ? "sent" : "inspected", source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }], grounding: "Authored local premise." }] }
-            : { query, status: "unresolved", query_excerpt: "parcel", explanation: "No equivalent proposed." };
-        }) } });
+    const assessments = handles.map(query => {
+      const endpoint = request.catalog.query_endpoints.find(row => row.handle === query)!;
+      return !unresolved && endpoint.kind === "predicate" ? { query, status: "supported", equivalents: [{
+        source: request.catalog.source_endpoints.find(row => row.kind === "frame")!.handle,
+        query_excerpt: endpoint.frame === "qSend" ? "sent" : "inspected", source_semantic_support: [{ kind: "lexical", mentions: ["mSent"] }], grounding: "Authored local premise." }] }
+        : { query, status: "unresolved", query_excerpt: "parcel", explanation: "No equivalent proposed." };
+    });
+    const rawJson = JSON.stringify(request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT
+      ? { decision: "assess", assessments }
+      : { contract: "source-semantic-correspondence-response-v5", outcome: { status: "interpreted" }, semantic_correspondence: {
+        contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1", assessments } });
     const usage = { inputTokens: 3, outputTokens: 5, totalTokens: 8 };
     return { rawJson, usage, responseBody: syntheticGeminiBody(rawJson, "STOP", usage),
       responseMetadata: { finishReason: "STOP", completionWitness: "finish_reason" as const, completionContractVersion: 1 as const } };
@@ -217,7 +217,7 @@ it.each([false, true])("revises only the exact consumed retained C after request
     reasonResults: [reason(selected, consumedId)] });
   expect(changed.workset!.items).toHaveLength(workset.items.length);
   const revised = lines(changed.workset!);
-  expect(revised[0]!.request.revision?.parent_request_json).toBe(lines(workset)[parentIndex]!.userPrompt);
+  expect(revised[0]!.request.revision?.parent_request_json).toBe(JSON.stringify(lines(workset)[parentIndex]!.request));
   expect(revised[0]!.key).not.toBe(lines(workset)[parentIndex]!.key);
   if (!full) expect(revised[1]!.key).toBe(lines(workset)[0]!.key);
   const child = { ...changed.workset!, items: [changed.workset!.items[0]] };

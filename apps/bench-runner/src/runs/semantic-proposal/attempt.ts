@@ -6,7 +6,7 @@ import { inspectSemanticProposalShard, hasAdmittedProposalOutcome, semanticPropo
   type SemanticProposalLookup, type SemanticProposalShard } from "./artifact.js";
 import { assertSemanticProposalExecutionScope, proposalAttemptLineage, verifySemanticProposalAuthority, type SemanticProposalAuthority } from "./authority.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
-import { materializeSemanticProposalLines, type SemanticProposalKind, type SemanticProposalLine,
+import { materializeSemanticProposalLines, resolveSemanticProposalRevisionParent, type SemanticProposalKind, type SemanticProposalLine,
   type SemanticProposalWorkset } from "./workset.js";
 import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReservation, listProviderRawAttempts,
   providerRawAttemptInputPaths, providerRawSuccessEvidenceState,
@@ -42,10 +42,8 @@ export function semanticProposalCacheInputPaths(
     paths.push(dirname(shard), shard, ledgerPath(cacheRoot,
       semanticProposalLookup(workset, line, maxOutputTokens).attempt_lineage_digest!),
       ...providerRawAttemptInputPaths(cacheRoot, line.key));
-    if (line.request.revision !== undefined && workset.revision_parent_cache_root !== undefined &&
-        typeof item === "object" && item !== null && !Array.isArray(item)) {
-      const { revision: _revision, ...baseItem } = item as Record<string, unknown>;
-      const parent = materializeSemanticProposalLines({ ...workset, items: [baseItem] }, maxOutputTokens)[0]!;
+    if (line.request.revision !== undefined && workset.revision_parent_cache_root !== undefined) {
+      const parent = resolveSemanticProposalRevisionParent(workset, item, maxOutputTokens);
       const parentRoot = workset.revision_parent_cache_root;
       const parentShard = semanticProposalShardPath(parentRoot, parent.key);
       paths.push(parentRoot, dirname(parentShard), parentShard,

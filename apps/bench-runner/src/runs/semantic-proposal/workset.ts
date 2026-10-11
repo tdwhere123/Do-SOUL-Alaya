@@ -29,13 +29,27 @@ export function semanticProposalWorksetContract(requestProfile: string) {
     ? STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT : SEMANTIC_PROPOSAL_WORKSET_CONTRACT;
 }
 
+/** Bench-only lookup context. Native wire identity and retained evidence verify every field. */
+const RetainedSemanticQueryParentSchema = z.object({
+  key: z.string().regex(/^[0-9a-f]{64}$/u),
+  request_digest: z.string().regex(/^[0-9a-f]{64}$/u),
+  system_prompt: z.string().min(1),
+  model: z.string().min(1),
+  request_profile: z.string().min(1),
+  provider_url: z.string().min(1),
+  max_output_tokens: z.number().int().positive()
+}).strict();
+export type RetainedSemanticQueryParent = z.infer<typeof RetainedSemanticQueryParentSchema>;
+
 const QueryItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
   approved_fixed_context: ApprovedSemanticContextSchema.optional(),
   attribution_context: UtteranceAttributionSchema.optional(),
   generation_presentation: SourceSemanticQueryPresentationSchema.optional(),
-  revision: SourceSemanticProposalRevisionSchema.optional()
-}).strict();
+  revision: SourceSemanticProposalRevisionSchema.optional(),
+  retained_parent: RetainedSemanticQueryParentSchema.optional()
+}).strict().refine(item => item.retained_parent === undefined || item.revision !== undefined,
+  "retained query parent requires a revision");
 
 const CorrespondenceItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
@@ -123,6 +137,36 @@ export function materializeSemanticProposalLines(
     return bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request), request,
       sourceSemanticCorrespondenceResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
   });
+}
+
+/** Select the physical parent identically for revision preparation, validation and input containment. */
+export function resolveSemanticProposalRevisionParent(
+  workset: SemanticProposalWorkset, item: unknown, maxOutputTokens: number
+): SemanticProposalLine {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) {
+    throw new AlayaError("VALIDATION", "proposal revision requires its original workset item");
+  }
+  const { revision: _revision, retained_parent: retainedParent, ...baseItem } = item as Record<string, unknown>;
+  if (retainedParent !== undefined && (workset.kind !== "query" || !isChatSemanticRequestProfile(workset.request_profile))) {
+    // Native chat encodes the complete schema. Gemini can project it, so its wire
+    // identity alone cannot prove that the full retained response schema is unchanged.
+    throw new AlayaError("VALIDATION", "explicit retained proposal parents require a native chat query profile");
+  }
+  const current = materializeSemanticProposalLines({ ...workset, items: [baseItem] }, maxOutputTokens)[0]!;
+  if (retainedParent === undefined) return current;
+  const retained = RetainedSemanticQueryParentSchema.parse(retainedParent);
+  if (retained.model !== workset.model || retained.request_profile !== workset.request_profile ||
+      retained.provider_url !== workset.provider_url || retained.max_output_tokens !== maxOutputTokens) {
+    throw new AlayaError("CONFLICT", "retained query parent changed model, profile, route or output cap");
+  }
+  // Only historical system guidance can differ. Rebinding the current request and schema
+  // must reproduce the retained physical key and exact wire digest before cache inspection.
+  const parent = bindLine(workset, "query", retained.system_prompt, current.request,
+    current.responseJsonSchema, current.original_query, maxOutputTokens);
+  if (parent.key !== retained.key || parent.requestDigest !== retained.request_digest) {
+    throw new AlayaError("CONFLICT", "retained query parent differs from the unchanged request, schema or wire identity");
+  }
+  return parent;
 }
 
 function bindLine(

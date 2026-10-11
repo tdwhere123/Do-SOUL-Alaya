@@ -1719,6 +1719,19 @@ Existing ledger census and ceiling mismatches fail closed. A different attempt
 cannot settle an unresolved reservation; legacy lineages require explicit settled
 continuation before using the same cache. This repair does not grant new budget.
 
+Native chat query revision worksets may name a `retained_parent` on each revised
+item when only the original system guidance changed. The bench parent resolver requires
+the same canonical request, response schema, model, profile, route and output
+cap to reproduce that parent's retained key and exact wire digest. Native
+shard, raw-response and reservation readers then verify its complete settled
+physical response. The reference is lookup context, not evidence of success;
+it remains in the child workset and in the evaluator input exclusion inventory.
+The isolated child uses current guidance and its own request identity. Without
+an explicit reference, revision preparation retains same-generation lookup.
+Gemini's projected schema does not establish full-schema equality from wire
+identity and therefore does not support this explicit historical reference.
+Historical output is revision context, never relabeled current producer output.
+
 Proposal publication verifies retained bytes and their exact reserved ordinal/key
 before writing a shard. Offline preparation and chain readers also require raw,
 reservation, and successful-admission closure; parsing a shard alone never makes
