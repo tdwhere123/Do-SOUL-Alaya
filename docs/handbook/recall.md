@@ -1595,9 +1595,9 @@ memory nor establishes cross-task utility or benchmark acceptance.
 `ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
 episode and call reservations, physical MCP request/reply transcript, trusted
 handler context, source snapshot, first-exposure receipts and closed process.
-The current Protocol 16.0.0 reader accepts producer packages 14.1.0, 15.0.0 and
-16.0.0 with `conditional-field-source-only-v1` semantics. The semantic-library
-capacity and query-schema changes leave this public source-only contract
+The current Protocol 17.0.0 reader accepts producer packages 14.1.0, 15.0.0,
+16.0.0 and 17.0.0 with `conditional-field-source-only-v1` semantics. The
+semantic-library capacity and query-schema changes leave this public source-only contract
 unchanged. Producer provenance
 remains immutable and separate from the current
 verification and consumer execution revisions. Arbitrary ancestor commits and
