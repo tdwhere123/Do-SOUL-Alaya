@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
@@ -20,6 +20,33 @@ import type { nativeConsumerFixture } from "./consumer.test-support.js";
 export const writeJson = (path: string, value: unknown) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 export const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 type Mode = "complete" | "prefix" | "prefix_error" | "error";
+
+/** Match publicRecall finally files when await callTool rejects before observe updates its summary. */
+export function captureFailedCallFixture(capture: Awaited<ReturnType<typeof captureOrdinaryFixture>>, root: string,
+  options: { retainedContext: boolean; rpcError: boolean }) {
+  cpSync(capture.root, root, { recursive: true });
+  const execution = join(root, "execution"), ordinal = capture.observation.calls, stem = String(ordinal).padStart(2, "0");
+  rmSync(join(execution, `${stem}-public-envelope.json`));
+  rmSync(join(execution, `${stem}-first-exposure.json`), { force: true });
+  rmSync(join(execution, "observation.json"));
+  if (!options.retainedContext) writeJson(join(execution, `${stem}-trusted-contexts.json`), []);
+  const wirePath = join(execution, "public-mcp-messages.jsonl");
+  const wire = readFileSync(wirePath, "utf8").trimEnd().split("\n").map(line => JSON.parse(line));
+  const reply = wire.pop();
+  if (options.rpcError) wire.push({ ...reply, message: { jsonrpc: "2.0", id: reply.message.id,
+    error: { code: -32603, message: "fixture transport rejection" } } });
+  writeFileSync(wirePath, `${wire.map(row => JSON.stringify(row)).join("\n")}\n`);
+  const observation = ordinal === 1 ? { calls: 1, membership_calls: 1, payload_expansion_calls: 0,
+    contiguous_delivered_bytes: 0, source_complete: false, first_source_exposure: null,
+    pages: [], trusted_principal: null, query_identity: null, remaining_tail_bytes: capture.config.expected_source_bytes,
+    stop_reason: "operator_or_transport_error" } : { ...capture.observation, stop_reason: "operator_or_transport_error" };
+  writeJson(join(execution, "observation-final-state.json"), observation);
+  writeJson(join(execution, "process-result.json"), { status: "failed_or_interrupted", close: { code: 1, signal: null },
+    forced: false, child_error: null, process_in_flight: false, no_retry: true });
+  writeJson(join(execution, "shutdown.json"), { ...readJson(join(execution, "shutdown.json")),
+    failure: { name: "Error", message: "fixture public call rejection" } });
+  return { root, execution, observation };
+}
 
 function prepareCapture(base: Awaited<ReturnType<typeof nativeConsumerFixture>>, mode: Mode) {
   const root = join(base.root, `ordinary-${mode}`), execution = join(root, "execution");

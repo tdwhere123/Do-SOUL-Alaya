@@ -1566,6 +1566,9 @@ signalled processes remain unknown even when public bytes and shutdown records
 were retained. Both remain unclosed for consumer authority, while inspection
 preserves any successful public prefix. Failed startup can retain a shutdown
 record with no started daemon or public calls.
+An unreturned public call may retain zero or one trusted handler context while
+the outer observation principal remains unset. Inspection validates retained
+contexts without inventing a public envelope or populating that summary.
 Private snapshot reads verify emitted bytes and disclosures without supplying
 hidden source material to the model. The existing consumer provider binding,
 quote, separate output root, ledger and raw recovery own all subsequent effects.

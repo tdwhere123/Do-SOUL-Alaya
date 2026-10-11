@@ -18,7 +18,7 @@ import { executeSemanticChainConsumer } from "../../../runs/semantic-chain/consu
 import { consumerResultPath } from "../../../runs/semantic-chain/consumer/persist.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { nativeConsumerFixture, CONSUMER_CONFIG, QUESTION, HIDDEN_GOLD, HIDDEN_SOURCE } from "./consumer.test-support.js";
-import { captureOrdinaryFixture, readJson, writeJson } from "./ordinary-consumer.test-support.js";
+import { captureFailedCallFixture, captureOrdinaryFixture, readJson, writeJson } from "./ordinary-consumer.test-support.js";
 
 let base: Awaited<ReturnType<typeof nativeConsumerFixture>>;
 const captures = {} as Record<"complete" | "prefix" | "prefix_error" | "error", Awaited<ReturnType<typeof captureOrdinaryFixture>>>;
@@ -126,6 +126,52 @@ it("keeps an unfinished reserved episode unknown and refuses authority", () => {
   unlinkSync(join(root, "execution/process-result.json"));
   expect(inspectOrdinaryRecallObservation(root)).toMatchObject({ state: "unknown", closed: false });
   expect(() => prepare(root, "unknown-consumer")).toThrow(/closed/u);
+});
+
+it.each([
+  { name: "first call after handler entry", capture: "prefix", retainedContext: true, rpcError: false },
+  { name: "first call before handler entry", capture: "prefix", retainedContext: false, rpcError: false },
+  { name: "first RPC error after handler entry", capture: "prefix", retainedContext: true, rpcError: true },
+  { name: "first RPC error before handler entry", capture: "prefix", retainedContext: false, rpcError: true },
+  { name: "later call after handler entry", capture: "prefix_error", retainedContext: true, rpcError: false },
+  { name: "later RPC error before handler entry", capture: "prefix_error", retainedContext: false, rpcError: true }
+] as const)("preserves the producer summary when the $name never returns", ({ name, capture, ...options }) => {
+  const run = captureFailedCallFixture(captures[capture], join(base.root, `failed-call-${name}`), options), before = hits;
+  const inspected = inspectOrdinaryRecallObservation(run.root), last = inspected.evidence.calls.at(-1)!;
+  expect(inspected).toMatchObject({ state: "failed", closed: false, successfulExposures: capture === "prefix" ? 0 : 1 });
+  expect(last).toMatchObject({ envelope: null, response_state: options.rpcError ? "transport_error" : "unknown" });
+  expect(inspected.evidence.calls[0]!.envelope).toEqual(capture === "prefix" ? null
+    : readJson(join(captures.prefix_error.execution, "01-public-envelope.json")));
+  expect(() => prepare(run.root, `consumer-failed-call-${name}`)).toThrow(/closed/u);
+  expect(readJson(join(run.execution, "observation-final-state.json"))).toEqual(run.observation);
+  expect(hits).toBe(before);
+});
+
+it.each(["workspaceId", "runId"] as const)("checks retained %s even when the principal summary was never populated", key => {
+  const run = captureFailedCallFixture(captures.prefix, join(base.root, `failed-call-${key}`), { retainedContext: true, rpcError: false });
+  const path = join(run.execution, "01-trusted-contexts.json"), contexts = readJson(path); contexts[0][key] = "other"; writeJson(path, contexts);
+  expect(() => inspectOrdinaryRecallObservation(run.root)).toThrow(/workspace or run/u);
+});
+
+it("rejects a recorded principal that conflicts with returned public-call context", () => {
+  const run = captureFailedCallFixture(captures.prefix_error, join(base.root, "failed-call-conflicting-summary"), { retainedContext: true, rpcError: false });
+  writeJson(join(run.execution, "observation-final-state.json"), { ...run.observation,
+    trusted_principal: { ...OrdinaryRecallContextSchema.parse(run.observation.trusted_principal), sessionId: "other" } });
+  expect(() => inspectOrdinaryRecallObservation(run.root)).toThrow(/trusted principal/u);
+});
+
+it("rejects a failed call context that changes the previously returned principal", () => {
+  const run = captureFailedCallFixture(captures.prefix_error, join(base.root, "failed-call-conflicting-context"), { retainedContext: true, rpcError: false });
+  const path = join(run.execution, "02-trusted-contexts.json"), contexts = readJson(path);
+  contexts[0].sessionId = "other"; writeJson(path, contexts);
+  expect(() => inspectOrdinaryRecallObservation(run.root)).toThrow(/principal changed/u);
+});
+
+it("rejects multiple retained handler contexts for an unreturned call", () => {
+  const run = captureFailedCallFixture(captures.prefix, join(base.root, "failed-call-duplicate-context"), { retainedContext: true, rpcError: false });
+  const path = join(run.execution, "01-trusted-contexts.json"), contexts = readJson(path);
+  writeJson(path, [...contexts, ...contexts]);
+  expect(() => inspectOrdinaryRecallObservation(run.root)).toThrow(/unique trusted context/u);
 });
 
 it.each([

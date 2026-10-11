@@ -57,7 +57,9 @@ function verifySequence(config: OrdinaryRecallCaptureConfig, calls: readonly Cap
     if (complete) conflict("capture continued after complete public delivery");
     verifyCallRequest(config, call, previous, end, requests);
     if (call.request.phase === "membership") membership += 1; else payload += 1;
-    if (call.contexts.length !== 1 && call.responseState !== "unknown") conflict("public response lacks its unique trusted context");
+    if (call.contexts.length > 1 || call.envelope !== null && call.contexts.length !== 1) {
+      conflict("public response lacks its unique trusted context");
+    }
     for (const context of call.contexts) {
       if (context.workspaceId !== config.workspace_id || context.runId !== config.run_id) conflict("trusted workspace or run changed");
       if (previous?.contexts[0] !== undefined) same(context, previous.contexts[0], "trusted principal changed between calls");
@@ -96,7 +98,8 @@ function verifySequence(config: OrdinaryRecallCaptureConfig, calls: readonly Cap
     same(observation.query_identity, identity, "observation query identity differs from public output");
     same(observation.first_source_exposure, firstSource, "first source exposure differs from public output");
     same(observation.pages, pages, "observation page summary differs from public output");
-    same(observation.trusted_principal, calls.find(call => call.contexts[0] !== undefined)?.contexts[0] ?? null,
+    // A throwing public call can retain handler context before the outer observation assigns its principal.
+    same(observation.trusted_principal, calls.find(call => call.envelope !== null)?.contexts[0] ?? null,
       "observation trusted principal differs from handler context");
     if (observation.contiguous_delivered_bytes !== end || observation.source_complete !== complete ||
         observation.remaining_tail_bytes !== config.expected_source_bytes - end ||
