@@ -57,14 +57,14 @@ describe("fresh Batch source workset", () => {
 
   it("prepares legal requests beside complete sources over catalog capacity without inventing a key", () => {
     const source = (assistantCount: number, suffix: string): LongMemEvalExtractionTurn => {
-      const user = Array(32).fill("Café α.").join(" ");
+      const user = Array(64).fill("Café α.").join(" ");
       const assistant = Array(assistantCount).fill("再次。").join(" ");
       return { turnContent: `${user} ${assistant}`, turnMessages: [
         { message_id: `user-${suffix}`, role: "user", content: user },
         { message_id: `assistant-${suffix}`, role: "assistant", content: assistant }
       ] };
     };
-    const ready = source(32, "ready"), excess = source(33, "excess");
+    const ready = source(64, "ready"), excess = source(65, "excess");
     const preparedSources = { ...prepared([ready, excess]),
       config: { ...config, sourcePacking: "complete-source" as const,
         openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION } };
@@ -72,9 +72,9 @@ describe("fresh Batch source workset", () => {
     expect(plan.lines).toHaveLength(1);
     expect(plan.requests).toHaveLength(1);
     expect(plan.unsupportedSources).toMatchObject([{ messageIds: ["user-excess", "assistant-excess"],
-      datasetRevision: "synthetic-revision", sourceUnitCount: 65,
-      disposition: { status: "unsupported_source", assertion_count: 65,
-        reason: { dimension: "assertions", actual: 65, limit: 64 } } }]);
+      datasetRevision: "synthetic-revision", sourceUnitCount: 129,
+      disposition: { status: "unsupported_source", assertion_count: 129,
+        reason: { dimension: "assertions", actual: 129, limit: 128 } } }]);
     expect(plan.lines[0]!.key).toBe(computeExtractionTurnCacheKeys(config.model, config.requestProfile,
       plan.lines[0]!.systemPrompt, ready, "complete-source", undefined, EXTRACTION_OPEN_SEMANTICS_GENERATION)[0]);
     expect(computeExtractionTurnCacheKeys(config.model, config.requestProfile, plan.lines[0]!.systemPrompt,

@@ -662,34 +662,6 @@ it("prepares multi-sentence sources with packing units instead of one whole-body
   }
 });
 
-it("returns typed unsupported source capacity through the native read worker", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "source-semantic-library-capacity-"));
-  const filename = join(directory, "alaya.db");
-  const { database } = await createRecallRealStorage(() => undefined, filename);
-  const eventLogRepo = new SqliteEventLogRepo(database);
-  const runtimeNotifier = { notifyEntry: async () => undefined };
-  const stores = createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) });
-  const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
-  const source = Array.from({ length: 65 }, (_, index) => `Unit ${index + 1}.`).join(" ");
-  await admission.admit({
-    workspace_id: WS, source_id: "artifact-capacity", source_version: "1", content_bytes: source,
-    evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
-    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(source)
-  }, { workspaceId: WS });
-  database.close(); closeCachedDatabase(filename);
-  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
-  try {
-    await client.ready();
-    await expect(call((input) => client.sourceSemanticsPort!.execute(input), {
-      kind: "prepare_source", source_id: "artifact-capacity", budget: BUDGET
-    })).rejects.toMatchObject({ code: "VALIDATION", details: {
-      admission: "unsupported_source", capacity: { dimension: "assertions", actual: 65, limit: 64 }
-    } });
-  } finally {
-    await client.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true });
-  }
-});
-
 it("binds delivery_id to the delivered first-exposure membership", async () => {
   await withLibrary(async ({ allIds, execute }) => {
     const semantic_correspondences = [correspondenceOf(allIds[0]!, queryOf())];

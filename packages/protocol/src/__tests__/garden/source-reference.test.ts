@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
 import { expect, it } from "vitest";
+import { z } from "zod";
 import { buildSourceReferenceCatalog, sourceReferenceCapacityReason, SourceReferenceCapacityReasonSchema,
-  sourceReferenceResolver } from "../../evidence/source-reference.js";
+  SourceReferenceCatalogSchema, sourceReferenceResolver } from "../../evidence/source-reference.js";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+
+it("preserves existing catalog identities at the historical assertion boundary", () => {
+  const assertions = Array.from({ length: 64 }, (_, index) => ({ assertion_id: index + 1, text: `Item ${index} is recorded.` }));
+  expect(buildSourceReferenceCatalog(sha("historical"), assertions, sha).catalog_id).toMatchInlineSnapshot(`"sha256:94660619dd82a13aa6c5d6688219ec9dad2ebf4b31cb173b5a73afb2d316c8db"`);
+});
 
 it("gives repeated we distinct host IDs without counting occurrence in the response", () => {
   const text = "we promise; we believe";
@@ -57,13 +63,65 @@ it("retains a source-bound empty catalog without admitting any reference", () =>
 });
 
 it("classifies only valid sources that exceed the shared catalog capacity", () => {
-  const assertions = Array.from({ length: 65 }, (_, index) => ({ assertion_id: index + 1, text: `Café ${index}.` }));
-  expect(sourceReferenceCapacityReason(assertions.slice(0, 64))).toBeNull();
-  expect(sourceReferenceCapacityReason(assertions)).toEqual({ dimension: "assertions", actual: 65, limit: 64 });
-  expect(SourceReferenceCapacityReasonSchema.safeParse({ dimension: "assertions", actual: 65, limit: 63 }).success).toBe(false);
-  expect(() => sourceReferenceCapacityReason([...assertions.slice(0, 64), assertions[0]!])).toThrow(/duplicate/u);
-  expect(() => sourceReferenceCapacityReason([...assertions.slice(0, 64), { assertion_id: 65, text: "\ud800" }]))
+  const assertions = Array.from({ length: 129 }, (_, index) => ({ assertion_id: index + 1, text: `Café ${index}.` }));
+  expect(sourceReferenceCapacityReason(assertions.slice(0, 128))).toBeNull();
+  const catalog = buildSourceReferenceCatalog(sha("boundary"), assertions.slice(0, 128), sha);
+  expect(catalog.assertions).toHaveLength(128);
+  expect(sourceReferenceResolver(catalog, sha).resolve(catalog.catalog_id, 128,
+    { first: "a128s0", last: "a128s4" }).text).toBe("Café 127.");
+  expect(sourceReferenceCapacityReason(assertions)).toEqual({ dimension: "assertions", actual: 129, limit: 128 });
+  expect(() => buildSourceReferenceCatalog(sha("over"), assertions, sha)).toThrow(/129\/128/u);
+  expect(() => sourceReferenceCapacityReason([...assertions.slice(0, 128), assertions[0]!])).toThrow(/duplicate/u);
+  expect(() => sourceReferenceCapacityReason([...assertions.slice(0, 128), { assertion_id: 129, text: "\ud800" }]))
     .toThrow(/surrogate/u);
   expect(sourceReferenceCapacityReason([{ assertion_id: 1, text: " ".repeat(32769) }]))
     .toEqual({ dimension: "segments", actual: 32769, limit: 32768 });
+});
+
+it("reads historical and current assertion refusals while rejecting unknown or inconsistent limits", () => {
+  for (const reason of [{ dimension: "assertions", actual: 95, limit: 64 },
+    { dimension: "assertions", actual: 65, limit: 64 }, { dimension: "assertions", actual: 129, limit: 128 },
+    { dimension: "text_units", actual: 65537, limit: 65536 }, { dimension: "segments", actual: 32769, limit: 32768 }]) {
+    expect(SourceReferenceCapacityReasonSchema.parse(reason)).toEqual(reason);
+  }
+  for (const limit of [63, 96, 129, 256]) {
+    expect(SourceReferenceCapacityReasonSchema.safeParse({ dimension: "assertions", actual: 300, limit }).success).toBe(false);
+  }
+  for (const limit of [64, 128]) {
+    expect(SourceReferenceCapacityReasonSchema.safeParse({ dimension: "assertions", actual: limit, limit }).success).toBe(false);
+  }
+  expect(SourceReferenceCapacityReasonSchema.safeParse({ dimension: "text_units", actual: 65, limit: 64 }).success).toBe(false);
+});
+
+it("checks aggregate text and segment bounds before nested catalog parsing", () => {
+  const envelope = { contract: "ascii-run-unicode-scalar-v1", source_digest: sha("raw"), catalog_id: `sha256:${sha("raw")}` };
+  const unparsed = { get id(): string { throw new Error("nested catalog parser ran before capacity refusal"); }, text: "x".repeat(32769) };
+  const textOverflow = { ...envelope, assertions: [
+    { assertion_id: 1, segments: [unparsed] }, { assertion_id: 2, segments: [unparsed] }
+  ] };
+  expect(SourceReferenceCatalogSchema.safeParse(textOverflow).success).toBe(false);
+  const segment = { get id(): string { throw new Error("nested catalog parser ran before capacity refusal"); }, text: " " };
+  const segmentOverflow = { ...envelope, assertions: [
+    { assertion_id: 1, segments: Array(16384).fill(segment) }, { assertion_id: 2, segments: Array(16385).fill(segment) }
+  ] };
+  expect(SourceReferenceCatalogSchema.safeParse(segmentOverflow).success).toBe(false);
+  const assertionOverflow = { ...envelope, assertions: Array(129).fill({ get segments() { throw new Error("excess rows traversed"); } }) };
+  expect(SourceReferenceCatalogSchema.safeParse(assertionOverflow).success).toBe(false);
+  const textBoundary = buildSourceReferenceCatalog(sha("text-boundary"), [
+    { assertion_id: 1, text: "x".repeat(32768) }, { assertion_id: 2, text: "y".repeat(32768) }
+  ], sha);
+  expect(SourceReferenceCatalogSchema.parse(textBoundary)).toEqual(textBoundary);
+  const segmentBoundary = buildSourceReferenceCatalog(sha("segment-boundary"), [
+    { assertion_id: 1, text: " ".repeat(16384) }, { assertion_id: 2, text: " ".repeat(16384) }
+  ], sha);
+  expect(SourceReferenceCatalogSchema.parse(segmentBoundary)).toEqual(segmentBoundary);
+});
+
+it("keeps the catalog object and row bounds visible to JSON schema consumers", () => {
+  for (const io of ["input", "output"] as const) {
+    expect(z.toJSONSchema(SourceReferenceCatalogSchema, { io })).toMatchObject({ type: "object",
+      properties: { assertions: { type: "array", maxItems: 128, items: { properties: {
+        segments: { type: "array", maxItems: 32768, items: { properties: { text: { maxLength: 65536 } } } }
+      } } } } });
+  }
 });

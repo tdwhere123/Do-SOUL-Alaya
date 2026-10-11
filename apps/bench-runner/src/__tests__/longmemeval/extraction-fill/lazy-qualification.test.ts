@@ -498,7 +498,7 @@ it("keeps a budget-limited long raw source in place without qualifying or replac
 
 it("retains unsupported dispositions inside and outside the shortlist without interpretation attempts", async () => {
   const { config } = await preparedSourceFixture(Array.from({ length: 12 }, (_, index) =>
-    `I completed item ${index}. ` + Array.from({ length: 65 }, (_, part) => `Part ${part} occurred.`).join(" ")));
+    `I completed item ${index}. ` + Array.from({ length: 128 }, (_, part) => `Part ${part} occurred.`).join(" ")));
   const root = join(cacheRoot, "unsupported-stage");
   const window = await prepareLazyQualificationWindow(config, root);
   expect(window.window).toHaveLength(10);
@@ -817,7 +817,7 @@ it("delivers the fixed completed item through the normal native qualification li
       .map((row: { source_id: string }) => row.source_id).sort())
       .toEqual(["fixture:bounded-s0-r0", "fixture:bounded-s4-r0"]);
     expect(report.sources[0]).toMatchObject({ host_preparation: { status: "unsupported_source",
-      reason: { dimension: "assertions", actual: 5000, limit: 64 } }, source_interpretation: "absent" });
+      reason: { dimension: "assertions", actual: 5000, limit: 128 } }, source_interpretation: "absent" });
     expect(report.sources[4]).toMatchObject({ host_preparation: { status: "ready" },
       source_interpretation: "absent", publication: "not_attempted" });
     expect(final).toMatchObject({ selected_new_associations: 10, warm_outside_associations: 0,

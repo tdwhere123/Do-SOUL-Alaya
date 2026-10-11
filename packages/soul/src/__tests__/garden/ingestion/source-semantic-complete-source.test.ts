@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildSourceSemanticRequest, sourceSemanticRequestCatalog, parseSourceSemanticRequest } from "../../../garden/ingestion/official-api/source-semantic-request.js";
 import { collectSourceSemanticUnitPacks } from "../../../garden/ingestion/official-api/source-semantic-units.js";
 import { completeEmptySourceSemantics, receiveSourceSemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
-import { prepareSourceSemanticRevision } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
+import { prepareSourceSemanticRevision, sourceSemanticBaseRequestDigest } from "../../../garden/ingestion/official-api/source-semantic-revision.js";
 import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
 
 const producer = { source_id: "source", source_version: "1", producer_id: "authored-control", producer_version: "1" };
@@ -13,6 +13,26 @@ const emptyDraft = JSON.stringify({ contract: "source-semantic-proposal-v8", out
   content: { roots: [], entities: [], nodes: [], gaps: [] } });
 
 describe("bounded complete-source semantic requests", () => {
+  it("preserves existing complete-source request and catalog identities", () => {
+    expect([1, 64].map(count => {
+      const request = buildSourceSemanticRequest(inputFor(count));
+      return { count, base: sourceSemanticBaseRequestDigest(request), catalog: sourceSemanticRequestCatalog(request).catalog_id };
+    })).toMatchInlineSnapshot(`
+      [
+        {
+          "base": "f35cb527b4e242c76b3ebfce18954fbdfbde66c5fc03da8a5ad4acb6dbc8bec4",
+          "catalog": "sha256:cb189ff89b15e349b5bfc91591be41564f0bd85cc4b86cb8f42ffbc11aafc100",
+          "count": 1,
+        },
+        {
+          "base": "4964d79c2f77a853cf61f9a976d3cb00fc919bf67dfaf5ee7e342257bdb74df1",
+          "catalog": "sha256:7b1702c727f8c7b04a3f1447199ef34bd0ebd2648451ca875cee3ee15311cedd",
+          "count": 64,
+        },
+      ]
+    `);
+  });
+
   it("packs all source units once while preserving historical eight-unit and singleton packing", () => {
     const corpus = source(25);
     const complete = collectSourceSemanticUnitPacks(corpus, "complete-source");
@@ -24,18 +44,28 @@ describe("bounded complete-source semantic requests", () => {
     expect(collectSourceSemanticUnitPacks(source(65), "complete-source")).toHaveLength(1);
   });
 
-  it("accepts the catalog's 64-unit boundary and rejects excess without truncation", () => {
-    const input = inputFor(64), request = buildSourceSemanticRequest(input);
-    expect(request.source_request.source_assertions).toHaveLength(64);
-    expect(request.source_request.assertion_locations).toHaveLength(64);
-    expect(sourceSemanticRequestCatalog(request).assertions).toHaveLength(64);
-    expect(() => buildSourceSemanticRequest(inputFor(65))).toThrow();
+  it("accepts the catalog's 128-unit boundary and rejects excess without truncation", () => {
+    const input = { ...inputFor(128), sourceCorpus: buildOfficialApiSourceCorpus("", [
+      { role: "user", content: source(64) }, { role: "assistant", content: source(64) }
+    ]) };
+    const request = buildSourceSemanticRequest(input);
+    expect(request.source_request.source_assertions.map(row => row.assertion_id)).toEqual(input.assertionIds);
+    expect(request.source_request.source_assertions.map(row => row.source_role))
+      .toEqual([...Array<string>(64).fill("user"), ...Array<string>(64).fill("assistant")]);
+    expect(request.source_request.assertion_locations).toHaveLength(128);
+    const bytes = Buffer.from(input.sourceCorpus);
+    for (const [index, location] of request.source_request.assertion_locations.entries()) {
+      expect(bytes.subarray(...location.source_utf8_span).toString("utf8"))
+        .toBe(request.source_request.source_assertions[index]!.text);
+    }
+    expect(sourceSemanticRequestCatalog(request).assertions).toHaveLength(128);
+    expect(() => buildSourceSemanticRequest(inputFor(129))).toThrow(/129\/128/u);
     expect(() => buildSourceSemanticRequest({ ...inputFor(1), sourceCorpus: "x".repeat(65537) })).toThrow(/bound/u);
   });
 
   it("rejects omitted, reordered and duplicated unit selections under complete scope", () => {
-    const input = inputFor(9);
-    for (const assertionIds of [input.assertionIds.slice(1), [...input.assertionIds].reverse(), [...input.assertionIds, 9]]) {
+    const input = inputFor(128);
+    for (const assertionIds of [input.assertionIds.slice(1), [...input.assertionIds].reverse(), [...input.assertionIds, 128]]) {
       expect(() => buildSourceSemanticRequest({ ...input, assertionIds })).toThrow(/every source unit in original order/u);
     }
     const selected = buildSourceSemanticRequest({ ...input, assertionIds: [9], sourceScope: undefined });

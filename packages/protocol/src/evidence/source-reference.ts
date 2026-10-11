@@ -5,7 +5,7 @@ import { Sha256HexSchema, Sha256DigestSchema } from "../recall/conditional-field
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import type { FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 
-export const SOURCE_REFERENCE_MAX_ASSERTIONS = 64;
+export const SOURCE_REFERENCE_MAX_ASSERTIONS = 128;
 export const SOURCE_REFERENCE_MAX_SEGMENTS = 32768;
 export const SOURCE_REFERENCE_MAX_TEXT_UNITS = 65536;
 const SEGMENT_PATTERN = /[A-Za-z0-9_]+|[^]/gu;
@@ -15,7 +15,16 @@ const CatalogBody = z.object({ contract: z.literal("ascii-run-unicode-scalar-v1"
   assertions: z.array(z.object({ assertion_id: SourceAssertionIdSchema,
     segments: z.array(Segment).min(1).max(SOURCE_REFERENCE_MAX_SEGMENTS).readonly() }).strict().readonly()).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly()
 }).strict();
-export const SourceReferenceCatalogSchema = CatalogBody.extend({ catalog_id: Sha256DigestSchema }).strict().readonly();
+// Reject aggregate capacity before Zod copies nested arrays and before consumers join or hash them.
+export const SourceReferenceCatalogSchema = z.preprocess((value, context) => {
+  const reason = rawCatalogCapacityReason(value);
+  if (reason !== null) {
+    context.addIssue({ code: "custom", path: ["assertions"],
+      message: `source reference catalog exceeds its ${reason.dimension} bound (${reason.actual}/${reason.limit})` });
+    return z.NEVER;
+  }
+  return value;
+}, CatalogBody.extend({ catalog_id: Sha256DigestSchema }).strict().readonly());
 export const SourceReferenceSchema = z.object({ first: SegmentId, last: SegmentId }).strict().readonly();
 export type SourceReferenceCatalog = z.infer<typeof SourceReferenceCatalogSchema>;
 export type SourceReference = z.infer<typeof SourceReferenceSchema>;
@@ -27,11 +36,35 @@ export const SourceReferenceCapacityReasonSchema = z.object({
   dimension: z.enum(["assertions", "text_units", "segments"]),
   actual: z.number().int().nonnegative(), limit: z.number().int().positive()
 }).strict().superRefine((reason, context) => {
-  if (reason.limit !== CAPACITY_LIMITS[reason.dimension] || reason.actual <= reason.limit) {
+  // Historical refusals are immutable evidence; accepting their reason never reauthorizes execution.
+  const historicalAssertions = reason.dimension === "assertions" && reason.limit === 64;
+  if ((!historicalAssertions && reason.limit !== CAPACITY_LIMITS[reason.dimension]) || reason.actual <= reason.limit) {
     context.addIssue({ code: "custom", message: "source reference capacity reason is inconsistent" });
   }
 }).readonly();
 export type SourceReferenceCapacityReason = z.infer<typeof SourceReferenceCapacityReasonSchema>;
+
+function rawCatalogCapacityReason(value: unknown): SourceReferenceCapacityReason | null {
+  if (value === null || typeof value !== "object" || !("assertions" in value) || !Array.isArray(value.assertions)) return null;
+  const assertions = value.assertions;
+  if (assertions.length > SOURCE_REFERENCE_MAX_ASSERTIONS) {
+    return { dimension: "assertions", actual: assertions.length, limit: SOURCE_REFERENCE_MAX_ASSERTIONS };
+  }
+  let segments = 0;
+  let textUnits = 0;
+  for (const row of assertions) {
+    if (row === null || typeof row !== "object" || !Array.isArray(row.segments)) continue;
+    segments += row.segments.length;
+    if (segments > SOURCE_REFERENCE_MAX_SEGMENTS) return { dimension: "segments", actual: segments, limit: SOURCE_REFERENCE_MAX_SEGMENTS };
+    for (const segment of row.segments) {
+      if (segment === null || typeof segment !== "object" || typeof segment.text !== "string") continue;
+      textUnits += segment.text.length;
+      if (textUnits > SOURCE_REFERENCE_MAX_TEXT_UNITS) return { dimension: "text_units", actual: textUnits, limit: SOURCE_REFERENCE_MAX_TEXT_UNITS };
+    }
+  }
+  // Shape, identities and canonical segmentation remain the existing schemas/resolver's responsibility.
+  return null;
+}
 
 export class SourceReferenceCapacityExceeded extends AlayaError {
   public constructor(public readonly reason: SourceReferenceCapacityReason) {

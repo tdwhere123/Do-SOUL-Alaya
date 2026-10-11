@@ -115,3 +115,23 @@ it("charges index preparation before traversing or copying source accounting gra
   expect(() => accountSourceSemanticDraft(draft(), catalog, meter)).toThrow(/source accounting indexes budget exhausted/u);
   expect(meter.spentWork).toBe(1);
 });
+
+it("keeps omitted source units explicit at the catalog boundary and preserves resource exhaustion", () => {
+  const sourceCatalog = buildSourceReferenceCatalog(sha("bounded source"), Array.from({ length: 128 }, (_, i) => ({
+    assertion_id: i + 1, text: i === 0 ? "Alice runs." : `Item ${i} is recorded.`
+  })), sha);
+  const value = SourceSemanticDraftSchema.parse({ ...draft(), referents: [],
+    mentions: [draft().mentions[0]], frames: [{ ...draft().frames[0], assertion_ids: [1], slots: [] }] });
+  const result = normalize(value, sourceCatalog);
+  expect(result.status).toBe("normalized");
+  if (result.status !== "normalized") throw new Error("expected bounded normalization");
+  expect(result.interpretation.mentions).toHaveLength(128);
+  expect(result.interpretation.gaps).toHaveLength(127);
+  expect(result.interpretation.gaps).toContainEqual(expect.objectContaining({
+    kind: "uninterpreted_clause", affected_ids: ["hostAssertion128"]
+  }));
+  expect(normalizeSourceSemantics({ draft: value, catalog: sourceCatalog, sha256: sha,
+    source: result.interpretation.source, producer_id: "producer", producer_version: "1",
+    contract_version: "source-interpretation-v4", budget: { work_units: 1, memory_bytes: 20000000 } }))
+    .toEqual({ status: "resource_exhausted" });
+});

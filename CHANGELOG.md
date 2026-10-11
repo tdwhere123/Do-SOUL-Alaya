@@ -8,13 +8,24 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 14.1.0, engine gateway 1.2.0
+## Unreleased — protocol 15.0.0, engine gateway 1.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 14.1.0 can move
+heading (currently `## v0.3.11` below). Protocol 15.0.0 can move
 independently of the app semver.
+
+Protocol 15.0.0 raises source-reference catalog capacity from 64 to 128 source
+units and checks aggregate text and segment bounds before copying nested catalog
+input. The exported parser now rejects catalogs previously accepted by its shape
+but refused by reference resolution, so the combined change is major under
+invariant §25. The 65,536 UTF-16-unit and 32,768-segment bounds, graph limits,
+request budgets and resource-exhaustion outcomes stay unchanged. Historical
+assertion-capacity reasons with limit 64 remain readable; current refusals use
+128. Historical records grant no retry or publication authority. Existing valid
+catalog, request and interpretation identities are preserved. No release is
+performed here.
 
 Protocol 14.1.0 adds optional `prepare_query.access_hint` and the explicit
 `soul.interpretation` invalidation operation/event under invariant §25 (minor,

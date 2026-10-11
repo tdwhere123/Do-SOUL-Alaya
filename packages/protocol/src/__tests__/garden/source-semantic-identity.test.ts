@@ -59,7 +59,7 @@ it("hashes source interpretation from semantic body, structural version, normali
   expect(preimage).not.toContain("raw_response");
   expect(preimage).not.toContain("principal");
   expect(preimage).not.toContain("preparation_handle");
-  expect(sourceSemanticInterpretationIdentity(interpretation, sha)).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  expect(sourceSemanticInterpretationIdentity(interpretation, sha)).toMatchInlineSnapshot(`"sha256:419ebefd3e7d7a1d2e2bc53723363f1216f75bbf970d1a46656d88555f365c68"`);
   const shifted = SourceSemanticInterpretationSchema.parse({
     ...interpretation, producer_version: "p2"
   });

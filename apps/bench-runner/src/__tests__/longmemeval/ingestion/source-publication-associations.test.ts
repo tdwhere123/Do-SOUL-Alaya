@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, renameS
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, expect, it, vi } from "vitest";
-import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
+import { buildSourceSemanticRequest, parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
 import { registerExtractionFillHooks, setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
@@ -239,7 +239,7 @@ it("rejects duplicate or foreign retained request identity before writing associ
   expect(existsSync(join(cacheRoot, "duplicate-owner.json"))).toBe(false);
 }, 60000);
 
-it("retains a 65-unit source beside a ready 64-unit source through association and SQLite reopen", async () => {
+it("retains a 129-unit source beside a ready 128-unit source through association and SQLite reopen", async () => {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
@@ -248,15 +248,15 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
   vi.stubGlobal("fetch", fetchGuard);
   const longQuestion = (id: string, assistantCount: number) => ({ ...question(id, []),
     haystack_session_ids: ["shared-session"], haystack_dates: ["2023-09-10"],
-    haystack_sessions: [[{ role: "user" as const, content: Array(32).fill("I completed alpha.").join(" ") },
+    haystack_sessions: [[{ role: "user" as const, content: Array(64).fill("I completed alpha.").join(" ") },
       { role: "assistant" as const, content: [
         ...Array(assistantCount - 1).fill("Acknowledged."), "再次确认。"
       ].join(" ") }]] });
-  await writeDataset([longQuestion("ready", 32), longQuestion("excess", 33)]);
+  await writeDataset([longQuestion("ready", 64), longQuestion("excess", 65)]);
   const population = { name: "fixture", dataDir, pinnedMetaRoot,
     model: MODEL, requestProfile: REQUEST_PROFILE };
   const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot });
-  expect(census.records.map((source) => source.units.length)).toEqual([64, 65]);
+  expect(census.records.map((source) => source.units.length)).toEqual([128, 129]);
   const preflight = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot, dataDir, pinnedMetaRoot,
     sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
     batch: { operation: "prepare", limits: { maxJobs: 1, maxRequestsPerJob: 10, maxFileBytes: 1000000,
@@ -264,8 +264,8 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
       inputUsdPerMillion: 1, outputUsdPerMillion: 2, deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 } } });
   expect(preflight).toMatchObject({ contract: "extraction-batch-preflight-v2", provider_calls: 0,
     source_occurrences: 2, unsupported_source_occurrences: 1, total_requests: 1, selected_requests: 1 });
-  expect(preflight.unsupported_sources).toMatchObject([{ status: "unsupported_source", assertion_count: 65,
-    reason: { dimension: "assertions", actual: 65, limit: 64 }, provider_attempts: 0 }]);
+  expect(preflight.unsupported_sources).toMatchObject([{ status: "unsupported_source", assertion_count: 129,
+    reason: { dimension: "assertions", actual: 129, limit: 128 }, provider_attempts: 0 }]);
   expect(preflight.planned_requests).toHaveLength(1);
   const preflightPath = join(cacheRoot, "mixed-preflight.json");
   writeFileSync(preflightPath, JSON.stringify(preflight));
@@ -301,14 +301,50 @@ it("retains a 65-unit source beside a ready 64-unit source through association a
   expect(fetchGuard).not.toHaveBeenCalled();
 }, 60000);
 
+it("reads a historical capacity refusal without republishing a source now within capacity", async () => {
+  setExtractionCredentialFixture();
+  const fetchGuard = vi.fn<typeof fetch>(async () => { throw new Error("provider use forbidden"); });
+  vi.stubGlobal("fetch", fetchGuard);
+  const item = question("historical-capacity", ["alpha"]);
+  item.haystack_sessions[0]![0]!.content = Array.from({ length: 65 }, (_, i) => `Item ${i} is recorded.`).join(" ");
+  await writeDataset([item]);
+  const population = { name: "fixture", dataDir, pinnedMetaRoot, model: MODEL, requestProfile: REQUEST_PROFILE };
+  const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot });
+  const source = census.records[0]!;
+  expect(source.units).toHaveLength(65);
+  const request = buildSourceSemanticRequest({ sourceCorpus: source.content_bytes,
+    assertionIds: source.units.map(unit => unit.assertion_id), sourceScope: "complete-source",
+    source_id: source.source_id, source_version: source.source_version,
+    producer_id: "authored-history", producer_version: "1" });
+  const body = request.source_request;
+  const historical = { source_id: source.source_id, source_version: source.source_version,
+    content_digest: source.content_digest, corpus_digest: source.corpus_digest,
+    status: "unsupported_source", source_digest: request.source_digest, source_scope: "complete-source",
+    source_unit_contract: body.source_unit_contract, interpretation_contract: request.interpretation_contract,
+    k_version: body.k_version, normalizer_version: body.normalizer_version,
+    proposal_contract: body.proposal_contract, generation_schema_contract: body.generation_schema_contract,
+    assertion_count: 65, reason: { dimension: "assertions", actual: 65, limit: 64 }, provider_attempts: 0 };
+  const bindings = parseSourcePublicationAssociations({ contract: "source-publication-associations-v2",
+    publicationAssociations: [historical] });
+  expect(bindings).toEqual([historical]);
+  const snapshotPath = join(cacheRoot, "historical.sqlite");
+  await expect(publishSourceSemanticSnapshot({ snapshotPath,
+    dataDirRoot: join(cacheRoot, "historical-publication"), recordedAt: CLOCK, producerCommit: "a".repeat(40),
+    populations: [{ ...population, publicationAssociations: bindings }] }))
+    .rejects.toThrow(/retained unsupported source disposition differs/u);
+  expect(bindings).toEqual([historical]);
+  expect(existsSync(snapshotPath)).toBe(false);
+  expect(fetchGuard).not.toHaveBeenCalled();
+}, 60000);
+
 it("composes earlier and current owning roots for one original question with unsupported source through native publication", async () => {
   setExtractionCredentialFixture();
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", REQUEST_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
   const target = question("target", ["alpha", "beta"]);
-  const longSession = [{ role: "user" as const, content: Array(32).fill("I completed alpha.").join(" ") },
-    { role: "assistant" as const, content: [...Array(32).fill("Acknowledged."), "再次确认。"].join(" ") }];
+  const longSession = [{ role: "user" as const, content: Array(64).fill("I completed alpha.").join(" ") },
+    { role: "assistant" as const, content: [...Array(64).fill("Acknowledged."), "再次确认。"].join(" ") }];
   await writeDataset([question("alpha-owner", ["alpha"]), question("beta-owner", ["beta"]), {
     ...target, haystack_session_ids: [...target.haystack_session_ids, "long-session"],
     haystack_dates: [...target.haystack_dates, "2023-09-15"],
@@ -347,7 +383,7 @@ it("composes earlier and current owning roots for one original question with uns
     "longmemeval_s:target-s0-r0", "longmemeval_s:target-s1-r0"
   ]);
   expect(associations.find((row) => "status" in row)).toMatchObject({ source_id: "longmemeval_s:target-s2-r0",
-    status: "unsupported_source", assertion_count: 65, provider_attempts: 0 });
+    status: "unsupported_source", assertion_count: 129, provider_attempts: 0 });
   const earlier = await prepareSourcePublicationAssociations({ ...population, questionWindow: { offset: 0, limit: 1 } },
     owners, join(cacheRoot, "earlier-associations.json"));
   const census = await censusCompleteSourceRecords({ population: population.name, dataDir, pinnedMetaRoot,

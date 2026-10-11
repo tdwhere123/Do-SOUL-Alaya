@@ -466,7 +466,7 @@ it("retains unsupported source rows and an incomplete gold join as unknown witho
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
   const guardedFetch = vi.fn(async () => { throw new Error("provider must not be called"); });
   vi.stubGlobal("fetch", guardedFetch);
-  const unsupported = `I completed item 0. ${Array.from({ length: 65 }, (_, index) => `Part ${index} occurred.`).join(" ")}`;
+  const unsupported = `I completed item 0. ${Array.from({ length: 128 }, (_, index) => `Part ${index} occurred.`).join(" ")}`;
   const row = question("partial", 2, "missing-answer-session");
   row.haystack_sessions[0]![0]!.content = unsupported;
   await writeDataset([row]);

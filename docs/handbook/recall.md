@@ -697,8 +697,11 @@ and UTF-16 spans; Core's existing owner converts durable spans to UTF-8. An
 implicit predicate is still a semantic proposal, never a fabricated quotation.
 The previous in-progress packet text/occurrence wire is superseded; historical
 interpretation-v1 retains its strict original selector and ambiguity policy.
-Catalog preparation is capped at 64 assertions, 65,536 UTF-16 code units and
-32,768 segments, with a 1 MB new-request envelope limit. The Protocol segment
+Catalog preparation is capped at 128 assertions, 65,536 UTF-16 code units and
+32,768 segments, with a 1 MB new-request envelope limit. The catalog schema
+checks these aggregate bounds before copying nested input. This is an admission
+ceiling, not a promise that every legal catalog and graph fits a request budget.
+The Protocol segment
 owner estimates temporary catalog/index workspace before worker reconstruction;
 insufficient request memory fails without a proof. This is conservative logical
 budget accounting, not a measurement of JavaScript process RSS. Temporary
@@ -1178,14 +1181,17 @@ it does not certify the text as a fact or resolve its semantic context.
 Open extraction may explicitly select `complete-source` packing. Its request
 records that scope and binds all indexed units of the supplied source corpus
 in order, including both message roles. SOUL checks this membership against the
-original source on receipt. Existing catalog limits (64 units, bounded text and
+original source on receipt. Existing catalog limits (128 units, bounded text and
 segments) apply. For a valid complete source beyond a catalog limit, the host
 records a typed `unsupported_source` preparation disposition with the exact
 capacity reason and source/contract identity. The full raw source and every
 question occurrence remain in the census; that source has no extraction request,
 cache key, provider attempt, or interpretation. Invalid source identities,
 membership, metadata, or revisions remain errors rather than unsupported
-sources. Ready requests retain their existing identities. Batch dry preflight
+sources. Ready requests retain their existing identities.
+Historical assertion-capacity reasons with limit 64 remain readable alongside
+current limit 128 reasons. Reading them does not authorize re-execution or
+rewrite the original disposition. Batch dry preflight
 reports ready request counts separately from original source and unsupported
 occurrence counts. Its versioned source-publication associations carry the
 unsupported disposition to native publication, which rechecks it against the
