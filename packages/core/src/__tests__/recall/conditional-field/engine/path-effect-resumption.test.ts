@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { productSubjectId, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
+import { productSubjectId, type ObserverPage, type QueryInterpretation, type QueryProgram } from "@do-soul/alaya-protocol";
 import { createAdjacencyEffectCursor, adjacencyEffectsForRows } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import { composedFacetPathId, facetBelongsToOutput } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
@@ -27,7 +27,84 @@ function setup(program: QueryProgram) {
   return { interpretation, state };
 }
 
+function preparedFrontier() {
+  const { interpretation, state } = setup({ schema_version: 1, kind: "repeat", count: 2,
+    local_variables: ["x", "y"], body: relation("p") });
+  const page: ObserverPage = { schema_version: 1, query_id: interpretation.query_id, snapshot_id: SNAPSHOT_ID,
+    cursor: { schema_version: 1, cursor_id: "adjacency", region_id: "adjacency", query_id: interpretation.query_id,
+      snapshot_id: SNAPSHOT_ID, position: null, committed_through: null },
+    observations: [], outcome: { schema_version: 1, status: "exhausted" }, open_regions: [] };
+  const rows = [row("p", "b", "old-edge"), row("p", "d", "new-edge"),
+    { ...row("p", "c", "old-downstream"), sourceObjectId: "b" },
+    { ...row("p", "e", "new-downstream"), sourceObjectId: "d" }];
+  const options = { interpretation, asOf: AS_OF, liveStates: state.seen_identities, overlay: {},
+    sourceFacts: new Map(["a", "b", "c", "d", "e"].map(object_id => [object_id, { object_id, source_revision: "rev" }])) };
+  const oldEffect = adjacencyEffectsForRows(rows.slice(0, 1), options).find(effect => effect.transition !== undefined)!;
+  const observed = applyObserverPage(state, { page, effects: [oldEffect] });
+  const input = { rows, options: { ...options, liveStates: observed.seen_identities, facets: observed.facets } };
+  const effects = adjacencyEffectsForRows(rows, input.options);
+  expect(effects[0]!.facet!.path_id).toBe(oldEffect.facet!.path_id);
+  const prepared: FieldEngineState = { ...observed, pending_path_effects: {
+    offset: 0, retained_bytes: 0, page, input,
+    preparation: { effects, next_offset: effects.length, status: "complete", effect_index: 0, stage: "start",
+      facet_scan_index: 0, facet_resume_offset: observed.seen_identities.length,
+      pair_demands: observed.pair_demands, pair_bytes: 0, source_demands: observed.source_fact_demands,
+      source_pending: observed.source_fact_pending_count, source_bytes: 0, retained_bytes: 128 + 8 * effects.length }
+  } };
+  return { prepared, oldEffect };
+}
+
 describe("bounded path effect continuation", () => {
+  it.each(["unchanged", "earlier-batch"])("keeps the %s frontier while committing useful effects beside a duplicate facet", (frontier) => {
+    const { prepared, oldEffect } = preparedFrontier();
+    const pending = prepared.pending_path_effects!, preparation = pending.preparation!;
+    const offset = frontier === "earlier-batch" ? 0 : prepared.seen_identities.length;
+    const derivation = { ...oldEffect.derivation!, derivation_id: "updated-leaf" };
+    const updated = { ...preparation.effects[0]!, observation_id: "updated-edge",
+      transition: { ...oldEffect.transition!, instance_id: "updated-edge", strength_milligrades: 400 },
+      facet: { ...oldEffect.facet!, coordinates: [400] }, derivation, derivations: [derivation] };
+    const resumed = resumePathEffects({ ...prepared, remaining_exploration: 1,
+      pending_path_effects: { ...pending, preparation: { ...preparation,
+        facet_resume_offset: offset, effects: [updated, ...preparation.effects.slice(1)] } } });
+    expect(resumed.pending_path_effects?.preparation?.effect_index).toBe(1);
+    expect(resumed.pending_path_effects?.preparation?.facet_resume_offset).toBe(offset);
+    expect(resumed.pending_path_effects?.preparation?.facet_scan_index).toBe(0);
+    const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    expect(completed.transitions.some(edge => edge.instance_id === "updated-edge" && edge.strength_milligrades === 400)).toBe(true);
+    expect(completed.derivations.some(row => row.derivation_id === "updated-leaf")).toBe(true);
+    expect(completed.facets.find(facet => facet.path_id === oldEffect.facet!.path_id)).toEqual(oldEffect.facet);
+    expect(completed.binding.kind === "bound" && completed.binding.snapshot.values.some(value =>
+      value.accepting && productSubjectId(value.state) === "e" && value.milligrades === 1000)).toBe(true);
+  });
+
+  it("rewinds for a distinct facet and carries its coordinates through an already retained row", () => {
+    const { prepared, oldEffect } = preparedFrontier();
+    const pending = prepared.pending_path_effects!, preparation = pending.preparation!;
+    const distinct = { ...preparation.effects[0]!, facet: { ...oldEffect.facet!,
+      path_id: composedFacetPathId(oldEffect.transition!.to, "late-facet"), coordinates: [321] } };
+    const resumed = resumePathEffects({ ...prepared, remaining_exploration: 3,
+      pending_path_effects: { ...pending, preparation: { ...preparation,
+        effects: [distinct, ...preparation.effects.slice(1)] } } });
+    expect(resumed.pending_path_effects?.preparation?.facet_resume_offset).toBe(1);
+    const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    const target = completed.transitions.find(edge => productSubjectId(edge.to) === "c")!.to;
+    expect(completed.facets.some(facet => facetBelongsToOutput(facet.path_id, target)
+      && facet.coordinates.includes(321))).toBe(true);
+  });
+
+  it("keeps bounded facet scanning when the optional retention index is absent", () => {
+    const { prepared } = preparedFrontier();
+    const resumed = resumePathEffects({ ...prepared, retained_index: undefined, remaining_exploration: 1 });
+    expect(resumed.pending_path_effects?.preparation?.effect_index).toBe(0);
+    expect(resumed.pending_path_effects?.preparation?.stage).toBe("facet");
+    const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
+    expect(completed.pending_path_effects).toBeUndefined();
+    expect(completed.binding.kind === "bound" && completed.binding.snapshot.values.some(value =>
+      value.accepting && productSubjectId(value.state) === "e" && value.milligrades === 1000)).toBe(true);
+  });
+
   it("resumes facet lookup under the same small work allowance until its effect commits", () => {
     const program = relation("p");
     const interpretation = query(program);
