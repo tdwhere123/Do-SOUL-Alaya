@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
@@ -92,9 +93,9 @@ describe("complete-source census and publication", () => {
     }
     expect(readdirSync(root).some(name => name.startsWith("measurement-"))).toBe(false);
     const blockedMeasurement = await measureLongMemEvalSemanticRun(root, blockedReplay.path, evaluatorRoot);
-    expect(blockedMeasurement.path.startsWith(`${evaluatorRoot}/`)).toBe(true);
+    expect(blockedMeasurement.path.startsWith(`${canonicalPath(evaluatorRoot)}/`)).toBe(true);
     expect(blockedMeasurement.result.rows.filter(row => row.measurement_path !== null)
-      .every(row => row.measurement_path!.startsWith(`${evaluatorRoot}/`))).toBe(true);
+      .every(row => row.measurement_path!.startsWith(`${canonicalPath(evaluatorRoot)}/`))).toBe(true);
     expect(readdirSync(root).some(name => name.startsWith("measurement-"))).toBe(false);
     // An unavailable Q interpretation still permits the original-query raw source hit.
     expect(blockedMeasurement.result.primary).toMatchObject({ eligible: 1, hits: 1, unknown: 0,
@@ -236,7 +237,7 @@ describe("complete-source census and publication", () => {
     await rename(snapshotBackup, peerPublication.snapshot_path);
     const detailPath = measured.result.rows.find(row => row.question_id === "first")?.measurement_path;
     if (!detailPath) throw new Error("first source detail required");
-    expect(detailPath.startsWith(`${evaluatorRoot}/`)).toBe(true);
+    expect(detailPath.startsWith(`${canonicalPath(evaluatorRoot)}/`)).toBe(true);
     const goldPath = join(f.root, "gold.json");
     const gold = (readChainArtifact(detailPath) as { gold: unknown }).gold;
     writeFileSync(goldPath, JSON.stringify(gold));

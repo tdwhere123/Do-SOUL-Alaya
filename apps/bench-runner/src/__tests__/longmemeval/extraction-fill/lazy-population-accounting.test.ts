@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { registerExtractionFillHooks } from "./fixture.js";
@@ -180,7 +181,7 @@ it("keeps every held and unresolved member in separate fixed denominators withou
       expect(existsSync(join(root, "population-cutoff-initial.json"))).toBe(false);
     }
     const observed = await observeLongMemEvalLazyPopulation(root, cutoff, evaluatorRoot);
-    expect(observed.path.startsWith(`${evaluatorRoot}/`)).toBe(true);
+    expect(observed.path.startsWith(`${canonicalPath(evaluatorRoot)}/`)).toBe(true);
     expect(observed.result.population_identity).toBe(chainIdentity(frozen));
     expect(observed.result.primary).toEqual({ eligible: frozen.selection.selected_count,
       hits: 0, misses: 0, unknown: frozen.selection.selected_count, lower_bound: 0, upper_bound: 1 });
