@@ -1,7 +1,7 @@
 import {
   SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, SourceReferenceCapacityExceeded,
   buildSourceReferenceCatalog, canonicalJson,
-  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticWorkerResult
+  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticQuery, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
   fieldContractSha256, reasonSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
@@ -177,8 +177,7 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   const sourceTraceRemaining = nextSourceOffset < pool.sources.length;
   const open = pool.access.unvisited_sources || pool.access.unvisited_interpretations;
   const coverage: SourceSemanticCoverage = { ...IDLE, discovery: discovery.truncated || open ? "truncated" : "complete",
-    source_interpretation: "open", query_semantics: admission.kind === "admitted"
-      ? admission.query.gaps.length === 0 ? "complete" : "open" : "unexercised" };
+    source_interpretation: "open", query_semantics: querySemanticsCoverage(query) };
   const base = queryPreparationLease(queryLeaseContext, pool, discovery.offset, nextSourceOffset, discovery.truncated || open);
   const needsContinuation = (discovery.truncated || sourceTraceRemaining)
     && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset);
@@ -192,6 +191,10 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query", query_handle, continuation_handle, query_semantics_id: querySemanticsId,
     query_semantics_status: queryStatus,
     access, candidates: discovery.candidates, truncated: discovery.truncated || sourceTraceRemaining || open, outcome, coverage, work: workOf(meter) });
+}
+
+function querySemanticsCoverage(query: SourceSemanticQuery | undefined): SourceSemanticCoverage["query_semantics"] {
+  return query === undefined ? "unexercised" : query.gaps.length === 0 ? "complete" : "open";
 }
 
 function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, authorized: readonly string[] | null,
@@ -216,6 +219,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
   const checked = loadVerified(runtime, payload.workspace_id, sourceInterpretationId, authorized, meter);
   const source_disclosure = projectSourceDisclosure({ material_kind: "interpretation",
     evaluated_as_of: lease?.as_of ?? payload.as_of, source: checked.stored.record });
+  const discovery = lease === undefined ? "unexercised" as const : lease.truncated ? "truncated" as const : "complete" as const;
   if (querySemantics === undefined || correspondence === undefined) {
     const missing = querySemantics === undefined
       ? correspondence === undefined ? "query_semantics_and_correspondence" as const : "query_semantics" as const
@@ -239,8 +243,8 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
       interpretation: checked.bound.interpretation,
       ...(queryAdmission.kind === "admitted" ? { query: queryAdmission.query } : {}),
       source_disclosure,
-      coverage: { ...IDLE, discovery: lease === undefined ? "unexercised" : "complete",
-        source_interpretation: "open", query_semantics: queryAdmission.kind === "admitted" ? "complete" : "unexercised" },
+      coverage: { ...IDLE, discovery, source_interpretation: "open",
+        query_semantics: querySemanticsCoverage(queryAdmission.kind === "admitted" ? queryAdmission.query : undefined) },
       work: workOf(meter) });
   }
   meter.retain(querySemantics, "query semantics admission");
@@ -249,8 +253,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
     semantic_correspondence: correspondence, source_interpretation: checked.bound.interpretation,
     query_semantics: querySemantics, original_query: original
   });
-  const discovery = lease === undefined ? "unexercised" as const : lease.truncated ? "truncated" as const : "complete" as const;
-  const queryCoverage = querySemantics.gaps.length === 0 ? "complete" as const : "open" as const;
+  const queryCoverage = querySemanticsCoverage(querySemantics);
   if (admission.kind !== "admitted") {
     return SourceSemanticWorkerResultSchema.parse({
       kind: "reason",

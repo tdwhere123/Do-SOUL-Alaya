@@ -277,6 +277,31 @@ it("fits preparation-required reasons at native and public UTF-8 boundaries with
   });
 });
 
+it.each(["absent", "complete", "open"] as const)("preserves %s query coverage when correspondence is missing", async status => {
+  await withPublished(async ({ sourceInterpretationId, execute }) => {
+    const query: SourceSemanticQuery | undefined = status === "absent" ? undefined : {
+      ...queryOf(), gaps: status === "open" ? [{ kind: "comparison", affected_ids: [],
+        support: [{ kind: "query_text", excerpt: "tools" }] }] : []
+    };
+    const publicReason = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
+    const request = { accepts_unreviewed_conditional_results: true as const,
+      source_interpretation_id: sourceInterpretationId, original_query: ORIGINAL, budget: BUDGET,
+      output_byte_limit: 1_000_000, ...(query === undefined ? {} : { query_semantics: query }) };
+    const prepared = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, budget: BUDGET,
+      ...(query === undefined ? {} : { query_semantics: query }) });
+    const response = await publicReason({ operation: "reason", ...request },
+      { workspaceId: WS, runId: RUN, agentTarget: "test", sessionId: "test" });
+    const expected = status === "absent" ? "unexercised" : status;
+    expect(prepared.coverage.query_semantics).toBe(expected);
+    expect(response.coverage.query_semantics).toBe(expected);
+    expect(response.result?.outcome).toEqual({ status: "preparation_required",
+      missing: query === undefined ? "query_semantics_and_correspondence" : "semantic_correspondence" });
+    expect(response.result?.world_claim).toBe("unknown");
+    expect(response.coverage.conditional_computation).toBe("unexercised");
+    if (query !== undefined) expect(response.query?.gaps).toEqual(query.gaps);
+  });
+});
+
 it("fits multibyte preparation output and measures the public envelope rather than the native envelope", async () => {
   await withPublished(async ({ allIds, execute }) => {
     const request = { accepts_unreviewed_conditional_results: true as const, source_interpretation_id: allIds[1]!,
@@ -638,6 +663,12 @@ it("paginates current interpretations including a large source interpretation an
     expect(firstPage.continuation_handle).toBeDefined();
     expect(firstPage.coverage.discovery).toBe("truncated");
     expect(firstPage.work.logical_work).toBeLessThanOrEqual(BUDGET.work_units);
+    const awaitingCorrespondence = await call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
+      query_handle: firstPage.query_handle, source_interpretation_id: firstPage.candidates[0]!.interpretation_id,
+      budget: BUDGET, output_byte_limit: 1_000_000 });
+    if (awaitingCorrespondence.kind !== "reason") throw new Error("expected preparation reason");
+    expect(awaitingCorrespondence.result.outcome).toEqual({ status: "preparation_required", missing: "semantic_correspondence" });
+    expect(awaitingCorrespondence.coverage.discovery).toBe("truncated");
     const observationBudget = { ...BUDGET, work_units: 1_000_000 };
     let continuation: string | undefined;
     let count = 0;
