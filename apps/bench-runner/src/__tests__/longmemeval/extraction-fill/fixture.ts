@@ -121,7 +121,7 @@ export function buildGroundedInterpretationResponse(userPrompt: string): string 
   })) });
 }
 
-async function writeExtractionFillDataset(
+export async function writeExtractionFillDataset(
   dataDir: string,
   pinnedMetaRoot: string,
   questions: readonly LongMemEvalQuestion[],

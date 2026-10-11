@@ -6,12 +6,14 @@ import { OFFICIAL_API_SYSTEM_PROMPT, parseOfficialApiSourcePacketRequest, receiv
 import { prepareSourceRequestWorkset } from "../../../runs/extraction/fill/source-request-workset.js";
 import { computeExtractionTurnCacheKeys } from "../../../runs/compile-seed/cache/cache-key.js";
 import { writeCachedExtraction } from "../../../runs/compile-seed/cache/cache-shard.js";
+import { createCachingSignalExtractor } from "../../../runs/compile-seed/compile-seed-cache.js";
+import { fixtureAttemptAuthority, writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 import {
   inspectTurnContentKeySpace,
   type LongMemEvalExtractionTurn
 } from "../../../runs/extraction/turn-contents.js";
 import type { PreparedExtractionFill } from "../../../runs/extraction/fill/fill-preparation.js";
-import { buildExtractionFillQuestion, buildGroundedInterpretationResponse } from "./fixture.js";
+import { buildExtractionFillQuestion, groundedExtractor } from "./fixture.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 
 const config = {
@@ -108,15 +110,22 @@ describe("fresh Batch source workset", () => {
     expect(reordered.units).toEqual(baseline.units);
   });
 
-  it("submits only the selected missing shard while retaining the full occurrence bindings", () => {
+  it("submits only the selected missing shard while retaining the full occurrence bindings", async () => {
     const turns = [turn("I moved to Berlin in March.", "one"),
       turn("My favorite hobby is cycling.", "two")];
     const first = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(turns) });
     const cached = first.requests[0]!;
-    writeCachedExtraction(root, cached.line.key, {
-      model: config.model, request_profile: config.requestProfile,
-      cache_key: cached.line.key, extracted_at: "2026-09-12T00:00:00.000Z",
-      raw_json: buildGroundedInterpretationResponse(cached.line.userPrompt)
+    writeExtractionCacheTestManifest({ cacheRoot: root, model: config.model,
+      providerUrl: config.providerUrl, requestProfile: config.requestProfile,
+      systemPrompt: cached.line.systemPrompt });
+    const extractor = createCachingSignalExtractor({
+      cacheRoot: root, config, delegate: groundedExtractor(),
+      ...fixtureAttemptAuthority({ cacheRoot: root, model: config.model,
+        requestProfile: config.requestProfile })
+    });
+    await extractor.extract({
+      systemPrompt: cached.line.systemPrompt, userPrompt: cached.line.userPrompt,
+      sourceCorpus: cached.sourceCorpus
     });
     const next = prepareSourceRequestWorkset({ cacheRoot: root, prepared: prepared(turns) });
     expect(next.lines).toHaveLength(1);

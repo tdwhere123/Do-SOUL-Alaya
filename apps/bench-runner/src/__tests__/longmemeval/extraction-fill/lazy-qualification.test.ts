@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
-import { registerExtractionFillHooks } from "./fixture.js";
+import { registerExtractionFillHooks, writeExtractionFillDataset } from "./fixture.js";
 import { preflightExtractionBatch } from "../../../runs/extraction/fill/batch-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from "../../../runs/extraction/request-artifact.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
@@ -31,6 +31,8 @@ import { setExtractionCredentialFixture } from "./fixture.js";
 import { inspectExtractionAuthority } from "../../../runs/extraction/authority/inspection.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
+import { createFreshRetiredSourceRebuildTargetSelection,
+  writeExtractionTargetSelectionReceipt } from "../../../runs/extraction/authority/target-selection/receipt.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import type { GeminiBatchLimits, GeminiBatchPlan } from "../../../runs/extraction/fill/batch/contract.js";
 import { writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
@@ -49,12 +51,14 @@ function question(contents: readonly string[]) {
     haystack_sessions: contents.map(content => [{ role: "user" as const, content }]), answer_session_ids: [] };
 }
 
-async function preparedSourceFixture(contents: readonly string[], outputByteLimit = 100000) {
+async function preparedSourceFixture(contents: readonly string[], outputByteLimit = 100000,
+  sourceCacheRoot = cacheRoot) {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://fixture-provider.invalid");
   await writeDataset([question(contents)]);
-  const preflight = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot, dataDir, pinnedMetaRoot,
+  mkdirSync(sourceCacheRoot, { recursive: true });
+  const preflight = await preflightExtractionBatch({ variant: "longmemeval_s", cacheRoot: sourceCacheRoot, dataDir, pinnedMetaRoot,
     offset: 0, limit: 1, sourcePacking: "complete-source", openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION,
     batch: { operation: "prepare", limits: { maxJobs: 1, maxRequestsPerJob: 64,
       maxFileBytes: 1000000, maxInputTokensPerJob: 1000000, maxEnqueuedTokens: 1000000,
@@ -83,7 +87,7 @@ async function preparedSourceFixture(contents: readonly string[], outputByteLimi
     const plan = await prepareSemanticChain(currentChain, initialChainRoot);
     const bound = await admitNativeLazyConfig({ plan, initialChainRoot,
       population: { name: "fixture", dataDir, pinnedMetaRoot, questionWindow: { offset: 0, limit: 1 } },
-      sourcePreflightPath: preflightPath, sourceCacheRoot: cacheRoot,
+      sourcePreflightPath: preflightPath, sourceCacheRoot,
       recordedAt: "2026-09-23T00:00:00.000Z", producerCommit: "a".repeat(40) });
     return bound.config;
   };
@@ -623,14 +627,31 @@ async function fillAuthoredCompletionCorrespondence(
 
 async function fillFrozenShortSources(selectedKeys: readonly string[]) {
   setExtractionCredentialFixture();
-  const fillOptions = { variant: "longmemeval_s" as const, cacheRoot, dataDir, pinnedMetaRoot,
-    offset: 0, limit: 1, sourcePacking: "complete-source" as const,
+  // Keep native source versions fixed while the Batch sample uses its admitted first-100 inventory.
+  const sampleDataDir = join(cacheRoot, "sample-data"), sampleMetaRoot = join(cacheRoot, "sample-pinned");
+  mkdirSync(sampleDataDir);
+  mkdirSync(sampleMetaRoot);
+  const originalQuestions = JSON.parse(readFileSync(join(dataDir, "longmemeval_s.json"), "utf8"));
+  expect(originalQuestions).toHaveLength(1);
+  await writeExtractionFillDataset(sampleDataDir, sampleMetaRoot, [
+    ...originalQuestions,
+    ...Array.from({ length: 99 }, (_, index) => ({ ...question([]), question_id: `empty-${index}` }))
+  ], "longmemeval_s");
+  const sourceCacheRoot = join(cacheRoot, "sample-source-cache");
+  const fillOptions = { variant: "longmemeval_s" as const, cacheRoot: sourceCacheRoot,
+    dataDir: sampleDataDir, pinnedMetaRoot: sampleMetaRoot,
+    offset: 0, limit: 100, sourcePacking: "complete-source" as const,
     openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
   const inspection = await inspectExtractionAuthority({ ...fillOptions,
     revision: readCurrentExtractionAuthorityRevision(), action: "sample" });
   const sampleScope = createExtractionSampleScope(selectedKeys, inspection);
+  rmdirSync(sourceCacheRoot);
+  const selection = createFreshRetiredSourceRebuildTargetSelection({ cacheRoot: sourceCacheRoot,
+    operator: "fixture-operator", observation: inspection.observation });
+  const targetSelectionReceiptPath = join(cacheRoot, "composition-target-selection.json");
+  writeExtractionTargetSelectionReceipt(targetSelectionReceiptPath, selection);
   const receipt = createExtractionAuthorityReceipt({ action: "sample", sampleScope,
-    observation: inspection.observation, inspection,
+    observation: inspection.observation, inspection, targetSelectionDigest: selection.receipt_digest,
     outputTokenCap: { field: "maxOutputTokens", value: 4096 }, diskFloorBytes: 0,
     priceEstimate: { inputUsdPerMillion: 1, outputUsdPerMillion: 2,
       maximumInputTokensPerAttempt: 100000 } });
@@ -642,10 +663,10 @@ async function fillFrozenShortSources(selectedKeys: readonly string[]) {
     deadlineMs: 60000, requestTimeoutMs: 5000, maxPolls: 10 };
   const { fetchMock, createCount } = installStrictShortSourceBatchMock();
   const fill = (operation: "prepare" | "submit" | "resume" | "import") =>
-    runExtractionFill({ ...fillOptions, authorityReceiptPath,
+    runExtractionFill({ ...fillOptions, authorityReceiptPath, targetSelectionReceiptPath,
       batch: { operation, limits, window: "sample" }, log: () => undefined });
   await fill("prepare");
-  const plan = JSON.parse(readFileSync(join(cacheRoot, "gemini-batch-plan-sample.json"), "utf8")) as GeminiBatchPlan;
+  const plan = JSON.parse(readFileSync(join(sourceCacheRoot, "gemini-batch-plan-sample.json"), "utf8")) as GeminiBatchPlan;
   expect(plan.lines).toHaveLength(10);
   expect([...plan.lines.map(line => line.key)].sort()).toEqual([...selectedKeys].sort());
   await fill("submit");
@@ -659,7 +680,7 @@ async function fillFrozenShortSources(selectedKeys: readonly string[]) {
 it("records whether three cold authored composition windows share the same eligible first ten", async () => {
   const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
     ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
-  const fixture = await preparedSourceFixture(contents);
+  const fixture = await preparedSourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache"));
   await fillAuthoredCompletionQuery(fixture.config.chain.query_workset, fixture.config.chain.query_cache_root);
   const normalChain = fixture.config.chain;
   const smallChain = { ...normalChain, output_byte_limit: 21600, budget: { ...normalChain.budget,
@@ -756,16 +777,16 @@ it("delivers the fixed completed item through the normal native qualification li
     ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
   const expectedWindow = [5, 11, 3, 8, 1, 10, 9, 2, 6, 7];
   const expectedSourceKeys = [
-    ["fixture:bounded-s5-r0", "771d102e2bfb32dccecbb331c23da0e468d9580be122bf68a065e2a49c303a86"],
-    ["fixture:bounded-s11-r0", "5ffcce96854dfb2e14e9c22f05e9d9e3d75f20cbd94e89d840874de7d01a51c0"],
-    ["fixture:bounded-s3-r0", "3f6ef4668db9f0233c27c4236ad20cf6b88f97b80f594a67297993e5f12077ea"],
-    ["fixture:bounded-s8-r0", "d78068e0a374a4b5b0a4cf4fc6996288c1679e05d0842871385df3d70f8f2628"],
-    ["fixture:bounded-s1-r0", "54543ab54db7bbd40c80f97f50e8c20ce09a03271d7be0bde4db6b65e37c1db0"],
-    ["fixture:bounded-s10-r0", "b090c44090fbff25b273e10521b62fd73f40b741990062bea4c2901c346e8ef8"],
-    ["fixture:bounded-s9-r0", "2d63f1db084db67b8f97e5ea0365c8ba160f1561cd3de07b7b48b3ad5eb651ed"],
-    ["fixture:bounded-s2-r0", "132d3220865c619b3b742dc4a48573f9ebd4d4b72cad16c8daf84b7bd890e720"],
-    ["fixture:bounded-s6-r0", "7062fa196d56bec9be9c745532acbdea558d948d216b552145ca594b4440457a"],
-    ["fixture:bounded-s7-r0", "064174b1d122806392e55cf5939b5862a72a5f8a19996a45af4d9df082d5045c"]
+    ["fixture:bounded-s5-r0", "e0e7e5b00e6ab7f2451b8d2698434812a1c49ce18471b79dfaa9bf2b5daf6b7e"],
+    ["fixture:bounded-s11-r0", "1e2a56109c5a0ba84185dc3c80c7c7d81ba86dc0b835032b203bad09b4af154d"],
+    ["fixture:bounded-s3-r0", "6fb835f9d2f3412b389c0d3b43d2b608c3dc574c8b6b946e5042ebc00fcf5949"],
+    ["fixture:bounded-s8-r0", "211b3768caa73df9d71cad67bb37167ddc089e4513924f511b39b115ca77b63b"],
+    ["fixture:bounded-s1-r0", "8edc47689992851f7112a6e7985b93bd3ae8a7a38fea9a13feadeb7a65369aa0"],
+    ["fixture:bounded-s10-r0", "519b8ac588569b6aad9e243d693511f99119eec2491c0009622570e55e1c860f"],
+    ["fixture:bounded-s9-r0", "bdf9e862d92b79bbe0863f306324cf1ac74ae099cc539d420ce23f58cc3f2a86"],
+    ["fixture:bounded-s2-r0", "97003876395602856c9abafc0e097bec920dc4f9eff1a3e0f668ca105da47d52"],
+    ["fixture:bounded-s6-r0", "4b8fff15db51563466b734248427dcd59b503f1540c3e7ec9e607ace9d5582fa"],
+    ["fixture:bounded-s7-r0", "ba2fca4bbe6e9cbf9831c3000ba288d5aa70940cc687e8f2650e8b3efae43722"]
   ] as const;
   const expectedRecords = ["06a672c9f0466751e19d3c33f56bbee649e49b7b7da3e306d58e5f7a98a43da5",
     "3c1de53a4a3dc4c90a2464191796b78ffe21a1f614f6042d8cc535d3cbbeeca1",
@@ -781,7 +802,7 @@ it("delivers the fixed completed item through the normal native qualification li
   const returnRoot = process.env.NATIVE_DELIVERY_CONTROL_RETURN_ROOT;
   if (returnRoot !== undefined) mkdirSync(returnRoot, { recursive: true });
   try {
-    const fixture = await preparedSourceFixture(contents);
+    const fixture = await preparedSourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache"));
     await fillAuthoredCompletionQuery(fixture.config.chain.query_workset,
       fixture.config.chain.query_cache_root);
     const config = await fixture.bind(fixture.config.chain, "normal-lifecycle");
@@ -789,7 +810,7 @@ it("delivers the fixed completed item through the normal native qualification li
     const window = await prepareLazyQualificationWindow(config, root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "window.json"), JSON.stringify(window, null, 2));
     expect(window.config.chain.query_workset.items).toEqual([{ original_query: "What was completed?" }]);
-    expect(window.query_key).toBe("f423a5b53723bfc1739dba6b3ebaf034e4b8afde07bffae8eeaf97655b7a5f8b");
+    expect(window.query_key).toBe("55fa729155e44490fb4a721f3393957ad8875bf5e2bdd99d33d0190e9435d3b5");
     expect(window.window.map(row => row.source_id)).toEqual(expectedWindow.map(index => `fixture:bounded-s${index}-r0`));
     expect(window.window.map(row => row.record_id)).toEqual(expectedRecords);
     expect(window.window.map(row => row.source_version)).toEqual(Array(10)
@@ -831,7 +852,7 @@ it("delivers the fixed completed item through the normal native qualification li
       JSON.stringify({ query, lines: lines.map(line => ({ key: line.key, request: line.request })) }, null, 2));
     expect(query.status).toBe("ready");
     if (query.status !== "ready") throw new Error("fixed source requires a ready native opportunity");
-    expect(query.descriptors.map(row => row.source_id)).toEqual(["fixture:bounded-s8-r0"]);
+    expect(query.descriptors.map(row => row.source_id)).toEqual(["fixture:bounded-s2-r0"]);
     expect(query.correspondence_opportunities).toEqual([{
       source_interpretation_id: query.descriptors[0]!.interpretation_id, decision: "selected" }]);
     expect(query).toMatchObject({ discovery_open: true, discovery_truncated: true,
@@ -839,7 +860,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(lines).toHaveLength(1);
     const request = lines[0]!.request as SourceSemanticCorrespondenceRequest;
     expect(request.source_interpretation_descriptors[0]?.interpretation.source.source_id)
-      .toBe("fixture:bounded-s8-r0");
+      .toBe("fixture:bounded-s2-r0");
     const correspondence = await fillAuthoredCompletionCorrespondence(workset, 0,
       fixture.config.chain.correspondence_cache_root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence.json"),
@@ -853,10 +874,10 @@ it("delivers the fixed completed item through the normal native qualification li
     const native = SoulInterpretationResponseSchema.parse(row.response);
     if (native.operation !== "recall" || native.index === undefined) throw new Error("native indexed recall required");
     const roots = native.index.entries.map(entry => entry.target.kind === "source_evidence" ? entry.target.root_id : null);
-    expect(roots).toEqual([8, 5, 11, 3, 1].map(index =>
+    expect(roots).toEqual([2, 5, 11, 3, 8].map(index =>
       report.sources.find((source: { source_id: string }) => source.source_id === `fixture:bounded-s${index}-r0`)?.record_id));
     expect(roots).not.toContain(report.sources[4]?.record_id);
-    const target = report.sources[8]!.record_id;
+    const target = report.sources[2]!.record_id;
     const slot = native.slot_qualifiers?.[0];
     const proof = native.proofs?.find(value => value.source_interpretation_id === query.descriptors[0]!.interpretation_id);
     expect(slot).toMatchObject({ index: 0, evidence_kind: "semantic_proof", selection_basis: "direct_answer",
@@ -866,7 +887,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(proof?.binding_results?.some(binding => binding.query_complete && Object.keys(binding.returned).length > 0))
       .toBe(true);
     const answer = proof?.binding_results?.find(binding => binding.kind === "answer" && binding.query_complete);
-    const themeMention = proof?.interpretation.mentions.find(mention => mention.text === "item 8");
+    const themeMention = proof?.interpretation.mentions.find(mention => mention.text === "item 2");
     const themeReferent = proof?.interpretation.referents.find(referent =>
       themeMention !== undefined && referent.mentions.includes(themeMention.id));
     expect(answer).toBeDefined();
@@ -881,7 +902,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(proof?.consumed_leaves.some(leaf => leaf.leaf_kind.startsWith("semantic_correspondence_"))).toBe(true);
     const result = native.results?.[0];
     expect(result).toMatchObject({ object_kind: "semantic_proof", target: { root_id: target } });
-    expect(result?.content_preview).toBe("User: I completed item 8.");
+    expect(result?.content_preview).toBe("User: I completed item 2.");
     expect(result?.target).toEqual(native.index.entries[0]!.target);
     expect(result?.output_binding).toBe(answer?.binding_id);
     expect(native.index.entries[0]?.interpretation_node?.packet_id).toBe(proof?.source_interpretation_id);
