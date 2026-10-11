@@ -696,9 +696,18 @@ it.each(["transport", "admission", "completion"] as const)("keeps settled %s fai
     .sort((left, right) => left.attempt_ordinal - right.attempt_ordinal)[0]!;
   const ledgerPath = join(cacheRoot, readdirSync(cacheRoot).find(name => name.startsWith("extraction-attempt-ledger"))!);
   const ledgerBefore = readFileSync(ledgerPath, "utf8");
-  expect(JSON.parse(ledgerBefore).transport_failures).toContainEqual(expect.objectContaining({
-    attempt_ordinal: raw.attempt_ordinal, kind: failure === "transport" ? "http_error" : "response_schema_error"
-  }));
+  if (failure === "completion") {
+    expect(raw).toMatchObject({ finish_reason: null, completion_witness: null });
+    expect(raw.transport_failure).toBeUndefined();
+    expect(JSON.parse(ledgerBefore)).toMatchObject({ transport_failures: [], unresolved_attempts: [],
+      successful_shards: [], settled_attempts: expect.arrayContaining([expect.objectContaining({
+        cache_key: raw.cache_key, attempt_ordinal: raw.attempt_ordinal
+      })]) });
+  } else {
+    expect(JSON.parse(ledgerBefore).transport_failures).toContainEqual(expect.objectContaining({
+      attempt_ordinal: raw.attempt_ordinal, kind: failure === "transport" ? "http_error" : "response_schema_error"
+    }));
+  }
   const prompt = JSON.parse(String(fixture.fetchMock.mock.calls[0]![1]!.body)).contents[0].parts[0].text as string;
   const rawPath = providerRawAttemptPath(cacheRoot, raw.cache_key, raw.attempt_ordinal);
   unlinkSync(rawPath);
@@ -812,7 +821,8 @@ it.each(["network", "http", "authentication", "historical authentication"])("ret
     });
     if (kind === "historical authentication") {
       // Model the historical contradictory flag in this synthetic fixture before reopening it.
-      writeFileSync(providerRawAttemptPath(cacheRoot, key, 1), JSON.stringify({ ...raws[0], failure_retryable: true }));
+      writeFileSync(providerRawAttemptPath(cacheRoot, key, raws[0]!.attempt_ordinal),
+        JSON.stringify({ ...raws[0], failure_retryable: true }));
     }
   }
   const rawBytes = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key).map(raw => {
