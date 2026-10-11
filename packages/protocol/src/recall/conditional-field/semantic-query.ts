@@ -71,10 +71,21 @@ export const SourceSemanticContextObligationSchema = z.object({
   incidence: SourceSemanticQueryIncidenceSchema.optional()
 }).strict().readonly();
 
+const QueryPurposeSchema = z.enum(["support", "counterexample"]);
+const SupportPurposeSchema = QueryPurposeSchema.exclude(["counterexample"]).optional();
+const UniversalPurposeSchema = QueryPurposeSchema.optional();
+
+/** The purpose/evaluation implication is shared by canonical admission and producer body modes. */
+export function sourceSemanticQueryPurposeSchema(
+  evaluationKind?: z.infer<typeof SourceSemanticQueryEvaluationSchema>["kind"]
+): typeof UniversalPurposeSchema | typeof SupportPurposeSchema {
+  return evaluationKind === "forall" ? UniversalPurposeSchema : SupportPurposeSchema;
+}
+
 export const SourceSemanticQueryAlternativeSchema = z.object({
   frames: z.array(SourceSemanticQueryFrameSchema).max(256).readonly(),
   context_obligations: z.array(SourceSemanticContextObligationSchema).max(256).readonly(),
-  purpose: z.enum(["support", "counterexample"]).optional(),
+  purpose: UniversalPurposeSchema,
   answer_frames: z.array(Handle).max(256).readonly().optional(),
   evidence_inputs: z.array(z.object({ frames: z.array(Handle).min(1).max(256).readonly() })
     .strict().readonly()).min(1).max(16).readonly().optional()
@@ -133,6 +144,7 @@ export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRe
   if (domains.size !== (query.domains?.length ?? 0)) problem("duplicate query domains");
   if (query.evaluation !== undefined && !domains.has(query.evaluation.domain)) problem("evaluation requires a declared query domain");
   const evaluation = query.evaluation;
+  const purpose = sourceSemanticQueryPurposeSchema(evaluation?.kind);
   if (query.alternatives.some(row => row.evidence_inputs !== undefined) && query.requested_operation === undefined) {
     problem("evidence inputs require the original requested operation");
   }
@@ -159,8 +171,8 @@ export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRe
       problem("comparison uses typed operand scope; additional frame constraints are not supported");
     }
     if (alternative.frames.length === 0 && evaluation?.kind !== "comparison") problem("query body requires a frame");
+    if (!purpose.safeParse(alternative.purpose).success) problem("counterexample alternative requires a universal query");
     if (alternative.purpose === "counterexample") {
-      if (evaluation?.kind !== "forall") problem("counterexample alternative requires a universal query");
       if (!isStructuralCounterexample(query.alternatives, alternative)) problem("counterexample must explicitly negate the same single-frame universal body");
     }
     refineAlternative(alternative, variables, problem, alternative.evidence_inputs === undefined);

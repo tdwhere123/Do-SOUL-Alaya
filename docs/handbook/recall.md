@@ -926,6 +926,14 @@ a major under invariant §25 even though native admission already rejected the
 illegal combinations. Upgrading clients must adopt the structural alternatives;
 existing valid canonical identities and wire contract IDs remain unchanged.
 Domain, reference, binding and semantic checks remain native.
+Protocol 17.0.0 further restricts alternative `purpose: "counterexample"` to
+universal evaluation. Canonical admission and all three producer presentations
+derive this implication from one Protocol purpose rule. Ordinary, operation and
+comparison bodies allow omitted purpose or `support`; universal bodies retain
+both purposes. This public schema narrowing is a major under invariant §25.
+Clients must adopt that combination; valid canonical identities and wire
+contract IDs remain unchanged. Same-body negation and connectivity still require
+native validation, and lawful generation shapes do not prove producer fidelity.
 Historical current-wire inline declarations and unambiguous entity-support
 inheritance still use the same receiver. Generation shape does not certify
 reference closure or fidelity.

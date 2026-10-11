@@ -8,9 +8,9 @@ import { isAuthorityRevision } from "../../extraction/authority/receipt.js";
 /** Offline support for the reviewed local capture protocol, not an authorization to execute Recall. */
 export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v1";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
-export const OrdinaryRecallProtocolVersionSchema = z.enum(["14.1.0", "15.0.0", "16.0.0"]);
+export const OrdinaryRecallProtocolVersionSchema = z.enum(["14.1.0", "15.0.0", "16.0.0", "17.0.0"]);
 
-/** Versions 15/16 change semantic catalog/query schemas; this source-only public contract is unchanged. */
+/** Versions 15/16/17 change semantic catalog/query schemas; this source-only public contract is unchanged. */
 export function ordinaryRecallReaderProtocolVersion() {
   const entry = fileURLToPath(import.meta.resolve("@do-soul/alaya-protocol"));
   const manifest = JSON.parse(readFileSync(resolve(dirname(entry), "../package.json"), "utf8")) as { version?: unknown };
