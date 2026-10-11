@@ -157,12 +157,11 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const prior = pending.input.options;
   const newFacets = applied.facets.length !== (prior.facets?.length ?? 0);
   const guardsSeen = pending.guards_seen === true || effects.some((effect) => effect.unresolved_guard === true);
-  // Only a complete pass can replace the prior guard result. A new source fact
-  // replays retained rows, so an obsolete unknown can clear without hiding an
-  // independent unknown encountered elsewhere in the same pass.
-  const guards = finished ? (prior.liveStateOffset ?? 0) === 0 ? guardsSeen
-    : state.observation_gaps?.guards === true || guardsSeen
-    : state.observation_gaps?.guards === true;
+  // joinRows is a row delta, not a complete population pass, even when
+  // liveStateOffset is 0. Only a complete pass may replace guard unknowns.
+  const priorUnknown = state.observation_gaps?.guards === true;
+  const completePopulation = finished && prior.joinRows === undefined && (prior.liveStateOffset ?? 0) === 0;
+  const guards = completePopulation ? guardsSeen : finished ? priorUnknown || guardsSeen : priorUnknown;
   const measurements = state.observation_gaps?.measurements === true || effects.some((effect) => effect.missing_measurement === true);
   const missingRevision = effects.some((effect) => effect.missing_target_revision === true);
   const semanticDelta = finished && (applied.seen_identities.length > prior.liveStates.length || newFacets
@@ -170,6 +169,7 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
     bindingContexts: applied.binding_contexts,
     liveStates: applied.seen_identities, liveStateOffset: missingRevision ? 0 : preparation.facet_resume_offset,
+    joinRows: undefined,
     facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   return { ...applied, resume_subjects: subjects,

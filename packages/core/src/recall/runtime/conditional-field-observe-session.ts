@@ -17,7 +17,7 @@ import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditiona
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
-import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
+import { ObservedRelations, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects, SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
 import {
   applyObserverPage,
@@ -280,7 +280,11 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     pairProgress.bytes = completedPair.bytes;
     return observed.page.outcome.status === "interrupted";
   }
-  for (const row of captured) session.relationRows = session.relationRows.with(row);
+  const retained = retainRelationPage(session.relationRows, captured);
+  session.relationRows = retained.population;
+  // A proper subset is not a complete pass. The continuation clears joinRows
+  // so new states still meet the retained population.
+  const joinRows = retained.changed.length === retained.population.length ? undefined : retained.changed;
   recordObservedAt(input, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]), observedAt, sourceFacts);
   for (const row of captured) if (!overlayIsRoutingOnly(RELATION_ROUTING, row.predicate)) {
     addSubjects(subjects, [row.sourceObjectId, row.targetObjectId]);
@@ -291,7 +295,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
       interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: RELATION_ROUTING,
       sourceFacts: sourceFacts.snapshot, facets: session.state.facets, discoveries: session.state.discoveries,
       physicalKinds: session.predicates, compiledAutomaton: session.state.compiled_automaton,
-      bindingContexts: session.state.binding_contexts } },
+      bindingContexts: session.state.binding_contexts,
+      ...(joinRows === undefined ? {} : { joinRows }) } },
       offset: 0, retained_bytes: 0,
       page: maskAdjacencyExhaustion(observed.page, completedPair.hasOpenDemand()) },
     resume_cursors: resumeCursors(cursors, completedPair) };
