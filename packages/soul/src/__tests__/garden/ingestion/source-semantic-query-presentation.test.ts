@@ -115,6 +115,51 @@ it.each(sourceSemanticQueryNestedExamples)("preserves the complete neutral meani
   } });
 });
 
+it.each([
+  { presentation: "flat-carrier-v1", examples: sourceSemanticQueryExamples },
+  { presentation: "nested-meaning-v1", examples: sourceSemanticQueryNestedExamples },
+  { presentation: "nested-referent-constraints-v1", examples: sourceSemanticQueryReferentExamples }
+] as const)("qualifies the free tool user as a person in $presentation", ({ presentation, examples }) => {
+  const example = examples.find(row => row.original_query === "Which tool did someone use?")!;
+  const result = proposeQuerySemantics({ ...input(example.original_query), generation_presentation: presentation },
+    { rawJson: JSON.stringify(example.response) });
+  expect(result.outcome.status).toBe("interpreted");
+  const query = result.query!;
+  expect(query.alternatives).toHaveLength(1);
+  const alternative = sourceSemanticQueryBranchViews(query.alternatives[0]!)[0]!.alternative;
+  const use = alternative.frames.find(frame => frame.predicate_reading === "use")!;
+  const agent = use.role_requirements.find(role => role.role_reading === "agent")!;
+  const tool = use.role_requirements.find(role => role.role_reading === "theme")!;
+  const personClass = alternative.frames.find(frame => frame.predicate_reading === "is a person");
+  const toolClass = alternative.frames.find(frame => frame.predicate_reading === "is a tool");
+  expect(personClass).toBeDefined();
+  expect(toolClass).toBeDefined();
+  expect(personClass!.role_requirements).toMatchObject([{
+    role_reading: "theme", target_variable: agent.target_variable,
+    support: { kind: "query_text", excerpt: "someone" }
+  }]);
+  expect(toolClass!.role_requirements).toMatchObject([{
+    role_reading: "theme", target_variable: tool.target_variable,
+    support: { kind: "query_text", excerpt: "tool" }
+  }]);
+  expect(agent.support).toEqual({ kind: "query_text", excerpt: "someone" });
+  expect(tool.support).toEqual({ kind: "query_text", excerpt: "Which tool" });
+  for (const target of [agent.target_variable, tool.target_variable]) {
+    expect(query.variables.find(variable => variable.id === target)).toEqual({ id: target, sort: "entity" });
+  }
+  expect(agent.target_variable).not.toBe(tool.target_variable);
+  expect(query.return_variables).toEqual([tool.target_variable]);
+  expect(alternative.context_obligations).toEqual(expect.arrayContaining([{
+    frame: personClass!.id, kind: "asserted_at_source"
+  }]));
+  expect(query.gaps).toEqual([{
+    kind: "unsupported_meaning", affected_ids: [use.id],
+    support: [{ kind: "query_text", excerpt: "did someone use" }],
+    description: "The use event's past tense is not encoded by the retained predicate."
+  }]);
+  expect(result.outcome).toEqual({ status: "interpreted", gaps: query.gaps });
+});
+
 it("preserves scope, embedded content and source-act requirements across presentations", () => {
   const inner = parity(meaning([{ kind: "statement", key: "say", predicate: "say", arguments: [],
     content: { kind: "not", key: "denial", content: sent } }], { entities: sentBody.entities }));

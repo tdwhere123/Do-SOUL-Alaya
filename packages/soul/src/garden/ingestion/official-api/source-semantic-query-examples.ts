@@ -369,6 +369,9 @@ const nestedSourceSemanticQueryExamples = [
             { role: "agent", target: { kind: "reference", key: "person" }, excerpt: "someone" },
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "Which tool" }
           ] },
+          { kind: "statement", key: "person_class", predicate: "is a person", arguments: [
+            { role: "theme", target: { kind: "reference", key: "person" }, excerpt: "someone" }
+          ] },
           { kind: "statement", key: "tool_class", predicate: "is a tool", arguments: [
             { role: "theme", target: { kind: "reference", key: "tool" }, excerpt: "tool" }
           ] }
