@@ -1,6 +1,6 @@
 import {
   assertAllowedProviderChatUrlResolved, buildProviderChatRequestBody, executeProviderChatCompletion, providerChatCompletionsUrl,
-  ProviderChatCompletionError, type ProviderChatCompletionRequest,
+  ProviderChatCompletionError, providerExecutionFailureOf, type ProviderChatCompletionRequest,
   type ProviderHttpResponseEvidence
 } from "@do-soul/alaya-engine-gateway";
 import { isChatSemanticRequestProfile, isInternSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
@@ -97,11 +97,7 @@ export function createSemanticProviderHttpExtractor(
           aborted: cause instanceof ProviderChatCompletionError && cause.kind === "aborted" });
       const failure = toBenchTransportFailureAttempt(error, 0);
       const wrapped = wrapGardenHttpTransportError(error,
-        cause instanceof ProviderChatCompletionError && cause.kind === "timeout" ? "failure_timeout" :
-          cause instanceof ProviderChatCompletionError && cause.kind === "aborted" ? "failure_aborted" :
-            cause instanceof ProviderChatCompletionError && cause.kind === "http_error" &&
-              cause.httpStatus !== null && cause.httpStatus >= 400 && cause.httpStatus < 500
-              ? "failure_non_retryable_4xx" : "failure_non_retryable_response",
+        providerExecutionFailureOf(cause)?.retryClassification ?? "failure_non_retryable_response",
         0, 0, failure === undefined ? [] : [failure]);
       if (cause instanceof ProviderChatCompletionError && cause.httpResponse !== undefined) {
         nativeChatResponseEvidence.set(wrapped, cause.httpResponse);

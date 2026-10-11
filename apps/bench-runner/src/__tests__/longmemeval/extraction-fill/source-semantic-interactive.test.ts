@@ -777,10 +777,12 @@ it("does not retry thought-only STOP generateContent as transport", async () => 
   expect(ledger.attempts).toBe(fixture.keys.length);
 }, 60000);
 
-it.each(["network", "http"])("retains each interactive %s failure and never repeats exhausted attempts", async (kind) => {
+it.each(["network", "http", "authentication", "historical authentication"])("retains each interactive %s failure and never repeats terminal attempts", async (kind) => {
   const fixture = await setupInteractive();
+  const authentication = kind.endsWith("authentication");
   const fetchMock = vi.fn(async () => {
     if (kind === "http") return Response.json({ error: { code: 500, message: "fixture server failure" } }, { status: 500 });
+    if (authentication) return Response.json({ error: { code: 401, message: "fixture authentication failure" } }, { status: 401 });
     throw Object.assign(new TypeError("fetch failed"), { cause: new Error("socket hang up") });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -799,17 +801,29 @@ it.each(["network", "http"])("retains each interactive %s failure and never repe
   };
   expect(ledger.successful_shards).toEqual([]);
   expect(ledger.transport_failures.length).toBeGreaterThan(0);
-  expect(ledger.attempts).toBe(fixture.keys.length * 2);
+  const attemptsPerKey = authentication ? 1 : 2;
+  expect(ledger.attempts).toBe(fixture.keys.length * attemptsPerKey);
   for (const key of fixture.keys) {
     const raws = listProviderRawAttempts(cacheRoot, key);
-    expect(raws).toHaveLength(2);
-    expect(raws.every((raw) => raw.failure_retryable === true && raw.usage_known === false)).toBe(true);
+    expect(raws).toHaveLength(attemptsPerKey);
+    expect(raws.every((raw) => raw.failure_retryable === !authentication && raw.usage_known === false)).toBe(true);
     if (kind === "http") expect(raws[0]).toMatchObject({
       transport_failure: { kind: "http_error", httpStatus: 500 }, response_body: { text: expect.stringContaining("fixture server failure") }
     });
+    if (kind === "historical authentication") {
+      // Model the historical contradictory flag in this synthetic fixture before reopening it.
+      writeFileSync(providerRawAttemptPath(cacheRoot, key, 1), JSON.stringify({ ...raws[0], failure_retryable: true }));
+    }
   }
+  const rawBytes = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key).map(raw => {
+    const path = providerRawAttemptPath(cacheRoot, key, raw.attempt_ordinal);
+    return { path, bytes: readFileSync(path) };
+  }));
+  const ledgerPath = join(cacheRoot, ledgerName!), ledgerBytes = readFileSync(ledgerPath);
   expect(await runCli(args)).toBe(0);
-  expect(fetchMock).toHaveBeenCalledTimes(fixture.keys.length * 2);
+  expect(fetchMock).toHaveBeenCalledTimes(fixture.keys.length * attemptsPerKey);
+  for (const { path, bytes } of rawBytes) expect(readFileSync(path)).toEqual(bytes);
+  expect(readFileSync(ledgerPath)).toEqual(ledgerBytes);
 }, 60000);
 
 it("continues later complete-source keys after one interactive transport failure", async () => {

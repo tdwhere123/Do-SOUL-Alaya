@@ -1740,6 +1740,16 @@ Existing ledger census and ceiling mismatches fail closed. A different attempt
 cannot settle an unresolved reservation; legacy lineages require explicit settled
 continuation before using the same cache. This repair does not grant new budget.
 
+Provider-request and interactive source recovery derive HTTP retry eligibility
+from the retained status through the engine gateway policy: 429 and 5xx may use
+remaining authorized attempts; other HTTP statuses, including 401 and 403, are
+terminal. Retained `failure_retryable=false` remains closed. A historical true
+flag cannot override terminal physical status, including at transport-continuation
+admission. Recovery preserves the original raw bytes and settled classification;
+it does not repair history or grant another attempt. Missing raw remains unknown,
+aborted and completed parse/schema failures remain terminal, and existing bounded
+retry treatment of timeout, network and response-body transport failures is unchanged.
+
 Native chat query revision worksets may name a `retained_parent` on each revised
 item when only the original system guidance changed. The bench parent resolver requires
 the same canonical request, response schema, model, profile, route and output

@@ -11,7 +11,7 @@ import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/com
 import { inspectProviderChatCompletionResponse, MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { readProviderResponseWithEvidence } from "../../../../../../packages/engine-gateway/src/provider/chat-completion/response-evidence.js";
 import { inspectExtractionAttemptLedger } from "../../../runs/extraction/authority/attempt-ledger.js";
-import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRawAttempt,
+import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRawAttempt, retainedFailureOutcome,
   writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
@@ -485,6 +485,50 @@ export function proposalRecoveryCases(input: {
       expect(f.read().status).toBe("incomplete");
       expect(await f.fill()).toMatchObject({ unknown: 0, incomplete: 1, unattempted: 0, newly_admitted: 0 });
       expect(readFileSync(f.ledgerPath, "utf8")).toBe(bytes);
+    });
+
+    it.each([
+      { status: 401, retryable: true }, { status: 403, retryable: true }, { status: 503, retryable: false }
+    ].flatMap(failure => [false, true].map(settled => ({ ...failure, settled }))))(
+    "does not redispatch retained HTTP $status with retryable=$retryable and settled=$settled", async ({ status, retryable, settled }) => {
+      const f = fixture(), ordinal = f.ledger.reserveAttemptOrdinal(f.line.key);
+      const raw = writeProviderRawAttempt({ root: f.cacheRoot, cacheKey: f.line.key, attemptOrdinal: ordinal,
+        kind: f.line.kind, model: f.workset.model, requestProfile: f.workset.request_profile,
+        requestDigest: f.line.requestDigest, attemptLineageDigest: f.authority.attempt_lineage_digest,
+        decodedText: "", finishReason: null, failureRetryable: retryable, failureClassification: "failure_non_retryable_4xx",
+        transportFailure: { kind: "http_error", phase: "response_status", httpStatus: status, attempt: 1, fingerprint: "f".repeat(64) } });
+      if (settled) f.ledger.recordTransportOutcome(f.line.key, retainedFailureOutcome(raw)!, ordinal);
+      const rawPath = providerRawAttemptPath(f.cacheRoot, f.line.key, ordinal), bytes = readFileSync(rawPath);
+      expect(f.authority.limits.maximum_attempts_per_key).toBeGreaterThan(1);
+      expect(f.read().status).toBe("pending");
+      expect(await f.fill()).toMatchObject({ attempts: 1, terminal_failures: 1, newly_admitted: 0 });
+      expect(f.read().status).toBe("transport_failure");
+      expect(f.chain().status).toBe("transport_failure");
+      expect(openSemanticProposalAttemptLedger({ cacheRoot: f.cacheRoot, authority: f.authority,
+        kind: f.workset.kind }).snapshot()).toMatchObject({ attempts: 1, unresolvedAttempts: [], successfulKeys: [] });
+      const history = readFileSync(f.ledgerPath);
+      expect(await f.fill()).toMatchObject({ attempts: 0, terminal_failures: 1, newly_admitted: 0 });
+      expect(readFileSync(rawPath)).toEqual(bytes); expect(readFileSync(f.ledgerPath)).toEqual(history);
+    });
+
+    it.each([429, 503])("resumes retained HTTP %s despite an older non-retryable classification", async status => {
+      const f = fixture(), ordinal = f.ledger.reserveAttemptOrdinal(f.line.key);
+      const raw = writeProviderRawAttempt({ root: f.cacheRoot, cacheKey: f.line.key, attemptOrdinal: ordinal,
+        kind: f.line.kind, model: f.workset.model, requestProfile: f.workset.request_profile,
+        requestDigest: f.line.requestDigest, attemptLineageDigest: f.authority.attempt_lineage_digest,
+        decodedText: "", finishReason: null, failureRetryable: true, failureClassification: "failure_non_retryable_4xx",
+        transportFailure: { kind: "http_error", phase: "response_status", httpStatus: status, attempt: 1, fingerprint: "f".repeat(64) } });
+      f.ledger.recordTransportOutcome(f.line.key, retainedFailureOutcome(raw)!, ordinal);
+      const rawPath = providerRawAttemptPath(f.cacheRoot, f.line.key, ordinal), bytes = readFileSync(rawPath);
+      let calls = 0;
+      const result = await executeSemanticProposalFill({ workset: f.workset, cacheRoot: f.cacheRoot, authority: f.authority,
+        config: input.config(), extractor: { extract: async () => {
+          calls += 1; const rawJson = input.body(f.line);
+          return { rawJson, responseMetadata: { finishReason: "STOP" }, responseBody: syntheticGeminiBody(rawJson, "STOP") };
+        } } });
+      expect(calls).toBe(1); expect(result).toMatchObject({ interpreted: 1, attempts: 2, unknown: 0 });
+      expect(f.read().status).toBe("interpreted");
+      expect(readFileSync(rawPath)).toEqual(bytes);
     });
 
     it("resumes after a settled retryable decoded response using its remaining attempt", async () => {

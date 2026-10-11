@@ -28,7 +28,7 @@ const TEXT = "Lee left the lab on Tuesday after the sample arrived.";
 const CAP = 128;
 const roots: string[] = [];
 const servers: Server[] = [];
-type Response = "failure" | "assessed" | "abstained" | "incomplete" | "invalid";
+type Response = "failure" | "authentication" | "assessed" | "abstained" | "incomplete" | "invalid";
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -101,6 +101,21 @@ it.each(["assessed", "abstained", "incomplete", "invalid"] as const)(
     expect(fixture.bodies).toHaveLength(1);
   }
 );
+
+it.each([
+  { response: "authentication", flag: true }, { response: "failure", flag: false }
+] as const)("refuses $response continuation with retained retry flag $flag without rewriting history", async ({ response, flag }) => {
+  const fixture = await failedFixture([response]);
+  const key = fixture.authority.keys[0]!, rawPath = rawOwner.providerRawAttemptPath(fixture.cacheRoot, key, 1);
+  const raw = JSON.parse(readFileSync(rawPath, "utf8"));
+  // Author the historical contradictory flag before capturing the immutable fixture history.
+  raw.failure_retryable = flag; writeFileSync(rawPath, JSON.stringify(raw));
+  const retained = predecessorBytes(fixture);
+  expect(() => prepare(fixture)).toThrow(/settled retryable transport failure/u);
+  expect(await executePageSupportComparisonFill({ ...fixture, config: fixture.config })).toMatchObject({ attempts: 0, terminal_failures: 1 });
+  expect(predecessorBytes(fixture)).toEqual(retained); expect(fixture.bodies).toHaveLength(1);
+  expect(existsSync(continuationChildClaimPath(fixture.cacheRoot, fixture.authority.attempt_lineage_digest))).toBe(false);
+});
 
 it("reads receipt-bound historical child results after executable revision changes while refusing all execution", async () => {
   const fixture = await failedFixture();
@@ -298,8 +313,8 @@ function makeWorkset() {
 }
 
 function respond(response: ServerResponse, kind: Response) {
-  if (kind === "failure") {
-    response.writeHead(503, { "content-type": "application/json" });
+  if (kind === "failure" || kind === "authentication") {
+    response.writeHead(kind === "authentication" ? 401 : 503, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: { message: "fixture temporary unavailable" } }));
     return;
   }

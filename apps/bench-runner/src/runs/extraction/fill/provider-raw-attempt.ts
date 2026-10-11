@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, opendirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { inspectProviderChatCompletionResponse,
+import { inspectProviderChatCompletionResponse, isRetryableProviderHttpStatus,
   MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES,
   type ProviderHttpResponseEvidence } from "@do-soul/alaya-engine-gateway";
@@ -555,6 +555,24 @@ export function retainedFailureOutcome(raw: ProviderRawAttempt) {
     transportFailures: [raw.transport_failure], usageRequestCount: raw.usage_known ? 1 : 0,
     ...(raw.usage === null ? {} : { usage: raw.usage })
   };
+}
+
+/** Physical HTTP status owns eligibility even when an older retained label disagrees. */
+export function isRetryableProviderTransportFailure(
+  failure: BenchTransportFailureAttempt | undefined, classification?: BenchTerminalRetryClassification
+): boolean {
+  if (failure === undefined || failure.kind === "aborted") return false;
+  if (failure.kind === "http_error") {
+    return failure.httpStatus !== null && isRetryableProviderHttpStatus(failure.httpStatus);
+  }
+  return classification !== "failure_non_retryable_response" ||
+    failure.phase !== "response_schema" && failure.phase !== "response_parse";
+}
+
+/** A historical true flag cannot reopen a terminal failure; an explicit false remains closed. */
+export function isRetryableProviderRawFailure(raw: ProviderRawAttempt): boolean {
+  return raw.failure_retryable === true &&
+    isRetryableProviderTransportFailure(raw.transport_failure, raw.failure_classification);
 }
 
 export function requestEnvelopeDigest(requestJson: string): string {

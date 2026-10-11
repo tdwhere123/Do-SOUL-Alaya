@@ -29,7 +29,7 @@ import { isGeminiGenerateContentProfile } from "./batch/native-codec.js";
 import { baseReportedUsage } from "../authority/step-quote.js";
 import {
   bindProviderRawAttempt, listProviderRawAttempts, requestEnvelopeDigest,
-  providerRawInvalidUsageOutcome,
+  providerRawInvalidUsageOutcome, isRetryableProviderRawFailure, isRetryableProviderTransportFailure,
   writeProviderRawAttempt, retainedFailureOutcome, verifyProviderRawReservation,
   providerRawSuccessEvidenceState, type ProviderRawAttempt
 } from "./provider-raw-attempt.js";
@@ -205,7 +205,7 @@ function importInteractiveFromRaw(
   if (failure !== undefined) {
     input.authority!.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
     input.authority!.abandonPendingShard(line.key, raw.attempt_ordinal);
-    return raw.failure_retryable === true ? "transport_exhausted" : "quarantined";
+    return isRetryableProviderRawFailure(raw) ? "transport_exhausted" : "quarantined";
   }
   const extracted: InteractiveExtracted = {
     rawJson: raw.decoded_text,
@@ -295,7 +295,8 @@ async function dispatchInteractiveLine(
       sourceRequestSha256: line.requestSha256,
       requestDigest: sourceSemanticRequestWireDigest(input.prepared.config, line, maxOutputTokens), decodedText: "",
       finishReason: response?.finishReason ?? null,
-      failureRetryable: input.options.signal?.aborted === true ? false : !isCompletedNonRetryableResponse(outcome),
+      failureRetryable: input.options.signal?.aborted !== true &&
+        isRetryableProviderTransportFailure(outcome.transportFailures[0], outcome.terminalRetryClassification),
       failureClassification: outcome.terminalRetryClassification,
       ...(response === undefined ? {} : { responseBody: response.rawBody }),
       ...(nativeChatResponse === undefined ? {} : { httpResponse: nativeChatResponse }),
@@ -321,14 +322,6 @@ async function dispatchInteractiveLine(
     ...(extracted.httpResponse === undefined ? {} : { httpResponse: extracted.httpResponse })
   });
   return importInteractiveFromRaw(input, line, sourceCorpus, raw);
-}
-
-function isCompletedNonRetryableResponse(
-  transport: NonNullable<ReturnType<typeof readLiveTransportFailure>>
-): boolean {
-  return transport.terminalRetryClassification === "failure_non_retryable_response" &&
-    transport.transportFailures.some((item) =>
-      item.phase === "response_schema" || item.phase === "response_parse");
 }
 
 function isLocalPersistenceFailure(cause: unknown): boolean {

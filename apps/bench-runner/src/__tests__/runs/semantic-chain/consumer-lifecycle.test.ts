@@ -122,11 +122,13 @@ it("keeps absent usage unknown while preserving a physically complete answer", a
   expect(readProviderRawAttempt(run.root, run.key, 1)?.usage).toBeNull();
 });
 
-it("retains an HTTP failure as a single unknown-cost attempt", async () => {
-  const run = consumerAuthority(fixture, "http-failure"); ledgerPath = run.ledgerPath;
-  handler = res => { res.statusCode = 503; res.end("unavailable"); }; const before = hits;
+it.each([401, 429, 503])("retains HTTP %s with its retry eligibility as a single unknown-cost attempt", async status => {
+  const run = consumerAuthority(fixture, `http-failure-${status}`); ledgerPath = run.ledgerPath;
+  handler = res => { res.statusCode = status; res.end("fixture failure"); }; const before = hits;
   const result = await executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" });
   expect(result.rows[0]?.result).toMatchObject({ complete_response: false, outcome: { status: "transport_failure" } });
+  expect(readProviderRawAttempt(run.root, run.key, 1)).toMatchObject({ failure_retryable: status !== 401,
+    failure_classification: status === 401 ? "failure_non_retryable_4xx" : "failure_max_retries" });
   await executeSemanticChainConsumer({ authority: run.authority, mode: "recover" });
   expect(hits - before).toBe(1); expect(result.ledger.attempts).toBe(1);
 });

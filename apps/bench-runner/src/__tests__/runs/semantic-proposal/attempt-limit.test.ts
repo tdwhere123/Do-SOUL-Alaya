@@ -13,7 +13,7 @@ import { ledgerPath, listExtractionAttemptLedgerRecords } from "../../../runs/ex
 import { readAttemptLedgerRecordEnvelope } from "../../../runs/extraction/authority/attempt-ledger/contract.js";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
-import { providerRawAttemptPath, requestEnvelopeDigest, retainedFailureOutcome, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
+import { listProviderRawAttempts, providerRawAttemptPath, requestEnvelopeDigest, retainedFailureOutcome, writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
 import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
@@ -190,6 +190,43 @@ it("limits each failed HTTP request to one attempt and preserves the next key's 
   } finally {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+it.each([
+  { status: 401, attemptsPerKey: 1, retryable: false },
+  { status: 403, attemptsPerKey: 1, retryable: false },
+  { status: 429, attemptsPerKey: 2, retryable: true },
+  { status: 503, attemptsPerKey: 2, retryable: true }
+])("retains HTTP $status with only $attemptsPerKey attempt(s) per key despite remaining allowance", async ({ status, attemptsPerKey, retryable }) => {
+  let calls = 0;
+  const server = createServer((request, response) => {
+    request.resume(); calls += 1;
+    response.writeHead(status, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: { code: status, message: "local fixture failure" } }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const providerUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const prepared = { ...workset, provider_url: providerUrl }, { cacheRoot, authority } = fixture(prepared, 2);
+    const run = () => executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: { ...config, providerUrl } });
+    await run();
+    expect(calls).toBe(prepared.items.length * attemptsPerKey);
+    for (const key of authority.keys) {
+      const raws = listProviderRawAttempts(cacheRoot, key);
+      expect(raws).toHaveLength(attemptsPerKey);
+      for (const raw of raws) expect(raw).toMatchObject({ failure_retryable: retryable,
+        transport_failure: { kind: "http_error", httpStatus: status }, usage_known: false });
+    }
+    const history = openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot();
+    expect(history).toMatchObject({ attempts: calls, maximumAttempts: prepared.items.length * 2,
+      unresolvedAttempts: [], pendingKeys: [], successfulKeys: [] });
+    expect(readSemanticProposalResults(prepared, cacheRoot, 128).map(row => row.status))
+      .toEqual(prepared.items.map(() => "transport_failure"));
+    await run(); expect(calls).toBe(prepared.items.length * attemptsPerKey);
+    expect(openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }).snapshot()).toEqual(history);
+  } finally {
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
 

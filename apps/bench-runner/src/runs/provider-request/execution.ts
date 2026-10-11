@@ -13,6 +13,7 @@ import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill
 import {
   listProviderRawAttempts, readProviderRawAttempt, writeProviderRawAttempt,
   retainedFailureOutcome, providerRawSuccessEvidenceState, providerRawInvalidUsageOutcome,
+  isRetryableProviderRawFailure, isRetryableProviderTransportFailure,
   type ProviderRawAttempt, type RawAttemptOwner
 } from "../extraction/fill/provider-raw-attempt.js";
 import { readLiveTransportFailure } from "../extraction/cache/cache-live-delegate.js";
@@ -240,12 +241,13 @@ function replayPersistedProviderRequestRaw(
   }
   const failure = retainedFailureOutcome(raw);
   if (failure !== undefined) {
-    if (raw.failure_retryable !== true || lastAttempt) {
+    const retryable = isRetryableProviderRawFailure(raw);
+    if (!retryable || lastAttempt) {
       publishPhysicalFailure(context, line, raw, { status: "transport_failure", failure: raw.transport_failure }, false);
     }
     context.ledger.recordTransportOutcome(line.key, failure, raw.attempt_ordinal);
     context.ledger.abandonPendingShard(line.key, raw.attempt_ordinal);
-    return { classified: raw.failure_retryable === true ? "retryable" : "terminal", admitted: false };
+    return { classified: retryable ? "retryable" : "terminal", admitted: false };
   }
   if (!raw.full_replay_possible) {
     publishPhysicalFailure(context, line, raw, { status: "invalid", reason: "truncated_raw" }, false);
@@ -318,7 +320,7 @@ function persistFailedProviderRequest(
     ...(response === undefined ? {} : { responseBody: response.rawBody }),
     ...(nativeChatResponse === undefined ? {} : { httpResponse: nativeChatResponse }),
     ...(transport.transportFailures[0] === undefined ? {} : { transportFailure: transport.transportFailures[0] }),
-    failureRetryable: !isCompletedNonRetryableResponse(transport),
+    failureRetryable: isRetryableProviderTransportFailure(transport.transportFailures[0], transport.terminalRetryClassification),
     ...(transport.terminalRetryClassification === undefined ? {} : { failureClassification: transport.terminalRetryClassification }),
     ...(usage === undefined ? {} : { usage }),
     ...(phase === undefined ? {} : { transportPhase: phase })
@@ -365,14 +367,6 @@ function settledProviderRequestOutcome(
     usageRequestCount: usage === undefined ? 0 : 1,
     ...(usage === undefined ? {} : { usage })
   };
-}
-
-function isCompletedNonRetryableResponse(
-  transport: NonNullable<ReturnType<typeof readLiveTransportFailure>>
-): boolean {
-  return transport.terminalRetryClassification === "failure_non_retryable_response" &&
-    transport.transportFailures.some((item) =>
-      item.phase === "response_schema" || item.phase === "response_parse");
 }
 
 function isLocalPersistenceFailure(cause: unknown): boolean {

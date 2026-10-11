@@ -7,7 +7,8 @@ import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { listExtractionAttemptLedgerRecords } from "../extraction/authority/attempt-ledger.js";
 import type { ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { StepQuoteBasisSchema, assertStepQuoteRates } from "../extraction/authority/step-quote.js";
-import { hasProviderRawContinuationAttempts, listProviderRawAttempts, readProviderRawAttemptWithFileWitness } from "../extraction/fill/provider-raw-attempt.js";
+import { hasProviderRawContinuationAttempts, isRetryableProviderRawFailure,
+  listProviderRawAttempts, readProviderRawAttemptWithFileWitness } from "../extraction/fill/provider-raw-attempt.js";
 import { assertAuthorizedComparisonRequest } from "./execute.js";
 import { materializePageSupportComparisonLines, PageSupportComparisonWorksetSchema,
   PAGE_SUPPORT_COMPARISON_KIND, type PageSupportComparisonWorkset } from "./input.js";
@@ -98,7 +99,7 @@ export function readComparisonTransportPredecessor(input: {
       ledger.settledAttempts.length !== 1 || ledger.transportFailures.length !== 1 ||
       listProviderRawAttempts(input.cacheRoot, line.key).length !== 1 ||
       comparisonOutcomeStatus(shard.shard) !== "transport_failure" || shard.shard.admitted ||
-      physical.raw.failure_retryable !== true || physical.raw.transport_failure === undefined ||
+      !isRetryableProviderRawFailure(physical.raw) || physical.raw.transport_failure === undefined ||
       canonicalJson(shard.shard.outcome) !== canonicalJson({ status: "transport_failure", failure: physical.raw.transport_failure }) ||
       physical.raw.decoded_text !== "" || physical.raw.finish_reason !== null ||
       ["response_parse", "response_schema"].includes(physical.raw.transport_failure.phase) ||
