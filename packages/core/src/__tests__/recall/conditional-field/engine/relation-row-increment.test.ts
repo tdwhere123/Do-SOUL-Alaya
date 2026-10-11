@@ -682,6 +682,39 @@ describe("incremental relation-row join", () => {
     expect(visits.count).toBe(0);
     expect(hyperLeaves(promoted).some((ids) => ids.has("bound-hop") && ids.has("open-hop"))).toBe(true);
   });
+
+  it("keeps a prior unknown guard when exploration runs out before the row-delta recheck", () => {
+    const program: QueryProgram = { schema_version: 1, kind: "alternative", options: [relation("p", "y", AUTH_GUARD), relation("q")] };
+    const state = seeded(program, [{ binding: "c=x" }]);
+    const guarded = edge("p", "a", "b", "guarded-row");
+    const source = facts(["a", "b"]);
+    const established = settle(state, [guarded], source);
+    expect(established.observation_gaps?.guards).toBe(true);
+    expect(established.pending_path_effects).toBeUndefined();
+    const noise = edge("q", "z", "w", "noise-row");
+    const population = [guarded, noise];
+    let stopped: FieldEngineState | undefined;
+    for (let work = 1; work <= 64; work += 1) {
+      const candidate = resumePathEffects({
+        ...established, remaining_exploration: work, remaining_memory_bytes: 1_000_000,
+        memory_exhausted: false, retention_rejected: undefined,
+        pending_path_effects: { offset: 0, retained_bytes: 0, page: observerPage(established),
+          input: { rows: population, options: {
+            interpretation: established.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, joinRows: [noise],
+            liveStates: established.seen_identities, facets: established.facets, discoveries: established.discoveries,
+            bindingContexts: established.binding_contexts
+          } } }
+      });
+      const pending = candidate.pending_path_effects;
+      // A later full pass recomputes the guard. This budget can publish before that pass.
+      if (pending?.input.options.joinRows === undefined && pending.population_checked !== true
+        && candidate.remaining_exploration === 0) { stopped = candidate; break; }
+    }
+    expect(stopped?.last_observer_status).toBe("interrupted");
+    expect(stopped?.pending_path_effects?.input.options.liveStateOffset).toBe(0);
+    expect(stopped?.seen_identities.length).toBe(established.seen_identities.length);
+    expect(stopped?.observation_gaps?.guards).toBe(true);
+  });
 });
 
 describe("observed relation pages", () => {
