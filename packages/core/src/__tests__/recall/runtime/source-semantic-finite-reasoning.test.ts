@@ -200,7 +200,6 @@ it("distinguishes closed finite, closed empty, and open empty universal evaluati
     .toMatchObject({ status: "unknown", vacuous: false, reasons: ["open_domain"] });
 });
 
-// V8 coverage makes this finite admission exceed Vitest's 5s default.
 it("admits novel members only with a consumed conditional semantic_correspondence assumption", () => {
   const base = finiteSource(), interpretation = { ...base, domains: base.domains!.map((row) => ({ ...row, closure: { kind: "open" as const } })) };
   const original = finiteQuery(), semantics = { ...original, variables: original.variables.map((row) => row.id === "actor"
@@ -214,6 +213,7 @@ it("admits novel members only with a consumed conditional semantic_correspondenc
   expect(result.derived_nodes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "query_entity", query_variable: "actor" })]));
   expect(result.derived_nodes?.every((row) => row.node_id.length <= 64)).toBe(true);
   expect(result.consumed_leaves.some((row) => row.leaf_kind === "semantic_correspondence_membership")).toBe(true);
+  // Coverage instruments open-domain admission; the request budget stays the default.
 }, 30_000);
 
 it("keeps decimal equality exact and bounds unsupported magnitudes", () => {
