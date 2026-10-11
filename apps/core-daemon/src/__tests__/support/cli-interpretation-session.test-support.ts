@@ -6,7 +6,8 @@ import { once } from "node:events";
 export async function withCliInterpretationSession<T>(root: string, workspace: string, run: string,
   body: (call: (request: unknown) => Promise<{ exitCode: number; output: unknown }>) => Promise<T>): Promise<T> {
   const binary = fileURLToPath(new URL("../../../../../bin/alaya.mjs", import.meta.url));
-  const guard = fileURLToPath(new URL("./provider-free-cli.mjs", import.meta.url));
+  // Node loads --import as an ESM URL; a Windows drive path is parsed as a scheme.
+  const guard = new URL("./provider-free-cli.mjs", import.meta.url).href;
   const child = spawn(process.execPath, ["--import", guard, binary, "tools", "session",
     "--workspace", workspace, "--run", run, "--agent", "codex"], {
     cwd: root, env: { PATH: process.env.PATH, HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: root, DATA_DIR: root },

@@ -228,6 +228,7 @@ it("keeps reserved slots when later selection work exhausts", () => {
 const coverageTask = coverageSelectionFixture(selectionExecutionBudget);
 const alternativeTask = alternativeSelectionFixture(selectionExecutionBudget);
 
+// V8 coverage makes this partial exhaustion exceed Vitest's 5s default.
 it("retains a nonempty open input prefix when source-local execution exhausts its original work allowance", () => {
   const original = coverageSelectionFixture(), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
   const proof = partial.proofs[0]!;
@@ -248,7 +249,7 @@ it("retains a nonempty open input prefix when source-local execution exhausts it
   expect(proof.resource_usage!.memory_bytes).toBeLessThan(original.execution_budget.memory_bytes);
   expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []).evidence_inputs.map(row => row.status))
     .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
-});
+}, 30_000);
 
 it("executes only the distinct source-bound deployment inputs without claiming task completion", () => {
   const readiness = [coverageTask, alternativeTask].flatMap(fixture => fixture.sources.map(authored => ({

@@ -106,6 +106,7 @@ it("rejects substitution of another admitted alternative while preserving its or
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record).proof).toBeUndefined();
 });
 
+// V8 coverage makes comparison projection exceed the 15s deadline.
 it.each(["instantiation", "query_entity", "universal", "comparison"] as const)("admits actual %s witnesses through the same projection owner", (kind) => {
   let interpretation = finiteSource(), semantics = finiteQuery(kind === "universal" || kind === "comparison");
   if (kind === "query_entity") {
@@ -131,4 +132,4 @@ it.each(["instantiation", "query_entity", "universal", "comparison"] as const)("
   const forged = structuredClone(proof), answer = forged.binding_results!.find((row) => row.binding_id === entry.output_binding)!;
   Object.assign(answer, { alternative: 999 });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record, budget).proof).toBeUndefined();
-}, 15_000);
+}, 60_000);
