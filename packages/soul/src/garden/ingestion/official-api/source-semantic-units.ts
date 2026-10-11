@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import { DEFAULT_EXTRACTION_SOURCE_PACKING, extractionSourcePackingSize,
   type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
 import { sentenceSpans } from "../../triage/grounding/source-assertion/clause-spans.js";
 import { collectSourceRoleMarkers } from "../../triage/grounding/source-role/marker.js";
 
 export const SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT = "source-semantic-units-v1" as const;
+export const SourceSemanticSourceRoleSchema = z.enum(["user", "assistant"]);
+type SourceRole = z.infer<typeof SourceSemanticSourceRoleSchema>;
 
 export interface SourceSemanticSourceUnit {
   readonly assertion_id: number;
   readonly text: string;
   readonly start: number;
   readonly end: number;
-  readonly source_role: "user" | "assistant";
+  readonly source_role: SourceRole;
 }
 
 interface SourceSemanticSourcePack {
@@ -22,10 +25,11 @@ interface SourceSemanticSourcePack {
 }
 
 /** Source boundaries are not assertion eligibility: retain questions, fragments and scoped clauses. */
-export function indexSourceSemanticUnits(sourceCorpus: string): readonly SourceSemanticSourceUnit[] {
-  const markers = collectSourceRoleMarkers(sourceCorpus);
+export function indexSourceSemanticUnits(sourceCorpus: string, sourceRole?: SourceRole): readonly SourceSemanticSourceUnit[] {
+  // A known single-source author owns quoted marker-looking text as well.
+  const markers = sourceRole === undefined ? collectSourceRoleMarkers(sourceCorpus) : [];
   let markerIndex = 0;
-  let source_role: "user" | "assistant" = "user";
+  let source_role: SourceRole = sourceRole === undefined ? "user" : SourceSemanticSourceRoleSchema.parse(sourceRole);
   return sentenceSpans(sourceCorpus).map((span, index) => {
     while (markerIndex < markers.length && markers[markerIndex]!.start <= span.start) {
       source_role = markers[markerIndex++]!.role;
@@ -35,8 +39,8 @@ export function indexSourceSemanticUnits(sourceCorpus: string): readonly SourceS
   });
 }
 
-export function selectSourceSemanticUnits(sourceCorpus: string, assertionIds: readonly number[]): readonly SourceSemanticSourceUnit[] {
-  const byId = new Map(indexSourceSemanticUnits(sourceCorpus).map((unit) => [unit.assertion_id, unit]));
+export function selectSourceSemanticUnits(sourceCorpus: string, assertionIds: readonly number[], sourceRole?: SourceRole): readonly SourceSemanticSourceUnit[] {
+  const byId = new Map(indexSourceSemanticUnits(sourceCorpus, sourceRole).map((unit) => [unit.assertion_id, unit]));
   if (new Set(assertionIds).size !== assertionIds.length) throw new TypeError("duplicate requested source unit");
   return assertionIds.map((id) => {
     const unit = byId.get(id);
@@ -46,8 +50,8 @@ export function selectSourceSemanticUnits(sourceCorpus: string, assertionIds: re
 }
 
 export function collectSourceSemanticUnitPacks(sourceCorpus: string,
-  packing: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING): readonly SourceSemanticSourcePack[] {
-  const units = indexSourceSemanticUnits(sourceCorpus);
+  packing: ExtractionSourcePacking = DEFAULT_EXTRACTION_SOURCE_PACKING, sourceRole?: SourceRole): readonly SourceSemanticSourcePack[] {
+  const units = indexSourceSemanticUnits(sourceCorpus, sourceRole);
   const source_corpus_identity = digest({ contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, sourceCorpus });
   if (packing === "complete-source") {
     return [{ source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, source_corpus_identity,
@@ -64,9 +68,9 @@ export function collectSourceSemanticUnitPacks(sourceCorpus: string,
 }
 
 /** Transport occurrence identity does not claim Garden assertion eligibility or semantic equivalence. */
-export function sourceSemanticTransportUnits(sourceCorpus: string, messageIds: readonly string[], datasetRevision: string) {
+export function sourceSemanticTransportUnits(sourceCorpus: string, messageIds: readonly string[], datasetRevision: string, sourceRole?: SourceRole) {
   const sourceDigest = digest(sourceCorpus);
-  return indexSourceSemanticUnits(sourceCorpus).map((unit) => ({
+  return indexSourceSemanticUnits(sourceCorpus, sourceRole).map((unit) => ({
     assertionId: unit.assertion_id, text: unit.text, sourceCorpus,
     binding: { occurrenceIdentity: digest({ contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
       sourceDigest, source_role: unit.source_role, start: unit.start, end: unit.end, messageIds, datasetRevision }) }

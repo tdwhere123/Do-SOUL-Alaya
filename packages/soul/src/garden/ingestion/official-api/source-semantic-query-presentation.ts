@@ -35,10 +35,7 @@ function derefJsonSchema(root: Record<string, unknown>, node: Record<string, unk
 
 function queryReferenceSchema(schema: Record<string, unknown>, target: Record<string, unknown>): object {
   const resolved = derefJsonSchema(schema, target);
-  const variants = Array.isArray(resolved.oneOf) ? resolved.oneOf : Array.isArray(resolved.anyOf) ? resolved.anyOf : [];
-  for (const variant of variants) {
-    if (!isJsonSchemaObject(variant)) continue;
-    const shape = derefJsonSchema(schema, variant);
+  for (const shape of jsonSchemaVariants(schema, resolved)) {
     const properties = isJsonSchemaObject(shape.properties) ? shape.properties : undefined;
     const kind = isJsonSchemaObject(properties?.kind) ? derefJsonSchema(schema, properties.kind) : undefined;
     if (Array.isArray(kind?.enum) && kind.enum.length === 1 && kind.enum[0] === "reference") return structuredClone(shape);
@@ -46,25 +43,36 @@ function queryReferenceSchema(schema: Record<string, unknown>, target: Record<st
   throw new AlayaError("VALIDATION", "query target schema is missing a local reference variant");
 }
 
+function jsonSchemaVariants(schema: Record<string, unknown>, node: Record<string, unknown>): Record<string, unknown>[] {
+  const resolved = derefJsonSchema(schema, node);
+  const variants = Array.isArray(resolved.oneOf) ? resolved.oneOf : Array.isArray(resolved.anyOf) ? resolved.anyOf : undefined;
+  return variants === undefined ? [resolved] : variants.flatMap(variant => {
+    if (!isJsonSchemaObject(variant)) throw new AlayaError("VALIDATION", "invalid query schema variant");
+    return jsonSchemaVariants(schema, variant);
+  });
+}
+
 /** Use one producer declaration location; historical receive syntax remains unchanged. */
 function constrainQueryGenerationNodes(schema: Record<string, unknown>, body: Record<string, unknown>,
   presentation: SourceSemanticQueryPresentation): void {
   const properties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
-  let expressions = isJsonSchemaObject(properties?.nodes) ? properties.nodes : undefined;
+  let expressions = isJsonSchemaObject(properties?.nodes) ? [properties.nodes] : [];
   if (presentation !== "flat-carrier-v1") {
-    const alternatives = isJsonSchemaObject(properties?.alternatives) ? properties.alternatives : undefined;
+    const alternatives = isJsonSchemaObject(properties?.alternatives) ? derefJsonSchema(schema, properties.alternatives) : undefined;
     if (!isJsonSchemaObject(alternatives?.items)) throw new AlayaError("VALIDATION", "query meaning schema is missing alternatives.items");
-    const alternative = derefJsonSchema(schema, alternatives.items);
-    const fields = isJsonSchemaObject(alternative.properties) ? alternative.properties : undefined;
-    expressions = isJsonSchemaObject(fields?.conditions) ? fields.conditions : undefined;
+    expressions = jsonSchemaVariants(schema, alternatives.items).map(alternative => {
+      const fields = isJsonSchemaObject(alternative.properties) ? alternative.properties : undefined;
+      if (!isJsonSchemaObject(fields?.conditions)) throw new AlayaError("VALIDATION", "query alternative is missing conditions");
+      return fields.conditions;
+    });
   }
-  if (!isJsonSchemaObject(expressions?.items)) throw new AlayaError("VALIDATION", "query schema is missing expression items");
-  const node = derefJsonSchema(schema, expressions.items);
-  const variants = Array.isArray(node.oneOf) ? node.oneOf : Array.isArray(node.anyOf) ? node.anyOf : [];
+  const variants = expressions.flatMap(expression => {
+    const array = derefJsonSchema(schema, expression);
+    if (!isJsonSchemaObject(array.items)) throw new AlayaError("VALIDATION", "query schema is missing expression items");
+    return jsonSchemaVariants(schema, array.items);
+  });
   let found = false;
-  for (const variant of variants) {
-    if (!isJsonSchemaObject(variant)) continue;
-    const shape = derefJsonSchema(schema, variant);
+  for (const shape of variants) {
     const fields = isJsonSchemaObject(shape.properties) ? shape.properties : undefined;
     if (isJsonSchemaObject(fields?.reporter)) fields.reporter = queryReferenceSchema(schema, fields.reporter);
     if (!isJsonSchemaObject(fields?.arguments)) continue;
@@ -81,23 +89,14 @@ function constrainQueryGenerationNodes(schema: Record<string, unknown>, body: Re
   if (!found) throw new AlayaError("VALIDATION", "query schema is missing statement arguments");
 }
 
-/** Derive the producer constraints from the shared meaning body owner. */
-function constrainQueryGenerationSchema(envelope: object, presentation: SourceSemanticQueryPresentation): object {
-  const schema = structuredClone(envelope) as Record<string, unknown>;
-  const properties = isJsonSchemaObject(schema.properties) ? schema.properties : undefined;
-  if (!isJsonSchemaObject(properties?.query)) {
-    throw new AlayaError("VALIDATION", "query generation schema is missing properties.query");
-  }
-  const body = structuredClone(derefJsonSchema(schema, properties.query));
-  constrainQueryGenerationNodes(schema, body, presentation);
+function constrainQueryGenerationDeclarations(schema: Record<string, unknown>, body: Record<string, unknown>): void {
   const bodyProperties = isJsonSchemaObject(body.properties) ? body.properties : undefined;
-  if (body.anyOf !== undefined || body.oneOf !== undefined || bodyProperties?.requested_operation === undefined
-    || !isJsonSchemaObject(bodyProperties.entities) || !isJsonSchemaObject(bodyProperties.alternatives)
-    || bodyProperties.alternatives.items === undefined) {
-    throw new AlayaError("VALIDATION", "query carrier body cannot encode the operation/input generation union");
+  if (!isJsonSchemaObject(bodyProperties?.entities)) {
+    throw new AlayaError("VALIDATION", "query schema is missing entity declarations");
   }
-  if (!isJsonSchemaObject(bodyProperties.entities.items)) throw new AlayaError("VALIDATION", "query entity schema is missing items");
-  const entity = derefJsonSchema(schema, bodyProperties.entities.items);
+  const declarationsArray = derefJsonSchema(schema, bodyProperties.entities);
+  if (!isJsonSchemaObject(declarationsArray.items)) throw new AlayaError("VALIDATION", "query entity schema is missing items");
+  const entity = derefJsonSchema(schema, declarationsArray.items);
   const declarations = Array.isArray(entity.oneOf) ? entity.oneOf : Array.isArray(entity.anyOf) ? entity.anyOf : [];
   if (declarations.length === 0) throw new AlayaError("VALIDATION", "query entity schema is missing declaration variants");
   for (const declaration of declarations) {
@@ -111,39 +110,19 @@ function constrainQueryGenerationSchema(envelope: object, presentation: SourceSe
   body.required = [...new Set([...(Array.isArray(body.required) ? body.required : []), "entities"])];
   const { contract, entities, nodes, ...remaining } = bodyProperties;
   body.properties = { contract, entities, ...(nodes === undefined ? {} : { nodes }), ...remaining };
-  const itemNode = isJsonSchemaObject(bodyProperties.alternatives.items)
-    ? bodyProperties.alternatives.items : { $ref: bodyProperties.alternatives.items };
-  const items = structuredClone(derefJsonSchema(schema, itemNode));
-  if (!isJsonSchemaObject(items.properties) || items.properties.evidence_inputs === undefined) {
-    throw new AlayaError("VALIDATION", "query alternative schema is missing evidence_inputs");
+}
+
+/** Preserve the shared body's legal modes while tightening producer declaration syntax. */
+function constrainQueryGenerationSchema(envelope: object, presentation: SourceSemanticQueryPresentation): object {
+  const schema = structuredClone(envelope) as Record<string, unknown>;
+  const properties = isJsonSchemaObject(schema.properties) ? schema.properties : undefined;
+  if (!isJsonSchemaObject(properties?.query)) {
+    throw new AlayaError("VALIDATION", "query generation schema is missing properties.query");
   }
-  const withOperation = structuredClone(body);
-  const required = Array.isArray(withOperation.required) ? [...withOperation.required as string[]] : [];
-  if (!required.includes("requested_operation")) required.push("requested_operation");
-  withOperation.required = required;
-  const withoutInputs = structuredClone(body);
-  const residualItems = structuredClone(items);
-  delete (residualItems.properties as Record<string, unknown>).evidence_inputs;
-  if (Array.isArray(residualItems.required)) {
-    residualItems.required = (residualItems.required as string[]).filter((key) => key !== "evidence_inputs");
+  for (const body of jsonSchemaVariants(schema, properties.query)) {
+    constrainQueryGenerationNodes(schema, body, presentation);
+    constrainQueryGenerationDeclarations(schema, body);
   }
-  (withoutInputs.properties as Record<string, unknown>).alternatives = {
-    ...structuredClone(bodyProperties.alternatives), items: residualItems
-  };
-  const defsKey = schema.$defs !== undefined ? "$defs" : schema.definitions !== undefined ? "definitions" : "$defs";
-  const defs = isJsonSchemaObject(schema[defsKey]) ? schema[defsKey] as Record<string, unknown> : {};
-  for (const name of ["queryRequiresRequestedOperation", "queryOmitsEvidenceInputs"]) {
-    if (defs[name] !== undefined) throw new AlayaError("VALIDATION", `generation schema already defines ${defsKey}.${name}`);
-  }
-  schema[defsKey] = {
-    ...defs,
-    queryRequiresRequestedOperation: withOperation,
-    queryOmitsEvidenceInputs: withoutInputs
-  };
-  properties.query = {
-    ...(properties.query.readOnly === undefined ? {} : { readOnly: properties.query.readOnly }),
-    anyOf: [{ $ref: `#/${defsKey}/queryRequiresRequestedOperation` }, { $ref: `#/${defsKey}/queryOmitsEvidenceInputs` }]
-  };
   if (presentation === "nested-referent-constraints-v1") renderReferentSchemaKinds(schema);
   return schema;
 }
@@ -191,7 +170,7 @@ const queryMeaningGuidance = (named: string, free: string): string => [
   '4. Add independently useful evidence_inputs:[{conditions:[...]}] for the requested operation. Qualify each input independently, including its event, participants, classification, time and units. Separate alternative input actions instead of joining all actions into the answer. Inputs do not execute the task or prove its result. A reference to an event shares identity but imports neither its occurrence nor its classifications. Reuse a keyed event with {kind:"occurrence",key} when its full condition is needed, and also include connected qualification conditions needed by this branch.',
   '5. Set scope and evidence act. Use statement:{predicate,arguments,content?} and explicit operators; content preserves what another event says, asks or requires, without separately asserting the embedded event. possible, not, reported and conditional retain their governing scope. Omit required_evidence_act for ordinary factual questions: the current question form does not request source question evidence. Use required_evidence_act:{act,excerpt} only when the query explicitly seeks a source question or directive, on that independently sought root. entailed_at_source requests inference; asserted_at_source requests a literal assertion. Marking an input event as returned or as a source question changes what evidence is sought.',
   '6. Retain qualifications and residuals. Encode tense relative to the approved interpretation clock, completion/aspect, modality and units in meaningful predicates/roles, or query.gaps:[{kind,affected_ids,support:[{kind:"query_text",excerpt}],description?}]. A bare event lemma does not encode past occurrence. Preserve only stated temporal restrictions; invent no dates. affected_ids names declared semantic entity, occurrence/frame or domain keys, or [] for unrepresented meaning; serialization tokens are not gap targets. Omit outcome.gaps so the host echoes this single list. A gap records missing or unsupported meaning, not a substitute for expressible meaning or a complete answer. Do not add a gap solely because a requested operation is unexecuted; the host derives execution status from requested_operation. Execution status neither supplies nor removes a faithful answer relation or its qualified inputs.',
-  `7. Use existing evaluation forms when applicable. domains are {key,excerpt}; universal evaluation is {kind:"forall",domain,binder,local_variables}, with a body-bound binder that cannot be returned. Population restrictions are not ${named} entities or invented censuses; unknown members do not imply an unresolved referent. Nested universals remain unsupported. Counterexample alternatives use purpose:"counterexample". Comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"}; declare operands as entities and return only operand keys. Pairwise strict is true only for lt/gt; extrema omit right and choose strictness explicitly. Evaluation has no nested meaning.`,
+  `7. Use existing evaluation forms when applicable. domains are {key,excerpt}; universal evaluation is {kind:"forall",domain,binder,local_variables}, with nonempty conditions and a body-bound binder that cannot be returned. Population restrictions are not ${named} entities or invented censuses; unknown members do not imply an unresolved referent. Nested universals remain unsupported. Counterexample alternatives use purpose:"counterexample". Numeric comparison evaluation is {kind:"comparison",domain,operation:"lt"|"le"|"eq"|"ge"|"gt"|"minimum"|"maximum",left,right?,strict,metric,unit,context,scope:"asserted"|"preserve"}; declare operands as entities and return only operand keys. Pairwise strict is true only for lt/gt; extrema omit right and choose strictness explicitly. Comparison evaluation requires conditions:[]; neither finite evaluation form includes evidence_inputs. Ordinary qualitative comparisons, permissions and reuse conditions use answer relations and operation inputs, not a fabricated numeric evaluation.`,
 ].join(" ");
 
 const SERIALIZATION_BOUND = `8. Serialize the chosen meaning. A nesting path has at most ${SOURCE_SEMANTIC_QUERY_MEANING_MAX_DEPTH + 1} statement/operator nodes; deeper meaning remains a located gap.`;

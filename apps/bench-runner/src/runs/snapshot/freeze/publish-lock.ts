@@ -40,7 +40,7 @@ function acquireSnapshotPublishLock(snapshotOut: string): DatabaseSync {
   }
 }
 
-function snapshotPublishLockPath(snapshotOut: string): string {
+export function snapshotPublishLockPath(snapshotOut: string): string {
   return join(dirname(snapshotOut), `.${basename(snapshotOut)}.publish-lock.sqlite`);
 }
 

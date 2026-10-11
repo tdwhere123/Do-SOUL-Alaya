@@ -387,6 +387,7 @@ function bindSource(request: SourceSemanticRequest, input: SourceSemanticProposa
   const ids = request.source_request.source_assertions.map((row) => row.assertion_id);
   const expected = buildSourceSemanticRequest({ ...input, assertionIds: ids, sourceScope: request.source_request.source_scope });
   if (canonicalJson(sourceSemanticRequestCatalog(expected)) !== canonicalJson(sourceSemanticRequestCatalog(request)) ||
+    expected.source_request.source_role !== request.source_request.source_role ||
     canonicalJson(expected.source_request.source_assertions) !== canonicalJson(request.source_request.source_assertions) ||
     canonicalJson(expected.source_request.attribution_context) !== canonicalJson(request.source_request.attribution_context) ||
     canonicalJson(expected.source_request.assertion_locations) !== canonicalJson(request.source_request.assertion_locations)) {

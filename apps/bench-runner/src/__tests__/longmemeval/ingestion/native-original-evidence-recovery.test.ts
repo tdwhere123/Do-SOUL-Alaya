@@ -5,29 +5,18 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
-import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
-  SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION } from "@do-soul/alaya-core";
+import { SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, type SourceSemanticCorrespondenceProposalInput } from "@do-soul/alaya-soul";
-import { interpretedQueryRaw } from "../query-producer-fixture.js";
-import { correspondenceAssessmentJson } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-producer-fixture.js";
-import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 import { prepareNativeSourceRecordsSnapshot, readVerifiedNativeSourceSnapshot } from
   "../../../runs/snapshot/source-records/native.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from
   "../../../runs/semantic-proposal/workset.js";
-import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
-import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
+import { readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
-import { preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
+import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { readCompletePhysicalSourceResponseForRequest } from
   "../../../runs/extraction/cache/source-interactive-binding.js";
-import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
-import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from
-  "../../../runs/extraction/authority/receipt.js";
-import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
@@ -38,23 +27,15 @@ import { chainIdentity, readChainArtifact, withSemanticChainDaemon } from "../..
 import { freezeRecoveryAllowance, reserveRecoveryAction, reserveRecoveryHostEffect,
   reserveRecoveryRead, recordRecoveryNativeWork } from "../../../runs/semantic-chain/recovery-allowance.js";
 import { admitInitialQualified } from "../../../runs/semantic-chain/recovery-publication.js";
+import { admitFinalRecoveryQualified } from "../../../runs/semantic-chain/recovery-final-publication.js";
+import { admitRecoveryWindow } from "../../../runs/semantic-chain/recovery-window.js";
 import { censusNativeSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { nativeSourceRequestInventory } from "../../../runs/extraction/fill/source-request-workset.js";
 import { providerRawAttemptPath } from "../../../runs/extraction/fill/provider-raw-attempt.js";
-import type { ExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";
+import { CLOCK, OBSERVED, INGESTED, URL, MODEL, H_PROFILE, Q_PROFILE, BUDGET, ALLOWANCE,
+  queryRaw, sourceRaw, correspondenceRaw, fillProposal, fillSource, prepareRetainedRecoverySnapshot, readRetainedSourceMetadata } from
+  "./native-recovery-provider.test-support.js";
 
-const CLOCK = "2026-09-25T00:00:00.000Z";
-const OBSERVED = "2026-09-20T12:00:00.000Z";
-const INGESTED = ["2026-09-21T09:00:00.000Z", "2026-09-21T09:00:01.000Z"] as const;
-const URL = "https://generativelanguage.googleapis.com";
-const MODEL = "gemini-3.1-flash-lite";
-const H_PROFILE = "gemini-3.1-low-v1";
-const Q_PROFILE = "gemini-3.1-minimal-v1";
-const BUDGET = { schema_version: 1, work_units: 10_000_000, memory_bytes: 200_000_000,
-  page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
-const ALLOWANCE = { total_work_units: 4_000_000_000, total_memory_bytes: 30_000_000_000,
-  read_work_units: 10_000_000, read_memory_bytes: 100_000_000,
-  max_input_bytes_per_read: 100_000_000, max_read_admissions: 256, max_effects: 32 };
 const DATE_QUESTION = "Which tool did Mira use for indexing on August 14, 2026?";
 const FORMAT_QUESTION = "Which file format did Mira use for the Atlas export?";
 const DATE_CONTEXT = { context_id: "original-tool-date", notes:
@@ -79,137 +60,13 @@ const WORLDS = [
 const roots: string[] = [];
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function queryRaw(date: boolean, reviewed: boolean): string {
-  const roles = date ? [
-    { role: "actor", target: { kind: "named", key: "actor", excerpt: "Mira" }, excerpt: "Mira" },
-    { role: "tool", target: { kind: "free", key: "answer", return: true }, excerpt: "Which tool" },
-    { role: "purpose", target: { kind: "named", key: "purpose", excerpt: "indexing" }, excerpt: "indexing" },
-    ...(reviewed ? [{ role: "event_date", target: { kind: "named", key: "eventDate",
-      excerpt: "August 14, 2026" }, excerpt: "August 14, 2026" }] : [])
-  ] : [
-    { role: "actor", target: { kind: "named", key: "actor", excerpt: "Mira" }, excerpt: "Mira" },
-    { role: "format", target: { kind: "free", key: "answer", return: true }, excerpt: "Which file format" },
-    { role: "export", target: { kind: "named", key: "export", excerpt: "Atlas export" }, excerpt: "Atlas export" }
-  ];
-  return interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-    alternatives: [{ conditions: [{ kind: "statement", key: "use", predicate: "use", arguments: roles }] }], gaps: [] });
-}
-
-function sourceRaw(prompt: string, completeInitial = false): string {
-  const request = parseSourceSemanticRequest(JSON.parse(prompt));
-  const assertions = request.source_request.source_assertions;
-  const revision = request.source_request.revision !== undefined;
-  const selected = revision || completeInitial ? assertions.find(row => row.text.includes(" used ")) ?? assertions.find(row => row.text.includes(" archived ")) ?? assertions[0]
-    : assertions[0];
-  if (selected === undefined) throw new Error("source response has no assertion");
-  const text = selected.text;
-  const indexing = /Mira used (\w+) for indexing on (\d{4}-\d{2}-\d{2})\./u.exec(text);
-  const format = /Mira used (\w+) for the (\w+) export\./u.exec(text);
-  const named = indexing ? { actor: "Mira", tool: indexing[1]!, purpose: "indexing", event_date: indexing[2]! }
-    : format ? { actor: "Mira", format: format[1]!, export: format[2]! }
-      : { export: "Atlas" };
-  const quote = (value: string) => ({ assertion_id: selected.assertion_id, text: value });
-  const entities = Object.entries(named).map(([key, value]) => ({ form: "selection", key,
-    selection: quote(value) }));
-  const use = indexing !== null || format !== null;
-  const predicate = use ? "used" : text.includes("archived") ? "archived" : "completed";
-  return JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "interpreted" },
-    content: { roots: [{ act: "assertion", expression: { kind: "content_ref", key: "event" } }],
-      entities, nodes: [{ kind: "statement", key: "event", predicate: { kind: "explicit",
-        reading: use ? "use" : predicate, support: quote(predicate) },
-        arguments: Object.keys(named).map(role => ({ role, target: { kind: "entity_ref", key: role } })),
-        qualifications: [] }], gaps: [] } });
-}
-
-function correspondenceRaw(prompt: string): string {
-  const request = JSON.parse(prompt) as SourceSemanticCorrespondenceProposalInput;
-  const interpretation = request.source_interpretation_descriptors[0]!.interpretation;
-  const query = request.admitted_query_semantics;
-  const frame = interpretation.frames[0]!;
-  const queryFrame = query.alternatives[0]!.frames[0]!;
-  const pairs: object[] = [];
-  if (frame.predicate_support.kind === "explicit" && frame.predicate_support.reading === "use") pairs.push({
-    relation: "contextual_equivalence", query_endpoint: { kind: "predicate", alternative: 0, frame: queryFrame.id },
-    source_endpoint: { kind: "frame", frame: frame.id }, query_support: { kind: "query_text", excerpt: "use" },
-    source_semantic_support: [{ kind: "lexical", mentions: frame.predicate_support.mentions }] });
-  for (const requirement of queryFrame.role_requirements) {
-    const slot = frame.slots.find(row => row.role_reading === requirement.role_reading);
-    if (slot === undefined) continue;
-    const target = frame.bindings.find(row => row.slot_id === slot.id)?.target;
-    if (target?.kind !== "node") throw new Error("authored source role lacks referent");
-    const referent = interpretation.referents.find(row => row.id === target.id)!;
-    const support = [{ kind: "lexical", mentions: [referent.mentions[0]!] }];
-    pairs.push({ relation: "contextual_equivalence",
-      query_endpoint: { kind: "slot", alternative: 0, frame: queryFrame.id, slot: requirement.id },
-      source_endpoint: { kind: "slot", frame: frame.id, slot: slot.id },
-      query_support: requirement.support, source_semantic_support: support });
-    const variable = query.variables.find(row => row.id === requirement.target_variable);
-    const sourceText = referent.mentions.map(id => interpretation.mentions.find(row => row.id === id)?.text ?? "").join(" ");
-    const reference = variable?.reference?.excerpt ?? "";
-    const same = requirement.role_reading === "event_date"
-      ? new Date(`${sourceText}T00:00:00.000Z`).getTime() === new Date(`${reference} UTC`).getTime()
-      : reference.includes(sourceText);
-    if (variable?.reference !== undefined && same) pairs.push({ relation: "contextual_equivalence",
-      query_endpoint: { kind: "referent", variable: variable.id },
-      source_endpoint: { kind: "referent", referent: referent.id },
-      query_support: variable.reference, source_semantic_support: support });
-  }
-  return correspondenceAssessmentJson({ ...request,
-    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
-    producer_version: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION },
-  { correspondences: pairs });
-}
-
-async function fillProposal(path: string, cacheRoot: string, raw: (prompt: string) => string,
-  profile: ExtractionRequestProfile, onAttempt?: () => void) {
-  const workset = parseSemanticProposalWorkset(JSON.parse(readFileSync(path, "utf8")));
-  mkdirSync(cacheRoot, { recursive: true });
-  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 16_384, 1),
-    inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  return executeSemanticProposalFill({ workset, cacheRoot, authority,
-    config: { providerUrl: URL, model: MODEL, requestProfile: profile, apiKey: "fixture" },
-    extractor: { extract: async ({ userPrompt }) => {
-      onAttempt?.();
-      const rawJson = raw(userPrompt);
-      return { rawJson, responseMetadata: { finishReason: "STOP" },
-        usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-        responseBody: syntheticGeminiBody(rawJson, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) };
-    } } });
-}
-
-async function fillSource(root: string, snapshotPath: string, cacheRoot: string,
-  generation: typeof EXTRACTION_OPEN_SEMANTICS_GENERATION, keys: readonly string[], label: string,
-  raw: (prompt: string) => string = sourceRaw, onAttempt?: () => void) {
-  mkdirSync(cacheRoot, { recursive: true });
-  const options = { variant: "native_source_snapshot" as const,
-    nativeSourcePopulation: { name: "originals", snapshotPath }, cacheRoot,
-    sourcePacking: "complete-source" as const, openSemantics: generation };
-  const inspection = await inspectExtractionAuthority({ ...options, action: "sample",
-    revision: readCurrentExtractionAuthorityRevision() });
-  const preflight = await preflightSourceSemanticInteractive({ ...options, preflightKeys: keys,
-    preflightOutputTokenCap: 16_384, geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } });
-  const receipt = createExtractionAuthorityReceipt({ action: "sample",
-    sampleScope: createExtractionSampleScope(keys, inspection), sourcePreflight: preflight,
-    observation: inspection.observation, inspection, maxConcurrency: 1,
-    outputTokenCap: { field: "maxOutputTokens", value: 16_384 }, diskFloorBytes: 0,
-    priceEstimate: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5,
-      maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } });
-  const receiptPath = join(root, `${label}-receipt.json`), preflightPath = join(root, `${label}-preflight.json`);
-  writeExtractionAuthorityReceipt(receiptPath, receipt);
-  writeFileSync(preflightPath, JSON.stringify(preflight));
-  vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (_url, init) => {
-    onAttempt?.();
-    const prompt = JSON.parse(String(init?.body)).contents[0].parts[0].text as string;
-    const response = raw(prompt);
-    return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: response }] } }],
-      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
-  }));
-  const filled = await runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 });
-  expect(filled.newlyExtracted).toBe(keys.length);
-  return preflightPath;
-}
-
-for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", cOnly: true }] as const)
+for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", cOnly: true },
+  { ...WORLDS[2], name: "retained assistant known event time", retainedClock: OBSERVED },
+  { ...WORLDS[2], name: "retained assistant unknown event time", retainedClock: null },
+  { ...WORLDS[2], name: "retained assistant minute-precision event time", retainedClock: "2026-09-22T00:00Z" },
+  { ...WORLDS[2], name: "retained assistant minute-precision recorded time with unknown event time", retainedClock: null,
+    retainedRecordedAt: ["2026-09-22T00:00Z", "2026-09-22T00:01Z"] }
+] as const)
   it(`delivers the frozen ${world.name} distinction through the connected native recovery`, async () => {
   const cOnly = "cOnly" in world && world.cOnly;
   const evidenceRoot = mkdtempSync(join(tmpdir(), "native-original-recovery-")); roots.push(evidenceRoot);
@@ -224,15 +81,25 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const question = world.date ? DATE_QUESTION : FORMAT_QUESTION;
   const context = world.date ? DATE_CONTEXT : FORMAT_CONTEXT;
   const sourceIds = ["source-7df0", "source-b326"] as const;
-  await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
+  const sourceClock = "retainedClock" in world ? world.retainedClock : OBSERVED;
+  const sourceRecordedAt = "retainedRecordedAt" in world ? world.retainedRecordedAt : INGESTED;
+  const expectedSourceMetadata = sourceIds.map((source_id, index) => ({ source_id,
+    event_time: sourceClock, speaker: "assistant", recorded_at: sourceRecordedAt[index] }));
+  if ("retainedClock" in world) await prepareRetainedRecoverySnapshot(root, snapshotPath, worldId,
+    world.bodies.map((body, index) => ({ source_id: sourceIds[index]!, content_bytes: body,
+      event_time: sourceClock, recorded_at: sourceRecordedAt[index]!, speaker: "assistant",
+      attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION })));
+  else await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
     workspaceId: worldId, runId: worldId,
     producerCommit,
     sources: world.bodies.map((body, index) => ({ source_id: sourceIds[index]!, source_version: "1",
       title: world.titles[index]!, content_bytes: body, source_observed_at: OBSERVED,
       recorded_at: INGESTED[index]! })) });
   const native = readVerifiedNativeSourceSnapshot(snapshotPath);
-  expect(native.records.map(row => [row.title, row.content_bytes, row.source_observed_at, row.recorded_at]))
-    .toEqual(world.bodies.map((body, index) => [world.titles[index], body, OBSERVED, INGESTED[index]]));
+  expect(native.records.map(row => [row.content_bytes, row.source_observed_at, row.recorded_at]))
+    .toEqual(world.bodies.map((body, index) => [body, sourceClock, sourceRecordedAt[index]]));
+  if ("retainedClock" in world) expect(native.records.every(row => row.source_role === "assistant")).toBe(true);
+  else expect(native.records.map(row => row.title)).toEqual(world.titles);
   const qCache = join(root, "q-cache");
   const qWorksetPath = join(root, "initial-q.json");
   writeFileSync(qWorksetPath, JSON.stringify(parseSemanticProposalWorkset({
@@ -272,6 +139,15 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     initial_discovery_work: unknown };
   recordRecoveryNativeWork(staticRoot, "shared-raw-observation", frozen.initial_discovery_work);
   expect(frozen.window).toHaveLength(2);
+  if ("retainedClock" in world) {
+    const windowBytes = readFileSync(join(recoveryRoot, "recovery-window.json"));
+    expect(await runSemanticChainLauncher(["recover-freeze", "--config", freezePath, "--root", recoveryRoot])).toBe(0);
+    expect(readFileSync(join(recoveryRoot, "recovery-window.json"))).toEqual(windowBytes);
+    const reopened = admitRecoveryWindow(recoveryRoot);
+    expect(reopened.window.map(row => [row.source_id, row.source_observed_at, row.recorded_at]).sort())
+      .toEqual(expectedSourceMetadata.map(row => [row.source_id, row.event_time, row.recorded_at]).sort());
+    expect(readRetainedSourceMetadata(reopened.raw_snapshot_path)).toEqual(expectedSourceMetadata);
+  }
   if (!world.date) expect(frozen.window.find(row => row.source_id === sourceIds[0])).toMatchObject({
     read_bytes: Buffer.byteLength("Mira completed the Atlas export.\n"), complete: false });
   if (world.name === "date positive") {
@@ -407,6 +283,19 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     [revision.child_key], "child-h", cOnly
       ? () => JSON.stringify({ contract: "source-semantic-proposal-v8", outcome: { status: "abstained" } })
       : sourceRaw);
+  if ("retainedClock" in world) {
+    const physical = parseSourceSemanticInteractivePreflight(JSON.parse(readFileSync(childPreflight, "utf8")));
+    expect(physical.ready_requests).toHaveLength(1);
+    const childLine = physical.ready_requests[0]!;
+    const childRequest = parseSourceSemanticRequest(JSON.parse(childLine.userPrompt));
+    expect(childRequest.source_request.source_role).toBe("assistant");
+    expect(childRequest.source_request.source_assertions.length).toBeGreaterThan(0);
+    expect(childRequest.source_request.source_assertions.every(row => row.source_role === "assistant")).toBe(true);
+    const raw = readCompletePhysicalSourceResponseForRequest({ cacheRoot: childCache,
+      currentPreflight: physical, physicalPreflight: physical, currentLine: childLine });
+    expect(JSON.parse(raw)).toMatchObject({ outcome: { status: "interpreted" },
+      content: { roots: [expect.any(Object)], nodes: [expect.any(Object)] } });
+  }
   if (world.name === "date positive") {
     const shard = cacheFilePath(childCache, revision.child_key);
     const missing = `${shard}.temporarily-absent`;
@@ -418,6 +307,15 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   }
   expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
     "--source-preflight", childPreflight, "--source-cache-root", childCache])).toBe(0);
+  if ("retainedClock" in world) {
+    const final = admitFinalRecoveryQualified(recoveryRoot);
+    expect(final.final.source_outcome).toBe("child_published");
+    expect(readRetainedSourceMetadata(final.final.snapshot_path)).toEqual(expectedSourceMetadata);
+    const retainedFinal = readFileSync(join(recoveryRoot, "final-qualified.json"));
+    expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
+      "--source-preflight", childPreflight, "--source-cache-root", childCache])).toBe(0);
+    expect(readFileSync(join(recoveryRoot, "final-qualified.json"))).toEqual(retainedFinal);
+  }
   expect(await runSemanticChainLauncher(["recover-prepare-final-c", "--root", recoveryRoot])).toBe(0);
   const newC = join(recoveryRoot, "final-correspondence-new-workset.json");
   if (cOnly) {

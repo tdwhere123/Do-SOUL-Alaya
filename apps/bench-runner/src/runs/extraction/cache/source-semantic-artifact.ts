@@ -80,10 +80,11 @@ function unboundProposal(sourceCorpus: string): {
   };
 }
 
-function proposalForRequest(sourceCorpus: string, request: SourceSemanticRequest) {
+export function proposalForRequest(sourceCorpus: string, request: SourceSemanticRequest) {
   const body = request.source_request;
   return { ...unboundProposal(sourceCorpus), assertionIds: body.source_assertions.map(row => row.assertion_id),
     attribution_context: body.attribution_context,
+    ...(body.source_role === undefined ? {} : { sourceRole: body.source_role }),
     ...(body.generation_task === undefined ? {} : { generationTask: body.generation_task }) };
 }
 

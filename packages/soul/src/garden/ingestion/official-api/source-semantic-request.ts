@@ -26,7 +26,7 @@ import {
   ApprovedSemanticContextSchema, UtteranceAttributionSchema, UNKNOWN_UTTERANCE_ATTRIBUTION,
   bindUtteranceAttribution, type UtteranceAttribution
 } from "@do-soul/alaya-protocol";
-import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
+import { SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT, SourceSemanticSourceRoleSchema, indexSourceSemanticUnits, selectSourceSemanticUnits } from "./source-semantic-units.js";
 import { sourceSemanticGenerationSystemPrompt } from "./source-semantic-inline-guidance.js";
 import { SourceSemanticRevisionSchema, validateSourceSemanticRevision, type SourceSemanticRevision } from "./source-semantic-revision.js";
 import { SourceSemanticProposalRevisionSchema, assertSourceSemanticProposalRevision, type SourceSemanticProposalRevision } from "./source-semantic-proposal-revision.js";
@@ -82,6 +82,7 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   proposal_contract: z.enum([SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT, SOURCE_SEMANTIC_INLINE_PROPOSAL_CONTRACT]),
   source_unit_contract: z.literal(SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT),
   source_scope: z.literal("complete-source").optional(),
+  source_role: SourceSemanticSourceRoleSchema.optional(),
   generation_schema_contract: SourceSemanticGenerationSchemaContractSchema,
   generation_view_contract: SourceSemanticGenerationViewContractSchema.optional(),
   generation_task: SourceSemanticGenerationTaskSchema.optional(),
@@ -92,12 +93,15 @@ const SourceSemanticOpenRequestBodySchema = z.object({
   attribution_context: UtteranceAttributionSchema,
   assertion_locations: z.array(SourceSemanticAssertionLocationSchema).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly(),
   source_assertions: z.array(z.object({
-    assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: z.enum(["user", "assistant"])
+    assertion_id: SourceAssertionIdSchema, text: z.string().trim().min(1), source_role: SourceSemanticSourceRoleSchema
   }).strict().readonly()).max(SOURCE_REFERENCE_MAX_ASSERTIONS).readonly()
 }).strict().superRefine((request, context) => {
   validatePresentation(request, context);
   if (request.source_scope === undefined && (request.source_assertions.length > 8 || request.assertion_locations.length > 8)) {
     context.addIssue({ code: "custom", message: "partial source requests permit at most eight source units" });
+  }
+  if (request.source_role !== undefined && request.source_assertions.some(unit => unit.source_role !== request.source_role)) {
+    context.addIssue({ code: "custom", message: "source units differ from the known source role" });
   }
 }).readonly();
 
@@ -129,6 +133,7 @@ export type SourceSemanticProposalInput = Readonly<{
   sourceCorpus: string;
   assertionIds: readonly number[];
   sourceScope?: SourceSemanticOpenRequestBody["source_scope"];
+  sourceRole?: SourceSemanticOpenRequestBody["source_role"];
   generationViewContract?: SourceSemanticGenerationViewContract;
   generationTask?: SourceSemanticGenerationTask;
   generationSchemaContract?: SourceSemanticGenerationSchemaContract;
@@ -277,7 +282,7 @@ function assertSourceSemanticTaskContext(request: SourceSemanticRequest): void {
   if (body.source_scope !== "complete-source" || semanticSha256(body.original_source) !== request.source_digest) {
     throw new AlayaError("CONFLICT", "source generation task requires its exact complete original source");
   }
-  const units = indexSourceSemanticUnits(body.original_source);
+  const units = indexSourceSemanticUnits(body.original_source, body.source_role);
   if (canonicalJson(units.map(({ assertion_id, text, source_role }) => ({ assertion_id, text, source_role }))) !==
       canonicalJson(body.source_assertions) || canonicalJson(assertionLocations(body.original_source, units)) !==
       canonicalJson(body.assertion_locations)) {
@@ -289,7 +294,8 @@ function assertSourceSemanticTaskContext(request: SourceSemanticRequest): void {
 export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput): SourceSemanticHostPreparation {
   rejectForbiddenProposalInput(input);
   const units = input.sourceScope === "complete-source"
-    ? indexSourceSemanticUnits(input.sourceCorpus) : selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds);
+    ? indexSourceSemanticUnits(input.sourceCorpus, input.sourceRole)
+    : selectSourceSemanticUnits(input.sourceCorpus, input.assertionIds, input.sourceRole);
   if (input.generationTask !== undefined && input.sourceScope !== "complete-source") {
     throw new AlayaError("VALIDATION", "source generation task requires complete-source input");
   }
@@ -325,6 +331,7 @@ export function prepareSourceSemanticRequest(input: SourceSemanticProposalInput)
     proposal_contract: presentation.proposal_contract,
     source_unit_contract: SOURCE_SEMANTIC_SOURCE_UNIT_CONTRACT,
     ...(input.sourceScope !== undefined ? { source_scope: input.sourceScope } : {}),
+    ...(input.sourceRole === undefined ? {} : { source_role: input.sourceRole }),
     generation_schema_contract: presentation.generation_schema_contract,
     ...(input.generationViewContract === undefined ? {} : { generation_view_contract: input.generationViewContract }),
     ...(input.generationTask === undefined ? {} : { generation_task: input.generationTask, original_source: input.sourceCorpus }),

@@ -4,12 +4,11 @@ import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { inspectCachedSourceSemantic } from "../extraction/cache/source-semantic-artifact.js";
+import { inspectCachedSourceSemantic, proposalForRequest } from "../extraction/cache/source-semantic-artifact.js";
 import { readCompletePhysicalSourceResponseForRequest,
   readCompleteRetainedSourceResponse } from "../extraction/cache/source-interactive-binding.js";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
-import { parseExtractionOpenSemanticsGeneration, SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-  SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION } from "../extraction/request-artifact.js";
+import { parseExtractionOpenSemanticsGeneration } from "../extraction/request-artifact.js";
 import { receiveSourceSemanticBatchLine } from "../extraction/fill/batch/source-semantic-interpretation.js";
 import { censusNativeSourceRecords } from "../snapshot/source-records/census.js";
 import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
@@ -63,13 +62,7 @@ export function interpretCompleteRecoverySourceChild(input: Readonly<{
   const request = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
   const parsed = receiveSourceSemanticBatchLine({ config: { model,
     requestProfile }, line, rawJson: raw,
-    sourceCorpus, proposal: { sourceCorpus,
-      assertionIds: request.source_request.source_assertions.map(row => row.assertion_id),
-      source_id: "unbound", source_version: "unbound", producer_id: SOURCE_SEMANTIC_BATCH_PRODUCER_ID,
-      producer_version: SOURCE_SEMANTIC_BATCH_PRODUCER_VERSION,
-      ...(request.source_request.generation_task === undefined ? {} : { generationTask: request.source_request.generation_task }),
-      ...(request.source_request.attribution_context === undefined ? {} : {
-        attribution_context: request.source_request.attribution_context }) } });
+    sourceCorpus, proposal: proposalForRequest(sourceCorpus, request) });
   const cached = inspectCachedSourceSemantic(cacheRoot, line.key, model, requestProfile);
   if (cached.status === "pending" || cached.status === "hit" &&
       cached.admitted.outcome.status !== parsed.outcome.status ||

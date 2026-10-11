@@ -209,23 +209,26 @@ export function nativeSourceRequestInventory(
   records: readonly SourceCensusRecord[], datasetRevision: string,
   config: Pick<CompileSeedExtractionConfig,
     "model" | "requestProfile" | "sourcePacking" | "sourceInterpretationProfile" | "openSemantics">
-): Readonly<{ requests: readonly SourceExtractionRequest[]; unsupportedSources: readonly UnsupportedSourceRequest[] }> {
+): Readonly<{ requests: readonly SourceExtractionRequest[]; unsupportedSources: readonly UnsupportedSourceRequest[];
+  requestKeysByOccurrence: ReadonlyMap<string, string> }> {
   if (config.openSemantics === undefined || config.sourcePacking !== "complete-source") {
     throw new ExtractionCacheInvariantError("native source requests require complete-source semantics");
   }
   const collected = new Map<string, { line: SourceRequestLine; request: ExtractionArtifactSource;
     sourceCorpus: string; units: Map<string, BatchExtractionSourceUnit> }>();
+  const requestKeysByOccurrence = new Map<string, string>();
   const unsupported: UnsupportedSourceRequest[] = [];
   for (const source of records) {
     const occurrenceId = nativeSourceOccurrenceId(source);
-    const prepared = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", config.openSemantics);
+    const prepared = sourceSemanticArtifactPreparations(source.content_bytes, "complete-source", config.openSemantics,
+      source.attribution_context, source.source_role);
     for (const item of prepared) {
       if (item.status === "unsupported_source") {
         unsupported.push(Object.freeze({ messageIds: [occurrenceId], datasetRevision,
           disposition: item.disposition, sourceUnitCount: item.source.source_assertions.length }));
         continue;
       }
-      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrenceId], datasetRevision);
+      const units = sourceSemanticTransportUnits(source.content_bytes, [occurrenceId], datasetRevision, source.source_role);
       const byAssertion = new Map(units.map(unit => [unit.assertionId, unit]));
       const assigned = item.source.source_assertions.map(assertion => {
         const unit = byAssertion.get(assertion.assertion_id);
@@ -235,6 +238,12 @@ export function nativeSourceRequestInventory(
         return unit;
       });
       const expectedLine = prepareSourceSemanticRequestLine(item.semantic, [], config);
+      const priorKey = requestKeysByOccurrence.get(occurrenceId);
+      if (priorKey !== undefined && priorKey !== expectedLine.key) {
+        throw new ExtractionCacheInvariantError("native source occurrence spans different complete-source requests");
+      }
+      // Empty ready sources also own a key; unsupported sources have no assignment.
+      requestKeysByOccurrence.set(occurrenceId, expectedLine.key);
       const existing = collected.get(expectedLine.key);
       if (existing !== undefined && (existing.sourceCorpus !== source.content_bytes ||
           existing.line.requestSha256 !== expectedLine.requestSha256)) {
@@ -255,7 +264,7 @@ export function nativeSourceRequestInventory(
     assertSourceSemanticShardCapacity(item.sourceCorpus, line);
     return Object.freeze({ line, request: item.request, sourceCorpus: item.sourceCorpus, units });
   });
-  return Object.freeze({ requests: Object.freeze(requests), unsupportedSources: Object.freeze(unsupported) });
+  return Object.freeze({ requests: Object.freeze(requests), unsupportedSources: Object.freeze(unsupported), requestKeysByOccurrence });
 }
 
 function prepareNativeSourceRequestWorkset(input: Parameters<typeof prepareSourceRequestWorkset>[0],

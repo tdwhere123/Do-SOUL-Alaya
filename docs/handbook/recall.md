@@ -234,6 +234,26 @@ separate from post-extraction artifacts. A known zero-byte source has an
 `[empty source]` display preview; raw bodies, span identities and source evidence
 remain unchanged, and missing payload stays distinct.
 
+Bench can admit a retained SQLite source population through
+`admitRetainedNativeSourceSnapshot`. It copies an explicitly digest-bound,
+quiescent original into a fresh output under the snapshot publication lock;
+only the copy is opened as SQLite. The version 2 native manifest derives each
+complete current workspace record and original body from that copy, preserving
+nullable event time, recorded time, speaker, validity, project scope and explicit
+utterance attribution. Missing attribution is unavailable; explicit `unknown`
+remains valid. Original path/digest provenance is distinct from the sealer's
+candidate and publication run. Failed admission leaves an unsealed output.
+Version 2 requires a known `user` or `assistant` speaker; absent/null and system
+speakers are unavailable for this source-semantic route. Its known author is
+forwarded through the shared SOUL unit, request and transport-identity owners;
+literal role markers quoted in the body cannot override that author. Source
+bytes, assertion segmentation and catalog text remain unchanged.
+Version 1 construction and request identities remain supported. Census, source
+request preparation, retained-response association and audited publication carry
+the same attribution; publication verification compares the full source record.
+This admission prepares source evidence for the existing extraction authority;
+it does not authorize a provider attempt or establish interpretation quality.
+
 Retained source bodies remain authoritative. Write transactions maintain a
 derived projection of UTF-8-aligned chunks of at most 4 KiB, with a digest bound
 to root kind, workspace, revision, original digest and offset. Migration builds
@@ -896,6 +916,12 @@ wire contracts remain historical and cannot enter current execution. Nested
 The outgoing generation schema requires one entity declaration table and explicit
 role excerpts. Argument and reporter targets use local references; examples and
 schema present entities before branches, with nodes before roots in flat output.
+Protocol 15.0.1 derives generation and receipt from the same structural query
+body modes: ordinary alternatives need answer conditions or operation-bound
+evidence inputs; universal evaluation needs nonempty conditions; comparison
+evaluation needs empty conditions. Neither finite mode admits evidence inputs.
+Pairwise comparators require both operands and matching strictness; extrema omit
+the right operand. Domain, reference, binding and semantic checks remain native.
 Historical current-wire inline declarations and unambiguous entity-support
 inheritance still use the same receiver. Generation shape does not certify
 reference closure or fidelity.
@@ -1177,6 +1203,13 @@ and transport occurrence identity. Garden factual eligibility is not an input
 filter for this channel. Marker-absent requests retain their historical Garden
 assertion binding for offline replay. A source role records who supplied text;
 it does not certify the text as a fact or resolve its semantic context.
+An optional source-request `source_role` binds a known single-source author and
+all its units. It is included in request/revision identity and reconstructed
+from the retained request during admission. This additive SOUL request-body
+field keeps the existing opaque public request envelope version; absent fields
+retain legacy marker parsing and exact request bytes/keys. It changes neither
+the public source-reference catalog nor the producer response schema. New
+role-bound requests require their own exact request authority and cache key.
 
 Open extraction may explicitly select `complete-source` packing. Its request
 records that scope and binds all indexed units of the supplied source corpus
@@ -1580,6 +1613,14 @@ the complete source census and emits only selected, owned cache misses for the
 existing extraction authority; failed, pending, unknown, unsupported, invalid and
 incompletely observed states are not misses. An open or resource-limited first
 observation retains its fixed prefix and residual without replacing a source.
+For retained native sources, the request inventory assigns each exact source
+occurrence to its H key. Identical text with different role or attribution can
+require distinct keys; multiple exact occurrences can share one key. Ready empty
+sources retain their deterministic key, while unsupported sources have none.
+Recovery reuses the source-record timestamp contract and preserves event and
+recorded time strings, including minute precision, through the frozen window
+and final publication. Unknown event time remains null. Final H child classification uses the same role,
+attribution and generation proposal reconstruction as cache admission.
 Finalization publishes the full census to a distinct sealed
 SQLite snapshot. Newly admitted interpretations may bind only the frozen
 source/version window; compatible associations that predate it remain available

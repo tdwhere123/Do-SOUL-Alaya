@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SourceSemanticAccessReceiptSchema,
+import { AlayaError, canonicalJson, SourceRecordIdentitySchema, SourceSemanticAccessReceiptSchema,
   SourceSemanticCorrespondencePreparationOptionsSchema } from "@do-soul/alaya-protocol";
 import { censusNativeSourceRecords } from "../snapshot/source-records/census.js";
 import { readVerifiedNativeSourceSnapshot } from "../snapshot/source-records/native.js";
 import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport } from "../snapshot/source-records/publish.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
-import { nativeSourceRequestInventory } from "../extraction/fill/source-request-workset.js";
+import { nativeSourceOccurrenceId, nativeSourceRequestInventory } from "../extraction/fill/source-request-workset.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, parseExtractionOpenSemanticsGeneration } from
   "../extraction/request-artifact.js";
 import type { SourceRequestLine } from "../extraction/request-artifact.js";
@@ -49,10 +49,11 @@ const RecoveryFreezeInputSchema = z.object({
   open_semantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional(),
   chain: RecoveryChainConfigSchema
 }).strict();
+const SourceRecordFields = SourceRecordIdentitySchema.unwrap().shape;
 const WindowSourceSchema = z.object({ rank: z.number().int().min(1).max(10),
   source_id: z.string(), source_version: z.string(), record_id: z.string().min(1),
-  content_digest: z.string().min(1), corpus_digest: z.string().min(1), source_observed_at: z.string().datetime(),
-  recorded_at: z.string().datetime(), body_bytes: z.number().int().nonnegative().nullable(),
+  content_digest: z.string().min(1), corpus_digest: z.string().min(1), source_observed_at: SourceRecordFields.event_time,
+  recorded_at: SourceRecordFields.recorded_at, body_bytes: z.number().int().nonnegative().nullable(),
   read_bytes: z.number().int().nonnegative(), complete: z.boolean(),
   initial_key: Digest.nullable(), initial_cache_status: z.enum(["hit", "missing", "invalid", "unsupported"])
 }).strict();
@@ -145,7 +146,7 @@ function projectInitialWindow(input: FreezeInput, census: ReturnType<typeof cens
   const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
     model: input.source_model, requestProfile: input.source_request_profile,
     sourcePacking: "complete-source", openSemantics: generation });
-  const requestByCorpus = new Map(inventory.requests.map(row => [row.sourceCorpus, row.line]));
+  const requestByKey = new Map(inventory.requests.map(row => [row.line.key, row.line]));
   const physicalOwners = (input.initial_h_physical_owners ?? []).map(row => ({ ...row,
     cache_root: resolve(row.cache_root), physical_preflight_path: resolve(row.physical_preflight_path) }));
   const physicalByKey = new Map(physicalOwners.map(row => [row.key, row]));
@@ -162,7 +163,11 @@ function projectInitialWindow(input: FreezeInput, census: ReturnType<typeof cens
       throw new AlayaError("CONFLICT", "initial recovery window contains stale or foreign source");
     }
     seen.add(candidate.record_id);
-    const line = requestByCorpus.get(source.content_bytes);
+    const requestKey = inventory.requestKeysByOccurrence.get(nativeSourceOccurrenceId(source));
+    const line = requestKey === undefined ? undefined : requestByKey.get(requestKey);
+    if (requestKey !== undefined && line === undefined) {
+      throw new AlayaError("CONFLICT", "native source occurrence request is absent from its inventory");
+    }
     const key = line?.key ?? null;
     const owner = key === null ? undefined : physicalByKey.get(key);
     const cache = key === null ? "unsupported" : inspectCachedSourceSemantic(owner?.cache_root ?? input.source_cache_root,

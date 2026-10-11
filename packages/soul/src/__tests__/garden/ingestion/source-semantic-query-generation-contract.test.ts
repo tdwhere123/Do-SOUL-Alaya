@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import {
-  canonicalJson, encodeSourceSemanticQueryCarrier, expandSourceSemanticQueryCarrier, projectSourceSemanticQuerySupport,
-  SourceSemanticQueryCarrierBodySchema, sourceSemanticQueryIdentity, type SourceSemanticQueryMeaningBody
+  canonicalJson, encodeSourceSemanticQueryCarrier, encodeSourceSemanticQueryReferentConstraints,
+  expandSourceSemanticQueryCarrier, projectSourceSemanticQuerySupport,
+  SourceSemanticQueryCarrierBodySchema, sourceSemanticQueryIdentity, type SourceSemanticQueryMeaningBody,
+  type SourceSemanticQueryPresentation
 } from "@do-soul/alaya-protocol";
 import {
-  semanticSha256, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT
+  buildSourceSemanticQueryRequest, semanticSha256, SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT
 } from "../../../garden/ingestion/official-api/source-semantic-request.js";
-import { sourceSemanticQueryResponseJsonSchema, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT }
+import { sourceSemanticQueryResponseJsonSchema, sourceSemanticQueryResponseContract, SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT }
   from "../../../garden/ingestion/official-api/source-semantic-query-presentation.js";
 import { proposeQuerySemantics } from "../../../garden/ingestion/official-api/source-semantic-receive.js";
 import { sourceSemanticQueryExamples } from "../../../garden/ingestion/official-api/source-semantic-query-examples.js";
@@ -84,6 +86,81 @@ const operation = sourceSemanticQueryExamples.find((example) =>
   && example.response.query.alternatives.some((row) => row.evidence_inputs !== undefined))!;
 
 describe("query generation contract", () => {
+  it.each(["flat-carrier-v1", "nested-meaning-v1", "nested-referent-constraints-v1"] as const)
+  ("agrees with native admission on ordinary and finite body modes in %s", (presentation: SourceSemanticQueryPresentation) => {
+    const original_query = "Compare the mass of the rotor and axle. Did every part pass inspection?";
+    const selected = { original_query, producer_id: "query-producer", producer_version: "1", generation_presentation: presentation };
+    const request = buildSourceSemanticQueryRequest(selected);
+    const generationSchema = sourceSemanticQueryResponseJsonSchema(request);
+    const operation = { reading: "Compare mass", support: { kind: "query_text" as const, excerpt: "Compare" } };
+    const ordinary: SourceSemanticQueryMeaningBody = {
+      contract: "source-semantic-query-meaning-v5", gaps: [], domains: [{ key: "parts", excerpt: "part" }],
+      entities: [{ kind: "free", key: "part", excerpt: "every part" }],
+      alternatives: [{ conditions: [{ kind: "statement", key: "inspection", predicate: "pass inspection", arguments: [
+        { role: "part", target: { kind: "reference", key: "part" }, excerpt: "part" }
+      ] }] }]
+    };
+    const comparison: SourceSemanticQueryMeaningBody = {
+      ...ordinary, alternatives: [{ conditions: [] }],
+      entities: [{ kind: "named", key: "left", excerpt: "rotor" }, { kind: "named", key: "right", excerpt: "axle" }],
+      evaluation: { kind: "comparison", domain: "parts", operation: "gt", left: "left", right: "right", strict: true,
+        metric: "mass", unit: "kg", context: "weighing", scope: "asserted" }
+    };
+    const universal: SourceSemanticQueryMeaningBody = { ...ordinary,
+      evaluation: { kind: "forall", domain: "parts", binder: "part", local_variables: ["part", "inspection"] } };
+    const encode = (body: SourceSemanticQueryMeaningBody) => (presentation === "flat-carrier-v1"
+      ? encodeSourceSemanticQueryCarrier(body) : presentation === "nested-referent-constraints-v1"
+        ? encodeSourceSemanticQueryReferentConstraints(body) : structuredClone(body)) as {
+          alternatives: readonly { conditions: readonly unknown[] }[]; evaluation?: Record<string, unknown>
+        };
+    const ordinaryWire = encode(ordinary), comparisonWire = encode(comparison), universalWire = encode(universal);
+    const constrained = encode({ ...ordinary, entities: [...ordinary.entities ?? [], ...comparison.entities ?? []] });
+    const withInputs = { ...ordinaryWire, requested_operation: operation, alternatives: [{
+      conditions: [], evidence_inputs: [{ conditions: ordinaryWire.alternatives[0]!.conditions }]
+    }] };
+    const extremum = structuredClone(comparisonWire);
+    Object.assign(extremum.evaluation!, { operation: "maximum", strict: false });
+    Reflect.deleteProperty(extremum.evaluation!, "right");
+    const cases = [
+      { id: "ordinary", valid: true, query: ordinaryWire },
+      { id: "input-only operation", valid: true, query: withInputs },
+      { id: "forall", valid: true, query: universalWire },
+      ...(["lt", "le", "eq", "ge", "gt"] as const).map(operation => ({ id: `pairwise ${operation}`, valid: true,
+        query: { ...comparisonWire, evaluation: { ...comparisonWire.evaluation, operation, strict: operation === "lt" || operation === "gt" } }
+      })),
+      ...(["minimum", "maximum"] as const).flatMap(operation => [false, true].map(strict => ({
+        id: `${operation} strict=${strict}`, valid: true, query: { ...extremum, evaluation: { ...extremum.evaluation, operation, strict } }
+      }))),
+      { id: "empty ordinary", valid: false, query: { ...ordinaryWire, alternatives: [{ conditions: [] }] } },
+      { id: "empty operation", valid: false, query: { ...ordinaryWire, requested_operation: operation, alternatives: [{ conditions: [] }] } },
+      { id: "inputs without operation", valid: false, query: { ...ordinaryWire, alternatives: withInputs.alternatives } },
+      { id: "empty forall", valid: false, query: { ...universalWire, alternatives: [{ conditions: [] }] } },
+      { id: "forall with inputs", valid: false, query: { ...universalWire, requested_operation: operation, alternatives: [{
+        ...universalWire.alternatives[0], evidence_inputs: [{ conditions: ordinaryWire.alternatives[0]!.conditions }]
+      }] } },
+      { id: "comparison with conditions", valid: false, query: { ...constrained, evaluation: comparisonWire.evaluation } },
+      { id: "comparison with inputs", valid: false, query: { ...constrained, evaluation: comparisonWire.evaluation,
+        requested_operation: operation, alternatives: withInputs.alternatives } },
+      { id: "comparison with conditions and inputs", valid: false, query: { ...constrained, evaluation: comparisonWire.evaluation,
+        requested_operation: operation, alternatives: [{ ...ordinaryWire.alternatives[0],
+          evidence_inputs: [{ conditions: ordinaryWire.alternatives[0]!.conditions }]
+        }] } },
+      { id: "pairwise without right", valid: false, query: { ...comparisonWire, evaluation: { ...extremum.evaluation, operation: "gt", strict: true } } },
+      { id: "pairwise wrong strictness", valid: false, query: { ...comparisonWire, evaluation: { ...comparisonWire.evaluation, strict: false } } },
+      { id: "inclusive pairwise wrong strictness", valid: false, query: { ...comparisonWire, evaluation: { ...comparisonWire.evaluation, operation: "le" } } },
+      { id: "extremum with right", valid: false, query: { ...comparisonWire, evaluation: { ...comparisonWire.evaluation, operation: "maximum" } } }
+    ];
+    const responses = cases.map(row => ({ ...row, instance: {
+      contract: sourceSemanticQueryResponseContract(request), outcome: { status: "interpreted" }, query: row.query
+    } }));
+    const generated = draft2020(generationSchema, responses);
+    for (const row of responses) {
+      const received = proposeQuerySemantics(selected, { rawJson: JSON.stringify(row.instance) });
+      expect.soft({ generation: generated[row.id], native: received.outcome.status === "interpreted" }, row.id)
+        .toEqual({ generation: row.valid, native: row.valid });
+    }
+  });
+
   it("retains the requested property independently of the answer variable's local name", () => {
     const example = sourceSemanticQueryExamples.find((row) => row.original_query === "What is the color of cabinet C?")!;
     const result = receive(example.original_query, example.response);
@@ -205,8 +282,11 @@ describe("query generation contract", () => {
     expect(draft2020(schema, [
       { id: "table", instance: example.response }, { id: "inline", instance: inline }, { id: "omitted", instance: omitted }
     ])).toEqual({ table: true, inline: false, omitted: false });
-    for (const name of ["queryRequiresRequestedOperation", "queryOmitsEvidenceInputs"]) {
-      const body = deref(schema, { $ref: `#/$defs/${name}` });
+    const query = deref(schema, isObject(schema.properties) ? schema.properties.query : undefined);
+    const branches = Array.isArray(query.anyOf) ? query.anyOf : [];
+    expect(branches.length).toBeGreaterThan(0);
+    for (const branch of branches) {
+      const body = deref(schema, branch);
       expect(body.required).toEqual(expect.arrayContaining(["entities"]));
       expect(Object.keys(body.properties as object).slice(0, 3)).toEqual(["contract", "entities", "nodes"]);
     }
@@ -257,7 +337,7 @@ describe("query generation contract", () => {
     }
   });
 
-  it("keeps the historical request/response contract ids and derives the generation union from the carrier body", () => {
+  it("keeps historical request/response contract ids and leaves outcome gaps host-derived", () => {
     expect(SOURCE_SEMANTIC_QUERY_MEANING_REQUEST_CONTRACT).toBe("source-semantic-query-request-v9");
     expect(SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT).toBe("source-semantic-query-response-v8");
     const outcome = deref(schema, isObject(schema.properties) ? schema.properties.outcome : undefined);
@@ -265,24 +345,6 @@ describe("query generation contract", () => {
       .map((branch) => deref(schema, branch));
     const interpreted = branches.find((branch) => JSON.stringify(branch.properties ?? {}).includes("interpreted"));
     expect(interpreted?.properties).not.toHaveProperty("gaps");
-    const query = isObject(schema.properties) ? schema.properties.query : undefined;
-    expect(isObject(query) ? query.anyOf : undefined).toEqual([
-      { $ref: "#/$defs/queryRequiresRequestedOperation" },
-      { $ref: "#/$defs/queryOmitsEvidenceInputs" }
-    ]);
-    const requiredOperation = deref(schema, { $ref: "#/$defs/queryRequiresRequestedOperation" });
-    expect(requiredOperation.required).toEqual(expect.arrayContaining(["requested_operation"]));
-    const omittedInputs = deref(schema, { $ref: "#/$defs/queryOmitsEvidenceInputs" });
-    const omittedProperties = isObject(omittedInputs.properties) ? omittedInputs.properties : undefined;
-    expect(isObject(requiredOperation.properties) ? requiredOperation.properties.requested_operation : undefined)
-      .toEqual(omittedProperties?.requested_operation);
-    const residualItems = deref(schema, isObject(omittedProperties?.alternatives) ? omittedProperties.alternatives.items : undefined);
-    const residualProperties = isObject(residualItems.properties) ? residualItems.properties : undefined;
-    expect(residualProperties).not.toHaveProperty("evidence_inputs");
-    const operationItems = deref(schema, isObject(requiredOperation.properties)
-      && isObject(requiredOperation.properties.alternatives) ? requiredOperation.properties.alternatives.items : undefined);
-    const operationProperties = isObject(operationItems.properties) ? operationItems.properties : undefined;
-    expect(operationProperties).toHaveProperty("evidence_inputs");
   });
 
   it("preserves canonical admitted meaning when valid envelopes omit or match outcome.gaps", () => {
