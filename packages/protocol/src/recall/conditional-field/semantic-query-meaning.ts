@@ -8,6 +8,7 @@ import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resou
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticQueryEvaluationSchema, SourceSemanticQuerySchema, SourceSemanticQueryGapSchema,
   SourceSemanticRequestedOperationSchema, SourceSemanticQueryUniversalEvaluationSchema, SourceSemanticQueryComparisonEvaluationSchema,
+  sourceSemanticQueryPurposeSchema,
   type SourceSemanticContextObligation, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
@@ -160,7 +161,7 @@ function alternativeShape<Condition extends z.ZodTypeAny>(condition: Condition) 
     conditions,
     evidence_inputs: z.array(z.object({ conditions: z.array(condition).min(1).max(16).readonly() })
       .strict().readonly()).min(1).max(16).readonly().optional(),
-    purpose: z.enum(["support", "counterexample"]).optional()
+    purpose: sourceSemanticQueryPurposeSchema("forall")
   }).strict().readonly();
 }
 const Alternative = alternativeShape(Meaning);
@@ -187,7 +188,8 @@ function queryBodySchema<Condition extends z.ZodTypeAny, Extra extends Record<st
   const alternative = alternativeShape(condition);
   const fields = { ...meaningBodyShape(alternative), ...extra };
   const { evaluation: _evaluation, alternatives: _alternatives, ...ordinary } = fields;
-  const { evidence_inputs, purpose } = alternative.unwrap().shape;
+  const { evidence_inputs } = alternative.unwrap().shape;
+  const purpose = sourceSemanticQueryPurposeSchema();
   const nonemptyConditions = z.array(condition).min(1).max(16).readonly();
   const emptyConditions = z.array(condition).max(0).readonly();
   const withoutInputs = z.object({ conditions: nonemptyConditions, purpose }).strict().readonly();
@@ -201,7 +203,8 @@ function queryBodySchema<Condition extends z.ZodTypeAny, Extra extends Record<st
     z.object({ ...ordinary, requested_operation: SourceSemanticRequestedOperationSchema,
       alternatives: alternatives(operationAlternative) }).strict().readonly(),
     z.object({ ...ordinary, evaluation: SourceSemanticQueryUniversalEvaluationSchema,
-      alternatives: alternatives(withoutInputs) }).strict().readonly(),
+      alternatives: alternatives(z.object({ conditions: nonemptyConditions,
+        purpose: sourceSemanticQueryPurposeSchema("forall") }).strict().readonly()) }).strict().readonly(),
     z.object({ ...ordinary, evaluation: SourceSemanticQueryComparisonEvaluationSchema,
       alternatives: alternatives(z.object({ conditions: emptyConditions, purpose }).strict().readonly()) }).strict().readonly()
   ]);

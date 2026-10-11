@@ -8,13 +8,24 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 16.0.0, engine gateway 1.2.0
+## Unreleased — protocol 17.0.0, engine gateway 1.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 16.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 17.0.0 can move
 independently of the app semver.
+
+Protocol 17.0.0 restricts query alternative `purpose: "counterexample"` to
+universal (`evaluation.kind: "forall"`) bodies. One Protocol purpose rule owns
+both canonical admission and the flat, nested meaning and referent generation
+schemas. Ordinary, operation and comparison bodies accept omitted purpose or
+`support`; valid universal counterexamples remain supported. Narrowing the
+publicly exported meaning/carrier validators used by the SOUL producer is a
+major under invariant §25, despite native admission already rejecting
+non-universal counterexamples. The MCP schema snapshot is unchanged. Exact
+same-body negation, references and connectivity remain native checks; the
+restriction does not establish producer fidelity.
 
 Protocol 16.0.0 publishes the shared query body and comparison constraints in
 generation and public MCP schemas. Pairwise comparisons require `right` and
@@ -26,12 +37,13 @@ and empty comparison bodies; finite evaluation cannot carry evidence inputs.
 
 Cross-major migration: consumers generating or validating query semantics must
 adopt the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
-and its comparison alternatives. Valid canonical query identities and wire
-contract IDs remain unchanged; changed generation schema/prompt bytes receive
-their own request/cache identities. Historical requests, failed attempts and
+and its comparison alternatives and purpose/evaluation combinations. Valid
+canonical query identities and wire contract IDs remain unchanged; changed
+generation schema/prompt bytes receive their own request/cache identities.
+Historical requests, failed attempts and
 source records are not rewritten or granted retry authority. The ordinary
 source-only Recall archive reader explicitly supports producer packages
-14.1.0, 15.0.0 and 16.0.0 while recording its current reader version separately.
+14.1.0, 15.0.0, 16.0.0 and 17.0.0 while recording its current reader version separately.
 This candidate does not register 15.0.1 as a historical capture format or perform
 a release, provider run or semantic-fidelity acceptance.
 

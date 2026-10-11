@@ -51,18 +51,37 @@ export function facetModeAccepts(
   return evaluateFacetPredicate(mode, retainSamePathVectors(vectors), threshold);
 }
 
+/** One generator owns the lookup for its immutable facet input version. */
+export class PathFacetLookup {
+  private readonly byIdentity = new Map<string, readonly FacetVector[]>();
+  public constructor(private readonly facets: RetainedRows<FacetVector>) {}
+
+  public *forState(state: ProductStateKey): PathComputation<readonly FacetVector[]> {
+    const identity = facetPathId(state), cached = this.byIdentity.get(identity);
+    if (cached !== undefined) { yield { kind: "work" }; return cached; }
+    yield { kind: "work", retained_bytes: 96 + 2 * identity.length };
+    const matching: FacetVector[] = [];
+    for (let index = 0; index < this.facets.length; index += 1) {
+      yield { kind: "work" };
+      const vector = this.facets.at(index)!;
+      if (!facetBelongsToOutput(vector.path_id, state)) continue;
+      yield { kind: "work", retained_bytes: 16 };
+      matching.push(vector);
+    }
+    // Partial buckets remain generator scratch until their scan is complete.
+    this.byIdentity.set(identity, matching);
+    return matching;
+  }
+}
+
 export function* extendFacets(
-  priorFacets: RetainedRows<FacetVector>,
+  lookup: PathFacetLookup,
   from: ProductStateKey,
   to: ProductStateKey,
   route: string,
   milligrades: number
 ): PathComputation<readonly FacetVector[]> {
-  const inherited: FacetVector[] = [];
-  for (const vector of priorFacets) {
-    if (facetBelongsToOutput(vector.path_id, from)) inherited.push(vector);
-    yield { kind: "work" };
-  }
+  const inherited = yield* lookup.forState(from);
   const obligation = { obligation_id: createHash("sha256").update(route).digest("hex"), domain_id: ASSOCIATION_DOMAIN_ID };
   if (inherited.length === 0) {
     return [{

@@ -118,6 +118,12 @@ describe("query generation contract", () => {
     const withInputs = { ...ordinaryWire, requested_operation: operation, alternatives: [{
       conditions: [], evidence_inputs: [{ conditions: ordinaryWire.alternatives[0]!.conditions }]
     }] };
+    const universalCounterexample = encode({ ...universal,
+      evaluation: { kind: "forall", domain: "parts", binder: "part", local_variables: ["part", "inspection", "failure"] },
+      alternatives: [...universal.alternatives, { purpose: "counterexample", conditions: [{
+        kind: "not", key: "failure", content: universal.alternatives[0]!.conditions[0]!
+      }] }]
+    });
     const extremum = structuredClone(comparisonWire);
     Object.assign(extremum.evaluation!, { operation: "maximum", strict: false });
     Reflect.deleteProperty(extremum.evaluation!, "right");
@@ -125,6 +131,18 @@ describe("query generation contract", () => {
       { id: "ordinary", valid: true, query: ordinaryWire },
       { id: "input-only operation", valid: true, query: withInputs },
       { id: "forall", valid: true, query: universalWire },
+      { id: "forall with same-body counterexample", valid: true, query: universalCounterexample },
+      ...[
+        { id: "ordinary", query: ordinaryWire },
+        { id: "operation with answers", query: { ...ordinaryWire, requested_operation: operation } },
+        { id: "input-only operation", query: withInputs },
+        { id: "forall", query: universalWire },
+        { id: "comparison", query: comparisonWire }
+      ].flatMap(row => (["support", "counterexample"] as const).map(purpose => ({
+        id: `${row.id} with ${purpose} purpose`, valid: purpose === "support" || row.id === "forall",
+        query: row.id === "forall" && purpose === "counterexample" ? universalCounterexample
+          : { ...row.query, alternatives: row.query.alternatives.map(alternative => ({ ...alternative, purpose })) }
+      }))),
       ...(["lt", "le", "eq", "ge", "gt"] as const).map(operation => ({ id: `pairwise ${operation}`, valid: true,
         query: { ...comparisonWire, evaluation: { ...comparisonWire.evaluation, operation, strict: operation === "lt" || operation === "gt" } }
       })),

@@ -893,7 +893,17 @@ delivered source records.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Q proposal inputs and native query workset items may select
+operation. Ordinary `alternatives` are disjunctive ways to satisfy the same query
+with the same return projection, not independent subtasks. All `return:true`
+declarations form one global return set; every nonempty answer view must bind
+every returned key, except comparison evaluation, which uses its operand rules.
+An empty ordinary answer view has no direct-answer binding. Each evidence input projects
+its own participating free entity values independently of the direct-answer
+return set. The shared generation guidance explains these existing rules and
+requires the whole request's participants, governing conditions and residual
+relationships to remain in the relevant answer/input conditions; moving
+conditions between branches alone does not establish faithful meaning.
+Q proposal inputs and native query workset items may select
 `generation_presentation`. Omitted or `flat-carrier-v1` selection keeps request v9
 and response v8: expression occurrences use a bounded acyclic `nodes` table, and
 condition/operand positions carry serialization tokens. Explicit
@@ -926,6 +936,14 @@ a major under invariant §25 even though native admission already rejected the
 illegal combinations. Upgrading clients must adopt the structural alternatives;
 existing valid canonical identities and wire contract IDs remain unchanged.
 Domain, reference, binding and semantic checks remain native.
+Protocol 17.0.0 further restricts alternative `purpose: "counterexample"` to
+universal evaluation. Canonical admission and all three producer presentations
+derive this implication from one Protocol purpose rule. Ordinary, operation and
+comparison bodies allow omitted purpose or `support`; universal bodies retain
+both purposes. This public schema narrowing is a major under invariant §25.
+Clients must adopt that combination; valid canonical identities and wire
+contract IDs remain unchanged. Same-body negation and connectivity still require
+native validation, and lawful generation shapes do not prove producer fidelity.
 Historical current-wire inline declarations and unambiguous entity-support
 inheritance still use the same receiver. Generation shape does not certify
 reference closure or fidelity.
@@ -1587,9 +1605,9 @@ memory nor establishes cross-task utility or benchmark acceptance.
 `ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
 episode and call reservations, physical MCP request/reply transcript, trusted
 handler context, source snapshot, first-exposure receipts and closed process.
-The current Protocol 16.0.0 reader accepts producer packages 14.1.0, 15.0.0 and
-16.0.0 with `conditional-field-source-only-v1` semantics. The semantic-library
-capacity and query-schema changes leave this public source-only contract
+The current Protocol 17.0.0 reader accepts producer packages 14.1.0, 15.0.0,
+16.0.0 and 17.0.0 with `conditional-field-source-only-v1` semantics. The
+semantic-library capacity and query-schema changes leave this public source-only contract
 unchanged. Producer provenance
 remains immutable and separate from the current
 verification and consumer execution revisions. Arbitrary ancestor commits and

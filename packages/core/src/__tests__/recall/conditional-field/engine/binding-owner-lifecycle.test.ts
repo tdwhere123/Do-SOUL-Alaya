@@ -5,6 +5,7 @@ import { BindingContextStore, BindingContextResourceError, BindingContextUnavail
 import { createConditionalField, applyObserverPage } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { adjacencyEffectsForRows, createAdjacencyEffectCursor } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
+import { facetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import { claimObligationAccepts } from "../../../../recall/conditional-field/index/claim-obligation.js";
 import { retainedFieldLevels, snapshotRestoredEngineWork } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
@@ -78,7 +79,7 @@ describe("execution-owned binding recovery", () => {
       .toEqual(["committed", "prepared", "after-binding"]);
   });
 
-  it("retains native compiled payloads across rebuild and one-work resumes", () => {
+  it.each([false, true])("retains native compiled payloads across rebuild and one-work resumes (facets: %s)", (withFacets) => {
     const requestBudget = { ...budget, finalization_reserve: 100, min_envelope: 10 };
     const interpretation = compileConditionalFieldQuery({ source: "typed", program: query.program, budget: requestBudget,
       snapshot_id: SNAPSHOT_ID, authorized_scopes: null, interpretation_clock: "2026-09-10T00:00:00Z",
@@ -94,28 +95,37 @@ describe("execution-owned binding recovery", () => {
         validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00Z" }
       };
     });
+    const liveStates = seedProgramStates(query.program).map((state) => productKey("a", "h0", "x=a", state));
     const attempt = (memory: number) => {
+      let facetReads = 0;
+      const facets = new Proxy(withFacets ? [{ schema_version: 1 as const, path_id: facetPathId(liveStates[0]!), coordinates: [411] }] : [], {
+        get(target, key, receiver) {
+          if (typeof key === "string" && /^\d+$/u.test(key)) facetReads += 1;
+          return Reflect.get(target, key, receiver);
+        }
+      });
       const cursor = createAdjacencyEffectCursor(rows, { interpretation, asOf: "2026-09-10T00:00:00Z",
-        liveStates: seedProgramStates(query.program).map((state) => productKey("a", "h0", "x=a", state)),
+        liveStates, facets,
         sourceFacts: new Map(["a", ...rows.map((row) => row.targetObjectId)].map((object_id) => [object_id, { object_id, source_revision: "rev" }])),
         overlay: { p: { applicable: true, milligrades: 1000 } }, bindingContexts: new BindingContextStore(memory) }, memory)!;
       const failed = cursor.advance(0, 100_000, memory);
       const restarted = cursor.advance(0, 0, memory), cached = cursor.advance(0, 15, memory);
-      return { cursor, failed, restarted, cached };
+      return { cursor, failed, restarted, cached, facetReads: () => facetReads };
     };
     // Find the binding-allocation boundary; preceding cursor scratch can change
     // without changing the retained-prefix recovery obligation.
     let selected: ReturnType<typeof attempt> | undefined;
-    for (let memory = 51_000; memory <= 55_000; memory += 64) {
+    for (let memory = 51_000; memory <= 61_000; memory += 64) {
       const candidate = attempt(memory);
       if (candidate.failed.status === "memory_exhausted" && candidate.failed.effects.length === 0
         && candidate.cached.effects.length === 15) { selected = candidate; break; }
     }
     if (selected === undefined) throw new Error("expected native binding failure after fifteen cached effects");
-    const { cursor, failed, restarted, cached } = selected;
+    const { cursor, failed, restarted, cached, facetReads } = selected;
     expect(failed.status).toBe("memory_exhausted");
     expect(failed.effects).toEqual([]);
     expect(cached.effects).toHaveLength(15);
+    expect(facetReads()).toBe(withFacets ? 1 : 0);
     const payloadBytes = cached.effects.reduce((sum, effect) => sum + 512
       + Buffer.byteLength(JSON.stringify({ transition: effect.transition, derivation: effect.derivation, facet: effect.facet }), "utf8"), 0);
     expect(restarted.retained_bytes).toBeGreaterThanOrEqual(payloadBytes + 15 * 64);
@@ -135,6 +145,8 @@ describe("execution-owned binding recovery", () => {
     expect(complete).toBe(true);
     expect(effects).toHaveLength(16);
     expect(new Set(effects.map((effect) => effect.observation_id)).size).toBe(16);
+    expect(facetReads()).toBe(withFacets ? 2 : 0);
+    expect(effects.map(effect => effect.facet!.coordinates)).toEqual(rows.map(() => withFacets ? [411, 1000] : [1000]));
     cached.effects.forEach((effect, i) => expect(effects[i]).toBe(effect));
   });
 

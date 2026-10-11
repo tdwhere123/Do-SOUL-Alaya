@@ -36,6 +36,34 @@ it("accepts a connected positive existential query", () => {
   expect(SourceSemanticQuerySchema.parse(connected).alternatives).toHaveLength(1);
 });
 
+it("requires universal evaluation for a counterexample even through canonical admission", () => {
+  const body: SourceSemanticQueryFrame = { id: "qPack", variable: "fPack", predicate_reading: "pack",
+    role_requirements: [role("object", "parcel")] };
+  const positive = query([body], [{ frame: "qPack", kind: "asserted_at_source" }]);
+  const universal = {
+    ...positive, return_variables: [],
+    variables: [...positive.variables, { id: "negative", sort: "context" as const }],
+    domains: [{ id: "parcels", support: { kind: "query_text", excerpt: "all parcels" } }],
+    evaluation: { kind: "forall", domain: "parcels", binder: "parcel", local_variables: ["parcel", "fPack", "negative"] },
+    alternatives: [...positive.alternatives, { purpose: "counterexample", frames: [
+      { id: "qNot", variable: "negative", predicate_reading: "not", operator: "not", role_requirements: [] }, body
+    ], context_obligations: [{ frame: "qNot", kind: "asserted_at_source" }, {
+      frame: "qPack", kind: "explicit_embedded_structure",
+      incidence: { kind: "operator_operand", other_frame: "qNot", role: "content" }
+    }] }]
+  };
+  expect(SourceSemanticQuerySchema.safeParse(universal).success).toBe(true);
+  for (const evaluation of [undefined, { kind: "comparison", domain: "parcels", operation: "minimum",
+    left: "parcel", strict: false, metric: "mass", unit: "kg", context: "lab", scope: "asserted" }]) {
+    for (const requested_operation of [undefined, { reading: "check packing", support: { kind: "query_text", excerpt: "pack" } }]) {
+      const result = SourceSemanticQuerySchema.safeParse({ ...universal, evaluation, requested_operation });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.issues.map(issue => issue.message))
+        .toContain("counterexample alternative requires a universal query");
+    }
+  }
+});
+
 it("rejects a disconnected query instead of dropping the extra constraint", () => {
   const disconnected = query([{
     id: "qPack", variable: "fPack", predicate_reading: "pack",
