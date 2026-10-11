@@ -29,19 +29,48 @@ const structuralIds = new Map<string, string>();
 let nextProgramKey = 0;
 const reachByOwner = new WeakMap<object, Map<string, SequenceReach>>();
 
-export function sequenceReachKey(program: QueryProgram, fromId: string): string {
+function programStorageId(program: QueryProgram): string {
   let key = programIds.get(program);
+  if (key !== undefined) return key;
+  const canonical = stableStringify(program);
+  key = structuralIds.get(canonical);
   if (key === undefined) {
-    const canonical = stableStringify(program);
-    key = structuralIds.get(canonical);
-    if (key === undefined) {
-      nextProgramKey += 1;
-      key = String(nextProgramKey);
-      structuralIds.set(canonical, key);
-    }
-    programIds.set(program, key);
+    nextProgramKey += 1;
+    key = String(nextProgramKey);
+    structuralIds.set(canonical, key);
   }
-  return `${key}\0${fromId}`;
+  programIds.set(program, key);
+  return key;
+}
+
+export function sequenceReachKey(program: QueryProgram, fromId: string): string {
+  return `${programStorageId(program)}\0${fromId}`;
+}
+
+/** True when this owner already remembered some state of the program. */
+export function sequenceProgramHasReach(owner: object, program: QueryProgram): boolean {
+  const bucket = reachByOwner.get(owner);
+  if (bucket === undefined) return false;
+  const prefix = `${programStorageId(program)}\0`;
+  for (const key of bucket.keys()) if (key.startsWith(prefix)) return true;
+  return false;
+}
+
+/**
+ * A delta with no stored program reach reads the population. Remember that
+ * for the rest of the page so a later product is not flipped by a write.
+ */
+export function sequenceProgramIsCold(
+  owner: object | undefined,
+  program: QueryProgram,
+  rememberedCold: Set<string> | undefined
+): boolean {
+  if (owner === undefined) return true;
+  const id = programStorageId(program);
+  if (rememberedCold?.has(id)) return true;
+  if (sequenceProgramHasReach(owner, program)) return false;
+  rememberedCold?.add(id);
+  return true;
 }
 
 export function readSequenceReach(owner: object, key: string): SequenceReach | undefined {

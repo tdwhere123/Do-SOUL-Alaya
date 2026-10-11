@@ -155,6 +155,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   yield { kind: "work", retained_bytes: 256 };
   const automaton = input.compiledAutomaton ?? compileProgramAutomaton(runtime);
   const compiledPremises = input.compiledPremises ?? new Map<QueryProgram, ProgramAutomaton>();
+  const coldPrograms = new Set<string>();
   const physicalKinds = new Set<string>();
   for (const kind of input.physicalKinds ?? []) {
     yield { kind: "work", retained_bytes: 64 + Buffer.byteLength(kind, "utf8") };
@@ -200,6 +201,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         toProgramStates: advance.to,
         observedStates: input.liveStates,
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
+        coldPrograms,
         // Resume replaces interpretation. The compiled automaton object stays on the field.
         reachOwner: input.compiledAutomaton ?? input.interpretation,
         ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })

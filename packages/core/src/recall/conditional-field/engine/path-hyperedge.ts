@@ -45,6 +45,7 @@ import {
 } from "./path-matching.js";
 import {
   readSequenceReach,
+  sequenceProgramIsCold,
   sequenceReachKey,
   sequenceReachWithoutAssertions,
   writeSequenceReach,
@@ -92,6 +93,8 @@ type HyperedgeInput = Readonly<{
   readonly reachOwner?: object;
   /** Old rows whose missing target revision resolved on this pass. */
   readonly promotedIds?: Set<string>;
+  /** Programs whose row delta started with no stored reach. Shared for the page. */
+  readonly coldPrograms?: Set<string>;
 }>;
 
 export function tryCompleteHyperedge(
@@ -281,6 +284,7 @@ function* nestedHyperedgeAssignments(
     compiledPremises: input.compiledPremises,
     ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
     ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),
+    ...(input.coldPrograms === undefined ? {} : { coldPrograms: input.coldPrograms }),
     ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
   })) {
     if (step.kind === "work") { yield step; continue; }
@@ -406,6 +410,7 @@ function* extendSequenceState(
       compiledPremises: input.compiledPremises,
       ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
       ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),
+      ...(input.coldPrograms === undefined ? {} : { coldPrograms: input.coldPrograms }),
       ...(nestedJoin === undefined ? {} : { joinRows: nestedJoin })
     })) {
       if (inner.kind === "work") { yield inner; continue; }
@@ -470,8 +475,11 @@ function* walkCompiledPremise(
   };
   const observed = input.observedStates ?? input.liveStates;
   if (stored === undefined) {
-    // A missing frontier must not skip retained rows.
-    for (const node of starts) frontier.queue.push({ node, reach: "population" });
+    // A program with no stored reach must not skip retained rows. A new product
+    // beside a frontier that already exists only joins the row delta.
+    const cold = deltaIds !== undefined && sequenceProgramIsCold(owner, program, input.coldPrograms);
+    const reach = deltaIds === undefined || cold ? "population" : "join";
+    for (const node of starts) frontier.queue.push({ node, reach });
   } else {
     // States already reached only extend along the row delta. A stored miss is rechecked alone.
     for (const node of stored.states) frontier.queue.push({ node, reach: "join" });
