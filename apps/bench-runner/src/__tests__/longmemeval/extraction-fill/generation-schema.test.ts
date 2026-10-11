@@ -185,17 +185,17 @@ describe("Gemini complete generation schema guidance", () => {
       }
     );
     const encoded = JSON.stringify(body);
-    expect(encoded).toContain("responseJsonSchema");
     expect(encoded).not.toContain("source-semantic-proposal-v4");
     expect(encoded).not.toContain(SOURCE_SEMANTIC_TABLE_PROPOSAL_CONTRACT);
     expect(encoded).toContain("application/json");
     const projected = projectGeminiGenerationSchema(schema);
+    // The query grammar is past the structured provider budget, so the wire keeps it in guidance.
     expect(projected.recursive).toBe(false);
-    expect(projected.schema).toBeDefined();
-    expect(projected.instruction).toBeUndefined();
-    expect(body).toHaveProperty("generationConfig.responseJsonSchema");
-    expect((body as { systemInstruction: { parts: unknown[] } }).systemInstruction.parts).toHaveLength(1);
-    expect(countGeminiEnvelopeExpandedNodes(schema)).toBeLessThan(1024);
+    expect(projected.schema).toBeUndefined();
+    expect(projected.instruction).toContain(JSON.stringify(schema));
+    expect(body).not.toHaveProperty("generationConfig.responseJsonSchema");
+    expect((body as { systemInstruction: { parts: unknown[] } }).systemInstruction.parts).toHaveLength(2);
+    expect(countGeminiEnvelopeExpandedNodes(schema)).toBeGreaterThan(1024);
     expect(proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
       SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT, request, schema, 4096, "http://127.0.0.1:9")).not.toBe(
       proposalCacheKey("gemini-3.1-flash-lite", "gemini-3.1-minimal-v1",
@@ -206,17 +206,23 @@ describe("Gemini complete generation schema guidance", () => {
         `${SOURCE_SEMANTIC_QUERY_SYSTEM_PROMPT} revised`, request, schema, 4096, "http://127.0.0.1:9"));
   });
 
-  it("projects the complete acyclic source and query schemas without mutation", () => {
+  it("projects the complete acyclic source schema and keeps the over-budget query schema in guidance", () => {
     const source = JSON.parse(officialApiExtractionResponseSchemaPreimage(JSON.stringify(buildSourceSemanticRequest(input))));
-    for (const schema of [source, sourceSemanticQueryResponseJsonSchema()]) {
-      const before = structuredClone(schema);
-      const projected = projectGeminiGenerationSchema(schema);
-      expect(projected.recursive).toBe(false);
-      expect(projected.schema).toBeDefined();
-      expect(projected.instruction).toBeUndefined();
-      expect(schema).toEqual(before);
-      expect(projectGeminiGenerationSchema(schema)).toEqual(projected);
-    }
+    const query = sourceSemanticQueryResponseJsonSchema();
+    const sourceBefore = structuredClone(source);
+    const sourceProjected = projectGeminiGenerationSchema(source);
+    expect(sourceProjected.recursive).toBe(false);
+    expect(sourceProjected.schema).toBeDefined();
+    expect(sourceProjected.instruction).toBeUndefined();
+    expect(source).toEqual(sourceBefore);
+    expect(projectGeminiGenerationSchema(source)).toEqual(sourceProjected);
+    const before = structuredClone(query);
+    const projected = projectGeminiGenerationSchema(query);
+    expect(projected.recursive).toBe(false);
+    expect(projected.schema).toBeUndefined();
+    expect(projected.instruction).toContain(JSON.stringify(query));
+    expect(query).toEqual(before);
+    expect(projectGeminiGenerationSchema(query)).toEqual(projected);
   });
 
   it("binds the selected nested query to complete envelope guidance through the native Gemini codec", () => {
@@ -241,7 +247,7 @@ describe("Gemini complete generation schema guidance", () => {
     });
   });
 
-  it("sends the complete structured query schema through an actual local SSE socket", async () => {
+  it("sends the over-budget query schema as complete JSON guidance through a local SSE socket", async () => {
     const wires: { url: string | undefined; body: unknown }[] = [];
     const raw = JSON.stringify({ contract: SOURCE_SEMANTIC_QUERY_MEANING_RESPONSE_CONTRACT, outcome: { status: "abstained" } });
     const server = createServer((request, response) => {
@@ -268,24 +274,17 @@ describe("Gemini complete generation schema guidance", () => {
       expect(result.responseMetadata?.finishReason).toBe("STOP");
       expect(wires).toHaveLength(1);
       expect(wires[0]?.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
+      const projected = projectGeminiGenerationSchema(schema);
       const material = JSON.parse(geminiGenerationSchemaCacheMaterial(JSON.stringify(schema)));
-      expect(material).toEqual(schema);
-      expect(wires[0]?.body).toHaveProperty("generationConfig.responseJsonSchema");
+      expect(material).toEqual({ contract: "gemini-instruction-generation-schema-v1", source_schema: schema,
+        response_schema: null, instruction: projected.instruction });
+      expect(wires[0]?.body).not.toHaveProperty("generationConfig.responseJsonSchema");
       expect(wires[0]?.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
-        systemInstruction: { parts: [{ text: line.systemPrompt }] } });
+        systemInstruction: { parts: [{ text: line.systemPrompt }, { text: projected.instruction }] } });
       expect(wires[0]?.body).toEqual(encodeGeminiGenerateContent(line, { ...config, maxOutputTokens: 4096,
         includeThoughts: true, responseJsonSchema: schema }));
-      const sent = (wires[0]?.body as { generationConfig: { responseJsonSchema: {
-        properties?: { outcome?: { oneOf?: { properties?: { gaps?: unknown } }[] }; query?: { anyOf?: unknown } }
-      } } }).generationConfig.responseJsonSchema;
-      expect(sent).toEqual(projectGeminiGenerationSchema(schema).schema);
-      const interpreted = sent.properties?.outcome?.oneOf?.find((branch) =>
-        JSON.stringify(branch.properties ?? {}).includes("interpreted"));
-      expect(interpreted?.properties).not.toHaveProperty("gaps");
-      expect(sent.properties?.query?.anyOf).toEqual([
-        { $ref: "#/$defs/queryRequiresRequestedOperation" },
-        { $ref: "#/$defs/queryOmitsEvidenceInputs" }
-      ]);
+      const embedded = JSON.parse(projected.instruction!.slice(projected.instruction!.indexOf("{")));
+      expect(embedded).toEqual(schema);
     } finally {
       server.closeAllConnections();
       await new Promise<void>(resolve => server.close(() => resolve()));

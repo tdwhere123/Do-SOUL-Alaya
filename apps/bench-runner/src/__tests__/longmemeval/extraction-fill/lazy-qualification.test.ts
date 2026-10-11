@@ -810,7 +810,8 @@ it("delivers the fixed completed item through the normal native qualification li
     const window = await prepareLazyQualificationWindow(config, root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "window.json"), JSON.stringify(window, null, 2));
     expect(window.config.chain.query_workset.items).toEqual([{ original_query: "What was completed?" }]);
-    expect(window.query_key).toBe("55fa729155e44490fb4a721f3393957ad8875bf5e2bdd99d33d0190e9435d3b5");
+    // Instruction-mode guidance is part of the request identity once the query schema exceeds the structured budget.
+    expect(window.query_key).toBe("fdda3a080ed0dee7eaede1e8921f9d98efc153c71e47d3b523a6849a749e2c19");
     expect(window.window.map(row => row.source_id)).toEqual(expectedWindow.map(index => `fixture:bounded-s${index}-r0`));
     expect(window.window.map(row => row.record_id)).toEqual(expectedRecords);
     expect(window.window.map(row => row.source_version)).toEqual(Array(10)

@@ -354,9 +354,13 @@ it.each([
     expect(result.terminal_failures).toBe(1);
     for (const wire of wires) {
       expect(wire.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
-      expect(wire.body).toHaveProperty("generationConfig.responseJsonSchema");
+      // The query grammar is past the structured provider budget, so guidance carries the complete schema.
+      expect(wire.body).not.toHaveProperty("generationConfig.responseJsonSchema");
       expect(wire.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
-        systemInstruction: { parts: [{ text: expect.stringContaining("source-semantic-query-meaning-v5") }] } });
+        systemInstruction: { parts: [
+          { text: expect.stringContaining("source-semantic-query-meaning-v5") },
+          { text: expect.stringContaining("source-semantic-query-response-v8") }
+        ] } });
     }
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)).toMatchObject([
       { status: "transport_failure", shard: { outcome: { status: "transport_failure" } } }
