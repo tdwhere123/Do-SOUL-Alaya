@@ -21,6 +21,8 @@ import {
 } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
 import { observedTargetRevision } from "../../../../recall/conditional-field/engine/path-matching.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
+import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
+import { readSequenceReach, sequenceReachKey, writeSequenceReach } from "../../../../recall/conditional-field/engine/sequence-reach.js";
 import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../../../../recall/conditional-field/engine/observed-relations.js";
 import { RetainedSequence } from "../../../../recall/conditional-field/engine/retained-sequence.js";
 import {
@@ -149,6 +151,26 @@ function byJson(left: unknown, right: unknown): number {
 
 function counting(rows: readonly AdjacencyRow[], visits: { count: number }): Iterable<AdjacencyRow> {
   return { *[Symbol.iterator]() { for (const row of rows) { visits.count += 1; yield row; } } };
+}
+
+function hop(kind: string, source: string, target: string): QueryProgram {
+  return { schema_version: 1, kind: "relation", relation_kind: kind, source_variable: source, target_variable: target,
+    facet_mode: "same_path", threshold_milligrades: 0, guard: OPEN_GUARD };
+}
+
+function sequenceHyperedge(steps: readonly QueryProgram[]): QueryProgram {
+  return { schema_version: 1, kind: "hyperedge", join: "and", premises: [
+    { schema_version: 1, kind: "alternative", options: [{ schema_version: 1, kind: "sequence", steps }] }
+  ] };
+}
+
+function hyperLeaves(effects: ReturnType<typeof adjacencyEffectsForRows>): Set<string>[] {
+  return effects.filter((effect) => effect.hyperedge !== undefined).map((effect) =>
+    new Set((effect.derivations ?? []).flatMap((row) => row.leaf_ids)));
+}
+
+function hyperSubjects(effects: ReturnType<typeof adjacencyEffectsForRows>): string[] {
+  return effects.flatMap((effect) => effect.hyperedge === undefined ? [] : [productSubjectId(effect.hyperedge.to)]);
 }
 
 function storedFacts(ids: readonly string[]): PersistentStringMap<BoundSourceFacts> {
@@ -541,6 +563,108 @@ describe("incremental relation-row join", () => {
     const covered = retainRelationPage(new ObservedRelations(), [first, revised]);
     expect(covered.changed).toHaveLength(1);
     expect(relationPageJoinRows(covered.population, covered.changed, false)).toBeUndefined();
+  });
+
+  it("shares sequence reach across structurally equal programs", () => {
+    const owner = {};
+    const reach = { states: [], transitions: [], derivations: [], roots: {}, unresolved: [] };
+    writeSequenceReach(owner, sequenceReachKey(relation("p"), "seed"), reach);
+    expect(readSequenceReach(owner, sequenceReachKey(relation("p"), "seed"))).toBe(reach);
+  });
+
+  it("keeps a warm sequence frontier across a replaced interpretation", () => {
+    const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
+    const state = seeded(program);
+    const automaton = compileProgramAutomaton(program);
+    const first = edge("p", "a", "b", "hop-1");
+    const second = edge("q", "b", "c", "hop-2");
+    const source = facts(["a", "b", "c"]);
+    const base = { asOf: AS_OF, overlay: {}, sourceFacts: source, liveStates: state.seen_identities, compiledAutomaton: automaton };
+    adjacencyEffectsForRows([first], { ...base, interpretation: state.interpretation });
+    const visits = { count: 0 };
+    const joined = adjacencyEffectsForRows(counting([first, second], visits), {
+      ...base, interpretation: query(structuredClone(program)), joinRows: [second]
+    });
+    expect(visits.count).toBe(0);
+    expect(hyperLeaves(joined).some((ids) => ids.has("hop-1") && ids.has("hop-2"))).toBe(true);
+  });
+
+  it("reads retained sequence hops when the frontier is missing", () => {
+    const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
+    const state = seeded(program);
+    const first = edge("p", "a", "b", "hop-1");
+    const second = edge("q", "b", "c", "hop-2");
+    const visits = { count: 0 };
+    const joined = adjacencyEffectsForRows(counting([first, second], visits), {
+      interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: facts(["a", "b", "c"]),
+      liveStates: state.seen_identities, joinRows: [second]
+    });
+    expect(visits.count).toBeGreaterThan(0);
+    expect(hyperLeaves(joined).some((ids) => ids.has("hop-1") && ids.has("hop-2"))).toBe(true);
+  });
+
+  it("replaces a stored sequence hop when that assertion id changes", () => {
+    const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
+    const state = seeded(program);
+    const first = edge("p", "a", "b", "hop-1");
+    const second = edge("q", "b", "c", "hop-2");
+    const source = facts(["a", "b", "c", "d"]);
+    const base = { interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, liveStates: state.seen_identities };
+    adjacencyEffectsForRows([first, second], base);
+    const visits = { count: 0 };
+    const revised = adjacencyEffectsForRows(counting([first, edge("q", "b", "d", "hop-2")], visits), { ...base, joinRows: [edge("q", "b", "d", "hop-2")] });
+    expect(visits.count).toBe(0);
+    expect(hyperSubjects(revised)).toContain("d");
+    expect(hyperSubjects(revised)).not.toContain("c");
+    const retractedState = seeded(program);
+    const retractedBase = { ...base, interpretation: retractedState.interpretation, liveStates: retractedState.seen_identities };
+    adjacencyEffectsForRows([first, second], retractedBase);
+    const retracted = adjacencyEffectsForRows([first, { ...second, resolutionKind: "retracted" }], {
+      ...retractedBase, joinRows: [{ ...second, resolutionKind: "retracted" }]
+    });
+    expect(hyperSubjects(retracted)).not.toContain("c");
+    expect(hyperLeaves(retracted).some((ids) => ids.has("hop-2"))).toBe(false);
+  });
+
+  it("does not replay a withdrawn sequence hop on the next row delta", () => {
+    const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
+    const automaton = compileProgramAutomaton(program);
+    const state = { ...seeded(program), compiled_automaton: automaton };
+    const first = edge("p", "a", "b", "hop-1");
+    const second = edge("q", "b", "c", "hop-2");
+    const base = { interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: facts(["a", "b", "c"]),
+      liveStates: state.seen_identities, compiledAutomaton: automaton };
+    adjacencyEffectsForRows([first, second], base);
+    withdrawDerivationLeaves(state, "hop-1");
+    const noise = edge("q", "z", "w", "noise-row");
+    const visits = { count: 0 };
+    const after = adjacencyEffectsForRows(counting([first, second, noise], visits), { ...base, joinRows: [noise] });
+    expect(visits.count).toBe(0);
+    expect(hyperLeaves(after).some((ids) => ids.has("hop-1"))).toBe(false);
+  });
+
+  it("grounds a promoted sequence hop on the binding that still carries locals", () => {
+    const repeat: QueryProgram = { schema_version: 1, kind: "repeat", count: 2, local_variables: ["x", "y"], body: relation("p") };
+    const program: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "and", premises: [
+      { schema_version: 1, kind: "alternative", options: [repeat] }
+    ] };
+    const state = seeded(program);
+    const from = state.seen_identities.at(0)!;
+    const bound = edge("p", "a", "b", "bound-hop");
+    const open = edge("p", "b", "t", "open-hop");
+    const source = facts(["a", "b"]);
+    const base = { interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: source, liveStates: state.seen_identities };
+    const missed = adjacencyEffectsForRows([bound, open], base);
+    expect(missed.some((effect) => effect.missing_target_revision === true)).toBe(true);
+    expect(missed.some((effect) => effect.hyperedge !== undefined)).toBe(false);
+    const witness = productKey("t", from.hypothesis_id, from.binding_context, from.program_state);
+    const noise = edge("p", "z", "c", "noise-row");
+    const visits = { count: 0 };
+    const promoted = adjacencyEffectsForRows(counting([bound, open, noise], visits), {
+      ...base, liveStates: RetainedSequence.from([...state.seen_identities, witness]), joinRows: [noise]
+    });
+    expect(visits.count).toBe(0);
+    expect(hyperLeaves(promoted).some((ids) => ids.has("bound-hop") && ids.has("open-hop"))).toBe(true);
   });
 });
 

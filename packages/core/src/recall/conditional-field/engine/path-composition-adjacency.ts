@@ -200,7 +200,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         toProgramStates: advance.to,
         observedStates: input.liveStates,
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
-        reachOwner: input.interpretation,
+        // Resume replaces interpretation. The compiled automaton object stays on the field.
+        reachOwner: input.compiledAutomaton ?? input.interpretation,
         ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }

@@ -43,6 +43,7 @@ import { type HyperedgeCompletion, type HyperedgePremise } from "./path-composit
 import { facetBelongsToOutput, retainSamePathVectors } from "./path-composition-facet.js";
 import { collectIdentities, mergeSeeds } from "./path-composition-seed.js";
 import { mergeTransitions, transitionKey } from "./path-composition.js";
+import { dropSequenceReachAssertion } from "./sequence-reach.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
 import type { BoundSourceFacts } from "./binding-environment.js";
@@ -426,6 +427,8 @@ export function withdrawDerivationLeaves(
     propositions.delete(key);
   }
   const affectedStates = state.seen_identities.filter((key) => affected.has(productStateNodeId(key)));
+  // Field transitions are filtered above. Sequence reach lives beside them.
+  dropSequenceReachAssertion(state.compiled_automaton, withdrawnLeafId);
   return bindEngineState({
     ...rest,
     retained_index: undefined,

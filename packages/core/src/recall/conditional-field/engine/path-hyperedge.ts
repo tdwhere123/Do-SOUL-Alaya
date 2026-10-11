@@ -46,6 +46,7 @@ import {
 import {
   readSequenceReach,
   sequenceReachKey,
+  sequenceReachWithoutAssertions,
   writeSequenceReach,
   type UnresolvedHop
 } from "./sequence-reach.js";
@@ -316,7 +317,7 @@ type SequenceFrontier = {
 };
 
 function noteUnresolvedHop(frontier: SequenceFrontier, pair: UnresolvedHop): void {
-  const id = `${productStateNodeId(pair.here)}\0${pair.row.assertionId}\0${pair.relation.relation_kind}`;
+  const id = `${productStateNodeId(pair.node)}\0${pair.row.assertionId}\0${pair.relation.relation_kind}`;
   if (frontier.seenUnresolved.has(id)) return;
   frontier.seenUnresolved.add(id);
   frontier.unresolved.push(pair);
@@ -330,13 +331,14 @@ function* retainSequenceAssignment(
   successor: SequenceStep["reach"],
   input: HyperedgeInput,
   observed: Iterable<ProductStateKey>
-): PathComputation<void> {
+): PathComputation<boolean> {
   const revision = observedTargetRevision(assignment.target_object_id, input.sourceFacts, observed);
   if (revision === undefined) {
     yield { kind: "effect", effect: { observation_id: `revision:${assignment.observation_id}:${node.program_state}`,
       unresolved_guard: true, missing_target_revision: true } };
-    return;
+    return false;
   }
+  let retained = false;
   for (const programState of nextStates) {
     yield { kind: "work", retained_bytes: 1024 };
     const to = hyperedgeTarget(node, { object_id: assignment.target_object_id, source_revision: revision,
@@ -349,10 +351,12 @@ function* retainSequenceAssignment(
       strength_milligrades: assignment.milligrades, validity: assignment.validity,
       ...(assignment.cap_contract_id === undefined ? {} : { cap_contract_id: assignment.cap_contract_id }) };
     frontier.transitions.push(edge);
+    retained = true;
     frontier.roots[transitionKey(edge)] = assignment.derivation.derivation_id;
     for (const row of assignment.derivations) { yield { kind: "work", retained_bytes: 72 }; frontier.derivations.set(row.derivation_id, row); }
     frontier.queue.push({ node: to, reach: successor });
   }
+  return retained;
 }
 
 function* extendSequenceState(
@@ -422,7 +426,7 @@ function* extendSequenceState(
       if (assignment === undefined) {
         if (row.sourceObjectId === productEndpointId(here) && relationMatches(advance.relation.relation_kind, row.predicate)
           && observedTargetRevision(row.targetObjectId, input.sourceFacts, observed) === undefined) {
-          noteUnresolvedHop(frontier, { here, row, relation: advance.relation, nextStates: advance.to });
+          noteUnresolvedHop(frontier, { here, node, row, relation: advance.relation, nextStates: advance.to });
         }
         continue;
       }
@@ -454,27 +458,30 @@ function* walkCompiledPremise(
   const reachKey = owner === undefined ? undefined : sequenceReachKey(program, productStateNodeId(from));
   const prior = owner !== undefined && reachKey !== undefined && deltaIds !== undefined
     ? readSequenceReach(owner, reachKey) : undefined;
+  const stored = prior === undefined || deltaIds === undefined ? prior : sequenceReachWithoutAssertions(prior, deltaIds);
   const frontier: SequenceFrontier = {
     queue: [],
     visited: new Map(),
-    transitions: prior === undefined ? [] : [...prior.transitions],
-    derivations: new Map(prior === undefined ? [] : prior.derivations.map((row) => [row.derivation_id, row])),
-    roots: prior === undefined ? {} : { ...prior.roots },
+    transitions: stored === undefined ? [] : [...stored.transitions],
+    derivations: new Map(stored === undefined ? [] : stored.derivations.map((row) => [row.derivation_id, row])),
+    roots: stored === undefined ? {} : { ...stored.roots },
     unresolved: [],
     seenUnresolved: new Set()
   };
   const observed = input.observedStates ?? input.liveStates;
-  if (prior === undefined) {
-    for (const node of starts) frontier.queue.push({ node, reach: deltaIds === undefined ? "population" : "join" });
+  if (stored === undefined) {
+    // A missing frontier must not skip retained rows.
+    for (const node of starts) frontier.queue.push({ node, reach: "population" });
   } else {
     // States already reached only extend along the row delta. A stored miss is rechecked alone.
-    for (const node of prior.states) frontier.queue.push({ node, reach: "join" });
-    for (const pair of prior.unresolved) {
+    for (const node of stored.states) frontier.queue.push({ node, reach: "join" });
+    for (const pair of stored.unresolved) {
       if (deltaIds?.has(pair.row.assertionId) === true) continue;
       const assignment = yield* assignmentFromRow(pair.relation, pair.here, pair.row, input);
       if (assignment === undefined) { noteUnresolvedHop(frontier, pair); continue; }
-      input.promotedIds?.add(pair.row.assertionId);
-      yield* retainSequenceAssignment(frontier, pair.here, assignment, pair.nextStates, "population", input, observed);
+      const retained = yield* retainSequenceAssignment(frontier, pair.node, assignment, pair.nextStates, "population", input, observed);
+      if (retained) input.promotedIds?.add(pair.row.assertionId);
+      else noteUnresolvedHop(frontier, pair);
     }
   }
   for (let offset = 0; offset < frontier.queue.length; offset += 1) {
