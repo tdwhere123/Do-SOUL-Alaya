@@ -893,7 +893,17 @@ delivered source records.
 
 Query meaning v5 uses `conditions` for conjunction and optional
 `evidence_inputs: [{conditions}]` for the facts needed by the original requested
-operation. Q proposal inputs and native query workset items may select
+operation. Ordinary `alternatives` are disjunctive ways to satisfy the same query
+with the same return projection, not independent subtasks. All `return:true`
+declarations form one global return set; every nonempty answer view must bind
+every returned key, except comparison evaluation, which uses its operand rules.
+An empty ordinary answer view has no direct-answer binding. Each evidence input projects
+its own participating free entity values independently of the direct-answer
+return set. The shared generation guidance explains these existing rules and
+requires the whole request's participants, governing conditions and residual
+relationships to remain in the relevant answer/input conditions; moving
+conditions between branches alone does not establish faithful meaning.
+Q proposal inputs and native query workset items may select
 `generation_presentation`. Omitted or `flat-carrier-v1` selection keeps request v9
 and response v8: expression occurrences use a bounded acyclic `nodes` table, and
 condition/operand positions carry serialization tokens. Explicit
