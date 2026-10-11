@@ -916,6 +916,12 @@ wire contracts remain historical and cannot enter current execution. Nested
 The outgoing generation schema requires one entity declaration table and explicit
 role excerpts. Argument and reporter targets use local references; examples and
 schema present entities before branches, with nodes before roots in flat output.
+Protocol 15.0.1 derives generation and receipt from the same structural query
+body modes: ordinary alternatives need answer conditions or operation-bound
+evidence inputs; universal evaluation needs nonempty conditions; comparison
+evaluation needs empty conditions. Neither finite mode admits evidence inputs.
+Pairwise comparators require both operands and matching strictness; extrema omit
+the right operand. Domain, reference, binding and semantic checks remain native.
 Historical current-wire inline declarations and unambiguous entity-support
 inheritance still use the same receiver. Generation shape does not certify
 reference closure or fidelity.

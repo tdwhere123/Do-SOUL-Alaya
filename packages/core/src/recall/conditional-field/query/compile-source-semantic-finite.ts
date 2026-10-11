@@ -190,15 +190,15 @@ function compileComparison(input: Input, domain: SourceSemanticDomain): SourceSe
     options.push(sequence([...domainEntry(input, domain), ...(closed ? [closureProof(input, domain)] : []), body,
       rel(key("accept"), DOMAIN, `@accepted:${index}`, input.meter)]));
   };
-  const extreme = evaluation.operation === "minimum" || evaluation.operation === "maximum";
+  const extreme = !("right" in evaluation);
   if (extreme && domain.members.length === 0 && domain.closure.kind === "closed") {
     add("empty_domain", { schema_version: 1, kind: "epsilon" }, undefined, true);
   }
-  if (!extreme) {
+  if ("right" in evaluation) {
     const orders = comparisonOrders(evaluation.operation), inverse = ["lt", "eq", "gt"].filter((order) => !orders.includes(order));
-    add("support", numericProof(input, domain, evaluation.left, evaluation.right!, orders, "yes"));
-    add("counterexample", numericProof(input, domain, evaluation.left, evaluation.right!, inverse, "no"));
-    add("incomparable", numericProof(input, domain, evaluation.left, evaluation.right!, ["incomparable"], "inc"));
+    add("support", numericProof(input, domain, evaluation.left, evaluation.right, orders, "yes"));
+    add("counterexample", numericProof(input, domain, evaluation.left, evaluation.right, inverse, "no"));
+    add("incomparable", numericProof(input, domain, evaluation.left, evaluation.right, ["incomparable"], "inc"));
   } else {
     const anyMember = (variable: string, suffix: string) => alternatives(domain.members.map((member, index) =>
       memberProof(input, domain, member, variable, `${suffix}:${index}`)));
@@ -224,7 +224,8 @@ function compileComparison(input: Input, domain: SourceSemanticDomain): SourceSe
   }
   const referenced = (id: string | undefined) => input.semantic_correspondence.correspondences.find((row) => row.query_endpoint.kind === "referent"
     && row.query_endpoint.variable === id)?.source_endpoint;
-  const operands = [referenced(evaluation.left), referenced(evaluation.right)].flatMap((row) => row?.kind === "referent" ? [row.referent] : []);
+  const operands = [referenced(evaluation.left), referenced("right" in evaluation ? evaluation.right : undefined)]
+    .flatMap((row) => row?.kind === "referent" ? [row.referent] : []);
   const missingOperands = extreme ? domain.members.some((row) => !values.some((value) => value.subject === row.referent))
     : operands.some((id) => !values.some((value) => value.subject === id)) || values.length === 0;
   const missingMembership = !extreme && operands.some((id) => !domain.members.some((row) => row.referent === id));

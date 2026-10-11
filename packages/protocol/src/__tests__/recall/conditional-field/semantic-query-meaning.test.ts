@@ -199,10 +199,14 @@ it("retains an unrepresented original answer while admitting a faithfully stated
 });
 
 it("rejects finite evaluation with evidence inputs before any branch can be silently discarded", () => {
-  expect(() => materializeSourceSemanticQueryMeaning({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
-    requested_operation: operation, alternatives: [{ conditions: [], evidence_inputs: [{ conditions: [statement("joined", [])] }] }],
+  const finite = { contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, gaps: [],
+    requested_operation: operation, alternatives: [{ conditions: [] }], entities: [{ kind: "free", key: "person", excerpt: "Who" }],
     domains: [{ key: "people", excerpt: "Who" }], evaluation: { kind: "comparison", domain: "people", operation: "minimum",
-      left: "person", strict: false, metric: "age", unit: "years", context: "now", scope: "asserted" } }, envelope)).toThrow(/finite evaluation/u);
+      left: "person", strict: false, metric: "age", unit: "years", context: "now", scope: "asserted" } };
+  expect(materializeSourceSemanticQueryMeaning(finite, envelope).evaluation).toEqual(finite.evaluation);
+  expect(() => materializeSourceSemanticQueryMeaning({ ...finite,
+    alternatives: [{ conditions: [], evidence_inputs: [{ conditions: [statement("joined", [])] }] }]
+  }, envelope)).toThrow(/invalid_union/u);
 });
 
 it("keeps a free sender distinct from a named recipient and a send proposition", () => {

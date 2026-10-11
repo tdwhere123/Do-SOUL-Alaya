@@ -7,7 +7,7 @@ import {
 import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import {
   SOURCE_SEMANTIC_QUERY_CONTRACT, SourceSemanticQueryEvaluationSchema, SourceSemanticQuerySchema, SourceSemanticQueryGapSchema,
-  SourceSemanticRequestedOperationSchema,
+  SourceSemanticRequestedOperationSchema, SourceSemanticQueryUniversalEvaluationSchema, SourceSemanticQueryComparisonEvaluationSchema,
   type SourceSemanticContextObligation, type SourceSemanticQuery, type SourceSemanticQueryAlternative,
   type SourceSemanticQueryFrame, type SourceSemanticQueryRoleRequirement, type SourceSemanticQueryVariable
 } from "./semantic-query.js";
@@ -164,7 +164,6 @@ function alternativeShape<Condition extends z.ZodTypeAny>(condition: Condition) 
   }).strict().readonly();
 }
 const Alternative = alternativeShape(Meaning);
-
 const Domain = z.object({
   key: Key, excerpt: z.string().min(1).max(1024)
 }).strict().readonly();
@@ -181,35 +180,39 @@ function meaningBodyShape<AlternativeSchema extends z.ZodTypeAny>(alternative: A
   };
 }
 
-function validateMeaningBody(body: { evaluation?: { kind: string }; requested_operation?: unknown;
-  alternatives: readonly { conditions: readonly unknown[]; evidence_inputs?: unknown }[] }, context: z.RefinementCtx): void {
-  const comparison = body.evaluation?.kind === "comparison";
-  for (const [index, alternative] of body.alternatives.entries()) {
-    if (comparison && alternative.conditions.length > 0) {
-      context.addIssue({ code: "custom", path: ["alternatives", index, "conditions"],
-        message: "comparison uses typed operand scope; nested meaning is not supported" });
-    }
-    if (!comparison && alternative.conditions.length === 0 && alternative.evidence_inputs === undefined) {
-      context.addIssue({ code: "custom", path: ["alternatives", index, "conditions"],
-        message: "query body requires answer conditions or evidence inputs" });
-    }
-    if (alternative.evidence_inputs !== undefined && body.requested_operation === undefined) {
-      context.addIssue({ code: "custom", path: ["requested_operation"], message: "evidence inputs require the original requested operation" });
-    }
-    if (alternative.evidence_inputs !== undefined && body.evaluation !== undefined) {
-      context.addIssue({ code: "custom", path: ["alternatives", index, "evidence_inputs"],
-        message: "finite evaluation cannot include independent evidence branches" });
-    }
-  }
+/** Fixed body modes are structural so generation and receipt share their legal combinations. */
+function queryBodySchema<Condition extends z.ZodTypeAny, Extra extends Record<string, z.ZodTypeAny>>(
+  condition: Condition, extra: Extra
+) {
+  const alternative = alternativeShape(condition);
+  const fields = { ...meaningBodyShape(alternative), ...extra };
+  const { evaluation: _evaluation, alternatives: _alternatives, ...ordinary } = fields;
+  const { evidence_inputs, purpose } = alternative.unwrap().shape;
+  const nonemptyConditions = z.array(condition).min(1).max(16).readonly();
+  const emptyConditions = z.array(condition).max(0).readonly();
+  const withoutInputs = z.object({ conditions: nonemptyConditions, purpose }).strict().readonly();
+  const operationAlternative = z.union([
+    z.object({ conditions: nonemptyConditions, evidence_inputs, purpose }).strict().readonly(),
+    z.object({ conditions: emptyConditions, evidence_inputs: evidence_inputs.unwrap(), purpose }).strict().readonly()
+  ]);
+  const alternatives = <Item extends z.ZodTypeAny>(item: Item) => z.array(item).min(1).max(16).readonly();
+  return z.union([
+    z.object({ ...ordinary, alternatives: alternatives(withoutInputs) }).strict().readonly(),
+    z.object({ ...ordinary, requested_operation: SourceSemanticRequestedOperationSchema,
+      alternatives: alternatives(operationAlternative) }).strict().readonly(),
+    z.object({ ...ordinary, evaluation: SourceSemanticQueryUniversalEvaluationSchema,
+      alternatives: alternatives(withoutInputs) }).strict().readonly(),
+    z.object({ ...ordinary, evaluation: SourceSemanticQueryComparisonEvaluationSchema,
+      alternatives: alternatives(z.object({ conditions: emptyConditions, purpose }).strict().readonly()) }).strict().readonly()
+  ]);
 }
 
-export const SourceSemanticQueryMeaningBodySchema = z.object(meaningBodyShape(Alternative))
-  .strict().readonly().superRefine(validateMeaningBody);
-export const SourceSemanticQueryCarrierBodySchema = z.object({
-  ...meaningBodyShape(alternativeShape(Key)),
-  nodes: z.array(SourceSemanticQueryCarrierNodeSchema).max(SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES).readonly()
-})
-  .strict().readonly().superRefine(validateMeaningBody);
+type QueryBodyView<Item extends z.ZodTypeAny> = Readonly<z.output<z.ZodObject<ReturnType<typeof meaningBodyShape<Item>>>>>;
+const CarrierNodes = z.array(SourceSemanticQueryCarrierNodeSchema).max(SOURCE_SEMANTIC_QUERY_CARRIER_MAX_NODES).readonly();
+export const SourceSemanticQueryMeaningBodySchema: z.ZodType<QueryBodyView<typeof Alternative>> = queryBodySchema(Meaning, {});
+export const SourceSemanticQueryCarrierBodySchema: z.ZodType<
+  QueryBodyView<ReturnType<typeof alternativeShape<typeof Key>>> & { readonly nodes: z.output<typeof CarrierNodes> }
+> = queryBodySchema(Key, { nodes: CarrierNodes });
 
 export type SourceSemanticQueryMeaningBody = z.infer<typeof SourceSemanticQueryMeaningBodySchema>;
 
@@ -332,7 +335,7 @@ class QueryMeaningCompiler {
         for (const key of [evaluation.binder, ...evaluation.local_variables]) referenced.add(key);
       } else {
         referenced.add(evaluation.left);
-        if (evaluation.right !== undefined) referenced.add(evaluation.right);
+        if ("right" in evaluation) referenced.add(evaluation.right);
       }
     }
     const entities = new Set<string>(), occurrences = new Map<string, number>();
@@ -386,7 +389,7 @@ class QueryMeaningCompiler {
     }
     if (body.evaluation?.kind === "comparison") {
       this.declareEntityKey(body.evaluation.left, ["evaluation", "left"]);
-      if (body.evaluation.right !== undefined) this.declareEntityKey(body.evaluation.right, ["evaluation", "right"]);
+      if ("right" in body.evaluation) this.declareEntityKey(body.evaluation.right, ["evaluation", "right"]);
     }
   }
 

@@ -80,15 +80,22 @@ export const SourceSemanticQueryAlternativeSchema = z.object({
     .strict().readonly()).min(1).max(16).readonly().optional()
 }).strict().readonly();
 
-export const SourceSemanticQueryEvaluationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("forall"), domain: Handle, binder: Handle,
-    local_variables: z.array(Handle).max(256).readonly() }).strict().readonly(),
-  z.object({ kind: z.literal("comparison"), domain: Handle,
-    operation: z.enum(["lt", "le", "eq", "ge", "gt", "minimum", "maximum"]),
-    left: Handle, right: Handle.optional(), strict: z.boolean(),
-    metric: SourceSemanticReadingSchema, unit: SourceSemanticReadingSchema, context: SourceSemanticReadingSchema,
-    scope: z.enum(["asserted", "preserve"])
-  }).strict().readonly()
+export const SourceSemanticQueryUniversalEvaluationSchema = z.object({
+  kind: z.literal("forall"), domain: Handle, binder: Handle,
+  local_variables: z.array(Handle).max(256).readonly()
+}).strict().readonly();
+const comparisonScope = {
+  kind: z.literal("comparison"), domain: Handle, left: Handle,
+  metric: SourceSemanticReadingSchema, unit: SourceSemanticReadingSchema, context: SourceSemanticReadingSchema,
+  scope: z.enum(["asserted", "preserve"])
+};
+export const SourceSemanticQueryComparisonEvaluationSchema = z.union([
+  z.object({ ...comparisonScope, operation: z.enum(["lt", "gt"]), right: Handle, strict: z.literal(true) }).strict().readonly(),
+  z.object({ ...comparisonScope, operation: z.enum(["le", "eq", "ge"]), right: Handle, strict: z.literal(false) }).strict().readonly(),
+  z.object({ ...comparisonScope, operation: z.enum(["minimum", "maximum"]), strict: z.boolean() }).strict().readonly()
+]);
+export const SourceSemanticQueryEvaluationSchema = z.union([
+  SourceSemanticQueryUniversalEvaluationSchema, SourceSemanticQueryComparisonEvaluationSchema
 ]);
 
 const SourceSemanticQueryObjectSchema = z.object({
@@ -140,12 +147,9 @@ export const SourceSemanticQuerySchema = SourceSemanticQueryObjectSchema.superRe
     if (query.return_variables.some((id) => evaluation.local_variables.includes(id))) problem("universal query cannot return a bound witness");
   }
   if (evaluation?.kind === "comparison") {
-    if (sorts.get(evaluation.left) !== "entity" || (evaluation.right !== undefined && sorts.get(evaluation.right) !== "entity")) problem("comparison requires entity operands");
-    const extreme = evaluation.operation === "minimum" || evaluation.operation === "maximum";
-    if (!extreme && evaluation.right === undefined) problem("pairwise comparison requires both operands");
-    if (!extreme && evaluation.strict !== ["lt", "gt"].includes(evaluation.operation)) problem("pairwise strictness must agree with its comparator");
-    if (extreme && evaluation.right !== undefined) problem("extremum uses its declared population");
-    if (query.return_variables.some((id) => id !== evaluation.left && id !== evaluation.right)) problem("comparison cannot return an unbound variable");
+    const right = "right" in evaluation ? evaluation.right : undefined;
+    if (sorts.get(evaluation.left) !== "entity" || (right !== undefined && sorts.get(right) !== "entity")) problem("comparison requires entity operands");
+    if (query.return_variables.some((id) => id !== evaluation.left && id !== right)) problem("comparison cannot return an unbound variable");
   }
   for (const variable of query.variables) {
     if (variable.reference !== undefined && variable.sort !== "entity") problem("query reference requires an entity variable");
