@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 import { AlayaError, SoulInterpretationResponseSchema, canonicalJson } from "@do-soul/alaya-protocol";
-import { parseSourceSemanticRequest, prepareSourceSemanticRevision, sourceSemanticTransportUnits } from "@do-soul/alaya-soul";
+import { parseSourceSemanticRequest, prepareSourceSemanticRevision } from "@do-soul/alaya-soul";
 import { readCompleteRetainedSourceResponse } from "../extraction/cache/source-interactive-binding.js";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
@@ -75,9 +75,8 @@ export function prepareRecoverySourceRevision(rootInput: string) {
   const inventory = nativeSourceRequestInventory(census.records, census.dataset_sha256, {
     model: window.source_model, requestProfile: window.source_request_profile,
     sourcePacking: "complete-source", openSemantics: generation });
-  const occurrenceUnits = sourceSemanticTransportUnits(occurrence.content_bytes, [occurrenceId], census.dataset_sha256, occurrence.source_role);
-  const child = inventory.requests.find(row => occurrenceUnits.every(unit =>
-    row.units.some(candidate => candidate.binding.occurrenceIdentity === unit.binding.occurrenceIdentity)));
+  const childKey = inventory.requestKeysByOccurrence.get(occurrenceId);
+  const child = inventory.requests.find(row => row.line.key === childKey);
   if (child === undefined || child.line.key === parentLine.key ||
       parseSourceSemanticRequest(JSON.parse(child.line.userPrompt)).source_request.revision?.parent_request_sha256 !==
         revision.parent_request_sha256) {
