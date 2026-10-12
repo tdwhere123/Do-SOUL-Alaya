@@ -124,7 +124,7 @@ function ToastItem({ toast, onClose }: { toast: ToastEntry; onClose: () => void 
         visible ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
       )}
     >
-      <div className="flex-shrink-0">{icons[toast.type ?? "info"]}</div>
+      <div className="shrink-0">{icons[toast.type ?? "info"]}</div>
       <div className="flex-1 text-sm font-mono text-ink-700">{toast.message}</div>
       {toast.action ? (
         <button
