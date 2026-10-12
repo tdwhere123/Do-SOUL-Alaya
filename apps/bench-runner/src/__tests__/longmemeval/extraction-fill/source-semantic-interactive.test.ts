@@ -166,8 +166,8 @@ it("fills complete-source open semantics through interactive generateContent wit
   await assertNativeSemanticChain(cacheRoot, sourceOnly);
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
-  // Nine complete-source questions, two publications, and the native arm already take about ninety seconds.
-}, 240_000);
+  // Nine complete-source questions, two publications, and the native arm take about ninety seconds; a loaded Windows runner crosses four minutes and leaves a daemon that blocks the next test.
+}, 480_000);
 
 it("withholds a source after its settled usage witness is removed", async () => {
   const fixture = await setupInteractive();
