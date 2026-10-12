@@ -22,6 +22,7 @@ import {
   DIRECTORY_OPEN_FLAG,
   NO_FOLLOW_OPEN_FLAG
 } from "../../../fs/open-flags.js";
+import { readWindowsProcessStartIdentity } from "./windows-process-start.js";
 import {
   assertBoundDirectoryIdentity,
   assertDirectoryIdentity,
@@ -400,24 +401,10 @@ const NON_CREDENTIAL_ENV_KEYS = [
   "LANG", "LC_ALL", "LC_CTYPE"
 ] as const;
 
-// PowerShell does not finish starting when these profile paths are missing.
-export const WINDOWS_SHELL_ENV_KEYS = [
-  "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "ProgramData",
-  "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
-  "CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432",
-  "COMPUTERNAME", "LOGONSERVER", "PUBLIC", "SystemDrive", "USERNAME",
-  "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE", "SESSIONNAME", "DriverData",
-  "PSModulePath", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
-  "PROCESSOR_ARCHITEW6432", "PROCESSOR_IDENTIFIER", "OS"
-] as const;
-
 /** Child processes may locate system tools. They do not inherit credential-like environment keys. */
 export function nonCredentialChildEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  const keys = process.platform === "win32"
-    ? [...NON_CREDENTIAL_ENV_KEYS, ...WINDOWS_SHELL_ENV_KEYS]
-    : NON_CREDENTIAL_ENV_KEYS;
-  for (const key of keys) {
+  for (const key of NON_CREDENTIAL_ENV_KEYS) {
     const value = process.env[key];
     if (value !== undefined) env[key] = value;
   }
@@ -436,7 +423,9 @@ let selfProcessStartIdentity: string | undefined;
 
 function readPlatformProcessStartIdentity(pid: number): string {
   if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
-  if (process.platform === "win32") return readWindowsProcessStartIdentity(pid);
+  if (process.platform === "win32") {
+    return readWindowsProcessStartIdentity(pid, nonCredentialChildEnv());
+  }
   return readPosixProcessStartIdentity(pid);
 }
 
@@ -452,63 +441,6 @@ function readLinuxProcessStartIdentity(pid: number): string {
     throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
   }
   return startTime;
-}
-
-function readWindowsProcessStartIdentity(pid: number): string {
-  if (!Number.isSafeInteger(pid) || pid <= 0) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT" }
-    );
-  }
-  let output: string;
-  try {
-    output = execFileSync("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
-    ], {
-      encoding: "utf8",
-      timeout: 20_000,
-      windowsHide: true,
-      env: nonCredentialChildEnv(),
-      stdio: ["ignore", "pipe", "pipe"]
-    }).replace(/^\uFEFF/u, "").trim();
-  } catch (cause) {
-    throw windowsStartIdentityFailure(cause);
-  }
-  if (!/^\d+$/u.test(output) || output.length > MAX_EXTRACTION_FILL_OWNER_BYTES) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT" }
-    );
-  }
-  return output;
-}
-
-export function windowsStartIdentityFailure(cause: unknown): ExtractionCacheInvariantError {
-  if (isAbsentWindowsProcess(cause)) {
-    return Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT", cause }
-    );
-  }
-  return new ExtractionCacheInvariantError(
-    "writer process start identity is unavailable",
-    { cause: cause instanceof Error ? cause : new Error(String(cause)) }
-  );
-}
-
-function isAbsentWindowsProcess(cause: unknown): boolean {
-  if (typeof cause !== "object" || cause === null) return false;
-  if ("code" in cause && (cause.code === "ETIMEDOUT" || cause.code === "ENOENT")) return false;
-  if (!("status" in cause) || cause.status !== 1) return false;
-  const stderr = "stderr" in cause && typeof cause.stderr === "string" ? cause.stderr : "";
-  const stdout = "stdout" in cause && typeof cause.stdout === "string" ? cause.stdout : "";
-  const message = cause instanceof Error ? cause.message : "";
-  return /NoProcessFoundForGivenId|Cannot find a process with the process identifier/u
-    .test(`${stdout}\n${stderr}\n${message}`);
 }
 
 function readPosixProcessStartIdentity(pid: number): string {
