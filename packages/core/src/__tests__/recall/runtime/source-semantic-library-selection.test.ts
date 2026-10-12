@@ -254,6 +254,8 @@ it("retains an ordered open prefix when the work allowance stops early", () => {
   const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 2 };
   const original = coverageSelectionFixture(allowance), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
   const proof = partial.proofs[0]!;
+  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 100_000, memory_bytes: 20_000_000,
+    page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
   expect(root(partial)).toBe(root(complete));
   expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
   expect(proof.query_semantics_id).toBe(complete.proofs[0]!.query_semantics_id);
