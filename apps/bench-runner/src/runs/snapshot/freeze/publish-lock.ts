@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { sqliteHostFilename } from "@do-soul/alaya-storage";
+// The package barrel is a reviewed export set. This owner module is the path rule.
+import { sqliteHostFilename } from "@do-soul/alaya-storage/sqlite/open-sqlite-connection";
 
 export async function withSnapshotPublishLock<T>(
   snapshotOut: string,
