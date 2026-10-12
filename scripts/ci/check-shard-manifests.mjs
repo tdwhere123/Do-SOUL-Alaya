@@ -203,10 +203,11 @@ function runSelfTest() {
     const skipped = statusFailures(shardDir, "skipped");
     const overlap = overlapFailures(shardDir);
     const below = belowFloorFailures(shardDir, coverageDir);
-    const partial = partialShardFailures(root);
-    const failures = { partition, ok, cancelled, missing, skipped, overlap, below, partial };
+    const { complete, partial } = fileShardFailures(root);
+    const failures = { partition, ok, cancelled, missing, skipped, overlap, below, complete, partial };
     if (partition.length > 0 || ok.length !== 0 || cancelled.length === 0 || missing.length === 0
-      || skipped.length === 0 || overlap.length === 0 || below.length === 0 || partial.length === 0) {
+      || skipped.length === 0 || overlap.length === 0 || below.length === 0
+      || complete.length > 0 || partial.length === 0) {
       console.error("check-shard-manifests --self-test failed", failures);
       return 1;
     }
@@ -269,23 +270,31 @@ function belowFloorFailures(shardDir, coverageDir) {
   return failures.filter((line) => line.includes("below"));
 }
 
-function partialShardFailures(root) {
-  const shardDir = path.join(root, "partial");
+function fileShardFailures(root) {
+  const shardDir = path.join(root, "file-shards");
   mkdirSync(shardDir, { recursive: true });
   for (const [group, projects] of Object.entries(VITEST_PROJECT_GROUPS)) {
-    const dir = path.join(shardDir, group);
-    mkdirSync(dir);
-    writeFileSync(path.join(dir, "shard-manifest.json"), JSON.stringify({
-      label: "windows-node24",
-      group,
-      status: "success",
-      projects,
-      ...(group === "bench-runner" ? { shard: "1/2" } : {})
-    }));
+    const count = group === "bench-runner" ? 4 : 1;
+    for (let index = 1; index <= count; index += 1) {
+      const dir = path.join(shardDir, `${group}-${index}`);
+      mkdirSync(dir);
+      writeFileSync(path.join(dir, "shard-manifest.json"), JSON.stringify({
+        label: "windows-node24",
+        group,
+        status: "success",
+        projects,
+        ...(group === "bench-runner" ? { shard: `${index}/${count}` } : {})
+      }));
+    }
   }
-  return checkShards({
+  const complete = checkShards({
+    label: "windows-node24", shardDir, needsResult: "success"
+  });
+  rmSync(path.join(shardDir, "bench-runner-4"), { recursive: true });
+  const partial = checkShards({
     label: "windows-node24", shardDir, needsResult: "success"
   }).filter((line) => line.includes("incomplete"));
+  return { complete, partial };
 }
 
 function writeGood(root) {

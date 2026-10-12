@@ -161,7 +161,7 @@ export default [
         include: [testIncludeGlob(testDir)],
         exclude: ["**/dist/**"],
         ...(process.platform === "win32"
-          ? windowsSqliteTimeouts
+          ? { ...windowsSqliteTimeouts, fileParallelism: false, maxWorkers: 1 }
           : { testTimeout: 30_000 }),
         coverage: {
           include: ["apps/bench-runner/src/**"]

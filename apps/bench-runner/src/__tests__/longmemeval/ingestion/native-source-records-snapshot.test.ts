@@ -1,3 +1,4 @@
+import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +39,7 @@ const generationTask = { contract: "source-semantic-generation-task-v1" as const
   context: "complete_original_source" as const, original_query: "Which file format did Mira use for the Atlas export?",
   responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
 const taskGeneration = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION, generation_task: generationTask };
+
 afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -120,7 +122,10 @@ it("stops a selected Gemini source sample after its first failed key on dispatch
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("preserves both source clocks, revisions and every document newline through native installation", async () => {
+it("preserves both source clocks, revisions and every document newline through native installation", async (testContext) => {
+  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id, testContext.task.timeout, testContext.signal);
+  const benchPhase = phases.phase;
+  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
   const root = mkdtempSync(join(tmpdir(), "native-source-snapshot-"));
   roots.push(root);
   const snapshotPath = join(root, "initial.sqlite");
@@ -132,8 +137,8 @@ it("preserves both source clocks, revisions and every document newline through n
       content_bytes: "Mira used CSV for the Beacon export.\n",
       source_observed_at: "2026-09-20T12:00:00.000Z", recorded_at: "2026-09-21T09:00:01.000Z" }
   ] as const;
-  await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "daemon"),
-    workspaceId: "native-source-test", runId: "native-source-test", producerCommit: "0".repeat(40), sources: records });
+  await benchPhase("snapshot.native", () => prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "daemon"),
+    workspaceId: "native-source-test", runId: "native-source-test", producerCommit: "0".repeat(40), sources: records }));
   const verified = readVerifiedNativeSourceSnapshot(snapshotPath);
   expect(verified.records.map(({ source_id, source_version, title, content_bytes, source_observed_at, recorded_at }) =>
     ({ source_id, source_version, title, content_bytes, source_observed_at, recorded_at }))).toEqual(records);
@@ -159,11 +164,11 @@ it("preserves both source clocks, revisions and every document newline through n
       expect(prepared.semantic.source_request.source_assertions[1]?.text).toBe("Mira used Parquet for the Atlas export.");
     }
   }
-  const published = await publishSourceSemanticSnapshot({ snapshotPath: join(root, "qualified.sqlite"),
+  const published = await benchPhase("snapshot.publish", () => publishSourceSemanticSnapshot({ snapshotPath: join(root, "qualified.sqlite"),
     dataDirRoot: join(root, "qualified-daemon"), recordedAt: "2026-09-25T00:00:00.000Z",
     workspaceId: "native-source-test", runId: "native-source-test", producerCommit: "0".repeat(40),
     populations: [{ name: "native-records", nativeSnapshotPath: snapshotPath,
-      model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" }] });
+      model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1" }] }));
   expect(published.admitted_count).toBe(2);
   expect(published.published_count).toBe(0);
   expect(published.sources.map(row => ({ source_id: row.source_id, record_id: row.record_id,
@@ -207,17 +212,17 @@ it("preserves both source clocks, revisions and every document newline through n
         page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 },
       authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 1_000_000 } }));
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  expect(await runSemanticChainLauncher(["recover-declare-initial-q", "--config", recoveryConfigPath,
-    "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-declare-initial-q", () => runSemanticChainLauncher(["recover-declare-initial-q", "--config", recoveryConfigPath,
+    "--root", recoveryRoot]))).toBe(0);
   const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(queryWorkset, queryCacheRoot, 16_384, 1),
     inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  await executeSemanticProposalFill({ workset: queryWorkset, cacheRoot: queryCacheRoot, authority: queryAuthority,
+  await benchPhase("fill.proposal", () => executeSemanticProposalFill({ workset: queryWorkset, cacheRoot: queryCacheRoot, authority: queryAuthority,
     config: { providerUrl: "https://generativelanguage.googleapis.com", model: "gemini-3.1-flash-lite",
       requestProfile: "gemini-3.1-minimal-v1", apiKey: "fixture" },
     extractor: { extract: async () => ({ rawJson: queryRaw, responseMetadata: { finishReason: "STOP" },
       usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-      responseBody: syntheticGeminiBody(queryRaw, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) }) } });
-  expect(await runSemanticChainLauncher(["recover-freeze", "--config", recoveryConfigPath, "--root", recoveryRoot])).toBe(0);
+      responseBody: syntheticGeminiBody(queryRaw, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) }) } }));
+  expect(await benchPhase("recover-freeze", () => runSemanticChainLauncher(["recover-freeze", "--config", recoveryConfigPath, "--root", recoveryRoot]))).toBe(0);
   const frozen = readChainArtifact(join(recoveryRoot, "recovery-window.json")) as {
     window: { source_id: string; read_bytes: number; body_bytes: number; complete: boolean }[];
     selected_missing_keys: string[]; initial_access: { trace: { source_offset: number } };
@@ -229,7 +234,7 @@ it("preserves both source clocks, revisions and every document newline through n
     read_bytes: Buffer.byteLength("Mira completed the Atlas export.\n"), complete: false });
   expect(frozen.window.find(row => row.source_id === "source-b326")).toMatchObject({
     read_bytes: Buffer.byteLength(records[1].content_bytes), complete: true });
-  expect(await runSemanticChainLauncher(["recover-freeze", "--config", recoveryConfigPath, "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-freeze", () => runSemanticChainLauncher(["recover-freeze", "--config", recoveryConfigPath, "--root", recoveryRoot]))).toBe(0);
 
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gemini-3.1-flash-lite");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "gemini-3.1-low-v1");
@@ -286,7 +291,7 @@ it("preserves both source clocks, revisions and every document newline through n
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
   });
   vi.stubGlobal("fetch", fetchMock);
-  const filled = await runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 });
+  const filled = await benchPhase("fill.source", () => runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 }));
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(filled.newlyExtracted).toBe(2);
   for (const row of preflight.ready_requests) {
@@ -306,16 +311,16 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(associations.sources.every(row => row.status === "associated")).toBe(true);
   expect(readCompleteRetainedSourceResponse({ cacheRoot, preflight, line: preflight.ready_requests[0]! }))
     .toContain("source-semantic-proposal-v8");
-  const qualified = await publishSourceSemanticSnapshot({ snapshotPath: join(root, "with-h.sqlite"),
+  const qualified = await benchPhase("snapshot.publish", () => publishSourceSemanticSnapshot({ snapshotPath: join(root, "with-h.sqlite"),
     dataDirRoot: join(root, "with-h-daemon"), recordedAt: "2026-09-25T00:00:00.000Z",
     workspaceId: "native-source-test", runId: "native-source-test", producerCommit: "0".repeat(40),
     populations: [{ name: "native-records", nativeSnapshotPath: snapshotPath,
       model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1",
       openSemantics: taskGeneration,
-      cacheRoots: [cacheRoot], publicationAssociations: associations.publicationAssociations }] });
+      cacheRoots: [cacheRoot], publicationAssociations: associations.publicationAssociations }] }));
   expect(qualified.published_count).toBe(2);
-  expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
-    "--source-preflight", preflightPath, "--source-cache-root", cacheRoot])).toBe(0);
+  expect(await benchPhase("recover-publish-initial", () => runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+    "--source-preflight", preflightPath, "--source-cache-root", cacheRoot]))).toBe(0);
   const initialQualified = readChainArtifact(join(recoveryRoot, "initial-qualified.json")) as {
     snapshot_path: string; snapshot_sha256: string; published_selected_count: number;
     descriptor_export: { source_id: string; record_id: string; descriptor: { source_interpretation_id: string } }[] };
@@ -326,8 +331,8 @@ it("preserves both source clocks, revisions and every document newline through n
   const initialPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(frozen.initial_chain_root, "prepare.json")));
   const initialQuery = initialPlan.queries[0];
   if (initialQuery?.status !== "ready") throw new Error("original Q was not admitted");
-  const qualifiedPlan = await prepareSemanticChain({ ...initialPlan.config, snapshot_path: initialQualified.snapshot_path,
-    snapshot_sha256: initialQualified.snapshot_sha256 }, join(root, "task-discovery"));
+  const qualifiedPlan = await benchPhase("chain.prepare", () => prepareSemanticChain({ ...initialPlan.config, snapshot_path: initialQualified.snapshot_path,
+    snapshot_sha256: initialQualified.snapshot_sha256 }, join(root, "task-discovery")));
   const qualifiedQuery = qualifiedPlan.queries[0];
   if (qualifiedQuery?.status !== "ready") throw new Error("qualified task discovery required");
   expect(qualifiedQuery.descriptors).not.toHaveLength(0);
@@ -337,7 +342,7 @@ it("preserves both source clocks, revisions and every document newline through n
     expect(descriptor.generation_task).not.toHaveProperty("original_query");
     expect(descriptor.interpretation?.generation_task).toEqual(generationTask);
   }
-  await withSemanticChainDaemon({ ...initialPlan.config, snapshot_path: initialQualified.snapshot_path,
+  await benchPhase("chain.live", () => withSemanticChainDaemon({ ...initialPlan.config, snapshot_path: initialQualified.snapshot_path,
     snapshot_sha256: initialQualified.snapshot_sha256 }, recoveryRoot, async daemon => {
     const missingC = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
       SoulInterpretationRequestSchema.parse({ operation: "reason", original_query: initialQuery.original_query,
@@ -351,14 +356,14 @@ it("preserves both source clocks, revisions and every document newline through n
     expect(missingC.result?.attention).toMatchObject({ kind: "preparation", missing: "semantic_correspondence",
       source_id: records[0].source_id, observation: "not_executed" });
     expect(missingC.work.native_work).toBeGreaterThan(0);
-  });
-  expect(await runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot])).toBe(0);
+  }));
+  expect(await benchPhase("recover-prepare-initial-c", () => runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot]))).toBe(0);
   const cWorkset = parseSemanticProposalWorkset(JSON.parse(readFileSync(join(recoveryRoot, "initial-correspondence-workset.json"), "utf8")));
   expect(cWorkset.items).toHaveLength(2);
   const cCacheRoot = join(root, "correspondence-cache"); mkdirSync(cCacheRoot);
   const cAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(cWorkset, cCacheRoot, 16_384, 1),
     inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  const cFilled = await executeSemanticProposalFill({ workset: cWorkset, cacheRoot: cCacheRoot, authority: cAuthority,
+  const cFilled = await benchPhase("fill.proposal", () => executeSemanticProposalFill({ workset: cWorkset, cacheRoot: cCacheRoot, authority: cAuthority,
     config: { providerUrl: "https://generativelanguage.googleapis.com", model: "gemini-3.1-flash-lite",
       requestProfile: "gemini-3.1-low-v1", apiKey: "fixture" },
     extractor: { extract: async ({ userPrompt }) => {
@@ -372,9 +377,9 @@ it("preserves both source clocks, revisions and every document newline through n
       return { rawJson, responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
         responseBody: syntheticGeminiBody(rawJson, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) };
-    } } });
+    } } }));
   expect(cFilled.interpreted).toBe(2);
-  expect(await runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-reason-initial", () => runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot]))).toBe(0);
   const initialReason = readChainArtifact(join(recoveryRoot, "initial-reason.json")) as {
     results: { status: string; response?: { operation: string; result?: { binding_results?: unknown[];
       attention?: { source_id: string; entries: { obligation: string; state: string }[] } } } }[] };
@@ -384,23 +389,23 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(initialReason.results.map(row => row.response?.result?.attention?.source_id)).toEqual(records.map(row => row.source_id));
   expect(initialReason.results[0]?.response?.result?.attention?.entries.some(row =>
     row.obligation === "predicate" && row.state === "correspondence_missing")).toBe(true);
-  expect(await runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-prepare-q-review", () => runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot]))).toBe(0);
   const qReviewWorkset = parseSemanticProposalWorkset(JSON.parse(readFileSync(join(recoveryRoot, "query-review-workset.json"), "utf8")));
   const qReviewCache = join(recoveryRoot, "query-review-cache"); mkdirSync(qReviewCache);
   const qReviewAuthority = pinSemanticProposalAuthority({
     preflight: prepareSemanticProposal(qReviewWorkset, qReviewCache, 16_384, 1),
     inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  const qReviewFilled = await executeSemanticProposalFill({ workset: qReviewWorkset, cacheRoot: qReviewCache,
+  const qReviewFilled = await benchPhase("fill.proposal", () => executeSemanticProposalFill({ workset: qReviewWorkset, cacheRoot: qReviewCache,
     authority: qReviewAuthority, config: { providerUrl: "https://generativelanguage.googleapis.com",
       model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-minimal-v1", apiKey: "fixture" },
     extractor: { extract: async () => ({ rawJson: queryRaw, responseMetadata: { finishReason: "STOP" },
       usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
-      responseBody: syntheticGeminiBody(queryRaw, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) }) } });
+      responseBody: syntheticGeminiBody(queryRaw, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) }) } }));
   expect(qReviewFilled.interpreted).toBe(1);
-  expect(await runSemanticChainLauncher(["recover-settle-q-review", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-settle-q-review", () => runSemanticChainLauncher(["recover-settle-q-review", "--root", recoveryRoot]))).toBe(0);
   expect(readChainArtifact(join(recoveryRoot, "query-review.json"))).toMatchObject({
     active_query_origin: "admitted_child", changed: false });
-  expect(await runSemanticChainLauncher(["recover-prepare-source", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-prepare-source", () => runSemanticChainLauncher(["recover-prepare-source", "--root", recoveryRoot]))).toBe(0);
   const freshSource = readChainArtifact(join(recoveryRoot, "recovery-source-read.json")) as {
     source_id: string; initial_read_bytes: number; initial_body_bytes: number;
     response: { catalog: { assertions: { segments: { text: string }[] }[] }; work: { native_work: number } } };
@@ -409,7 +414,7 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(freshSource.response.catalog.assertions.map(row => row.segments.map(part => part.text).join("")))
     .toContain("Mira used Parquet for the Atlas export.");
   expect(freshSource.response.work.native_work).toBeGreaterThan(0);
-  expect(await runSemanticChainLauncher(["recover-prepare-h-revision", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-prepare-h-revision", () => runSemanticChainLauncher(["recover-prepare-h-revision", "--root", recoveryRoot]))).toBe(0);
   expect(readChainArtifact(join(recoveryRoot, "source-revision.json"))).toMatchObject({
     source_id: records[0].source_id, parent_key: expect.any(String), child_key: expect.any(String),
     parent_response_sha256: expect.any(String) });
@@ -448,7 +453,7 @@ it("preserves both source clocks, revisions and every document newline through n
     return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: response }] } }],
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
   }));
-  const childFilled = await runExtractionFill({ ...childOptions, authorityReceiptPath: childReceiptPath, concurrency: 1 });
+  const childFilled = await benchPhase("fill.source", () => runExtractionFill({ ...childOptions, authorityReceiptPath: childReceiptPath, concurrency: 1 }));
   expect(childFilled.newlyExtracted).toBe(1);
   const childPreflightPath = join(root, "source-child-preflight.json");
   writeFileSync(childPreflightPath, JSON.stringify(childPreflight));
@@ -464,8 +469,8 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(mixed.sources.every(row => row.status === "associated")).toBe(true);
   expect(mixed.publicationAssociations.find(row => row.source_id === records[0].source_id))
     .toMatchObject({ generation_key: revision.child_key });
-  expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
-    "--source-preflight", childPreflightPath, "--source-cache-root", childCacheRoot])).toBe(0);
+  expect(await benchPhase("recover-publish-final", () => runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
+    "--source-preflight", childPreflightPath, "--source-cache-root", childCacheRoot]))).toBe(0);
   const finalQualified = readChainArtifact(join(recoveryRoot, "final-qualified.json")) as {
     snapshot_path: string; snapshot_sha256: string; descriptor_export: { source_id: string;
       generation_key: string; descriptor: { source_interpretation_id: string } }[] };
@@ -475,7 +480,7 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(finalQualified.descriptor_export.find(row => row.source_id === records[1].source_id))
     .toMatchObject({ generation_key: frozen.selected_missing_keys.find(key => key !== revision.parent_key) });
   expect(finalQualified.snapshot_sha256).not.toBe(initialQualified.snapshot_sha256);
-  expect(await runSemanticChainLauncher(["recover-prepare-final-c", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-prepare-final-c", () => runSemanticChainLauncher(["recover-prepare-final-c", "--root", recoveryRoot]))).toBe(0);
   const finalC = parseSemanticProposalWorkset(JSON.parse(readFileSync(join(recoveryRoot,
     "final-correspondence-workset.json"), "utf8")));
   const initialKeys = materializeSemanticProposalLines(cWorkset, 16_384).map(row => row.key);
@@ -488,7 +493,7 @@ it("preserves both source clocks, revisions and every document newline through n
   const finalCacheRoot = join(recoveryRoot, "final-correspondence-cache"); mkdirSync(finalCacheRoot);
   const finalCAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(finalNewC, finalCacheRoot, 16_384, 1),
     inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  const finalCFilled = await executeSemanticProposalFill({ workset: finalNewC, cacheRoot: finalCacheRoot,
+  const finalCFilled = await benchPhase("fill.proposal", () => executeSemanticProposalFill({ workset: finalNewC, cacheRoot: finalCacheRoot,
     authority: finalCAuthority, config: { providerUrl: "https://generativelanguage.googleapis.com",
       model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", apiKey: "fixture" },
     extractor: { extract: async ({ userPrompt }) => {
@@ -501,16 +506,16 @@ it("preserves both source clocks, revisions and every document newline through n
       return { rawJson, responseMetadata: { finishReason: "STOP" },
         usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
         responseBody: syntheticGeminiBody(rawJson, "STOP", { inputTokens: 10, outputTokens: 20, totalTokens: 30 }) };
-    } } });
+    } } }));
   expect(finalCFilled.newly_admitted).toBe(1);
-  expect(await runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-final-deliver", () => runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot]))).toBe(0);
   const firstExposure = readChainArtifact(join(recoveryRoot, "first-exposure.json")) as {
     replay_path: string; replay_identity: string; stage_identity: string };
   expect(firstExposure).toMatchObject({
     contract: "source-semantic-recovery-first-exposure-v1", delivered_count: expect.any(Number) });
   rmSync(firstExposure.replay_path);
   rmSync(join(recoveryRoot, "first-exposure.json"));
-  expect(await runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot])).toBe(0);
+  expect(await benchPhase("recover-final-deliver", () => runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot]))).toBe(0);
   expect(readChainArtifact(join(recoveryRoot, "first-exposure.json"))).toMatchObject({
     replay_identity: firstExposure.replay_identity, stage_identity: firstExposure.stage_identity });
 });
