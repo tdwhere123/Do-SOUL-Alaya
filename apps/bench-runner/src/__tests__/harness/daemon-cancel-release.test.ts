@@ -177,10 +177,28 @@ it("starts sequential daemons when no test signal is bound", async () => {
 });
 
 it("shuts down each later daemon on the same scope", async () => {
-  for (const name of ["one", "two", "three"]) {
-    const dataDir = mkdtempSync(join(tmpdir(), `daemon-again-${name}-`));
-    const handle = await startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
-    await handle.shutdown();
-    rmSync(dataDir, { recursive: true, force: true });
+  const scope = currentBenchScope();
+  const owned = mkdtempSync(join(tmpdir(), "daemon-again-owned-"));
+  removeDataDirWhenBenchDaemonCancelled(owned);
+  const previousConfig = process.env.ALAYA_CONFIG_DIR;
+  try {
+    for (const name of ["one", "two", "three"]) {
+      const dataDir = mkdtempSync(join(tmpdir(), `daemon-again-${name}-`));
+      const handle = await startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
+      let closed = 0;
+      const shutdown = handle.shutdown.bind(handle);
+      handle.shutdown = async () => {
+        closed += 1;
+        await shutdown();
+      };
+      await handle.shutdown();
+      expect(closed).toBe(1);
+      expect(currentBenchScope()).toBe(scope);
+      expect(existsSync(owned)).toBe(true);
+      expect(process.env.ALAYA_CONFIG_DIR).toBe(previousConfig);
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(owned, { recursive: true, force: true });
   }
 });
