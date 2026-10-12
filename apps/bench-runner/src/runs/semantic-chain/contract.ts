@@ -153,12 +153,13 @@ export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, ro
   let complete = false;
   try {
     restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
-    daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
+    const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
       sourceSemanticInterpretationClock: config.interpretation_clock,
       embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
+    daemon = started;
     removeDataDirWhenBenchDaemonCancelled(directory);
     const scope = currentBenchScope();
-    const result = scope === undefined ? await body(daemon) : await trackBenchBody(scope, () => body(daemon));
+    const result = scope === undefined ? await body(started) : await trackBenchBody(scope, () => body(started));
     complete = true;
     return result;
   } finally {
