@@ -5,10 +5,11 @@ type Phase = { phase: string; started: number; ms: number; failed: boolean };
 type Trace = { active: Set<Phase>; completed: Map<string, { count: number; ms: number }>; slowest: Phase[]; last?: Phase };
 let hardwareReported = false;
 
-/** Called only by the three instrumented integration files, using their existing Vitest timeout. */
+/** Warning timing is independent of the task timeout, which is reported unchanged. */
 export function startBenchPhaseDiagnostics(
   filepath: string, testId: string, timeout: number, signal: AbortSignal,
-  emit: (line: string) => void = line => { process.stderr.write(`${line}\n`); }
+  emit: (line: string) => void = line => { process.stderr.write(`${line}\n`); },
+  warningBudgetMs: number = timeout * 0.75
 ): { phase<T>(name: string, body: () => Promise<T>): Promise<T>; finish(failed: boolean): void } {
   const trace: Trace = { active: new Set(), completed: new Map(), slowest: [] };
   /** Explicitly awaited test phases preserve rejection behavior; no runtime functions are replaced. */
@@ -38,24 +39,24 @@ export function startBenchPhaseDiagnostics(
   signal.addEventListener("abort", onAbort, { once: true });
   let slow = false, finished = false;
   const summary = ({ phase, ms, failed }: Phase) => ({ phase, ms, failed });
-  function report(event: "budget_75pct" | "finished", failed = false) {
+  function report(event: "warning_budget" | "finished", failed = false) {
     const usage = process.cpuUsage(cpu);
     const hardware = hardwareReported ? undefined : { platform: process.platform,
       availableParallelism: availableParallelism(), cpuCount: cpus().length, totalMemoryMB: Math.round(totalmem() / 1024 ** 2) };
     hardwareReported = true;
     emit(`[bench-phase] ${JSON.stringify({ event, file: basename(filepath), testId, pid: process.pid,
-      timeoutMs: timeout, elapsedMs: Math.round(performance.now() - started), failed, hardware,
+      timeoutMs: timeout, warningBudgetMs, elapsedMs: Math.round(performance.now() - started), failed, hardware,
       cpuMs: Math.round((usage.user + usage.system) / 1000), totals: Object.fromEntries(trace.completed),
       active: active(), atAbort, last: trace.last === undefined ? undefined : summary(trace.last),
       slowest: trace.slowest.map(summary) })}`);
   }
-  const timer = timeout > 0 ? setTimeout(() => { slow = true; report("budget_75pct"); }, timeout * 0.75) : undefined;
+  const timer = warningBudgetMs > 0 ? setTimeout(() => { slow = true; report("warning_budget"); }, warningBudgetMs) : undefined;
   timer?.unref();
   return { phase, finish(failed) {
     if (finished) return;
     finished = true;
     if (timer !== undefined) clearTimeout(timer);
     signal.removeEventListener("abort", onAbort);
-    if (failed || slow || (timeout > 0 && performance.now() - started >= timeout * 0.75)) report("finished", failed);
+    if (failed || slow || (warningBudgetMs > 0 && performance.now() - started >= warningBudgetMs)) report("finished", failed);
   } };
 }

@@ -1,3 +1,4 @@
+import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
@@ -144,7 +145,12 @@ describe("complete-source census and publication", () => {
     }
   });
 
-  it("keeps original question haystacks isolated through source-only development and evaluator-only scoring", async () => {
+  // This correctness E2E covers development and formal arms across multiple cold daemon sessions.
+  it("keeps original question haystacks isolated through source-only development and evaluator-only scoring", async (testContext) => {
+    const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
+      testContext.task.timeout, testContext.signal, undefined, process.platform === "win32" ? 45_000 : undefined);
+    const benchPhase = phases.phase;
+    testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
     const f = await fixture(false, true);
     const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
     const root = join(f.root, "development"), queryCache = join(f.root, "query-cache"), evaluatorRoot = join(f.root, "evaluator");
@@ -158,8 +164,8 @@ describe("complete-source census and publication", () => {
     expect(frozen.selected.map((row) => row.source_manifest.length)).toEqual([1, 1]);
     expect(frozen.selected.every((row) => row.interpretation_clock === AS_OF)).toBe(true);
     expect(JSON.stringify(frozen)).not.toContain("excluded gold");
-    const blocked = await prepareLongMemEvalSemanticRun(root);
-    const blockedReplay = await replayLongMemEvalSemanticRun(root, blocked.path);
+    const blocked = await benchPhase("blocked.prepare", () => prepareLongMemEvalSemanticRun(root));
+    const blockedReplay = await benchPhase("blocked.replay", () => replayLongMemEvalSemanticRun(root, blocked.path));
     expect(await runLongMemEvalSemanticLauncher(["measure", "--root", root, "--replay", blockedReplay.path])).toBe(2);
     const alias = join(f.root, "producer-alias");
     await symlink(root, alias, "dir");
@@ -167,7 +173,7 @@ describe("complete-source census and publication", () => {
       await expect(measureLongMemEvalSemanticRun(root, blockedReplay.path, unsafe)).rejects.toThrow(/separate from producer and input roots/u);
     }
     expect(readdirSync(root).some(name => name.startsWith("measurement-"))).toBe(false);
-    const blockedMeasurement = await measureLongMemEvalSemanticRun(root, blockedReplay.path, evaluatorRoot);
+    const blockedMeasurement = await benchPhase("blocked.measure", () => measureLongMemEvalSemanticRun(root, blockedReplay.path, evaluatorRoot));
     expect(isContainedPath(evaluatorRoot, blockedMeasurement.path)).toBe(true);
     expect(blockedMeasurement.result.rows.filter(row => row.measurement_path !== null)
       .every(row => isContainedPath(evaluatorRoot, row.measurement_path!))).toBe(true);
@@ -192,7 +198,7 @@ describe("complete-source census and publication", () => {
           responseMetadata: { finishReason: "STOP" }, usage };
       } } });
     expect(filled.newly_admitted).toBe(2);
-    const prepared = await prepareLongMemEvalSemanticRun(root);
+    const prepared = await benchPhase("new-q.prepare", () => prepareLongMemEvalSemanticRun(root));
     expect(prepared.result.rows).toEqual(frozen.selected.map(({ question_id }) => ({ question_id, status: "prepared",
       chain_root: expect.any(String), publication_path: expect.any(String), publication_identity: expect.any(String) })));
     for (const row of prepared.result.rows) {
@@ -202,9 +208,9 @@ describe("complete-source census and publication", () => {
       expect(plan.queries.every((query) => query.status === "ready"
         && query.discovery_trace.every((page) => page.access.policy === "canonical-v1"))).toBe(true);
     }
-    const replayed = await replayLongMemEvalSemanticRun(root, prepared.path);
+    const replayed = await benchPhase("new-q.replay", () => replayLongMemEvalSemanticRun(root, prepared.path));
     expect(await replayLongMemEvalSemanticRun(root, prepared.path)).toEqual(replayed);
-    const measured = await measureLongMemEvalSemanticRun(root, replayed.path, evaluatorRoot);
+    const measured = await benchPhase("new-q.measure", () => measureLongMemEvalSemanticRun(root, replayed.path, evaluatorRoot));
     expect(measured.result).toMatchObject({ contract: "longmemeval-semantic-measurement-v2", order_policy: "native_canonical_source_root_order" });
     expect(measured.result.inventory).toEqual({ questions: 3, answerable: 2, abstention: 1 });
     expect(measured.result.rows.find((row) => row.selected && row.cohort === "answerable")?.reason).toBeNull();
@@ -227,9 +233,9 @@ describe("complete-source census and publication", () => {
       previously_exposed_question_ids: ["mixed-roles"],
       question_ids: frozen.inventory.map(row => row.question_id), query_cache_root: join(f.root, "formal-empty-cache") }, formalRoot);
     expect(formal.exposure).toBe("formal_with_recorded_development_exposure");
-    const formalPrepared = await prepareLongMemEvalSemanticRun(formalRoot);
-    const formalReplay = await replayLongMemEvalSemanticRun(formalRoot, formalPrepared.path);
-    const formalMeasurement = await measureLongMemEvalSemanticRun(formalRoot, formalReplay.path, evaluatorRoot);
+    const formalPrepared = await benchPhase("formal.prepare", () => prepareLongMemEvalSemanticRun(formalRoot));
+    const formalReplay = await benchPhase("formal.replay", () => replayLongMemEvalSemanticRun(formalRoot, formalPrepared.path));
+    const formalMeasurement = await benchPhase("formal.measure", () => measureLongMemEvalSemanticRun(formalRoot, formalReplay.path, evaluatorRoot));
     // This legacy source-only fixture observes the native raw-query fallback; it does not approve a new formal arm.
     expect(formalMeasurement.result.primary).toMatchObject({ eligible: 2, hits: 2, unknown: 0, target_decision: "achieved" });
     expect(formalMeasurement.result.formal_target).toMatchObject({ eligible: 2, strict_over_90_required_hits: 2,
@@ -237,7 +243,7 @@ describe("complete-source census and publication", () => {
     expect(formalMeasurement.result.rows.filter(row => row.prior_development_exposure).map(row => row.question_id)).toEqual(["mixed-roles"]);
     expect(formalMeasurement.result.rows.filter(row => row.cohort === "answerable")
       .every(row => row.attribution.layer === "query_unavailable")).toBe(true);
-  }, 60000);
+  }, process.platform === "win32" ? 120_000 : 60_000);
 
   it("admits every physical question path before any evaluator output and requires a separate chain CLI root", async () => {
     const f = await fixture(false, false, [question("first", [[{ role: "user", content: "First source." }]]),

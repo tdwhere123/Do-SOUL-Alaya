@@ -25,11 +25,13 @@ it("preserves phase results and errors while logging only bounded fixed-label ti
   } finally { diagnostics.finish(false); }
 });
 
-it("reports the existing budget once, captures active cancellation, and clears the watchdog", async () => {
+it.each([{ timeout: 60_000, warningBudget: undefined }, { timeout: 120_000, warningBudget: 45_000 }])(
+  "reports the warning budget once with timeout=$timeout, captures cancellation, and clears the watchdog",
+  async ({ timeout, warningBudget }) => {
   vi.useFakeTimers();
   const lines: string[] = [], controller = new AbortController();
-  const diagnostics = startBenchPhaseDiagnostics("native-source-records-snapshot.test.ts", "probe", 60_000,
-    controller.signal, line => { lines.push(line); });
+  const diagnostics = startBenchPhaseDiagnostics("native-source-records-snapshot.test.ts", "probe", timeout,
+    controller.signal, line => { lines.push(line); }, warningBudget);
   const benchPhase = diagnostics.phase;
   let release: () => void = () => undefined;
   const pending = benchPhase("snapshot.publish", () => new Promise<void>(resolve => { release = resolve; }));
@@ -38,7 +40,9 @@ it("reports the existing budget once, captures active cancellation, and clears t
     expect(lines).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('"event":"budget_75pct"');
+    expect(lines[0]).toContain('"event":"warning_budget"');
+    const warning = JSON.parse(lines[0]!.slice("[bench-phase] ".length));
+    expect(warning).toMatchObject({ timeoutMs: timeout, warningBudgetMs: 45_000 });
     controller.abort(); release(); await pending;
     diagnostics.finish(false);
     const final = JSON.parse(lines[1]!.slice("[bench-phase] ".length));

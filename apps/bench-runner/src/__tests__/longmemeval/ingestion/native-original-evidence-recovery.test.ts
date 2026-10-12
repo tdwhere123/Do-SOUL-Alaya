@@ -68,6 +68,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+// This correctness E2E spans multiple cold SQLite/daemon sessions on Windows.
 for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", cOnly: true },
   { ...WORLDS[2], name: "retained assistant known event time", retainedClock: OBSERVED },
   { ...WORLDS[2], name: "retained assistant unknown event time", retainedClock: null },
@@ -76,7 +77,8 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     retainedRecordedAt: ["2026-09-22T00:00Z", "2026-09-22T00:01Z"] }
 ] as const)
   it(`delivers the frozen ${world.name} distinction through the connected native recovery`, async (testContext) => {
-  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id, testContext.task.timeout, testContext.signal);
+  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
+    testContext.task.timeout, testContext.signal, undefined, process.platform === "win32" ? 45_000 : undefined);
   const benchPhase = phases.phase;
   testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
   const cOnly = "cOnly" in world && world.cOnly;
@@ -417,7 +419,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     expect(await runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot])).toBe(0);
     expect(chainIdentity(readChainArtifact(join(recoveryRoot, "first-exposure.json")))).toBe(firstExposureIdentity);
   }
-}, 60_000);
+}, process.platform === "win32" ? 120_000 : 60_000);
 
 it("reuses exact Q and H physical owners across isolated native source worlds", async () => {
   const root = mkdtempSync(join(tmpdir(), "native-shared-physical-owner-")); roots.push(root);
