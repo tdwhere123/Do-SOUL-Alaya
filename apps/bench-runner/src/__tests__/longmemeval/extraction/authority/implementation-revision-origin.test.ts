@@ -83,7 +83,7 @@ it("binds large tracked patches and untracked bytes and modes to the loaded chec
   writeFileSync(untracked, "new bytes\n");
   const changedBytes = inspect(loaded, foreign).revision;
   expect(changedBytes).not.toBe(changedUntracked);
-  chmodSync(untracked, 0o755);
+  chmodSync(untracked, process.platform === "win32" ? 0o444 : 0o755);
   expect(inspect(loaded, foreign).revision).not.toBe(changedBytes);
   writeFileSync(join(foreign, "source.txt"), "foreign-only drift\n");
   expect(inspect(loaded, foreign).revision).toBe(inspect(loaded, loaded).revision);

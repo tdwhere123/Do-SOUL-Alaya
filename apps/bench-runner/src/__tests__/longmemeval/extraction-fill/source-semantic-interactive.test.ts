@@ -917,12 +917,19 @@ it("does not classify a programmer extract error as transport failure", async ()
 it.each(["intact", "changed"] as const)("rechecks %s persisted raw after a shard write failure without a second provider call", async integrity => {
   const fixture = await setupInteractive();
   const buckets = [...new Set(fixture.keys.map((key) => join(cacheRoot, key.slice(0, 2))))];
-  for (const bucket of buckets) {
-    mkdirSync(bucket, { recursive: true });
-    if (process.platform === "win32") {
-      rmSync(bucket, { recursive: true });
-      writeFileSync(bucket, "not a directory");
-    } else chmodSync(bucket, 0o500);
+  for (const bucket of buckets) mkdirSync(bucket, { recursive: true });
+  if (process.platform === "win32") {
+    const respond = fixture.fetchMock.getMockImplementation();
+    fixture.fetchMock.mockImplementation(async (url, init) => {
+      const result = await respond!(url, init);
+      for (const bucket of buckets) {
+        rmSync(bucket, { recursive: true, force: true });
+        writeFileSync(bucket, "not a directory");
+      }
+      return result;
+    });
+  } else {
+    for (const bucket of buckets) chmodSync(bucket, 0o500);
   }
   expect(await runCli([
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,

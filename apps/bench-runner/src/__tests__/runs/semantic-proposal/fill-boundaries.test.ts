@@ -223,11 +223,16 @@ it("treats a disk failure after model output as local persistence failure withou
   });
   const rawDir = join(cacheRoot, "provider-raw");
   mkdirSync(rawDir, { recursive: true });
-  if (process.platform === "win32") {
-    rmSync(rawDir, { recursive: true });
-    writeFileSync(rawDir, "not a directory");
-  } else chmodSync(rawDir, 0o500);
   const spy = extractor(["{\"outcome\":{\"status\":\"abstained\"}}"]);
+  if (process.platform === "win32") {
+    const extract = spy.extract;
+    spy.extract = async (input) => {
+      const result = await extract(input);
+      rmSync(rawDir, { recursive: true, force: true });
+      writeFileSync(rawDir, "not a directory");
+      return result;
+    };
+  } else chmodSync(rawDir, 0o500);
   await expect(executeSemanticProposalFill({
     workset: prepared, cacheRoot, authority, config: config(), extractor: spy
   })).rejects.toMatchObject({ code: process.platform === "win32" ? expect.stringMatching(/^(?:EPERM|ENOTDIR|EEXIST|EISDIR)$/u) : "EACCES" });

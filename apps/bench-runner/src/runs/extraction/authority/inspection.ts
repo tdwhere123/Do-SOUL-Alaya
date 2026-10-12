@@ -39,8 +39,10 @@ import {
 } from "./repair/preserved-valid-closure.js";
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
-import { inspectExtractionCacheWriterLock } from
-  "../fill/manifest/writer-lock.js";
+import {
+  inspectExtractionCacheWriterLock,
+  nonCredentialChildEnv
+} from "../fill/manifest/writer-lock.js";
 
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 
@@ -342,7 +344,9 @@ export function readCurrentExtractionAuthorityRevision(): string {
   }
   return computeExtractionAuthorityWorktreeRevision({
     head: readGitText(["rev-parse", "HEAD"], checkoutRoot),
-    trackedDiff: readGitBuffer(["diff", "--no-ext-diff", "--binary", "HEAD", "--"], checkoutRoot),
+    trackedDiff: readGitBuffer([
+      "diff", "--no-ext-diff", "--binary", "--ignore-cr-at-eol", "HEAD", "--"
+    ], checkoutRoot),
     untrackedFiles: readUntrackedFileDigests(checkoutRoot)
   });
 }
@@ -385,8 +389,16 @@ function readUntrackedFileDigests(checkoutRoot: string): readonly {
     }));
 }
 
+const AUTHORITY_GIT_CONFIG = [
+  "-c", "core.autocrlf=true",
+  "-c", "core.fsmonitor=false",
+  "-c", "core.untrackedCache=false",
+  "-c", "credential.helper=",
+  "-c", "core.askPass="
+] as const;
+
 function readGitText(args: readonly string[], checkoutRoot: string): string {
-  return execFileSync("git", args, {
+  return execFileSync("git", [...AUTHORITY_GIT_CONFIG, ...args], {
     cwd: checkoutRoot,
     env: gitProcessEnv(),
     encoding: "utf8",
@@ -395,7 +407,7 @@ function readGitText(args: readonly string[], checkoutRoot: string): string {
 }
 
 function readGitBuffer(args: readonly string[], checkoutRoot: string): Buffer {
-  return execFileSync("git", args, {
+  return execFileSync("git", [...AUTHORITY_GIT_CONFIG, "--no-pager", ...args], {
     cwd: checkoutRoot,
     env: gitProcessEnv(),
     encoding: "buffer",
@@ -405,15 +417,17 @@ function readGitBuffer(args: readonly string[], checkoutRoot: string): Buffer {
   }) as Buffer;
 }
 
-/** Checkout identity does not read the caller's credentials. */
+/** Checkout identity does not read the caller's credentials or wait on a prompt. */
 function gitProcessEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of ["PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
-    "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE"]) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
+  return {
+    ...nonCredentialChildEnv(),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_CONFIG_SYSTEM: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
+    LC_ALL: "C"
+  };
 }
 
 function digest(value: unknown): string {

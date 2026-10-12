@@ -24,7 +24,12 @@ const GIT_IDENTITY_CONFIG = [
   "-c", "diff.algorithm=myers",
   "-c", "diff.context=3",
   "-c", "status.showUntrackedFiles=normal",
-  "-c", "status.renames=false"
+  "-c", "status.renames=false",
+  // Stripped system config drops Windows autocrlf and can mark the whole checkout dirty.
+  "-c", "core.autocrlf=true",
+  "-c", "core.fsmonitor=false",
+  "-c", "credential.helper=",
+  "-c", "core.askPass="
 ] as const;
 
 const GIT_DIFF_ARGV = [
@@ -38,6 +43,7 @@ const GIT_DIFF_ARGV = [
   "--unified=3",
   "--diff-algorithm=myers",
   "--abbrev=40",
+  "--ignore-cr-at-eol",
   "HEAD",
   "--"
 ] as const;

@@ -58,9 +58,9 @@ function pathCoversLeaseRoot(root: string, path: string): boolean {
   return path === root || path.startsWith(`${root}${sep}`) || path.startsWith(`${root}/`);
 }
 
-/** A renamed Darwin root keeps the fd, but the path names the replacement. */
+/** Linux writes through the leased fd. Other platforms follow the named path, so a replaced root must not receive the write. */
 export function assertNamedDirectoryAnchorCurrent(path: string): void {
-  if (process.platform === "linux" || process.platform === "win32") return;
+  if (process.platform === "linux") return;
   for (const [descriptor, roots] of liveLeasePaths) {
     const covering = roots.filter(root => pathCoversLeaseRoot(root, path));
     if (covering.length === 0) continue;

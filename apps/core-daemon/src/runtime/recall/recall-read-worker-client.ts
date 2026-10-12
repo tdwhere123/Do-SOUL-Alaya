@@ -319,7 +319,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   public async ready(): Promise<void> {
     if (this.readyPromise === null) {
       const worker = this.workers[0] ?? this.requireWorker("ready");
-      this.readyPromise = this.dispatchToWorker(worker, "ready", {}).then(() => undefined);
+      const pending = this.dispatchToWorker(worker, "ready", {}).then(() => undefined);
+      this.readyPromise = pending;
+      pending.catch(() => {
+        if (this.readyPromise === pending) this.readyPromise = null;
+      });
     }
     await this.readyPromise;
   }

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { dirname, join } from "node:path";
 import { samePhysicalLocation } from "../fs/opened-contained-path.js";
 import { AlayaError, canonicalJson, hashSourceRecordId } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceSemanticLibraryQueryIdentity } from "@do-soul/alaya-core";
@@ -127,11 +126,11 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
   if (typeof row.measurement_path !== "string") return reportRow(row, true,
     `${typeof row.reason === "string" ? row.reason : "missing_measurement_path"}; denominator retained`, "unavailable");
   const measurement = readEnvelope(row.measurement_path, readText);
-  if (!samePhysicalLocation(row.measurement_path, join(replayed.chain_root, `measurement-${chainIdentity(measurement)}.json`))) {
+  if (!samePhysicalLocation(row.measurement_path, evidenceChildPath(replayed.chain_root, `measurement-${chainIdentity(measurement)}.json`))) {
     throw new AlayaError("CONFLICT", "measurement path does not bind this question chain");
   }
   const replay = readEnvelope(replayed.replay_path, readText);
-  const plan = readEnvelope(join(replayed.chain_root, "prepare.json"), readText);
+  const plan = readEnvelope(evidenceChildPath(replayed.chain_root, "prepare.json"), readText);
   const publication = LongMemEvalPublicationSchema.parse(readEnvelope(replayed.publication_path, readText));
   const replayRow = one(replay.rows, selected.query_key), chainRow = one(measurement.rows, selected.query_key);
   const planned = one(plan.queries, selected.query_key), gold = one(measurement.gold, selected.query_key);
@@ -151,7 +150,7 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
     || canonicalJson(config.query_workset) !== canonicalJson({ ...queryWorkset, items: [queryItems[selectedIndex]] })
     || publication.recorded_at !== frozen.config.recorded_at || publication.workspace_id !== `longmemeval-semantic-${selected.index}`
     || publication.run_id !== `longmemeval-semantic-${selected.index}`
-    || publication.snapshot_path !== join(dirname(replayed.publication_path), "library.sqlite")
+    || publication.snapshot_path !== evidenceChildPath(evidenceParentPath(replayed.publication_path), "library.sqlite")
     || planned.original_query !== selected.question || publication.census_count !== selected.source_manifest.length
     || publication.sources.some((source) => source.question_id !== selected.question_id)
     || canonicalJson(publication.sources.map(sourceIdentity)) !== canonicalJson(selected.source_manifest.map(sourceIdentity))) {
@@ -204,6 +203,21 @@ function archivedSourceResponse(response: Record<string, unknown>): Record<strin
     discovery: rename(response.discovery, { visited_h_pages: "visited_source_interpretation_pages",
       visited_h_descriptors: "visited_source_interpretation_descriptors", examined_h_ids: "examined_source_interpretation_ids",
       unexamined_h_count: "unexamined_source_interpretation_count" }) };
+}
+
+/** Evidence fixtures keep the separator they were authored with. Platform join rewrites slash paths on Windows. */
+function evidenceChildPath(root: string, name: string): string {
+  const slash = root.lastIndexOf("/");
+  const backslash = root.lastIndexOf("\\");
+  const separator = backslash > slash ? "\\" : "/";
+  return root.endsWith(separator) ? `${root}${name}` : `${root}${separator}${name}`;
+}
+
+function evidenceParentPath(path: string): string {
+  const slash = path.lastIndexOf("/");
+  const backslash = path.lastIndexOf("\\");
+  const cut = Math.max(slash, backslash);
+  return cut <= 0 ? path : path.slice(0, cut);
 }
 
 function sourceIdentity(row: { source_id: string; source_version: string; content_digest: string; session_id: string }) {

@@ -394,6 +394,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const NON_CREDENTIAL_ENV_KEYS = [
+  "PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
+  "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR",
+  "LANG", "LC_ALL", "LC_CTYPE"
+] as const;
+
+/** Child processes may locate system tools. They do not inherit credential-like environment keys. */
+export function nonCredentialChildEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of NON_CREDENTIAL_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 export function readProcessStartIdentity(pid: number): string {
   if (pid === process.pid) {
     selfProcessStartIdentity ??= readPlatformProcessStartIdentity(pid);
@@ -442,6 +458,7 @@ function readWindowsProcessStartIdentity(pid: number): string {
       encoding: "utf8",
       timeout: 20_000,
       windowsHide: true,
+      env: nonCredentialChildEnv(),
       stdio: ["ignore", "pipe", "ignore"]
     }).replace(/^\uFEFF/u, "").trim();
   } catch (cause) {
@@ -471,6 +488,7 @@ function readPosixProcessStartIdentity(pid: number): string {
     output = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
       encoding: "utf8",
       timeout: 2_000,
+      env: nonCredentialChildEnv(),
       stdio: ["ignore", "pipe", "ignore"]
     }).trim();
   } catch (cause) {
