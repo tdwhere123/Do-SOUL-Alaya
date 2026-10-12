@@ -7,6 +7,7 @@ import { AlayaError, type SourceInterpretationProfile, type ExtractionSourcePack
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, realpathSync, statfsSync } from "node:fs";
+import { samePhysicalLocation } from "../../fs/opened-contained-path.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
@@ -38,8 +39,10 @@ import {
 } from "./repair/preserved-valid-closure.js";
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
-import { inspectExtractionCacheWriterLock } from
-  "../fill/manifest/writer-lock.js";
+import {
+  inspectExtractionCacheWriterLock,
+  nonCredentialChildEnv
+} from "../fill/manifest/writer-lock.js";
 
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 
@@ -336,12 +339,14 @@ export function readCurrentExtractionAuthorityRevision(): string {
   } catch (cause) {
     throw new AlayaError("CONFLICT", "cannot establish the loaded bench-runner Git checkout", { cause });
   }
-  if (gitRoot !== checkoutRoot) {
+  if (!samePhysicalLocation(gitRoot, checkoutRoot)) {
     throw new AlayaError("CONFLICT", "loaded bench-runner module is outside its Git checkout root");
   }
   return computeExtractionAuthorityWorktreeRevision({
     head: readGitText(["rev-parse", "HEAD"], checkoutRoot),
-    trackedDiff: readGitBuffer(["diff", "--no-ext-diff", "--binary", "HEAD", "--"], checkoutRoot),
+    trackedDiff: readGitBuffer([
+      "diff", "--no-ext-diff", "--binary", "HEAD", "--"
+    ], checkoutRoot),
     untrackedFiles: readUntrackedFileDigests(checkoutRoot)
   });
 }
@@ -384,22 +389,45 @@ function readUntrackedFileDigests(checkoutRoot: string): readonly {
     }));
 }
 
+const AUTHORITY_GIT_CONFIG = [
+  "-c", "core.autocrlf=true",
+  "-c", "core.fsmonitor=false",
+  "-c", "core.untrackedCache=false",
+  "-c", "credential.helper=",
+  "-c", "core.askPass="
+] as const;
+
 function readGitText(args: readonly string[], checkoutRoot: string): string {
-  return execFileSync("git", args, {
+  return execFileSync("git", [...AUTHORITY_GIT_CONFIG, ...args], {
     cwd: checkoutRoot,
+    env: gitProcessEnv(),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"]
   }).trim();
 }
 
 function readGitBuffer(args: readonly string[], checkoutRoot: string): Buffer {
-  return execFileSync("git", args, {
+  return execFileSync("git", [...AUTHORITY_GIT_CONFIG, "--no-pager", ...args], {
     cwd: checkoutRoot,
+    env: gitProcessEnv(),
     encoding: "buffer",
     // Authority binds the full patch; large legitimate retirements exceed Node's default.
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"]
   }) as Buffer;
+}
+
+/** Checkout identity does not read the caller's credentials or wait on a prompt. */
+function gitProcessEnv(): NodeJS.ProcessEnv {
+  return {
+    ...nonCredentialChildEnv(),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_CONFIG_SYSTEM: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_OPTIONAL_LOCKS: "0",
+    LC_ALL: "C"
+  };
 }
 
 function digest(value: unknown): string {

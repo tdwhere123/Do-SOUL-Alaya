@@ -894,7 +894,8 @@ it("delivers qualified answers through the actual CLI executable with no provide
     const querySemantics = queryOf(), args = { operation: "reason", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
     const root = dirname(filename), binary = fileURLToPath(new URL("../../../../../../bin/alaya.mjs", import.meta.url));
-    const guard = fileURLToPath(new URL("../../support/provider-free-cli.mjs", import.meta.url));
+    // Node loads --import as an ESM URL; a Windows drive path is parsed as a scheme.
+    const guard = new URL("../../support/provider-free-cli.mjs", import.meta.url).href;
     const output = await promisify(execFile)(process.execPath, ["--import", guard, binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
       "--workspace", WS, "--run", RUN, "--agent", "codex", "--json"], {
       cwd: root, timeout: 30000, maxBuffer: 2_000_000,

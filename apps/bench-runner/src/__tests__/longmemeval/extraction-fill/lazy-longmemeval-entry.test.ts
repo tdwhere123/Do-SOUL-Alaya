@@ -1,4 +1,5 @@
 import { dirname, join } from "node:path";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 import { registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
@@ -236,7 +237,7 @@ it("binds one original question through full-source preflight, native window, fi
     inventory: { questions: 2, answerable: 2, abstention: 0 }, primary: { eligible: 1 } });
   expect(measured.result.primary.hits + measured.result.primary.misses + measured.result.primary.unknown).toBe(1);
   expect(measured.result.rows.find(row => row.question_id === "beta")?.outcome).toBe("not_selected_development");
-  expect(measured.path.startsWith(evaluatorRoot)).toBe(true);
+  expect(measured.path.startsWith(canonicalPath(evaluatorRoot))).toBe(true);
   expect(readChainArtifact(measured.path)).toEqual(measured.result);
   expect(await measureLongMemEvalLazyFirstExposure({ ...alpha.input, lazyRoot, evaluatorRoot })).toEqual(measured);
   const physicalQueryBucket = join(dirname(cacheRoot), "physical-lazy-query-bucket");

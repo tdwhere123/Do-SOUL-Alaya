@@ -24,8 +24,14 @@ if (parentPort === null) {
 }
 
 const databaseFilename = readDatabaseFilename(workerData);
-const database = openReadOnlyDatabase(databaseFilename);
-const runtime = createRecallReadWorkerRuntime(database, readPathReadBind(workerData));
+const pathReadBind = readPathReadBind(workerData);
+let runtime: ReturnType<typeof createRecallReadWorkerRuntime> | undefined;
+
+function openRuntime(): ReturnType<typeof createRecallReadWorkerRuntime> {
+  // Open on the first request so a parent close can release the Windows share lock first.
+  runtime ??= createRecallReadWorkerRuntime(openReadOnlyDatabase(databaseFilename), pathReadBind);
+  return runtime;
+}
 
 attachRecallReadRequestListener(parentPort, handleRequest, enqueueRecallReadRequest);
 
@@ -46,20 +52,21 @@ async function handleRequest(message: unknown): Promise<void> {
     return;
   }
   try {
+    const active = openRuntime();
     // Chunked window bypasses runOperation; reject closed before a reopenable statement.
-    if (runtime.closed && message.operation !== "close") {
+    if (active.closed && message.operation !== "close") {
       throw new Error("recall read worker database is closed");
     }
     if (message.operation === "memory.findRecallTierWindow") {
       const payload: WorkerOperationPayload<"memory.findRecallTierWindow"> =
         parseWorkerOperationPayload(message.operation, message.payload);
-      const result = await runtime.memoryEntryRepo.findRecallTierWindow(
+      const result = await active.memoryEntryRepo.findRecallTierWindow(
         readRecallTierWindowQuery(payload)
       );
       await postRecallTierWindowChunks(message.id, result, postResponse);
       return;
     }
-    const result = await runOperation(runtime, message);
+    const result = await runOperation(active, message);
     postResponse({ id: message.id, ok: true, result });
   } catch (error) {
     postResponse({

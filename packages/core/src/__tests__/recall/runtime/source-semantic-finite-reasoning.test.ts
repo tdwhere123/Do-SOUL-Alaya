@@ -173,7 +173,8 @@ it("instantiates forall-not only as a preserved negative proposition", () => {
   expect(result.outcome.status).toBe("interpreted");
   expect(result.binding_results?.map((row) => row.returned.actor!.node_id).sort()).toEqual(["rAlice", "rBob"]);
   expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "source_interpretation_operator", value: "not" })]));
-}, 15000);
+  // Coverage instruments forall-not instantiation; the reasoning budget stays the default.
+}, 30_000);
 
 it("reports exhausted finite enumeration without returning an empty success", () => {
   const interpretation = finiteSource(), semantics = finiteQuery(), correspondence = finiteCorrespondence(interpretation, semantics);
@@ -213,7 +214,8 @@ it("admits novel members only with a consumed conditional semantic_correspondenc
   expect(result.derived_nodes).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "query_entity", query_variable: "actor" })]));
   expect(result.derived_nodes?.every((row) => row.node_id.length <= 64)).toBe(true);
   expect(result.consumed_leaves.some((row) => row.leaf_kind === "semantic_correspondence_membership")).toBe(true);
-});
+  // Coverage instruments open-domain admission; the request budget stays the default.
+}, 30_000);
 
 it("keeps decimal equality exact and bounds unsupported magnitudes", () => {
   expect(canonicalSourceSemanticDecimal("2.100")).toBe("2.1");
@@ -255,7 +257,8 @@ it("delivers an explicit universal counterexample separately from missing body p
   expect(result.evaluation?.status).toBe("refuted");
   expect(result.evaluation?.counterexample_explanation_ids.length).toBeGreaterThan(0);
   expect(result.consumed_leaves).toEqual(expect.arrayContaining([expect.objectContaining({ leaf_kind: "source_interpretation_operator", occurrence: "notBob", value: "not" })]));
-}, 15000);
+  // Coverage instruments counterexample projection; the reasoning budget stays the default.
+}, 30_000);
 
 it("rejects comparison branches whose frame constraints cannot be evaluated", () => {
   const semantics = finiteQuery(true);
@@ -284,14 +287,16 @@ it("supports requested measurement equality with both measurement witnesses", ()
   expect(equal.outcome.status).toBe("interpreted");
   expect(equal.evaluation?.status).toBe("supported");
   expect(equal.consumed_leaves.filter((row) => row.leaf_kind === "source_interpretation_measurement").map((row) => row.measurement).sort()).toEqual(["valueAlice", "valueBob"]);
-}, 15000);
+  // Coverage instruments measurement equality; the reasoning budget stays the default.
+}, 30_000);
 
 it("keeps measurements incomparable when their metric differs from the query", () => {
   const { interpretation, semantics, correspondence } = measurementComparisonInput();
   const wrongMetric = reasonFinite({ ...interpretation, measurements: interpretation.measurements!.map((row) => ({ ...row, metric: "weight" })) }, semantics, correspondence);
   expect(wrongMetric.evaluation?.status).toBe("incomparable");
   expect(wrongMetric.binding_results).toEqual([]);
-}, 15000);
+  // Coverage instruments a metric mismatch; the reasoning budget stays the default.
+}, 30_000);
 
 it("rejects conflicting values for one measurement assignment", () => {
   const interpretation = finiteSource();

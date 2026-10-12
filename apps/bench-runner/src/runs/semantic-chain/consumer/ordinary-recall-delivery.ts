@@ -5,8 +5,7 @@ import { authorizeSemanticScope, fieldContractSha256, projectSourceDisclosure, r
 import { AlayaError, canonicalJson, sameSourceEvidenceRoot, sourceRecallTarget,
   type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
-import { withCachedRegularFileNoFollow } from "../../snapshot/bound-file.js";
-import { boundedArtifactEntryExists, readBoundedStableRegularFile } from "../../extraction/cache-audit/bounded-artifact-reader.js";
+import { withCachedSqliteSnapshot } from "../../snapshot/bound-file.js";
 import { admitEmittedSourcePreview } from "../replay.js";
 import { exposureSlots, firstExposureMismatch, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
 import { OrdinaryRecallObservationSchema, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";
@@ -19,17 +18,12 @@ const TERMINAL = new Set(["unavailable", "resource_rejected", "interrupted", "in
 /** Source reads validate emitted spans only; the body and all private metadata stay outside the consumer request. */
 export function verifyOrdinaryRecallDelivery(config: OrdinaryRecallCaptureConfig,
   calls: readonly CapturedOrdinaryRecallCall[], observation: Observation | undefined) {
-  const wal = `${config.snapshot_path}-wal`;
-  if (boundedArtifactEntryExists(wal) &&
-      readBoundedStableRegularFile({ path: wal, maxBytes: 1, label: "sealed source WAL" }).bytes.length !== 0) {
-    conflict("sealed snapshot has uncheckpointed source bytes");
-  }
-  return withCachedRegularFileNoFollow({ filePath: config.snapshot_path, expectedSha256: config.snapshot_sha256,
-    operation: path => {
-      const connection = new BetterSqlite3(path, { readonly: true, fileMustExist: true });
+  return withCachedSqliteSnapshot({ filePath: config.snapshot_path, expectedSha256: config.snapshot_sha256,
+    operation: databasePath => {
+      const connection = new BetterSqlite3(databasePath, { readonly: true, fileMustExist: true });
       try {
         connection.pragma("query_only = ON");
-        const stores = sourceLookupStores(new StorageDatabase(path, connection));
+        const stores = sourceLookupStores(new StorageDatabase(databasePath, connection));
         const retained = stores.getStoredRecord(config.workspace_id, config.expected_target.root_id);
         if (retained === null) conflict("expected source is absent from the sealed snapshot");
         const source = resolveCurrentSource(stores, config.workspace_id, { artifact_key: retained.record.source_id,

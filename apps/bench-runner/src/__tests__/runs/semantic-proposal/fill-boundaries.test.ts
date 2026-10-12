@@ -221,14 +221,23 @@ it("treats a disk failure after model output as local persistence failure withou
     preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2
   });
-  mkdirSync(join(cacheRoot, "provider-raw"), { recursive: true });
-  chmodSync(join(cacheRoot, "provider-raw"), 0o500);
+  const rawDir = join(cacheRoot, "provider-raw");
+  mkdirSync(rawDir, { recursive: true });
   const spy = extractor(["{\"outcome\":{\"status\":\"abstained\"}}"]);
+  if (process.platform === "win32") {
+    const extract = spy.extract;
+    spy.extract = async (input) => {
+      const result = await extract(input);
+      rmSync(rawDir, { recursive: true, force: true });
+      writeFileSync(rawDir, "not a directory");
+      return result;
+    };
+  } else chmodSync(rawDir, 0o500);
   await expect(executeSemanticProposalFill({
     workset: prepared, cacheRoot, authority, config: config(), extractor: spy
-  })).rejects.toMatchObject({ code: "EACCES" });
+  })).rejects.toMatchObject({ code: process.platform === "win32" ? expect.stringMatching(/^(?:EPERM|ENOTDIR|EEXIST|EISDIR)$/u) : "EACCES" });
   expect(spy.calls).toHaveLength(1);
-  chmodSync(join(cacheRoot, "provider-raw"), 0o700);
+  if (process.platform !== "win32") chmodSync(rawDir, 0o700);
 });
 
 it("replays persisted raw without a second provider call after a reserved unresolved restart", async () => {
@@ -354,9 +363,13 @@ it.each([
     expect(result.terminal_failures).toBe(1);
     for (const wire of wires) {
       expect(wire.url).toBe("/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse");
-      expect(wire.body).toHaveProperty("generationConfig.responseJsonSchema");
+      // The query grammar is past the structured provider budget, so guidance carries the complete schema.
+      expect(wire.body).not.toHaveProperty("generationConfig.responseJsonSchema");
       expect(wire.body).toMatchObject({ generationConfig: { responseMimeType: "application/json" },
-        systemInstruction: { parts: [{ text: expect.stringContaining("source-semantic-query-meaning-v5") }] } });
+        systemInstruction: { parts: [
+          { text: expect.stringContaining("source-semantic-query-meaning-v5") },
+          { text: expect.stringContaining("source-semantic-query-response-v8") }
+        ] } });
     }
     expect(readSemanticProposalResults(prepared, cacheRoot, 128)).toMatchObject([
       { status: "transport_failure", shard: { outcome: { status: "transport_failure" } } }

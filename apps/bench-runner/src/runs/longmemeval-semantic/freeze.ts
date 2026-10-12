@@ -1,3 +1,4 @@
+import { currentBenchScope, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../harness/daemon-task.js";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { requireLongMemEvalTimestamp } from "../../datasets/longmemeval/ingestion/source-time.js";
@@ -13,6 +14,13 @@ import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from ".
 
 /** Freezes original dataset identities and context before any query-semantics outputs; never dispatches a provider. */
 export async function freezeLongMemEvalSemanticRun(value: unknown, root: string) {
+  const scope = currentBenchScope();
+  const freeze = () => freezeBoundLongMemEvalSemanticRun(value, root);
+  return scope === undefined ? freeze() : trackBenchOperation(scope, freeze);
+}
+
+async function freezeBoundLongMemEvalSemanticRun(value: unknown, root: string) {
+  refuseBenchWorkAfterCancel();
   const config = LongMemEvalExperimentConfigSchema.parse(value);
   if (new Set(config.question_ids).size !== config.question_ids.length) throw new AlayaError("VALIDATION", "development question IDs repeat");
   if (config.stage !== "formal" && config.question_ids.length > 50) throw new AlayaError("VALIDATION", "development selection exceeds 50 questions");
@@ -21,6 +29,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
   }
   return withSnapshotPublishLock(longMemEvalFreezePath(root), async () => {
     const loaded = await loadFrozenLongMemEvalDataset(config);
+    refuseBenchWorkAfterCancel();
     const existing = readChainArtifact(longMemEvalFreezePath(root));
     if (existing !== undefined) {
       const frozen = LongMemEvalExperimentFreezeSchema.parse(existing);
@@ -48,6 +57,7 @@ export async function freezeLongMemEvalSemanticRun(value: unknown, root: string)
       const question = loaded.questions[row.index]!;
       const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: config.data_dir,
         pinnedMetaRoot: config.pinned_meta_root, questionWindow: { offset: row.index, limit: 1 } });
+      refuseBenchWorkAfterCancel();
       selected.push({ ...row, question: question.question, question_date: question.question_date,
         interpretation_clock: requireLongMemEvalTimestamp(question.question_date),
         source_manifest: census.records.map(({ source_id, source_version, content_digest, corpus_digest,

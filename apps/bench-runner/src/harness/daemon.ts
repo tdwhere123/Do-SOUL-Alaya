@@ -1,6 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
   type BenchDaemonHandle,
@@ -59,6 +60,7 @@ import {
   type BenchDaemonLaunchConfig
 } from "./daemon/daemon-environment.js";
 import { createBenchWorkspaceManager } from "./daemon/workspace/daemon-workspace-manager.js";
+import { adoptBenchDaemonShutdown, beginBenchDaemonTask, finishBenchDaemonTask } from "./daemon-task.js";
 
 let activeBenchDaemonCount = 0;
 
@@ -66,12 +68,23 @@ export async function startBenchDaemon(
   opts: BenchDaemonOptions = {},
   preparedLaunch?: BenchDaemonLaunchConfig
 ): Promise<BenchDaemonHandle> {
-  const state = await createBenchDaemonState(opts, preparedLaunch);
+  const task = beginBenchDaemonTask();
   try {
-    return await bootBenchDaemon(state);
-  } catch (err) {
-    await cleanupFailedBenchDaemonStart(state);
-    throw err;
+    const state = await createBenchDaemonState(opts, preparedLaunch);
+    try {
+      const handle = await bootBenchDaemon(state);
+      handle.shutdown = adoptBenchDaemonShutdown(task, handle.shutdown.bind(handle));
+      if (task.wasCancelled) {
+        await task.done;
+        throw new AlayaError("CANCELLED", "bench daemon was cancelled before the caller received it");
+      }
+      return handle;
+    } catch (err) {
+      if (!task.bound) await cleanupFailedBenchDaemonStart(state);
+      throw err;
+    }
+  } finally {
+    if (!task.bound) finishBenchDaemonTask(task);
   }
 }
 

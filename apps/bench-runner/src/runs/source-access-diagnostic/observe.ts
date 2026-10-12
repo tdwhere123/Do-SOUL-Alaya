@@ -194,7 +194,7 @@ function summaryReservation(config: SourceAccessDiagnosticConfig, admittedAttemp
 
 function verifiedInputs(config: SourceAccessDiagnosticConfig): { frozen: LongMemEvalSemanticFreeze; prepared: Prepared } {
   const root = resolve(config.source_run_root), preparedPath = resolve(config.prepared_path);
-  if (!preparedPath.startsWith(`${root}/`)) throw new AlayaError("VALIDATION", "prepared artifact is outside its source root");
+  if (!isContainedPath(root, preparedPath)) throw new AlayaError("VALIDATION", "prepared artifact is outside its source root");
   const frozen = readLongMemEvalSemanticFreeze(root);
   if (frozen.contract !== "longmemeval-semantic-development-v3" || frozen.config.stage !== "development"
     || canonicalJson(frozen.selected.map((row) => row.question_id)) !== canonicalJson(config.expected_question_ids)

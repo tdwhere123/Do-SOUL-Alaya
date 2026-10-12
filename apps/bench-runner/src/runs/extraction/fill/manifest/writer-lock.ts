@@ -22,6 +22,7 @@ import {
   DIRECTORY_OPEN_FLAG,
   NO_FOLLOW_OPEN_FLAG
 } from "../../../fs/open-flags.js";
+import { readWindowsProcessStartIdentity } from "./windows-process-start.js";
 import {
   assertBoundDirectoryIdentity,
   assertDirectoryIdentity,
@@ -394,6 +395,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const NON_CREDENTIAL_ENV_KEYS = [
+  "PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
+  "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR",
+  "LANG", "LC_ALL", "LC_CTYPE"
+] as const;
+
+/** Child processes may locate system tools. They do not inherit credential-like environment keys. */
+export function nonCredentialChildEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of NON_CREDENTIAL_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 export function readProcessStartIdentity(pid: number): string {
   if (pid === process.pid) {
     selfProcessStartIdentity ??= readPlatformProcessStartIdentity(pid);
@@ -406,7 +423,9 @@ let selfProcessStartIdentity: string | undefined;
 
 function readPlatformProcessStartIdentity(pid: number): string {
   if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
-  if (process.platform === "win32") return readWindowsProcessStartIdentity(pid);
+  if (process.platform === "win32") {
+    return readWindowsProcessStartIdentity(pid, nonCredentialChildEnv());
+  }
   return readPosixProcessStartIdentity(pid);
 }
 
@@ -424,41 +443,6 @@ function readLinuxProcessStartIdentity(pid: number): string {
   return startTime;
 }
 
-function readWindowsProcessStartIdentity(pid: number): string {
-  if (!Number.isSafeInteger(pid) || pid <= 0) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT" }
-    );
-  }
-  let output: string;
-  try {
-    output = execFileSync("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
-    ], {
-      encoding: "utf8",
-      timeout: 20_000,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"]
-    }).replace(/^\uFEFF/u, "").trim();
-  } catch (cause) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT", cause }
-    );
-  }
-  if (!/^\d+$/u.test(output) || output.length > MAX_EXTRACTION_FILL_OWNER_BYTES) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT" }
-    );
-  }
-  return output;
-}
-
 function readPosixProcessStartIdentity(pid: number): string {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     throw Object.assign(
@@ -471,6 +455,7 @@ function readPosixProcessStartIdentity(pid: number): string {
     output = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
       encoding: "utf8",
       timeout: 2_000,
+      env: nonCredentialChildEnv(),
       stdio: ["ignore", "pipe", "ignore"]
     }).trim();
   } catch (cause) {

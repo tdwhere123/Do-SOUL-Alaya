@@ -304,6 +304,7 @@ it("verifies a lexical nominee beyond an unavailable census row and reuses its c
   });
 });
 
+// This pool is about 3.4s locally and crossed Vitest's 5s default under Ubuntu coverage.
 it("orders the complete observed pool for two queries before native descriptor pages and keeps raw sources without interpretations", async () => {
   await withAccessLibrary([
     { id: "filler", text: "Granite walls surround the courtyard.", reading: "surround", count: 128 },
@@ -354,7 +355,7 @@ it("orders the complete observed pool for two queries before native descriptor p
     expect(first.work.logical_work).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
     expect(first.work.logical_memory_bytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
   });
-});
+}, 15_000);
 
 it("rejects changed query, budget, policy, scope and stale revision instead of borrowing a frozen access cursor", async () => {
   await withAccessLibrary([{ id: "orchard", text: "Orchid irrigation.", reading: orchid, count: 20 }], async ({ execute, filename }) => {

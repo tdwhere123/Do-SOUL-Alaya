@@ -17,6 +17,7 @@ import {
   readBoundedCanonicalUtf8Artifact, readBoundedStableRegularFile, decodeCanonicalUtf8Artifact, withRootBoundDirectory
 } from "../cache-audit/bounded-artifact-reader.js";
 import { writeBytesExclusiveDurable } from "./manifest/durable-exclusive-publication.js";
+import { assertNamedDirectoryAnchorCurrent } from "./manifest/root-directory-binding.js";
 import { assertExtractionAttemptReservation, type ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
 import { settledAttemptUsageDigest } from "../authority/attempt-ledger/outcome.js";
 import { BENCH_TRANSPORT_FAILURE_KINDS, BENCH_TRANSPORT_FAILURE_PHASES, BENCH_TERMINAL_RETRY_CLASSIFICATIONS,
@@ -535,6 +536,7 @@ export function writeProviderRawAttempt(input: Readonly<{
   }
   const path = providerRawAttemptPath(input.root, input.cacheKey, input.attemptOrdinal,
     input.continuationLineageDigest);
+  assertNamedDirectoryAnchorCurrent(path);
   mkdirSync(dirname(path), { recursive: true });
   writeBytesExclusiveDurable(path, bytes);
   return record;

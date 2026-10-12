@@ -19,6 +19,7 @@ import { inspectCachedSourceSemantic } from "../../extraction/cache/source-seman
 import { publishAdmittedSourceSemanticInterpretation } from "../../extraction/cache/source-semantic-runtime-publish.js";
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
 import { hashRegularFileNoFollow } from "../bound-file.js";
+import { currentBenchScope, trackBenchBody, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../../harness/daemon-task.js";
 import { checkpointAndCopyBenchDb } from "../freeze/db-copy.js";
 import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
@@ -187,44 +188,52 @@ export async function publishSourceSemanticSnapshot(input: Readonly<{
   workspaceId?: string;
   runId?: string;
 }>): Promise<SourcePublicationReport> {
-  const snapshotPath = resolve(input.snapshotPath);
-  const dataDirRoot = resolve(input.dataDirRoot);
-  if (snapshotPath === join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) throw new AlayaError("VALIDATION", "snapshot must differ from live DB");
-  IsoDatetimeStringSchema.parse(input.recordedAt);
-  if (!/^[a-f0-9]{40}$/u.test(input.producerCommit)) throw new AlayaError("VALIDATION", "producer commit must be a full SHA-1");
-  const workspaceId = input.workspaceId ?? "source-semantic-library";
-  const runId = input.runId ?? "source-semantic-library-run";
-  const census = await loadCensus(input.populations);
-  const nativePopulation = input.populations.find(population => population.nativeSnapshotPath !== undefined);
-  if (nativePopulation !== undefined && (input.populations.length !== 1 ||
-      nativePopulation.nativeSnapshotPath === undefined)) {
-    throw new AlayaError("VALIDATION", "native source publication requires one complete source population");
-  }
-  const { preparations, requests } = prepareCensusSources(census, input.populations);
-  const descriptorExport = new Set(input.descriptorExportSourceIds ?? []);
-  if (descriptorExport.size !== (input.descriptorExportSourceIds?.length ?? 0) || descriptorExport.size > 10 ||
-      [...descriptorExport].some(id => !census.some(row => row.records.some(source => source.source_id === id)))) {
-    throw new AlayaError("VALIDATION", "publication descriptor export must select at most ten current sources");
-  }
-  // Validate and inspect associations before creating any database or source record.
-  const retained = indexRetainedSemantics(census, input.populations, preparations, requests);
-  return withSnapshotPublishLock(snapshotPath, () => withSnapshotPublishLock(join(dataDirRoot, "source-semantic-publication"), async () => {
-    bindIsolatedSnapshot(dataDirRoot, snapshotPath);
-    const dispositions = nativePopulation === undefined
-      ? await admitCensusSources(dataDirRoot, snapshotPath, census, preparations, {
-        recordedAt: input.recordedAt, workspaceId, runId
-      })
-      : copyAdmittedNativeSources(nativePopulation.nativeSnapshotPath!, snapshotPath, census[0]!, preparations,
-        workspaceId, runId);
-    await publishRetainedSemantics(snapshotPath, census, retained.joined, dispositions, workspaceId, runId,
-      descriptorExport);
-    checkpointSnapshot(snapshotPath);
-    const report = sealReport({
-      recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions, unbound: retained.unbound
-    });
-    atomicWriteJson(`${snapshotPath}.publication.json`, report);
-    return report;
-  }));
+  const scope = currentBenchScope();
+  const publishSnapshot = async (): Promise<SourcePublicationReport> => {
+    refuseBenchWorkAfterCancel();
+    const snapshotPath = resolve(input.snapshotPath);
+    const dataDirRoot = resolve(input.dataDirRoot);
+    if (snapshotPath === join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) throw new AlayaError("VALIDATION", "snapshot must differ from live DB");
+    IsoDatetimeStringSchema.parse(input.recordedAt);
+    if (!/^[a-f0-9]{40}$/u.test(input.producerCommit)) throw new AlayaError("VALIDATION", "producer commit must be a full SHA-1");
+    const workspaceId = input.workspaceId ?? "source-semantic-library";
+    const runId = input.runId ?? "source-semantic-library-run";
+    const census = await loadCensus(input.populations);
+    refuseBenchWorkAfterCancel();
+    const nativePopulation = input.populations.find(population => population.nativeSnapshotPath !== undefined);
+    if (nativePopulation !== undefined && (input.populations.length !== 1 ||
+        nativePopulation.nativeSnapshotPath === undefined)) {
+      throw new AlayaError("VALIDATION", "native source publication requires one complete source population");
+    }
+    const { preparations, requests } = prepareCensusSources(census, input.populations);
+    const descriptorExport = new Set(input.descriptorExportSourceIds ?? []);
+    if (descriptorExport.size !== (input.descriptorExportSourceIds?.length ?? 0) || descriptorExport.size > 10 ||
+        [...descriptorExport].some(id => !census.some(row => row.records.some(source => source.source_id === id)))) {
+      throw new AlayaError("VALIDATION", "publication descriptor export must select at most ten current sources");
+    }
+    // Validate and inspect associations before creating any database or source record.
+    const retained = indexRetainedSemantics(census, input.populations, preparations, requests);
+    return withSnapshotPublishLock(snapshotPath, () => withSnapshotPublishLock(join(dataDirRoot, "source-semantic-publication"), async () => {
+      bindIsolatedSnapshot(dataDirRoot, snapshotPath);
+      const dispositions = nativePopulation === undefined
+        ? await admitCensusSources(dataDirRoot, snapshotPath, census, preparations, {
+          recordedAt: input.recordedAt, workspaceId, runId
+        })
+        : copyAdmittedNativeSources(nativePopulation.nativeSnapshotPath!, snapshotPath, census[0]!, preparations,
+          workspaceId, runId);
+      refuseBenchWorkAfterCancel();
+      await publishRetainedSemantics(snapshotPath, census, retained.joined, dispositions, workspaceId, runId,
+        descriptorExport);
+      refuseBenchWorkAfterCancel();
+      checkpointSnapshot(snapshotPath);
+      const report = sealReport({
+        recordedAt: input.recordedAt, workspaceId, runId, snapshotPath, census, dispositions, unbound: retained.unbound
+      });
+      atomicWriteJson(`${snapshotPath}.publication.json`, report);
+      return report;
+    }));
+  };
+  return scope === undefined ? publishSnapshot() : trackBenchOperation(scope, publishSnapshot);
 }
 
 function prepareCensusSources(census: readonly SourceCensus[], populations: readonly SourcePublicationPopulation[]) {
@@ -264,6 +273,7 @@ async function loadCensus(populations: readonly SourcePublicationPopulation[]): 
         population: population.name, dataDir: population.dataDir, pinnedMetaRoot: population.pinnedMetaRoot,
         ...(population.questionWindow === undefined ? {} : { questionWindow: population.questionWindow })
       }));
+      refuseBenchWorkAfterCancel();
     }
   }
   return loaded;
@@ -308,15 +318,23 @@ async function admitCensusSources(
   });
   const dispositions: SourcePublicationDisposition[] = [];
   try {
-    for (const population of census) {
-      for (const source of population.records) {
-        dispositions.push(await admitOneSource(daemon, source, preparations.get(source.source_id)!, input.recordedAt));
+    const admit = async () => {
+      refuseBenchWorkAfterCancel();
+      for (const population of census) {
+        for (const source of population.records) {
+          dispositions.push(await admitOneSource(daemon, source, preparations.get(source.source_id)!, input.recordedAt));
+          refuseBenchWorkAfterCancel();
+        }
       }
-    }
-    await daemon.checkpointFieldProjection();
+      await daemon.checkpointFieldProjection();
+      refuseBenchWorkAfterCancel();
+    };
+    const scope = currentBenchScope();
+    await (scope === undefined ? admit() : trackBenchBody(scope, admit));
   } finally {
     await daemon.shutdown();
   }
+  refuseBenchWorkAfterCancel();
   checkpointAndCopyBenchDb(join(dataDirRoot, BENCH_DAEMON_DB_FILENAME), snapshotPath);
   return dispositions;
 }
@@ -336,6 +354,8 @@ async function admitOneSource(
     });
     return { ...base, admission: "admitted", record_id: admitted.record.identity, source_record: admitted.record, source_interpretation: "absent", publication: "not_attempted" };
   } catch (error) {
+    refuseBenchWorkAfterCancel();
+    if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
     return {
       ...base, admission: "rejected",
       admission_reason: error instanceof Error ? error.message.slice(0, 300) : String(error),
@@ -350,6 +370,7 @@ async function publishRetainedSemantics(
   dispositions: SourcePublicationDisposition[],
   workspaceId: string, runId: string, descriptorExport: ReadonlySet<string>
 ): Promise<void> {
+  refuseBenchWorkAfterCancel();
   const database = initDatabase({ filename: snapshotPath });
   try {
     const publication = createSourceSemanticInterpretationPublication({
@@ -368,6 +389,7 @@ async function publishRetainedSemantics(
         publication, joined.get(source.source_id), source, current, workspaceId, runId,
         descriptorExport.has(source.source_id)
       );
+      refuseBenchWorkAfterCancel();
     }
   } finally {
     closeCachedDatabase(snapshotPath);
@@ -422,6 +444,8 @@ async function publishOneSource(
         interpretation: published.bound.interpretation } } : {})
     };
   } catch (error) {
+    refuseBenchWorkAfterCancel();
+    if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
     return {
       ...current, ...generation, publication: "failed",
       publication_error: error instanceof Error ? error.message.slice(0, 300) : String(error)

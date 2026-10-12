@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { admitEvaluatorOutputRoot } from "../../../runs/measurement/evaluator-output.js";
 import { retainedSourceRequestInputKeys, sourceCacheInputPaths } from "../../../runs/extraction/cache/source-cache-inputs.js";
 import { cacheFilePath } from "../../../runs/compile-seed/cache/cache-shard.js";
@@ -84,7 +85,7 @@ it("protects source raw, shard, and ledger aliases despite unavailable sibling e
   expect(paths).toContain(cacheFilePath(cacheRoot, shardKey));
   expect(() => admitEvaluatorOutputRoot(rawTarget, paths)).toThrow(/separate from producer and input roots/u);
   const safeRoot = join(root, "separate-evaluator");
-  expect(admitEvaluatorOutputRoot(safeRoot, paths)).toBe(safeRoot);
+  expect(admitEvaluatorOutputRoot(safeRoot, paths)).toBe(canonicalPath(safeRoot));
 
   const shardTarget = join(root, "physical-shard");
   mkdirSync(shardTarget);

@@ -83,10 +83,37 @@ it("binds large tracked patches and untracked bytes and modes to the loaded chec
   writeFileSync(untracked, "new bytes\n");
   const changedBytes = inspect(loaded, foreign).revision;
   expect(changedBytes).not.toBe(changedUntracked);
-  chmodSync(untracked, 0o755);
+  chmodSync(untracked, process.platform === "win32" ? 0o444 : 0o755);
   expect(inspect(loaded, foreign).revision).not.toBe(changedBytes);
   writeFileSync(join(foreign, "source.txt"), "foreign-only drift\n");
   expect(inspect(loaded, foreign).revision).toBe(inspect(loaded, loaded).revision);
+});
+
+it("binds carriage-return edits when tracked attributes forbid text normalization", () => {
+  const loaded = checkout();
+  writeFileSync(join(loaded, ".gitattributes"), "*.txt -text\n");
+  writeFileSync(join(loaded, "source.txt"), "one\ntwo\n");
+  git(loaded, ["add", ".gitattributes", "source.txt"]);
+  git(loaded, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+    "commit", "--quiet", "-m", "byte-sensitive text"]);
+  const baseline = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "one\r\ntwo\n");
+  const first = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "one\ntwo\r\n");
+  const second = inspect(loaded, loaded).revision;
+  expect(first).not.toBe(baseline);
+  expect(second).not.toBe(first);
+});
+
+it("preserves authority revision across canonical LF and CRLF checkout bytes", () => {
+  const loaded = checkout();
+  writeFileSync(join(loaded, ".gitattributes"), "*.txt text\n");
+  git(loaded, ["add", ".gitattributes"]);
+  git(loaded, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+    "commit", "--quiet", "-m", "canonical text"]);
+  const baseline = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "original\r\n");
+  expect(inspect(loaded, loaded).revision).toBe(baseline);
 });
 
 it("fails closed when the loaded module has no Git checkout, even from another Git cwd", () => {

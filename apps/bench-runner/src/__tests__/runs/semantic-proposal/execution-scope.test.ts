@@ -11,6 +11,7 @@ import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/au
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
 const roots: string[] = [];
@@ -54,7 +55,7 @@ it("prepares nested absent ancestors without writes and binds the root created b
   try {
     const parent = root(), output = join(parent, "future", "run"), cacheRoot = join(output, "query-cache");
     const prepared = workset(http.origin), preflight = prepareSemanticProposal(prepared, cacheRoot, 128, 1);
-    expect(preflight.execution_scope.execution_root_path).toBe(cacheRoot);
+    expect(preflight.execution_scope.execution_root_path).toBe(canonicalPath(cacheRoot));
     expect(readdirSync(parent)).toEqual([]);
     const authority = pinSemanticProposalAuthority({ preflight, inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
     expect(existsSync(cacheRoot)).toBe(true);

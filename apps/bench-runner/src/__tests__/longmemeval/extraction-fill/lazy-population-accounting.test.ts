@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { isContainedPath } from "../../../runs/fs/opened-contained-path.js";
 import { afterEach, expect, it, vi } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { registerExtractionFillHooks } from "./fixture.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
@@ -24,7 +26,11 @@ import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semant
 const roots: string[] = [];
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks(roots => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), "longmemeval_s");
-afterEach(() => { vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await settleActiveBenchDaemonTasks();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 const digest = "a".repeat(64);
 
 function authoredPopulation(kind: "development20" | "reused_readiness50") {
@@ -180,7 +186,7 @@ it("keeps every held and unresolved member in separate fixed denominators withou
       expect(existsSync(join(root, "population-cutoff-initial.json"))).toBe(false);
     }
     const observed = await observeLongMemEvalLazyPopulation(root, cutoff, evaluatorRoot);
-    expect(observed.path.startsWith(`${evaluatorRoot}/`)).toBe(true);
+    expect(isContainedPath(evaluatorRoot, observed.path)).toBe(true);
     expect(observed.result.population_identity).toBe(chainIdentity(frozen));
     expect(observed.result.primary).toEqual({ eligible: frozen.selection.selected_count,
       hits: 0, misses: 0, unknown: frozen.selection.selected_count, lower_bound: 0, upper_bound: 1 });

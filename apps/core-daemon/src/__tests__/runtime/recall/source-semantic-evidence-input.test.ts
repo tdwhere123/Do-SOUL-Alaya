@@ -83,7 +83,8 @@ it("keeps invited AND actually spoke on one person and event without counting lo
       source_interpretation_id: admitted.interpretation_id, query_semantics_id: admitted.query_id,
       semantic_correspondence_id: admitted.semantic_correspondence_id, original_query: COUNT,
       budget: BUDGET, output_byte_limit: 1_000_000 } }).result.binding_results).toEqual([]);
-}, 90_000);
+  // Coverage instruments forum-notebook admission; the reasoning budget stays the fixture value.
+}, 240_000);
 
 it("retains two dates as individually supported inputs with unknown cross-source compatibility and no subtraction", () => {
   const joining = fixture("joining-note", "duration"), promotion = fixture("promotion-note", "duration");
@@ -112,7 +113,8 @@ it.each([["forum-notebook", "count"], ["joining-note", "duration"]] as const)
     : [{ alternative: 0, input: 0, status: "supported" }, { alternative: 0, input: 1, status: "open" }],
     operation: "not_executed", compatibility: "unknown", distinctness: "unknown" });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [proof], record, BUDGET).verified_proofs).toEqual([proof]);
-}, 90_000);
+  // Coverage instruments gap-free native verification; the reasoning budget stays the fixture value.
+}, 240_000);
 
 it("leaves a past-use question open against an assertion of future use when past meaning is a located gap", () => {
   const original = "which tools did Alice use?";

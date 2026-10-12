@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, copyFileSync, existsSync, mkdtempSync, readFileSync, renameSync,
+import { appendFileSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, renameSync,
   rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { pinSemanticProposalAuthority, verifySemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
@@ -111,7 +111,8 @@ it.each(["uppercase digest", "malformed digest", "uppercase prefix", "non-JSON s
       extract: async () => { calls += 1; throw new Error("noncanonical pending history must not dispatch"); }
     } })).rejects.toThrow(/noncanonical filename/u);
     expect(calls).toBe(0);
-    expect(existsSync(canonical)).toBe(false);
+    // opendir reports the stored case; existsSync follows case-insensitive volumes.
+    expect(readdirSync(cacheRoot).includes(basename(canonical))).toBe(false);
     expect(readFileSync(renamed)).toEqual(retainedBytes);
   }
 );

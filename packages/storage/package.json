@@ -41,6 +41,10 @@
     "./lru-cache": {
       "types": "./src/sqlite/lru-cache.ts",
       "import": "./dist/sqlite/lru-cache.js"
+    },
+    "./sqlite/open-sqlite-connection": {
+      "types": "./src/sqlite/open-sqlite-connection.ts",
+      "import": "./dist/sqlite/open-sqlite-connection.js"
     }
   }
 }
