@@ -31,8 +31,11 @@ for (const project of selected) {
 
 function parseArgs(argv) {
   const groupArg = argv.find((arg) => arg.startsWith("--group="));
+  const projectsFileArg = argv.find((arg) => arg.startsWith("--projects-file="));
   const deferThresholds = argv.includes("--defer-coverage-thresholds");
-  const vitestArgs = argv.filter((arg) => arg !== "--defer-coverage-thresholds" && !arg.startsWith("--group="));
+  const vitestArgs = argv.filter((arg) => arg !== "--defer-coverage-thresholds"
+    && !arg.startsWith("--group=")
+    && !arg.startsWith("--projects-file="));
   return {
     group: groupArg?.slice("--group=".length),
     deferThresholds,
@@ -47,7 +50,7 @@ function parseArgs(argv) {
       (arg) => arg === "--coverage.include" || arg.startsWith("--coverage.include=")
     ),
     hasCoverageThresholdArg: vitestArgs.some((arg) => arg.startsWith("--coverage.thresholds.")),
-    projectsFile: process.env.ALAYA_SHARD_PROJECTS
+    projectsFile: projectsFileArg?.slice("--projects-file=".length) ?? process.env.ALAYA_SHARD_PROJECTS
   };
 }
 
@@ -63,6 +66,7 @@ function createChildEnv(coverageEnabled) {
   }
   // vitest.config.mjs budgets ~3.5 GiB/worker (~7 GiB under coverage). Node's
   // default old-space is ~2 GiB and coverage + live daemon fixtures exceed it.
+  delete env.ALAYA_SHARD_PROJECTS;
   if (!/(?:^|\s)--max-old-space-size=/.test(env.NODE_OPTIONS ?? "")) {
     const heapMb = coverageEnabled ? 6144 : 3584;
     env.NODE_OPTIONS = [env.NODE_OPTIONS, `--max-old-space-size=${heapMb}`]

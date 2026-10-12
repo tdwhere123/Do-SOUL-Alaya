@@ -56,9 +56,12 @@ jobs:
         id: vitest
         shell: bash
         env:
-          ALAYA_SHARD_PROJECTS: shard-projects.json
+          VITEST_SHARD: ${{ matrix.vitest_shard || '' }}
         run: |
-          args=(--group="${{ matrix.group }}")
+          args=(--group="${{ matrix.group }}" --projects-file=shard-projects.json)
+          if [[ -n "${VITEST_SHARD}" ]]; then
+            args+=(--shard="${VITEST_SHARD}")
+          fi
           if [[ "${SHARD_COVERAGE}" == "1" ]]; then
             args+=(--defer-coverage-thresholds --coverage.enabled --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=lcov)
           fi
@@ -67,13 +70,20 @@ jobs:
       - name: Record shard manifest
         if: always()
         shell: bash
-        run: node scripts/ci/write-shard-manifest.mjs --group="${{ matrix.group }}" --label="${SHARD_LABEL}" --status="${{ steps.vitest.outcome }}" --output=shard-manifest.json
+        env:
+          VITEST_SHARD: ${{ matrix.vitest_shard || '' }}
+        run: |
+          args=(--group="${{ matrix.group }}" --label="${SHARD_LABEL}" --status="${{ steps.vitest.outcome }}" --output=shard-manifest.json --projects-file=shard-projects.json)
+          if [[ -n "${VITEST_SHARD}" ]]; then
+            args+=(--shard="${VITEST_SHARD}")
+          fi
+          node scripts/ci/write-shard-manifest.mjs "${args[@]}"
 
       - name: Upload shard manifest
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shard-${{ env.SHARD_LABEL }}-${{ matrix.group }}
+          name: shard-${{ env.SHARD_LABEL }}-${{ matrix.group }}${{ matrix.shard_name && format('-{0}', matrix.shard_name) || '' }}
           path: shard-manifest.json
           retention-days: 14
           if-no-files-found: error
@@ -100,13 +110,22 @@ jobs:
     steps: *shard-steps
 
   test-shard-windows:
-    name: Test ${{ matrix.group }} (windows-node24)
+    name: Test ${{ matrix.group }}${{ matrix.shard_name && format(' {0}', matrix.shard_name) || '' }} (windows-node24)
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        group: [libraries, core-daemon, bench-runner]
+        include:
+          - group: libraries
+          - group: core-daemon
+          # One bench job did not finish inside 60 minutes on Windows.
+          - group: bench-runner
+            vitest_shard: "1/2"
+            shard_name: "1-of-2"
+          - group: bench-runner
+            vitest_shard: "2/2"
+            shard_name: "2-of-2"
     env:
       SHARD_LABEL: windows-node24
       SHARD_COVERAGE: "0"

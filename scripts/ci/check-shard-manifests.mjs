@@ -29,21 +29,27 @@ export function checkShards({ label, shardDir, coverageDir, needsResult }) {
   const manifests = loadManifests(shardDir, failures);
   const seen = new Map();
   for (const group of GROUPS) {
-    const manifest = manifests.get(group);
-    if (manifest === undefined) {
+    const groupManifests = manifests.get(group) ?? [];
+    if (groupManifests.length === 0) {
       failures.push(`${label} missing shard ${group}`);
       continue;
     }
-    if (manifest.label !== label) failures.push(`${group} manifest label is ${manifest.label}`);
-    if (manifest.status !== "success") failures.push(`${label} ${group} status is ${manifest.status}`);
-    const projects = Array.isArray(manifest.projects) ? manifest.projects : [];
-    const expected = VITEST_PROJECT_GROUPS[group];
-    if (!sameList(projects, expected)) {
-      failures.push(`${label} ${group} projects differ from the group`);
-    }
-    for (const project of projects) {
-      if (seen.has(project)) failures.push(`${project} ran in both ${seen.get(project)} and ${group}`);
-      else seen.set(project, group);
+    const shardFailures = shardSetFailures(group, groupManifests);
+    failures.push(...shardFailures);
+    if (shardFailures.length > 0) continue;
+    for (const manifest of groupManifests) {
+      if (manifest.label !== label) failures.push(`${group} manifest label is ${manifest.label}`);
+      if (manifest.status !== "success") failures.push(`${label} ${group} status is ${manifest.status}`);
+      const projects = Array.isArray(manifest.projects) ? manifest.projects : [];
+      const expected = VITEST_PROJECT_GROUPS[group];
+      if (!sameList(projects, expected)) {
+        failures.push(`${label} ${group} projects differ from the group`);
+      }
+      for (const project of projects) {
+        if (seen.has(project) && manifest.shard === undefined) {
+          failures.push(`${project} ran in both ${seen.get(project)} and ${group}`);
+        } else seen.set(project, group);
+      }
     }
   }
   for (const project of VITEST_PROJECTS) {
@@ -106,6 +112,35 @@ function readTotal(file) {
   }
 }
 
+function shardSetFailures(group, manifests) {
+  const shards = manifests.map((manifest) => manifest.shard).filter((shard) => shard !== undefined && shard !== "");
+  if (shards.length === 0) {
+    return manifests.length === 1 ? [] : [`duplicate shard manifest for ${group}`];
+  }
+  if (shards.length !== manifests.length) return [`${group} mixed a full run with a file shard`];
+  const parsed = shards.map(parseShard);
+  if (parsed.some((shard) => shard === undefined)) return [`${group} has an unreadable file shard`];
+  const count = parsed[0].count;
+  if (parsed.some((shard) => shard.count !== count)) return [`${group} file shard widths differ`];
+  const indexes = new Set(parsed.map((shard) => shard.index));
+  if (indexes.size !== count || parsed.length !== count) {
+    return [`${group} file shard set is incomplete`];
+  }
+  for (let index = 1; index <= count; index += 1) {
+    if (!indexes.has(index)) return [`${group} missing file shard ${index}/${count}`];
+  }
+  return [];
+}
+
+function parseShard(shard) {
+  const match = /^(\d+)\/(\d+)$/u.exec(shard);
+  if (match === null) return undefined;
+  const index = Number(match[1]);
+  const count = Number(match[2]);
+  if (count < 1 || index < 1 || index > count) return undefined;
+  return { index, count };
+}
+
 function loadManifests(shardDir, failures) {
   const manifests = new Map();
   if (!existsSync(shardDir)) {
@@ -118,8 +153,9 @@ function loadManifests(shardDir, failures) {
       : entry.name === "shard-manifest.json" ? path.join(shardDir, entry.name) : undefined;
     if (manifestPath === undefined || !existsSync(manifestPath)) continue;
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    if (manifests.has(manifest.group)) failures.push(`duplicate shard manifest for ${manifest.group}`);
-    manifests.set(manifest.group, manifest);
+    const groupManifests = manifests.get(manifest.group) ?? [];
+    groupManifests.push(manifest);
+    manifests.set(manifest.group, groupManifests);
   }
   return manifests;
 }
@@ -167,9 +203,10 @@ function runSelfTest() {
     const skipped = statusFailures(shardDir, "skipped");
     const overlap = overlapFailures(shardDir);
     const below = belowFloorFailures(shardDir, coverageDir);
-    const failures = { partition, ok, cancelled, missing, skipped, overlap, below };
+    const partial = partialShardFailures(root);
+    const failures = { partition, ok, cancelled, missing, skipped, overlap, below, partial };
     if (partition.length > 0 || ok.length !== 0 || cancelled.length === 0 || missing.length === 0
-      || skipped.length === 0 || overlap.length === 0 || below.length === 0) {
+      || skipped.length === 0 || overlap.length === 0 || below.length === 0 || partial.length === 0) {
       console.error("check-shard-manifests --self-test failed", failures);
       return 1;
     }
@@ -230,6 +267,25 @@ function belowFloorFailures(shardDir, coverageDir) {
   });
   writeFileSync(summaryPath, original);
   return failures.filter((line) => line.includes("below"));
+}
+
+function partialShardFailures(root) {
+  const shardDir = path.join(root, "partial");
+  mkdirSync(shardDir, { recursive: true });
+  for (const [group, projects] of Object.entries(VITEST_PROJECT_GROUPS)) {
+    const dir = path.join(shardDir, group);
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "shard-manifest.json"), JSON.stringify({
+      label: "windows-node24",
+      group,
+      status: "success",
+      projects,
+      ...(group === "bench-runner" ? { shard: "1/2" } : {})
+    }));
+  }
+  return checkShards({
+    label: "windows-node24", shardDir, needsResult: "success"
+  }).filter((line) => line.includes("incomplete"));
 }
 
 function writeGood(root) {
