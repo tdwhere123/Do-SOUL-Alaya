@@ -89,8 +89,8 @@ it.each(["blocked", "unresolved"])("refuses %s provider DNS before reserving a Q
   const cacheRoot = root(), authority = pinSemanticProposalAuthority({
     preflight: prepareSemanticProposal(workset, cacheRoot, 8192), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
   const line = materializeSemanticProposalLines(workset, 8192)[0]!;
-  // Instruction-mode guidance is part of the request identity once the query schema exceeds the structured budget.
-  expect(line.key).toBe("0044d556fb7c40335f5a134564fb22ac583852b30bae178a49eb1c9f96511ea7");
+  // Composition guidance in the system prompt is part of the request identity once the query schema exceeds the structured budget.
+  expect(line.key).toBe("9bda4b54c6748a370d7ef7c48bcce598ebf6baaf8dcbe9e076ad744975845eb2");
   if (failure === "blocked") vi.mocked(lookup).mockImplementationOnce((async () => [
     { address: "198.18.0.105", family: 4 }
   ]) as unknown as typeof lookup);
@@ -124,8 +124,8 @@ it("executes an injected offline Q delegate without DNS and preserves its exact 
       config: { providerUrl: ENDPOINT, model: MODEL, requestProfile: PROFILE, apiKey: null }, extractor }))
       .resolves.toMatchObject({ abstained: 1, attempts: 1 });
     expect(lookup).not.toHaveBeenCalled(); expect(extractor.extract).toHaveBeenCalledTimes(1);
-    // Instruction-mode guidance is part of the request identity once the query schema exceeds the structured budget.
-    expect(line.key).toBe("0044d556fb7c40335f5a134564fb22ac583852b30bae178a49eb1c9f96511ea7");
+    // Composition guidance in the system prompt is part of the request identity once the query schema exceeds the structured budget.
+    expect(line.key).toBe("9bda4b54c6748a370d7ef7c48bcce598ebf6baaf8dcbe9e076ad744975845eb2");
   } finally { vi.mocked(lookup).mockImplementation(previous); }
 });
 
