@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { dirname, join } from "node:path";
+import { samePhysicalLocation } from "../fs/opened-contained-path.js";
 import { AlayaError, canonicalJson, hashSourceRecordId } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceSemanticLibraryQueryIdentity } from "@do-soul/alaya-core";
 import { chainIdentity } from "../semantic-chain/contract.js";
@@ -126,7 +127,7 @@ function measuredRow(row: Record<string, unknown>, frozen: FrozenPopulation, sel
   if (typeof row.measurement_path !== "string") return reportRow(row, true,
     `${typeof row.reason === "string" ? row.reason : "missing_measurement_path"}; denominator retained`, "unavailable");
   const measurement = readEnvelope(row.measurement_path, readText);
-  if (row.measurement_path !== join(replayed.chain_root, `measurement-${chainIdentity(measurement)}.json`)) {
+  if (!samePhysicalLocation(row.measurement_path, join(replayed.chain_root, `measurement-${chainIdentity(measurement)}.json`))) {
     throw new AlayaError("CONFLICT", "measurement path does not bind this question chain");
   }
   const replay = readEnvelope(replayed.replay_path, readText);

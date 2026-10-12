@@ -167,7 +167,14 @@ export function canonicalExtractionTargetRoot(cacheRoot: string): string {
   let parent = dirname(absolute);
   const missing = [basename(absolute)];
   for (;;) {
-    try { return join(realpathSync(parent), ...missing); }
+    try {
+      const resolved = realpathSync(parent);
+      // Windows reports a file ancestor as ENOENT, so realpath of the file itself succeeds.
+      if (!lstatSync(resolved).isDirectory()) {
+        throw new AlayaError("VALIDATION", "extraction target ancestor is not a directory");
+      }
+      return join(resolved, ...missing);
+    }
     catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
       try { lstatSync(parent); }

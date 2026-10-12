@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -919,7 +919,10 @@ it.each(["intact", "changed"] as const)("rechecks %s persisted raw after a shard
   const buckets = [...new Set(fixture.keys.map((key) => join(cacheRoot, key.slice(0, 2))))];
   for (const bucket of buckets) {
     mkdirSync(bucket, { recursive: true });
-    chmodSync(bucket, 0o500);
+    if (process.platform === "win32") {
+      rmSync(bucket, { recursive: true });
+      writeFileSync(bucket, "not a directory");
+    } else chmodSync(bucket, 0o500);
   }
   expect(await runCli([
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
@@ -929,7 +932,12 @@ it.each(["intact", "changed"] as const)("rechecks %s persisted raw after a shard
   ])).toBe(2);
   expect(fixture.fetchMock).toHaveBeenCalled();
   expect(fixture.keys.some((key) => listProviderRawAttempts(cacheRoot, key).length > 0)).toBe(true);
-  for (const bucket of buckets) chmodSync(bucket, 0o700);
+  for (const bucket of buckets) {
+    if (process.platform === "win32") {
+      rmSync(bucket, { force: true });
+      mkdirSync(bucket, { recursive: true });
+    } else chmodSync(bucket, 0o700);
+  }
   fixture.fetchMock.mockClear();
   if (integrity === "changed") {
     const retained = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key))[0]!;

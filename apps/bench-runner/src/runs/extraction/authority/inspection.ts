@@ -7,6 +7,7 @@ import { AlayaError, type SourceInterpretationProfile, type ExtractionSourcePack
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, realpathSync, statfsSync } from "node:fs";
+import { samePhysicalLocation } from "../../fs/opened-contained-path.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
@@ -336,7 +337,7 @@ export function readCurrentExtractionAuthorityRevision(): string {
   } catch (cause) {
     throw new AlayaError("CONFLICT", "cannot establish the loaded bench-runner Git checkout", { cause });
   }
-  if (gitRoot !== checkoutRoot) {
+  if (!samePhysicalLocation(gitRoot, checkoutRoot)) {
     throw new AlayaError("CONFLICT", "loaded bench-runner module is outside its Git checkout root");
   }
   return computeExtractionAuthorityWorktreeRevision({

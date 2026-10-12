@@ -221,14 +221,18 @@ it("treats a disk failure after model output as local persistence failure withou
     preflight: prepareSemanticProposal(prepared, cacheRoot, 128),
     inputUsdPerMillion: 1, outputUsdPerMillion: 2
   });
-  mkdirSync(join(cacheRoot, "provider-raw"), { recursive: true });
-  chmodSync(join(cacheRoot, "provider-raw"), 0o500);
+  const rawDir = join(cacheRoot, "provider-raw");
+  mkdirSync(rawDir, { recursive: true });
+  if (process.platform === "win32") {
+    rmSync(rawDir, { recursive: true });
+    writeFileSync(rawDir, "not a directory");
+  } else chmodSync(rawDir, 0o500);
   const spy = extractor(["{\"outcome\":{\"status\":\"abstained\"}}"]);
   await expect(executeSemanticProposalFill({
     workset: prepared, cacheRoot, authority, config: config(), extractor: spy
-  })).rejects.toMatchObject({ code: "EACCES" });
+  })).rejects.toMatchObject({ code: process.platform === "win32" ? expect.stringMatching(/^(?:EPERM|ENOTDIR|EEXIST|EISDIR)$/u) : "EACCES" });
   expect(spy.calls).toHaveLength(1);
-  chmodSync(join(cacheRoot, "provider-raw"), 0o700);
+  if (process.platform !== "win32") chmodSync(rawDir, 0o700);
 });
 
 it("replays persisted raw without a second provider call after a reserved unresolved restart", async () => {

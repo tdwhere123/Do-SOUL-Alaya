@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { realpath, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
@@ -73,6 +73,34 @@ export function canonicalPathsOverlap(left: string, right: string): boolean {
   const reverse = path.relative(right, left);
   return [relative, reverse].some(value => value !== "" && !path.isAbsolute(value) &&
     !value.split(path.sep).includes(".."));
+}
+
+/** A missing leaf under a real directory is absence. A file or dangling link in the chain is not. */
+export function existingNonDirectoryAncestor(input: string): string | undefined {
+  let current = path.resolve(input);
+  for (;;) {
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    try {
+      if (!isDirectoryPath(parent)) return parent;
+      return undefined;
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      // Linux says ENOTDIR for a file in the middle. Windows says ENOENT.
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw cause;
+      current = parent;
+    }
+  }
+}
+
+function isDirectoryPath(input: string): boolean {
+  const named = lstatSync(input);
+  if (!named.isSymbolicLink()) return named.isDirectory();
+  try {
+    return statSync(input).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function comparableWin32Path(input: string): string {

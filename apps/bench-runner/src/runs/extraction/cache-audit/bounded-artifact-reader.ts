@@ -9,6 +9,7 @@ import {
   NO_FOLLOW_OPEN_FLAG,
   splitAbsolutePath
 } from "../../fs/open-flags.js";
+import { existingNonDirectoryAncestor } from "../../fs/opened-contained-path.js";
 import {
   boundDirectoryAnchor,
   boundDirectoryChildNoFollow,
@@ -30,7 +31,15 @@ export function boundedArtifactEntryExists(path: string): boolean {
     lstatSync(path);
     return true;
   } catch (cause) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return false;
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
+      // Windows reports a file in the path as ENOENT. That is not a missing leaf.
+      if (existingNonDirectoryAncestor(path) !== undefined) {
+        const blocked = new Error("not a directory") as NodeJS.ErrnoException;
+        blocked.code = "ENOTDIR";
+        throw blocked;
+      }
+      return false;
+    }
     throw cause;
   }
 }
