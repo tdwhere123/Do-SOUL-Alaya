@@ -14,9 +14,6 @@ import { CLOCK, deliveredProofFixture, query, source, correspondenceFor } from "
 const DEPLOYMENT = "Deployment Cedar";
 export const selectionExecutionBudget: RequestBudget = { ...SOURCE_SEMANTIC_REASONING_BUDGET,
   work_units: 1_000_000, memory_bytes: 64_000_000 };
-// Each correspondence group now costs less, so the production allowance binds all seven a-trap inputs before exhaustion.
-export const sourcePrefixExhaustionBudget: RequestBudget = { ...SOURCE_SEMANTIC_REASONING_BUDGET,
-  work_units: 150_000 };
 const deploymentPredicates = ["permission granted", "backup completed", "schema validated", "migration rehearsed",
   "rollback verified", "capacity reserved", "health checks passed", "audit logging enabled", "secrets rotated",
   "network rules approved", "dependency versions pinned", "operator handoff recorded", "maintenance window confirmed"] as const;

@@ -3,8 +3,9 @@ import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import * as observation from "../../../recall/runtime/conditional-field-observe.js";
 import * as projection from "../../../recall/runtime/source-semantic-projection.js";
 import { RequestCostLedger } from "../../../recall/runtime/request-cost-ledger.js";
+import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { deliveredProofFixture } from "./source-semantic-proof-fixture.js";
-import { coverageSelectionFixture, executedInputNumbers, selectionExecutionBudget, sourcePrefixExhaustionBudget } from "./source-semantic-selection-fixture.js";
+import { coverageSelectionFixture, executedInputNumbers, selectionExecutionBudget } from "./source-semantic-selection-fixture.js";
 
 it("attributes bounded observation cost while retaining its source-supported input prefix", () => {
   const complete = coverageSelectionFixture(selectionExecutionBudget).pool[0]!;
@@ -60,7 +61,8 @@ it("attributes bounded observation cost while retaining its source-supported inp
   try {
     const actual = deliveredProofFixture({ interpretation: proof.interpretation, semantics: proof.query,
       correspondence: proof.semantic_correspondence, original: proof.original_query,
-      library: true, budget: sourcePrefixExhaustionBudget });
+      library: true, budget: { ...SOURCE_SEMANTIC_REASONING_BUDGET,
+        work_units: SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 2 } });
     expect(groups.length).toBeGreaterThan(0);
     expect(projections.length).toBeGreaterThan(0);
     const charges = [...ledgers].map(([ledger, value]) => {

@@ -9,6 +9,7 @@ import {
 } from "../../../../recall/conditional-field/engine/field-engine.js";
 import { seedProgramStates } from "../../../../recall/conditional-field/engine/path-composition-seed.js";
 import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
+import { ObservedRelations } from "../../../../recall/conditional-field/engine/observed-relations.js";
 import { sequenceReachAccountBytes } from "../../../../recall/conditional-field/engine/sequence-reach.js";
 import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
 import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
@@ -187,5 +188,36 @@ describe("withdraw after a path pass", () => {
     expect(proof(resumed)).toEqual(proof(fresh));
     expect(observeObligation(resumed)).toBe(false);
     expect(resumed.sequence_reach_bytes ?? 0).toBe(sequenceReachAccountBytes(resumed.sequence_reach_owner));
+  });
+
+  it("leaves a listed relation on the derivation graph when the sequence frontier is still charged", () => {
+    const program = orSequenceProgram();
+    const source = facts(["a", "m", "y"]);
+    const proved = resumeOn(withAutomaton(program), [edge("p", "a", "m", "p1"), edge("p", "a", "m", "p2"), edge("r", "m", "y", "r1")], source);
+    expect(proved.pending_path_effects).toBeUndefined();
+    expect(proved.path_effect_frontier).toBeDefined();
+    expect(proved.sequence_reach_bytes ?? 0).toBeGreaterThan(0);
+    const listed = {
+      ...proved,
+      observed_relations: new ObservedRelations().with({
+        assertionId: "p2", sourceObjectId: "a", targetObjectId: "m", resultObjectId: "m", predicate: "p"
+      })
+    };
+    const withdrawn = withdrawDerivationLeaves(listed, "p2");
+    expect(withdrawn.pending_path_effects).toBeUndefined();
+    expect(withdrawn.path_effect_frontier).toBe(proved.path_effect_frontier);
+    expect(observeObligation(withdrawn)).toBe(false);
+    expect(withdrawn.last_observer_status).toBe(proved.last_observer_status);
+  });
+
+  it("does not open a rebuild when a charged sequence has no path frontier", () => {
+    const program = orSequenceProgram();
+    const source = facts(["a", "m", "y"]);
+    const proved = resumeOn(withAutomaton(program), [edge("p", "a", "m", "p1"), edge("p", "a", "m", "p2"), edge("r", "m", "y", "r1")], source);
+    expect(proved.sequence_reach_bytes ?? 0).toBeGreaterThan(0);
+    const withdrawn = withdrawDerivationLeaves({ ...proved, path_effect_frontier: undefined }, "p2");
+    expect(withdrawn.pending_path_effects).toBeUndefined();
+    expect(withdrawn.path_effect_frontier).toBeUndefined();
+    expect(observeObligation(withdrawn)).toBe(false);
   });
 });
