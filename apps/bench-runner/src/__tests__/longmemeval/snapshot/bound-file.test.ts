@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -35,7 +35,7 @@ async function fixture(): Promise<{ root: string; source: string; sha256: string
 }
 
 describe("descriptor-bound file IO", () => {
-  it.each(process.platform === "linux" ? ["linux", "darwin", "win32"] : [process.platform])("keeps sealed SQLite bytes when the source parent is replaced before SQLite opens (%s branch)", async (host) => {
+  it.each(process.platform === "linux" ? ["linux", "darwin", "win32"] : [process.platform])("keeps sealed SQLite bytes when source parent replacement is attempted before SQLite opens (%s branch)", async (host) => {
     const { root } = await fixture();
     const named = join(root, "named"), replacement = join(root, "replacement");
     for (const [directory, value] of [[named, "sealed"], [replacement, "replacement"]] as const) {
@@ -47,7 +47,11 @@ describe("descriptor-bound file IO", () => {
       } finally { database.close(); }
     }
     const source = join(named, "snapshot.db");
+    const replacementSource = join(replacement, "snapshot.db");
+    const sourceBytes = await readFile(source), replacementBytes = await readFile(replacementSource);
+    const moved = join(root, "moved");
     const digest = hashRegularFileNoFollow(source);
+    const nativePlatform = process.platform;
     const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
     const reads = boundFileFullContentReadCount();
     let consumedPath = "";
@@ -56,8 +60,19 @@ describe("descriptor-bound file IO", () => {
       const value = withCachedSqliteSnapshot({ filePath: source, expectedSha256: digest,
         operation: (sqlitePath) => {
           consumedPath = sqlitePath;
-          renameSync(named, join(root, "moved"));
-          renameSync(replacement, named);
+          let movedSource = false;
+          try {
+            renameSync(named, moved);
+            movedSource = true;
+          } catch (cause) {
+            if (nativePlatform !== "win32") throw cause;
+            // Windows can protect the source directory while its file descriptor is held.
+            expect(cause).toMatchObject({ code: "EPERM", syscall: "rename", path: named, dest: moved });
+            expect(existsSync(moved)).toBe(false);
+            expect(readFileSync(source)).toEqual(sourceBytes);
+            expect(readFileSync(replacementSource)).toEqual(replacementBytes);
+          }
+          if (movedSource) renameSync(replacement, named);
           const database = new BetterSqlite3(sqlitePath, { readonly: true, fileMustExist: true });
           try { return database.prepare("SELECT value FROM proof").get(); }
           finally { database.close(); }

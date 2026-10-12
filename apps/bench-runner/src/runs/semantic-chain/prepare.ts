@@ -1,3 +1,4 @@
+import { currentBenchScope, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../harness/daemon-task.js";
 import { join } from "node:path";
 import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   sourceSemanticCorrespondenceGenerationPolicies, SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY,
@@ -19,99 +20,107 @@ export async function prepareSemanticChain(value: unknown, root: string,
   settledCorrespondenceWorkset?: SemanticProposalWorkset | null,
   settledSelection: "strict" | "observed_subset" = "strict"
 ): Promise<SemanticChainPlan> {
-  const config = SemanticChainConfigSchema.parse(value);
-  assertChainSnapshot(config);
-  if (settledSelection === "observed_subset" && settledCorrespondenceWorkset === undefined) {
-    throw new AlayaError("CONFLICT", "observed C subset requires an explicit settled input");
-  }
-  const results = readSemanticChainProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
-  const settledInput = settledSelection === "observed_subset" ? { selection: settledSelection,
-    full_workset_identity: settledCorrespondenceWorkset === null ? null :
-      chainIdentity(settledCorrespondenceWorkset) } : undefined;
-  const inputIdentity = semanticChainPreparationIdentity(config, results, settledInput);
-  const path = join(root, "prepare.json");
-  return withSnapshotPublishLock(path, async () => {
-    const existing = readChainArtifact(path);
-    if (existing !== undefined) {
-      const plan = SemanticChainPlanSchema.parse(existing);
-      if (plan.input_identity !== inputIdentity) throw new AlayaError("CONFLICT", "semantic chain preparation inputs changed; use a new stage root");
-      verifySemanticChainQueries(plan);
+  const scope = currentBenchScope();
+  const operation = async (): Promise<SemanticChainPlan> => {
+    refuseBenchWorkAfterCancel();
+    const config = SemanticChainConfigSchema.parse(value);
+    assertChainSnapshot(config);
+    if (settledSelection === "observed_subset" && settledCorrespondenceWorkset === undefined) {
+      throw new AlayaError("CONFLICT", "observed C subset requires an explicit settled input");
+    }
+    const results = readSemanticChainProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
+    const settledInput = settledSelection === "observed_subset" ? { selection: settledSelection,
+      full_workset_identity: settledCorrespondenceWorkset === null ? null :
+        chainIdentity(settledCorrespondenceWorkset) } : undefined;
+    const inputIdentity = semanticChainPreparationIdentity(config, results, settledInput);
+    const path = join(root, "prepare.json");
+    return withSnapshotPublishLock(path, async () => {
+      const existing = readChainArtifact(path);
+      if (existing !== undefined) {
+        const plan = SemanticChainPlanSchema.parse(existing);
+        if (plan.input_identity !== inputIdentity) throw new AlayaError("CONFLICT", "semantic chain preparation inputs changed; use a new stage root");
+        verifySemanticChainQueries(plan);
+        materializeCorrespondenceWorkset(plan, root);
+        return plan;
+      }
+      const queries: SemanticChainPlan["queries"] = [];
+      const items: unknown[] = [];
+      const liveHandles = new Map<string, string | undefined>();
+      const prepare = async (daemon?: BenchDaemonHandle) => {
+        for (const row of results) {
+          const base = { query_key: row.line.key, original_query: row.line.original_query, raw_digest: row.shard?.raw_digest ?? null };
+          const availability = semanticChainQueryAvailability(row);
+          const querySemantics = availability.status === "admitted" ? availability.query : undefined;
+          const unavailable = availability.status === "unavailable" && availability.unavailable !== "absent"
+            ? availability.unavailable : undefined;
+          let found;
+          const discoveryStarted = performance.now();
+          try {
+            const observed = await discoverSemanticChainQuery(daemon!, config, row.line.original_query, querySemantics, unavailable);
+            refuseBenchWorkAfterCancel();
+            found = observed.discovery;
+            liveHandles.set(row.line.key, observed.query_handle);
+          }
+          catch (error) {
+            refuseBenchWorkAfterCancel();
+            if (!(error instanceof AlayaError && error.code === "UNAVAILABLE")) throw error;
+            queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}` });
+            continue;
+          }
+          if (querySemantics === undefined) {
+            if (availability.status !== "unavailable") throw new AlayaError("INTERNAL", "raw query availability changed");
+            queries.push({ ...base, status: "raw_ready", reason: availability.reason,
+              query_semantics_unavailable: availability.unavailable, ...found,
+              initial_discovery_elapsed_ms: performance.now() - discoveryStarted });
+            continue;
+          }
+          const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, config.correspondence_pair_cap);
+          const demands = prepareCorrespondenceDemands(config, querySemantics, selected);
+          queries.push({ ...base, status: "ready", query_semantics: querySemantics, ...found,
+            ...(config.correspondence_demand === undefined ? {} : { correspondence_demand_opportunities: demands.opportunities }),
+            initial_discovery_elapsed_ms: performance.now() - discoveryStarted,
+            selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id),
+            correspondence_opportunities: found.descriptors.map((descriptor) => ({ source_interpretation_id: descriptor.interpretation_id,
+              decision: descriptor.interpretation === undefined ? "missing_interpretation" : config.correspondence_pair_cap === 0
+                ? "zero_budget" : selected.includes(descriptor) ? "selected" : "not_selected" })) });
+          for (const demand of demands.selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: querySemantics,
+            ...(config.correspondence_demand === undefined ? {} : { generation_policy: demand.generation_policy }),
+            source_interpretation_descriptors: [{ source_interpretation_id: demand.descriptor.interpretation_id, interpretation: demand.descriptor.interpretation }] });
+        }
+      };
+      if (liveDaemon === undefined) await withSemanticChainDaemon(config, root, prepare);
+      else await prepare(liveDaemon);
+      refuseBenchWorkAfterCancel();
+      const cGeneration = config.correspondence_generation ?? {
+        model: config.query_workset.model, request_profile: config.query_workset.request_profile,
+        provider_url: config.query_workset.provider_url
+      };
+      const generated = items.length === 0 ? null : parseSemanticProposalWorkset({
+        contract: semanticProposalWorksetContract(cGeneration.request_profile), kind: "semantic_correspondence", model: cGeneration.model,
+        request_profile: cGeneration.request_profile, provider_url: cGeneration.provider_url, items
+      });
+      let workset = settledCorrespondenceWorkset === undefined ? generated : settledCorrespondenceWorkset;
+      if (settledSelection === "observed_subset") {
+        if (queries.length !== 1 || queries[0]?.status !== "ready") {
+          throw new AlayaError("CONFLICT", "observed C subset requires one settled native query");
+        }
+        workset = selectObservedSettledCorrespondence(workset, queries[0], config.correspondence_cap ?? config.correspondence_pair_cap,
+          config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens).workset;
+      }
+      if (settledCorrespondenceWorkset !== undefined) {
+        const selectedTasks = workset === null ? [] : validateSettledCorrespondenceWorkset(workset, queries, config, cGeneration);
+        reconcileSettledDemandSelection(queries, config, selectedTasks);
+      }
+      const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
+        config, queries, correspondence_workset: workset,
+        ...(settledInput === undefined ? {} : { settled_input: settledInput }) });
+      writeChainArtifact(path, plan);
       materializeCorrespondenceWorkset(plan, root);
+      onLiveHandles?.(liveHandles);
       return plan;
-    }
-    const queries: SemanticChainPlan["queries"] = [];
-    const items: unknown[] = [];
-    const liveHandles = new Map<string, string | undefined>();
-    const prepare = async (daemon?: BenchDaemonHandle) => {
-      for (const row of results) {
-        const base = { query_key: row.line.key, original_query: row.line.original_query, raw_digest: row.shard?.raw_digest ?? null };
-        const availability = semanticChainQueryAvailability(row);
-        const querySemantics = availability.status === "admitted" ? availability.query : undefined;
-        const unavailable = availability.status === "unavailable" && availability.unavailable !== "absent"
-          ? availability.unavailable : undefined;
-        let found;
-        const discoveryStarted = performance.now();
-        try {
-          const observed = await discoverSemanticChainQuery(daemon!, config, row.line.original_query, querySemantics, unavailable);
-          found = observed.discovery;
-          liveHandles.set(row.line.key, observed.query_handle);
-        }
-        catch (error) {
-          if (!(error instanceof AlayaError && error.code === "UNAVAILABLE")) throw error;
-          queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}` });
-          continue;
-        }
-        if (querySemantics === undefined) {
-          if (availability.status !== "unavailable") throw new AlayaError("INTERNAL", "raw query availability changed");
-          queries.push({ ...base, status: "raw_ready", reason: availability.reason,
-            query_semantics_unavailable: availability.unavailable, ...found,
-            initial_discovery_elapsed_ms: performance.now() - discoveryStarted });
-          continue;
-        }
-        const selected = found.descriptors.filter((descriptor) => descriptor.interpretation !== undefined).slice(0, config.correspondence_pair_cap);
-        const demands = prepareCorrespondenceDemands(config, querySemantics, selected);
-        queries.push({ ...base, status: "ready", query_semantics: querySemantics, ...found,
-          ...(config.correspondence_demand === undefined ? {} : { correspondence_demand_opportunities: demands.opportunities }),
-          initial_discovery_elapsed_ms: performance.now() - discoveryStarted,
-          selected_source_interpretation_ids: selected.map((entry) => entry.interpretation_id),
-          correspondence_opportunities: found.descriptors.map((descriptor) => ({ source_interpretation_id: descriptor.interpretation_id,
-            decision: descriptor.interpretation === undefined ? "missing_interpretation" : config.correspondence_pair_cap === 0
-              ? "zero_budget" : selected.includes(descriptor) ? "selected" : "not_selected" })) });
-        for (const demand of demands.selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: querySemantics,
-          ...(config.correspondence_demand === undefined ? {} : { generation_policy: demand.generation_policy }),
-          source_interpretation_descriptors: [{ source_interpretation_id: demand.descriptor.interpretation_id, interpretation: demand.descriptor.interpretation }] });
-      }
-    };
-    if (liveDaemon === undefined) await withSemanticChainDaemon(config, root, prepare);
-    else await prepare(liveDaemon);
-    const cGeneration = config.correspondence_generation ?? {
-      model: config.query_workset.model, request_profile: config.query_workset.request_profile,
-      provider_url: config.query_workset.provider_url
-    };
-    const generated = items.length === 0 ? null : parseSemanticProposalWorkset({
-      contract: semanticProposalWorksetContract(cGeneration.request_profile), kind: "semantic_correspondence", model: cGeneration.model,
-      request_profile: cGeneration.request_profile, provider_url: cGeneration.provider_url, items
     });
-    let workset = settledCorrespondenceWorkset === undefined ? generated : settledCorrespondenceWorkset;
-    if (settledSelection === "observed_subset") {
-      if (queries.length !== 1 || queries[0]?.status !== "ready") {
-        throw new AlayaError("CONFLICT", "observed C subset requires one settled native query");
-      }
-      workset = selectObservedSettledCorrespondence(workset, queries[0], config.correspondence_cap ?? config.correspondence_pair_cap,
-        config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens).workset;
-    }
-    if (settledCorrespondenceWorkset !== undefined) {
-      const selectedTasks = workset === null ? [] : validateSettledCorrespondenceWorkset(workset, queries, config, cGeneration);
-      reconcileSettledDemandSelection(queries, config, selectedTasks);
-    }
-    const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
-      config, queries, correspondence_workset: workset,
-      ...(settledInput === undefined ? {} : { settled_input: settledInput }) });
-    writeChainArtifact(path, plan);
-    materializeCorrespondenceWorkset(plan, root);
-    onLiveHandles?.(liveHandles);
-    return plan;
-  });
+  };
+  return scope === undefined ? operation() : trackBenchOperation(scope, operation);
 }
 
 function reconcileSettledDemandSelection(queries: SemanticChainPlan["queries"], config: SemanticChainConfig,

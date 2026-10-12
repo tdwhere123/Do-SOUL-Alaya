@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { startBenchDaemon } from "../../harness/daemon.js";
+import { withSnapshotPublishLock } from "../../runs/snapshot/freeze/publish-lock.js";
 import * as daemonStartup from "../../harness/daemon/daemon-startup.js";
 import {
   adoptBenchDaemonShutdown,
@@ -14,7 +15,8 @@ import {
   runOutsideBenchDaemonScope,
   scopeForBenchWork,
   settleActiveBenchDaemonTasks,
-  trackBenchBody
+  trackBenchBody,
+  trackBenchOperation
 } from "../../harness/daemon-task.js";
 
 it("refuses work resumed from a cancelled scope after the next scope is current", async () => {
@@ -102,7 +104,8 @@ it("settles a cancelled startup before allowing the next scope to start", async 
     await gate;
     return resources;
   });
-  const pending = startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
+  const pending = trackBenchOperation(scopeForBenchWork(), () =>
+    startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" }));
   try {
     await Promise.race([booted, pending]);
     first.abort();
@@ -223,5 +226,69 @@ it("shuts down each later daemon on the same scope", async () => {
     }
   } finally {
     rmSync(owned, { recursive: true, force: true });
+  }
+});
+
+it.each(["released", "deadline"] as const)("settles outer publication locks after nested daemon shutdown: %s", async (drain) => {
+  const controller = new AbortController();
+  bindBenchDaemonTestSignal(controller.signal);
+  const root = mkdtempSync(join(tmpdir(), "daemon-operation-"));
+  const dataDir = join(root, "daemon");
+  const snapshot = join(root, "snapshot.sqlite");
+  removeDataDirWhenBenchDaemonCancelled(dataDir);
+  let releaseBody: () => void = () => undefined;
+  let releaseLock: () => void = () => undefined;
+  let reportReady: () => void = () => undefined;
+  let reportShutdown: () => void = () => undefined;
+  const bodyGate = new Promise<void>((resolve) => { releaseBody = resolve; });
+  const lockGate = new Promise<void>((resolve) => { releaseLock = resolve; });
+  const ready = new Promise<void>((resolve) => { reportReady = resolve; });
+  const shutdown = new Promise<void>((resolve) => { reportShutdown = resolve; });
+  const scope = scopeForBenchWork();
+  const operation = trackBenchOperation(scope, () => withSnapshotPublishLock(snapshot, async () => {
+    const daemon = await startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
+    try {
+      await trackBenchBody(scope, async () => {
+        reportReady();
+        await bodyGate;
+      });
+    } finally {
+      await daemon.shutdown();
+      reportShutdown();
+      await lockGate;
+    }
+  }));
+  const outcome = operation.then(() => undefined, error => error);
+  let cleanup: Promise<void> | undefined;
+  try {
+    await Promise.race([ready, operation]);
+    controller.abort();
+    let settled = false;
+    cleanup = settleActiveBenchDaemonTasks().then(() => { settled = true; });
+    releaseBody();
+    await Promise.race([shutdown, operation]);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(existsSync(dataDir)).toBe(true);
+    await expect(withSnapshotPublishLock(snapshot, async () => undefined))
+      .rejects.toThrow("snapshot publish is already in progress");
+    if (drain === "deadline") {
+      await expect(cleanup).rejects.toMatchObject({ code: "DEADLINE" });
+      expect(existsSync(dataDir)).toBe(true);
+      bindBenchDaemonTestSignal(new AbortController().signal);
+      expect(() => beginBenchDaemonTask()).toThrow("a bench scope is still alive");
+    }
+    releaseLock();
+    expect(await outcome).toBeUndefined();
+    if (drain === "deadline") await settleActiveBenchDaemonTasks();
+    else await cleanup;
+    expect(existsSync(dataDir)).toBe(false);
+    await withSnapshotPublishLock(snapshot, async () => undefined);
+  } finally {
+    releaseBody();
+    releaseLock();
+    await outcome;
+    await cleanup?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
   }
 });

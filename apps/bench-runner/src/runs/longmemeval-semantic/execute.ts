@@ -1,3 +1,4 @@
+import { currentBenchScope, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../harness/daemon-task.js";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
@@ -57,8 +58,16 @@ export function longMemEvalQuestionInputPaths(root: string, index: number) {
 }
 
 export async function prepareLongMemEvalSemanticRun(root: string) {
+  const scope = currentBenchScope();
+  const prepare = () => prepareBoundLongMemEvalSemanticRun(root);
+  return scope === undefined ? prepare() : trackBenchOperation(scope, prepare);
+}
+
+async function prepareBoundLongMemEvalSemanticRun(root: string) {
+  refuseBenchWorkAfterCancel();
   const frozen = readLongMemEvalSemanticFreeze(root);
   await loadFrozenLongMemEvalDataset(frozen.config);
+  refuseBenchWorkAfterCancel();
   if (frozen.contract === "longmemeval-native-semantic-v3") assertSourceCaches(frozen.source_caches);
   const results = readSemanticChainProposalResults(frozen.query_workset, frozen.config.query_cache_root, frozen.config.max_output_tokens);
   const rows: z.infer<typeof LongMemEvalPreparedSchema>["rows"] = [];
@@ -66,13 +75,19 @@ export async function prepareLongMemEvalSemanticRun(root: string) {
     try {
       const { directory, publicationPath } = longMemEvalQuestionInputPaths(root, selected.index);
       const publication = await publishQuestion(frozen, selected, directory, publicationPath);
+      refuseBenchWorkAfterCancel();
       const current = results[index]!;
       if (current.line.key !== selected.query_key) throw new AlayaError("CONFLICT", "frozen query request identity changed");
       const chainRoot = join(directory, `chain-${chainIdentity({ key: current.line.key, cache_identity: current.cache_identity, status: current.status })}`);
       await prepareSemanticChain(questionChainConfig(frozen, selected, directory, publication), chainRoot);
+      refuseBenchWorkAfterCancel();
       rows.push({ question_id: selected.question_id, status: "prepared", chain_root: chainRoot,
         publication_path: publicationPath, publication_identity: chainIdentity(publication) });
-    } catch (error) { rows.push({ question_id: selected.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) {
+      refuseBenchWorkAfterCancel();
+      if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
+      rows.push({ question_id: selected.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) });
+    }
   }
   const native = frozen.contract === "longmemeval-native-semantic-v3";
   const items = native ? rows.flatMap((row) => row.status !== "prepared" ? []
@@ -108,6 +123,7 @@ async function publishQuestion(frozen: LongMemEvalSemanticFreeze, selected: Long
             selected.source_manifest.some((source) => source.source_id === association.source_id)) } : {}) }] });
     }
   }
+  refuseBenchWorkAfterCancel();
   const report = verifyLongMemEvalQuestionPublication(frozen, selected, directory, retained);
   writeChainArtifact(publicationPath, retained);
   return report;
@@ -170,6 +186,13 @@ export function verifyLongMemEvalQuestionChain(frozen: LongMemEvalSemanticFreeze
 }
 
 export async function replayLongMemEvalSemanticRun(root: string, preparedPath: string) {
+  const scope = currentBenchScope();
+  const replay = () => replayBoundLongMemEvalSemanticRun(root, preparedPath);
+  return scope === undefined ? replay() : trackBenchOperation(scope, replay);
+}
+
+async function replayBoundLongMemEvalSemanticRun(root: string, preparedPath: string) {
+  refuseBenchWorkAfterCancel();
   const frozen = readLongMemEvalSemanticFreeze(root);
   const prepared = ExperimentPreparedSchema.parse(readChainArtifact(preparedPath));
   if ((prepared.contract === "longmemeval-native-semantic-prepared-v1") !== (frozen.contract === "longmemeval-native-semantic-v3")) {
@@ -188,9 +211,14 @@ export async function replayLongMemEvalSemanticRun(root: string, preparedPath: s
       if (chainIdentity(publication) !== row.publication_identity) throw new AlayaError("CONFLICT", "prepared question publication changed");
       verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, row.chain_root);
       const replay = await replaySemanticChain(row.chain_root);
+      refuseBenchWorkAfterCancel();
       if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(replay.result);
       rows.push({ ...row, status: "replayed", replay_path: replay.path });
-    } catch (error) { rows.push({ question_id: row.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) {
+      refuseBenchWorkAfterCancel();
+      if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
+      rows.push({ question_id: row.question_id, status: "unavailable", reason: error instanceof Error ? error.message : String(error) });
+    }
   }
   const result = LongMemEvalExperimentReplaySchema.parse({ contract: frozen.contract === "longmemeval-native-semantic-v3"
     ? "longmemeval-native-semantic-replay-v1" : "longmemeval-semantic-replay-v1", freeze_identity: chainIdentity(frozen),

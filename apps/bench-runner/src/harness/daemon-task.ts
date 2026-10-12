@@ -16,6 +16,7 @@ interface BenchScope {
   busy: number;
   readonly tasks: DaemonTask[];
   readonly bodies: Array<Promise<unknown>>;
+  readonly operations: Set<Promise<unknown>>;
   readonly dirs: OwnedDir[];
   shutdown: (() => Promise<void>) | undefined;
   lateError: unknown;
@@ -66,7 +67,7 @@ export async function runBenchDaemonOperation<T>(body: () => Promise<T>): Promis
     return await storage.run(scope, body);
   } finally {
     if (!scope.blocking && scope.busy === 0 && scope.shutdown === undefined &&
-        scope.bodies.length === 0 && !scope.cancelled) {
+        scope.bodies.length === 0 && scope.operations.size === 0 && !scope.cancelled) {
       scopes.delete(scope);
     }
   }
@@ -107,6 +108,17 @@ export function finishBenchDaemonTask(task: DaemonTask): void {
 export function trackBenchBody<T>(scope: BenchScope, body: () => Promise<T>): Promise<T> {
   const work = storage.run(scope, body);
   scope.bodies.push(work);
+  return work;
+}
+
+/** Operations include outer resource release and may await daemon shutdown. */
+export function trackBenchOperation<T>(scope: BenchScope, body: () => Promise<T>): Promise<T> {
+  const work = storage.run(scope, async () => {
+    refuseBenchWorkAfterCancel();
+    return body();
+  });
+  scope.operations.add(work);
+  work.then(() => scope.operations.delete(work), () => scope.operations.delete(work));
   return work;
 }
 
@@ -151,6 +163,7 @@ function createScope(signal: AbortSignal): BenchScope {
     busy: 0,
     tasks: [],
     bodies: [],
+    operations: new Set(),
     dirs: [],
     shutdown: undefined,
     lateError: undefined,
@@ -204,7 +217,8 @@ function createTask(scope: BenchScope): DaemonTask {
       if (task.bound) return;
       scope.busy = Math.max(0, scope.busy - 1);
       resolveStarted();
-      if (scope.busy === 0 && scope.shutdown === undefined && scope.bodies.length === 0) {
+      if (scope.busy === 0 && scope.shutdown === undefined && scope.bodies.length === 0 &&
+          scope.operations.size === 0) {
         removeOwnedDirs(scope);
         scope.blocking = false;
       }
@@ -223,15 +237,17 @@ function createTask(scope: BenchScope): DaemonTask {
   }
 }
 
-function closeScope(scope: BenchScope): Promise<void> {
-  return ensureClosed(scope);
+async function closeScope(scope: BenchScope): Promise<void> {
+  // Outer operations may await daemon shutdown before releasing their own locks.
+  await Promise.all([ensureClosed(scope), Promise.allSettled([...scope.operations])]);
+  await ensureClosed(scope);
 }
 
 function ensureClosed(scope: BenchScope): Promise<void> {
   // A second close waits for the first. Returning early would drop the directory while it is still open.
   if (scope.tail !== undefined) return scope.tail;
   const closing = closeResources(scope).then(() => {
-    removeOwnedDirs(scope);
+    if (scope.operations.size === 0) removeOwnedDirs(scope);
     // The caller still holds this scope. Sealing it would skip the next daemon's shutdown.
     scope.shutdown = undefined;
     scope.tail = undefined;
@@ -239,8 +255,8 @@ function ensureClosed(scope: BenchScope): Promise<void> {
     scope.busy = 0;
     scope.bodies.length = 0;
     scope.tasks.length = 0;
-    scope.blocking = false;
-    if (scope.cancelled || storage.getStore() !== scope) scopes.delete(scope);
+    scope.blocking = scope.cancelled && scope.operations.size > 0;
+    if (scope.operations.size === 0 && (scope.cancelled || storage.getStore() !== scope)) scopes.delete(scope);
   }, (error: unknown) => {
     scope.tail = undefined;
     scope.lateError = error;
@@ -283,7 +299,7 @@ function markCancelled(scope: BenchScope): void {
 }
 
 function scopeNeedsClose(scope: BenchScope): boolean {
-  return scope.shutdown !== undefined || scope.bodies.length > 0 || scope.dirs.length > 0;
+  return scope.shutdown !== undefined || scope.bodies.length > 0 || scope.operations.size > 0 || scope.dirs.length > 0;
 }
 
 function assertScopeCanStart(scope: BenchScope): void {

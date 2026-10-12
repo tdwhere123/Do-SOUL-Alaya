@@ -57,6 +57,9 @@ jobs:
         shell: bash
         env:
           VITEST_SHARD: ${{ matrix.vitest_shard || '' }}
+          # Reuse compiled code, never runtime state; V8 coverage needs uncached compilation.
+          NODE_COMPILE_CACHE: ${{ env.SHARD_COVERAGE == '0' && matrix.group == 'bench-runner' && format('{0}/alaya-node-compile-cache', runner.temp) || '' }}
+          NODE_DISABLE_COMPILE_CACHE: ${{ env.SHARD_COVERAGE == '1' && '1' || '' }}
         run: |
           args=(--group="${{ matrix.group }}" --projects-file=shard-projects.json)
           if [[ -n "${VITEST_SHARD}" ]]; then

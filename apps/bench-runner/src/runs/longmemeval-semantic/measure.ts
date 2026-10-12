@@ -1,5 +1,6 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
+import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } from "../../harness/daemon-task.js";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
 import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
@@ -64,7 +65,14 @@ export function summarizeLongMemEvalOutcomes(rows: readonly {
 }
 
 /** Trusted import may parse labels; answer-session gold joins only replayed, publication-admitted rows. */
-export async function measureLongMemEvalSemanticRun(root: string, replayPath: string, evaluatorRoot: string) {
+export function measureLongMemEvalSemanticRun(root: string, replayPath: string, evaluatorRoot: string) {
+  const scope = currentBenchScope();
+  const measure = () => measureBoundLongMemEvalSemanticRun(root, replayPath, evaluatorRoot);
+  return scope === undefined ? measure() : trackBenchOperation(scope, measure);
+}
+
+async function measureBoundLongMemEvalSemanticRun(root: string, replayPath: string, evaluatorRoot: string) {
+  refuseBenchWorkAfterCancel();
   const frozen = readLongMemEvalSemanticFreeze(root);
   const config = frozen.config;
   const replay = LongMemEvalExperimentReplaySchema.parse(readChainArtifact(replayPath));
@@ -92,6 +100,7 @@ export async function measureLongMemEvalSemanticRun(root: string, replayPath: st
     ...("arm" in config ? [config.correspondence_cache_root,
       ...config.source_cache_roots.flatMap(cacheRoot => sourceCacheInputPaths(cacheRoot, sourceKeys))] : [])]);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
+  refuseBenchWorkAfterCancel();
   const selectedRows: LongMemEvalOutcome[] = [];
   for (const selected of frozen.selected) {
     const question = dataset.questions[selected.index]!;

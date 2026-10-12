@@ -5,15 +5,18 @@ import { join } from "node:path";
 import { isContainedPath } from "../../../runs/fs/opened-contained-path.js";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
+import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal, runOutsideBenchDaemonScope, settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import Database from "better-sqlite3";
-import { SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
+import { AlayaError, SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import * as benchDaemon from "../../../harness/daemon.js";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
+import { snapshotPublishLockPath } from "../../../runs/snapshot/freeze/publish-lock.js";
 import { restoreSnapshotToDataDir } from "../../../runs/snapshot/materialize.js";
+import * as sourceCensus from "../../../runs/snapshot/source-records/census.js";
+import * as sourcePublication from "../../../runs/snapshot/source-records/publish.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { runSourceSemanticPublicationLauncher } from "../../../runs/snapshot/source-records/launch-publication.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
@@ -23,12 +26,14 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/r
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
+import * as experimentContract from "../../../runs/longmemeval-semantic/contract.js";
 import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
 import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
+import * as semanticReplay from "../../../runs/semantic-chain/replay.js";
 import { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { chainIdentity, SemanticChainPlanSchema, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { chainIdentity, SemanticChainPlanSchema, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
 import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 
 const roots = new Set<string>();
@@ -76,6 +81,69 @@ function question(id: string, sessions: { role: string; content: string }[][]) {
 }
 
 describe("complete-source census and publication", () => {
+  it.each(["active", "before_read", "during_read"] as const)("owns evaluator writes with measurement cancellation %s", async (cancellation) => {
+    const f = await fixture(false, false, [question("one", [[{ role: "user", content: "An original source." }]])]);
+    const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+    const root = join(f.root, "development"), evaluatorRoot = join(f.root, "evaluator");
+    const frozen = await freezeLongMemEvalSemanticRun({ data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
+      dataset_sha256: census.dataset_sha256, dataset_question_count: 1, question_ids: ["one"],
+      model: "gemini-2.5-flash-lite", provider_url: "http://127.0.0.1:9", request_profile: "gemini-2.5-nonthinking-v1",
+      query_cache_root: join(f.root, "query-cache"), recorded_at: CLOCK, producer_commit: "a".repeat(40),
+      max_output_tokens: 4096, output_byte_limit: 1000000,
+      budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+        finalization_reserve: 10000, min_envelope: 10 } }, root);
+    const preparedPath = join(root, "prepared.json");
+    writeChainArtifact(preparedPath, { contract: "longmemeval-semantic-prepared-v1", freeze_identity: chainIdentity(frozen),
+      rows: [{ question_id: "one", status: "unavailable", reason: "fixture preparation unavailable" }] });
+    const replay = await replayLongMemEvalSemanticRun(root, preparedPath);
+    const controller = new AbortController();
+    bindBenchDaemonTestSignal(controller.signal);
+    let release: () => void = () => undefined;
+    let reportLoaded: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const loaded = new Promise<void>((resolve) => { reportLoaded = resolve; });
+    const read = experimentContract.loadFrozenLongMemEvalDataset;
+    const loading = vi.spyOn(experimentContract, "loadFrozenLongMemEvalDataset").mockImplementationOnce(async (config) => {
+      const dataset = await read(config);
+      reportLoaded();
+      if (cancellation === "during_read") await gate;
+      return dataset;
+    });
+    if (cancellation === "before_read") controller.abort();
+    const pending = measureLongMemEvalSemanticRun(root, replay.path, evaluatorRoot);
+    const outcome = pending.then(value => ({ status: "fulfilled" as const, value }),
+      reason => ({ status: "rejected" as const, reason }));
+    let cleanup: Promise<void> | undefined;
+    try {
+      if (cancellation === "during_read") {
+        await Promise.race([loaded, pending]);
+        controller.abort();
+        let settled = false;
+        cleanup = settleActiveBenchDaemonTasks().then(() => { settled = true; });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
+        expect(existsSync(f.root)).toBe(true);
+        release();
+      }
+      if (cancellation === "active") {
+        const measured = await pending;
+        expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 0, unknown: 1 });
+        expect(existsSync(measured.path)).toBe(true);
+        expect(await runOutsideBenchDaemonScope(() => measureLongMemEvalSemanticRun(root, replay.path, evaluatorRoot)))
+          .toEqual(measured);
+      } else {
+        expect(await outcome).toMatchObject({ status: "rejected", reason: { code: "CANCELLED" } });
+        expect(existsSync(evaluatorRoot)).toBe(false);
+        if (cancellation === "before_read") expect(loading).not.toHaveBeenCalled();
+      }
+    } finally {
+      release();
+      await outcome;
+      await cleanup;
+      loading.mockRestore();
+    }
+  });
+
   it("keeps original question haystacks isolated through source-only development and evaluator-only scoring", async () => {
     const f = await fixture(false, true);
     const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
@@ -501,3 +569,164 @@ describe("complete-source census and publication", () => {
     }
   }, 120000);
 });
+
+
+function cancellationGate() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>(ready => { resolve = ready; });
+  return { promise, resolve };
+}
+
+async function cancellationFixture() {
+  const f = await fixture(false, false, [question("cancel-source", [[{ role: "user", content: "Retained source." }]])]);
+  const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: f.dataDir, pinnedMetaRoot: f.pinnedMetaRoot });
+  const root = join(f.root, "cancel-freeze");
+  const config = { data_dir: f.dataDir, pinned_meta_root: f.pinnedMetaRoot,
+    dataset_sha256: census.dataset_sha256, dataset_question_count: 1, question_ids: ["cancel-source"],
+    model: "gemini-2.5-flash-lite", provider_url: "http://127.0.0.1:9", request_profile: "gemini-2.5-nonthinking-v1",
+    query_cache_root: join(f.root, "query-cache"), recorded_at: CLOCK, producer_commit: "a".repeat(40),
+    max_output_tokens: 4096, output_byte_limit: 1000000,
+    budget: { schema_version: 1, work_units: 1000000, memory_bytes: 60000000, page_budget: 100000,
+      finalization_reserve: 10000, min_envelope: 10 } };
+  return { ...f, outputRoot: root, config };
+}
+
+it.each(["dataset", "census"] as const)("drains a cancelled freeze held after its real %s read without recreating output", async boundary => {
+  const f = await cancellationFixture();
+  const controller = new AbortController();
+  const entered = cancellationGate(), release = cancellationGate();
+  if (boundary === "dataset") {
+    const original = experimentContract.loadFrozenLongMemEvalDataset;
+    vi.spyOn(experimentContract, "loadFrozenLongMemEvalDataset").mockImplementationOnce(async (...args) => {
+      const result = await original(...args); entered.resolve(); await release.promise; return result;
+    });
+  } else {
+    const original = sourceCensus.censusCompleteSourceRecords;
+    vi.spyOn(sourceCensus, "censusCompleteSourceRecords").mockImplementationOnce(async (...args) => {
+      const result = await original(...args); entered.resolve(); await release.promise; return result;
+    });
+  }
+  bindBenchDaemonTestSignal(controller.signal);
+  const pending = freezeLongMemEvalSemanticRun(f.config, f.outputRoot);
+  const outcome = pending.then(value => ({ value }), error => ({ error }));
+  try {
+    await entered.promise;
+    controller.abort();
+    let settled = false;
+    const cleanup = settleActiveBenchDaemonTasks().then(() => { settled = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const waitedForRead = !settled;
+    release.resolve();
+    const result = await outcome;
+    await cleanup;
+    await rm(f.outputRoot, { recursive: true, force: true });
+    expect(waitedForRead).toBe(true);
+    expect(result).toMatchObject({ error: { code: "CANCELLED" } });
+    expect(existsSync(f.outputRoot)).toBe(false);
+  } finally {
+    release.resolve(); await outcome; await settleActiveBenchDaemonTasks(); clearBenchDaemonTestSignal(controller.signal);
+  }
+});
+
+it("drains a cancelled source census before publication can create output directories", async () => {
+  const f = await cancellationFixture();
+  const controller = new AbortController();
+  const entered = cancellationGate(), release = cancellationGate();
+  const original = sourceCensus.censusCompleteSourceRecords;
+  vi.spyOn(sourceCensus, "censusCompleteSourceRecords").mockImplementationOnce(async (...args) => {
+    const result = await original(...args); entered.resolve(); await release.promise; return result;
+  });
+  const output = join(f.root, "cancel-publication");
+  bindBenchDaemonTestSignal(controller.signal);
+  const pending = publishSourceSemanticSnapshot({ snapshotPath: join(output, "sealed.sqlite"), dataDirRoot: join(output, "runtime"),
+    recordedAt: CLOCK, producerCommit: "a".repeat(40), populations: [{ name: "longmemeval_s", dataDir: f.dataDir,
+      pinnedMetaRoot: f.pinnedMetaRoot, model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1" }] });
+  const outcome = pending.then(value => ({ value }), error => ({ error }));
+  try {
+    await entered.promise; controller.abort();
+    let settled = false;
+    const cleanup = settleActiveBenchDaemonTasks().then(() => { settled = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const waitedForRead = !settled;
+    release.resolve();
+    const result = await outcome; await cleanup;
+    expect(waitedForRead).toBe(true);
+    expect(result).toMatchObject({ error: { code: "CANCELLED" } });
+    expect(existsSync(output)).toBe(false);
+  } finally {
+    release.resolve(); await outcome; await settleActiveBenchDaemonTasks(); clearBenchDaemonTestSignal(controller.signal);
+  }
+});
+
+it.each(["CANCELLED", "UNAVAILABLE"] as const)("preserves %s as control flow or ordinary preparation unavailability", async code => {
+  const f = await cancellationFixture();
+  await freezeLongMemEvalSemanticRun(f.config, f.outputRoot);
+  vi.spyOn(sourcePublication, "publishSourceSemanticSnapshot").mockRejectedValueOnce(new AlayaError(code, "publication boundary"));
+  if (code === "CANCELLED") {
+    await expect(prepareLongMemEvalSemanticRun(f.outputRoot)).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(readdirSync(f.outputRoot).some(name => name.startsWith("prepared-"))).toBe(false);
+  } else {
+    const prepared = await prepareLongMemEvalSemanticRun(f.outputRoot);
+    expect(prepared.result.rows).toEqual([{ question_id: "cancel-source", status: "unavailable", reason: "publication boundary" }]);
+    expect(existsSync(prepared.path)).toBe(true);
+  }
+});
+
+
+it.each(["CANCELLED", "UNAVAILABLE"] as const)("preserves %s at the native replay boundary after actual preparation", async code => {
+  const f = await cancellationFixture();
+  await freezeLongMemEvalSemanticRun(f.config, f.outputRoot);
+  const prepared = await prepareLongMemEvalSemanticRun(f.outputRoot);
+  expect(prepared.result.rows[0]?.status).toBe("prepared");
+  vi.spyOn(semanticReplay, "replaySemanticChain").mockRejectedValueOnce(new AlayaError(code, "native replay boundary"));
+  if (code === "CANCELLED") {
+    await expect(replayLongMemEvalSemanticRun(f.outputRoot, prepared.path)).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(readdirSync(f.outputRoot).some(name => name.startsWith("replay-"))).toBe(false);
+  } else {
+    const replay = await replayLongMemEvalSemanticRun(f.outputRoot, prepared.path);
+    expect(replay.result.rows).toEqual([{ question_id: "cancel-source", status: "unavailable", reason: "native replay boundary" }]);
+    expect(existsSync(replay.path)).toBe(true);
+  }
+}, 60_000);
+
+
+it("waits for an actual source admission body before cancelling publication and deleting its runtime", async () => {
+  const f = await cancellationFixture();
+  const controller = new AbortController();
+  const entered = cancellationGate(), release = cancellationGate();
+  const original = benchDaemon.startBenchDaemon;
+  vi.spyOn(benchDaemon, "startBenchDaemon").mockImplementationOnce(async options => {
+    const daemon = await original(options);
+    return { ...daemon, importSourceRecord: async (...args) => {
+      const result = await daemon.importSourceRecord(...args);
+      entered.resolve(); await release.promise; return result;
+    } };
+  });
+  const output = join(f.root, "cancel-admission");
+  bindBenchDaemonTestSignal(controller.signal);
+  const pending = publishSourceSemanticSnapshot({ snapshotPath: join(output, "sealed.sqlite"), dataDirRoot: join(output, "runtime"),
+    recordedAt: CLOCK, producerCommit: "a".repeat(40), populations: [{ name: "longmemeval_s", dataDir: f.dataDir,
+      pinnedMetaRoot: f.pinnedMetaRoot, model: "gemini-2.5-flash-lite", requestProfile: "gemini-2.5-nonthinking-v1" }] });
+  const outcome = pending.then(value => ({ value }), error => ({ error }));
+  try {
+    await entered.promise; controller.abort();
+    let settled = false;
+    const cleanup = settleActiveBenchDaemonTasks().then(() => { settled = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const waitedForAdmission = !settled;
+    release.resolve();
+    await cleanup;
+    for (const target of [join(output, "sealed.sqlite"), join(output, "runtime", "source-semantic-publication")]) {
+      const lock = new Database(snapshotPublishLockPath(target));
+      try { lock.exec("BEGIN EXCLUSIVE"); lock.exec("ROLLBACK"); } finally { lock.close(); }
+    }
+    const result = await outcome;
+    expect(waitedForAdmission).toBe(true);
+    expect(result).toMatchObject({ error: { code: "CANCELLED" } });
+    expect(existsSync(join(output, "sealed.sqlite"))).toBe(false);
+    await rm(output, { recursive: true, force: true });
+    expect(existsSync(output)).toBe(false);
+  } finally {
+    release.resolve(); await outcome; await settleActiveBenchDaemonTasks(); clearBenchDaemonTestSignal(controller.signal);
+  }
+}, 60_000);
