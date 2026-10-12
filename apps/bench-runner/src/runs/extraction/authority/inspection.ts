@@ -387,6 +387,7 @@ function readUntrackedFileDigests(checkoutRoot: string): readonly {
 function readGitText(args: readonly string[], checkoutRoot: string): string {
   return execFileSync("git", args, {
     cwd: checkoutRoot,
+    env: gitProcessEnv(),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"]
   }).trim();
@@ -395,11 +396,23 @@ function readGitText(args: readonly string[], checkoutRoot: string): string {
 function readGitBuffer(args: readonly string[], checkoutRoot: string): Buffer {
   return execFileSync("git", args, {
     cwd: checkoutRoot,
+    env: gitProcessEnv(),
     encoding: "buffer",
     // Authority binds the full patch; large legitimate retirements exceed Node's default.
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"]
   }) as Buffer;
+}
+
+/** Checkout identity does not read the caller's credentials. */
+function gitProcessEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of ["PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
+    "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE"]) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 function digest(value: unknown): string {
