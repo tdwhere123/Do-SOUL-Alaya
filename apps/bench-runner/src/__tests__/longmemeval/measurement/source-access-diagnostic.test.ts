@@ -459,8 +459,9 @@ describe("source access diagnostic", () => {
       && row.first_gold_source_rank === 1 && row.pool_at_5 === "hit")).toBe(true);
   }, 120000);
 
-  it("retains native attempt cost when the full source page cannot fit the output bound", async () => {
-    const f = await fixture(false, 30);
+  it("retains completed native attempt costs when the observation output bound stops paging", async () => {
+    // 480 sources exceed the output-limited page count without importing the larger 2100-source population.
+    const f = await fixture(false, 30, 1, 16);
     const observed = await observeSourceAccessDiagnostic({ ...f.config,
       limits: { ...f.config.limits, max_total_work: 20_000_000,
         max_output_bytes: 144 * 1024 } }, join(f.root, "output-limited"));
@@ -469,7 +470,21 @@ describe("source access diagnostic", () => {
     expect(observed.result.settled_pages).toBeGreaterThan(0);
     expect(observed.result.unresolved_attempts).toBe(0);
     expect(observed.result.total_logical_work).toBeGreaterThan(0);
-    expect(observed.result.rows[0]?.attempt_paths.some((path) => path.endsWith(".result.json"))).toBe(true);
+    expect(observed.result.settled_pages).toBe(observed.result.attempted_pages);
+    const attempts = observed.result.rows.flatMap((row) => row.attempt_evidence);
+    expect(attempts).toHaveLength(observed.result.settled_pages);
+    let retainedLogicalWork = 0;
+    for (const attempt of attempts) {
+      expect(attempt.result).not.toBeNull();
+      const result = readChainArtifact(join(f.root, "output-limited", attempt.result!.path)) as {
+        work: { logical_work: number }; provider_attempts: number };
+      expect(result.work.logical_work).toBeGreaterThan(0);
+      expect(result.provider_attempts).toBe(0);
+      retainedLogicalWork += result.work.logical_work;
+    }
+    expect(retainedLogicalWork).toBe(observed.result.total_logical_work);
+    expect(observed.result.output_bytes).toBeLessThanOrEqual(144 * 1024);
+    expect(observed.result.provider_calls).toBe(0);
     expect(readChainArtifact(join(f.root, "output-limited", "start.json"))).toBeDefined();
   }, 120000);
 
