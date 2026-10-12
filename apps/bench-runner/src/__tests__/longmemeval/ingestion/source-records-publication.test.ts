@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import Database from "better-sqlite3";
 import { SoulMemorySearchRequestSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
@@ -33,7 +34,13 @@ import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-respons
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
 const AS_OF = "2023-09-13T00:00:00.000Z";
-afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
+afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  await settleActiveBenchDaemonTasks();
+  for (const root of roots) await rm(root, { recursive: true, force: true });
+  roots.clear();
+});
 
 async function fixture(duplicate = false, abstention = false, authoredQuestions?: ReturnType<typeof question>[]) {
   const root = await mkdtemp(join(tmpdir(), "source-records-publication-"));

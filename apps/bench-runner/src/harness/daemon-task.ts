@@ -1,102 +1,77 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { rmSync } from "node:fs";
+import { AlayaError } from "@do-soul/alaya-protocol";
 
 const EXIT_BOUND_MS = 8_000;
 
-interface ExitHook {
+interface OwnedDir {
+  readonly path: string;
   readonly whenCancelled: boolean;
-  readonly run: () => Promise<void> | void;
+}
+
+interface BenchScope {
+  readonly signal: AbortSignal;
+  cancelled: boolean;
+  blocking: boolean;
+  resourcesClosed: boolean;
+  busy: number;
+  readonly tasks: DaemonTask[];
+  readonly bodies: Array<Promise<unknown>>;
+  readonly dirs: OwnedDir[];
+  shutdown: (() => Promise<void>) | undefined;
+  lateError: unknown;
+  tail: Promise<void> | undefined;
 }
 
 interface DaemonTask {
   wasCancelled: boolean;
   bound: boolean;
-  readonly exits: ExitHook[];
+  readonly scope: BenchScope;
+  readonly done: Promise<void>;
   arm(shutdown: () => Promise<void>): () => Promise<void>;
   requestCancel(): void;
   finishWithoutShutdown(): void;
-  readonly done: Promise<void>;
 }
 
-const tasks = new Set<DaemonTask>();
-let current: DaemonTask | undefined;
-let testSignal: AbortSignal | undefined;
+const storage = new AsyncLocalStorage<BenchScope>();
+const scopes = new Set<BenchScope>();
 
-/** Vitest stops waiting on timeout before the test's finally runs. This signal is that cancel. */
+/** The signal belongs to this test. Later tests get their own scope. */
 export function bindBenchDaemonTestSignal(signal: AbortSignal): void {
-  testSignal = signal;
+  const scope = createScope(signal);
+  storage.enterWith(scope);
 }
 
 export function clearBenchDaemonTestSignal(signal: AbortSignal): void {
-  if (testSignal === signal) testSignal = undefined;
+  const scope = storage.getStore();
+  if (scope?.signal !== signal || scope.blocking) return;
+  scopes.delete(scope);
 }
 
 export function beginBenchDaemonTask(): DaemonTask {
-  let resolveDone: () => void = () => undefined;
-  let rejectDone: (error: unknown) => void = () => undefined;
-  const done = new Promise<void>((resolve, reject) => {
-    resolveDone = resolve;
-    rejectDone = reject;
-  });
-  let run: ((fromCancel: boolean) => Promise<void>) | undefined;
-  let pending: Promise<void> | undefined;
-  const task: DaemonTask = {
-    wasCancelled: false,
-    bound: false,
-    exits: [],
-    arm(shutdown) {
-      task.bound = true;
-      run = (fromCancel) => {
-        if (fromCancel) task.wasCancelled = true;
-        pending ??= shutdown().then(() => runExitHooks(task.exits, task.wasCancelled));
-        return pending;
-      };
-      const started = () => {
-        const promise = run!(false).then(resolveDone, (error) => {
-          rejectDone(error);
-          throw error;
-        });
-        void promise.catch(() => undefined);
-        return promise;
-      };
-      if (task.wasCancelled) void run(true).then(resolveDone, rejectDone);
-      return started;
-    },
-    requestCancel() {
-      task.wasCancelled = true;
-      if (run === undefined || pending !== undefined) return;
-      void run(true).then(resolveDone, (error) => {
-        rejectDone(error);
-      });
-    },
-    finishWithoutShutdown() {
-      if (pending !== undefined || task.bound) return;
-      pending = Promise.resolve();
-      resolveDone();
-    },
-    done
-  };
-  tasks.add(task);
-  current = task;
-  const signal = testSignal;
-  const onAbort = () => task.requestCancel();
-  if (signal?.aborted) task.requestCancel();
-  else signal?.addEventListener("abort", onAbort, { once: true });
-  void done.finally(() => {
-    signal?.removeEventListener("abort", onAbort);
-    tasks.delete(task);
-    if (current === task) current = undefined;
-  });
+  const scope = storage.getStore() ?? createScope(new AbortController().signal);
+  assertScopeCanStart(scope);
+  const task = createTask(scope);
+  scope.busy += 1;
   return task;
 }
 
-async function runExitHooks(exits: readonly ExitHook[], cancelled: boolean): Promise<void> {
-  for (const hook of exits) {
-    if (hook.whenCancelled && !cancelled) continue;
-    await hook.run();
+export function currentBenchScope(): BenchScope | undefined {
+  return storage.getStore();
+}
+
+export function refuseBenchWorkAfterCancel(): void {
+  const scope = storage.getStore();
+  if (scope === undefined) return;
+  if (scope.cancelled || scope.signal.aborted) {
+    throw new AlayaError("CANCELLED", "bench scope was cancelled before new work could start");
   }
 }
 
-export function adoptBenchDaemonShutdown(task: DaemonTask, shutdown: () => Promise<void>): () => Promise<void> {
+export function adoptBenchDaemonShutdown(
+  task: DaemonTask,
+  shutdown: () => Promise<void>
+): () => Promise<void> {
   return task.arm(shutdown);
 }
 
@@ -104,29 +79,212 @@ export function finishBenchDaemonTask(task: DaemonTask): void {
   task.finishWithoutShutdown();
 }
 
-/** A timed-out body never reaches its finally, so the session directory has to leave with the daemon. */
+/** Inner work stays on the scope that started it, even if a later test replaces the store. */
+export function trackBenchBody<T>(scope: BenchScope, body: () => Promise<T>): Promise<T> {
+  const work = storage.run(scope, body);
+  scope.bodies.push(work);
+  return work;
+}
+
+export function scopeForBenchWork(): BenchScope {
+  return requireScope();
+}
+
+/** A timed-out body never reaches its finally, so the directory leaves only after that body stops. */
 export function removeDataDirWhenBenchDaemonCancelled(dataDir: string): void {
-  current?.exits.push({
-    whenCancelled: true,
-    run: () => rmSync(dataDir, { recursive: true, force: true })
-  });
+  requireScope().dirs.push({ path: dataDir, whenCancelled: true });
 }
 
 export async function settleActiveBenchDaemonTasks(): Promise<void> {
-  const pending = [...tasks];
-  for (const task of pending) task.requestCancel();
+  const pending = [...scopes].filter((scope) => scope.blocking || scopeNeedsClose(scope));
+  for (const scope of pending) markCancelled(scope);
   if (pending.length === 0) return;
+  const quiet = Promise.all(pending.map((scope) => closeScope(scope)));
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      Promise.all(pending.map((task) => task.done)),
+      quiet,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(
-          "bench daemon was still running when the next test needed the process slot"
+        timer = setTimeout(() => reject(new AlayaError(
+          "DEADLINE",
+          "bench scope was still alive when the next test needed it"
         )), EXIT_BOUND_MS);
       })
     ]);
+  } catch (error) {
+    retainLate(quiet);
+    throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+function createScope(signal: AbortSignal): BenchScope {
+  const scope: BenchScope = {
+    signal,
+    cancelled: false,
+    blocking: false,
+    resourcesClosed: false,
+    busy: 0,
+    tasks: [],
+    bodies: [],
+    dirs: [],
+    shutdown: undefined,
+    lateError: undefined,
+    tail: undefined
+  };
+  scopes.add(scope);
+  const onAbort = () => markCancelled(scope);
+  if (signal.aborted) markCancelled(scope);
+  else signal.addEventListener("abort", onAbort, { once: true });
+  return scope;
+}
+
+function createTask(scope: BenchScope): DaemonTask {
+  let resolveDone: () => void = () => undefined;
+  let rejectDone: (error: unknown) => void = () => undefined;
+  const done = new Promise<void>((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+  // A caller may ignore `done`. The rejection still has to stay on the scope.
+  done.catch((error: unknown) => {
+    if (scope.lateError === undefined) scope.lateError = error;
+  });
+  const task: DaemonTask = {
+    get wasCancelled() {
+      return scope.cancelled;
+    },
+    bound: false,
+    scope,
+    done,
+    arm(shutdown) {
+      task.bound = true;
+      scope.busy = Math.max(0, scope.busy - 1);
+      scope.shutdown = shutdown;
+      if (scope.cancelled) remember(scope, closeOnce(true));
+      return () => closeOnce(false);
+    },
+    requestCancel() {
+      scope.cancelled = true;
+      scope.blocking = true;
+      if (!task.bound || scope.tail !== undefined) return;
+      remember(scope, closeOnce(true));
+    },
+    finishWithoutShutdown() {
+      if (task.bound) return;
+      scope.busy = Math.max(0, scope.busy - 1);
+      if (scope.busy === 0 && scope.shutdown === undefined && scope.bodies.length === 0) {
+        removeOwnedDirs(scope);
+        scope.resourcesClosed = true;
+        scope.blocking = false;
+        scopes.delete(scope);
+      }
+      resolveDone();
+    }
+  };
+  scope.tasks.push(task);
+  return task;
+
+  function closeOnce(fromCancel: boolean): Promise<void> {
+    if (fromCancel) markCancelled(scope);
+    return ensureClosed(scope).then(resolveDone, (error: unknown) => {
+      rejectDone(error);
+      throw error;
+    });
+  }
+}
+
+function closeScope(scope: BenchScope): Promise<void> {
+  return ensureClosed(scope);
+}
+
+function ensureClosed(scope: BenchScope): Promise<void> {
+  if (scope.resourcesClosed) return Promise.resolve();
+  // A second close waits for the first. Returning early would drop the directory while it is still open.
+  if (scope.tail !== undefined) return scope.tail;
+  scope.tail = closeResources(scope).then(() => {
+    scope.resourcesClosed = true;
+    removeOwnedDirs(scope);
+    scope.blocking = false;
+    scopes.delete(scope);
+  }, (error: unknown) => {
+    scope.tail = undefined;
+    scope.lateError = error;
+    scope.blocking = true;
+    throw error;
+  });
+  return scope.tail;
+}
+
+async function closeResources(scope: BenchScope): Promise<void> {
+  await settledBodies(scope);
+  if (scope.busy > 0 && scope.shutdown === undefined) {
+    throw new AlayaError("DEADLINE", "bench scope is still starting");
+  }
+  if (scope.shutdown !== undefined) await scope.shutdown();
+}
+
+function settledBodies(scope: BenchScope): Promise<unknown> {
+  // The caller of the body still receives its rejection. Cleanup only waits until that promise has settled.
+  return Promise.all(scope.bodies.map((body) => body.then(() => undefined, () => undefined)));
+}
+
+function removeOwnedDirs(scope: BenchScope): void {
+  for (const dir of scope.dirs) {
+    if (dir.whenCancelled && !scope.cancelled) continue;
+    rmSync(dir.path, { recursive: true, force: true });
+  }
+  scope.dirs.length = 0;
+}
+
+function markCancelled(scope: BenchScope): void {
+  const already = scope.cancelled;
+  scope.cancelled = true;
+  scope.blocking = true;
+  if (already) return;
+  for (const task of scope.tasks) task.requestCancel();
+}
+
+function scopeNeedsClose(scope: BenchScope): boolean {
+  return scope.shutdown !== undefined || scope.bodies.length > 0 || scope.dirs.length > 0;
+}
+
+function assertScopeCanStart(scope: BenchScope): void {
+  if (scope.lateError !== undefined) {
+    throw scope.lateError instanceof Error
+      ? scope.lateError
+      : new AlayaError("CONFLICT", "bench scope failed and cannot be reused");
+  }
+  if (scope.cancelled || scope.signal.aborted) {
+    throw new AlayaError("CANCELLED", "bench scope was cancelled before new work could start");
+  }
+  for (const other of scopes) {
+    if (other !== scope && other.blocking) {
+      throw new AlayaError("CONFLICT", "a bench scope is still alive");
+    }
+  }
+}
+
+function requireScope(): BenchScope {
+  const scope = storage.getStore();
+  if (scope === undefined) {
+    throw new AlayaError("CANCELLED", "bench work has no owning scope");
+  }
+  return scope;
+}
+
+function remember(scope: BenchScope, pending: Promise<unknown>): void {
+  // closeOnce already rejected `done`. This only keeps the extra rejection from going unhandled.
+  pending.then(() => undefined, (error: unknown) => {
+    if (scope.lateError === undefined) scope.lateError = error;
+  });
+}
+
+function retainLate(quiet: Promise<unknown>): void {
+  quiet.then(() => undefined, (error: unknown) => {
+    for (const scope of scopes) {
+      if (scope.blocking && scope.lateError === undefined) scope.lateError = error;
+    }
+  });
 }

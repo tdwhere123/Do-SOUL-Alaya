@@ -3,6 +3,7 @@ import { cp, mkdtemp, mkdir, readdir, rm, stat, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationRequestSchema } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
@@ -18,7 +19,11 @@ import { SourceAccessDiagnosticEvaluationSchema, SourceAccessDiagnosticObservati
   type SourceAccessDiagnosticObservation } from "../../../runs/source-access-diagnostic/contract.js";
 
 const roots = new Set<string>();
-afterEach(async () => { for (const root of roots) await rm(root, { recursive: true, force: true }); roots.clear(); });
+afterEach(async () => {
+  await settleActiveBenchDaemonTasks();
+  for (const root of roots) await rm(root, { recursive: true, force: true });
+  roots.clear();
+});
 
 async function fixture(allGold = false, roundsPerSession = 1, questionCount = 1,
   sourceCount = 70, questionText = "Which source mentions tungsten?") {

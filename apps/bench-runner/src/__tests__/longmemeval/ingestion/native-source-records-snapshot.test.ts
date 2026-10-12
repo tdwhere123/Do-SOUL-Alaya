@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
   "../../../runs/extraction/authority/inspection.js";
 import { preflightSourceSemanticInteractive } from
@@ -37,7 +38,12 @@ const generationTask = { contract: "source-semantic-generation-task-v1" as const
   context: "complete_original_source" as const, original_query: "Which file format did Mira use for the Atlas export?",
   responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
 const taskGeneration = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION, generation_task: generationTask };
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  await settleActiveBenchDaemonTasks();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 it("reports an available empty native source as complete under a tuple-bound preview", async () => {
   const root = mkdtempSync(join(tmpdir(), "native-empty-source-")); roots.push(root);

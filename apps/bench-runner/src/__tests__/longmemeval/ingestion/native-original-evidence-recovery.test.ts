@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, type SourceSemanticCorrespondenceProposalInput } from "@do-soul/alaya-soul";
 import { prepareNativeSourceRecordsSnapshot, readVerifiedNativeSourceSnapshot } from
@@ -58,7 +59,12 @@ const WORLDS = [
       "Mira used CSV for the Beacon export.\n"], answer: null, support: null }
 ] as const;
 const roots: string[] = [];
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  await settleActiveBenchDaemonTasks();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", cOnly: true },
   { ...WORLDS[2], name: "retained assistant known event time", retainedClock: OBSERVED },

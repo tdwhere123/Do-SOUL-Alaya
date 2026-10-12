@@ -19,6 +19,7 @@ import { inspectCachedSourceSemantic } from "../../extraction/cache/source-seman
 import { publishAdmittedSourceSemanticInterpretation } from "../../extraction/cache/source-semantic-runtime-publish.js";
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
 import { hashRegularFileNoFollow } from "../bound-file.js";
+import { refuseBenchWorkAfterCancel } from "../../../harness/daemon-task.js";
 import { checkpointAndCopyBenchDb } from "../freeze/db-copy.js";
 import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
@@ -317,6 +318,7 @@ async function admitCensusSources(
   } finally {
     await daemon.shutdown();
   }
+  refuseBenchWorkAfterCancel();
   checkpointAndCopyBenchDb(join(dataDirRoot, BENCH_DAEMON_DB_FILENAME), snapshotPath);
   return dispositions;
 }

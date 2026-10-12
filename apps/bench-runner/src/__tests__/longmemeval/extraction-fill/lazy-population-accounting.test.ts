@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { afterEach, expect, it, vi } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { registerExtractionFillHooks } from "./fixture.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
@@ -25,7 +26,11 @@ import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semant
 const roots: string[] = [];
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks(roots => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), "longmemeval_s");
-afterEach(() => { vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await settleActiveBenchDaemonTasks();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 const digest = "a".repeat(64);
 
 function authoredPopulation(kind: "development20" | "reused_readiness50") {

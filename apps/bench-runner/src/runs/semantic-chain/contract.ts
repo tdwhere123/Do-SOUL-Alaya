@@ -14,7 +14,7 @@ import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durabl
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { restoreSnapshotToDataDir } from "../snapshot/materialize.js";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../harness/daemon.js";
-import { removeDataDirWhenBenchDaemonCancelled } from "../../harness/daemon-task.js";
+import { currentBenchScope, removeDataDirWhenBenchDaemonCancelled, trackBenchBody } from "../../harness/daemon-task.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { isAuthorityRevision } from "../extraction/authority/receipt.js";
 
@@ -157,7 +157,8 @@ export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, ro
       sourceSemanticInterpretationClock: config.interpretation_clock,
       embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
     removeDataDirWhenBenchDaemonCancelled(directory);
-    const result = await body(daemon);
+    const scope = currentBenchScope();
+    const result = scope === undefined ? await body(daemon) : await trackBenchBody(scope, () => body(daemon));
     complete = true;
     return result;
   } finally {
