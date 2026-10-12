@@ -6,15 +6,16 @@ import {
   fsyncSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
   readSync,
   realpathSync,
   rmSync,
-  statSync,
   writeSync
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { AlayaError } from "@do-soul/alaya-protocol";
 
 // Child proof process strip-types-loads this file; a .js specifier cannot see sibling .ts.
@@ -117,11 +118,18 @@ export function withCachedRegularFileNoFollow<T>(input: {
   readonly expectedSha256: string;
   readonly operation: (openedPath: string) => T;
 }): T {
+  return withOpenedRegularFile(input.filePath, requireCachedFileSha256(input), input.operation);
+}
+
+function requireCachedFileSha256(input: {
+  readonly filePath: string;
+  readonly expectedSha256: string;
+}): OpenedFileSha256 {
   const cached = cachedFileSha256(input.filePath);
   if (cached === undefined || cached.sha256 !== input.expectedSha256) {
     throw new Error(`${input.filePath} changed after cached digest`);
   }
-  return withOpenedRegularFile(input.filePath, cached, input.operation);
+  return cached;
 }
 
 export function boundFileFullContentReadCount(): number {
@@ -192,7 +200,7 @@ export function assertRegularFileNoFollow(filePath: string): void {
 function withOpenedRegularFile<T>(
   filePath: string,
   expected: OpenedFileSha256 | undefined,
-  operation: (openedPath: string) => T
+  operation: (openedPath: string, descriptor: number) => T
 ): T {
   const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
   try {
@@ -200,7 +208,7 @@ function withOpenedRegularFile<T>(
     if (expected !== undefined && !sameFileIdentity(before, expected)) {
       throw new Error(`${filePath} changed after cached digest`);
     }
-    const result = operation(openedFileDescriptorPath(descriptor, filePath));
+    const result = operation(openedFileDescriptorPath(descriptor, filePath), descriptor);
     if (!sameFileIdentity(openedRegularFileIdentity(descriptor), before)) {
       throw new Error(`${filePath} changed while copying`);
     }
@@ -222,18 +230,49 @@ export function openedFileDescriptorPath(
   throw new Error(`descriptor-bound file copy is unsupported on ${process.platform}`);
 }
 
-/** SQLite rejects Darwin's /dev/fd character device. Admit the named path only while it is still the held file. */
-export function sqlitePathForOpenedRegularFile(openedPath: string, namedPath: string): string {
-  if (process.platform !== "darwin" && process.platform !== "freebsd") return openedPath;
-  const match = /^\/dev\/fd\/(\d+)$/u.exec(openedPath);
-  if (match === null) return openedPath;
-  const opened = openedRegularFileIdentity(Number(match[1]));
-  const real = realpathSync(namedPath);
-  const onDisk = statSync(real);
-  if (!onDisk.isFile() || !sameFileIdentity(opened, fileIdentity(onDisk))) {
-    throw new AlayaError("CONFLICT", `${namedPath} no longer matches the opened snapshot`);
+/** Only sealed, checkpointed snapshots may omit sidecars. Live databases use the checkpoint owner. */
+export function withCachedSqliteSnapshot<T>(input: {
+  readonly filePath: string;
+  readonly expectedSha256: string;
+  readonly operation: (sqlitePath: string) => T;
+}): T {
+  assertSealedSqliteWal(input.filePath);
+  const cached = requireCachedFileSha256(input);
+  return withOpenedRegularFile(input.filePath, cached, (openedPath, descriptor) => {
+    // Linux can reopen the held inode; Darwin SQLite rejects /dev/fd, and Windows has no fd path.
+    if (process.platform === "linux") return input.operation(openedPath);
+    return withPrivateSqliteSnapshot(descriptor, input.expectedSha256, input.operation);
+  });
+}
+
+function assertSealedSqliteWal(filePath: string): void {
+  let metadata;
+  try { metadata = lstatSync(`${filePath}-wal`); }
+  catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return;
+    throw cause;
   }
-  return real;
+  if (!metadata.isFile() || metadata.size !== 0) {
+    throw new AlayaError("CONFLICT", "sealed snapshot has uncheckpointed source bytes");
+  }
+}
+
+function withPrivateSqliteSnapshot<T>(
+  source: number,
+  expectedSha256: string,
+  operation: (sqlitePath: string) => T
+): T {
+  const directory = mkdtempSync(join(tmpdir(), "alaya-sealed-sqlite-"));
+  try {
+    const filename = join(directory, "snapshot.sqlite");
+    const target = openSync(filename, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+    try {
+      if (copyAndHash(source, target) !== expectedSha256) {
+        throw new AlayaError("CONFLICT", "sealed snapshot DB SHA-256 mismatch");
+      }
+    } finally { closeSync(target); }
+    return operation(filename);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 }
 
 function sameFileIdentity(left: OpenedFileIdentity, right: OpenedFileIdentity): boolean {

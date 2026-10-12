@@ -54,6 +54,33 @@ describe("worktree identity path and repository authority", () => {
     expect(JSON.stringify(excluded)).not.toContain("info-exclude-bytes");
   });
 
+  it("distinguishes carriage-return edits in tracked files whose attributes forbid normalization", async () => {
+    const fixture = await identityRepository();
+    await writeFile(join(fixture.root, ".gitattributes"), "*.txt -text\n", "utf8");
+    await writeFile(join(fixture.root, "tracked.txt"), "one\ntwo\n", "utf8");
+    await git(fixture.root, "add", ".gitattributes", "tracked.txt");
+    await git(fixture.root, "commit", "--quiet", "-m", "byte-sensitive text");
+    await writeFile(join(fixture.root, "tracked.txt"), "one\r\ntwo\n", "utf8");
+    const first = await measureGitState(fixture.root, { allowDirty: true });
+    await writeFile(join(fixture.root, "tracked.txt"), "one\ntwo\r\n", "utf8");
+    const second = await measureGitState(fixture.root, { allowDirty: true });
+    expect(first.worktreeClean).toBe(false);
+    expect(second.worktreeClean).toBe(false);
+    expect(second.worktreeStateSha256).not.toBe(first.worktreeStateSha256);
+  });
+
+  it("preserves canonical text identity across LF and CRLF checkout bytes", async () => {
+    const fixture = await identityRepository();
+    await writeFile(join(fixture.root, ".gitattributes"), "*.txt text\n", "utf8");
+    await writeFile(join(fixture.root, "tracked.txt"), "one\ntwo\n", "utf8");
+    await git(fixture.root, "add", ".gitattributes", "tracked.txt");
+    await git(fixture.root, "commit", "--quiet", "-m", "canonical text");
+    await writeFile(join(fixture.root, "tracked.txt"), "one\ntwo\nthree\n", "utf8");
+    const baseline = await measureGitState(fixture.root, { allowDirty: true });
+    await writeFile(join(fixture.root, "tracked.txt"), "one\r\ntwo\r\nthree\r\n", "utf8");
+    expect(await measureGitState(fixture.root, { allowDirty: true })).toEqual(baseline);
+  });
+
   it("ignores non-authoritative global core.autocrlf when hashing v3", async () => {
     const fixture = await identityRepository();
     await writeFile(join(fixture.root, "tracked.txt"), "one\n", "utf8");

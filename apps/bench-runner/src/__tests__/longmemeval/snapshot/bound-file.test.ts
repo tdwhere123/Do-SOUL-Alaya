@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { lstatSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   boundFileFullContentReadCount,
@@ -10,6 +11,7 @@ import {
   hashRegularFileNoFollow,
   readRegularFileNoFollow,
   seedRegularFileSha256,
+  withCachedSqliteSnapshot,
   type OpenedFileIdentity
 } from "../../../runs/snapshot/bound-file.js";
 
@@ -33,6 +35,92 @@ async function fixture(): Promise<{ root: string; source: string; sha256: string
 }
 
 describe("descriptor-bound file IO", () => {
+  it.each(process.platform === "linux" ? ["linux", "darwin", "win32"] : [process.platform])("keeps sealed SQLite bytes when the source parent is replaced before SQLite opens (%s branch)", async (host) => {
+    const { root } = await fixture();
+    const named = join(root, "named"), replacement = join(root, "replacement");
+    for (const [directory, value] of [[named, "sealed"], [replacement, "replacement"]] as const) {
+      mkdirSync(directory);
+      const database = new BetterSqlite3(join(directory, "snapshot.db"));
+      try {
+        database.exec("CREATE TABLE proof (value TEXT)");
+        database.prepare("INSERT INTO proof VALUES (?)").run(value);
+      } finally { database.close(); }
+    }
+    const source = join(named, "snapshot.db");
+    const digest = hashRegularFileNoFollow(source);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const reads = boundFileFullContentReadCount();
+    let consumedPath = "";
+    try {
+      Object.defineProperty(process, "platform", { value: host });
+      const value = withCachedSqliteSnapshot({ filePath: source, expectedSha256: digest,
+        operation: (sqlitePath) => {
+          consumedPath = sqlitePath;
+          renameSync(named, join(root, "moved"));
+          renameSync(replacement, named);
+          const database = new BetterSqlite3(sqlitePath, { readonly: true, fileMustExist: true });
+          try { return database.prepare("SELECT value FROM proof").get(); }
+          finally { database.close(); }
+        }
+      });
+      expect(value).toEqual({ value: "sealed" });
+      expect(boundFileFullContentReadCount() - reads).toBe(host === "linux" ? 0 : 1);
+      if (host !== "linux") expect(existsSync(dirname(consumedPath))).toBe(false);
+    } finally { Object.defineProperty(process, "platform", platform); }
+  });
+
+  it("refuses a live WAL database instead of dropping its uncheckpointed rows", async () => {
+    const { root } = await fixture();
+    const source = join(root, "live.db");
+    const database = new BetterSqlite3(source);
+    try {
+      database.pragma("journal_mode = WAL");
+      database.exec("CREATE TABLE proof (value TEXT); INSERT INTO proof VALUES ('uncheckpointed')");
+      const expectedSha256 = hashRegularFileNoFollow(source);
+      let called = false;
+      expect(() => withCachedSqliteSnapshot({ filePath: source, expectedSha256,
+        operation: () => { called = true; }
+      })).toThrow(/uncheckpointed/u);
+      expect(called).toBe(false);
+    } finally { database.close(); }
+  });
+
+  it("removes a private sealed copy when its consumer fails", async () => {
+    const input = await fixture();
+    const expectedSha256 = hashRegularFileNoFollow(input.source);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    let consumedPath = "";
+    const failure = new Error("SQLite consumer failed");
+    try {
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      expect(() => withCachedSqliteSnapshot({ filePath: input.source, expectedSha256,
+        operation: sqlitePath => {
+          consumedPath = sqlitePath;
+          expect(existsSync(sqlitePath)).toBe(true);
+          expect(sqlitePath).not.toBe(input.source);
+          throw failure;
+        }
+      })).toThrow(failure);
+      expect(existsSync(dirname(consumedPath))).toBe(false);
+    } finally { Object.defineProperty(process, "platform", platform); }
+  });
+
+  it("checks copied bytes against the sealed digest before invoking SQLite", async () => {
+    const input = await fixture();
+    const expectedSha256 = "0".repeat(64);
+    seedRegularFileSha256({ filePath: input.source, expectedIdentity: openedIdentity(input.source),
+      sha256: expectedSha256 });
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    let called = false;
+    try {
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      expect(() => withCachedSqliteSnapshot({ filePath: input.source, expectedSha256,
+        operation: () => { called = true; }
+      })).toThrow(/SHA-256 mismatch/u);
+      expect(called).toBe(false);
+    } finally { Object.defineProperty(process, "platform", platform); }
+  });
+
   it("copies and hashes the same opened source bytes", async () => {
     const input = await fixture();
     const target = join(input.root, "working", "alaya.db");

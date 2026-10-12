@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile);
 
 // Identity must not inherit user git config or ambient diff/index env.
 // Repo .gitignore, .git/info/exclude, and tracked .gitattributes remain authority.
-// Local autocrlf is unpinned because checked-out worktree bytes are hashed.
+// Git normalizes text checkout endings; -text attributes retain exact byte changes.
 export const EMPTY_GIT_IDENTITY_SOURCE =
   process.platform === "win32" ? "NUL" : devNull;
 
@@ -43,7 +43,6 @@ const GIT_DIFF_ARGV = [
   "--unified=3",
   "--diff-algorithm=myers",
   "--abbrev=40",
-  "--ignore-cr-at-eol",
   "HEAD",
   "--"
 ] as const;

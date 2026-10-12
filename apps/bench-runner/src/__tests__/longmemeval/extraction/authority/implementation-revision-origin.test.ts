@@ -89,6 +89,33 @@ it("binds large tracked patches and untracked bytes and modes to the loaded chec
   expect(inspect(loaded, foreign).revision).toBe(inspect(loaded, loaded).revision);
 });
 
+it("binds carriage-return edits when tracked attributes forbid text normalization", () => {
+  const loaded = checkout();
+  writeFileSync(join(loaded, ".gitattributes"), "*.txt -text\n");
+  writeFileSync(join(loaded, "source.txt"), "one\ntwo\n");
+  git(loaded, ["add", ".gitattributes", "source.txt"]);
+  git(loaded, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+    "commit", "--quiet", "-m", "byte-sensitive text"]);
+  const baseline = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "one\r\ntwo\n");
+  const first = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "one\ntwo\r\n");
+  const second = inspect(loaded, loaded).revision;
+  expect(first).not.toBe(baseline);
+  expect(second).not.toBe(first);
+});
+
+it("preserves authority revision across canonical LF and CRLF checkout bytes", () => {
+  const loaded = checkout();
+  writeFileSync(join(loaded, ".gitattributes"), "*.txt text\n");
+  git(loaded, ["add", ".gitattributes"]);
+  git(loaded, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+    "commit", "--quiet", "-m", "canonical text"]);
+  const baseline = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "original\r\n");
+  expect(inspect(loaded, loaded).revision).toBe(baseline);
+});
+
 it("fails closed when the loaded module has no Git checkout, even from another Git cwd", () => {
   const loaded = checkout(), foreign = checkout();
   rmSync(join(loaded, ".git"), { recursive: true });

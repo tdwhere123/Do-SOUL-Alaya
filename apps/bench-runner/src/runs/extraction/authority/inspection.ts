@@ -345,7 +345,7 @@ export function readCurrentExtractionAuthorityRevision(): string {
   return computeExtractionAuthorityWorktreeRevision({
     head: readGitText(["rev-parse", "HEAD"], checkoutRoot),
     trackedDiff: readGitBuffer([
-      "diff", "--no-ext-diff", "--binary", "--ignore-cr-at-eol", "HEAD", "--"
+      "diff", "--no-ext-diff", "--binary", "HEAD", "--"
     ], checkoutRoot),
     untrackedFiles: readUntrackedFileDigests(checkoutRoot)
   });

@@ -39,7 +39,6 @@ const SPEC_DIFF_ARGV = [
   "--unified=3",
   "--diff-algorithm=myers",
   "--abbrev=40",
-  "--ignore-cr-at-eol",
   "HEAD",
   "--"
 ] as const;

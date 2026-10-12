@@ -1,9 +1,9 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { expect, it, vi } from "vitest";
 import { startBenchDaemon } from "../../harness/daemon.js";
+import * as daemonStartup from "../../harness/daemon/daemon-startup.js";
 import {
   adoptBenchDaemonShutdown,
   beginBenchDaemonTask,
@@ -86,20 +86,43 @@ it("deletes a cancelled directory only after the body has stopped", async () => 
   expect(existsSync(dataDir)).toBe(false);
 });
 
-it("does not return a daemon when the scope is cancelled during start", async () => {
+it("settles a cancelled startup before allowing the next scope to start", async () => {
   const first = new AbortController();
   bindBenchDaemonTestSignal(first.signal);
   const dataDir = mkdtempSync(join(tmpdir(), "daemon-start-"));
-  const pending = startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
-  first.abort();
-  await expect(pending).rejects.toBeInstanceOf(AlayaError);
   const nextDir = mkdtempSync(join(tmpdir(), "daemon-start-next-"));
-  const second = new AbortController();
-  bindBenchDaemonTestSignal(second.signal);
-  const handle = await startBenchDaemon({ dataDirRoot: nextDir, embeddingMode: "disabled" });
-  await handle.shutdown();
-  rmSync(dataDir, { recursive: true, force: true });
-  rmSync(nextDir, { recursive: true, force: true });
+  let release: () => void = () => undefined;
+  let reportBooted: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const booted = new Promise<void>((resolve) => { reportBooted = resolve; });
+  const initialize = daemonStartup.initializeBenchDaemon;
+  const startup = vi.spyOn(daemonStartup, "initializeBenchDaemon").mockImplementationOnce(async (input) => {
+    const resources = await initialize(input);
+    reportBooted();
+    await gate;
+    return resources;
+  });
+  const pending = startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
+  try {
+    await Promise.race([booted, pending]);
+    first.abort();
+    const outcomes = Promise.allSettled([pending, settleActiveBenchDaemonTasks()]);
+    await Promise.resolve();
+    release();
+    const [started, settled] = await outcomes;
+    expect(started).toMatchObject({ status: "rejected", reason: { code: "CANCELLED" } });
+    expect(settled).toEqual({ status: "fulfilled", value: undefined });
+    const second = new AbortController();
+    bindBenchDaemonTestSignal(second.signal);
+    const handle = await startBenchDaemon({ dataDirRoot: nextDir, embeddingMode: "disabled" });
+    await handle.shutdown();
+  } finally {
+    release();
+    startup.mockRestore();
+    await pending.then((handle) => handle.shutdown(), () => undefined);
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(nextDir, { recursive: true, force: true });
+  }
 });
 
 it("keeps the directory and blocks reuse when shutdown rejects", async () => {

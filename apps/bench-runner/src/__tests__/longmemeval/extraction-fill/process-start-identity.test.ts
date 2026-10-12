@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   nonCredentialChildEnv,
@@ -7,7 +8,7 @@ import {
 import {
   interpretWindowsProcessStartOutput,
   windowsCreationDateToTicks,
-  windowsProcessStartCommand,
+  withWindowsProcessStartCommand,
   windowsStartIdentityFailure
 } from "../../../runs/extraction/fill/manifest/windows-process-start.js";
 
@@ -78,18 +79,54 @@ describe("process start identity", () => {
     expect(thrownIdentity("not-a-date")).not.toMatchObject({ code: "ENOENT" });
   });
 
-  it("asks Windows for the process start time without PowerShell", () => {
-    const [program, args] = windowsProcessStartCommand(process.pid);
-    expect(program.toLowerCase().endsWith("cscript.exe")).toBe(true);
-    expect(program.toLowerCase()).not.toContain("powershell");
-    expect(args.slice(0, 3)).toEqual(["//B", "//nologo", "//E:jscript"]);
-    expect(args.at(-1)).toBe(String(process.pid));
-    const script = readFileSync(String(args[3]), "utf8");
-    expect(script).toContain("WbemScripting.SWbemLocator");
-    expect(script).toContain("WScript.StdOut.WriteLine('absent')");
-    expect(script).toContain("WScript.StdOut.WriteLine(String(created))");
-    expect(script).not.toMatch(/WScript\.Echo\(/u);
-    expect(script.toLowerCase()).not.toContain("powershell");
+  it("asks Windows for the process start time without PowerShell and removes its script", () => {
+    let scriptPath = "";
+    const value = withWindowsProcessStartCommand(process.pid, (program, args) => {
+      expect(program.toLowerCase().endsWith("cscript.exe")).toBe(true);
+      expect(program.toLowerCase()).not.toContain("powershell");
+      expect(args.slice(0, 3)).toEqual(["//B", "//nologo", "//E:jscript"]);
+      expect(args.at(-1)).toBe(String(process.pid));
+      scriptPath = String(args[3]);
+      const script = readFileSync(scriptPath, "utf8");
+      expect(script).toContain("WbemScripting.SWbemLocator");
+      expect(script).toContain("WScript.StdOut.WriteLine('absent')");
+      expect(script).toContain("WScript.StdOut.WriteLine(String(created))");
+      expect(script).not.toMatch(/WScript\.Echo\(/u);
+      expect(script.toLowerCase()).not.toContain("powershell");
+      if (process.platform !== "win32") {
+        expect(statSync(dirname(scriptPath)).mode & 0o777).toBe(0o700);
+        expect(statSync(scriptPath).mode & 0o777).toBe(0o600);
+      }
+      return "observed";
+    });
+    expect(value).toBe("observed");
+    expect(existsSync(dirname(scriptPath))).toBe(false);
+  });
+
+  it("keeps independent command scripts in distinct temporary paths without adopting substituted bytes", () => {
+    withWindowsProcessStartCommand(process.pid, (_program, first) => {
+      const firstPath = String(first[3]);
+      writeFileSync(firstPath, "substituted script");
+      withWindowsProcessStartCommand(process.pid, (_nextProgram, second) => {
+        const secondPath = String(second[3]);
+        expect(firstPath).not.toBe(secondPath);
+        expect(dirname(firstPath)).not.toBe(dirname(secondPath));
+        expect(readFileSync(secondPath, "utf8")).toContain("WbemScripting.SWbemLocator");
+        expect(readFileSync(secondPath, "utf8")).not.toContain("substituted script");
+      });
+      expect(existsSync(firstPath)).toBe(true);
+    });
+  });
+
+  it("removes its private directory when the child command fails", () => {
+    let scriptPath = "";
+    const failure = new Error("child failed");
+    expect(() => withWindowsProcessStartCommand(process.pid, (_program, args) => {
+      scriptPath = String(args[3]);
+      expect(existsSync(scriptPath)).toBe(true);
+      throw failure;
+    })).toThrow(failure);
+    expect(existsSync(dirname(scriptPath))).toBe(false);
   });
 
   it("reads this process start identity", () => {

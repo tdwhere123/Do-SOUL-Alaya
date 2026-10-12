@@ -26,6 +26,7 @@ interface DaemonTask {
   wasCancelled: boolean;
   bound: boolean;
   readonly scope: BenchScope;
+  readonly started: Promise<void>;
   readonly done: Promise<void>;
   arm(shutdown: () => Promise<void>): () => Promise<void>;
   requestCancel(): void;
@@ -163,6 +164,10 @@ function createScope(signal: AbortSignal): BenchScope {
 }
 
 function createTask(scope: BenchScope): DaemonTask {
+  let resolveStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    resolveStarted = resolve;
+  });
   let resolveDone: () => void = () => undefined;
   let rejectDone: (error: unknown) => void = () => undefined;
   const done = new Promise<void>((resolve, reject) => {
@@ -179,11 +184,13 @@ function createTask(scope: BenchScope): DaemonTask {
     },
     bound: false,
     scope,
+    started,
     done,
     arm(shutdown) {
       task.bound = true;
       scope.busy = Math.max(0, scope.busy - 1);
       scope.shutdown = shutdown;
+      resolveStarted();
       if (scope.cancelled) remember(scope, closeOnce(true));
       return () => closeOnce(false);
     },
@@ -196,6 +203,7 @@ function createTask(scope: BenchScope): DaemonTask {
     finishWithoutShutdown() {
       if (task.bound) return;
       scope.busy = Math.max(0, scope.busy - 1);
+      resolveStarted();
       if (scope.busy === 0 && scope.shutdown === undefined && scope.bodies.length === 0) {
         removeOwnedDirs(scope);
         scope.blocking = false;
@@ -244,6 +252,8 @@ function ensureClosed(scope: BenchScope): Promise<void> {
 }
 
 async function closeResources(scope: BenchScope): Promise<void> {
+  // Startup must hand over shutdown before cleanup; task.done also waits for cleanup.
+  await Promise.all(scope.tasks.map((task) => task.started));
   await settledBodies(scope);
   if (scope.busy > 0 && scope.shutdown === undefined) {
     throw new AlayaError("DEADLINE", "bench scope is still starting");

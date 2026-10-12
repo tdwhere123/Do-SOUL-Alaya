@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
@@ -95,18 +94,25 @@ export function windowsStartIdentityFailure(cause: unknown): ExtractionCacheInva
   );
 }
 
-export function windowsProcessStartCommand(pid: number): readonly [string, readonly string[]] {
+/** Each synchronous invocation owns its script until the child has exited. */
+export function withWindowsProcessStartCommand<T>(
+  pid: number,
+  operation: (program: string, args: readonly string[]) => T
+): T {
   const root = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? "";
   const program = root.length > 0
     ? path.win32.join(root, "System32", "cscript.exe")
     : "cscript.exe";
-  return [program, [
-    "//B",
-    "//nologo",
-    "//E:jscript",
-    windowsProcessStartScriptPath(),
-    String(pid)
-  ]];
+  const directory = mkdtempSync(path.join(tmpdir(), "alaya-process-start-"));
+  try {
+    const filename = path.join(directory, "process-start.js");
+    writeFileSync(filename, WINDOWS_PROCESS_START_SCRIPT, {
+      encoding: "utf8", flag: "wx", mode: 0o600
+    });
+    return operation(program, ["//B", "//nologo", "//E:jscript", filename, String(pid)]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 export function readWindowsProcessStartIdentity(
@@ -120,30 +126,18 @@ export function readWindowsProcessStartIdentity(
     );
   }
   try {
-    const [program, args] = windowsProcessStartCommand(pid);
-    const output = execFileSync(program, [...args], {
+    const output = withWindowsProcessStartCommand(pid, (program, args) => execFileSync(program, [...args], {
       encoding: "buffer",
       timeout: WINDOWS_PROCESS_START_TIMEOUT_MS,
       windowsHide: true,
       env,
       stdio: ["ignore", "pipe", "pipe"]
-    });
+    }));
     return interpretWindowsProcessStartOutput(decodeWindowsChildOutput(output));
   } catch (cause) {
     if (cause instanceof ExtractionCacheInvariantError) throw cause;
     throw windowsStartIdentityFailure(cause);
   }
-}
-
-function windowsProcessStartScriptPath(): string {
-  const digest = createHash("sha256").update(WINDOWS_PROCESS_START_SCRIPT).digest("hex").slice(0, 16);
-  const filename = path.join(tmpdir(), `alaya-process-start-${digest}.js`);
-  try {
-    writeFileSync(filename, WINDOWS_PROCESS_START_SCRIPT, { encoding: "utf8", flag: "wx" });
-  } catch (cause) {
-    if (!hasErrorCode(cause, "EEXIST")) throw cause;
-  }
-  return filename;
 }
 
 function decodeWindowsChildOutput(output: Buffer): string {
@@ -153,9 +147,4 @@ function decodeWindowsChildOutput(output: Buffer): string {
     ? output.subarray(hasBom ? 2 : 0).toString("utf16le")
     : output.toString("utf8");
   return text.replace(/^\uFEFF/u, "").replaceAll("\0", "").trim();
-}
-
-function hasErrorCode(cause: unknown, code: string): boolean {
-  return typeof cause === "object" && cause !== null &&
-    "code" in cause && cause.code === code;
 }
