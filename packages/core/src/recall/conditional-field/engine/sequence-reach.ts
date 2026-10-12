@@ -50,7 +50,7 @@ export function sequenceReachKey(program: QueryProgram, fromId: string): string 
 }
 
 /** True when this owner already remembered some state of the program. */
-export function sequenceProgramHasReach(owner: object, program: QueryProgram): boolean {
+function sequenceProgramHasReach(owner: object, program: QueryProgram): boolean {
   const bucket = reachByOwner.get(owner);
   if (bucket === undefined) return false;
   const prefix = `${programStorageId(program)}\0`;
@@ -79,7 +79,7 @@ export function readSequenceReach(owner: object, key: string): SequenceReach | u
   return reachByOwner.get(owner)?.get(key);
 }
 
-export function sequenceReachFootprint(reach: SequenceReach): number {
+function sequenceReachFootprint(reach: SequenceReach): number {
   return Buffer.byteLength(JSON.stringify(reach), "utf8");
 }
 
@@ -88,12 +88,12 @@ export function sequenceReachAccountBytes(owner: object | undefined): number {
   return bytesByOwner.get(owner) ?? 0;
 }
 
-export function reserveSequenceReach(owner: object, bytes: number): void {
+function reserveSequenceReach(owner: object, bytes: number): void {
   if (bytes <= 0) return;
   bytesByOwner.set(owner, sequenceReachAccountBytes(owner) + bytes);
 }
 
-export function releaseSequenceReach(owner: object, bytes: number): void {
+function releaseSequenceReach(owner: object, bytes: number): void {
   if (bytes <= 0) return;
   const next = sequenceReachAccountBytes(owner) - bytes;
   if (next <= 0) bytesByOwner.delete(owner);
@@ -110,7 +110,7 @@ function reachBucket(owner: object): Map<string, SequenceReach> {
 }
 
 /** Replace one stored frontier and move its bytes onto the persistent owner. */
-export function replaceSequenceReach(owner: object, key: string, reach: SequenceReach): void {
+function replaceSequenceReach(owner: object, key: string, reach: SequenceReach): void {
   const bucket = reachBucket(owner);
   const prior = bucket.get(key);
   if (prior !== undefined) releaseSequenceReach(owner, sequenceReachFootprint(prior));
