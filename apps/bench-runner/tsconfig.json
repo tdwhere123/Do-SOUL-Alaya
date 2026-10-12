@@ -12,6 +12,7 @@
       "@do-soul/alaya-soul": ["../../packages/soul/src/index.ts"],
       "@do-soul/alaya-engine-gateway": ["../../packages/engine-gateway/src/index.ts"],
       "@do-soul/alaya-storage": ["../../packages/storage/src/index.ts"],
+      "@do-soul/alaya-storage/sqlite/open-sqlite-connection": ["../../packages/storage/src/sqlite/open-sqlite-connection.ts"],
       "@do-soul/alaya": ["../../apps/core-daemon/src/index.ts"],
       "@do-soul/alaya/mcp-server": ["../../apps/core-daemon/src/mcp/server/mcp-server.ts"],
       "@do-soul/alaya/cli/bridge": ["../../apps/core-daemon/src/cli/bridge.ts"],

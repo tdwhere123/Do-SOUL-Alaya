@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isContainedPath, isPhysicalNamedPath, samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
+import { boundedArtifactEntryExists } from "../../../runs/extraction/cache-audit/bounded-artifact-reader.js";
+import { existingNonDirectoryAncestor, isContainedPath, isPhysicalNamedPath, samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
 
 describe("isContainedPath", () => {
   it("accepts a legal ..foo basename and rejects escape segments", async () => {
@@ -52,5 +53,22 @@ describe("isContainedPath", () => {
     await symlink(outside, link);
     expect(isPhysicalNamedPath(link)).toBe(false);
     expect(samePhysicalLocation(root, await realpath(root))).toBe(true);
+  });
+});
+
+describe("existingNonDirectoryAncestor", () => {
+  it("treats a file in the path as a blocked ancestor and a missing leaf as absence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "ancestor-file-"));
+    const file = path.join(root, "ancestor");
+    await writeFile(file, "retained");
+    const blocked = path.join(file, "run", "cache");
+    expect(existingNonDirectoryAncestor(blocked)).toBe(file);
+    expect(() => boundedArtifactEntryExists(blocked)).toThrow(expect.objectContaining({ code: "ENOTDIR" }));
+    const missing = path.join(root, "missing-leaf");
+    expect(existingNonDirectoryAncestor(missing)).toBeUndefined();
+    expect(boundedArtifactEntryExists(missing)).toBe(false);
+    const dangling = path.join(root, "dangling");
+    await symlink(path.join(root, "missing-target"), dangling);
+    expect(existingNonDirectoryAncestor(path.join(dangling, "child"))).toBe(dangling);
   });
 });

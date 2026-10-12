@@ -14,6 +14,8 @@ import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durabl
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { restoreSnapshotToDataDir } from "../snapshot/materialize.js";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../harness/daemon.js";
+import { currentBenchScope, removeDataDirWhenBenchDaemonCancelled, runBenchDaemonOperation,
+  trackBenchBody } from "../../harness/daemon-task.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { isAuthorityRevision } from "../extraction/authority/receipt.js";
 
@@ -146,16 +148,25 @@ export function assertChainSnapshot(config: SemanticChainConfig): void {
 export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
   body: (daemon: BenchDaemonHandle) => Promise<T>): Promise<T> {
   assertChainSnapshot(config);
+  return runBenchDaemonOperation(() => runBoundSemanticChainDaemon(config, root, body));
+}
+
+async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
+  body: (daemon: BenchDaemonHandle) => Promise<T>): Promise<T> {
   mkdirSync(root, { recursive: true });
   const directory = mkdtempSync(join(root, "native-session-"));
   let daemon: BenchDaemonHandle | undefined;
   let complete = false;
   try {
     restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
-    daemon = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
+    const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
       sourceSemanticInterpretationClock: config.interpretation_clock,
       embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
-    const result = await body(daemon);
+    daemon = started;
+    removeDataDirWhenBenchDaemonCancelled(directory);
+    const scope = currentBenchScope();
+    if (scope === undefined) throw new AlayaError("CANCELLED", "bench work has no owning scope");
+    const result = await trackBenchBody(scope, () => body(started));
     complete = true;
     return result;
   } finally {

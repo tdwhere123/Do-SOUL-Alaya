@@ -9,7 +9,6 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
@@ -29,7 +28,8 @@ const ABSTAINED = JSON.stringify({ contract: "source-semantic-proposal-v8", outc
 const OVERSIZED = ABSTAINED + "\n".repeat(1024 * 1024);
 const FULL_DIGEST = createHash("sha256").update(OVERSIZED).digest("hex");
 const execFileAsync = promisify(execFile);
-const CLI_BOOTSTRAP = fileURLToPath(new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url));
+// Node loads --import as an ESM URL; a Windows drive path is parsed as a scheme.
+const CLI_BOOTSTRAP = new URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href;
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks(roots => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), "longmemeval_s");
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

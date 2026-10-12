@@ -1,3 +1,4 @@
+import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { join } from "node:path";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import { cpSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
@@ -42,6 +43,7 @@ const MODEL = "gemini-2.5-flash-lite";
 const PROFILE = "gemini-2.5-nonthinking-v1" as const;
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;
 const writeDataset = registerExtractionFillHooks((roots) => ({ cacheRoot, dataDir, pinnedMetaRoot } = roots), "longmemeval_s");
+
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function question(contents: readonly string[]) {
@@ -677,24 +679,27 @@ async function fillFrozenShortSources(selectedKeys: readonly string[]) {
   return { plan, imported, fetchMock, createCount };
 }
 
-it("records whether three cold authored composition windows share the same eligible first ten", async () => {
+it("records whether three cold authored composition windows share the same eligible first ten", async (testContext) => {
+  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id, testContext.task.timeout, testContext.signal);
+  const benchPhase = phases.phase;
+  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
   const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
     ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
-  const fixture = await preparedSourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache"));
-  await fillAuthoredCompletionQuery(fixture.config.chain.query_workset, fixture.config.chain.query_cache_root);
+  const fixture = await benchPhase("fixture.prepare", () => preparedSourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache")));
+  await benchPhase("fill.query", () => fillAuthoredCompletionQuery(fixture.config.chain.query_workset, fixture.config.chain.query_cache_root));
   const normalChain = fixture.config.chain;
   const smallChain = { ...normalChain, output_byte_limit: 21600, budget: { ...normalChain.budget,
     work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } };
   const stages = [
-    await fixture.bind(normalChain, "composition-cold"),
-    await fixture.bind(normalChain, "composition-qualified-normal"),
-    await fixture.bind(smallChain, "composition-qualified-small")
+    await benchPhase("chain.bind", () => fixture.bind(normalChain, "composition-cold")),
+    await benchPhase("chain.bind", () => fixture.bind(normalChain, "composition-qualified-normal")),
+    await benchPhase("chain.bind", () => fixture.bind(smallChain, "composition-qualified-small"))
   ];
   const roots = ["composition-cold", "composition-qualified-normal", "composition-qualified-small"]
     .map(name => join(cacheRoot, name));
-  const windows = [];
+  const windows: Awaited<ReturnType<typeof prepareLazyQualificationWindow>>[] = [];
   for (let index = 0; index < roots.length; index++) {
-    windows.push(await prepareLazyQualificationWindow(stages[index]!, roots[index]!));
+    windows.push(await benchPhase("lazy.window", () => prepareLazyQualificationWindow(stages[index]!, roots[index]!)));
   }
   const tuples = windows.map(window => window.window.map(row =>
     [row.source_id, row.source_version, row.record_id]));
@@ -725,17 +730,17 @@ it("records whether three cold authored composition windows share the same eligi
   expect(windows.map(window => window.starting_snapshot_sha256))
     .toEqual(Array(3).fill(windows[0]!.starting_snapshot_sha256));
   if (!matched) return; // No H/C is prepared when the native window lacks a common eligible first ten.
-  const coldFinal = await sealLazyQualificationFinal(roots[0]!);
-  const coldExposure = await replayLazyQualifiedFirstExposure(roots[0]!);
+  const coldFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[0]!));
+  const coldExposure = await benchPhase("lazy.exposure", () => replayLazyQualifiedFirstExposure(roots[0]!));
   expect(coldExposure.result.rows[0]?.status).toBe("replayed");
   if (returnRoot !== undefined) {
     writeFileSync(join(returnRoot, "cold-final.json"), JSON.stringify({ coldFinal,
       delivery: coldExposure.delivery, result: coldExposure.result }, null, 2));
     cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
   }
-  const { plan, imported, fetchMock, createCount } = await fillFrozenShortSources(windows[1]!.selected_missing_keys);
-  const normalFinal = await sealLazyQualificationFinal(roots[1]!);
-  const smallFinal = await sealLazyQualificationFinal(roots[2]!);
+  const { plan, imported, fetchMock, createCount } = await benchPhase("fill.source", () => fillFrozenShortSources(windows[1]!.selected_missing_keys));
+  const normalFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[1]!));
+  const smallFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[2]!));
   if (returnRoot !== undefined) {
     writeFileSync(join(returnRoot, "qualified-finals.json"), JSON.stringify({ plan, batchState: imported.batchState,
       authorityTelemetry: imported.authorityTelemetry, normalFinal, smallFinal,
@@ -760,11 +765,11 @@ it("records whether three cold authored composition windows share the same eligi
     normalOpportunity, smallOpportunity, advertisedCounts: lines.map(rows => rows.length) }, null, 2));
   if (targetSource === undefined || smallOpportunity < 0 || worksets[0] == null || worksets[1] == null) return;
   for (const [stage, opportunity] of [normalOpportunity, smallOpportunity].entries()) {
-    await fillAuthoredCompletionCorrespondence(worksets[stage]!, opportunity,
-      normalChain.correspondence_cache_root);
+    await benchPhase("fill.correspondence", () => fillAuthoredCompletionCorrespondence(worksets[stage]!, opportunity,
+      normalChain.correspondence_cache_root));
   }
   const qualifiedExposure = [];
-  for (const root of roots.slice(1)) qualifiedExposure.push(await replayLazyQualifiedFirstExposure(root));
+  for (const root of roots.slice(1)) qualifiedExposure.push(await benchPhase("lazy.exposure", () => replayLazyQualifiedFirstExposure(root)));
   expect(qualifiedExposure.every(exposure => exposure.result.rows[0]?.status === "replayed")).toBe(true);
   if (returnRoot !== undefined) {
     writeFileSync(join(returnRoot, "qualified-exposures.json"), JSON.stringify(qualifiedExposure, null, 2));
@@ -810,7 +815,8 @@ it("delivers the fixed completed item through the normal native qualification li
     const window = await prepareLazyQualificationWindow(config, root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "window.json"), JSON.stringify(window, null, 2));
     expect(window.config.chain.query_workset.items).toEqual([{ original_query: "What was completed?" }]);
-    expect(window.query_key).toBe("55fa729155e44490fb4a721f3393957ad8875bf5e2bdd99d33d0190e9435d3b5");
+    // Composition guidance in the system prompt is part of the request identity once the query schema exceeds the structured budget.
+    expect(window.query_key).toBe("79b9faccf403aa12ec582ad1f2e904bc6e82a0a26089ac9bb5cc342840829e48");
     expect(window.window.map(row => row.source_id)).toEqual(expectedWindow.map(index => `fixture:bounded-s${index}-r0`));
     expect(window.window.map(row => row.record_id)).toEqual(expectedRecords);
     expect(window.window.map(row => row.source_version)).toEqual(Array(10)

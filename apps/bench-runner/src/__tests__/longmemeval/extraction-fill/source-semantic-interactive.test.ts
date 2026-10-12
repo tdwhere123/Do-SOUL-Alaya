@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -166,7 +166,8 @@ it("fills complete-source open semantics through interactive generateContent wit
   await assertNativeSemanticChain(cacheRoot, sourceOnly);
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
-}, 120000);
+  // Nine complete-source questions, two publications, and the native arm already take about ninety seconds.
+}, 240_000);
 
 it("withholds a source after its settled usage witness is removed", async () => {
   const fixture = await setupInteractive();
@@ -916,9 +917,19 @@ it("does not classify a programmer extract error as transport failure", async ()
 it.each(["intact", "changed"] as const)("rechecks %s persisted raw after a shard write failure without a second provider call", async integrity => {
   const fixture = await setupInteractive();
   const buckets = [...new Set(fixture.keys.map((key) => join(cacheRoot, key.slice(0, 2))))];
-  for (const bucket of buckets) {
-    mkdirSync(bucket, { recursive: true });
-    chmodSync(bucket, 0o500);
+  for (const bucket of buckets) mkdirSync(bucket, { recursive: true });
+  if (process.platform === "win32") {
+    const respond = fixture.fetchMock.getMockImplementation();
+    fixture.fetchMock.mockImplementation(async (url, init) => {
+      const result = await respond!(url, init);
+      for (const bucket of buckets) {
+        rmSync(bucket, { recursive: true, force: true });
+        writeFileSync(bucket, "not a directory");
+      }
+      return result;
+    });
+  } else {
+    for (const bucket of buckets) chmodSync(bucket, 0o500);
   }
   expect(await runCli([
     "extraction-fill", "--variant", "s", "--data-dir", dataDir, "--pinned-meta-root", pinnedMetaRoot,
@@ -928,7 +939,12 @@ it.each(["intact", "changed"] as const)("rechecks %s persisted raw after a shard
   ])).toBe(2);
   expect(fixture.fetchMock).toHaveBeenCalled();
   expect(fixture.keys.some((key) => listProviderRawAttempts(cacheRoot, key).length > 0)).toBe(true);
-  for (const bucket of buckets) chmodSync(bucket, 0o700);
+  for (const bucket of buckets) {
+    if (process.platform === "win32") {
+      rmSync(bucket, { force: true });
+      mkdirSync(bucket, { recursive: true });
+    } else chmodSync(bucket, 0o700);
+  }
   fixture.fetchMock.mockClear();
   if (integrity === "changed") {
     const retained = fixture.keys.flatMap(key => listProviderRawAttempts(cacheRoot, key))[0]!;

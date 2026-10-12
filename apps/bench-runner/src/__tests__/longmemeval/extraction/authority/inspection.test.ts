@@ -239,3 +239,23 @@ describe("no-network extraction authority inspection", () => {
     })).toThrow(/identity drift|does not match/u);
   });
 });
+
+it("reads the loaded git checkout without credential environment keys", () => {
+  const environment = process.env;
+  const seen: string[] = [];
+  process.env = new Proxy(environment, {
+    get(target, key) {
+      if (typeof key === "string" && /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key)) {
+        seen.push(key);
+        throw new Error("Credential environment access forbidden");
+      }
+      return Reflect.get(target, key);
+    }
+  });
+  try {
+    expect(readCurrentExtractionAuthorityRevision().startsWith("git-worktree-v1:")).toBe(true);
+    expect(seen).toEqual([]);
+  } finally {
+    process.env = environment;
+  }
+});

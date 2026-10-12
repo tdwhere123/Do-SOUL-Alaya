@@ -38,6 +38,10 @@ const sharedAliasEntries = Object.entries(sharedAlias).map(([find, replacement])
 // entries are exact.
 const benchRunnerAlias = [
   {
+    find: "@do-soul/alaya-storage/sqlite/open-sqlite-connection",
+    replacement: path.resolve(rootDir, "packages/storage/src/sqlite/open-sqlite-connection.ts")
+  },
+  {
     find: "@do-soul/alaya-eval/authority",
     replacement: path.resolve(rootDir, "packages/eval/src/authority.ts")
   },
@@ -157,7 +161,7 @@ export default [
         include: [testIncludeGlob(testDir)],
         exclude: ["**/dist/**"],
         ...(process.platform === "win32"
-          ? windowsSqliteTimeouts
+          ? { ...windowsSqliteTimeouts, fileParallelism: false, maxWorkers: 1 }
           : { testTimeout: 30_000 }),
         coverage: {
           include: ["apps/bench-runner/src/**"]

@@ -3,9 +3,9 @@ import { createServer } from "node:http";
 import { lookup } from "node:dns/promises";
 import type { AddressInfo } from "node:net";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import {
@@ -558,7 +558,8 @@ it.each(["uppercase digest", "malformed digest"] as const)(
     await expect(executeSemanticProposalFill({ workset: prepared, cacheRoot, authority,
       config: config(), extractor: attempted })).rejects.toThrow(/noncanonical filename/u);
     expect(attempted.calls).toHaveLength(0);
-    expect(existsSync(canonical)).toBe(false);
+    // opendir reports the stored case; existsSync follows case-insensitive volumes.
+    expect(readdirSync(cacheRoot).includes(basename(canonical))).toBe(false);
     expect(readFileSync(renamed)).toEqual(pendingBytes);
   }
 );

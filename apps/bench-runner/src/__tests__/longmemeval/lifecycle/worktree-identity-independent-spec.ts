@@ -22,7 +22,11 @@ const SPEC_GIT_CONFIG = [
   "-c", "diff.algorithm=myers",
   "-c", "diff.context=3",
   "-c", "status.showUntrackedFiles=normal",
-  "-c", "status.renames=false"
+  "-c", "status.renames=false",
+  "-c", "core.autocrlf=true",
+  "-c", "core.fsmonitor=false",
+  "-c", "credential.helper=",
+  "-c", "core.askPass="
 ] as const;
 const SPEC_DIFF_ARGV = [
   "diff",

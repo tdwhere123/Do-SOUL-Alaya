@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, expect, vi } from "vitest";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 
 import type { LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { providerBackedExtractionResult } from
@@ -45,6 +46,8 @@ export function registerExtractionFillHooks(
 
   afterEach(async () => {
     vi.unstubAllEnvs();
+    // Vitest runs afterEach before onTestFinished, while a timed-out body can still hold this directory.
+    await settleActiveBenchDaemonTasks();
     await rm(tmpDir, { recursive: true, force: true });
   });
 

@@ -5,6 +5,8 @@
     "vendor/**",
     "dist/**",
     "coverage/**",
+    "shard-coverage/**",
+    "shard-manifests/**",
     "scripts/analyze-recall-bias.mjs",
     "scripts/append-bench-degradation-backlog.mjs",
     "scripts/compute-bench-quality-metrics.mjs",

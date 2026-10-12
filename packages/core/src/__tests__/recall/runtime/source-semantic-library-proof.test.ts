@@ -131,4 +131,5 @@ it.each(["instantiation", "query_entity", "universal", "comparison"] as const)("
   const forged = structuredClone(proof), answer = forged.binding_results!.find((row) => row.binding_id === entry.output_binding)!;
   Object.assign(answer, { alternative: 999 });
   expect(deliveredSourceSemanticLibraryProof(index, entry, qualifier, [forged], record, budget).proof).toBeUndefined();
-}, 15_000);
+  // Coverage instruments comparison projection; the witness budget stays the fixture value.
+}, 60_000);

@@ -5,7 +5,7 @@ packages:
 
 catalog:
   "@hono/node-server": 2.1.1
-  "@modelcontextprotocol/sdk": 1.30.0
+  "@modelcontextprotocol/sdk": 1.31.0
   "@types/better-sqlite3": ^9.6.0
   better-sqlite3: 13.0.3
   hono: ^4.13.7
@@ -25,20 +25,23 @@ overrides:
   adm-zip: 0.6.1
   body-parser: 2.3.0
   browserslist: 4.28.9
-  fast-uri: 3.1.7
+  fast-uri: 3.1.8
   form-data: 4.0.6
   hono: 4.13.7
-  ip-address: 10.7.0
+  ip-address: 10.7.1
   nanoid: 3.3.19
   onnxruntime-web: "-"
   postcss: 8.5.28
-  postcss-selector-parser: 6.1.4
+  postcss-selector-parser: 7.1.6
   qs: 6.16.0
   # Inspector loopback SPA; v7 is a breaking upgrade. See scripts/ci/audit-exemptions.json.
   react-router: 6.30.6
   react-router-dom: 6.30.6
   # Optional ONNX extra only. transformers 4.2.0 declares sharp ^0.34.5; 0.35.4 is the advisory-clean line.
   sharp: 0.35.4
+  smol-toml: 1.9.1
+  source-map-js: 1.2.2
+  proxy-addr: 2.0.8
   ws: 8.21.3
   zod: 4.6.2
 

@@ -5,6 +5,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { NO_FOLLOW_OPEN_FLAG } from "../../../fs/open-flags.js";
+import { assertNamedDirectoryAnchorCurrent } from "./root-directory-binding.js";
 
 interface FileIdentity {
   readonly device: bigint;
@@ -43,6 +44,7 @@ export function writeBytesExclusiveDurable(
   path: string,
   bytes: Uint8Array
 ): void {
+  assertNamedDirectoryAnchorCurrent(path);
   writeBytesExclusiveTracked(path, bytes, () => undefined);
 }
 
@@ -59,6 +61,7 @@ export function replaceBytesDurable(input: {
     writeOrAdoptExclusiveTemporary(temporary, input.bytes, (identity) => {
       owned = identity;
     });
+    assertNamedDirectoryAnchorCurrent(input.destination);
     renameSync(temporary, input.destination);
     owned = undefined;
     fsyncRegularFile(input.destination);
@@ -100,6 +103,7 @@ function writeBytesExclusiveTracked(
   bytes: Uint8Array,
   onCreated: (identity: FileIdentity) => void
 ): void {
+  assertNamedDirectoryAnchorCurrent(path);
   const descriptor = openSync(
     path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600
   );
@@ -111,6 +115,7 @@ function writeBytesExclusiveTracked(
 }
 
 export function linkFileExclusiveDurable(source: string, destination: string): void {
+  assertNamedDirectoryAnchorCurrent(destination);
   linkSync(source, destination);
   fsyncRegularFile(destination);
   fsyncDirectory(dirname(destination));
