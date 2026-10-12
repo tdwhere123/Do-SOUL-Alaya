@@ -117,6 +117,8 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly discoveries?: RetainedRows<RoutingDiscovery>;
     readonly physicalKinds?: readonly string[];
     readonly compiledAutomaton?: ProgramAutomaton;
+    /** Branch frontier. Absent callers keep writing the shared automaton. */
+    readonly sequenceReachOwner?: object;
     readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
   }>;
 
@@ -202,8 +204,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         observedStates: input.liveStates,
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
         coldPrograms,
-        // Resume replaces interpretation. The compiled automaton object stays on the field.
-        reachOwner: input.compiledAutomaton ?? input.interpretation,
+        // The compiled automaton stays shared. A branch writes only its own frontier.
+        reachOwner: input.sequenceReachOwner ?? input.compiledAutomaton ?? input.interpretation,
         ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }

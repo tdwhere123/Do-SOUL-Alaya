@@ -95,6 +95,8 @@ type HyperedgeInput = Readonly<{
   readonly promotedIds?: Set<string>;
   /** Programs whose row delta started with no stored reach. Shared for the page. */
   readonly coldPrograms?: Set<string>;
+  /** A nested premise still returns proofs this row delta did not touch. */
+  readonly retainPopulation?: boolean;
 }>;
 
 export function tryCompleteHyperedge(
@@ -143,7 +145,8 @@ export function* hyperedgeEffectSteps(
     for (const premise of program.premises) {
       roles.push(yield* premiseJoinRoles(premise, from, rows, input, deltaIds));
     }
-    const focuses = deltaIds === undefined ? [undefined] : roles.map((_, index) => index);
+    // A nested premise must still return proofs the sibling delta did not touch.
+    const focuses = deltaIds === undefined || input.retainPopulation === true ? [undefined] : roles.map((_, index) => index);
     for (const focus of focuses) {
       const grouped = roles.map((role, index) => focus !== undefined && index === focus ? role.delta : role.population);
       if (program.join === "or") yield* orHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
@@ -167,7 +170,8 @@ function* premiseJoinRoles(
     return { population, delta };
   }
   // Share old proofs apart from new ones. An OR across both would mark the old path as new.
-  const found = yield* assignmentsForPremise(premise, from, rows, input);
+  const found = yield* assignmentsForPremise(premise, from, rows,
+    deltaIds === undefined ? input : { ...input, retainPopulation: true });
   if (deltaIds === undefined) {
     const population = yield* shareCompatibleAssignments(found);
     return { population, delta: population };
@@ -285,6 +289,7 @@ function* nestedHyperedgeAssignments(
     ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
     ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),
     ...(input.coldPrograms === undefined ? {} : { coldPrograms: input.coldPrograms }),
+    ...(input.retainPopulation === true ? { retainPopulation: true } : {}),
     ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
   })) {
     if (step.kind === "work") { yield step; continue; }
@@ -515,7 +520,7 @@ function* orHyperedgeEffects(
   emitted?: Set<string>
 ): PathComputation<void> {
   for (const options of grouped) for (const option of options) {
-    if (deltaIds !== undefined && !assignmentInDelta(option, deltaIds, input.promotedIds)) continue;
+    if (deltaIds !== undefined && input.retainPopulation !== true && !assignmentInDelta(option, deltaIds, input.promotedIds)) continue;
     if (emitted !== undefined && !claimHyperedge(emitted, from, [option])) continue;
     yield { kind: "work", retained_bytes: completionReservation([option]) };
     for (const effect of yield* completionEffects(from, [option], {
@@ -542,7 +547,8 @@ function* andHyperedgeEffects(
 ): PathComputation<void> {
   if (grouped.some((group) => group.length === 0)) return;
   for (const combo of cartesian(grouped)) {
-    if (deltaIds !== undefined && !combo.some((assignment) => assignmentInDelta(assignment, deltaIds, input.promotedIds))) continue;
+    if (deltaIds !== undefined && input.retainPopulation !== true
+      && !combo.some((assignment) => assignmentInDelta(assignment, deltaIds, input.promotedIds))) continue;
     if (emitted !== undefined && !claimHyperedge(emitted, from, combo)) continue;
     yield { kind: "work" };
     const merged = mergeAssignments(combo, input.bindingContexts);

@@ -122,6 +122,17 @@ export function writeSequenceReach(owner: object, key: string, reach: SequenceRe
   replaceSequenceReach(owner, key, reach);
 }
 
+/** Copy the frontier so one branch cannot change a sibling's reach. */
+export function forkSequenceReachOwner(owner: object | undefined): object {
+  const fork = {};
+  if (owner === undefined) return fork;
+  const bucket = reachByOwner.get(owner);
+  if (bucket !== undefined) reachByOwner.set(fork, new Map(bucket));
+  const bytes = bytesByOwner.get(owner);
+  if (bytes !== undefined && bytes > 0) bytesByOwner.set(fork, bytes);
+  return fork;
+}
+
 export function transferSequenceReachCharge(
   field: Readonly<{ sequence_reach_bytes?: number }>,
   owner: object | undefined
@@ -151,8 +162,16 @@ export function dropSequenceReachAssertion(owner: object | undefined, assertionI
   const ids = new Set([assertionId]);
   for (const [key, reach] of [...bucket]) {
     if (!reachMentionsAssertion(reach, assertionId)) continue;
-    replaceSequenceReach(owner, key, sequenceReachWithoutAssertions(reach, ids));
+    const revised = sequenceReachWithoutAssertions(reach, ids);
+    // No remaining hop is not a frontier. Keeping the empty entry would still charge the owner.
+    if (revised.transitions.length === 0 && revised.unresolved.length === 0) {
+      releaseSequenceReach(owner, sequenceReachFootprint(reach));
+      bucket.delete(key);
+      continue;
+    }
+    replaceSequenceReach(owner, key, revised);
   }
+  if (bucket.size === 0) reachByOwner.delete(owner);
 }
 
 type RevisedDerivations = Readonly<{

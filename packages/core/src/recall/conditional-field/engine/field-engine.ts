@@ -43,7 +43,7 @@ import { type HyperedgeCompletion, type HyperedgePremise } from "./path-composit
 import { facetBelongsToOutput, retainSamePathVectors } from "./path-composition-facet.js";
 import { collectIdentities, mergeSeeds } from "./path-composition-seed.js";
 import { mergeTransitions, transitionKey } from "./path-composition.js";
-import { dropSequenceReachAssertion, transferSequenceReachCharge } from "./sequence-reach.js";
+import { dropSequenceReachAssertion, forkSequenceReachOwner, transferSequenceReachCharge } from "./sequence-reach.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
 import type { BoundSourceFacts } from "./binding-environment.js";
@@ -177,6 +177,8 @@ export type FieldEngineState = Readonly<{
   readonly compiled_automaton?: import("./program-automaton.js").ProgramAutomaton;
   readonly compiled_automaton_bytes?: number;
   readonly sequence_reach_bytes?: number;
+  /** Branch-private sequence frontier. Copies must not share one automaton cache. */
+  readonly sequence_reach_owner?: object;
   readonly path_effect_frontier?: Readonly<{ identities: number; facets: RetainedRows<FacetVector>; discoveries: number;
     sourceFacts?: PersistentStringMap<BoundSourceFacts> }>;
   readonly source_facts?: PersistentStringMap<BoundSourceFacts>;
@@ -428,11 +430,13 @@ export function withdrawDerivationLeaves(
     propositions.delete(key);
   }
   const affectedStates = state.seen_identities.filter((key) => affected.has(productStateNodeId(key)));
-  // Field transitions are filtered above. Sequence reach lives beside them.
-  dropSequenceReachAssertion(state.compiled_automaton, withdrawnLeafId);
-  const sequenceCharge = transferSequenceReachCharge(state, state.compiled_automaton);
+  // Field transitions are filtered above. The sequence frontier is forked first so a sibling keeps its copy.
+  const sequenceOwner = forkSequenceReachOwner(state.sequence_reach_owner ?? state.compiled_automaton);
+  dropSequenceReachAssertion(sequenceOwner, withdrawnLeafId);
+  const sequenceCharge = transferSequenceReachCharge(state, sequenceOwner);
   return bindEngineState({
     ...rest,
+    sequence_reach_owner: sequenceOwner,
     ...sequenceReachBalance(state, sequenceCharge),
     retained_index: undefined,
     claims,

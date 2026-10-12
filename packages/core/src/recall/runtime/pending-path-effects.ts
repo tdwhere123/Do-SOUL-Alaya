@@ -1,7 +1,7 @@
 import { productEndpointId, type ObserverPage } from "@do-soul/alaya-protocol";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
-import { transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
-import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition-adjacency.js";
+import { forkSequenceReachOwner, transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
+import { createAdjacencyEffectCursor, type AdjacencyEffectsInput } from "../conditional-field/engine/path-composition-adjacency.js";
 import type { PathEffectPreparation } from "../conditional-field/engine/path-effect-cursor.js";
 import { pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
@@ -35,13 +35,16 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   const pending = state.pending_path_effects;
   if (pending === undefined || pending.preparation !== undefined) return state;
   if (state.remaining_exploration === 0) return interrupted(state, false);
-  const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, pending.input.options,
+  const owned = ownSequenceReach(state, pending);
+  state = owned.state;
+  const options = owned.options;
+  const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, options,
     state.remaining_memory_bytes + pending.retained_bytes);
   if (cursor === undefined) return interrupted(state, true);
   const initialBytes = pending.cursor === undefined ? Math.max(0, cursor.initialRetainedBytes - pending.retained_bytes) : 0;
   const advanced = cursor.advance(pending.offset, Math.max(0, Math.floor(state.remaining_exploration / 2)),
     state.remaining_memory_bytes + pending.retained_bytes);
-  const retained = { ...pending, cursor, retained_bytes: advanced.retained_bytes,
+  const retained = { ...pending, input: { ...pending.input, options }, cursor, retained_bytes: advanced.retained_bytes,
     completed_work: advanced.completed_work, progress_position: advanced.progress_position };
   const charged = { ...state, pending_path_effects: retained,
     remaining_exploration: state.remaining_exploration - advanced.work,
@@ -203,7 +206,20 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
       closure: { ...applied.closure, observation: "interrupted" as const, requested_index: "open" as const } }) };
   // The cursor refunds its scratch above. The cache outlives that cursor.
   if (!finished) return committed;
-  return chargeSequenceReach(committed, prior.compiledAutomaton ?? prior.interpretation);
+  return chargeSequenceReach(committed, prior.sequenceReachOwner ?? committed.sequence_reach_owner
+    ?? prior.compiledAutomaton ?? prior.interpretation);
+}
+
+function ownSequenceReach(
+  state: FieldEngineState,
+  pending: NonNullable<FieldEngineState["pending_path_effects"]>
+): { readonly state: FieldEngineState; readonly options: AdjacencyEffectsInput } {
+  const options = pending.input.options;
+  if (pending.cursor !== undefined || options.sequenceReachOwner !== undefined) return { state, options };
+  const sequenceReachOwner = forkSequenceReachOwner(
+    state.sequence_reach_owner ?? options.compiledAutomaton ?? options.interpretation
+  );
+  return { state: { ...state, sequence_reach_owner: sequenceReachOwner }, options: { ...options, sequenceReachOwner } };
 }
 
 function chargeSequenceReach(state: FieldEngineState, owner: object): FieldEngineState {

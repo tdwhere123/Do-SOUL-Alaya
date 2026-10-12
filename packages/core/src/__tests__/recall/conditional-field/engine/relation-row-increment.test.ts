@@ -217,6 +217,10 @@ function acceptingBindings(state: FieldEngineState): string[] {
   return projected.bindings.flatMap((row) => row.accepting ? [`${row.subject}|${row.binding}`] : []);
 }
 
+function sequenceOwner(state: FieldEngineState, automaton: object): object {
+  return state.sequence_reach_owner ?? automaton;
+}
+
 describe("incremental relation-row join", () => {
   it("admits changed assertions instead of a key-order length suffix", () => {
     const retained = retainRelationPage(new ObservedRelations().with(edge("p", "a", "b", "b")).with(edge("p", "a", "d", "d")),
@@ -683,10 +687,14 @@ describe("incremental relation-row join", () => {
     const base = { interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: facts(["a", "b", "c"]),
       liveStates: state.seen_identities, compiledAutomaton: automaton };
     adjacencyEffectsForRows([first, second], base);
-    withdrawDerivationLeaves(state, "hop-1");
+    const withdrawn = withdrawDerivationLeaves(state, "hop-1");
     const noise = edge("q", "z", "w", "noise-row");
     const visits = { count: 0 };
-    const after = adjacencyEffectsForRows(counting([first, second, noise], visits), { ...base, joinRows: [noise] });
+    const after = adjacencyEffectsForRows(counting([first, second, noise], visits), {
+      ...base,
+      ...(withdrawn.sequence_reach_owner === undefined ? {} : { sequenceReachOwner: withdrawn.sequence_reach_owner }),
+      joinRows: [noise]
+    });
     expect(visits.count).toBe(0);
     expect(hyperLeaves(after).some((ids) => ids.has("hop-1"))).toBe(false);
   });
@@ -762,7 +770,7 @@ describe("incremental relation-row join", () => {
     const warmed = resumeOnAutomaton(state, [p1, p2], source);
     const from = state.seen_identities.at(0)!;
     const withdrawn = withdrawDerivationLeaves(warmed, "p1");
-    const surviving = readSequenceReach(automaton, sequenceReachKey(sequence, productStateNodeId(from)));
+    const surviving = readSequenceReach(sequenceOwner(withdrawn, automaton), sequenceReachKey(sequence, productStateNodeId(from)));
     const incremental = resumeOnAutomaton(withdrawn, [p2, r1], source, [r1]);
     const fresh = resumeOnAutomaton({ ...seeded(program), compiled_automaton: compileProgramAutomaton(program) }, [p2, r1], source);
     expect({
@@ -792,7 +800,7 @@ describe("incremental relation-row join", () => {
     const state = { ...seeded(program), compiled_automaton: automaton };
     const warmed = resumeOnAutomaton(state, [edge("p", "a", "m", "only-p")], facts(["a", "m", "y"]));
     const from = state.seen_identities.at(0)!;
-    const reach = readSequenceReach(automaton, sequenceReachKey(sequence, productStateNodeId(from)));
+    const reach = readSequenceReach(sequenceOwner(warmed, automaton), sequenceReachKey(sequence, productStateNodeId(from)));
     const cacheBytes = Buffer.byteLength(JSON.stringify(reach), "utf8");
     const charged = warmed.sequence_reach_bytes ?? 0;
     const counted = restoredFieldFootprint(warmed) - restoredFieldFootprint({ ...warmed, sequence_reach_bytes: 0 });
