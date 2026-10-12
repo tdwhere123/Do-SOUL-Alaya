@@ -28,6 +28,7 @@ export {
   installDefaultSqliteWriteQueue,
   isSqliteWriteQueueDisabled,
   prepareTemporalCandidate,
+  sqliteHostFilename,
   inspectTemporalProjectionSelection,
   isTemporalProjectionSelected,
   selectTemporalProjection,

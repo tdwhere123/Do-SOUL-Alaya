@@ -15,6 +15,7 @@ export {
   type InitDatabaseOptions
 } from "./db.js";
 export { openReadOnlyDatabase } from "./open-readonly.js";
+export { sqliteHostFilename } from "./open-sqlite-connection.js";
 export {
   EMBEDDING_OVERLAY_ALIAS,
   EMBEDDING_OVERLAY_BIND_FILENAME,

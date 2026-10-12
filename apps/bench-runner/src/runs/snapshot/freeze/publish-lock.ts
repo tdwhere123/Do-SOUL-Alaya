@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { sqliteHostFilename } from "@do-soul/alaya-storage";
 
 export async function withSnapshotPublishLock<T>(
   snapshotOut: string,
@@ -22,7 +23,7 @@ export async function withSnapshotPublishLock<T>(
 function acquireSnapshotPublishLock(snapshotOut: string): DatabaseSync {
   const lockPath = snapshotPublishLockPath(snapshotOut);
   mkdirSync(dirname(lockPath), { recursive: true });
-  const lockDb = new DatabaseSync(lockPath);
+  const lockDb = new DatabaseSync(sqliteHostFilename(lockPath));
   try {
     lockDb.exec("PRAGMA busy_timeout = 0");
     lockDb.exec("BEGIN EXCLUSIVE");
