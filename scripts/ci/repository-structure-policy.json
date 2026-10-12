@@ -1208,8 +1208,8 @@
     {
       "specifier": "@do-soul/alaya-storage",
       "path": "packages/storage/src/index.ts",
-      "expected_count": 317,
-      "expected_sha256": "449c68cc3ee8f30b3193ad3ced38742eee7f1a09f111f9ab9c52f59e49e05cf5"
+      "expected_count": 318,
+      "expected_sha256": "61580d164a820bc5fcd5f56627d01ee05b280cfc9c7af6b8fb3e4442cbe7a340"
     },
     {
       "specifier": "@do-soul/alaya",
