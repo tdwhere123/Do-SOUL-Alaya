@@ -245,6 +245,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   const captured: RelationObserverRow[] = [];
   const factsBefore = sourceFacts.snapshot;
   const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
+  // Re-reading a withdrawn assertion OR-merges it with the sibling that must survive, and absorption then drops both.
+  omitWithdrawnRelationRows(captured, session.state.withdrawn_leaves);
   recordObserverWork(session, "adjacency", observed);
   cursors.set(action.region_id, observed.page.cursor);
   const completedPair = new ObservationPairs(pairProgress.snapshot, pairProgress.completed,
@@ -498,6 +500,21 @@ function rejectBindingResource(session: ObservationSession, error: unknown): tru
   return true;
 }
 
+
+function omitWithdrawnRelationRows(
+  captured: RelationObserverRow[],
+  withdrawn: readonly string[] | undefined
+): void {
+  if (withdrawn === undefined || withdrawn.length === 0) return;
+  const ids = new Set(withdrawn);
+  let write = 0;
+  for (const row of captured) {
+    if (ids.has(row.assertionId)) continue;
+    captured[write] = row;
+    write += 1;
+  }
+  captured.length = write;
+}
 
 function capturingReaders(
   readers: ObserverReaders,
