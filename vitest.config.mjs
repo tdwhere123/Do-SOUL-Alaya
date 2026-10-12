@@ -61,7 +61,7 @@ export default defineConfig({
         "**/dist/**",
         "bin/**"
       ],
-      // Per-project include + floors live in scripts/ci/run-vitest-projects.mjs.
+      // Per-project include + floors live in scripts/ci/vitest-projects.mjs.
       // Mixed fallback must not sit below the old diluted 42/42 statements/lines.
       thresholds: {
         perFile: false,

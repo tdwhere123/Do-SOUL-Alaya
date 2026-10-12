@@ -17,40 +17,20 @@ env:
   PNPM_VERSION: '12.3.4'
 
 jobs:
-  quality:
-    name: Quality (${{ matrix.label }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.timeout_minutes }}
+  # Separate jobs per OS so a cancelled Windows shard cannot fail Quality on macOS.
+  # The 60 minute cap stays; bench-runner and core-daemon no longer share one clock with the libraries.
+  test-shard-ubuntu:
+    name: Test ${{ matrix.group }} (ubuntu-node24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Hygiene/audit stay on Ubuntu PR CI. macOS and Windows keep
-          # build+test (Windows also CLI smoke). Do not move hygiene onto
-          # every PR OS; native/path issues can use a nightly three-OS job.
-          # Combined Quality exceeds 30m on Ubuntu/macOS; a 30m job timeout cancels before tests finish.
-          - label: ubuntu-node24
-            os: ubuntu-latest
-            node: '24'
-            timeout_minutes: 60
-            run_hygiene: true
-            run_coverage: true
-            run_smoke: false
-          - label: macos-node24
-            os: macos-latest
-            node: '24'
-            timeout_minutes: 60
-            run_hygiene: false
-            run_coverage: false
-            run_smoke: false
-          - label: windows-node24
-            os: windows-latest
-            node: '24'
-            timeout_minutes: 60
-            run_hygiene: false
-            run_coverage: false
-            run_smoke: true
-    steps:
+        group: [libraries, core-daemon, bench-runner]
+    env:
+      SHARD_LABEL: ubuntu-node24
+      SHARD_COVERAGE: "1"
+    steps: &shard-steps
       - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
@@ -59,16 +39,12 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Install ripgrep for hygiene guards
-        if: ${{ matrix.run_hygiene && runner.os == 'Linux' }}
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Typecheck
         run: pnpm run --if-present typecheck
@@ -76,72 +52,184 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Test with coverage
-        if: ${{ matrix.run_coverage }}
-        run: pnpm run test:coverage
-
       - name: Test
-        if: ${{ !matrix.run_coverage }}
-        run: pnpm test
+        id: vitest
+        shell: bash
+        env:
+          ALAYA_SHARD_PROJECTS: shard-projects.json
+        run: |
+          args=(--group="${{ matrix.group }}")
+          if [[ "${SHARD_COVERAGE}" == "1" ]]; then
+            args+=(--defer-coverage-thresholds --coverage.enabled --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=lcov)
+          fi
+          node scripts/ci/run-vitest-projects.mjs "${args[@]}"
 
-      # Ubuntu-only hygiene. Keep changelog-version and process-env here so
-      # PR CI catches drift that used to wait for the release tag job.
+      - name: Record shard manifest
+        if: always()
+        shell: bash
+        run: node scripts/ci/write-shard-manifest.mjs --group="${{ matrix.group }}" --label="${SHARD_LABEL}" --status="${{ steps.vitest.outcome }}" --output=shard-manifest.json
+
+      - name: Upload shard manifest
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-${{ env.SHARD_LABEL }}-${{ matrix.group }}
+          path: shard-manifest.json
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload coverage
+        if: ${{ env.SHARD_COVERAGE == '1' && steps.vitest.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ env.SHARD_LABEL }}-${{ matrix.group }}
+          path: coverage
+          retention-days: 14
+
+  test-shard-macos:
+    name: Test ${{ matrix.group }} (macos-node24)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [libraries, core-daemon, bench-runner]
+    env:
+      SHARD_LABEL: macos-node24
+      SHARD_COVERAGE: "0"
+    steps: *shard-steps
+
+  test-shard-windows:
+    name: Test ${{ matrix.group }} (windows-node24)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [libraries, core-daemon, bench-runner]
+    env:
+      SHARD_LABEL: windows-node24
+      SHARD_COVERAGE: "0"
+    steps: *shard-steps
+
+  quality-ubuntu:
+    name: Quality (ubuntu-node24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [test-shard-ubuntu]
+    if: always()
+    env:
+      SHARD_LABEL: ubuntu-node24
+      SHARD_RESULT: ${{ needs.test-shard-ubuntu.result }}
+      RUN_HYGIENE: "1"
+      RUN_COVERAGE: "1"
+      RUN_SMOKE: "0"
+    steps: &quality-steps
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Download shard manifests
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: shard-${{ env.SHARD_LABEL }}-*
+          path: shard-manifests
+          merge-multiple: false
+
+      - name: Download coverage
+        if: ${{ env.RUN_COVERAGE == '1' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: coverage-${{ env.SHARD_LABEL }}-*
+          path: shard-coverage
+          merge-multiple: false
+
+      - name: Check shard manifests and coverage
+        shell: bash
+        run: |
+          args=(--label="${SHARD_LABEL}" --shards=shard-manifests --needs-result="${SHARD_RESULT}")
+          if [[ "${RUN_COVERAGE}" == "1" ]]; then
+            args+=(--coverage=shard-coverage)
+          fi
+          node scripts/ci/check-shard-manifests.mjs "${args[@]}"
+
+      - uses: pnpm/action-setup@v6
+        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' }}
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Install ripgrep for hygiene guards
+        if: ${{ env.RUN_HYGIENE == '1' && runner.os == 'Linux' }}
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Build
+        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' }}
+        run: pnpm build
+
       - name: Hygiene
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:unused
 
       - name: Guard production console
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:no-console
 
       - name: Guard test as-any
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: |
           pnpm run ci:test-as-any -- --self-test
           pnpm run ci:test-as-any
 
       - name: Guard storage row casts
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:storage-row-casts
 
       - name: Guard production throw new Error
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: |
           pnpm run ci:throw-new-error -- --self-test
           pnpm run ci:throw-new-error
 
       - name: Guard production as-unknown-as
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: |
           pnpm run ci:production-unknown-as -- --self-test
           pnpm run ci:production-unknown-as
 
       - name: Guard env docs
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run ci:env-docs
 
       - name: Guard changelog version
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run ci:changelog-version
 
       - name: Guard process.env call sites
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:process-env
 
       - name: Guard doc links
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run ci:doc-links
 
       - name: Guard unused package exports
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:unused-exports
 
       - name: Installer script checks
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run ci:install-scripts
 
       - name: Dependency audit moderate severity
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: |
           for attempt in 1 2 3; do
             pnpm run ci:audit && exit 0
@@ -150,24 +238,44 @@ jobs:
           exit 1
 
       - name: Guard inspector dependency isolation
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:inspector-deps
 
       - name: Guard repository structure
-        if: ${{ matrix.run_hygiene }}
+        if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run ci:repository-structure
 
       - name: CLI preflight smoke
-        if: ${{ matrix.run_smoke }}
+        if: ${{ env.RUN_SMOKE == '1' }}
         run: node scripts/ci/smoke-built-cli.mjs --preflight-only
 
-      - name: Upload coverage baseline
-        if: ${{ matrix.run_coverage }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: vitest-coverage-${{ matrix.label }}
-          path: coverage
-          retention-days: 14
+  quality-macos:
+    name: Quality (macos-node24)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    needs: [test-shard-macos]
+    if: always()
+    env:
+      SHARD_LABEL: macos-node24
+      SHARD_RESULT: ${{ needs.test-shard-macos.result }}
+      RUN_HYGIENE: "0"
+      RUN_COVERAGE: "0"
+      RUN_SMOKE: "0"
+    steps: *quality-steps
+
+  quality-windows:
+    name: Quality (windows-node24)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    needs: [test-shard-windows]
+    if: always()
+    env:
+      SHARD_LABEL: windows-node24
+      SHARD_RESULT: ${{ needs.test-shard-windows.result }}
+      RUN_HYGIENE: "0"
+      RUN_COVERAGE: "0"
+      RUN_SMOKE: "1"
+    steps: *quality-steps
 
   content-contracts:
     name: Bench content contracts
@@ -178,7 +286,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: "24"
 
       - name: Check bench-history contract
         run: node scripts/ci/check-content-contracts.mjs
@@ -187,7 +295,7 @@ jobs:
     name: CLI install surface smoke
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: quality
+    needs: [quality-ubuntu, quality-macos, quality-windows]
     steps:
       - uses: actions/checkout@v7
 
@@ -197,7 +305,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

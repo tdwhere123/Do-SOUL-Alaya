@@ -1,117 +1,65 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { PROJECT_COVERAGE, projectsForGroup, sanitizeProjectName } from "./vitest-projects.mjs";
 
-const PROJECTS = [
-  "@do-soul/alaya-protocol",
-  "@do-soul/alaya-graph-algorithms",
-  "@do-soul/alaya-cjk-segmentation",
-  "@do-soul/alaya-storage",
-  "@do-soul/alaya-core",
-  "@do-soul/alaya-soul",
-  "@do-soul/alaya-engine-gateway",
-  "@do-soul/alaya-eval",
-  "@do-soul/alaya-core-daemon",
-  "@do-soul/alaya-inspector",
-  "@do-soul/alaya-inspector-web",
-  "@do-soul/alaya-bench-runner"
-];
-
-const extraArgs = process.argv.slice(2);
+const parsed = parseArgs(process.argv.slice(2));
+const selected = projectsForGroup(parsed.group);
 const isWindows = process.platform === "win32";
-const coverageEnabled = extraArgs.some(
-  (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
-);
-const childEnv = createChildEnv();
-const hasCoverageReportsDirectoryArg = extraArgs.some(
-  (arg) =>
-    arg === "--coverage.reportsDirectory" || arg.startsWith("--coverage.reportsDirectory=")
-);
-const hasCoverageIncludeArg = extraArgs.some(
-  (arg) => arg === "--coverage.include" || arg.startsWith("--coverage.include=")
-);
-const hasCoverageThresholdArg = extraArgs.some((arg) => arg.startsWith("--coverage.thresholds."));
+const childEnv = createChildEnv(parsed.coverageEnabled);
+const completed = [];
 
-// Floors sit 3 points under isolated json-summary so a drop in one package
-// cannot hide behind a stronger sibling. engine-gateway was already pinned.
-const PROJECT_COVERAGE = {
-  "@do-soul/alaya-protocol": {
-    include: "packages/protocol/src/**",
-    statements: 88, lines: 89, functions: 81, branches: 72
-  },
-  "@do-soul/alaya-graph-algorithms": {
-    include: "packages/graph-algorithms/src/**",
-    statements: 78, lines: 79, functions: 83, branches: 69
-  },
-  "@do-soul/alaya-cjk-segmentation": {
-    include: "packages/cjk-segmentation/src/**",
-    statements: 91, lines: 91, functions: 89, branches: 83
-  },
-  "@do-soul/alaya-storage": {
-    include: "packages/storage/src/**",
-    statements: 72, lines: 72, functions: 82, branches: 63
-  },
-  "@do-soul/alaya-core": {
-    include: "packages/core/src/**",
-    statements: 85, lines: 86, functions: 90, branches: 77
-  },
-  "@do-soul/alaya-soul": {
-    include: "packages/soul/src/**",
-    statements: 88, lines: 89, functions: 92, branches: 82
-  },
-  "@do-soul/alaya-engine-gateway": {
-    include: "packages/engine-gateway/src/**",
-    statements: 88, lines: 90, functions: 95, branches: 74
-  },
-  "@do-soul/alaya-eval": {
-    include: "packages/eval/src/**",
-    statements: 83, lines: 85, functions: 91, branches: 80
-  },
-  "@do-soul/alaya-core-daemon": {
-    include: "apps/core-daemon/src/**",
-    statements: 75, lines: 76, functions: 81, branches: 66
-  },
-  "@do-soul/alaya-inspector": {
-    include: "apps/inspector/src/**",
-    statements: 77, lines: 80, functions: 87, branches: 60
-  },
-  "@do-soul/alaya-inspector-web": {
-    include: "apps/inspector/web/src/**",
-    statements: 79, lines: 80, functions: 82, branches: 66
-  },
-  "@do-soul/alaya-bench-runner": {
-    include: "apps/bench-runner/src/**",
-    statements: 65, lines: 65, functions: 52, branches: 45
-  }
-};
-
-for (const project of PROJECTS) {
+for (const project of selected) {
   console.log(`\n==> vitest project: ${project}`);
   const result = spawnSync(
     "pnpm",
-    buildVitestArgs(project),
-    {
-      env: childEnv,
-      stdio: "inherit",
-      shell: isWindows
-    }
+    buildVitestArgs(project, parsed),
+    { env: childEnv, stdio: "inherit", shell: isWindows }
   );
-
   if (result.error) {
     console.error(`failed to start vitest for ${project}: ${result.error.message}`);
+    recordCompleted(parsed.projectsFile, completed);
     process.exit(1);
   }
-
   if (result.status !== 0) {
+    recordCompleted(parsed.projectsFile, completed);
     process.exit(result.status ?? 1);
   }
+  completed.push(project);
+  recordCompleted(parsed.projectsFile, completed);
 }
 
-function createChildEnv() {
+function parseArgs(argv) {
+  const groupArg = argv.find((arg) => arg.startsWith("--group="));
+  const deferThresholds = argv.includes("--defer-coverage-thresholds");
+  const vitestArgs = argv.filter((arg) => arg !== "--defer-coverage-thresholds" && !arg.startsWith("--group="));
+  return {
+    group: groupArg?.slice("--group=".length),
+    deferThresholds,
+    vitestArgs,
+    coverageEnabled: vitestArgs.some(
+      (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
+    ),
+    hasCoverageReportsDirectoryArg: vitestArgs.some(
+      (arg) => arg === "--coverage.reportsDirectory" || arg.startsWith("--coverage.reportsDirectory=")
+    ),
+    hasCoverageIncludeArg: vitestArgs.some(
+      (arg) => arg === "--coverage.include" || arg.startsWith("--coverage.include=")
+    ),
+    hasCoverageThresholdArg: vitestArgs.some((arg) => arg.startsWith("--coverage.thresholds.")),
+    projectsFile: process.env.ALAYA_SHARD_PROJECTS
+  };
+}
+
+function recordCompleted(projectsFile, projects) {
+  if (projectsFile === undefined) return;
+  writeFileSync(projectsFile, `${JSON.stringify({ projects })}\n`);
+}
+
+function createChildEnv(coverageEnabled) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (key.startsWith("npm_")) {
-      delete env[key];
-    }
+    if (key.startsWith("npm_")) delete env[key];
   }
   // vitest.config.mjs budgets ~3.5 GiB/worker (~7 GiB under coverage). Node's
   // default old-space is ~2 GiB and coverage + live daemon fixtures exceed it.
@@ -124,17 +72,11 @@ function createChildEnv() {
   return env;
 }
 
-function buildVitestArgs(project) {
+function buildVitestArgs(project, parsed) {
   return [
-    "exec",
-    "vitest",
-    "run",
-    "--config",
-    "vitest.config.mjs",
-    "--project",
-    project,
-    ...extraArgs,
-    ...buildCoverageArgs(project),
+    "exec", "vitest", "run", "--config", "vitest.config.mjs", "--project", project,
+    ...parsed.vitestArgs,
+    ...buildCoverageArgs(project, parsed),
     ...windowsStorageWorkerArgs(project)
   ];
 }
@@ -142,25 +84,21 @@ function buildVitestArgs(project) {
 function windowsStorageWorkerArgs(project) {
   // Two forks still saturate NTFS on file-backed schema upgrades, so the
   // Quality windows-node24 storage project must run one file at a time.
-  if (isWindows && project === "@do-soul/alaya-storage") {
-    return ["--maxWorkers=1"];
-  }
+  if (isWindows && project === "@do-soul/alaya-storage") return ["--maxWorkers=1"];
   return [];
 }
 
-function buildCoverageArgs(project) {
-  if (!coverageEnabled) {
-    return [];
-  }
+function buildCoverageArgs(project, parsed) {
+  if (!parsed.coverageEnabled) return [];
   const config = PROJECT_COVERAGE[project];
   const args = [];
-  if (!hasCoverageReportsDirectoryArg) {
+  if (!parsed.hasCoverageReportsDirectoryArg) {
     args.push("--coverage.reportsDirectory", `coverage/${sanitizeProjectName(project)}`);
   }
-  if (!hasCoverageIncludeArg && config?.include !== undefined) {
+  if (!parsed.hasCoverageIncludeArg && config?.include !== undefined) {
     args.push(`--coverage.include=${config.include}`);
   }
-  if (!hasCoverageThresholdArg && config !== undefined) {
+  if (!parsed.deferThresholds && !parsed.hasCoverageThresholdArg && config !== undefined) {
     args.push(
       `--coverage.thresholds.statements=${config.statements}`,
       `--coverage.thresholds.lines=${config.lines}`,
@@ -169,8 +107,4 @@ function buildCoverageArgs(project) {
     );
   }
   return args;
-}
-
-function sanitizeProjectName(project) {
-  return project.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
