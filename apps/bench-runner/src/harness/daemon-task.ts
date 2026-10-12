@@ -13,7 +13,6 @@ interface BenchScope {
   readonly signal: AbortSignal;
   cancelled: boolean;
   blocking: boolean;
-  resourcesClosed: boolean;
   busy: number;
   readonly tasks: DaemonTask[];
   readonly bodies: Array<Promise<unknown>>;
@@ -46,6 +45,30 @@ export function clearBenchDaemonTestSignal(signal: AbortSignal): void {
   const scope = storage.getStore();
   if (scope?.signal !== signal || scope.blocking) return;
   scopes.delete(scope);
+}
+
+/** Launcher and CLI work have no vitest signal. The callback and its awaits see that. */
+export function runOutsideBenchDaemonScope<T>(body: () => T): T {
+  return storage.exit(body);
+}
+
+/** The operation that starts the daemon owns the scope, whether or not a test signal is bound. */
+export async function runBenchDaemonOperation<T>(body: () => Promise<T>): Promise<T> {
+  const parent = storage.getStore();
+  const controller = new AbortController();
+  if (parent?.cancelled === true || parent?.signal.aborted === true) controller.abort();
+  else if (parent !== undefined) {
+    parent.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  const scope = createScope(controller.signal);
+  try {
+    return await storage.run(scope, body);
+  } finally {
+    if (!scope.blocking && scope.busy === 0 && scope.shutdown === undefined &&
+        scope.bodies.length === 0 && !scope.cancelled) {
+      scopes.delete(scope);
+    }
+  }
 }
 
 export function beginBenchDaemonTask(): DaemonTask {
@@ -124,7 +147,6 @@ function createScope(signal: AbortSignal): BenchScope {
     signal,
     cancelled: false,
     blocking: false,
-    resourcesClosed: false,
     busy: 0,
     tasks: [],
     bodies: [],
@@ -176,9 +198,7 @@ function createTask(scope: BenchScope): DaemonTask {
       scope.busy = Math.max(0, scope.busy - 1);
       if (scope.busy === 0 && scope.shutdown === undefined && scope.bodies.length === 0) {
         removeOwnedDirs(scope);
-        scope.resourcesClosed = true;
         scope.blocking = false;
-        scopes.delete(scope);
       }
       resolveDone();
     }
@@ -200,21 +220,27 @@ function closeScope(scope: BenchScope): Promise<void> {
 }
 
 function ensureClosed(scope: BenchScope): Promise<void> {
-  if (scope.resourcesClosed) return Promise.resolve();
   // A second close waits for the first. Returning early would drop the directory while it is still open.
   if (scope.tail !== undefined) return scope.tail;
-  scope.tail = closeResources(scope).then(() => {
-    scope.resourcesClosed = true;
+  const closing = closeResources(scope).then(() => {
     removeOwnedDirs(scope);
+    // The caller still holds this scope. Sealing it would skip the next daemon's shutdown.
+    scope.shutdown = undefined;
+    scope.tail = undefined;
+    scope.lateError = undefined;
+    scope.busy = 0;
+    scope.bodies.length = 0;
+    scope.tasks.length = 0;
     scope.blocking = false;
-    scopes.delete(scope);
+    if (scope.cancelled || storage.getStore() !== scope) scopes.delete(scope);
   }, (error: unknown) => {
     scope.tail = undefined;
     scope.lateError = error;
     scope.blocking = true;
     throw error;
   });
-  return scope.tail;
+  scope.tail = closing;
+  return closing;
 }
 
 async function closeResources(scope: BenchScope): Promise<void> {

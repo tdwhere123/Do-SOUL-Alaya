@@ -8,7 +8,10 @@ import {
   adoptBenchDaemonShutdown,
   beginBenchDaemonTask,
   bindBenchDaemonTestSignal,
+  currentBenchScope,
   removeDataDirWhenBenchDaemonCancelled,
+  runBenchDaemonOperation,
+  runOutsideBenchDaemonScope,
   scopeForBenchWork,
   settleActiveBenchDaemonTasks,
   trackBenchBody
@@ -153,3 +156,31 @@ it("does not reuse a scope that is still alive when settle hits its cap", async 
   await handle.shutdown();
   rmSync(dataDir, { recursive: true, force: true });
 }, 20_000);
+
+it("starts sequential daemons when no test signal is bound", async () => {
+  await runOutsideBenchDaemonScope(async () => {
+    expect(currentBenchScope()).toBeUndefined();
+    const unboundDir = mkdtempSync(join(tmpdir(), "daemon-unbound-dir-"));
+    expect(() => removeDataDirWhenBenchDaemonCancelled(unboundDir)).toThrow("bench work has no owning scope");
+    rmSync(unboundDir, { recursive: true, force: true });
+    for (const name of ["one", "two", "three"]) {
+      const dataDir = mkdtempSync(join(tmpdir(), `daemon-unbound-${name}-`));
+      await runBenchDaemonOperation(async () => {
+        const handle = await startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
+        removeDataDirWhenBenchDaemonCancelled(dataDir);
+        await handle.shutdown();
+      });
+      expect(existsSync(dataDir)).toBe(true);
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+it("shuts down each later daemon on the same scope", async () => {
+  for (const name of ["one", "two", "three"]) {
+    const dataDir = mkdtempSync(join(tmpdir(), `daemon-again-${name}-`));
+    const handle = await startBenchDaemon({ dataDirRoot: dataDir, embeddingMode: "disabled" });
+    await handle.shutdown();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
