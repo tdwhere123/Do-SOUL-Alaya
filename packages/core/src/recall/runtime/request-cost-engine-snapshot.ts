@@ -15,6 +15,7 @@ export type EngineCostField = Readonly<{
   readonly source_fact_bytes?: number;
   readonly observed_relation_bytes?: number;
   readonly compiled_automaton_bytes?: number;
+  readonly sequence_reach_bytes?: number;
   readonly grounding_progress?: { readonly retained_bytes: number };
   readonly explanation_progress?: { readonly retainedBytes: number };
   readonly admitted_allocation_bytes: number;
@@ -48,6 +49,7 @@ export function restoredFieldFootprint(field: EngineCostField): number {
     + (field.pair_demand_bytes ?? 0) + (field.pair_progress_bytes ?? 0)
     + (field.source_fact_demand_bytes ?? 0) + (field.source_fact_bytes ?? 0)
     + (field.observed_relation_bytes ?? 0) + (field.compiled_automaton_bytes ?? 0)
+    + (field.sequence_reach_bytes ?? 0)
     + (field.grounding_progress?.retained_bytes ?? 0) + (field.explanation_progress?.retainedBytes ?? 0);
   return Math.max(owners, field.accounted_retained_bytes ?? 0);
 }

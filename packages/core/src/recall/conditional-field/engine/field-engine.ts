@@ -43,7 +43,7 @@ import { type HyperedgeCompletion, type HyperedgePremise } from "./path-composit
 import { facetBelongsToOutput, retainSamePathVectors } from "./path-composition-facet.js";
 import { collectIdentities, mergeSeeds } from "./path-composition-seed.js";
 import { mergeTransitions, transitionKey } from "./path-composition.js";
-import { dropSequenceReachAssertion } from "./sequence-reach.js";
+import { dropSequenceReachAssertion, transferSequenceReachCharge } from "./sequence-reach.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
 import type { BoundSourceFacts } from "./binding-environment.js";
@@ -176,6 +176,7 @@ export type FieldEngineState = Readonly<{
   readonly pending_path_effects?: PendingPathEffects;
   readonly compiled_automaton?: import("./program-automaton.js").ProgramAutomaton;
   readonly compiled_automaton_bytes?: number;
+  readonly sequence_reach_bytes?: number;
   readonly path_effect_frontier?: Readonly<{ identities: number; facets: RetainedRows<FacetVector>; discoveries: number;
     sourceFacts?: PersistentStringMap<BoundSourceFacts> }>;
   readonly source_facts?: PersistentStringMap<BoundSourceFacts>;
@@ -429,8 +430,10 @@ export function withdrawDerivationLeaves(
   const affectedStates = state.seen_identities.filter((key) => affected.has(productStateNodeId(key)));
   // Field transitions are filtered above. Sequence reach lives beside them.
   dropSequenceReachAssertion(state.compiled_automaton, withdrawnLeafId);
+  const sequenceCharge = transferSequenceReachCharge(state, state.compiled_automaton);
   return bindEngineState({
     ...rest,
+    ...sequenceReachBalance(state, sequenceCharge),
     retained_index: undefined,
     claims,
     claim_propositions: propositions,
@@ -454,6 +457,18 @@ export function withdrawDerivationLeaves(
     transition_derivations: transitionRoots,
     support
   });
+}
+
+function sequenceReachBalance(
+  state: FieldEngineState,
+  charge: Readonly<{ sequence_reach_bytes: number; delta: number }>
+): Partial<Pick<FieldEngineState, "sequence_reach_bytes" | "remaining_memory_bytes" | "admitted_allocation_bytes">> {
+  if (charge.sequence_reach_bytes === 0 && state.sequence_reach_bytes === undefined && charge.delta === 0) return {};
+  return {
+    sequence_reach_bytes: charge.sequence_reach_bytes,
+    remaining_memory_bytes: state.remaining_memory_bytes - charge.delta,
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + Math.max(0, charge.delta)
+  };
 }
 
 function leafTouchesTransition(transition: Transition, withdrawnLeafId: string): boolean {

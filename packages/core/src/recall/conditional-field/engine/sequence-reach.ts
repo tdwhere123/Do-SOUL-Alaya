@@ -2,6 +2,7 @@ import type { Derivation, ProductStateKey, QueryProgram, Transition } from "@do-
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import type { QueryRelation } from "../query/compile-query.js";
 import { transitionKey } from "./path-composition.js";
+import { derivationForest, evaluateDerivation, reviseDerivations } from "./path-derivation.js";
 import type { AdjacencyRow } from "./path-matching.js";
 
 /** A hop that already failed for lack of a target revision. */
@@ -28,6 +29,7 @@ const programIds = new WeakMap<QueryProgram, string>();
 const structuralIds = new Map<string, string>();
 let nextProgramKey = 0;
 const reachByOwner = new WeakMap<object, Map<string, SequenceReach>>();
+const bytesByOwner = new WeakMap<object, number>();
 
 function programStorageId(program: QueryProgram): string {
   let key = programIds.get(program);
@@ -77,35 +79,67 @@ export function readSequenceReach(owner: object, key: string): SequenceReach | u
   return reachByOwner.get(owner)?.get(key);
 }
 
-export function writeSequenceReach(owner: object, key: string, reach: SequenceReach): void {
+export function sequenceReachFootprint(reach: SequenceReach): number {
+  return Buffer.byteLength(JSON.stringify(reach), "utf8");
+}
+
+export function sequenceReachAccountBytes(owner: object | undefined): number {
+  if (owner === undefined) return 0;
+  return bytesByOwner.get(owner) ?? 0;
+}
+
+export function reserveSequenceReach(owner: object, bytes: number): void {
+  if (bytes <= 0) return;
+  bytesByOwner.set(owner, sequenceReachAccountBytes(owner) + bytes);
+}
+
+export function releaseSequenceReach(owner: object, bytes: number): void {
+  if (bytes <= 0) return;
+  const next = sequenceReachAccountBytes(owner) - bytes;
+  if (next <= 0) bytesByOwner.delete(owner);
+  else bytesByOwner.set(owner, next);
+}
+
+function reachBucket(owner: object): Map<string, SequenceReach> {
   let bucket = reachByOwner.get(owner);
   if (bucket === undefined) {
     bucket = new Map();
     reachByOwner.set(owner, bucket);
   }
+  return bucket;
+}
+
+/** Replace one stored frontier and move its bytes onto the persistent owner. */
+export function replaceSequenceReach(owner: object, key: string, reach: SequenceReach): void {
+  const bucket = reachBucket(owner);
+  const prior = bucket.get(key);
+  if (prior !== undefined) releaseSequenceReach(owner, sequenceReachFootprint(prior));
   bucket.set(key, reach);
+  reserveSequenceReach(owner, sequenceReachFootprint(reach));
+}
+
+export function writeSequenceReach(owner: object, key: string, reach: SequenceReach): void {
+  replaceSequenceReach(owner, key, reach);
+}
+
+export function transferSequenceReachCharge(
+  field: Readonly<{ sequence_reach_bytes?: number }>,
+  owner: object | undefined
+): Readonly<{ sequence_reach_bytes: number; delta: number }> {
+  const sequence_reach_bytes = sequenceReachAccountBytes(owner);
+  return { sequence_reach_bytes, delta: sequence_reach_bytes - (field.sequence_reach_bytes ?? 0) };
 }
 
 /** A revised or withdrawn assertion must not keep the hop it already contributed. */
 export function sequenceReachWithoutAssertions(reach: SequenceReach, assertionIds: ReadonlySet<string>): SequenceReach {
   if (assertionIds.size === 0) return reach;
-  const forest = derivationForest(reach.derivations);
-  const droppedRoots = new Set<string>();
-  const transitions = reach.transitions.filter((edge) => {
-    if (!transitionCarriesAssertion(edge, reach.roots, forest, assertionIds)) return true;
-    droppedRoots.add(transitionKey(edge));
-    return false;
-  });
-  const roots: Record<string, string> = {};
-  for (const [key, value] of Object.entries(reach.roots)) {
-    if (droppedRoots.has(key) || derivationTreeNamesAssertion(value, forest, assertionIds)) continue;
-    roots[key] = value;
-  }
+  const revised = reviseStoredDerivations(reach.derivations, assertionIds);
+  const kept = transitionsAfterWithdrawal(reach, revised, assertionIds);
   return {
     states: reach.states,
-    transitions,
-    derivations: reach.derivations.filter((row) => !derivationTreeNamesAssertion(row.derivation_id, forest, assertionIds)),
-    roots,
+    transitions: kept.transitions,
+    derivations: revised.derivations,
+    roots: kept.roots,
     unresolved: reach.unresolved.filter((pair) => !assertionIds.has(pair.row.assertionId))
   };
 }
@@ -115,14 +149,103 @@ export function dropSequenceReachAssertion(owner: object | undefined, assertionI
   const bucket = reachByOwner.get(owner);
   if (bucket === undefined) return;
   const ids = new Set([assertionId]);
-  for (const [key, reach] of bucket) {
+  for (const [key, reach] of [...bucket]) {
     if (!reachMentionsAssertion(reach, assertionId)) continue;
-    bucket.set(key, sequenceReachWithoutAssertions(reach, ids));
+    replaceSequenceReach(owner, key, sequenceReachWithoutAssertions(reach, ids));
   }
 }
 
-function derivationForest(rows: readonly Derivation[]): Map<string, Derivation> {
-  return new Map(rows.map((row) => [row.derivation_id, row]));
+type RevisedDerivations = Readonly<{
+  derivations: readonly Derivation[];
+  alias: ReadonlyMap<string, string | undefined>;
+}>;
+
+function reviseStoredDerivations(rows: readonly Derivation[], assertionIds: ReadonlySet<string>): RevisedDerivations {
+  let derivations = rows;
+  let alias = new Map<string, string | undefined>(rows.map((row) => [row.derivation_id, row.derivation_id]));
+  for (const assertionId of assertionIds) {
+    const revised = reviseDerivations(derivations, assertionId);
+    const next = new Map<string, string | undefined>();
+    for (const [original, current] of alias) {
+      if (current === undefined) next.set(original, undefined);
+      else next.set(original, revised.roots.has(current) ? revised.roots.get(current) : current);
+    }
+    alias = next;
+    derivations = revised.derivations;
+  }
+  return { derivations, alias };
+}
+
+function transitionsAfterWithdrawal(
+  reach: SequenceReach,
+  revised: RevisedDerivations,
+  assertionIds: ReadonlySet<string>
+): {
+  readonly transitions: Transition[];
+  readonly roots: Record<string, string>;
+} {
+  const forest = derivationForest(revised.derivations);
+  const grades = leafGrades(revised.derivations);
+  const transitions: Transition[] = [];
+  const roots: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const edge of reach.transitions) {
+    const next = survivingTransition(edge, reach.roots[transitionKey(edge)], revised.alias, assertionIds, grades, forest);
+    if (next === undefined) continue;
+    const key = transitionKey(next.edge);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    transitions.push(next.edge);
+    if (next.root !== undefined) roots[key] = next.root;
+  }
+  return { transitions, roots };
+}
+
+function leafGrades(rows: readonly Derivation[]): Map<string, number> {
+  const grades = new Map<string, number>();
+  for (const row of rows) {
+    if (row.association_milligrades === undefined) continue;
+    grades.set(row.derivation_id, row.association_milligrades);
+    for (const id of row.leaf_ids) grades.set(id, row.association_milligrades);
+  }
+  return grades;
+}
+
+function survivingTransition(
+  edge: Transition,
+  rootId: string | undefined,
+  alias: ReadonlyMap<string, string | undefined>,
+  assertionIds: ReadonlySet<string>,
+  grades: ReadonlyMap<string, number>,
+  forest: ReturnType<typeof derivationForest>
+): { readonly edge: Transition; readonly root?: string } | undefined {
+  const root = rootId === undefined ? undefined : mappedDerivation(rootId, alias);
+  // A root that lost every child no longer proves this hop.
+  if (rootId !== undefined && root === undefined) return undefined;
+  const instance = retargetInstance(edge.instance_id, root, alias, assertionIds);
+  if (instance === null) return undefined;
+  let next = instance === edge.instance_id ? edge : { ...edge, instance_id: instance };
+  if (root !== undefined && root !== rootId) {
+    const grade = evaluateDerivation(forest, root, grades);
+    if (grade !== undefined && grade !== next.strength_milligrades) next = { ...next, strength_milligrades: grade };
+  }
+  return root === undefined ? { edge: next } : { edge: next, root };
+}
+
+function mappedDerivation(id: string, alias: ReadonlyMap<string, string | undefined>): string | undefined {
+  return alias.has(id) ? alias.get(id) : id;
+}
+
+function retargetInstance(
+  instanceId: string | undefined,
+  root: string | undefined,
+  alias: ReadonlyMap<string, string | undefined>,
+  assertionIds: ReadonlySet<string>
+): string | undefined | null {
+  if (instanceId === undefined) return undefined;
+  const withdrawn = idNamesAssertion(instanceId, assertionIds) || (alias.has(instanceId) && alias.get(instanceId) === undefined);
+  if (withdrawn) return root === undefined ? null : root;
+  return alias.has(instanceId) ? alias.get(instanceId) : instanceId;
 }
 
 function transitionCarriesAssertion(

@@ -34,6 +34,7 @@ import {
 import type { BoundSourceFacts } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
+import { restoredFieldFootprint } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
 import { RequestCostLedger } from "../../../../recall/runtime/request-cost-ledger.js";
 import type { ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
@@ -183,6 +184,37 @@ function drain<T>(steps: Generator<unknown, T>): T {
   let next = steps.next();
   while (!next.done) next = steps.next();
   return next.value;
+}
+
+function resumeOnAutomaton(
+  state: FieldEngineState,
+  rows: readonly AdjacencyRow[],
+  sourceFacts: ReadonlyMap<string, BoundSourceFacts>,
+  joinRows?: readonly AdjacencyRow[]
+): FieldEngineState {
+  const automaton = state.compiled_automaton;
+  return resumePathEffects({
+    ...state,
+    remaining_exploration: 200_000,
+    memory_exhausted: false,
+    retention_rejected: undefined,
+    pending_path_effects: {
+      offset: 0, retained_bytes: 0, page: observerPage(state),
+      input: { rows, options: {
+        interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts,
+        liveStates: state.seen_identities, facets: state.facets, discoveries: state.discoveries,
+        bindingContexts: state.binding_contexts,
+        ...(automaton === undefined ? {} : { compiledAutomaton: automaton }),
+        ...(joinRows === undefined ? {} : { joinRows })
+      } }
+    }
+  });
+}
+
+function acceptingBindings(state: FieldEngineState): string[] {
+  const projected = project(state);
+  if (!Array.isArray(projected.bindings)) return [];
+  return projected.bindings.flatMap((row) => row.accepting ? [`${row.subject}|${row.binding}`] : []);
 }
 
 describe("incremental relation-row join", () => {
@@ -707,13 +739,72 @@ describe("incremental relation-row join", () => {
       });
       const pending = candidate.pending_path_effects;
       // A later full pass recomputes the guard. This budget can publish before that pass.
-      if (pending?.input.options.joinRows === undefined && pending.population_checked !== true
+      if (pending !== undefined && pending.input.options.joinRows === undefined && pending.population_checked !== true
         && candidate.remaining_exploration === 0) { stopped = candidate; break; }
     }
     expect(stopped?.last_observer_status).toBe("interrupted");
     expect(stopped?.pending_path_effects?.input.options.liveStateOffset).toBe(0);
     expect(stopped?.seen_identities.length).toBe(established.seen_identities.length);
     expect(stopped?.observation_gaps?.guards).toBe(true);
+  });
+
+  it("keeps an independently supported sequence hop when one or-child is withdrawn", () => {
+    const inner: QueryProgram = { schema_version: 1, kind: "hyperedge", join: "or", premises: [hop("p", "x", "m")] };
+    const steps = [inner, hop("r", "m", "y")];
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps };
+    const program = sequenceHyperedge(steps);
+    const automaton = compileProgramAutomaton(program);
+    const state = { ...seeded(program), compiled_automaton: automaton };
+    const p1 = edge("p", "a", "m", "p1");
+    const p2 = edge("p", "a", "m", "p2");
+    const r1 = edge("r", "m", "y", "r1");
+    const source = facts(["a", "m", "y"]);
+    const warmed = resumeOnAutomaton(state, [p1, p2], source);
+    const from = state.seen_identities.at(0)!;
+    const withdrawn = withdrawDerivationLeaves(warmed, "p1");
+    const surviving = readSequenceReach(automaton, sequenceReachKey(sequence, productStateNodeId(from)));
+    const incremental = resumeOnAutomaton(withdrawn, [p2, r1], source, [r1]);
+    const fresh = resumeOnAutomaton({ ...seeded(program), compiled_automaton: compileProgramAutomaton(program) }, [p2, r1], source);
+    expect({
+      pending: incremental.pending_path_effects !== undefined,
+      gaps: incremental.observation_gaps,
+      keptHop: (surviving?.transitions.length ?? 0) > 0,
+      keptP2: surviving?.derivations.some((row) => row.leaf_ids.includes("p2")) === true,
+      droppedP1: surviving?.derivations.some((row) => row.leaf_ids.includes("p1")) === true,
+      accepted: acceptingBindings(incremental),
+      fresh: acceptingBindings(fresh)
+    }).toEqual({
+      pending: false,
+      gaps: { guards: false, measurements: false },
+      keptHop: true,
+      keptP2: true,
+      droppedP1: false,
+      accepted: ["y|m=m;x=a;y=y"],
+      fresh: ["y|m=m;x=a;y=y"]
+    });
+  });
+
+  it("charges the surviving sequence cache on the restored field footprint", () => {
+    const steps = [hop("p", "x", "m"), hop("q", "m", "y")];
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps };
+    const program = sequenceHyperedge(steps);
+    const automaton = compileProgramAutomaton(program);
+    const state = { ...seeded(program), compiled_automaton: automaton };
+    const warmed = resumeOnAutomaton(state, [edge("p", "a", "m", "only-p")], facts(["a", "m", "y"]));
+    const from = state.seen_identities.at(0)!;
+    const reach = readSequenceReach(automaton, sequenceReachKey(sequence, productStateNodeId(from)));
+    const cacheBytes = Buffer.byteLength(JSON.stringify(reach), "utf8");
+    const charged = warmed.sequence_reach_bytes ?? 0;
+    const counted = restoredFieldFootprint(warmed) - restoredFieldFootprint({ ...warmed, sequence_reach_bytes: 0 });
+    const remainingDrop = state.remaining_memory_bytes - warmed.remaining_memory_bytes;
+    expect(warmed.pending_path_effects).toBeUndefined();
+    expect(warmed.transitions).toHaveLength(0);
+    expect(reach?.states.length).toBeGreaterThan(0);
+    expect(reach?.transitions.length).toBeGreaterThan(0);
+    expect(reach?.derivations.length).toBeGreaterThan(0);
+    expect({ charged, counted, cacheBytes, remainingDrop }).toEqual({
+      charged: cacheBytes, counted: cacheBytes, cacheBytes, remainingDrop: cacheBytes
+    });
   });
 });
 

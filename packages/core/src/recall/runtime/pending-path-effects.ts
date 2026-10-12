@@ -1,5 +1,6 @@
 import { productEndpointId, type ObserverPage } from "@do-soul/alaya-protocol";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
+import { transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
 import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition-adjacency.js";
 import type { PathEffectPreparation } from "../conditional-field/engine/path-effect-cursor.js";
 import { pairKey } from "../conditional-field/engine/path-routing.js";
@@ -184,7 +185,7 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
     population_checked: populationChecked,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   const frontierFacts = populationChecked ? applied.source_facts : state.path_effect_frontier?.sourceFacts;
-  return { ...applied, resume_subjects: subjects,
+  const committed = { ...applied, resume_subjects: subjects,
     pair_demands: preparation.pair_demands, pair_demand_bytes: state.pair_demand_bytes + preparation.pair_bytes,
     source_fact_demands: preparation.source_demands, source_fact_demand_bytes: state.source_fact_demand_bytes + preparation.source_bytes,
     source_fact_pending_count: preparation.source_pending,
@@ -200,6 +201,20 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
       - ((applied.binding_contexts?.bytes ?? 0) - (prior.bindingContexts?.bytes ?? 0)) : 0),
     ...(finished && !semanticDelta ? {} : { last_observer_status: "interrupted" as const,
       closure: { ...applied.closure, observation: "interrupted" as const, requested_index: "open" as const } }) };
+  // The cursor refunds its scratch above. The cache outlives that cursor.
+  if (!finished) return committed;
+  return chargeSequenceReach(committed, prior.compiledAutomaton ?? prior.interpretation);
+}
+
+function chargeSequenceReach(state: FieldEngineState, owner: object): FieldEngineState {
+  const charge = transferSequenceReachCharge(state, owner);
+  if (charge.delta === 0 && (state.sequence_reach_bytes ?? 0) === charge.sequence_reach_bytes) return state;
+  return {
+    ...state,
+    sequence_reach_bytes: charge.sequence_reach_bytes,
+    admitted_allocation_bytes: state.admitted_allocation_bytes + Math.max(0, charge.delta),
+    remaining_memory_bytes: state.remaining_memory_bytes - charge.delta
+  };
 }
 
 function interrupted(state: FieldEngineState, memory: boolean): FieldEngineState {
