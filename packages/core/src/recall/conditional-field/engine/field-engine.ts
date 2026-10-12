@@ -118,7 +118,7 @@ export type FieldClosureFacts = Readonly<{
 }>;
 
 export type RemainingWork = Readonly<{
-  readonly kind: "state_create" | "join" | "relaxation" | "provenance" | "projection";
+  readonly kind: "state_create" | "join" | "relaxation" | "provenance" | "projection" | "observe";
   readonly units: number;
 }>;
 
@@ -434,7 +434,7 @@ export function withdrawDerivationLeaves(
   const sequenceOwner = forkSequenceReachOwner(state.sequence_reach_owner ?? state.compiled_automaton);
   dropSequenceReachAssertion(sequenceOwner, withdrawnLeafId);
   const sequenceCharge = transferSequenceReachCharge(state, sequenceOwner);
-  return bindEngineState({
+  const withdrawn = bindEngineState({
     ...rest,
     sequence_reach_owner: sequenceOwner,
     ...sequenceReachBalance(state, sequenceCharge),
@@ -461,6 +461,57 @@ export function withdrawDerivationLeaves(
     transition_derivations: transitionRoots,
     support
   });
+  const listedRelation = [...state.observed_relations ?? []].some((row) => row.assertionId === withdrawnLeafId);
+  const oweScan = (state.sequence_reach_bytes ?? 0) > 0 && !listedRelation;
+  return rebuildPendingPathEffects(withdrawn, state.pending_path_effects, oweScan);
+}
+
+// A withdrawal invalidates a pass that already read the old population. The open pending
+// still holds that population; a finished frontier does not hold a path-effect input.
+function rebuildPendingPathEffects(
+  state: FieldEngineState,
+  pending: FieldEngineState["pending_path_effects"],
+  oweScan: boolean
+): FieldEngineState {
+  if (pending === undefined) {
+    // Listed relation withdrawals stay on the derivation graph. A charged sequence
+    // pass whose rows were not retained has no path-effect input left to restart.
+    if (!oweScan || state.path_effect_frontier === undefined) return state;
+    return markUnexecutedRebuild({ ...state, path_effect_frontier: undefined });
+  }
+  const withdrawnIds = new Set(state.withdrawn_leaves ?? []);
+  const { joinRows: _joinRows, sequenceReachOwner: _sequenceReachOwner, liveStateOffset: _liveStateOffset, ...options } = pending.input.options;
+  return markUnexecutedRebuild({
+    ...state,
+    path_effect_frontier: undefined,
+    pending_path_effects: {
+      offset: 0,
+      retained_bytes: 0,
+      page: { ...pending.page, observations: [] },
+      input: {
+        rows: [...pending.input.rows].filter((row) => !withdrawnIds.has(row.assertionId)),
+        options: {
+          ...options,
+          liveStateOffset: 0,
+          liveStates: state.seen_identities,
+          facets: state.facets,
+          discoveries: state.discoveries,
+          bindingContexts: state.binding_contexts,
+          ...(state.compiled_automaton === undefined ? {} : { compiledAutomaton: state.compiled_automaton })
+        }
+      }
+    },
+    remaining_memory_bytes: state.remaining_memory_bytes + pending.retained_bytes + (pending.preparation?.retained_bytes ?? 0)
+  });
+}
+
+function markUnexecutedRebuild(state: FieldEngineState): FieldEngineState {
+  const remaining_work = state.remaining_work.some((row) => row.kind === "observe")
+    ? state.remaining_work
+    : Object.freeze([...state.remaining_work, { kind: "observe" as const, units: 1 }]);
+  // Solver fixed_point is numeric. It must not present this pass as exhausted.
+  const open = { ...state, remaining_work, last_observer_status: "open" as const };
+  return Object.freeze({ ...open, closure: closureFacts(open, state.closure.propagation) });
 }
 
 function sequenceReachBalance(

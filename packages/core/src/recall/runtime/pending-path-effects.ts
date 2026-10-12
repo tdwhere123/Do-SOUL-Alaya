@@ -205,9 +205,19 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
     ...(finished && !semanticDelta ? {} : { last_observer_status: "interrupted" as const,
       closure: { ...applied.closure, observation: "interrupted" as const, requested_index: "open" as const } }) };
   // The cursor refunds its scratch above. The cache outlives that cursor.
-  if (!finished) return committed;
-  return chargeSequenceReach(committed, prior.sequenceReachOwner ?? committed.sequence_reach_owner
+  // A suffix scheduled by the full pass is still that pass. A row delta is not.
+  const restartedPopulation = prior.joinRows === undefined
+    && ((prior.liveStateOffset ?? 0) === 0 || pending.population_checked === true);
+  const fullPass = finished && next === undefined && restartedPopulation;
+  const settled = settleRebuildObligation(committed, fullPass);
+  if (!finished) return settled;
+  return chargeSequenceReach(settled, prior.sequenceReachOwner ?? settled.sequence_reach_owner
     ?? prior.compiledAutomaton ?? prior.interpretation);
+}
+
+function settleRebuildObligation(state: FieldEngineState, fullPass: boolean): FieldEngineState {
+  if (!fullPass || state.remaining_work.every((row) => row.kind !== "observe")) return state;
+  return { ...state, remaining_work: state.remaining_work.filter((row) => row.kind !== "observe") };
 }
 
 function ownSequenceReach(
