@@ -15,6 +15,7 @@ import {
   writeSync
 } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 
 // Child proof process strip-types-loads this file; a .js specifier cannot see sibling .ts.
 const NO_FOLLOW = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
@@ -230,7 +231,7 @@ export function sqlitePathForOpenedRegularFile(openedPath: string, namedPath: st
   const real = realpathSync(namedPath);
   const onDisk = statSync(real);
   if (!onDisk.isFile() || !sameFileIdentity(opened, fileIdentity(onDisk))) {
-    throw new Error(`${namedPath} no longer matches the opened snapshot`);
+    throw new AlayaError("CONFLICT", `${namedPath} no longer matches the opened snapshot`);
   }
   return real;
 }

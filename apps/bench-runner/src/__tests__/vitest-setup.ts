@@ -1,7 +1,19 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { vi } from "vitest";
+import { beforeEach, onTestFinished, vi } from "vitest";
+import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal, settleActiveBenchDaemonTasks } from "../harness/daemon-task.js";
+
+beforeEach((context) => {
+  bindBenchDaemonTestSignal(context.signal);
+  onTestFinished(async () => {
+    try {
+      await settleActiveBenchDaemonTasks();
+    } finally {
+      clearBenchDaemonTestSignal(context.signal);
+    }
+  });
+});
 
 vi.mock("node:dns/promises", () => ({
   lookup: vi.fn(async (_host: string, options?: { all?: boolean }) => {
