@@ -10,7 +10,7 @@ const UNIX_EPOCH_TICKS = 621355968000000000n;
 const CREATION_DATE =
   /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.(\d{6})([+-])(\d{3})$/u;
 
-// PowerShell does not finish starting when profile paths are absent from the child environment.
+// cscript //B discards WScript.Echo, so the date and the absent token use StdOut.WriteLine.
 const WINDOWS_PROCESS_START_SCRIPT = [
   "var pid = WScript.Arguments(0);",
   "if (!/^\\d+$/.test(String(pid))) {",
@@ -27,7 +27,7 @@ const WINDOWS_PROCESS_START_SCRIPT = [
   "  );",
   "  var matches = new Enumerator(processes);",
   "  if (matches.atEnd()) {",
-  "    WScript.Echo('absent');",
+  "    WScript.StdOut.WriteLine('absent');",
   "    WScript.Quit(0);",
   "  }",
   "  var created = matches.item().CreationDate;",
@@ -35,7 +35,7 @@ const WINDOWS_PROCESS_START_SCRIPT = [
   "    WScript.StdErr.WriteLine('missing creation date');",
   "    WScript.Quit(1);",
   "  }",
-  "  WScript.Echo(String(created));",
+  "  WScript.StdOut.WriteLine(String(created));",
   "} catch (error) {",
   "  var message = error && error.description ? error.description : String(error);",
   "  WScript.StdErr.WriteLine(message);",

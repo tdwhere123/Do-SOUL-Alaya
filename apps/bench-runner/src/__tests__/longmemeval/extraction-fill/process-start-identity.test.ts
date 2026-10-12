@@ -86,7 +86,9 @@ describe("process start identity", () => {
     expect(args.at(-1)).toBe(String(process.pid));
     const script = readFileSync(String(args[3]), "utf8");
     expect(script).toContain("WbemScripting.SWbemLocator");
-    expect(script).toContain("absent");
+    expect(script).toContain("WScript.StdOut.WriteLine('absent')");
+    expect(script).toContain("WScript.StdOut.WriteLine(String(created))");
+    expect(script).not.toMatch(/WScript\.Echo\(/u);
     expect(script.toLowerCase()).not.toContain("powershell");
   });
 
