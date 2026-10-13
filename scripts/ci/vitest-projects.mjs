@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import durations from "./bench-test-durations.json" with { type: "json" };
+
 /** Vitest projects Quality runs, and the floors checked after coverage is assembled. */
 
 export const VITEST_PROJECTS = [
@@ -91,4 +94,60 @@ export function projectsForGroup(group) {
     throw new Error(`unknown vitest project group ${group}`);
   }
   return selected;
+}
+
+export function parseShard(shard) {
+  const match = /^(\d+)\/(\d+)$/u.exec(shard ?? "");
+  if (match === null) return undefined;
+  const index = Number(match[1]);
+  const count = Number(match[2]);
+  if (!Number.isSafeInteger(count) || count < 1 || index < 1 || index > count) return undefined;
+  return { index, count };
+}
+
+export function benchShardPaths({ index, count }) {
+  const name = `bench-${index}-of-${count}`;
+  return {
+    partition: `.cache/ci-shards/${name}.json`,
+    reports: `.cache/ci-shards/${name}-coverage`,
+    blob: `coverage/${name}.json`
+  };
+}
+
+export function filesDigest(files) {
+  return createHash("sha256").update(JSON.stringify([...files].sort())).digest("hex");
+}
+
+export function partitionBenchFiles(files, count, weights = durations.weights, unknownWeight = durations.unknownFileSeconds) {
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error("invalid shard count");
+  if (new Set(files).size !== files.length) throw new Error("duplicate test file");
+  const entries = files.map((file) => ({ file, weight: weights[file] ?? unknownWeight }));
+  if (entries.some(({ weight }) => !Number.isFinite(weight) || weight <= 0)) {
+    throw new Error("invalid test duration weight");
+  }
+  entries.sort((a, b) => b.weight - a.weight || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  const bins = Array.from({ length: count }, () => ({ files: [], weight: 0 }));
+  for (const { file, weight } of entries) {
+    const lightest = bins.reduce((a, b) => a.weight <= b.weight ? a : b);
+    lightest.files.push(file);
+    lightest.weight += weight;
+  }
+  return bins.map(({ files: assigned }) => assigned);
+}
+
+export function createVitestEnv(coverageEnabled, source = process.env) {
+  const env = { ...source };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("npm_")) delete env[key];
+  }
+  // vitest.config.mjs budgets ~3.5 GiB/worker (~7 GiB under coverage). Node's
+  // default old-space is ~2 GiB and coverage + live daemon fixtures exceed it.
+  delete env.ALAYA_SHARD_PROJECTS;
+  if (!/(?:^|\s)--max-old-space-size=/.test(env.NODE_OPTIONS ?? "")) {
+    const heapMb = coverageEnabled ? 6144 : 3584;
+    env.NODE_OPTIONS = [env.NODE_OPTIONS, `--max-old-space-size=${heapMb}`]
+      .filter((part) => part !== undefined && part.length > 0)
+      .join(" ");
+  }
+  return env;
 }

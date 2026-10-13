@@ -180,6 +180,17 @@ async function callRecall(
   return response.output as SoulMemorySearchResponse & { index: InformationIndex };
 }
 
+async function openContinuationSlice() {
+  const directory = await mkdtemp(join(tmpdir(), "alaya-worker-continuation-"));
+  directories.push(directory);
+  const filename = join(directory, "field.sqlite");
+  const slice = await openBoundSlice((database) => databases.add(database), filename);
+  plantSourceRecord(slice.database, SOURCE_BODY);
+  await slice.writeMemory(MEM.r, "needle first", MemoryDimension.FACT);
+  await slice.writeMemory(MEM.c, "needle second", MemoryDimension.FACT);
+  return { filename, slice };
+}
+
 function milligradeValue(objectId: string, milligrades: number): FieldValue {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -417,14 +428,8 @@ describe("CP09 worker MCP CLI surfaces", () => {
     }
   });
 
-  it("invalidates continuation after worker restart and lease expiry without protected bytes", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "alaya-cp09-lease-"));
-    directories.push(directory);
-    const filename = join(directory, "field.sqlite");
-    const slice = await openBoundSlice((database) => databases.add(database), filename);
-    plantSourceRecord(slice.database, SOURCE_BODY);
-    await slice.writeMemory(MEM.r, "needle first", MemoryDimension.FACT);
-    await slice.writeMemory(MEM.c, "needle second", MemoryDimension.FACT);
+  it("invalidates continuation after worker restart without protected bytes and admits a fresh recall", async () => {
+    const { filename, slice } = await openContinuationSlice();
     const firstWorker = createRecallReadWorkerClient({
       databaseFilename: filename, workerCount: 1, workerUrl: recallReadWorkerUrl()
     });
@@ -459,17 +464,28 @@ describe("CP09 worker MCP CLI surfaces", () => {
     if (restarted === null) throw new Error("real worker required");
     try {
       await restarted.ready();
+      const handler = handlerFor(slice.database, serviceFor(slice.database, () => NOW, restarted));
       const lost = await callRecall(
-        handlerFor(slice.database, serviceFor(slice.database, () => NOW, restarted)),
+        handler,
         { query: "needle", max_results: 1, continuation: first.index.continuation }
       );
       expect(lost.index.completeness.logical_index).toBe("invalidated");
       expect(lost.index.continuation).toBeNull();
       expect(JSON.stringify(lost)).not.toContain(SOURCE_BODY);
-      expect(JSON.stringify(lost.results)).not.toContain("needle first");
+      expect(lost.results).toEqual([]);
+      const fresh = await callRecall(handler, { query: "needle", max_results: 1 });
+      expect(fresh.index.continuation).not.toBeNull();
+      expect(fresh.results.length).toBeGreaterThan(0);
+      expect(fresh.results.map((row) => row.object_id ?? row.target)).toEqual(
+        first.results.map((row) => row.object_id ?? row.target)
+      );
     } finally {
       await restarted.close();
     }
+  });
+
+  it("invalidates continuation after lease expiry without protected bytes and admits a fresh recall", async () => {
+    const { filename, slice } = await openContinuationSlice();
     let now = NOW;
     const live = createRecallReadWorkerClient({
       databaseFilename: filename, workerCount: 1, workerUrl: recallReadWorkerUrl()
@@ -477,17 +493,24 @@ describe("CP09 worker MCP CLI surfaces", () => {
     if (live === null) throw new Error("real worker required");
     try {
       await live.ready();
-      const opened = await callRecall(
-        handlerFor(slice.database, serviceFor(slice.database, () => now, live)),
-        { query: "needle", max_results: 1 }
-      );
+      const handler = handlerFor(slice.database, serviceFor(slice.database, () => now, live));
+      const opened = await callRecall(handler, { query: "needle", max_results: 1 });
+      expect(opened.index.continuation).not.toBeNull();
       now = "2026-09-07T01:00:00.000Z";
       const expired = await callRecall(
-        handlerFor(slice.database, serviceFor(slice.database, () => now, live)),
+        handler,
         { query: "needle", max_results: 1, continuation: opened.index.continuation }
       );
       expect(expired.index.completeness.logical_index).toBe("invalidated");
       expect(expired.index.continuation).toBeNull();
+      expect(JSON.stringify(expired)).not.toContain(SOURCE_BODY);
+      expect(expired.results).toEqual([]);
+      const fresh = await callRecall(handler, { query: "needle", max_results: 1 });
+      expect(fresh.index.continuation).not.toBeNull();
+      expect(fresh.results.length).toBeGreaterThan(0);
+      expect(fresh.results.map((row) => row.object_id ?? row.target)).toEqual(
+        opened.results.map((row) => row.object_id ?? row.target)
+      );
     } finally {
       await live.close();
     }

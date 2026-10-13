@@ -537,7 +537,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("stops before SQLite restore when the snapshot cannot fit the remaining disk allowance", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const prepared = readChainArtifact(f.config.prepared_path) as { rows: { chain_root: string }[] };
     const plan = readChainArtifact(join(prepared.rows[0]!.chain_root, "prepare.json")) as {
       config: { snapshot_path: string } };
@@ -556,7 +556,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("keeps zero page attempts unattempted through evaluation", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const observed = await observeSourceAccessDiagnostic({ ...f.config,
       limits: { ...f.config.limits, max_total_work: 1 } }, join(f.root, "work-stopped"));
     expect(observed.result.stop_reason).toBe("logical_work_limit");
@@ -569,7 +569,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("rejects output roots reached through physical aliases of source or observation trees", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const sourceAlias = join(f.root, "source-alias");
     await symlink(f.config.source_run_root, sourceAlias, "dir");
     await expect(observeSourceAccessDiagnostic(f.config, join(sourceAlias, "alias-observe")))
@@ -588,7 +588,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("rejects mismatched membership before reopening a source and parses CLI arguments strictly", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const observed = await observeSourceAccessDiagnostic({ ...f.config,
       expected_question_ids: ["not-the-frozen-question"] }, join(f.root, "rejected"));
     expect(observed.result.rows.map((row) => row.status)).toEqual(["unattempted", "unattempted"]);
@@ -597,16 +597,18 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("runs the separate observe and gold-evaluate CLI operations on a synthetic snapshot", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const configPath = join(f.root, "access-config.json");
     await writeFile(configPath, JSON.stringify(f.config));
     const observedRoot = join(f.root, "cli-observed"), evaluatedRoot = join(f.root, "cli-evaluated");
     expect(await runSourceAccessDiagnosticLauncher(["observe", "--config", configPath, "--out", observedRoot])).toBe(0);
     const observed = SourceAccessDiagnosticObservationSchema.parse(readChainArtifact(join(observedRoot, "observation.json")));
     expect(observed.rows.map((row) => row.status)).toEqual(["observed", "observed"]);
+    expect(observed.rows.map((row) => row.retained_source_count)).toEqual([1, 1]);
     expect(await runSourceAccessDiagnosticLauncher(["evaluate", "--observation",
       join(observedRoot, "observation.json"), "--out", evaluatedRoot])).toBe(0);
     const evaluated = SourceAccessDiagnosticEvaluationSchema.parse(readChainArtifact(join(evaluatedRoot, "evaluation.json")));
     expect(evaluated.rows.every((row) => row.status === "measured")).toBe(true);
+    expect(evaluated.rows.map((row) => row.first_gold_source_rank)).toEqual([1, 1]);
   }, 120000);
 });

@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { PROJECT_COVERAGE, projectsForGroup, sanitizeProjectName } from "./vitest-projects.mjs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { PROJECT_COVERAGE, benchShardPaths, createVitestEnv, parseShard, projectsForGroup, sanitizeProjectName } from "./vitest-projects.mjs";
 
 const parsed = parseArgs(process.argv.slice(2));
 const selected = projectsForGroup(parsed.group);
 const isWindows = process.platform === "win32";
-const childEnv = createChildEnv(parsed.coverageEnabled);
+const childEnv = createVitestEnv(parsed.coverageEnabled);
 const completed = [];
+if (parsed.shard !== undefined) {
+  const paths = benchShardPaths(parsed.shard);
+  rmSync(paths.partition, { force: true });
+  rmSync(paths.blob, { force: true });
+}
+recordCompleted(parsed.projectsFile, completed);
 
 for (const project of selected) {
   console.log(`\n==> vitest project: ${project}`);
@@ -33,12 +40,20 @@ function parseArgs(argv) {
   const groupArg = argv.find((arg) => arg.startsWith("--group="));
   const projectsFileArg = argv.find((arg) => arg.startsWith("--projects-file="));
   const deferThresholds = argv.includes("--defer-coverage-thresholds");
+  const shardIndex = argv.findIndex((arg) => arg === "--shard" || arg.startsWith("--shard="));
+  const shardArg = argv[shardIndex];
+  const shard = shardIndex < 0 ? undefined : parseShard(shardArg === "--shard"
+    ? argv[shardIndex + 1] : shardArg.slice("--shard=".length));
+  if (shardIndex >= 0 && (shard === undefined || groupArg !== "--group=bench-runner")) {
+    throw new Error("file sharding requires --group=bench-runner and a valid --shard=index/count");
+  }
   const vitestArgs = argv.filter((arg) => arg !== "--defer-coverage-thresholds"
     && !arg.startsWith("--group=")
     && !arg.startsWith("--projects-file="));
   return {
     group: groupArg?.slice("--group=".length),
     deferThresholds,
+    shard,
     vitestArgs,
     coverageEnabled: vitestArgs.some(
       (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
@@ -56,24 +71,18 @@ function parseArgs(argv) {
 
 function recordCompleted(projectsFile, projects) {
   if (projectsFile === undefined) return;
-  writeFileSync(projectsFile, `${JSON.stringify({ projects })}\n`);
-}
-
-function createChildEnv(coverageEnabled) {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("npm_")) delete env[key];
+  const result = { projects };
+  if (parsed.shard !== undefined && projects.length > 0) {
+    const paths = benchShardPaths(parsed.shard);
+    result.partition = JSON.parse(readFileSync(paths.partition, "utf8"));
+    if (parsed.coverageEnabled) {
+      result.coverage = {
+        format: "vitest-blob",
+        sha256: createHash("sha256").update(readFileSync(paths.blob)).digest("hex")
+      };
+    }
   }
-  // vitest.config.mjs budgets ~3.5 GiB/worker (~7 GiB under coverage). Node's
-  // default old-space is ~2 GiB and coverage + live daemon fixtures exceed it.
-  delete env.ALAYA_SHARD_PROJECTS;
-  if (!/(?:^|\s)--max-old-space-size=/.test(env.NODE_OPTIONS ?? "")) {
-    const heapMb = coverageEnabled ? 6144 : 3584;
-    env.NODE_OPTIONS = [env.NODE_OPTIONS, `--max-old-space-size=${heapMb}`]
-      .filter((part) => part !== undefined && part.length > 0)
-      .join(" ");
-  }
-  return env;
+  writeFileSync(projectsFile, `${JSON.stringify(result)}\n`);
 }
 
 function buildVitestArgs(project, parsed) {
@@ -81,6 +90,9 @@ function buildVitestArgs(project, parsed) {
     "exec", "vitest", "run", "--config", "vitest.config.mjs", "--project", project,
     ...parsed.vitestArgs,
     ...buildCoverageArgs(project, parsed),
+    ...(parsed.shard === undefined || !parsed.coverageEnabled ? [] : [
+      "--reporter=default", "--reporter=blob", `--outputFile.blob=${benchShardPaths(parsed.shard).blob}`
+    ]),
     ...windowsStorageWorkerArgs(project)
   ];
 }
@@ -97,7 +109,8 @@ function buildCoverageArgs(project, parsed) {
   const config = PROJECT_COVERAGE[project];
   const args = [];
   if (!parsed.hasCoverageReportsDirectoryArg) {
-    args.push("--coverage.reportsDirectory", `coverage/${sanitizeProjectName(project)}`);
+    args.push("--coverage.reportsDirectory", parsed.shard === undefined
+      ? `coverage/${sanitizeProjectName(project)}` : benchShardPaths(parsed.shard).reports);
   }
   if (!parsed.hasCoverageIncludeArg && config?.include !== undefined) {
     args.push(`--coverage.include=${config.include}`);

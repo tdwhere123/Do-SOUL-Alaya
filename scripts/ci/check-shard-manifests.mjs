@@ -1,33 +1,42 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PROJECT_COVERAGE, VITEST_PROJECT_GROUPS, VITEST_PROJECTS, sanitizeProjectName } from "./vitest-projects.mjs";
+import { PROJECT_COVERAGE, VITEST_PROJECT_GROUPS, VITEST_PROJECTS, benchShardPaths, createVitestEnv, filesDigest, parseShard, sanitizeProjectName } from "./vitest-projects.mjs";
 
 const GROUPS = Object.keys(VITEST_PROJECT_GROUPS);
 
-if (process.argv.includes("--self-test")) {
-  process.exit(runSelfTest());
+if (import.meta.main) {
+  if (process.argv.includes("--self-test")) {
+    process.exit(runSelfTest());
+  }
+
+  const label = requiredArg("--label");
+  const shardDir = requiredArg("--shards");
+  const coverageDir = argValue("--coverage");
+  const needsResult = argValue("--needs-result");
+  const failures = checkShards({ label, shardDir, coverageDir, needsResult });
+  if (failures.length > 0) {
+    console.error(failures.join("\n"));
+    process.exit(1);
+  }
+  console.log(`shard manifests ok for ${label}`);
 }
 
-const label = requiredArg("--label");
-const shardDir = requiredArg("--shards");
-const coverageDir = argValue("--coverage");
-const needsResult = argValue("--needs-result");
-const failures = checkShards({ label, shardDir, coverageDir, needsResult });
-if (failures.length > 0) {
-  console.error(failures.join("\n"));
-  process.exit(1);
-}
-console.log(`shard manifests ok for ${label}`);
-
-export function checkShards({ label, shardDir, coverageDir, needsResult }) {
+export function checkShards({ label, shardDir, coverageDir, needsResult, commit = currentCommit() }) {
   const failures = [];
   if (needsResult !== undefined && needsResult !== "success") {
     failures.push(`test shards finished as ${needsResult}`);
   }
   const manifests = loadManifests(shardDir, failures);
   const seen = new Map();
+  for (const group of manifests.keys()) {
+    if (!GROUPS.includes(group)) failures.push(`unknown shard group ${group}`);
+  }
   for (const group of GROUPS) {
     const groupManifests = manifests.get(group) ?? [];
     if (groupManifests.length === 0) {
@@ -38,6 +47,7 @@ export function checkShards({ label, shardDir, coverageDir, needsResult }) {
     failures.push(...shardFailures);
     if (shardFailures.length > 0) continue;
     for (const manifest of groupManifests) {
+      if (manifest.commit !== commit) failures.push(`${group} manifest commit differs from ${commit}`);
       if (manifest.label !== label) failures.push(`${group} manifest label is ${manifest.label}`);
       if (manifest.status !== "success") failures.push(`${label} ${group} status is ${manifest.status}`);
       const projects = Array.isArray(manifest.projects) ? manifest.projects : [];
@@ -55,13 +65,16 @@ export function checkShards({ label, shardDir, coverageDir, needsResult }) {
   for (const project of VITEST_PROJECTS) {
     if (!seen.has(project)) failures.push(`${label} did not run ${project}`);
   }
-  if (coverageDir !== undefined) checkCoverage(coverageDir, failures);
+  if (coverageDir !== undefined && failures.length === 0) {
+    mergeBenchCoverage(manifests.get("bench-runner"), coverageDir, label, failures);
+    if (failures.length === 0) checkCoverage(coverageDir, failures);
+  }
   return failures;
 }
 
 function checkCoverage(coverageDir, failures) {
   const found = new Map();
-  for (const summary of findSummaries(coverageDir)) {
+  for (const summary of findSummaries(coverageDir, failures)) {
     const project = summary.project;
     if (found.has(project)) failures.push(`coverage for ${project} arrived more than once`);
     found.set(project, summary.total);
@@ -82,7 +95,7 @@ function checkCoverage(coverageDir, failures) {
   }
 }
 
-function findSummaries(root) {
+function findSummaries(root, failures) {
   const summaries = [];
   const visit = (dir) => {
     if (!existsSync(dir)) return;
@@ -91,7 +104,8 @@ function findSummaries(root) {
       if (entry.isDirectory()) visit(full);
       else if (entry.name === "coverage-summary.json") {
         const project = projectFromSummary(full);
-        if (project !== undefined) summaries.push({ project, total: readTotal(full) });
+        if (project === undefined) failures.push(`unknown coverage summary ${full}`);
+        else summaries.push({ project, total: readTotal(full) });
       }
     }
   };
@@ -129,16 +143,105 @@ function shardSetFailures(group, manifests) {
   for (let index = 1; index <= count; index += 1) {
     if (!indexes.has(index)) return [`${group} missing file shard ${index}/${count}`];
   }
+  return partitionFailuresForShards(group, manifests);
+}
+
+function partitionFailuresForShards(group, manifests) {
+  const partitions = manifests.map((manifest) => manifest.partition);
+  if (group !== "bench-runner" || partitions.some((part) => part?.algorithm !== "duration-lpt"
+    || !Number.isSafeInteger(part.count) || part.count < 1 || !/^[a-f0-9]{64}$/u.test(part.digest)
+    || !Array.isArray(part.files) || part.files.some((file) => typeof file !== "string"))) {
+    return [`${group} partition metadata is missing or invalid`];
+  }
+  const first = partitions[0];
+  const files = partitions.flatMap((part) => part.files);
+  if (partitions.some((part) => part.count !== first.count || part.digest !== first.digest)
+    || new Set(files).size !== files.length || files.length !== first.count
+    || filesDigest(files) !== first.digest) return [`${group} partition is incomplete, duplicated, or inconsistent`];
   return [];
 }
 
-function parseShard(shard) {
-  const match = /^(\d+)\/(\d+)$/u.exec(shard);
-  if (match === null) return undefined;
-  const index = Number(match[1]);
-  const count = Number(match[2]);
-  if (count < 1 || index < 1 || index > count) return undefined;
-  return { index, count };
+function currentCommit() {
+  return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+}
+
+function mergeBenchCoverage(manifests, coverageDir, label, failures) {
+  if (manifests[0].shard === undefined) return;
+  const project = "@do-soul/alaya-bench-runner";
+  const destination = path.join(coverageDir, "merged", sanitizeProjectName(project));
+  const blobs = mkdtempSync(path.join(tmpdir(), "vitest-coverage-"));
+  try {
+    rmSync(path.join(coverageDir, "merged"), { recursive: true, force: true });
+    const expectedArtifacts = new Set([
+      ...GROUPS.filter((group) => group !== "bench-runner").map((group) => `coverage-${label}-${group}`),
+      ...manifests.map((manifest) => {
+        const shard = parseShard(manifest.shard);
+        return `coverage-${label}-bench-runner-${shard.index}-of-${shard.count}`;
+      })
+    ]);
+    for (const entry of readdirSafe(coverageDir)) {
+      if (!entry.isDirectory() || !expectedArtifacts.has(entry.name)) throw new Error(`unexpected coverage artifact ${entry.name}`);
+    }
+    for (const manifest of manifests) {
+      const shard = parseShard(manifest.shard);
+      const name = path.basename(benchShardPaths(shard).blob);
+      const dir = path.join(coverageDir, `coverage-${label}-bench-runner-${shard.index}-of-${shard.count}`);
+      const files = readdirSafe(dir);
+      if (files.length !== 1 || files[0].name !== name || !files[0].isFile()) {
+        throw new Error(`coverage artifact missing or unexpected for bench shard ${manifest.shard}`);
+      }
+      const source = path.join(dir, name);
+      verifyCoverageBlob(source, manifest);
+      copyFileSync(source, path.join(blobs, name));
+    }
+    const floor = PROJECT_COVERAGE[project];
+    const cli = path.join(path.dirname(fileURLToPath(import.meta.resolve("vitest/package.json"))), "vitest.mjs");
+    const result = spawnSync(process.execPath, [
+      cli, "run", "--config=vitest.config.mjs", `--project=${project}`, `--merge-reports=${blobs}`,
+      "--coverage.enabled", `--coverage.include=${floor.include}`, `--coverage.reportsDirectory=${destination}`,
+      "--coverage.reporter=text-summary", "--coverage.reporter=json-summary", "--coverage.reporter=lcov",
+      ...["statements", "lines", "functions", "branches"].map((metric) => `--coverage.thresholds.${metric}=${floor[metric]}`)
+    ], { stdio: "inherit", env: createVitestEnv(true, { ...process.env, NODE_DISABLE_COMPILE_CACHE: "1" }) });
+    if (result.error !== undefined || result.status !== 0) {
+      throw new Error(`native coverage merge failed: ${result.error?.message ?? result.status}`);
+    }
+  } catch (error) {
+    failures.push(error.message);
+  } finally {
+    rmSync(blobs, { recursive: true, force: true });
+  }
+}
+
+function verifyCoverageBlob(file, manifest) {
+  const content = readFileSync(file);
+  if (manifest.coverage?.format !== "vitest-blob"
+    || createHash("sha256").update(content).digest("hex") !== manifest.coverage.sha256) {
+    throw new Error(`coverage blob digest differs for shard ${manifest.shard}`);
+  }
+  // Vitest 4.1.11 has no public blob reader. Reject unknown envelope/version
+  // shapes here; native Vitest alone decodes and merges the coverage maps.
+  const encoded = JSON.parse(content.toString("utf8"));
+  const entry = (reference) => typeof reference === "string" && /^\d+$/u.test(reference) ? encoded[reference] : undefined;
+  const [versionRef, testsRef, errorsRef, coverageRef] = Array.isArray(encoded[0]) ? encoded[0] : [];
+  const tests = entry(testsRef);
+  const errors = entry(errorsRef);
+  const coverage = entry(coverageRef);
+  const require = createRequire(import.meta.url);
+  if (entry(versionRef) !== require("vitest/package.json").version || !Array.isArray(tests)
+    || !Array.isArray(errors) || errors.length > 0 || coverage === null || typeof coverage !== "object"
+    || Object.keys(coverage).length === 0) throw new Error(`coverage blob is incomplete or incompatible for shard ${manifest.shard}`);
+  const testFiles = tests.map((reference) => {
+    const test = entry(reference);
+    const file = entry(test?.filepath);
+    if (entry(test?.projectName) !== "@do-soul/alaya-bench-runner" || typeof file !== "string") {
+      throw new Error(`coverage blob has unexpected tests for shard ${manifest.shard}`);
+    }
+    return path.relative(process.cwd(), file).replaceAll("\\", "/");
+  });
+  if (testFiles.length !== manifest.partition.files.length
+    || filesDigest(testFiles) !== filesDigest(manifest.partition.files)) {
+    throw new Error(`coverage blob tests differ from partition for shard ${manifest.shard}`);
+  }
 }
 
 function loadManifests(shardDir, failures) {
@@ -152,7 +255,9 @@ function loadManifests(shardDir, failures) {
       ? path.join(shardDir, entry.name, "shard-manifest.json")
       : entry.name === "shard-manifest.json" ? path.join(shardDir, entry.name) : undefined;
     if (manifestPath === undefined || !existsSync(manifestPath)) continue;
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    let manifest;
+    try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); }
+    catch { failures.push(`unreadable shard manifest ${manifestPath}`); continue; }
     const groupManifests = manifests.get(manifest.group) ?? [];
     groupManifests.push(manifest);
     manifests.set(manifest.group, groupManifests);
@@ -283,7 +388,13 @@ function fileShardFailures(root) {
         group,
         status: "success",
         projects,
-        ...(group === "bench-runner" ? { shard: `${index}/${count}` } : {})
+        commit: currentCommit(),
+        ...(group === "bench-runner" ? {
+          shard: `${index}/${count}`,
+          partition: {
+            algorithm: "duration-lpt", count, digest: filesDigest(["1", "2", "3", "4"]), files: [String(index)]
+          }
+        } : {})
       }));
     }
   }
@@ -304,7 +415,7 @@ function writeGood(root) {
     const dir = path.join(shardDir, group);
     mkdirSync(dir);
     writeFileSync(path.join(dir, "shard-manifest.json"), JSON.stringify({
-      label: "ubuntu-node24", group, status: "success", projects
+      label: "ubuntu-node24", group, status: "success", projects, commit: currentCommit()
     }));
   }
   for (const project of VITEST_PROJECTS) {
