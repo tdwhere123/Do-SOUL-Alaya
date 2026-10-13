@@ -23,13 +23,16 @@ describe("RecallService explicit query time", () => {
     expect(result.index.as_of).toBe("2026-08-24T12:00:00.000Z");
   });
 
-  it("preserves the reference-time fixed offset while binding the same physical instant", async () => {
+  it("normalizes equivalent reference-time offsets to the same physical instant", async () => {
     const f = await fixture();
     await f.writeSource({ objectId: "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
       content: "deployment checklist", createdAt: "2026-08-22T17:00:00.000Z" });
     const utc = await f.service.recall({ ...request(), referenceTime: "2026-08-22T16:00:00.000Z" });
     const offset = await f.service.recall({ ...request(), referenceTime: "2026-08-23T00:00:00.000+08:00" });
     expect(utc.candidates).toHaveLength(1);
+    expect(utc.index.as_of).toBe("2026-08-22T16:00:00.000Z");
+    expect(offset.index.as_of).toBe("2026-08-22T16:00:00.000Z");
+    expect(Date.parse(offset.index.as_of!)).toBe(Date.parse(utc.index.as_of!));
     expect(offset.candidates.map((entry) => entry.object_id)).toEqual(utc.candidates.map((entry) => entry.object_id));
   });
 

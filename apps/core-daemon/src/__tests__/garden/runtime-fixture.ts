@@ -133,6 +133,7 @@ export function createRuntimeInput(options: {
       options.pathRelationRepo ??
       ({
         findActive: vi.fn(async () => []),
+        findActiveAll: vi.fn(async () => []),
         findByAnchors: vi.fn(async () => [])
       } as unknown as GardenRuntimeInput["pathRelationRepo"]),
     ...(options.legacyTopologyMutationsEnabled === true

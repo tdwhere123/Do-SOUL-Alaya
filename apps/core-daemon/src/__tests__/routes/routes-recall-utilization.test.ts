@@ -146,6 +146,8 @@ interface RouteResponseShape {
         readonly delivered_not_reported: number;
         readonly reported_skipped_or_na: number;
         readonly reported_used: number;
+        readonly orphan_report_count: number;
+        readonly orphan_session_count: number;
       };
       readonly delivery_total: number;
       readonly single_used_anchor_count: number;
@@ -272,7 +274,9 @@ describe("recall-utilization route", () => {
       empty_recall: 0,
       delivered_not_reported: 1,
       reported_skipped_or_na: 1,
-      reported_used: 1
+      reported_used: 1,
+      orphan_report_count: 0,
+      orphan_session_count: 0
     });
     // stop condition: 3-of-5 buckets sum to deliveries
     expect(

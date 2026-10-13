@@ -46,6 +46,10 @@ const AS_OF = "2026-09-07T00:00:00.000Z";
 describe("admission, binding, measurement, and evidence identities", () => {
   it("rejects equality, hypothesis, and associated-time negatives", () => {
     expect(acceptedIds(observeProgram(
+      relation("a", "x", "y", { kind: "equality", variable: "y", equals_variable: "y", time_scope: "none" }),
+      [edge("seed", "other", "a")]
+    ))).toContain("other");
+    expect(acceptedIds(observeProgram(
       relation("a", "x", "y", {
         kind: "equality",
         variable: "y",
@@ -55,6 +59,10 @@ describe("admission, binding, measurement, and evidence identities", () => {
       [edge("seed", "other", "a")]
     ))).not.toContain("other");
 
+    expect(acceptedIds(observeProgram(relation("a", "x", "y"), [edge("seed", "other", "a")], {
+      hypotheses: [{ schema_version: 1, hypothesis_id: "h1",
+        bindings: [{ schema_version: 1, variable: "y", value: "other" }] }]
+    }))).toContain("other");
     expect(acceptedIds(observeProgram(
       relation("a", "x", "y"),
       [edge("seed", "other", "a")],
@@ -112,6 +120,7 @@ describe("admission, binding, measurement, and evidence identities", () => {
       { times }
     ));
     expect(anchor).not.toEqual(associated);
+    expect(anchor).toContain("last-week");
     expect(associated).not.toContain("last-week");
   });
 

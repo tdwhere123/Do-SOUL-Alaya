@@ -239,7 +239,7 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
 
   it("continues interrupted observation without skipping already-read identities", async () => {
     const slice = await openSourceSlice((database) => databases.add(database));
-    await plantNeedles(slice, 6, 921);
+    const planted = await plantNeedles(slice, 6, 921);
     const tight = defaultBudget({
       work_units: 20,
       finalization_reserve: 5,
@@ -256,11 +256,12 @@ describe("snapshot, cursor, unavailable source, and continuation", () => {
       if (continuation === null) break;
     }
     const concatenated = pages.flatMap((page) => page.entries).map((entry) => entry.object_id);
+    expect(full.entries.map((entry) => entry.object_id)).toEqual(planted);
+    expect(concatenated.length).toBeGreaterThan(0);
     expect(new Set(concatenated).size).toBe(concatenated.length);
     expect(concatenated).toEqual(full.entries.map((entry) => entry.object_id).slice(0, concatenated.length));
-    if (full.entries.length > 1 && concatenated.length > 1) {
-      expect(concatenated[1]).toBe(full.entries[1]?.object_id);
-    }
+    expect(concatenated).toEqual(planted.slice(0, concatenated.length));
+    expect(continuation === null, JSON.stringify(pages.map(page => ({ ids: page.entries.map(entry => entry.object_id), completeness: page.completeness, continuation: page.continuation })))).toBe(concatenated.length === planted.length);
   });
 });
 

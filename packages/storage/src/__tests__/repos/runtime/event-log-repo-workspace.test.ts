@@ -17,6 +17,25 @@ afterEach(() => {
 });
 
 describe("SqliteEventLogRepo workspace and transaction queries", () => {
+  it("returns the complete type window beyond the default page and prioritizes payload time", async () => {
+    const { eventLogRepo } = await createEventLogRepos();
+    const since = "2026-05-01T00:00:00.000Z";
+    const until = "2026-05-02T00:00:00.000Z";
+    for (let index = 0; index < 502; index += 1) {
+      await eventLogRepo.append({
+        event_type: WorkspaceRunEventType.WORKSPACE_CREATED,
+        entity_type: "workspace", entity_id: `window-${index}`, workspace_id: "ws_window",
+        run_id: null, caused_by: "test",
+        payload_json: { workspace_id: "ws_window", name: "window", workspace_kind: WorkspaceKind.LOCAL_REPO,
+          occurred_at: index === 0 ? since : until,
+          ...(index === 501 ? { reported_at: since } : {}) }
+      });
+    }
+    const rows = await eventLogRepo.queryByWorkspaceAndType("ws_window", WorkspaceRunEventType.WORKSPACE_CREATED, since, until);
+    expect(rows).toHaveLength(500);
+    expect(rows.map((row) => row.entity_id)).toEqual(Array.from({ length: 500 }, (_, i) => `window-${i + 1}`));
+    await expect(eventLogRepo.queryByWorkspaceAndType("ws_window", WorkspaceRunEventType.WORKSPACE_CREATED)).resolves.toHaveLength(502);
+  });
   it("queryByWorkspace returns only matching workspace events", async () => {
     const { eventLogRepo } = await createEventLogRepos();
 

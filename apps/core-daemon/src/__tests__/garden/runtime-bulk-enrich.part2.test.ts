@@ -287,7 +287,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
 
-  it("B1 closure: a claim stranded by a crash (no markProcessed) is reclaimed by the scheduler pass and re-drains", async () => {
+  it("reclaims and drains a claim stranded by a crash before markProcessed", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-stranded");
 
@@ -344,42 +344,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
 
-  it("a fresh claim younger than the TTL is NOT reclaimed (a live in-flight cycle is never pulled out from under itself)", async () => {
-    const enrichPendingRepo = new FakeEnrichPendingRepo();
-    enrichPendingRepo.enqueue("workspace-1", "memory-1");
-    const runtime = createGardenRuntime(
-      createRuntimeInput({
-        enrichPendingRepo,
-        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
-        produceForNewMemory: vi.fn<ProduceFn>(async () => undefined)
-      })
-    );
-    void runtime;
-
-    // Claim with a fresh (now) timestamp, then reclaim with the production TTL.
-    enrichPendingRepo.claimBatch(
-      "workspace-1",
-      50,
-      BULK_ENRICH_TEST_NOW,
-      DYNAMICS_CONSTANTS.enrich.max_attempts
-    );
-    const reclaimed = enrichPendingRepo.reclaimStale(
-      BULK_ENRICH_TEST_NOW,
-      DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms
-    );
-    expect(reclaimed).toBe(0);
-    // Still in-flight (claimed), so a re-claim finds nothing.
-    expect(
-      enrichPendingRepo.claimBatch(
-        "workspace-1",
-        50,
-        BULK_ENRICH_TEST_NOW,
-        DYNAMICS_CONSTANTS.enrich.max_attempts
-      )
-    ).toHaveLength(0);
-  });
-
-  it("workspace-targeted bulk-enrich no-ops for fresh in-flight claims", async () => {
+  it("periodic stale-claim reclamation preserves fresh in-flight claims", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-1");
     const produceForNewMemory = vi.fn<ProduceFn>(async () => undefined);
@@ -398,10 +363,12 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       DYNAMICS_CONSTANTS.enrich.max_attempts
     );
 
-    await runtime.runBulkEnrichPass("workspace-1");
+    const reclaim = vi.spyOn(enrichPendingRepo, "reclaimStale");
+    await getService(runtime, "GardenScheduler").task();
 
+    expect(reclaim).toHaveBeenCalledWith(BULK_ENRICH_TEST_NOW, DYNAMICS_CONSTANTS.enrich.claim_stale_after_ms);
     expect(produceForNewMemory).not.toHaveBeenCalled();
-    expect(currentScheduler().completions).toHaveLength(0);
+    expect(currentScheduler().completions).toHaveLength(1);
     expect(currentScheduler().queue).toHaveLength(0);
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
     expect(

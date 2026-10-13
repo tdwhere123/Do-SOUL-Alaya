@@ -232,7 +232,7 @@ it("leaves source-access and custom selector routes unchanged and omits redundan
   expect(pairs.every(row => support([row]).evidence_inputs.every(input => input.status === "supported"))).toBe(true);
 });
 
-it("bounds complementary candidates at the native execution cap without spending baseline reservations", async () => {
+it("pairs a bounded complementary population without spending baseline reservations", async () => {
   const many = await createContext(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP);
   try {
     const candidates = packages(many).packages, limit = budgetForPair(many), measured = meter();

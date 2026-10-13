@@ -15,7 +15,7 @@ import type { WarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-h
 
 type ExtensionRegistryDeps = ConstructorParameters<typeof ExtensionRegistryService>[0];
 type McpToolDiscoveryDeps = ConstructorParameters<typeof McpToolDiscoveryService>[0];
-type EventLogWriterPort = ExtensionRegistryDeps["eventLogWriter"];
+type EventLogWriterPort = ExtensionRegistryDeps["eventLogWriter"] & McpToolDiscoveryDeps["eventLogWriter"];
 type RuntimeNotifierPort = NonNullable<ExtensionRegistryDeps["runtimeNotifier"]> &
   NonNullable<McpToolDiscoveryDeps["runtimeNotifier"]>;
 type ExtensionStorePort = ExtensionRegistryDeps["extensionStore"];

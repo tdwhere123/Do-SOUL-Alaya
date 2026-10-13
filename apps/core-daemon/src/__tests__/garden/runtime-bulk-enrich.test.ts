@@ -328,7 +328,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
   // passes. This pins the now-true ~1-min bound under a multi-workspace backlog.
   it("N workspaces' BULK_ENRICH all drain within a single scheduler pass (up to the cap)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
-    const workspaceIds = Array.from({ length: 10 }, (_unused, index) => `workspace-${index + 1}`);
+    const workspaceIds = Array.from({ length: 35 }, (_unused, index) => `workspace-${index + 1}`);
     for (const workspaceId of workspaceIds) {
       enrichPendingRepo.enqueue(workspaceId, `memory-${workspaceId}`);
     }
@@ -350,7 +350,11 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       .completions.filter((result) => result.task_kind === GardenTaskKind.BULK_ENRICH)
       .map((result) => result.workspace_id)
       .sort();
-    expect(completedWorkspaces).toEqual([...workspaceIds].sort());
+    expect(completedWorkspaces).toHaveLength(32);
+    expect(currentScheduler().queue.filter((task) => task.task_kind === GardenTaskKind.BULK_ENRICH)).toHaveLength(3);
+    await getService(runtime, "GardenScheduler").task();
+    expect([...new Set(currentScheduler().completions.filter((result) => result.task_kind === GardenTaskKind.BULK_ENRICH)
+      .map((result) => result.workspace_id))].sort()).toEqual([...workspaceIds].sort());
     expect(
       currentScheduler().queue.filter((task) => task.task_kind === GardenTaskKind.BULK_ENRICH)
     ).toHaveLength(0);

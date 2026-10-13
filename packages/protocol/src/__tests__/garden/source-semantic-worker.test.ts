@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { hashSourceRecordId } from "../../recall/field-contract/canonical-identity.js";
 import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
@@ -12,7 +14,7 @@ import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema, SourceSemanticLibraryProofSchema,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
-  sourceSemanticProofQualifier
+  sourceSemanticProofQualifier, verifySourceSemanticLibraryDelivery
 } from "../../garden/source-semantic-worker.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
@@ -176,6 +178,36 @@ function libraryDelivery() {
 }
 
 const otherDigest = `sha256:${"b".repeat(64)}`;
+it("verifies canonical unproved source identity and rejects a capsule occupying the same record key", () => {
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+  const source = { workspace_id: "workspace", source_id: "canonical-source", source_version: "v1", content_digest: digest };
+  const identity = hashSourceRecordId(source, sha256);
+  const entry = sourceIndexEntry({ ...source, root_kind: "source_record", root_id: identity, evidence_object_id: null,
+    hypothesis_id: digest, output_binding: "binding", role: "requested", association_milligrades: 0,
+    claim: "unknown", explanation_ids: [] });
+  const { coverage: _coverage, work: _work, ...base } = libraryDelivery();
+  const raw = { ...base, total_count: 1,
+    query_semantics_status: { status: "admitted", query_semantics_id: digest },
+    index: { ...base.index, entries: [entry] },
+    slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
+    source_disclosures: { [indexEntryCacheKey(entry)]: disclosure },
+    unproved_computations: [{ kind: "complete_zero_binding", conclusion_scope: "conditional_on_interpretation",
+      world_claim: "unknown", source_record: { ...source, identity }, source_interpretation_id: digest,
+      query_semantics_id: digest, semantic_correspondence_id: digest, conditional_computation_id: digest,
+      completeness: base.index.completeness }]
+  };
+  const valid = SourceSemanticLibraryDeliverySchema.parse(raw);
+  expect(verifySourceSemanticLibraryDelivery(valid, sha256)).toBe(valid);
+  const computation = valid.unproved_computations![0]!;
+  expect(() => verifySourceSemanticLibraryDelivery({ ...valid, unproved_computations: [{ ...computation,
+    source_record: { ...computation.source_record, source_id: "substituted-source" }
+  }] }, sha256)).toThrow(/unproved source record/u);
+  const capsule = sourceIndexEntry({ ...source, root_kind: "evidence_capsule", root_id: identity, evidence_object_id: null,
+    hypothesis_id: digest, output_binding: "binding", role: "requested", association_milligrades: 0,
+    claim: "unknown", explanation_ids: [] });
+  expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...raw, index: { ...raw.index, entries: [capsule] },
+    source_disclosures: { [indexEntryCacheKey(capsule)]: disclosure } }).success).toBe(false);
+});
 const secondCorrespondence = `sha256:${"c".repeat(64)}`;
 function sourceEntry(explanationIds: readonly string[] = []) {
   return sourceIndexEntry({ workspace_id: "workspace", root_kind: "source_record", root_id: "record",

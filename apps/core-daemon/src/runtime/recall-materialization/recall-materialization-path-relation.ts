@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { processEnvLookup } from "../config/daemon-config-environment.js";
 import {
   ControlPlaneObjectKind,
@@ -7,7 +7,8 @@ import {
   ProposalResolutionState,
   ProposalSchema,
   RetentionPolicy,
-  SoulProposalCreatedPayloadSchema
+  SoulProposalCreatedPayloadSchema,
+  canonicalJson
 } from "@do-soul/alaya-protocol";
 import { createGardenRelationNominationPort } from "./recall-materialization-garden-nomination.js";
 import {
@@ -200,9 +201,16 @@ async function createPathRelationProposal(
   proposalInput: Parameters<PathRelationProposalPort["createPathRelationProposal"]>[0]
 ) {
   const timestamp = new Date().toISOString();
-  const proposalId = randomUUID();
+  const identityDigest = createHash("sha256").update(canonicalJson({
+    kind: "signal_path_relation_proposal",
+    workspaceId: proposalInput.workspaceId,
+    targetObjectId: proposalInput.targetObjectId,
+    sourceSignalId: proposalInput.sourceSignalId,
+    proposedPathRelation: proposalInput.proposedPathRelation
+  })).digest("hex");
+  const proposalId = `${identityDigest.slice(0, 8)}-${identityDigest.slice(8, 12)}-8${identityDigest.slice(13, 16)}-a${identityDigest.slice(17, 20)}-${identityDigest.slice(20, 32)}`;
   const proposal = buildPathRelationProposalRecord(proposalId, proposalInput, timestamp);
-  const created = await input.proposalRepo.createProposalWithEvents(
+  const created = await input.proposalRepo.createProposalWithEventsIfAbsent(
     {
       proposal,
       workspace_id: proposalInput.workspaceId,
@@ -227,7 +235,8 @@ async function createPathRelationProposal(
           run_id: proposalInput.runId
         })
       }
-    ]
+    ],
+    { proposal_id: proposalId }
   );
   await notifyCreatedProposalEvents(input, created.events);
   return {

@@ -26,7 +26,11 @@ export function readLinuxKeychainSecret(
     return linuxToolingUnavailable(service, account, keychainSubprocessTimeoutReason("secret-tool"));
   }
 
-  if (result.code !== 0 || result.stdout.trim().length === 0) {
+  if (result.error || result.signal || result.code === null ||
+      (result.code !== 0 && (result.code !== 1 || result.stderr.trim().length > 0))) {
+    return linuxToolingUnavailable(service, account, "secret-tool failed to read the requested item.");
+  }
+  if (result.code === 1 || result.stdout.trim().length === 0) {
     return {
       kind: "keychain_entry_not_found",
       service,

@@ -76,7 +76,8 @@ describe("LongMemEval stage matrix replay", () => {
     expect(matrix.summary).toMatchObject({
       dataset_answerable: 1,
       scorable_answerable: 0,
-      unscorable_answerable: 1
+      unscorable_answerable: 1,
+      by_stage: { final_rank: { at_5: { count: 0, denominator: 0, rate: null } } }
     });
     expect(matrix.summary.by_stage.final_rank.at_5.denominator).toBe(0);
   });

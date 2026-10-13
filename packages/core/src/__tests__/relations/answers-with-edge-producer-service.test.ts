@@ -175,13 +175,13 @@ describe("AnswersWithEdgeProducerService", () => {
     expect(result.keptPairs).toBe(assertion.calls.length);
   });
 
-  it("fails closed to empty when the pair source throws", async () => {
+  it("preserves unavailable pair lookup rather than reporting known zero pairs", async () => {
     const assertion = recordingAssertionPort();
     const producer = new AnswersWithEdgeProducerService({
       pairSource: { answerCoRelevantPairs: async () => { throw new Error("hq store down"); } },
       assertionPort: assertion.port
     });
-    const result = await producer.crystallize({
+    const result = producer.crystallize({
       workspaceId: "ws",
       runId: null,
       objects: OBJECTS,
@@ -189,7 +189,7 @@ describe("AnswersWithEdgeProducerService", () => {
       capPerNode: 3,
       crossSessionOnly: true
     });
-    expect(result).toEqual({ coRelevantPairs: 0, keptPairs: 0, admitted: 0 });
+    await expect(result).rejects.toThrow("hq store down");
     expect(assertion.calls).toHaveLength(0);
   });
 
@@ -197,8 +197,7 @@ describe("AnswersWithEdgeProducerService", () => {
     const assertion = recordingAssertionPort();
     const producer = new AnswersWithEdgeProducerService({
       pairSource: { answerCoRelevantPairs: async () => { throw new Error("hq store down"); } },
-      assertionPort: assertion.port,
-      failOnPairSourceError: true
+      assertionPort: assertion.port
     });
 
     await expect(producer.crystallize({

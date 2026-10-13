@@ -105,7 +105,7 @@ it("page budget truncates the index without native FTS visit counters", async ()
       `deployment checklist ${index}`, MemoryDimension.FACT);
   }
   const result = runLive(slice, { query_text: "deployment checklist", page_budget: 12 });
-  expect(result.entries.length).toBeLessThanOrEqual(12);
+  expect(result.entries).toHaveLength(12);
   expect(result.representation.page_budget).toBe(12);
   expect(pageTruncated(result)).toBe(true);
   expect(slice.pendingGarden()).toHaveLength(0);
@@ -120,10 +120,11 @@ it("bounded field page is independent of source insertion order", async () => {
       await slice.writeMemory(id, "deployment checklist", MemoryDimension.FACT);
     }
     const limited = runLive(slice, { query_text: "deployment checklist", page_budget: 4 });
-    expect(limited.entries.length).toBeLessThanOrEqual(4);
+    expect(limited.entries).toHaveLength(4);
     expect(limited.representation.page_budget).toBe(4);
     expect(pageTruncated(limited)).toBe(true);
     const complete = runLive(slice, { query_text: "deployment checklist", page_budget: 800 });
+    expect(complete.entries.map((entry) => entry.object_id).sort()).toEqual(ids);
     outputs.push({
       limited: limited.entries.map((entry) => entry.object_id),
       complete: complete.entries.map((entry) => entry.object_id)

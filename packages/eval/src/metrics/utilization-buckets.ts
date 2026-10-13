@@ -35,6 +35,8 @@ export type UtilizationBucketReport = z.infer<typeof UtilizationBucketReportSche
 
 export interface UtilizationBucketCounts {
   readonly no_recall: number;
+  readonly orphan_report_count: number;
+  readonly orphan_session_count: number;
   readonly empty_recall: number;
   readonly delivered_not_reported: number;
   readonly reported_skipped_or_na: number;
@@ -56,9 +58,8 @@ export interface UtilizationBucketCohortRow {
 // empty_recall is a sub-count carved out of delivered_not_reported (pointer_count === 0
 // deliveries have nothing to report by construction).
 //
-// no_recall counts distinct session_id values whose reports reference a
-// delivery_id that has no matching SOUL_RECALL_DELIVERED in the window;
-// i.e., the agent attached but did not call recall in those sessions.
+// no_recall counts reported sessions with no delivery in the observed window.
+// An orphan report does not erase a different valid recall in the same session.
 // see also: apps/core-daemon/src/routes/memory/recall/recall-utilization.ts
 export function computeUtilizationBuckets(input: {
   readonly deliveries: readonly UtilizationBucketDelivery[];
@@ -104,13 +105,18 @@ export function computeUtilizationBuckets(input: {
   }
 
   const orphanSessions = new Set<string>();
+  const deliverySessions = new Set(input.deliveries.map(sessionKey));
+  let orphanReportCount = 0;
   for (const report of input.reports) {
     if (deliveryByKey.has(deliveryKey(report.workspace_id, report.delivery_id))) continue;
-    orphanSessions.add(report.session_id);
+    orphanReportCount += 1;
+    orphanSessions.add(sessionKey(report));
   }
 
   return Object.freeze({
-    no_recall: orphanSessions.size,
+    no_recall: [...orphanSessions].filter((session) => !deliverySessions.has(session)).length,
+    orphan_report_count: orphanReportCount,
+    orphan_session_count: orphanSessions.size,
     empty_recall: emptyRecall,
     delivered_not_reported: deliveredNotReported,
     reported_skipped_or_na: reportedSkippedOrNa,
@@ -208,6 +214,10 @@ export function listSingleUsedAnchorDeliveries(input: {
 // cohortKey. A missing workspace_id collapses to single-scope (pre-fix) behavior.
 function deliveryKey(workspaceId: string | undefined, deliveryId: string): string {
   return JSON.stringify([workspaceId ?? "", deliveryId]);
+}
+
+function sessionKey(row: UtilizationBucketDelivery | UtilizationBucketReport): string {
+  return JSON.stringify([row.workspace_id ?? "", row.agent_target, row.session_id]);
 }
 
 function mergeUsageState(

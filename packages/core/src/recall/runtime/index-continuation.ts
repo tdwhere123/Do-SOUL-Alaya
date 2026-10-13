@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  EMITTED_REVISIONS_MAX,
   canonicalIndexEntryIdentity,
   guaranteedMilligradesOf,
   productStateKeyFromIndexEntry,
@@ -25,7 +24,7 @@ import {
 } from "../conditional-field/query/compile-query-identity.js";
 import { compareText } from "../../shared/compare-text.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
-import type { EmittedProductLedger } from "../conditional-field/index/product-component-diff.js";
+import { assertCommittedLedgerCapacity, type EmittedProductLedger } from "../conditional-field/index/product-component-diff.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import {
   continuationCapabilityMatches,
@@ -130,11 +129,7 @@ export function mergeCommittedRevisions(
   for (const entry of entries) {
     next[productIdOfEntry(entry)] = indexEntryRevision(entry);
   }
-  const keys = Object.keys(next);
-  if (keys.length <= EMITTED_REVISIONS_MAX) return next;
-  for (const key of keys.slice(0, keys.length - EMITTED_REVISIONS_MAX)) {
-    delete next[key];
-  }
+  assertCommittedLedgerCapacity(next);
   return next;
 }
 

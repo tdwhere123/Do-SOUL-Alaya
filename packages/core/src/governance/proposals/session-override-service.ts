@@ -214,7 +214,7 @@ export class SessionOverrideService {
         const parsed = SoulSessionOverrideAppliedPayloadSchema.safeParse(event.payload_json);
 
         if (!parsed.success) {
-          return [];
+          throw new CoreError("CONFLICT", `Malformed applied session override for run ${runId}.`);
         }
 
         return [parseSessionOverride({

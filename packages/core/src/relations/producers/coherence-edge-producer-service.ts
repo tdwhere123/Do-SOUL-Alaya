@@ -102,7 +102,7 @@ export class CoherenceEdgeProducerService {
         run_id: input.runId,
         error: error instanceof Error ? error.message : String(error)
       });
-      return new Set<string>();
+      throw error;
     }
   }
 

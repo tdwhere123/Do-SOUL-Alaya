@@ -154,6 +154,7 @@ describe("merge-longmemeval release gates", () => {
           r_at_5: 1,
           seed_extraction_path: makeSeedExtractionPath({
             path: "official_api_compile",
+            extraction_attempts: 3,
             cache_hits: 1,
             llm_calls: 2,
             facts_produced: 3
@@ -215,7 +216,7 @@ describe("merge-longmemeval release gates", () => {
 
     expect(merged.kpi.seed_extraction_path).toEqual({
       path: "no_credentials_fallback",
-      extraction_attempts: 1,
+      extraction_attempts: 3,
       cache_hits: 1,
       llm_calls: 2,
       offline_fallbacks: 8,

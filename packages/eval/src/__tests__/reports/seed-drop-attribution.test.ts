@@ -72,19 +72,14 @@ describe("attributeSeedDrops", () => {
       compile_overflow_dropped: 0,
       signals_dropped_by_reason: {
         candidate_absent: 2,
-        materialization_drop: 0,
         materialization_error: 3
       } as unknown as NonNullable<
         KpiPayload["kpi"]["seed_extraction_path"]
       >["signals_dropped_by_reason"]
     });
-    // attributeSeedDrops reads the normalized in-memory shape; legacy key is
-    // only relevant at KPI parse time. Simulate the normalized output here.
-    const drops = attributeSeedDrops({
-      ...path,
-      signals_dropped_by_reason: { candidate_absent: 2, materialization_drop: 3 }
-    });
+    const drops = attributeSeedDrops(SeedExtractionPathSchema.parse(path));
     expect(drops.materializationDrop).toBe(3);
     expect(drops.batchResidual).toBe(2);
   });
 });
+import { SeedExtractionPathSchema } from "../../contracts/kpi-schema.js";

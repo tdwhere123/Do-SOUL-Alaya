@@ -58,6 +58,7 @@ it("discovers active servers in parallel before awaiting any single server respo
         listServerTools
       },
       eventLogWriter: {
+        queryByEntityAll: vi.fn(async () => []),
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
           ...entry,
           event_id: "event-1",
@@ -70,7 +71,7 @@ it("discovers active servers in parallel before awaiting any single server respo
 
     const discoveryPromise = service.discoverAndRegister([filesystemServer, githubServer]);
 
-    await Promise.resolve();
+    await vi.waitFor(() => expect(listServerTools).toHaveBeenCalledTimes(2));
 
     expect(listServerTools).toHaveBeenCalledTimes(2);
     expect(registerProvider).not.toHaveBeenCalled();

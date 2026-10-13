@@ -305,7 +305,11 @@ export class SignalService {
     );
 
     if (triagedEvent.run_id !== null) {
-      await this.dependencies.runtimeNotifier.notifyEntry(triagedEvent);
+      await bindEventPublisher({
+        eventLogRepo: this.dependencies.eventLogRepo,
+        runtimeNotifier: this.dependencies.runtimeNotifier,
+        purpose: "SignalService"
+      }).propagateCommitted([triagedEvent]);
     }
 
     if (triageResult !== "accepted" || this.dependencies.postTriageMaterializer === undefined) {

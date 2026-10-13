@@ -30,6 +30,20 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
     proof_use: { kind: "source_only", qualification: "not_current_proof" }
   };
 
+  it("keeps an uncomputed contradiction count distinct from computed zero", async () => {
+    fetchMock.mockImplementation(async (input: FetchInput) => urlOf(input).includes("/memory-entries/ws1")
+      ? jsonResponse({ success: true, data: [
+        { ...SAMPLE_ROWS[0]!, object_id: "unknown-count", content: "uncomputed contradictions", contradiction_count: null },
+        { ...SAMPLE_ROWS[0]!, object_id: "zero-count", content: "computed contradictions", contradiction_count: 0 }
+      ] }, 200, { "x-total-count": "2", "x-limit": "200", "x-offset": "0" })
+      : jsonResponse({}, 404));
+    renderMemoryBrowser();
+    const unknown = (await screen.findByText("uncomputed contradictions")).closest("tr")!;
+    const zero = screen.getByText("computed contradictions").closest("tr")!;
+    expect(unknown.lastElementChild?.textContent).toBe("—");
+    expect(zero.lastElementChild?.textContent).toBe("0");
+  });
+
   it("clears an already-open evidence pointer when refresh replaces the selected row data in place", async () => {
     let offsetZeroCalls = 0;
     fetchMock.mockImplementation(async (input: FetchInput) => {

@@ -228,6 +228,7 @@ describe("garden runtime path plasticity queue", () => {
         gardenDataPorts,
         pathRelationRepo: {
           findActive: vi.fn(async () => []),
+        findActiveAll: vi.fn(async () => []),
           findByAnchors: vi.fn(async (_workspaceId: string, anchors: readonly { readonly object_id: string }[]) =>
             anchors.some((anchor) => anchor.object_id === "memory-high")
               ? [

@@ -12,6 +12,19 @@ afterEach(() => {
 });
 
 describe("SqliteRelationRecallReader cursor", () => {
+  it.each(["not-json", "null", "[]", JSON.stringify({ source_observations: [{ source_id: "event", source_sha256: "bad" }] })])(
+    "rejects malformed present formation receipt %s instead of admitting empty observations", (receipt) => {
+      const database = openDatabase(), [id] = plantAssertions(database, 1);
+      const reader = new SqliteRelationRecallReader(database);
+      const before = reader.read("workspace-1", "vega", "owns", 1).observations;
+      expect(before).toHaveLength(1);
+      expect(before[0]?.sourceObservations).toEqual([]);
+      database.connection.prepare("UPDATE relation_assertions SET formation_receipt_json = ? WHERE assertion_id = ?")
+        .run(receipt, id);
+      expect(() => reader.read("workspace-1", "vega", "owns", 1)).toThrow();
+    }
+  );
+
   it("admits assertions by precise UTC instant instead of timestamp text", () => {
     const database = openDatabase(), [id] = plantAssertions(database, 1);
     const reader = new SqliteRelationRecallReader(database);

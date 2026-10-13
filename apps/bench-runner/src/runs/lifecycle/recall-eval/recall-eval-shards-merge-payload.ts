@@ -1,4 +1,5 @@
 import type { KpiPayload, PerScenarioRow, QualityMetrics } from "@do-soul/alaya-eval";
+import { overallRecallAt5 } from "../../measurement/answerable-recall.js";
 import { mergeSeedExtractionPath } from "../../../cli/merge-shared.js";
 import { buildMergedRates } from "../../../cli/merge/merged/merged-rates.js";
 import { computeQuestionIdDigest } from "../../selection/question-manifest.js";
@@ -77,12 +78,11 @@ export function mergeShardPayloads(
       r_at_1: rates.rAt1,
       r_at_5: rates.rAt5,
       r_at_10: rates.rAt10,
-      r_at_5_overall: rates.rAt5,
+      r_at_5_overall: overallRecallAt5(perScenario) ?? undefined,
       latency_ms_p50: rates.latencyP50,
       latency_ms_p95: rates.latencyP95,
       latency_source: rates.hasExactMergedLatency ? "exact" : "worst_shard_bound",
-      // token_saved_ratio_vs_full_prompt is not recomputed from rows.
-      // Omit it: unknown must not serialize as 0.
+      token_saved_ratio_vs_full_prompt: null,
       tier_distribution: sumTiers(shardPayloads),
       degradation_reasons: sumDegrade(shardPayloads),
       seed_truncation: sumTruncation(shardPayloads),

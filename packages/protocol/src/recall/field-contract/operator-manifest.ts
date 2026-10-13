@@ -13,7 +13,7 @@ export const ATTRIBUTED_COVERAGE_ATOMS_OPERATOR_ID = "attributed_coverage_atoms_
 export const SOURCE_SPAN_IDENTITY_OPERATOR_ID = "source_span_identity_v1";
 export const FACTOR_INCIDENCE_OPERATOR_ID = "factor_incidence_v1";
 export const PROJECTION_GENERATION_OPERATOR_ID = "projection_generation_v1";
-export const QUERY_CONDITION_OPERATOR_ID = "query_condition_v2";
+export const QUERY_CONDITION_OPERATOR_ID = "query_condition_v3";
 export const CAUSAL_USAGE_OPERATOR_ID = "causal_usage_v1";
 export const PROOF_EFFECT_OPERATOR_ID = "proof_effect_v1";
 export const PROOF_EFFECT_OPERATOR_VERSION = "1";
@@ -39,7 +39,7 @@ export const FIELD_OPERATOR_MANIFEST: readonly FieldOperatorVersionEntry[] = Obj
   Object.freeze({ id: SOURCE_SPAN_IDENTITY_OPERATOR_ID, version: "1" }),
   Object.freeze({ id: FACTOR_INCIDENCE_OPERATOR_ID, version: "1" }),
   Object.freeze({ id: PROJECTION_GENERATION_OPERATOR_ID, version: "1" }),
-  Object.freeze({ id: QUERY_CONDITION_OPERATOR_ID, version: "2" }),
+  Object.freeze({ id: QUERY_CONDITION_OPERATOR_ID, version: "3" }),
   Object.freeze({ id: CAUSAL_USAGE_OPERATOR_ID, version: "1" }),
   Object.freeze({ id: PROOF_EFFECT_OPERATOR_ID, version: PROOF_EFFECT_OPERATOR_VERSION }),
   Object.freeze({

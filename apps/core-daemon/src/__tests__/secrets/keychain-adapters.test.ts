@@ -16,6 +16,16 @@ import {
 } from "../../secrets/keychain/windows.js";
 
 describe("keychain adapters", () => {
+  it.each([readLinuxKeychainSecret, readMacosKeychainSecret])("does not mistake a crashed or denied read for a missing secret", (read) => {
+    for (const result of [
+      { code: 2, stdout: "", stderr: "denied" },
+      { code: null, stdout: "", stderr: "", signal: "SIGTERM" as const },
+      { code: null, stdout: "", stderr: "", error: Object.assign(new Error("denied"), { code: "EACCES" }) }
+    ]) expect(read("svc", "acct", stubRunner(result))).toMatchObject({ kind: "keychain_tooling_unavailable" });
+    const runner: KeychainSubprocessRunner = (_command, _args, options) =>
+      defaultKeychainSubprocessRunner(process.execPath, ["-e", "process.stderr.write('denied'); process.exit(2)"], options);
+    expect(read("svc", "acct", runner)).toMatchObject({ kind: "keychain_tooling_unavailable" });
+  });
   it("builds the macOS security argv and maps success", () => {
     const runner = stubRunner({ code: 0, stdout: "mac-secret\n", stderr: "" });
 

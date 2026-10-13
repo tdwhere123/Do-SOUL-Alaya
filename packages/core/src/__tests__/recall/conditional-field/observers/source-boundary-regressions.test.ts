@@ -106,18 +106,28 @@ describe("source boundary regressions", () => {
   });
 
   it("shares one native row allowance across records and capsules", async () => {
-    const { reader, capsules } = fixture("record");
+    const { reader, capsules, record } = fixture("record");
     await capsule(capsules, "workspace-1", "capsule");
-    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: null, byteLimit: 8 });
+    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: null, byteLimit: 8, nativeByteLimit: 65536 });
     expect(page.nativeVisits).toBeLessThanOrEqual(1);
     expect(page.rows.length).toBeLessThanOrEqual(1);
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0]).toMatchObject({ kind: "source_record", root_id: record.record_id });
+    expect(page.nativeVisits).toBeGreaterThan(0);
+    expect(page.bytesRead).toBeGreaterThan(0);
   });
 
   it("bounds native capsule body bytes before mapping", async () => {
     const { reader, capsules } = fixture("record");
-    await capsule(capsules, "workspace-1", "x".repeat(2000));
-    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: "c:", byteLimit: 8 });
-    expect(page.bytesRead).toBeLessThanOrEqual(11);
+    const stored = await capsule(capsules, "workspace-1", "x".repeat(20000));
+    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: "c:", byteLimit: 8, nativeByteLimit: 65536 });
+    // Physical reads fetch one retained 4 KiB chunk; logical delivery is eight bytes.
+    expect(page.bytesRead).toBeLessThanOrEqual(4096);
+    expect(page.bytesRead).toBeGreaterThan(0);
+    expect(page.nativeVisits).toBeGreaterThan(0);
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0]).toMatchObject({ kind: "evidence_capsule", root_id: stored.object_id });
+    expect(page.rows[0]?.content).toBe("xxxxxxxx");
   });
 
   it("rejects a replay that changes retained source role or scope", () => {
@@ -131,7 +141,7 @@ describe("source boundary regressions", () => {
     expect(() => records.insert({ ...hashedRecord("workspace-1", "foreign body", "foreign-link"), evidence_object_id: foreign.object_id })).toThrow();
   });
 
-  it("binds the delivered span to emitted text instead of the larger hydration buffer", () => {
+  it("binds the delivered span to emitted text instead of a larger advertised hydration extent", () => {
     const body = "x".repeat(1000);
     const target = sourceRecallTarget({ workspace_id: "workspace-1", root_kind: "source_record", root_id: "root",
       source_version: "v1", content_digest: SNAPSHOT_ID, evidence_object_id: null });
@@ -139,8 +149,8 @@ describe("source boundary regressions", () => {
       time_state: "as_of", role: "associated", association_milligrades: 1000, claim: "unknown", explanation_ids: [] };
     const payload = new BoundedIndexPayload({ workspaceId: "workspace-1", remainingMemoryBytes: 100_000,
       manifestationFor: () => "excerpt", readers: { sourceRoot: () => ({ row: { kind: "source_record", workspace_id: "workspace-1",
-        root_id: "root", revision: "v1", digest: SNAPSHOT_ID, evidence_object_id: null, content: body, content_start: 0, content_end: 1000,
-        content_complete: true, original_complete: true, retained_extent: "body" }, rowsRead: 1, bytesRead: 1000, unavailable: false }) } });
+        root_id: "root", revision: "v1", digest: SNAPSHOT_ID, evidence_object_id: null, content: body.slice(0, 100), content_start: 0, content_end: 1000,
+        content_complete: false, original_complete: true, retained_extent: "body" }, rowsRead: 1, bytesRead: 1000, unavailable: false }) } });
     const finalized = payload.finalize([entry], 100);
     const index = projectAcceptingIndex({ snapshot: { schema_version: 1, snapshot_id: SNAPSHOT_ID, query_id: "payload", seeds: [], values: [],
       retained_transitions: [], facets: [] }, view: defaultView(), query_id: "payload", snapshot_id: SNAPSHOT_ID, result_version: "v1", budget: defaultBudget() });
@@ -148,10 +158,9 @@ describe("source boundary regressions", () => {
     const stamped = delivered.entries[0]!.target;
     if (stamped.kind !== "source_evidence") throw new Error("wrong target");
     const preview = [...payload.previews.values()][0]!;
-    expect(stamped.span!.content_end - stamped.span!.content_start).toBeLessThanOrEqual(Buffer.byteLength(preview, "utf8"));
-    if (stamped.span!.content_end < body.length) {
-      expect(stamped.span!.content_complete).toBe(false);
-      expect(finalized.complete).toBe(false);
-    }
+    expect(preview).toBe(body.slice(0, 100));
+    expect(preview.length).toBeLessThan(body.length);
+    expect(stamped.span).toMatchObject({ content_start: 0, content_end: 100, content_complete: false });
+    expect(finalized.complete).toBe(false);
   });
 });

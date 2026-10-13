@@ -71,6 +71,11 @@ export function buildLocomoPayload(input: {
     dataset: buildLocomoDataset(input),
     sample_size: resolveLocomoSampleSize(input.conversations),
     evaluated_count: input.aggregate.totalQa,
+    execution_coverage: {
+      completed_questions: input.aggregate.totalQa,
+      failed_conversations: input.aggregate.conversationFailures,
+      unavailable_questions: input.aggregate.unavailableQuestions
+    },
     harness_mode: "mcp_propose_review",
     kpi: buildLocomoKpi(input, rates, summaries, qaMetrics)
   };

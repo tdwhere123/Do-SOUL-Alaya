@@ -103,13 +103,18 @@ if [ "$node_major" -lt 24 ]; then
 fi
 ok "node $(node -v)"
 
-# pnpm 12 is frozen via packageManager. PATH pnpm 12 is accepted; otherwise
+# pnpm is frozen via packageManager. Accept the declared >=12.3.4 <13 range;
 # switch to corepack-managed pnpm@12.3.4 inside this shell.
+pnpm_version_supported() {
+  local version="$1"
+  [[ "$version" =~ ^12\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  (( 10#${BASH_REMATCH[1]} > 3 || (10#${BASH_REMATCH[1]} == 3 && 10#${BASH_REMATCH[2]} >= 4) ))
+}
 need_corepack_switch=0
 if command -v pnpm >/dev/null 2>&1; then
-  pnpm_major=$(pnpm --version 2>/dev/null | cut -d. -f1 || echo 0)
-  if [ "$pnpm_major" != "12" ]; then
-    info "found pnpm ${pnpm_major}; this project requires pnpm 12. switching..."
+  pnpm_version=$(pnpm --version 2>/dev/null || echo 0)
+  if ! pnpm_version_supported "$pnpm_version"; then
+    info "found pnpm ${pnpm_version}; this project requires >=12.3.4 <13. switching..."
     need_corepack_switch=1
   fi
 else
@@ -123,9 +128,9 @@ if [ "$need_corepack_switch" = "1" ]; then
   corepack prepare pnpm@12.3.4 --activate >/dev/null 2>&1 \
     || err "corepack prepare pnpm@12.3.4 failed; install pnpm 12.3.4 manually"
 fi
-pnpm_major=$(pnpm --version 2>/dev/null | cut -d. -f1 || echo 0)
-[ "$pnpm_major" = "12" ] \
-  || err "pnpm 12 required (got: $(pnpm --version 2>/dev/null || echo 'none'))"
+pnpm_version=$(pnpm --version 2>/dev/null || echo 0)
+pnpm_version_supported "$pnpm_version" \
+  || err "pnpm >=12.3.4 <13 required (got: ${pnpm_version})"
 ok "pnpm $(pnpm --version)"
 
 # sha256 checker
@@ -222,7 +227,7 @@ pkg_version="$(node -p "require(process.argv[1]).version" "$STAGING_DIR/package.
 ok "package.json version matches ${VERSION_TAG}"
 
 # Locate the live DB before cd. Relative toml/DATA_DIR paths must stay
-# anchored to the daemon config dir, not the staging tree.
+# anchored to the daemon launch directory, not the staging tree.
 [ -f "$STAGING_DIR/scripts/resolve-live-db-path.mjs" ] \
   || err "tarball missing scripts/resolve-live-db-path.mjs"
 live_locator="$(node "$STAGING_DIR/scripts/resolve-live-db-path.mjs")" \
@@ -305,7 +310,8 @@ fi
 info ""
 info "Next steps:"
 info "  alaya doctor          # verify runtime"
-info "  alaya install         # attach to your CLI agent (codex / claude code / ...)"
+info "  alaya install         # configure the local runtime"
+info "  alaya attach codex    # preview agent attachment; follow the confirmation instructions"
 info "  alaya inspect --open  # open the Memory Inspector UI"
 info ""
-info "Uninstall: bash ${ALAYA_HOME}/scripts/uninstall.sh   (add --purge to remove ~/.config/alaya; .bak is kept unless --remove-bak)"
+info "Uninstall: bash ${ALAYA_HOME}/scripts/uninstall.sh --config-dir '${LIVE_CONFIG_DIR}'   (add --purge to remove '${LIVE_CONFIG_DIR}'; .bak is kept unless --remove-bak)"

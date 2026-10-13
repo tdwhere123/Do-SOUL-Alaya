@@ -14,6 +14,7 @@ import {
   type ProductUpdateKind
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../../shared/stable-stringify.js";
+import { CoreError } from "../../../shared/errors.js";
 
 export type ProductComponentState = Readonly<{
   readonly membership_revision: string;
@@ -155,12 +156,16 @@ export function mergeCommittedProductStates(
     const previous = next[id];
     if (previous !== undefined) next[id] = retractedComponentState(previous);
   }
-  const keys = Object.keys(next);
-  if (keys.length <= EMITTED_REVISIONS_MAX) return next;
-  for (const key of keys.slice(0, keys.length - EMITTED_REVISIONS_MAX)) {
-    delete next[key];
-  }
+  assertCommittedLedgerCapacity(next);
   return next;
+}
+
+export function assertCommittedLedgerCapacity(ledger: Readonly<Record<string, unknown>>): void {
+  if (Object.keys(ledger).length > EMITTED_REVISIONS_MAX) {
+    throw new CoreError("CONFLICT", "Recall delivery history capacity exhausted; prior delivery state was retained", {
+      details: { outcome: "resource_exhausted", resource: "delivery_history", limit: EMITTED_REVISIONS_MAX }
+    });
+  }
 }
 
 export function pagePurposeFor(input: Readonly<{

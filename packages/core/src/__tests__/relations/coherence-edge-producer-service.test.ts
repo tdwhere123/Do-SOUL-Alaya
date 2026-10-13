@@ -115,13 +115,13 @@ describe("CoherenceEdgeProducerService", () => {
     expect(result.keptPairs).toBe(mint.calls.length);
   });
 
-  it("fails open to empty when the pair source throws", async () => {
+  it("preserves unavailable pair lookup rather than reporting known zero pairs", async () => {
     const mint = recordingMintPort();
     const producer = new CoherenceEdgeProducerService({
       pairSource: { coherentPairKeys: async () => { throw new Error("vector store down"); } },
       mintPort: mint.port
     });
-    const result = await producer.crystallize({
+    const result = producer.crystallize({
       workspaceId: "ws",
       runId: null,
       objects: OBJECTS,
@@ -129,7 +129,7 @@ describe("CoherenceEdgeProducerService", () => {
       capPerNode: 3,
       crossSessionOnly: true
     });
-    expect(result).toEqual({ coherentPairs: 0, keptPairs: 0, minted: 0 });
+    await expect(result).rejects.toThrow("vector store down");
     expect(mint.calls).toHaveLength(0);
   });
 });

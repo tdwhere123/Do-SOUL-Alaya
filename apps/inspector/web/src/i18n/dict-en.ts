@@ -67,6 +67,8 @@ export const en: Record<keyof typeof zh, string> = {
   "overview:bench.live.hint": "Historical live-check archive. The runner is retired.",
   "overview:bench.empty": "No benchmark entries yet.",
   "overview:bench.loading": "Loading bench summary…",
+  "overview:bench.error": "Benchmark unavailable: {message}",
+  "recall:stale": "Showing previously loaded data; refresh failed.",
   "overview:bench.delta": "Δ vs prev {delta}",
   "overview:bench.firstBaseline": "first baseline",
   "overview:bench.history": "{count} historical entries",

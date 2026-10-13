@@ -282,10 +282,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
     expect(runtime.getStatus().last_pass_at).toBeNull();
   });
 
-  it("terminates after the bounded drain cap when backfill keeps re-queueing", async () => {
-    // A handler that always throws makes runEmbeddingBackfillTask report a
-    // failed completion (which re-queues the task). Without a bound the drain
-    // loop would spin forever; the cap guarantees termination.
+  it("records and propagates a failed backfill completion", async () => {
     const embeddingBackfillHandler = {
       handle: vi.fn(async () => {
         throw new Error("embedding provider unreachable");
@@ -298,9 +295,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     );
     const scheduler = currentScheduler();
 
-    // The FakeGardenScheduler does not re-queue on failed reportCompletion, so
-    // a single enqueue drains in one dispatch even on failure; the bound is
-    // still asserted by capping handler invocations within the loop ceiling.
     await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(
       "embedding provider unreachable"
     );
@@ -315,5 +309,27 @@ describe("garden runtime targeted embedding backfill pass", () => {
       })
     );
     expect(runtime.getStatus().last_pass_at).toBeNull();
+  });
+
+  it("stops at eight backfill dispatches with requeued work retained", async () => {
+    const handle = vi.fn(async (task: GardenTaskDescriptor) => {
+      currentScheduler().queue.push({ ...task, task_id: `${task.task_id}-next` });
+      return { objectsAffected: [], auditEntries: [] };
+    });
+    const runtime = createGardenRuntime(createRuntimeInput({ embeddingBackfillHandler: { handle } }));
+    await runtime.runEmbeddingBackfillPass("workspace-1");
+    expect(handle).toHaveBeenCalledTimes(8);
+    expect(currentScheduler().completions).toHaveLength(8);
+    expect(currentScheduler().queue).toHaveLength(1);
+  });
+
+  it("allows a later backfill after enqueue fails", async () => {
+    const handle = vi.fn(async () => ({ objectsAffected: [], auditEntries: [] }));
+    const runtime = createGardenRuntime(createRuntimeInput({ embeddingBackfillHandler: { handle } }));
+    const scheduler = currentScheduler() as InstanceType<typeof hoisted.FakeGardenScheduler>;
+    vi.spyOn(scheduler, "enqueue").mockImplementationOnce(() => { throw new Error("queue unavailable"); });
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow("queue unavailable");
+    await runtime.runEmbeddingBackfillPass("workspace-1");
+    expect(handle).toHaveBeenCalledTimes(1);
   });
 });

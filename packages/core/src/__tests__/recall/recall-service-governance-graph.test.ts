@@ -75,13 +75,17 @@ describe("conditional source governance ceilings", () => {
     expect(f.reader.read(input).unavailable).toBe(true);
   });
 
-  it("delivers a hint reference through the actual public source path without a hidden body", async () => {
+  it.each([false, true])("delivers a hint without a hidden body when governance byte exhaustion is %s", async (exhausted) => {
     const f = await fixture([path("hint_only")]);
     const service = new RecallService({ ...f.dependencies, activeConstraintsPort: {
       findActiveConstraints: async () => { throw new Error("unbounded governance is retired"); },
       readBounded: async (request) => {
         if (request.snapshotId === undefined) throw new Error("governance requires the pinned snapshot");
-        return readBoundedActiveConstraints(f.database, { ...request, snapshotId: request.snapshotId }, (input) => f.reader.read(input));
+        return readBoundedActiveConstraints(f.database, { ...request, snapshotId: request.snapshotId }, (input) => {
+          const page = f.reader.read({ ...input, ...(exhausted ? { byteLimit: 1 } : {}) });
+          if (exhausted) expect(page).toMatchObject({ rows: [], truncated: true });
+          return page;
+        });
       }
     } });
     const result = await service.recall({ ...capableRecallConsumerDeclaration(), taskSurface: { ...createTaskSurface(), display_name: "Atlas deployment" }, workspaceId: WS, strategy: "analyze" });

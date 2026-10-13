@@ -159,11 +159,12 @@ function deleteCompressedTombstone(
   objectId: string,
   onDeleted: (() => void) | undefined
 ): boolean {
+  const memory = host.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
   const guarded = host.hardDeleteTombstonedCompressedGuardedStatement.run(objectId);
   if (guarded.changes === 0) {
     return false;
   }
-  pruneDeletedMemoryGraph(host, objectId, onDeleted);
+  pruneDeletedMemoryGraph(host, objectId, String(memory!.workspace_id), onDeleted);
   return true;
 }
 
@@ -173,13 +174,14 @@ function deleteDispositionTombstone(
   requireJudgedUselessVerdict: boolean,
   onDeleted: (() => void) | undefined
 ): boolean {
+  const memory = host.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
   const result = requireJudgedUselessVerdict
     ? host.hardDeleteTombstonedJudgedUselessGuardedStatement.run(objectId)
     : host.hardDeleteTombstonedWithDispositionStatement.run(objectId);
   if (result.changes === 0) {
     return handleDispositionDeleteMiss(objectId, requireJudgedUselessVerdict);
   }
-  pruneDeletedMemoryGraph(host, objectId, onDeleted);
+  pruneDeletedMemoryGraph(host, objectId, String(memory!.workspace_id), onDeleted);
   return true;
 }
 
@@ -196,12 +198,13 @@ function handleDispositionDeleteMiss(objectId: string, guardedDelete: boolean): 
 function pruneDeletedMemoryGraph(
   host: MemoryEntryLifecycleWorkflowHost,
   objectId: string,
+  workspaceId: string,
   onDeleted: (() => void) | undefined
 ): void {
   onDeleted?.();
   deleteMemoryEntryEvidenceRefIndex(host, objectId);
-  host.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
-  host.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
+  host.deleteOrphanedPathRelationsStatement.run(workspaceId, objectId, objectId);
+  host.deleteOrphanedCoUsageCountersStatement.run(workspaceId, objectId, objectId);
 }
 
 export async function archiveMemoryEntry(
@@ -411,6 +414,7 @@ export async function hardDeleteTombstonedMemoryEntry(
 ): Promise<void> {
   try {
     this.transaction(() => {
+      const memory = this.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
       onDeleted?.();
 
       const result = this.hardDeleteTombstonedStatement.run(objectId);
@@ -424,8 +428,8 @@ export async function hardDeleteTombstonedMemoryEntry(
 
       // invariant: ineligible tombstones never strip live path topology.
       deleteMemoryEntryEvidenceRefIndex(this, objectId);
-      this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
-      this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
+      this.deleteOrphanedPathRelationsStatement.run(String(memory!.workspace_id), objectId, objectId);
+      this.deleteOrphanedCoUsageCountersStatement.run(String(memory!.workspace_id), objectId, objectId);
     });
   } catch (error) {
     if (error instanceof StorageError) {

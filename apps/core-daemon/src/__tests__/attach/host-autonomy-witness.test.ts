@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 // usage_state == "used" during a normal conversation, and the EventLog records
 // the linked chain. The fixture is a snapshot of real attached-host usage —
 // not a synthetic capture — produced by scripts/export-host-autonomy-witness.mjs
-// and refreshed by re-running it. This test pins the chain shape so a future
-// daemon change that breaks the recall -> usage telemetry contract is caught
-// offline, without a live host. When the upstream host model changes its
+// and refreshed by re-running it. This test checks historical witness integrity;
+// it does not execute or establish correctness of the current daemon producer.
+// When the upstream host model changes its
 // autonomous tool-selection behaviour the *recording* ages out and a fresh one
 // is exported; the assertions below stay the same.
 

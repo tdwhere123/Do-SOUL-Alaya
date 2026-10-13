@@ -107,13 +107,7 @@ export class EventPublisher {
   ): Promise<T> {
     const { entries, mutateResult } = this.appendManyInTransaction(eventInputs, mutate);
 
-    for (const entry of entries) {
-      try {
-        await this.propagate(entry);
-      } catch (propagateError) {
-        await this.reportPostCommitPropagationFailure(entry, propagateError, entries);
-      }
-    }
+    await this.propagateCommitted(entries);
 
     return mutateResult;
   }
@@ -163,13 +157,7 @@ export class EventPublisher {
       return { entries: collected, result: produced.result };
     });
 
-    for (const entry of entries) {
-      try {
-        await this.propagate(entry);
-      } catch (propagateError) {
-        await this.reportPostCommitPropagationFailure(entry, propagateError, entries);
-      }
-    }
+    await this.propagateCommitted(entries);
 
     return { result, entries };
   }
@@ -193,13 +181,7 @@ export class EventPublisher {
       return { entries, result };
     });
 
-    for (const entry of entries) {
-      try {
-        await this.propagate(entry);
-      } catch (propagateError) {
-        await this.reportPostCommitPropagationFailure(entry, propagateError, entries);
-      }
-    }
+    await this.propagateCommitted(entries);
     return result;
   }
 
@@ -207,11 +189,10 @@ export class EventPublisher {
    * Append + mutate atomically, return immediately after the transaction
    * commits, and run propagation as detached best-effort work.
    *
-   * This is intentionally separate from `appendManyWithMutation`: most callers
-   * need propagation errors to surface. Background durable-repair tasks such
-   * as path plasticity need the opposite post-commit behavior: once rows are
-   * durable, caller-side progress markers must be allowed to advance even if
-   * in-process listeners are slow, reject, or never settle.
+   * Unlike `appendManyWithMutation`, this does not wait for propagation.
+   * Background durable-repair tasks such as path plasticity must advance
+   * caller-side progress markers even if in-process listeners are slow,
+   * reject, or never settle.
    */
   public appendManyWithMutationAndDetachPropagation<T>(
     eventInputs: readonly EventPublisherInput[],
@@ -239,12 +220,32 @@ export class EventPublisher {
 
   public async publish(eventInput: EventPublisherInput): Promise<Readonly<EventLogEntry>> {
     const entry = await this.appendToEventLog(eventInput);
-    try {
-      await this.propagate(entry);
-    } catch (propagateError) {
-      throw new EventPublisherPropagationError(entry, propagateError);
-    }
+    const failures = await this.propagateEntries([entry]);
+    // Event-only callers can retry notification by the committed event identity.
+    // Mutation callers keep their committed result and consume diagnostics instead.
+    if (failures[0] !== undefined) throw failures[0];
     return entry;
+  }
+
+  /** Mutation callers preserve committed results; swallowed failures require durable diagnostics. */
+  public async propagateCommitted(entries: readonly EventLogEntry[]): Promise<void> {
+    const failures = await this.propagateEntries(entries);
+    for (const failure of failures) {
+      await this.reportPostCommitPropagationFailure(failure.entry, failure);
+    }
+  }
+
+  private async propagateEntries(entries: readonly EventLogEntry[]): Promise<readonly EventPublisherPropagationError[]> {
+    const failures: EventPublisherPropagationError[] = [];
+    for (const entry of entries) {
+      try {
+        await this.propagate(entry);
+      } catch (error) {
+        const failure = new EventPublisherPropagationError(entry, error, entries);
+        failures.push(failure);
+      }
+    }
+    return failures;
   }
 
   private async appendToEventLog(
@@ -300,8 +301,7 @@ export class EventPublisher {
 
   private async reportPostCommitPropagationFailure(
     entry: EventLogEntry,
-    error: unknown,
-    entries: readonly EventLogEntry[]
+    error: EventPublisherPropagationError
   ): Promise<void> {
     await reportAsyncSideEffectFailure(
       {
@@ -319,7 +319,7 @@ export class EventPublisher {
         eventLogRepo: this.dependencies.eventLogRepo,
         runtimeNotifier: this.dependencies.runtimeNotifier
       },
-      new EventPublisherPropagationError(entry, error, entries)
+      error
     );
   }
 }

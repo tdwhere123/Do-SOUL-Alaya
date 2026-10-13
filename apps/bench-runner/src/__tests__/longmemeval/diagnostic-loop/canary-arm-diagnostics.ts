@@ -94,7 +94,7 @@ function question(
   });
   const row = buildQuestionDiagnostic({
     questionId,
-    goldMemoryIds: [],
+    goldMemoryIds: ["memory:1"],
     answerSessionIds: [],
     deliveredResults: hitAt5 ? [{
       object_id: "memory:1",

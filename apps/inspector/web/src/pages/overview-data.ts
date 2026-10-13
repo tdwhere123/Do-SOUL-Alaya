@@ -23,6 +23,7 @@ export interface BenchSummaryData {
   readonly public: BenchSummaryShape | null;
   readonly publicMultiturn: BenchSummaryShape | null;
   readonly live: BenchSummaryShape | null;
+  readonly errors?: Readonly<Partial<Record<"self" | "public" | "publicMultiturn" | "live", string | null>>>;
 }
 
 interface PendingCountEnvelope {
@@ -40,6 +41,7 @@ interface BenchSummaryEnvelope {
     readonly public: BenchSummaryShape | null;
     readonly public_multiturn: BenchSummaryShape | null;
     readonly live: BenchSummaryShape | null;
+    readonly errors?: Readonly<Partial<Record<"self" | "public" | "public_multiturn" | "live", string | null>>>;
   };
 }
 
@@ -101,7 +103,12 @@ async function loadOverviewData(
   return {
     pendingCount: settledValue(pendingResult),
     recallStats: settledValue(recallResult),
-    benchData: settledValue(benchResult) ?? EMPTY_BENCH_DATA,
+    benchData: benchResult.status === "fulfilled" ? benchResult.value : {
+      ...EMPTY_BENCH_DATA,
+      errors: Object.fromEntries(["self", "public", "publicMultiturn", "live"].map((key) => [
+        key, benchResult.reason instanceof Error ? benchResult.reason.message : String(benchResult.reason)
+      ]))
+    },
     benchLoaded: true
   };
 }
@@ -141,7 +148,13 @@ async function fetchBenchData(signal: AbortSignal): Promise<BenchSummaryData> {
     self: envelope.data.self,
     public: envelope.data.public,
     publicMultiturn: envelope.data.public_multiturn,
-    live: envelope.data.live
+    live: envelope.data.live,
+    errors: {
+      self: envelope.data.errors?.self ?? null,
+      public: envelope.data.errors?.public ?? null,
+      publicMultiturn: envelope.data.errors?.public_multiturn ?? null,
+      live: envelope.data.errors?.live ?? null
+    }
   };
 }
 

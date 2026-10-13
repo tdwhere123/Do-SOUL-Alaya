@@ -344,6 +344,17 @@ describe("extraction cache replay formation closure", () => {
       factKeyProjectionCount: 4
     });
     expect(result.factFramePolicy).toEqual(EXTRACTION_REPLAY_FORMATION_POLICY);
+    const projected = [
+      { projection_id: 1, projection_kind: "fact_key", content: "I use Atlas" },
+      { projection_id: 2, projection_kind: "fact_key", content: "use Atlas" },
+      { projection_id: 3, projection_kind: "fact_key", content: "I Atlas" },
+      { projection_id: 4, projection_kind: "fact_key", content: "I use" }
+    ];
+    const expectedProjectionHash = createHash("sha256").update(JSON.stringify(projected)).digest("hex");
+    const emptyProjectionHash = createHash("sha256").update("[]").digest("hex");
+    expect(result.occurrences[0]?.entries.map((entry) => entry.factFrameFormation?.factKeyProjectionSha256))
+      .toEqual([expectedProjectionHash, emptyProjectionHash, emptyProjectionHash, emptyProjectionHash]);
+    expect(expectedProjectionHash).not.toBe(emptyProjectionHash);
     expect(result.occurrences[0]?.entries.map(({ factFrameFormation }) =>
       factFrameFormation)).toEqual([
       {

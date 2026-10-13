@@ -229,7 +229,7 @@ export class EmbeddingRecallService {
         error: readErrorMessage(error, "unknown_error")
       });
       await this.recordQuietVectorDegradation(params, "local_vector_lookup_failed");
-      return empty;
+      throw error;
     }
 
     if (storedVectors.length === 0 && this.dependencies.provider.isAvailable) {

@@ -14,6 +14,17 @@ afterEach(() => {
 });
 
 describe("SqliteSoftAssociationPathRepo", () => {
+  it("admits equivalent minute and fractional timestamps at the inclusive as-of", async () => {
+    const { database } = createRepo();
+    const repo = new SqliteSoftAssociationPathRepo(database);
+    repo.create(canonicalPath({ path_id: "minute", created_at: "2026-04-18T00:00Z", updated_at: "2026-04-18T00:00Z" }));
+    repo.create(canonicalPath({ path_id: "fraction", created_at: "2026-04-18T00:00:00.1Z", updated_at: "2026-04-18T00:00:00.1Z" }));
+    expect((await repo.findActiveByWorkspace("workspace-1", { asOf: "2026-04-18T00:00:00.000Z" })).map((row) => row.path_id)).toEqual(["minute"]);
+    expect((await repo.findActiveByWorkspace("workspace-1", { asOf: "2026-04-18T00:00:00.100Z" })).map((row) => row.path_id).sort()).toEqual(["fraction", "minute"]);
+    repo.create(canonicalPath({ path_id: "precise", created_at: "2026-04-18T00:00:00.0001Z", updated_at: "2026-04-18T00:00:00.0001Z" }));
+    expect((await repo.findActiveByWorkspace("workspace-1", { asOf: "2026-04-18T00:00:00.000099999Z" })).map((row) => row.path_id)).toEqual(["minute"]);
+    expect((await repo.findActiveByWorkspace("workspace-1", { asOf: "2026-04-18T00:00:00.000100Z" })).map((row) => row.path_id).sort()).toEqual(["minute", "precise"]);
+  });
   it("reads only canonical usage paths within both historical write boundaries", async () => {
     const { database } = createRepo();
     const repo = new SqliteSoftAssociationPathRepo(database);

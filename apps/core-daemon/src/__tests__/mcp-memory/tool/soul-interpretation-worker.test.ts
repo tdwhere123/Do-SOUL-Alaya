@@ -361,6 +361,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       });
       expect(preparedQuery.ok).toBe(true);
       if (!preparedQuery.ok) throw new Error("prepare_query must succeed");
+      // This is the host-operation protocol field, not an independent network observation.
       expect(preparedQuery.output.provider_attempts).toBe(0);
       if (preparedQuery.output.operation !== "prepare_query" || preparedQuery.output.query_handle === undefined) {
         throw new Error("prepare_query must return a handle");

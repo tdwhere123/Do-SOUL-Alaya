@@ -31,6 +31,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
       queryByEntity: vi.fn(async () => [])
     };
     const service = new GardenBacklogTelemetryService({
+      stopTimeoutMs: 20,
       scheduler: {
         getBacklogSnapshot: () => ({
           workspace_id: null,
@@ -58,6 +59,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
     await service.poll();
     await Promise.resolve();
     await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(warn).toHaveBeenCalledWith(
       "garden backlog snapshot publish failed",
@@ -76,6 +78,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
     process.on("unhandledRejection", unhandled);
     const warn = vi.fn();
     const service = new GardenBacklogTelemetryService({
+      stopTimeoutMs: 20,
       scheduler: {
         getBacklogSnapshot: () => {
           throw new Error("snapshot runner boom");
@@ -108,7 +111,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
       "garden backlog snapshot publish failed",
       expect.objectContaining({ error: "snapshot runner boom" })
     );
-    await service.stop();
+    await expect(service.stop()).resolves.toBe("timed_out");
     process.off("unhandledRejection", unhandled);
   });
 
@@ -116,6 +119,7 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
     const warn = vi.fn();
     let peekCalls = 0;
     const service = new GardenBacklogTelemetryService({
+      stopTimeoutMs: 20,
       scheduler: {
         getBacklogSnapshot: () => ({
           workspace_id: null,
@@ -157,6 +161,6 @@ describe("GardenBacklogTelemetryService snapshot publish", () => {
       "garden backlog telemetry poll failed",
       expect.objectContaining({ error: "unknown_error" })
     );
-    await service.stop();
+    await expect(service.stop()).resolves.toBe("timed_out");
   });
 });

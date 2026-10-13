@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { readSettledExtractionAttemptLedger } from
   "../../../../runs/extraction/authority/attempt-ledger.js";
@@ -27,12 +27,14 @@ describe("same-root continuation legacy adoption", () => {
   it("adopts an output-cap renewal that intentionally reuses its target selection", () => {
     const scenario = createAuthorityRenewalScenario();
     persistScenario(scenario);
+    unlinkSync(continuationChildClaimPath(scenario.cacheRoot, scenario.predecessorReceipt.lineage_digest));
 
     expect(adoptExistingContinuationChild({
       cacheRoot: scenario.cacheRoot,
       child: scenario.successorReceipt,
       childTargetSelection: scenario.successorSelection
     })?.successor.receipt_digest).toBe(scenario.successorReceipt.receipt_digest);
+    expectPersistedAdoption(scenario);
   });
 
   it("adopts a transport successor that intentionally reuses its target selection", () => {
@@ -40,12 +42,14 @@ describe("same-root continuation legacy adoption", () => {
       512, 300, "https://provider-b.example/v1"
     );
     persistScenario(scenario);
+    unlinkSync(continuationChildClaimPath(scenario.cacheRoot, scenario.predecessorReceipt.lineage_digest));
 
     expect(adoptExistingContinuationChild({
       cacheRoot: scenario.cacheRoot,
       child: scenario.successorReceipt,
       childTargetSelection: scenario.successorSelection
     })?.successor.receipt_digest).toBe(scenario.successorReceipt.receipt_digest);
+    expectPersistedAdoption(scenario);
   });
 
   it("adopts a spent legacy child and permits the next claimed generation", () => {
@@ -94,6 +98,22 @@ function readPredecessorLedger(scenario: ReturnType<typeof createContinuationSce
     lineageDigest: scenario.predecessorReceipt.lineage_digest,
     cacheIdentity: { model, requestProfile }
   });
+}
+
+function expectPersistedAdoption(scenario: ReturnType<typeof createAuthorityRenewalScenario>): void {
+  const persisted = JSON.parse(readFileSync(continuationChildClaimPath(
+    scenario.cacheRoot, scenario.predecessorReceipt.lineage_digest
+  ), "utf8"));
+  expect(persisted).toMatchObject({
+    predecessor: { receipt_digest: scenario.predecessorReceipt.receipt_digest,
+      lineage_digest: scenario.predecessorReceipt.lineage_digest },
+    successor: { receipt_digest: scenario.successorReceipt.receipt_digest,
+      lineage_digest: scenario.successorReceipt.lineage_digest,
+      target_selection_digest: scenario.successorReceipt.target_selection_digest }
+  });
+  expect(() => assertExtractionAuthorityHasNoContinuationChild({
+    cacheRoot: scenario.cacheRoot, authority: scenario.predecessorReceipt
+  })).toThrow(/already delegated/u);
 }
 
 function expectClaimDrift(

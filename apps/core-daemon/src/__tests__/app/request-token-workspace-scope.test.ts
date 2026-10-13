@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createApp } from "../../runtime/app.js";
+import { createApp, type CoreDaemonRouteServices } from "../../runtime/app.js";
 import {
   extractWorkspaceIdFromPath,
   WORKSPACE_TOKEN_DENIED_MESSAGE
@@ -28,6 +28,39 @@ function headersFor(token: string): Record<string, string> {
 }
 
 describe("request token workspace scope", () => {
+  it("binds every run read to the resolved resource workspace", async () => {
+    const runService = { getById: vi.fn(async (runId: string) => ({ run_id: runId, workspace_id: runId === "run-a" ? "wsA" : "wsB" })) };
+    const findByRunId = vi.fn(async () => []);
+    const shared = { runService, workspaceService: workspaceServiceStub() };
+    const app = createApp({ requestProtection: { allowedOrigin: "http://localhost:5173", requestToken: PROCESS_TOKEN,
+      boundWorkspaceIds: ["wsA"], allowDesktopOriginlessRequests: true }, routes: {
+      memories: routeServices<NonNullable<CoreDaemonRouteServices["memories"]>>({ ...shared, memoryService: { findByRunId } }),
+      evidence: routeServices<NonNullable<CoreDaemonRouteServices["evidence"]>>({ ...shared, evidenceService: { findByRunId } }),
+      signals: routeServices<NonNullable<CoreDaemonRouteServices["signals"]>>({ ...shared, signalService: { listByRun: findByRunId, countByRun: vi.fn(async () => 0) } }),
+      recall: routeServices<NonNullable<CoreDaemonRouteServices["recall"]>>(shared),
+      governance: routeServices<NonNullable<CoreDaemonRouteServices["governance"]>>(shared)
+    } });
+    for (const suffix of ["memories", "evidence", "signals", "task-surface", "recall-candidates", "governance-snapshot"]) {
+      const response = await app.request(`/runs/run-b/${suffix}`, { headers: headersFor(PROCESS_TOKEN) });
+      expect(response.status, suffix).toBe(403);
+    }
+    expect(findByRunId).not.toHaveBeenCalled();
+    const allowed = await app.request("/runs/run-a/signals", { headers: headersFor(PROCESS_TOKEN) });
+    expect(allowed.status).toBe(200);
+    expect(findByRunId).toHaveBeenCalledWith("run-a", expect.any(Object));
+  });
+
+  it.each(["text/plain", "application/octet-stream"])("binds JSON body workspace despite %s content type", async (contentType) => {
+    const adopt = vi.fn();
+    const app = createApp({ requestProtection: { allowedOrigin: "http://localhost:5173", requestToken: PROCESS_TOKEN,
+      boundWorkspaceIds: ["wsA"], allowDesktopOriginlessRequests: true }, routes: {
+      globalMemory: globalMemoryRouteServices({ workspaceService: workspaceServiceStub(), globalMemoryService: { adopt } })
+    } });
+    const response = await app.request("/soul/global-memory-entries/mem-1/adopt", { method: "POST",
+      headers: { ...headersFor(PROCESS_TOKEN), "content-type": contentType }, body: JSON.stringify({ workspace_id: "wsB" }) });
+    expect(response.status).toBe(403);
+    expect(adopt).not.toHaveBeenCalled();
+  });
   it("returns null for a malformed percent-encoded workspace path", () => {
     expect(extractWorkspaceIdFromPath("/workspaces/%ZZ/files")).toBeNull();
   });

@@ -32,13 +32,15 @@ describe("classifyRatioDrop", () => {
 });
 
 describe("classifyLatencyGrowth", () => {
-  it("returns ok when previous is zero (avoids divide-by-zero)", () => {
+  it("retains unavailable growth when a positive value has a zero baseline", () => {
     const result = classifyLatencyGrowth(
       120,
       0,
       DEFAULT_THRESHOLDS.latency_p95_growth_ratio
     );
-    expect(result.verdict).toBe("ok");
+    expect(result).toEqual({ verdict: "warn", growthRatio: null });
+    expect(classifyLatencyGrowth(0, 0, DEFAULT_THRESHOLDS.latency_p95_growth_ratio))
+      .toEqual({ verdict: "ok", growthRatio: 0 });
   });
 
   it("returns warn at +25% latency growth", () => {

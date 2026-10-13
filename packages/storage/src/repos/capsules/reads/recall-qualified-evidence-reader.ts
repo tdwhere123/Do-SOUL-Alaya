@@ -56,19 +56,16 @@ const QUERY_CHUNK_SIZE = 500;
 
 export class RecallQualifiedEvidenceReader {
   private readonly statementHolder: RefreshableStatementHolder<QualifiedEvidenceStatements>;
-  private readonly strictParse: boolean;
   private parseSkipCount = 0;
 
   public constructor(
     db: StorageDatabase,
-    private readonly resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver,
-    options: Readonly<{ readonly strictParse?: boolean }> = {}
+    private readonly resolveVerifiedAssertionLocator?: VerifiedAssertionLocatorResolver
   ) {
     this.statementHolder = new RefreshableStatementHolder(
       db,
       prepareQualifiedEvidenceStatements
     );
-    this.strictParse = options.strictParse === true;
   }
 
   public get skippedParseCount(): number {
@@ -186,7 +183,6 @@ export class RecallQualifiedEvidenceReader {
         JSON.stringify(evidenceObjectIds)
       ), { parse: (value: unknown) => value as EvidenceQualificationRow }, "evidence qualification row"),
       {
-        strictParse: this.strictParse,
         recordSkip: () => {
           this.parseSkipCount += 1;
         }
@@ -208,7 +204,6 @@ export class RecallQualifiedEvidenceReader {
   }
 }
 interface EvidenceParseSink {
-  readonly strictParse: boolean;
   recordSkip(): void;
 }
 function readEvidenceCandidates(
@@ -247,16 +242,7 @@ function readEvidenceCandidate(
   } catch (error) {
     if (error instanceof EvidenceProjectionIntegrityError) throw error;
     parse.recordSkip();
-    if (parse.strictParse) throw error;
-    process.emitWarning("evidence candidate parse failed; skipping row", {
-      code: "ALAYA_EVIDENCE_CANDIDATE_PARSE_FAILED",
-      detail: JSON.stringify({
-        layer: "storage",
-        object_id: row.object_id,
-        error: error instanceof Error ? error.message : "unknown"
-      })
-    });
-    return null;
+    throw error;
   }
 }
 
@@ -338,7 +324,8 @@ function readSignal(row: StoredSignalRow): Readonly<CandidateMemorySignal> | nul
       ? {}
       : { source_delivery_ids: parseJson(row.source_delivery_ids_json, "source_delivery_ids_json") })
   });
-  return parsed.success && parsed.data.signal_state === "materialized"
+  if (!parsed.success) throw parsed.error;
+  return parsed.data.signal_state === "materialized"
     ? parsed.data
     : null;
 }

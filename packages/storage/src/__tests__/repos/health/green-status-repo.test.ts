@@ -54,7 +54,7 @@ describe("SqliteGreenStatusRepo", () => {
     await expect(repo.findByTargetObjectId(greenStatus.target_object_id)).resolves.toEqual(greenStatus);
   });
 
-  it("replaces existing record for the same target object id", async () => {
+  it("rejects replacing a target's established status identity", async () => {
     const repo = createRepo();
     const original = createGreenStatus();
     const replaced = createGreenStatus({
@@ -65,10 +65,12 @@ describe("SqliteGreenStatusRepo", () => {
     });
 
     await repo.upsert(original);
-    await repo.upsert(replaced);
-
-    await expect(repo.findByTargetObjectId(original.target_object_id)).resolves.toEqual(replaced);
-    await expect(repo.findByObjectId(original.object_id)).resolves.toBeNull();
+    expect(() => repo.upsert(replaced)).toThrow();
+    expect(repo.findByTargetObjectIdSync(original.target_object_id)).toEqual(original);
+    await expect(repo.findByObjectId(original.object_id)).resolves.toEqual(original);
+    const updated = { ...replaced, object_id: original.object_id };
+    repo.upsert(updated);
+    await expect(repo.findByTargetObjectId(original.target_object_id)).resolves.toEqual(updated);
   });
 
   it("filters eligible and grace statuses", async () => {

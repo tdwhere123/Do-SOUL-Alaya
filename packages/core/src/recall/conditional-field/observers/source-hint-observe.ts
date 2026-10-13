@@ -54,7 +54,7 @@ export function takeSourceHintPage(
       ? takeTextHintPage(input, sketch, limit, nativeLimit, afterCursor)
       : takeProposalHintPage(input, sketch, limit, nativeLimit, afterCursor);
   } catch {
-    return emptyHint(afterCursor, true, false);
+    return { ...emptyHint(afterCursor, false, true), hydrationUnavailable: true, workUnits: nativeLimit };
   }
 }
 

@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -79,7 +80,7 @@ async function withLoopback(
     const selected = new URL(String(url));
     expect(selected.href).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
     expect(init?.redirect).toBe("error");
-    return nativeFetch(new URL(selected.pathname, origin), init);
+    return fetchLoopbackProvider(nativeFetch, new URL(selected.pathname, origin), init);
   };
   try { await run(fetchImpl, () => calls); }
   finally {

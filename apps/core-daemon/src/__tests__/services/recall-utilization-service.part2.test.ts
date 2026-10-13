@@ -97,19 +97,17 @@ function usagePayload(input: {
 }
 
 // Mirrors the production SQL semantics in
-// `packages/storage/src/repos/runtime/event-log-repo.ts` queryByWorkspaceAndTypeStatement:
-//   COALESCE(payload_json.reported_at, created_at) > since      (strict)
-//   COALESCE(payload_json.reported_at, created_at) <= until     (inclusive)
-// The new recall-context payloads carry occurred_at, not reported_at, so
-// the SQL falls back to created_at — same as this fake.
 function fakeEventLogRepo(rows: readonly EventLogEntry[]): RecallUtilizationEventLogPort {
   return {
     async queryByWorkspaceAndType(workspaceId, eventType, sinceIso, untilIso) {
       return rows.filter((row) => {
         if (row.workspace_id !== workspaceId) return false;
         if (row.event_type !== eventType) return false;
-        if (sinceIso !== undefined && !(row.created_at > sinceIso)) return false;
-        if (untilIso !== undefined && !(row.created_at <= untilIso)) return false;
+        const payload = row.payload_json as Record<string, unknown>;
+        const instant = typeof payload.reported_at === "string" ? payload.reported_at
+          : typeof payload.occurred_at === "string" ? payload.occurred_at : row.created_at;
+        if (sinceIso !== undefined && !(instant > sinceIso)) return false;
+        if (untilIso !== undefined && !(instant <= untilIso)) return false;
         return true;
       });
     }
@@ -175,15 +173,15 @@ describe("recall-utilization-service", () => {
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "delivery_at_since",
         runId: "run-since",
-        payload: deliveredPayload({ deliveryId: "delivery_at_since", runId: "run-since", pointerCount: 1, latencyMs: 10 }),
-        createdAt: SINCE
+        payload: { ...deliveredPayload({ deliveryId: "delivery_at_since", runId: "run-since", pointerCount: 1, latencyMs: 10 }), occurred_at: SINCE },
+        createdAt: UNTIL
       }),
       makeRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "delivery_at_until",
         runId: "run-until",
-        payload: deliveredPayload({ deliveryId: "delivery_at_until", runId: "run-until", pointerCount: 2, latencyMs: 20 }),
-        createdAt: UNTIL
+        payload: { ...deliveredPayload({ deliveryId: "delivery_at_until", runId: "run-until", pointerCount: 2, latencyMs: 20 }), occurred_at: UNTIL },
+        createdAt: SINCE
       })
     ];
     const stats = await createRecallUtilizationService({

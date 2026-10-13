@@ -73,7 +73,7 @@ describe("recall tier window IPC client pagination", () => {
     expect(second.done).toBe(true);
     if (!second.done) throw new Error("expected terminal page");
     expect(second.value.memories).toHaveLength(3);
-    expect(() => createTierWindowPageAssembler(1)({
+    expect(() => createTierWindowPageAssembler(RECALL_TIER_WINDOW_IPC_MAX_CHUNK_ROWS + 2)({
       kind: "recall-tier-window-chunk",
       memories: Array.from({ length: RECALL_TIER_WINDOW_IPC_MAX_CHUNK_ROWS + 1 }, (_, index) => ({
         object_id: `m-${index}`
@@ -81,12 +81,17 @@ describe("recall tier window IPC client pagination", () => {
       next_cursor: null,
       truncated: false,
       done: true
-    })).toThrow(/byte bound|row bound|bounded assembler/u);
+    })).toThrow(/row bound/u);
 
     const chunkBytes = Buffer.byteLength(JSON.stringify(
       Array.from({ length: RECALL_TIER_WINDOW_IPC_MAX_CHUNK_ROWS }, () => ({ object_id: "x".repeat(512) }))
     ), "utf8");
     expect(chunkBytes).toBeGreaterThan(RECALL_TIER_WINDOW_IPC_MAX_CHUNK_BYTES);
+    expect(() => createTierWindowPageAssembler(RECALL_TIER_WINDOW_IPC_MAX_CHUNK_ROWS)({
+      kind: "recall-tier-window-chunk",
+      memories: Array.from({ length: RECALL_TIER_WINDOW_IPC_MAX_CHUNK_ROWS }, () => ({ object_id: "x".repeat(512) })),
+      next_cursor: null, truncated: false, done: true
+    })).toThrow(/byte bound/u);
   });
 
   it("forwards page callbacks without requiring callers to aggregate IPC chunks", async () => {

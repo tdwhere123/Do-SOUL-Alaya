@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readCandidates, readNumberRecord } from "../../../artifacts/diagnostics-candidate-readers.js";
 
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../diagnostics/schema/diagnostics-schema.js";
 import {
@@ -7,6 +8,17 @@ import {
 } from "../../../diagnostics/diagnostics.js";
 
 describe("LongMemEval recall diagnostics (fusion/graph)", () => {
+  it("invalidates a supplied numeric map when one member is malformed", () => {
+    expect(readNumberRecord({ first: 1, second: "invalid" })).toBeNull();
+    expect(readNumberRecord({ first: 1, second: 2 })).toEqual({ first: 1, second: 2 });
+    const parsed = readCandidates({ candidates: [{
+      object_id: "gold-a", object_kind: "memory_entry", origin_plane: "workspace_local",
+      candidate_key: "workspace_local:memory_entry:gold-a",
+      per_axis_rank: { object: 1, path: "invalid" },
+      score_factors: { valid: 1, broken: { first: 1, second: "invalid" } }
+    }] });
+    expect(parsed.byObjectId.get("gold-a")).toMatchObject({ perAxisRank: null, scoreFactors: null });
+  });
   it("joins fusion breakdown details into delivered and gold diagnostics", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-fusion-breakdown",

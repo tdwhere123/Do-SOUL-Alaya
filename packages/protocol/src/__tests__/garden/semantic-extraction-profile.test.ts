@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   canonicalizeSemanticExtractionProfile,
@@ -34,35 +33,10 @@ describe("semantic extraction profile canonicalizer", () => {
     expect(semanticExtractionProfilesEqual(reordered, profile)).toBe(true);
   });
 
-  it("keeps semantic enrichment task ids stable across profile field order", () => {
-    const canonical = canonicalizeSemanticExtractionProfile(profile);
-    const reordered = canonicalizeSemanticExtractionProfile({
-      outputSchema: profile.outputSchema,
-      promptRevision: profile.promptRevision,
-      requestProfile: profile.requestProfile,
-      model: profile.model,
-      capability: profile.capability
-    });
-    const left = enrichmentTaskId("ws", "obj", "rev", canonical);
-    const right = enrichmentTaskId("ws", "obj", "rev", reordered);
-    expect(left).toBe(right);
+  it("defines the ordered semantic profile preimage consumed by task identity", () => {
+    expect(semanticExtractionProfilePreimage(profile)).toEqual([
+      "official-api-signals", "official-api-interactive", "logical-request-v1",
+      "official-api-system-prompt", "official-api-signals-v1"
+    ]);
   });
 });
-
-function enrichmentTaskId(
-  workspaceId: string,
-  objectId: string,
-  revision: string,
-  profile: SemanticExtractionProfile
-): string {
-  return `semantic:${digest(JSON.stringify([
-    workspaceId,
-    objectId,
-    revision,
-    ...semanticExtractionProfilePreimage(profile)
-  ]))}`;
-}
-
-function digest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}

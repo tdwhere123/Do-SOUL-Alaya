@@ -24,9 +24,17 @@ it("uses a metered task hint only for navigation while keeping original-query so
   expect(navigationMeter.spentBytes).toBeGreaterThan(0);
   expect(() => hinted.navigationQuery(new SourceSemanticResourceLedger({ work_units: 0, memory_bytes: 1000 })))
     .toThrow(SourceSemanticResourceExhausted);
-  const rows = ["orchid", "Harbor irrigation"].map(identity => ({ identity, signal: hinted.source(identity, meter) }));
-  expect(rows.map(row => row.signal)).toEqual(rows.map(row => original.source(row.identity, meter)));
-  expect(hinted.order(rows, meter).map(row => row.identity)).toEqual(["orchid", "Harbor irrigation"]);
+  const sources = [{ identity: "a", text: "Harbor irrigation" }, { identity: "z", text: "orchid" }];
+  const rows = sources.map(row => ({ identity: row.identity, signal: hinted.source(row.text, meter) }));
+  const originalRows = sources.map(row => ({ identity: row.identity, signal: original.source(row.text, meter) }));
+  expect(rows.map(row => row.signal)).toEqual(originalRows.map(row => row.signal));
+  expect(rows[0]!.signal).not.toBeNull();
+  expect(rows[1]!.signal).not.toBeNull();
+  expect(rows[0]!.signal!.source_text_score).not.toBeNull();
+  expect(rows[1]!.signal!.source_text_score).not.toBeNull();
+  expect(rows[1]!.signal!.source_text_score!).toBeGreaterThan(rows[0]!.signal!.source_text_score!);
+  expect(hinted.order(rows, meter).map(row => row.identity)).toEqual(["z", "a"]);
+  expect(original.order(originalRows, meter).map(row => row.identity)).toEqual(["z", "a"]);
   expect(() => createSourceSemanticAccessPolicy("orchid", undefined, "canonical-v1", meter, "Harbor"))
     .toThrow(/canonical/u);
 });

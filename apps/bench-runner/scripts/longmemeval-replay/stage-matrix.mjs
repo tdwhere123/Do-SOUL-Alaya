@@ -355,7 +355,7 @@ function stageSummary(questions, stage) {
   const denominator = questions.length;
   const atK = Object.fromEntries(CEILING_KS.map((k) => {
     const count = questions.filter((question) => question.any_gold_at_k[stage][k]).length;
-    return [k, { count, denominator, rate: ratio(count, denominator) }];
+    return [k, { count, denominator, rate: nullableRatio(count, denominator) }];
   }));
   return { at_5: atK[5], at_k: atK };
 }

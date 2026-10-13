@@ -12,6 +12,8 @@ import {
   type SourceRootObserverRow
 } from "../../../../recall/conditional-field/observers/observe.js";
 import { compileQuerySourceSketch } from "../../../../recall/conditional-field/query/query-source-sketch.js";
+import { sourceHintSketch, takeSourceHintPage } from "../../../../recall/conditional-field/observers/source-hint-observe.js";
+import { classifyResidualInfluence } from "../../../../recall/conditional-field/index/residual-influence.js";
 import {
   INTERPRETATION_CLOCK,
   SNAPSHOT_ID,
@@ -22,6 +24,34 @@ import {
 const ROOTS = ["root-a", "root-b", "root-c"] as const;
 
 describe("source hint membership", () => {
+  it("retains failed optional hint access separately while source continuation completes", () => {
+    const query = sketchQuery();
+    const unavailable = observeConditionalField(seedInput(query, readers("absent"), 8));
+    const empty = observeConditionalField(seedInput(query, readers("empty"), 8));
+    expect(unavailable.page.open_regions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "discovery", status: "unavailable", coverage_role: "optional_accelerator" }),
+      expect.objectContaining({ kind: "seed", status: "open" })
+    ]));
+    expect(empty.page.open_regions.some(region => region.status === "unavailable")).toBe(false);
+    const continued = observeConditionalField(seedInput(query, readers("absent"), 8, unavailable.page.cursor));
+    expect(continued.page.observations.map(row => row.object_id).sort()).toEqual([...ROOTS]);
+    expect(continued.page.outcome.status).toBe("exhausted");
+    const hintResidual = continued.page.open_regions.find(region => region.kind === "discovery")!;
+    expect(classifyResidualInfluence(hintResidual, {}, "membership")).toBe("irrelevant");
+    expect(continued.page.open_regions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "discovery", status: "unavailable", coverage_role: "optional_accelerator" }),
+      expect.objectContaining({ kind: "seed", status: "exhausted" })
+    ]));
+  });
+  it("keeps a thrown hint read unavailable and resumable instead of marking the lane exhausted", () => {
+    const input = seedInput(sketchQuery(), { boundInterpretations: () => { throw new Error("reader unavailable"); } }, 8);
+    const sketch = sourceHintSketch(input)!;
+    const result = takeSourceHintPage(input, sketch, 8, 20, "previous");
+    expect(result).toMatchObject({ observations: [], hintsDone: false, hydrationUnavailable: true,
+      truncated: true, hintCommitted: "previous", workUnits: 20 });
+    const empty = takeSourceHintPage(seedInput(sketchQuery(), readers("empty"), 8), sketch, 8, 20, null);
+    expect(empty).toMatchObject({ hintsDone: true, hydrationUnavailable: false });
+  });
   it.each(["disabled", "absent", "empty", "wrong", "stale", "corrupt"] as const)(
     "preserves completed membership when hints are %s",
     (mode) => {

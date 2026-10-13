@@ -18,7 +18,7 @@
     "replay:enrichment-admission": "node ./scripts/replay-enrichment-admission.mjs",
     "test:coverage": "node ./scripts/ci/run-vitest-projects.mjs --coverage.enabled --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=lcov",
     "test:parallel": "vitest run --config vitest.config.mjs",
-    "ci:content-contracts": "node --test ./scripts/ci/check-benchmark-storage.test.mjs && node ./scripts/ci/check-content-contracts.mjs",
+    "ci:content-contracts": "node --test ./scripts/ci/check-content-contracts.test.mjs && node --test ./scripts/ci/check-benchmark-storage.test.mjs && node ./scripts/ci/check-content-contracts.mjs",
     "ci:audit": "node ./scripts/ci/check-audit.mjs",
     "ci:test-as-any": "node ./scripts/ci/check-test-as-any.mjs",
     "ci:throw-new-error": "node ./scripts/ci/check-throw-new-error.mjs",

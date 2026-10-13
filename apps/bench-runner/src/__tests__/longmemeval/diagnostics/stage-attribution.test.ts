@@ -410,6 +410,9 @@ describe("stage attribution (fixtures)", () => {
     expect(tables.summary.denominators).toEqual({
       D_Q_evaluated: 5,
       D_Q_scorable: 4,
+      D_Q_non_abstention: 4,
+      D_Q_unscorable: 0,
+      D_Q_measurement_unknown: 0,
       D_Q_gold_bearing: 3,
       D_Q_miss: 3,
       D_G_all: 3

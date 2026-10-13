@@ -14,23 +14,14 @@ afterEach(() => {
 });
 
 describe("RecallQualifiedEvidenceReader parse failures", () => {
-  it("counts skipped parse failures by default", async () => {
+  it("throws on corrupt requested evidence instead of reporting ordinary absence", async () => {
     const { database } = await createMalformedEvidenceRow();
     const reader = new RecallQualifiedEvidenceReader(database);
 
-    expect(reader.find("workspace-1", [{ object_id: MALFORMED_OBJECT_ID }])).toEqual([]);
+    expect(() => reader.find("workspace-1", [{ object_id: MALFORMED_OBJECT_ID }])).toThrow(/Failed to validate evidence capsule row/);
     expect(reader.skippedParseCount).toBe(1);
   });
 
-  it("throws in strictParse instead of skipping the row", async () => {
-    const { database } = await createMalformedEvidenceRow();
-    const reader = new RecallQualifiedEvidenceReader(database, undefined, { strictParse: true });
-
-    expect(() => reader.find("workspace-1", [{ object_id: MALFORMED_OBJECT_ID }])).toThrow(
-      /Failed to validate evidence capsule row/
-    );
-    expect(reader.skippedParseCount).toBe(1);
-  });
 });
 
 const MALFORMED_OBJECT_ID = "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9";

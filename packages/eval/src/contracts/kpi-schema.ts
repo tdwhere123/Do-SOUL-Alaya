@@ -282,8 +282,8 @@ const FullGoldCoverageSliceSchema = z
     // Pool reach (pre-budget pool rank), distinct from the delivery-rank
     // coverage above: how many golds sit in the candidate pool within rank
     // 50/100 at all — separates retrieval/fusion reach from delivery budget.
-    pool_recall_at_50: RatioSchema,
-    pool_recall_at_100: RatioSchema,
+    pool_recall_at_50: RatioSchema.nullable(),
+    pool_recall_at_100: RatioSchema.nullable(),
     // Optional so older kpi.json records stay schema-valid; new LongMemEval
     // runs populate it from bench-runner delivery diagnostics.
     delivery_contribution: FullGoldDeliveryContributionSchema.optional()
@@ -340,7 +340,7 @@ const KpiCoreSchema = z.object({
   latency_ms_p50: z.number().nonnegative(),
   latency_ms_p95: z.number().nonnegative(),
   latency_source: LatencySourceSchema,
-  token_saved_ratio_vs_full_prompt: z.number(),
+  token_saved_ratio_vs_full_prompt: z.number().nullable(),
   // Optional so kpi.json records written before this block existed stay
   // schema-valid. When present, token_saved_ratio_vs_full_prompt is derived
   // from this block.
@@ -444,6 +444,16 @@ export const KpiPayloadSchema = z
     // refinement: evaluated_count <= sample_size.
     sample_size: z.number().int().nonnegative(),
     evaluated_count: z.number().int().nonnegative(),
+    execution_coverage: z.object({
+      completed_questions: z.number().int().nonnegative(),
+      failed_conversations: z.number().int().nonnegative(),
+      unavailable_questions: z.array(z.object({
+        conversation_id: z.string().min(1),
+        question_id: z.string().min(1),
+        status: z.literal("unavailable"),
+        reason: z.string().min(1)
+      }).strict())
+    }).strict().optional(),
     // New producers populate the answerable/scorable metric denominator.
     // Optional preserves reads of historical artifacts.
     answerable_evaluated_count: z.number().int().nonnegative().optional(),

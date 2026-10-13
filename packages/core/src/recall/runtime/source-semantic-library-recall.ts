@@ -8,7 +8,8 @@ import {
   SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
-  type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier
+  type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier,
+  verifySourceSemanticLibraryDelivery
 } from "@do-soul/alaya-protocol";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
@@ -284,6 +285,7 @@ function previewWithinTokens(text: string, allowance: number, estimator: ReturnT
 export function encodeSourceSemanticLibraryResponse(
   result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>
 ): SoulInterpretationResponse {
+  verifySourceSemanticLibraryDelivery(result, fieldContractSha256);
   const { kind: _kind, previews, coverage, ...rest } = result;
   const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true,
     result.source_disclosures);

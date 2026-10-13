@@ -1,4 +1,5 @@
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
+import { AlayaError } from "@do-soul/alaya-protocol";
 
 export const LONGMEMEVAL_PREDECESSOR_MATERIAL_EFFECT_POLICY = Object.freeze({
   answerableCount: 94,
@@ -183,7 +184,8 @@ function directionalEffect(
   return result;
 }
 
-function metricDelta(control: number, product: number): LongMemEvalMetricDelta {
+function metricDelta(control: number | null, product: number | null): LongMemEvalMetricDelta {
+  if (control === null || product === null) throw new AlayaError("UNAVAILABLE", "material effect requires available measurements");
   return { control, product, delta: product - control };
 }
 

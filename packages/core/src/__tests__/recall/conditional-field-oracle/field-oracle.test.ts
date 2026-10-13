@@ -156,9 +156,14 @@ describe("conditional-field independent field oracle", () => {
     for (let attempt = 0; attempt < 40 && !observationSettled(producedField); attempt += 1) {
       producedField = observeField(initial.interpretation, { ...initial.observeInput, resume_field: producedField });
     }
-    const producer = compareObjectMilligrades(enumeratedFromField(producedField), DEPLOYMENT_MILLIGRADES);
+    const enumerated = enumeratedFromField(producedField);
+    expect(enumerated.kind).toBe("enumerated");
+    const producer = compareObjectMilligrades(enumerated, DEPLOYMENT_MILLIGRADES);
     expect(producer.skipped_environments).toBe(0);
     expect(producer.mismatches).toBe(0);
+    expect(producer.unsupported).toBe(0);
+    expect(producer.observation_holes).toBe(0);
+    expect(producer.matches).toBe(Object.keys(DEPLOYMENT_MILLIGRADES).length);
   });
 
   it("rejects coordinate-wise max under same_path", () => {
@@ -243,8 +248,16 @@ describe("conditional-field independent field oracle", () => {
       roles: world.roles,
       claims: world.claims
     });
-    expect(first.entries.length).toBeLessThanOrEqual(2);
+    expect(first.entries.map(entry => entry.object_id)).toEqual(["c", "h"]);
     expect(first.continuation).not.toBeNull();
+    const rest = projectOracleIndex({ field, view: defaultView(), query_id: QUERY_ID,
+      snapshot_id: SNAPSHOT_ID, result_version: RESULT_VERSION,
+      budget: defaultBudget({ page_budget: 800, min_envelope: 10 }),
+      page_offset: 2, prior_continuation: first.continuation!, expires_at: "2099-01-01T00:00:00.000Z",
+      roles: world.roles, claims: world.claims });
+    // The canonical identity order excludes the routing-only service.
+    expect([...first.entries, ...rest.entries].map(entry => entry.object_id)).toEqual(["c", "h", "l", "r"]);
+    expect(rest.continuation).toBeNull();
   });
 
   it("treats seed 0 through a hard edge as reachable and an unseeded acceptor as unreachable", () => {

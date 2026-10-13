@@ -122,7 +122,8 @@ function evidenceDemandForProduct(state: FieldEngineState, value: FieldValue, as
   const assertions: RelationAssertionRead[] = rows.flatMap((row) => {
     const receipts = row.evidenceReceipts ?? [];
     const formation = formationReceiptFromRow(row);
-    return row.validity === undefined || row.validity.kind === "interpretation" ? [] : [{
+    return row.validity === undefined || row.validity.kind === "interpretation"
+      || row.validity.kind === "query_snapshot" ? [] : [{
       assertion_id: row.assertionId, relation_kind: row.predicate, validity: row.validity,
       anchors: { source_anchor: { kind: "object" as const, object_id: row.sourceObjectId }, target_anchor: { kind: "object" as const, object_id: row.targetObjectId } },
       evidence_receipts: receipts.map((receipt) => ({ evidence_id: receipt.evidenceId,

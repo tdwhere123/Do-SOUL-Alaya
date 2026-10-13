@@ -1,6 +1,7 @@
 import { createSourceSemanticPublication } from "../../field/source-semantic-publication.js";
 import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { SqliteSourceRootRecallReader } from "@do-soul/alaya-storage";
+import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { processEnvLookup } from "../../config/daemon-config-environment.js";
@@ -117,7 +118,12 @@ function createSynthesisEvidenceReader(input: FinalizeDaemonRuntimeWiringInput) 
   };
 }
 
-function createSynthesisMemberResolver(input: FinalizeDaemonRuntimeWiringInput) {
+export function createSynthesisMemberResolver(input: {
+  readonly memoryEntryRepo: {
+    findByEvidenceRefs(workspaceId: string, evidenceRefs: readonly string[]):
+      Promise<readonly Readonly<Pick<MemoryEntry, "object_id" | "evidence_refs">>[]>;
+  };
+}) {
   return {
     findMemberObjectIdsByEvidenceRefs: async (
       scopedWorkspaceId: string,

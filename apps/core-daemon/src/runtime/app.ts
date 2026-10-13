@@ -433,11 +433,6 @@ function registerJsonWorkspaceBindingMiddleware(app: Hono): void {
       await next();
       return;
     }
-    const contentType = context.req.header("content-type") ?? "";
-    if (!contentType.toLowerCase().includes("application/json")) {
-      await next();
-      return;
-    }
     try {
       const bodyWorkspaceId = extractWorkspaceIdFromUnknown(await context.req.raw.clone().json());
       if (bodyWorkspaceId !== null && isWorkspaceGrantDenied(grant, bodyWorkspaceId)) {

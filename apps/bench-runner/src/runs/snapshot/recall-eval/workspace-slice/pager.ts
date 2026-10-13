@@ -1,7 +1,6 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
-  explodePackedWorkingCopy,
   workspaceSliceDbPath,
   type ExplodedWorkspaceSlices
 } from "./explode.js";
@@ -17,7 +16,7 @@ import {
   isWorkspaceSliceSkipped,
   WORKSPACE_SLICE_DIRNAME
 } from "./names.js";
-import { completeSlicesOrNull, listWorkspaceIds } from "./complete-slices.js";
+import { listWorkspaceIds } from "./complete-slices.js";
 import {
   resolvePackedWorkingCopy,
   reuseOrExplodeSealedSlices,
@@ -54,9 +53,11 @@ export async function explodeRecallEvalWorkingCopyIfNeeded(input: {
       onProgress: input.onProgress
     });
   }
-  return await reuseOrExplodeLocalSlices({
+  return await reuseOrExplodeSealedSlices({
+    snapshotDbPath: packedDbPath,
     packedDbPath,
     destDir: join(input.dataDirRoot, WORKSPACE_SLICE_DIRNAME),
+    rebuildDrifted: true,
     workspaceIds,
     requireReuse,
     onProgress: input.onProgress
@@ -107,29 +108,4 @@ async function restoreSealedSlicesForWorker(input: {
     );
   }
   return reused;
-}
-
-async function reuseOrExplodeLocalSlices(input: {
-  readonly packedDbPath: string;
-  readonly destDir: string;
-  readonly workspaceIds: readonly string[];
-  readonly requireReuse: boolean;
-  readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
-}): Promise<ExplodedWorkspaceSlices> {
-  const reused = completeSlicesOrNull(input.packedDbPath, input.destDir, input.workspaceIds);
-  if (reused !== null) return reused;
-  if (input.requireReuse) {
-    throw new Error(
-      "[recall-eval] workspace-slice reuse is required and the cache is missing or drifted"
-    );
-  }
-  if (existsSync(input.destDir)) {
-    rmSync(input.destDir, { recursive: true, force: true });
-  }
-  return await explodePackedWorkingCopy({
-    packedDbPath: input.packedDbPath,
-    destDir: input.destDir,
-    workspaceIds: input.workspaceIds,
-    onProgress: input.onProgress
-  });
 }

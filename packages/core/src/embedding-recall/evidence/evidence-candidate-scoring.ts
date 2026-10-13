@@ -66,7 +66,7 @@ async function scoreEvidenceCandidates(
   if (candidates.length === 0) return scoringResult("not_applicable", 0, 0, 0, startedAt);
   if (!dependencies.provider.isAvailable) {
     return failedScoring(
-      params, dependencies, candidates.length, 0, startedAt, "provider_unavailable"
+      params, dependencies, params.candidates.length, 0, startedAt, "provider_unavailable"
     );
   }
   let inferenceCalls = 0;
@@ -100,7 +100,7 @@ async function scoreEvidenceCandidates(
     );
     return scoringResult(
       "returned",
-      candidates.length,
+      params.candidates.length,
       candidates.length,
       inferenceCalls,
       startedAt,
@@ -112,7 +112,7 @@ async function scoreEvidenceCandidates(
       inferenceCalls += error.inferenceCalls;
     }
     return failedScoring(
-      params, dependencies, candidates.length, inferenceCalls, startedAt, failureClass, error
+      params, dependencies, params.candidates.length, inferenceCalls, startedAt, failureClass, error
     );
   }
 }

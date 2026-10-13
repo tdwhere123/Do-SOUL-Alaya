@@ -54,6 +54,16 @@ describe("MaterializationRouter ingest reconciliation", () => {
     );
   });
 
+  it("retains committed evidence identity when reconciliation fails after its write", async () => {
+    const deps = createDeps();
+    deps.memoryService.create.mockRejectedValueOnce(new Error("memory write unavailable"));
+    const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
+    const result = await new MaterializationRouter({ ...deps, reconciliationPort }).materializeSignal(factSignal());
+    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.created_objects).toEqual([{ object_kind: "evidence_capsule", object_id: "evidence-1" }]);
+  });
+
   it("does not append when reconciliation defers because the neighbor scan is unavailable", async () => {
     const deps = createDeps();
     const { reconciliationPort, appliedVerdicts } = fakeReconciliationPort({

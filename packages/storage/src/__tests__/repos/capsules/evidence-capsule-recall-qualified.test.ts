@@ -37,6 +37,21 @@ afterEach(() => {
 });
 
 describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
+  it("distinguishes a malformed persisted signal from valid nonmaterialized exclusion", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const proof = await seedFallback(database, repo, "signal-validation", "12121212-1212-4212-8212-121212121212");
+    insertMaterializationEvent(database, proof.signal, proof.capsule, "event-signal-validation");
+    const read = () => repo.findRecallQualifiedByIds("workspace-1", [ownerMatch(proof.capsule.object_id)]);
+    expect((await read()).map(row => row.capsule.object_id)).toEqual([proof.capsule.object_id]);
+    database.connection.prepare("UPDATE signals SET signal_state = ? WHERE signal_id = ?")
+      .run(SignalState.EMITTED, proof.signal.signal_id);
+    await expect(read()).resolves.toEqual([]);
+    database.connection.prepare("UPDATE signals SET signal_state = ?, confidence = ? WHERE signal_id = ?")
+      .run(SignalState.MATERIALIZED, 2, proof.signal.signal_id);
+    await expect(read()).rejects.toMatchObject({ name: "StorageError", code: "QUERY_FAILED",
+      cause: expect.objectContaining({ issues: expect.arrayContaining([expect.objectContaining({ path: ["confidence"] })]) }) });
+  });
+
   it("returns a garden fallback only when its persisted proof closure is complete", async () => {
     const { database, repo } = await createEvidenceCapsuleRepo();
     const proof = await seedFallback(

@@ -37,9 +37,11 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = Object.freeze({
 
 export interface KpiDelta {
   readonly key: string;
-  readonly current: number;
-  readonly previous: number;
-  readonly delta: number;
+  readonly current: number | null;
+  readonly previous: number | null;
+  readonly delta: number | null;
+  readonly comparison_status?: "comparable" | "unavailable";
+  readonly growth_ratio?: number | null;
   readonly verdict: Verdict;
   readonly direction: "drop_bad" | "growth_bad";
 }
@@ -50,6 +52,7 @@ export interface KpiDiffResult {
   readonly fixture_regressions: readonly string[];
   readonly rebaselined_scenarios: readonly string[];
   readonly new_scenarios: readonly string[];
+  readonly unavailable_scenarios?: readonly string[];
 }
 
 export function classifyRatioDrop(
@@ -67,8 +70,9 @@ export function classifyLatencyGrowth(
   current: number,
   previous: number,
   band: RatioGrowthBand
-): { verdict: Verdict; growthRatio: number } {
-  if (previous <= 0) return { verdict: "ok", growthRatio: 0 };
+): { verdict: Verdict; growthRatio: number | null } {
+  if (previous === 0 && current === 0) return { verdict: "ok", growthRatio: 0 };
+  if (previous <= 0) return { verdict: "warn", growthRatio: null };
   const growthRatio = (current - previous) / previous;
   if (growthRatio >= band.fail) return { verdict: "fail", growthRatio };
   if (growthRatio >= band.warn) return { verdict: "warn", growthRatio };

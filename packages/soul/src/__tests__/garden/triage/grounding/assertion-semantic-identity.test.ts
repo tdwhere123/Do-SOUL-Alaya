@@ -37,16 +37,10 @@ function key(input: {
 }
 
 describe("assertion semantic identity", () => {
-  it("is stable across batch size, partition, run, workspace, and transport wrappers", () => {
+  it("is deterministic for the same semantic input", () => {
     const exactText = "User: I moved to Berlin.";
     const semanticKey = key({ exactText });
-    const wrappers = [
-      { batch_index: 0, batch_count: 1, run_id: "run-a", workspace_id: "ws-a", endpoint: "https://a" },
-      { batch_index: 7, batch_count: 8, run_id: "run-b", workspace_id: "ws-b", endpoint: "https://b" }
-    ];
-    expect(wrappers.map((transport) => ({ transport, semanticKey }))).toEqual(
-      wrappers.map((transport) => ({ transport, semanticKey: key({ exactText }) }))
-    );
+    expect(key({ exactText })).toBe(semanticKey);
   });
 
   it("changes when role, exact text, formation contract, or required context changes", () => {

@@ -297,6 +297,7 @@ function appendTimeConcernSignal(
           confidence: 0.52
         }
       ],
+      validation_result: { status: "valid" },
       turn_content_excerpt: buildTurnExcerpt(state.normalizedTurnContent, timeConcern.excerpt),
       full_turn_content: buildSourceVerificationText(
         state.normalizedTurnContent,

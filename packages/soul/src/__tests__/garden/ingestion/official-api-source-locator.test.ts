@@ -362,12 +362,17 @@ describe("official API assertion catalog locator", () => {
     const signal = createSignal({
       source: "garden_compile",
       raw_payload: {
-        source_locator: assertionLocator(2),
+        source_locator: assertionLocator(1),
+        matched_text: "I work remotely.",
+        proposed_matched_text: "I work remotely.",
         source_assertion: "I work remotely.",
-        full_turn_content: "User: I moved to Berlin."
+        full_turn_content: "User: I work remotely."
       }
     });
-    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "grounded" });
+    expect(resolveGardenSignalGrounding({ ...signal, raw_payload: {
+      ...signal.raw_payload, full_turn_content: "User: I moved to Berlin."
+    } })).toMatchObject({ status: "rejected", reason: "matched_text_absent" });
   });
 });
 

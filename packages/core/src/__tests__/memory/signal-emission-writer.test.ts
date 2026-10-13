@@ -18,6 +18,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { createSignalEmissionWriter } from "../../memory/signal-emission-writer.js";
+import { SignalService } from "../../memory/signal-service.js";
 import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
 import type { SignalServiceAtomicSignalRepoPort } from "../../memory/signal-service-types.js";
 import { createSignal } from "./signal-service.test-support.js";
@@ -179,5 +180,17 @@ describe("SignalEmissionWriter", () => {
     const events = await eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id);
     expect(events).toHaveLength(1);
     expect(events[0]?.event_id).toBe(receipt.emitted_event?.event_id);
+
+    const service = new SignalService({ eventLogRepo, signalRepo, emissionWriter: writer,
+      runtimeNotifier: { notifyEntry: async entry => {
+        if (entry.event_type === "soul.signal.triaged") throw new Error("triage listener offline");
+      } }
+    });
+    await expect(service.receiveSignal(signal)).resolves.toMatchObject({ triage_result: "accepted",
+      signal: { signal_state: "triaged" } });
+    expect(await signalRepo.getById(signal.signal_id)).toMatchObject({ signal_state: "triaged" });
+    const afterTriage = await eventLogRepo.queryByEntity("candidate_memory_signal", signal.signal_id);
+    expect(afterTriage.filter(row => row.event_type === "soul.signal.triaged")).toHaveLength(1);
+    expect((await eventLogRepo.queryByRun("run-1")).some(row => row.event_type === "runtime.side_effect_failed")).toBe(true);
   });
 });

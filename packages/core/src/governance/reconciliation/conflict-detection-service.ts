@@ -72,7 +72,7 @@ export class ConflictDetectionService {
       ? await this.linkRuleDetectedConflicts(params, loaded.context, strictNoDrop)
       : [];
     if (this.deps.llmPort !== undefined && contradictsCandidates.length === 0) {
-      await this.linkLlmDetectedConflicts(params, loaded.context, strictNoDrop);
+      return { availability: await this.linkLlmDetectedConflicts(params, loaded.context, strictNoDrop) };
     }
     return { availability: "ok" };
   }
@@ -163,19 +163,21 @@ export class ConflictDetectionService {
     params: ConflictDetectionRequest,
     context: ConflictCandidateContext,
     strictNoDrop: boolean
-  ): Promise<void> {
+  ): Promise<QueryAvailability> {
     const maxPairs = this.deps.llmMaxPairsPerNewMemory ?? DEFAULT_LLM_MAX_PAIRS;
     const ambiguousNeighbors = selectAmbiguousLlmNeighbors(params, context, maxPairs);
+    let availability: QueryAvailability = "ok";
     for (const candidate of ambiguousNeighbors) {
-      await this.linkSingleLlmCandidate(params, candidate, strictNoDrop);
+      if (await this.linkSingleLlmCandidate(params, candidate, strictNoDrop) === "unavailable") availability = "unavailable";
     }
+    return availability;
   }
 
   private async linkSingleLlmCandidate(
     params: ConflictDetectionRequest,
     candidate: Readonly<MemoryEntry>,
     strictNoDrop: boolean
-  ): Promise<void> {
+  ): Promise<QueryAvailability> {
     try {
       const verdict = await this.requireLlmPort().classifyPair({
         newContent: params.newMemoryContent,
@@ -186,6 +188,7 @@ export class ConflictDetectionService {
       if (verdict === "contradicts" || verdict === "incompatible_with") {
         await this.writeEdge(params.newMemoryId, candidate.object_id, verdict, params.workspaceId, params.runId, "llm", strictNoDrop);
       }
+      return "ok";
     } catch (err) {
       if (strictNoDrop) {
         throw err;
@@ -195,6 +198,7 @@ export class ConflictDetectionService {
         existing_memory_id: candidate.object_id,
         error: errorMessage(err)
       });
+      return "unavailable";
     }
   }
 

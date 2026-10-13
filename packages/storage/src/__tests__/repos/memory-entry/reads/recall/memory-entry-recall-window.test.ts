@@ -13,6 +13,19 @@ afterEach(() => {
 });
 
 describe("SqliteMemoryEntryRepo recall tier window", () => {
+  it("continues across equal-time ties when id order opposes time order", async () => {
+    const { repo } = await createRepo();
+    const expected = [4, 2, 3, 1].map((n) => `${String(n).padStart(8, "0")}-1111-4111-8111-111111111111`);
+    for (const [index, object_id] of expected.entries()) {
+      await repo.create(createMemoryEntry({ object_id, storage_tier: StorageTier.HOT,
+        created_at: ["2026-03-20T00:00:00.000Z", "2026-03-21T00:00:00.000Z", "2026-03-21T00:00:00.000Z", "2026-03-22T00:00:00.000Z"][index]! }));
+    }
+    const first = await repo.findRecallTierWindow!({ workspaceId: "workspace-1", tier: StorageTier.HOT, limit: 2 });
+    const second = await repo.findRecallTierWindow!({ workspaceId: "workspace-1", tier: StorageTier.HOT, limit: 2,
+      cursor: first.next_cursor! });
+    expect([...first.memories, ...second.memories].map((row) => row.object_id)).toEqual(expected);
+    expect(second.truncated).toBe(false);
+  });
   it.each([0, 499, 500])("returns %i rows without a continuation", async (rowCount) => {
     const { repo } = await createRepo();
     await seedRows(repo, rowCount);

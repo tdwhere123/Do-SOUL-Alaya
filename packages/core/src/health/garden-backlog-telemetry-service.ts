@@ -169,7 +169,7 @@ export class GardenBacklogTelemetryService {
         return;
       }
 
-      if (this.hasPendingSnapshotOperations()) {
+      if (this.hasPendingSnapshotOperations() && !this.snapshotPublishRetryArmed) {
         await this.ensureSnapshotRunner();
       }
     });
@@ -213,9 +213,14 @@ export class GardenBacklogTelemetryService {
       }
 
       const requestedSnapshotVersion = this.snapshotRequestedVersion;
-      await this.publishSnapshotSafely(generation);
+      const published = await this.publishSnapshotSafely(generation);
       if (generation !== this.snapshotRunnerGeneration) {
         return;
+      }
+      if (!published) {
+        if (this.acceptingOperations) return;
+        await delay(STOP_RETRY_BACKOFF_MS);
+        continue;
       }
       this.snapshotProcessedVersion = requestedSnapshotVersion;
     }
@@ -268,7 +273,7 @@ export class GardenBacklogTelemetryService {
     return signal !== null && signal.transition_id <= this.finalDrainBoundaryTransitionId;
   }
 
-  private async publishSnapshotSafely(generation: number): Promise<void> {
+  private async publishSnapshotSafely(generation: number): Promise<boolean> {
     try {
       const snapshot = this.getSnapshot();
       const payload = {
@@ -286,12 +291,13 @@ export class GardenBacklogTelemetryService {
         error: readErrorMessage(error, "unknown_error")
       });
       this.scheduleSnapshotPublishRetry();
-      return;
+      return false;
     }
 
     if (generation !== this.snapshotRunnerGeneration) {
-      return;
+      return false;
     }
+    return true;
   }
 
   private async publishWarningTransitionsSafely(generation: number): Promise<void> {
@@ -414,7 +420,7 @@ export class GardenBacklogTelemetryService {
       return;
     }
     this.snapshotPublishRetryArmed = true;
-    queueMicrotask(() => {
+    setTimeout(() => {
       if (!this.acceptingOperations) {
         return;
       }
@@ -424,7 +430,7 @@ export class GardenBacklogTelemetryService {
           error: readErrorMessage(error, "unknown_error")
         });
       });
-    });
+    }, STOP_RETRY_BACKOFF_MS);
   }
 
   private invalidateTimedOutRunners(): void {

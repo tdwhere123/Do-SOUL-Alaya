@@ -76,6 +76,8 @@ export const zh = {
   "overview:bench.live.hint": "历史 live-check 档案。该 runner 已退役。",
   "overview:bench.empty": "尚无 benchmark 记录。",
   "overview:bench.loading": "加载 benchmark 摘要中…",
+  "overview:bench.error": "Benchmark 不可用：{message}",
+  "recall:stale": "刷新失败，当前显示此前加载的数据。",
   "overview:bench.delta": "Δ vs 上一版 {delta}",
   "overview:bench.firstBaseline": "首份 baseline",
   "overview:bench.history": "共 {count} 份历史记录",

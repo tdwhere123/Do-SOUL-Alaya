@@ -31,7 +31,7 @@ describe("status source-grounding defer semantics", () => {
       resolveAgentTargets: () => ["codex"],
       getSourceGroundingDeferStats: () => ({
         queue_depth: 4_096,
-        queue_cap: 2_048,
+        queue_cap: 8_192,
         queue_cap_per_workspace: 2_048,
         queue_hard_limit_per_workspace: 2_049,
         queue_scope: "aggregate",
@@ -57,7 +57,7 @@ describe("status source-grounding defer semantics", () => {
       garden: {
         source_grounding_defers: {
           queue_depth: 4_096,
-          queue_cap: 2_048,
+          queue_cap: 8_192,
           queue_cap_per_workspace: 2_048,
           queue_hard_limit_per_workspace: 2_049,
           claimable_depth: 4_094,

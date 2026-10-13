@@ -124,6 +124,8 @@ describe("conditional-field executeRecall assembly", () => {
       dimension_filter: ["episode"]
     });
     expect(dimension.entries.every((entry) => entry.object_id !== MEM.u)).toBe(true);
+    expect(dimension.entries.map((entry) => entry.object_id)).toContain(MEM.r);
+    expect(dimension.entries.map((entry) => entry.object_id)).not.toContain(MEM.c);
     const tagged = runRecall(slice, {
       page_budget: 800,
       query_text: "checkout",

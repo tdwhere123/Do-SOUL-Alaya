@@ -106,13 +106,15 @@ const GARDEN_TASK_QUEUE_SQL: SqlDefinitionMap<GardenTaskQueueStatements> = {
       SELECT${GARDEN_TASK_SELECT_COLUMNS}
       FROM garden_tasks
       WHERE status = 'pending'
-${PENDING_ROLE_PRIORITY_FILTER_SQL}${PENDING_PRIORITY_ORDER_SQL}      LIMIT ?
+${PENDING_ROLE_PRIORITY_FILTER_SQL}        AND (? IS NULL OR kind = ?)
+${PENDING_PRIORITY_ORDER_SQL}      LIMIT ?
     `,
   peekPendingByWorkspaceStatement: `
       SELECT${GARDEN_TASK_SELECT_COLUMNS}
       FROM garden_tasks
       WHERE status = 'pending'
 ${PENDING_ROLE_PRIORITY_FILTER_SQL}        AND workspace_id = ?
+        AND (? IS NULL OR kind = ?)
 ${PENDING_PRIORITY_ORDER_SQL}      LIMIT ?
     `
 };

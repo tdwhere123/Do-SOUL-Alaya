@@ -203,7 +203,8 @@ Dependency direction:
 protocol              <- leaf, depends only on zod
 cjk-segmentation      -> protocol, @node-rs/jieba
 storage               -> protocol, cjk-segmentation
-core                  -> protocol, storage, cjk-segmentation
+graph-algorithms      <- dependency-free pure algorithms
+core                  -> protocol, cjk-segmentation, graph-algorithms
 soul                  -> protocol
 engine-gateway         -> protocol
 apps/core-daemon       -> packages/* (all of the above)
@@ -232,6 +233,18 @@ Deterministic catalog-empty work remains a separate zero-dispatch state. Legacy
 cache reads refuse them without rewriting history or starting another request.
 Semantic capability obligations still require their own qualifying signals.
 
+Guarded provider requests own their transport through response consumption: they
+close it after success and destroy it after failure or cancellation. Native
+environment proxy enablement follows Node flag precedence using the existing
+composition-root `env` injection plus process arguments; Undici selects the
+proxy or `NO_PROXY` branch using the original origin before the connector pins
+the admitted address. HTTP Host and TLS identity remain the original hostname.
+Custom transport policy uses `transportFactory`, passing the supplied pool
+`factory` into its dispatcher and preserving supplied `requestTls.servername`
+when adding proxy TLS options. The gateway does not inspect or replace the
+global dispatcher; explicit private-provider opt-in without a custom factory
+retains that inherited transport.
+
 ## Surface Shape
 
 Alaya has no agent-frontend GUI and no conversation TUI. The outward
@@ -244,8 +257,10 @@ surfaces are:
 - **CLI commands** (`bin/alaya.mjs` → `apps/core-daemon`) — `alaya
   doctor`, `alaya install`, `alaya attach <target>`, `alaya detach
   <target>`, `alaya status`, `alaya tools list`, `alaya tools call
-  --json`, `alaya inspect`. Used for installation, configuration,
-  diagnostics, and MCP-memory-tool fallback.
+  --json`, `alaya inspect`, `alaya mcp`, `alaya review`,
+  `alaya source-grounding-defers`, `alaya temporal-cutover`, `alaya update`,
+  and the registered backup/export/import operation commands. Used for
+  installation, configuration, diagnostics, maintenance, and MCP-memory-tool fallback.
 - **Memory Inspector** (`apps/inspector`) — local-only memory-tooling
   surface, started on demand via `alaya inspect`. Listens on
   `127.0.0.1:5174` with a per-launch httpOnly session; serves seven primary

@@ -37,6 +37,22 @@ function createSignal(overrides: Partial<LegacyCandidateMemorySignal> = {}): Leg
 }
 
 describe("schema-grounding", () => {
+  it("preserves whole-signal deferral when a valid field is mixed with an incomplete field", () => {
+    const signal = createSignal({ raw_payload: {
+      detected_object: { object_kind: "constraint" }, validation_result: { status: "valid" },
+      field_candidates: [
+        { field_name: "constraint", value: "Never print secrets.", evidence: "Never print secrets." },
+        { field_name: "constraint", value: "Another claim." }
+      ]
+    } });
+    expect(validateSchemaGroundingForSignal(signal)).toMatchObject({ status: "deferred",
+      reasons: ["field_candidates[1].evidence missing"] });
+    const normalized = normalizeSchemaGroundedSignal(signal);
+    expect(validateSchemaGroundingForSignal(normalized).status).toBe("deferred");
+    expect(normalized.raw_payload.validation_result).toMatchObject({
+      status: "deferred", reasons: ["field_candidates[1].evidence missing"]
+    });
+  });
   it("adds internal object/field/value validation metadata inside raw_payload", () => {
     const payload = buildSchemaGroundedRawPayload({
       signalKind: "potential_claim",

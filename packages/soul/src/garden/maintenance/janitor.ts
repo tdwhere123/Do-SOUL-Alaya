@@ -376,7 +376,7 @@ export class Janitor {
 
     const tombstonedNow = await this.runDispositionSweep(task, auditEntries);
 
-    if (this.tombstoneGcPort === undefined) {
+    if (this.tombstoneGcDeferredReason !== undefined || this.tombstoneGcPort === undefined) {
       auditEntries.push(
         this.tombstoneGcDeferredReason === undefined
           ? "[SKIPPED] tombstone_gc: gc port not wired"

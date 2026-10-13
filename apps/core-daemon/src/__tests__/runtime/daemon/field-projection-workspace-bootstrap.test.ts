@@ -3,7 +3,8 @@ import {
   EventPublisher,
   EventPublisherPropagationError,
   WorkspaceService,
-  fieldContractSha256
+  fieldContractSha256,
+  projectSourceFormationSnapshot
 } from "@do-soul/alaya-core";
 import {
   FACTOR_INCIDENCE_OPERATOR_ID,
@@ -106,7 +107,17 @@ describe("field projection workspace birth", () => {
     expect(active?.recorded_at).toBe(NOW);
     expect(active?.recorded_at).not.toBe(CREATED_AT);
     expect(artifacts).toBeNull();
-    expect(active?.input_event_frontier).toMatch(/^sha256:/);
+    expect(active?.input_event_frontier).toBe(projectSourceFormationSnapshot({
+      workspaceId: workspace.workspace_id, stores: composition.stores
+    }).input_event_frontier);
+    expect(composition.stores.listStoredRecords(workspace.workspace_id).map(({ record }) => record.source_id)).toEqual(["src-1"]);
+    seedCurrentSource(composition.stores, workspace.workspace_id, NOW, "src-2");
+    composition.projectionLifecycle.rebuild(workspace.workspace_id, NOW);
+    const changed = composition.fieldRepos.generations.readActive(workspace.workspace_id);
+    expect(changed?.input_event_frontier).not.toBe(active?.input_event_frontier);
+    expect(changed?.input_event_frontier).toBe(projectSourceFormationSnapshot({
+      workspaceId: workspace.workspace_id, stores: composition.stores
+    }).input_event_frontier);
     expect(composition).not.toHaveProperty("querySession");
   });
 
@@ -339,12 +350,13 @@ function seedEvidence(database: StorageDatabase, workspaceId: string, at: string
 function seedCurrentSource(
   stores: ReturnType<typeof createDaemonFieldComposition>["stores"],
   workspaceId: string,
-  at: string
+  at: string,
+  sourceId = "src-1"
 ): void {
   const body = "Ada wrote notes.";
   const content_digest = hashContentDigest(body, fieldContractSha256);
   const identity = hashSourceRecordId({
-    source_id: "src-1",
+    source_id: sourceId,
     source_version: "1",
     content_digest
   }, fieldContractSha256);
@@ -356,7 +368,7 @@ function seedCurrentSource(
     }),
     schema_version: 1,
     workspace_id: workspaceId,
-    source_id: "src-1",
+    source_id: sourceId,
     source_version: "1",
     content_digest,
     evidence_object_id: EVIDENCE_ID,

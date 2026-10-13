@@ -35,13 +35,12 @@ function createPathGraphSnapshotter(
   const pathRelationRepo = input.pathRelationRepo as typeof input.pathRelationRepo & {
     findActiveAll?: (workspaceId: string) => Promise<
       | readonly Readonly<PathRelation>[]
-      | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+      | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>
     >;
-    findActive?: (workspaceId: string) => Promise<readonly Readonly<PathRelation>[]>;
   };
   const findActiveAll = wrapSnapshotterFindActiveAll(pathRelationRepo);
   if (findActiveAll === undefined) {
-    throw new Error("path graph snapshotter requires findActiveAll or findActive");
+    throw new Error("path graph snapshotter requires complete findActiveAll");
   }
   return new PathGraphSnapshotter({
     pathRelationRepo: {
@@ -230,13 +229,11 @@ function isPathGraphSnapshotDue(
 function wrapSnapshotterFindActiveAll(pathRelationRepo: {
   findActiveAll?: (workspaceId: string) => Promise<
     | readonly Readonly<PathRelation>[]
-    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>
   >;
-  findActive?: (workspaceId: string) => Promise<readonly Readonly<PathRelation>[]>;
 }): ((workspaceId: string) => Promise<
   | readonly Readonly<PathRelation>[]
-  | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+  | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>
 >) | undefined {
-  return pathRelationRepo.findActiveAll?.bind(pathRelationRepo)
-    ?? pathRelationRepo.findActive?.bind(pathRelationRepo);
+  return pathRelationRepo.findActiveAll?.bind(pathRelationRepo);
 }

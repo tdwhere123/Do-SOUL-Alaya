@@ -1,5 +1,6 @@
 import { InformationIndexSchema, sharedProductIdentity, productStateKeyFromIndexEntry, indexEntryCacheKey, indexMemoryObjectId, type Continuation, type InformationIndex } from "@do-soul/alaya-protocol";
 import type { FieldEngineState } from "../conditional-field/engine/field-engine.js";
+import { CoreError } from "../../shared/errors.js";
 import {
   bindCommittedDelivery,
   committedProductStatesOf,
@@ -185,7 +186,10 @@ export function retainAndIssueIndex(input: Readonly<{
   );
   let retained = input.state;
   if (delivery.bytes > input.payload.remainingMemoryBytes) {
-    index = { ...index, continuation: null };
+    throw new CoreError("CONFLICT", "Recall delivery retention budget exhausted; page was not committed", {
+      details: { outcome: "resource_exhausted", resource: "delivery_retention",
+        required_bytes: delivery.bytes, available_bytes: input.payload.remainingMemoryBytes }
+    });
   } else {
     input.payload.remainingMemoryBytes -= delivery.bytes;
     input.cost.add("index", { charged_retained_bytes: delivery.bytes });

@@ -109,6 +109,16 @@ export function respondIfWorkspaceGrantDenied(
   return context.json({ success: false, error: WORKSPACE_TOKEN_DENIED_MESSAGE }, 403);
 }
 
+/** Resolve the run before authorizing its resource workspace; query/body scope is insufficient. */
+export async function resolveRequestRun<T extends { readonly workspace_id: string }>(
+  context: Context,
+  runService: { getById(runId: string): Promise<T> },
+  runId: string
+): Promise<T | Response> {
+  const run = await runService.getById(runId);
+  return respondIfWorkspaceGrantDenied(context, run.workspace_id) ?? run;
+}
+
 export function extractWorkspaceIdFromQuery(value: string | undefined): string | null {
   const workspaceId = value?.trim();
   if (workspaceId === undefined || workspaceId.length === 0) {

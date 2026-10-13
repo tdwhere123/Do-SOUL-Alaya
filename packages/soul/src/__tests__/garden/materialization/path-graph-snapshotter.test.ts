@@ -6,6 +6,12 @@ import {
 } from "../../../garden/materialization/path-graph-snapshotter.js";
 
 describe("PathGraphSnapshotter", () => {
+  it("refuses to publish complete graph totals from a truncated active population", async () => {
+    const snapshotter = new PathGraphSnapshotter({ pathRelationRepo: {
+      findActiveAll: async () => ({ relations: [], truncated: true })
+    } });
+    await expect(snapshotter.buildSnapshot("workspace-1")).rejects.toThrow("complete active-path population");
+  });
   it("uses findActiveAll and builds a zeroed snapshot for an empty workspace", async () => {
     const pathRelationRepo = {
       findActiveAll: vi.fn(async () => [] as const),

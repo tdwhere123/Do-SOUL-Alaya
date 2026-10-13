@@ -7,6 +7,7 @@ import {
   type TransitionCausedBy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { parseObjectId } from "../../shared/validators.js";
 import type {
   MemoryEntryLifecyclePort,
@@ -42,6 +43,11 @@ export class MemoryLifecycleManager {
     this.eventLogRepo = dependencies.eventLogRepo;
     this.runtimeNotifier = dependencies.runtimeNotifier;
     this.now = dependencies.now;
+  }
+
+  private async propagateCommitted(entries: readonly EventLogEntry[]): Promise<void> {
+    await bindEventPublisher({ eventLogRepo: this.eventLogRepo, runtimeNotifier: this.runtimeNotifier,
+      purpose: "MemoryLifecycleManager" }).propagateCommitted(entries);
   }
 
   public async archive(
@@ -105,8 +111,7 @@ export class MemoryLifecycleManager {
     if (archivedEvent === undefined || stateChangedEvent === undefined) {
       throw new CoreError("CONFLICT", "Memory archive transaction did not append its audit events.");
     }
-    await this.runtimeNotifier.notifyEntry(archivedEvent);
-    await this.runtimeNotifier.notifyEntry(stateChangedEvent);
+    await this.propagateCommitted([archivedEvent, stateChangedEvent]);
     return archived;
   }
 
@@ -168,7 +173,7 @@ export class MemoryLifecycleManager {
     if (event === undefined) {
       throw new CoreError("CONFLICT", "Memory lifecycle transition transaction did not append its audit event.");
     }
-    await this.runtimeNotifier.notifyEntry(event);
+    await this.propagateCommitted([event]);
     return updated;
   }
 
@@ -234,7 +239,7 @@ export class MemoryLifecycleManager {
     if (event === undefined) {
       throw new CoreError("CONFLICT", "Active->dormant demotion transaction did not append its audit event.");
     }
-    await this.runtimeNotifier.notifyEntry(event);
+    await this.propagateCommitted([event]);
     return { status: "demoted", entry: demoted };
   }
 
@@ -292,6 +297,6 @@ export class MemoryLifecycleManager {
     if (event === undefined) {
       throw new CoreError("CONFLICT", "Memory tombstone delete transaction did not append its audit event.");
     }
-    await this.runtimeNotifier.notifyEntry(event);
+    await this.propagateCommitted([event]);
   }
 }

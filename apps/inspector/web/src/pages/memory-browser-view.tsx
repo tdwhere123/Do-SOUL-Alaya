@@ -186,7 +186,7 @@ function MemoryTableRow(props: {
       <td className="px-3 py-2">{row.scope_class}</td>
       <td className="px-3 py-2">{row.storage_tier ?? "—"}</td>
       <td className="px-3 py-2">{formatRatio(row.activation_score)}</td>
-      <td className="px-3 py-2">{row.contradiction_count ?? 0}</td>
+      <td className="px-3 py-2">{row.contradiction_count ?? "—"}</td>
     </tr>
   );
 }

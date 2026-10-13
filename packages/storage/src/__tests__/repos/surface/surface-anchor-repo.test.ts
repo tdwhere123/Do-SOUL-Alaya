@@ -80,6 +80,7 @@ describe("SqliteSurfaceAnchorRepo", () => {
     });
 
     expect(created.event.revision).toBe(0);
+    await expect(anchorRepo.findById(ANCHOR_OBJECT_ID_1)).resolves.toEqual(createSurfaceAnchor());
 
     const eventCount = database.connection
       .prepare("SELECT COUNT(*) AS count FROM event_log WHERE entity_id = ?")

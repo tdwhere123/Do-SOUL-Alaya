@@ -36,7 +36,9 @@ describe("repair boundary falsifiers", () => {
 
   it("retraction preserves source evidence but removes active relation admission", async () => {
     const slice = await harness();
-    await slice.plantLaunchCorpus({ includeChannel: false });
+    await slice.plantLaunchCorpus({ includeChannel: false, includeCharlie: true });
+    const before = await slice.runRecall({ text: "Who owns Orion?" });
+    expect(before.membership).toEqual(expect.arrayContaining([MEM.orion, MEM.charlie]));
     const source = await slice.memoryEntryRepo.findById(MEM.orion);
     expect(source?.evidence_refs.length).toBeGreaterThan(0);
     await slice.relationService.resolve({ assertionId: "assert-orion-alice", workspaceId: WS,
@@ -48,6 +50,7 @@ describe("repair boundary falsifiers", () => {
     expect(state).toEqual({ resolution_kind: "retracted" });
     expect((await slice.memoryEntryRepo.findById(MEM.orion))?.evidence_refs).toEqual(source?.evidence_refs);
     const result = await slice.runRecall({ text: "Who owns Orion?" });
+    expect(result.membership).toContain(MEM.charlie);
     expect(result.index.entries.every((entry) => entry.claim !== "supported")).toBe(true);
     expect(result.index.completeness.interpretation_coverage).not.toBe("complete");
   });
@@ -115,10 +118,13 @@ it("a source revision change invalidates continuation without admitting new snap
 });
 
 it("common source admission excludes active lifecycle rows retained as tombstones", async () => {
-  const slice = await harness(); await slice.plantLaunchCorpus({ includeChannel: false });
+  const slice = await harness(); await slice.plantLaunchCorpus({ includeChannel: false, includeCharlie: true });
+  expect((await slice.runRecall({ text: "Who owns Orion?" })).membership)
+    .toEqual(expect.arrayContaining([MEM.orion, MEM.charlie]));
   slice.database.connection.prepare("UPDATE memory_entries SET retention_state = 'tombstoned' WHERE object_id = ?").run(MEM.orion);
   const result = await slice.runRecall({ text: "Who owns Orion?" });
   expect(result.membership).not.toContain(MEM.orion);
+  expect(result.membership).toContain(MEM.charlie);
   expect(result.index.entries.every((entry) => entry.claim !== "supported")).toBe(true);
 });
 

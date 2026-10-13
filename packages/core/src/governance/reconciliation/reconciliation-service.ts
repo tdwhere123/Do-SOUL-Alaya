@@ -548,7 +548,7 @@ export class ReconciliationService {
         object_id: targetObjectId,
         error: errorMessage(error)
       });
-      return null;
+      throw error;
     }
   }
 

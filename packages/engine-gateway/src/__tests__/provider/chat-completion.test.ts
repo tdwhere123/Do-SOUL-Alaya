@@ -27,6 +27,15 @@ const CHAT_REQUEST = {
 } as const;
 
 describe("provider chat completion", () => {
+  it.each([{}, { choices: [] }, { choices: [{}] }, { choices: [{ message: null }] }])(
+    "rejects a JSON envelope without a message completion witness: %j", async (payload) => {
+      await expect(fetchProviderChatCompletion({ ...CHAT_REQUEST,
+        fetchImpl: async () => new Response(JSON.stringify(payload), {
+          headers: { "content-type": "application/json" }
+        })
+      })).rejects.toMatchObject({ kind: "response_parse_error", inspectionReason: "schema" });
+    }
+  );
   it("posts a JSON chat completion with the selected profile", async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       expect(url).toBe("https://proxy.example/v1/chat/completions");

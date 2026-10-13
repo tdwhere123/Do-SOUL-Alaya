@@ -36,17 +36,17 @@ export interface ProposalCreateInput {
   readonly source_delivery_ids?: readonly string[] | null;
 }
 
-export interface PendingProposalDedupeKey {
+export type PendingProposalDedupeKey = {
   readonly workspace_id: string;
   readonly derived_from: string;
   readonly dossier_ref: string;
   readonly target_object_kind: string;
-}
+} | { readonly proposal_id: string };
 
 export type CreateProposalWithEventsIfAbsentResult = Readonly<{
   readonly proposal: Readonly<Proposal>;
   readonly events: readonly EventLogEntry[];
-  readonly status: "created" | "already_pending";
+  readonly status: "created" | "already_pending" | "already_present";
 }>;
 
 export interface PathRelationProposalPayload {

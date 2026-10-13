@@ -9,7 +9,7 @@
 # Environment overrides:
 #   ALAYA_HOME           default: $HOME/.local/share/do-soul-alaya
 #   ALAYA_BIN_DIR        default: $HOME/.local/bin
-#   ALAYA_CONFIG_DIR     default: $HOME/.config/alaya
+#   ALAYA_CONFIG_DIR     default: $XDG_CONFIG_HOME/alaya or $HOME/.config/alaya
 #   ALAYA_PURGE_YES      set to 1 to skip the interactive PURGE confirmation
 #                        (use only in scripted CI / test contexts)
 #   ALAYA_DETACH_TARGETS default: "codex claude-code"
@@ -17,7 +17,9 @@ set -euo pipefail
 
 ALAYA_HOME="${ALAYA_HOME:-${HOME}/.local/share/do-soul-alaya}"
 ALAYA_BIN_DIR="${ALAYA_BIN_DIR:-${HOME}/.local/bin}"
-ALAYA_CONFIG_DIR="${ALAYA_CONFIG_DIR:-${HOME}/.config/alaya}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ALAYA_CONFIG_DIR="$(node "$SCRIPT_DIR/resolve-live-db-path.mjs" --config-dir)"
+export ALAYA_CONFIG_DIR
 ALAYA_DETACH_TARGETS="${ALAYA_DETACH_TARGETS:-codex claude-code}"
 PURGE=0
 REMOVE_BAK=0

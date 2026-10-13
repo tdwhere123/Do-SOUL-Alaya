@@ -42,6 +42,9 @@ describe("lexical prefix before evidence candidate embedding", () => {
 
     expect(rankKeys(prefixed)).toEqual(rankKeys(onlyRetained));
     expect(prefixed.scoredCount).toBe(EVIDENCE_CANDIDATE_EMBEDDING_TOP_N);
+    expect(prefixed.expectedCount).toBe(65);
+    expect(prefixed.fieldChannelCapture?.channel).toMatchObject({ status: "truncated", unseen_upper_bound: 1 });
+    expect(onlyRetained.fieldChannelCapture?.channel).toMatchObject({ status: "complete", unseen_upper_bound: 0 });
     expect(onlyRetained.scoredCount).toBe(EVIDENCE_CANDIDATE_EMBEDDING_TOP_N);
   });
 });

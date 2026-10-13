@@ -35,6 +35,20 @@ function observerInput(guard: Guard): ObserveConditionalFieldInput {
 }
 
 describe("binding and temporal semantic identity", () => {
+  it.each(["2024-05-06T00:00:00.000Z", "2028-05-06T00:00:00.000Z"])(
+    "binds derived epsilon premises to the query snapshot at %s without inventing source validity", asOf => {
+      const query = compileConditionalFieldQuery({ source: "typed", snapshot_id: SNAPSHOT_ID, budget: defaultBudget(),
+        interpretation_clock: asOf, authorized_scopes: null,
+        program: { schema_version: 1, kind: "hyperedge", join: "and", premises: [{ schema_version: 1, kind: "epsilon" }] } });
+      const seeds = seedActivationsForObservation(observation("seed"), query, asOf);
+      const effects = adjacencyEffectsForRows([], { interpretation: query, asOf,
+        liveStates: seeds.map(seed => seed.state), overlay: {} });
+      const completions = effects.flatMap(effect => effect.hyperedge === undefined ? [] : [effect.hyperedge]);
+      expect(completions.length).toBeGreaterThan(0);
+      expect(completions.every(completion => completion.validity.kind === "query_snapshot"
+        && completion.validity.as_of === asOf)).toBe(true);
+    }
+  );
   it("preserves partial literal and original-context facts at binding admission", () => {
     const env = new Map([["x", "root"]]);
     const literal: Guard = { schema_version: 1, kind: "query_predicate", verdict: "unresolved",

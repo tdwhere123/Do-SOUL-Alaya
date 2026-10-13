@@ -1,3 +1,4 @@
+import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import type {
   GovernanceSnapshot,
@@ -30,7 +31,8 @@ export function registerGovernanceRoutes(app: Hono, services: GovernanceRouteSer
 
   app.get("/runs/:runId/governance-snapshot", async (context) => {
     const runId = context.req.param("runId");
-    const run = await services.runService.getById(runId);
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
 
     const [greenStatuses, activeOverrides, activeLease] = await Promise.all([
       services.greenService.findAll(run.workspace_id),

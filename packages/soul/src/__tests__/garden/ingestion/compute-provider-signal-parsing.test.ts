@@ -190,7 +190,7 @@ describe("OfficialApiGardenProvider", () => {
     });
   });
 
-  it("keeps historical graphless parsing readable and admits it under identities-only", async () => {
+  it("keeps historical graphless parsing readable with an unavailable graph projection", async () => {
     const graphlessRaw = JSON.stringify({
       signals: [{
         signal_kind: "potential_claim",

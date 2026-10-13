@@ -106,6 +106,7 @@ describe("LongMemEval committed artifact cleanup failures", () => {
     }, new Error("pointer failure"));
     const cleanup = new Error("staged cleanup");
     let removeCount = 0;
+    const removals: unknown[] = [];
 
     try {
       await expect(withPublishedDiagnosticsArtifact(
@@ -114,11 +115,17 @@ describe("LongMemEval committed artifact cleanup failures", () => {
         (error) => error instanceof HistoryEntryCommittedError,
         { remove: async (target, options) => {
           removeCount += 1;
+          removals.push({ target, options });
           if (removeCount === 1) return rm(target, options);
-          throw cleanup;
+          if (target === stagedPath && options?.force === true) throw cleanup;
+          return rm(target, options);
         } }
       )).rejects.toMatchObject({ errors: [committed, cleanup] });
       expect(removeCount).toBe(2);
+      expect(removals).toEqual([
+        { target: stagedPath, options: { force: true } },
+        { target: stagedPath, options: { force: true } }
+      ]);
       await expect(readFile(finalPath, "utf8")).resolves.toBe("evidence");
     } finally {
       await rm(root, { recursive: true, force: true });

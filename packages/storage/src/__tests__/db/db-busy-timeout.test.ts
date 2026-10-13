@@ -54,6 +54,8 @@ describe("initDatabase busy timeout policy", () => {
     try {
       expect(initDatabase({ filename })).toBe(database);
       expect(() => initDatabase({ filename, busyTimeoutMs: 5_000 })).toThrow(StorageError);
+      expect(initDatabase({ filename })).toBe(database);
+      expect(Number(database.connection.pragma("busy_timeout", { simple: true }))).toBe(250);
     } finally {
       database.close();
     }

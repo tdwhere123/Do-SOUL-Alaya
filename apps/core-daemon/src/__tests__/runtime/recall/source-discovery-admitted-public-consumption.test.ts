@@ -268,7 +268,9 @@ describe("bound source interpretation public consumption", () => {
     }, async (planted, handler, receipts, client) => {
       expect(planted.bind.receive.located.length).toBe(request.source_assertions.length);
       expect(planted.gistObjectIds.length).toBeGreaterThan(0);
-      expect(readGists(planted.database).every((gist) => gist?.outcome === "candidates")).toBe(true);
+      const gists = readGists(planted.database);
+      expect(gists).toHaveLength(planted.gistObjectIds.length);
+      expect(gists.every((gist) => gist?.outcome === "candidates")).toBe(true);
       const native = observePlantedDiscovery(
         planted.database, WS, CANARY, "proposal", "source_only", "canonical"
       );

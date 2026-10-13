@@ -50,7 +50,7 @@ export function resolveBenchCommitInfo(
   resolveFromGit: () => string = defaultResolveBenchCommitFromGit
 ): BenchCommitResolution {
   const fromEnv = env.BENCH_COMMIT_SHA7?.trim();
-  if (fromEnv !== undefined && /^[0-9a-f]{7,40}$/iu.test(fromEnv)) {
+  if (fromEnv !== undefined && /^[0-9a-f]{7,40}$/iu.test(fromEnv) && !/^0+$/u.test(fromEnv)) {
     return {
       sha7: fromEnv.slice(0, 7),
       source: "env",
@@ -58,18 +58,14 @@ export function resolveBenchCommitInfo(
     };
   }
   try {
-    return {
-      sha7: resolveFromGit(),
-      source: "git",
-      unavailable: false
-    };
+    const commit = resolveFromGit().trim();
+    if (/^[0-9a-f]{7,40}$/iu.test(commit) && !/^0+$/u.test(commit)) {
+      return { sha7: commit.slice(0, 7), source: "git", unavailable: false };
+    }
   } catch {
-    return {
-      sha7: "0000000",
-      source: "fallback",
-      unavailable: true
-    };
+    // A missing Git checkout and an invalid Git result share unavailable provenance.
   }
+  return { sha7: "0000000", source: "fallback", unavailable: true };
 }
 
 function defaultResolveBenchCommitFromGit(): string {

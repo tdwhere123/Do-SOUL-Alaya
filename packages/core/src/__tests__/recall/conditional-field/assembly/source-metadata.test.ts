@@ -59,10 +59,16 @@ describe("bounded source metadata retention", () => {
     expect(encoded.candidates[0]?.scope_class).toBe(ScopeClass.PROJECT);
   });
 
-  it("does not retain source metadata outside the memory allowance", () => {
-    const index = recall(true, 100);
-    expect(captureIndexSourceMetadata(index)).toEqual({});
-    expect(index.completeness.logical_index).not.toBe("complete");
+  it("refuses a delivery that cannot retain recovery and exposes no source metadata in its error", () => {
+    let failure: unknown;
+    try { recall(true, 100); } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: "CONFLICT", details: {
+      outcome: "resource_exhausted", resource: "delivery_retention"
+    } });
+    expect(JSON.stringify(failure)).not.toContain("capsule");
+    expect(JSON.stringify(failure)).not.toContain("Source needs review");
+    expect(JSON.stringify(failure)).not.toContain("needle source content");
+    expect(captureIndexSourceMetadata(recall(true))).toMatchObject({ memory: { evidence_refs: ["capsule"] } });
   });
 
   it("replaces a cached body with an object hint without exposing source references", () => {

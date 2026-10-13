@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { planBenchCliEnvProxyBootstrap } from "../../cli/proxy-bootstrap.js";
 
 describe("bench CLI proxy bootstrap", () => {
+  it.each([
+    { env: { NODE_OPTIONS: "--use-env-proxy" }, execArgv: [] },
+    { env: { NODE_OPTIONS: '"--use-env-proxy"' }, execArgv: [] },
+    { env: { NODE_OPTIONS: "--no-use-env-proxy", NODE_USE_ENV_PROXY: "1" }, execArgv: [] },
+    { env: { NODE_OPTIONS: "--use-env-proxy" }, execArgv: ["--no-use-env-proxy"] },
+    { env: {}, execArgv: ["--use-env-proxy", "--no-use-env-proxy"] }
+  ])("does not override an explicit native proxy decision: %j", ({ env, execArgv }) => {
+    expect(planBenchCliEnvProxyBootstrap({ argv: [], env: { HTTPS_PROXY: "http://proxy.example", ...env },
+      execArgv, entryPath: "/bin.mjs", supportsEnvProxy: true })).toBeNull();
+  });
+
   it("re-execs Node with env-proxy support when a standard proxy is configured", () => {
     expect(planBenchCliEnvProxyBootstrap({
       argv: ["extraction-fill", "--limit", "100"],

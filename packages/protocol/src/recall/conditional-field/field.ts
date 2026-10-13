@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
-  BoundedLabelSchema
+  BoundedLabelSchema,
+  IsoDatetimeStringSchema
 } from "../../shared/schema-primitives.js";
 import { RelationValiditySchema } from "../../relations/relation-assertion.js";
 import { InterpretationPremiseValiditySchema } from "./interpretation-coordinate.js";
@@ -62,7 +63,8 @@ export const TransitionSchema = z
     transfer_id: ConditionalFieldIdSchema.optional(),
     transfer_version: ConditionalFieldIdSchema.optional(),
     strength_milligrades: MilligradeSchema,
-    validity: z.union([RelationValiditySchema, InterpretationPremiseValiditySchema]),
+    validity: z.union([RelationValiditySchema, InterpretationPremiseValiditySchema,
+      z.object({ kind: z.literal("query_snapshot"), as_of: IsoDatetimeStringSchema }).strict()]),
     applicable: z.boolean(),
     cap_contract_id: Sha256DigestSchema.optional()
   })

@@ -1,3 +1,4 @@
+import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import { CoreError, type MemoryService, type RunService, type WorkspaceService } from "@do-soul/alaya-core";
 import { MemoryDimensionSchema, ScopeClassSchema, type ScopeClass } from "@do-soul/alaya-protocol";
@@ -40,7 +41,8 @@ export function registerMemoryRoutes(app: Hono, services: MemoryRouteServices): 
 
   app.get("/runs/:runId/memories", async (context) => {
     const runId = context.req.param("runId");
-    await services.runService.getById(runId);
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
 
     const pagination = parseListPagination(context);
     const memories = await services.memoryService.findByRunId(runId, pagination);

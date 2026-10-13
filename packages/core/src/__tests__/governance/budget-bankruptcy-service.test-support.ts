@@ -35,9 +35,13 @@ export function createDependencies(overrides: Partial<{
   runtimeNotifier: { notifyEntry: BroadcastEntryMock };
 }> = {}) {
   const proposalPort = overrides.proposalPort ?? createProposalPort();
+  const eventLogRepo = overrides.eventLogRepo ?? createEventLogRepo();
   return {
-    eventLogRepo: overrides.eventLogRepo ?? createEventLogRepo(),
-    proposalService: proposalPort,
+    eventLogRepo,
+    proposalService: { ...proposalPort, createWithEvents: async (
+      params: Parameters<typeof proposalPort.create>[0], events: readonly EventLogDraft[]
+    ) => ({ proposal: await proposalPort.create(params),
+      events: await Promise.all(events.map(event => eventLogRepo.append(event))) }) },
     proposalPort,
     runtimeNotifier:
       overrides.runtimeNotifier ??

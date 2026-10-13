@@ -12,7 +12,7 @@ import {
 } from "@do-soul/alaya-soul";
 import { computeCacheKey } from
   "../../../runs/compile-seed/cache/cache-key.js";
-import type { CachedExtractionEntry } from
+import { inspectCachedExtractionContent, type CachedExtractionEntry } from
   "../../../runs/compile-seed/cache/cache-shard.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
@@ -404,5 +404,11 @@ describe("legacy conversion snapshot authority reader", () => {
     const fixtures = dirname(fileURLToPath(import.meta.url)) + "/fixtures";
     const entry = JSON.parse(await readFile(join(fixtures, `${cacheKey}.shard.json`), "utf8")) as CachedExtractionEntry;
     expect(() => inspectExtractionRawJson(entry.raw_json)).toThrow(/signal_entry_invalid/u);
+    const current = await fixture();
+    expect(readFromAuthority(current)).toBeDefined();
+    const historical = { ...current.entry, raw_json: entry.raw_json };
+    await writeFile(current.shardPath, JSON.stringify(historical), "utf8");
+    expect(inspectCachedExtractionContent(historical)).toMatchObject({ status: "invalid" });
+    expect(() => readFromAuthority(current)).toThrow(/legacy shard is not completed: invalid cached extraction:.*signal_entry_invalid/iu);
   });
 });

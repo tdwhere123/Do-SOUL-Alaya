@@ -39,10 +39,10 @@ export type PremiseAssignment = HyperedgePremise & Readonly<{
   readonly revision_id?: string;
 }>;
 
-export function openValidity(from: ProductStateKey): Transition["validity"] {
+export function queryPremiseValidity(from: ProductStateKey, asOf: string): Transition["validity"] {
   if (from.interpretation_node !== undefined) return { kind: "interpretation",
     packet_id: from.interpretation_node.packet_id, hypothesis_id: from.hypothesis_id };
-  return { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
+  return { kind: "query_snapshot", as_of: asOf };
 }
 
 export function terminalAssignment(
@@ -135,7 +135,8 @@ export function* groundPremiseAssignments(
   visited: ReadonlyMap<string, ProductStateKey>,
   transitions: readonly Transition[],
   derivations: ReadonlyMap<string, Derivation>,
-  roots: Readonly<Record<string, string>>
+  roots: Readonly<Record<string, string>>,
+  asOf: string
 ): PathComputation<readonly PremiseAssignment[]> {
   const groundDerivations: Derivation[] = [];
   for (const row of derivations.values()) { yield { kind: "work", retained_bytes: 8 }; groundDerivations.push(row); }
@@ -157,7 +158,7 @@ export function* groundPremiseAssignments(
     const root = rootId === undefined ? undefined : grounded.progress.forest.get(rootId);
     const grade = grounded.progress.grades.get(key);
     if (root === undefined || grade === undefined) continue;
-    assignments.push({ ...terminalAssignment(from, productEndpointId(node), grade, openValidity(from), "path", node.binding_context),
+    assignments.push({ ...terminalAssignment(from, productEndpointId(node), grade, queryPremiseValidity(from, asOf), "path", node.binding_context),
       derivation: root, derivations: forest });
   }
   return assignments;

@@ -31,6 +31,11 @@ describe("resolveBenchRunnerVersion", () => {
 });
 
 describe("resolveBenchCommitSha7", () => {
+  it.each([undefined, "", "0000000", "0".repeat(40)])("retains unavailable Git provenance for override %s", (override) => {
+    expect(resolveBenchCommitInfo({ BENCH_COMMIT_SHA7: override }, () => {
+      throw new Error("git unavailable");
+    })).toEqual({ sha7: "0000000", source: "fallback", unavailable: true });
+  });
   it("prefers an explicit BENCH_COMMIT_SHA7 override", () => {
     expect(resolveBenchCommitSha7({ BENCH_COMMIT_SHA7: "abcdef123456" }))
       .toBe("abcdef1");

@@ -8,6 +8,7 @@ import { parseRows } from "../shared/parse-row.js";
 export interface GreenStatusRepo {
   findByObjectId(objectId: string): Promise<Readonly<GreenStatus> | null>;
   findByTargetObjectId(targetObjectId: string): Promise<Readonly<GreenStatus> | null>;
+  findByTargetObjectIdSync(targetObjectId: string): Readonly<GreenStatus> | null;
   findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
@@ -100,7 +101,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
       ORDER BY created_at ASC, object_id ASC
     `);
     this.upsertStatement = db.connection.prepare(`
-      INSERT OR REPLACE INTO green_statuses (
+      INSERT INTO green_statuses (
         object_id,
         object_kind,
         schema_version,
@@ -121,6 +122,20 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
         last_transition_at,
         workspace_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(object_id) DO UPDATE SET
+        lifecycle_state = excluded.lifecycle_state,
+        updated_at = excluded.updated_at,
+        green_state = excluded.green_state,
+        verification_basis = excluded.verification_basis,
+        verified_by = excluded.verified_by,
+        verified_at = excluded.verified_at,
+        valid_until = excluded.valid_until,
+        bound_surfaces = excluded.bound_surfaces,
+        bound_scope_class = excluded.bound_scope_class,
+        revoke_reason = excluded.revoke_reason,
+        last_transition_at = excluded.last_transition_at
+      WHERE green_statuses.workspace_id = excluded.workspace_id
+        AND green_statuses.target_object_id = excluded.target_object_id
     `);
     this.deleteStatement = db.connection.prepare(`
       DELETE FROM green_statuses
@@ -148,6 +163,10 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
   }
 
   public async findByTargetObjectId(targetObjectId: string): Promise<Readonly<GreenStatus> | null> {
+    return this.findByTargetObjectIdSync(targetObjectId);
+  }
+
+  public findByTargetObjectIdSync(targetObjectId: string): Readonly<GreenStatus> | null {
     const parsedTargetObjectId = parseNonEmptyString(targetObjectId, "target object id");
 
     try {
@@ -197,7 +216,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
     const parsedGreenStatus = parseGreenStatus(greenStatus);
 
     try {
-      this.upsertStatement.run(
+      const result = this.upsertStatement.run(
         parsedGreenStatus.object_id,
         parsedGreenStatus.object_kind,
         parsedGreenStatus.schema_version,
@@ -218,6 +237,7 @@ export class SqliteGreenStatusRepo implements GreenStatusRepo {
         parsedGreenStatus.last_transition_at,
         parsedGreenStatus.workspace_id
       );
+      if (result.changes !== 1) throw new StorageError("VALIDATION_FAILED", "Green status identity cannot change.");
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",

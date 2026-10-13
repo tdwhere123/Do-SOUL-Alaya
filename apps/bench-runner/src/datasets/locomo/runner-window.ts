@@ -1,4 +1,4 @@
-import type { PerScenarioRow } from "@do-soul/alaya-eval";
+import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
 import { startCampaignDaemon } from "../../runs/index.js";
 import type { BenchDaemonHandle, BenchEmbeddingMode } from "../../harness/daemon.js";
 import type { CompileSeedRunner } from "../../runs/compile-seed.js";
@@ -7,6 +7,7 @@ import { QaChatError } from "../../runs/qa/qa-chat.js";
 import type { LocomoSample } from "./dataset.js";
 import { runOneConversation, type ConversationResult } from "./runner-conversation.js";
 import type { LocomoRunOptions } from "./runner-types.js";
+import { buildLocomoQuestionId, shouldRunLocomoRecall } from "./runner-utils.js";
 
 export interface LocomoConversationAggregate {
   readonly perScenario: PerScenarioRow[];
@@ -21,6 +22,7 @@ export interface LocomoConversationAggregate {
   totalHitAt10: number;
   totalQa: number;
   conversationFailures: number;
+  readonly unavailableQuestions: NonNullable<KpiPayload["execution_coverage"]>["unavailable_questions"];
 }
 
 export async function runLocomoConversationWindow(input: {
@@ -53,7 +55,8 @@ function createLocomoConversationAggregate(): LocomoConversationAggregate {
     totalHitAt5: 0,
     totalHitAt10: 0,
     totalQa: 0,
-    conversationFailures: 0
+    conversationFailures: 0,
+    unavailableQuestions: []
   };
 }
 
@@ -107,6 +110,14 @@ async function runConversationOrRecordFailure(
   } catch (err) {
     if (!(err instanceof QaChatError)) throw err;
     input.aggregate.conversationFailures += 1;
+    conversation.qa.forEach((qa, qaIndex) => {
+      if (!shouldRunLocomoRecall(qa, input.opts)) return;
+      input.aggregate.unavailableQuestions.push({
+        conversation_id: conversation.sample_id,
+        question_id: buildLocomoQuestionId(conversation.sample_id, qaIndex),
+        status: "unavailable", reason: err.message
+      });
+    });
     process.stderr.write(
       `[${index + 1}/${input.window.length}] ${conversation.sample_id} FAILED - ` +
         `skipped: ${err.message}\n`

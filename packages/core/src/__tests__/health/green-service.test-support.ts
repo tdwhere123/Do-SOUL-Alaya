@@ -71,6 +71,7 @@ export function createHarness(options: {
   readonly memories?: readonly MemoryEntry[];
   readonly consecutiveNoGoMaxEntries?: number;
   readonly omitWarn?: boolean;
+  readonly omitStatusResolver?: boolean;
 } = {}): {
   readonly service: GreenService;
   readonly statuses: Map<string, GreenStatus>;
@@ -115,6 +116,7 @@ export function createHarness(options: {
       notifyEntry
     },
     greenStatusRepo: {
+      findByTargetObjectIdSync: (targetObjectId: string) => statuses.get(targetObjectId) ?? null,
       findByTargetObjectId: vi.fn(async (targetObjectId: string) => {
         const found = statuses.get(targetObjectId);
         return found === undefined ? null : Object.freeze({ ...found });
@@ -158,7 +160,7 @@ export function createHarness(options: {
       )
     },
     statusResolver:
-      options.governanceRole === undefined
+      options.omitStatusResolver === true
         ? undefined
         : {
             getGovernanceRole: vi.fn(async () => options.governanceRole ?? null)

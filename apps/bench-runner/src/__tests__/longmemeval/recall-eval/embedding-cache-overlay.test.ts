@@ -3,6 +3,7 @@ import { lstatSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import {
   MemoryDimension,
   RunMode,
@@ -82,6 +83,59 @@ afterEach(async () => {
 });
 
 describe("source-bound embedding cache overlay", () => {
+  it.each(["source header", "matching source and bound vectors"])(
+    "rejects sealed source drift on reuse: %s", async (mutation) => {
+      const written = await writeFixtureOverlay();
+      const input = { receiptPath, restoredDbPath: targetDbPath, expected: expectedBinding() };
+      await applyEmbeddingCacheOverlay(input);
+      const overlayPath = join(root, "overlay-receipt.sqlite");
+      const boundPath = join(root, `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`);
+      const sealedSource = await readFile(overlayPath);
+      for (const file of mutation === "source header" ? [overlayPath] : [overlayPath, boundPath]) {
+        const database = new BetterSqlite3(file);
+        database.exec(mutation === "source header" ? "PRAGMA application_id = 12345"
+          : "UPDATE memory_embeddings SET embedding_blob = zeroblob(length(embedding_blob))");
+        database.close();
+      }
+      const changedSource = await readFile(overlayPath);
+      const retainedBound = await readFile(boundPath);
+      expect(changedSource.equals(sealedSource)).toBe(false);
+      await expect(applyEmbeddingCacheOverlay(input)).rejects.toThrow(/source digest mismatch/u);
+      expect(await readFile(overlayPath)).toEqual(changedSource);
+      expect(await readFile(boundPath)).toEqual(retainedBound);
+    }
+  );
+
+  it.each([
+    "UPDATE memory_embeddings SET embedding_blob = zeroblob(length(embedding_blob))",
+    "DELETE FROM evidence_recall_embeddings",
+    "ALTER TABLE memory_embeddings RENAME COLUMN object_id TO renamed_id",
+    "CREATE TABLE duplicated_embeddings AS SELECT * FROM memory_embeddings UNION ALL SELECT * FROM memory_embeddings; DROP TABLE memory_embeddings; ALTER TABLE duplicated_embeddings RENAME TO memory_embeddings",
+    "INSERT INTO memory_embeddings SELECT object_id || '-extra', workspace_id, content_hash, provider_kind, model_id, schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at FROM memory_embeddings"
+  ])("rejects bound overlay row drift on recycle: %s", async (mutation) => {
+    const written = await writeFixtureOverlay();
+    const input = { receiptPath, restoredDbPath: targetDbPath, expected: expectedBinding() };
+    await applyEmbeddingCacheOverlay(input);
+    const boundPath = join(root, `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`);
+    const changed = new BetterSqlite3(boundPath);
+    changed.exec(mutation);
+    changed.close();
+    await expect(applyEmbeddingCacheOverlay(input)).rejects.toThrow(/content mismatch/u);
+  });
+
+  it("rejects changed bound overlay bytes on recycle and retains the changed evidence", async () => {
+    const written = await writeFixtureOverlay();
+    const input = { receiptPath, restoredDbPath: targetDbPath, expected: expectedBinding() };
+    await applyEmbeddingCacheOverlay(input);
+    await expect(applyEmbeddingCacheOverlay(input)).resolves.toMatchObject({
+      overlay_sha256: written.overlay_sha256
+    });
+    const boundPath = join(root, `.embedding-cache-overlay-${written.overlay_sha256}.sqlite`);
+    await writeFile(boundPath, "changed bound bytes");
+    await expect(applyEmbeddingCacheOverlay(input)).rejects.toThrow(/not a database/u);
+    expect(await readFile(boundPath, "utf8")).toBe("changed bound bytes");
+  });
+
   it("binds overlay vectors without inserting blobs into the restored copy", async () => {
     const written = await writeFixtureOverlay();
 

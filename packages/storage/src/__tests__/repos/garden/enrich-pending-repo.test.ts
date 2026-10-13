@@ -437,6 +437,22 @@ describe("SqliteEnrichPendingRepo", () => {
     expect(() => repo.reclaimStale("2026-05-30T00:00:00.000Z", -1)).toThrow();
   });
 
+  it("compares claim instants across minute and fractional UTC spellings", () => {
+    const database = openMemoryDb();
+    const repo = new SqliteEnrichPendingRepo(database);
+    repo.enqueue({ workspaceId: "workspace-1", memoryId: "minute", runId: "run-1",
+      sourceSignalId: "signal-minute", enqueuedAt: "2026-05-30T00:00:00.000Z" });
+    claim(repo, "workspace-1", 1, "2026-05-30T01:00Z");
+    expect(repo.reclaimStale("2026-05-30T01:00:00.000Z", 0)).toBe(0);
+    expect(repo.reclaimStale("2026-05-30T01:00:00.001Z", 0)).toBe(1);
+    claim(repo, "workspace-1", 1, "2026-05-30T01:00:00.0001Z");
+    expect(repo.reclaimStale("2026-05-30T01:00:00.001100Z", 1)).toBe(0);
+    expect(repo.reclaimStale("2026-05-30T01:00:00.001101Z", 1)).toBe(1);
+    claim(repo, "workspace-1", 1, "2026-05-30T01:00:00.1Z");
+    expect(repo.reclaimStale("2026-05-30T01:00:00.100Z", 0)).toBe(0);
+    expect(repo.reclaimStale("2026-05-30T01:00:00.101Z", 0)).toBe(1);
+  });
+
   it("survives a fresh repo instance over the same on-disk DB (restart-safety)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-enrich-pending-"));
     tempDirs.add(dir);

@@ -87,6 +87,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
       dimension: MemoryDimension.EPISODE
     });
     expect(dimension.results.every((row) => row.object_id !== MEM.u)).toBe(true);
+    expect(dimension.results.some((row) => row.object_id === MEM.r)).toBe(true);
     const tagged = await recallThroughHandler(slice, {
       query: "checkout",
       max_results: 800,
@@ -178,7 +179,7 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
       readers: counted.readers
     });
     expect(counted.counters.nativeVisits).toBeLessThanOrEqual(101);
-    const tiny = runRecall(slice, {
+    expect(() => runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({
         work_units: 10_000,
@@ -186,16 +187,15 @@ describe("conditional-field MCP/CLI producer-consumer counterexamples", () => {
         min_envelope: 1,
         page_budget: 800
       })
-    });
-    expect(tiny.completeness.logical_index === "complete" && tiny.entries.length >= 31).toBe(false);
+    })).toThrow(/Recall delivery retention budget exhausted/);
     const long = "y".repeat(1400);
-    const encoded = encodeIndexResults(tight, new Map(tight.entries.flatMap((entry) =>
+    const complete = runRecall(slice, { query_text: "needle" });
+    expect(complete.entries.length).toBeGreaterThan(0);
+    const encoded = encodeIndexResults(complete, new Map(complete.entries.flatMap((entry) =>
       entry.object_id === undefined ? [] : [[entry.object_id, long] as const]
     )));
-    if (encoded.length > 0) {
-      expect(encoded.every((row) => row.budget_state.token_estimate === 1)).toBe(false);
-      expect(Math.max(...encoded.map((row) => row.budget_state.token_estimate))).toBeGreaterThan(1);
-    }
+    expect(encoded.length).toBeGreaterThan(0);
+    expect(Math.max(...encoded.map((row) => row.budget_state.token_estimate))).toBeGreaterThan(1);
   });
 
   it("encoding stops before the advertised token cap", () => {

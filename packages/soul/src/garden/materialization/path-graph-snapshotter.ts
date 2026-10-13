@@ -10,7 +10,7 @@ export interface PathGraphSnapshotterDependencies {
   readonly pathRelationRepo: {
     findActiveAll(workspaceId: string): Promise<
       | readonly Readonly<PathRelation>[]
-      | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+      | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>
     >;
   };
   readonly now?: () => Date;
@@ -99,16 +99,19 @@ export function reviewPathGraphSnapshotHistory(
 function unwrapActivePathRelations(
   listed:
     | readonly Readonly<PathRelation>[]
-    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
+    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>
 ): readonly Readonly<PathRelation>[] {
+  if (isCappedPathRelationList(listed) && listed.truncated) {
+    throw new RangeError("path graph snapshot requires a complete active-path population");
+  }
   return isCappedPathRelationList(listed) ? listed.relations : listed;
 }
 
 function isCappedPathRelationList(
   listed:
     | readonly Readonly<PathRelation>[]
-    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }>
-): listed is Readonly<{ readonly relations: readonly Readonly<PathRelation>[] }> {
+    | Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }>
+): listed is Readonly<{ readonly relations: readonly Readonly<PathRelation>[]; readonly truncated: boolean }> {
   return typeof listed === "object" && listed !== null && "relations" in listed;
 }
 

@@ -278,9 +278,7 @@ describe("offline semantic replay execution identity", () => {
         .artifact?.replay_identity_digest).toBe(admitted.replay_identity_digest);
 
       rmSync(currentPath);
-      const providerCalls = { count: 0 };
       const replayedAgain = materializeDerivedReplayFromRaw({ root, task, lease });
-      expect(providerCalls.count).toBe(0);
       expect(replayedAgain.replay_identity_digest).toBe(admitted.replay_identity_digest);
       expect(replayedAgain.replay_identity_digest).not.toBe(driftedDigest);
       expect(existsSync(driftedPath)).toBe(true);

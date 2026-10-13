@@ -1,3 +1,4 @@
+import { IsoDatetimeStringSchema } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { prepareEnrichPendingStatements } from "./statements/enrich-pending-statements.js";
@@ -217,7 +218,12 @@ export class SqliteEnrichPendingRepo implements EnrichPendingRepo {
         "Failed to validate enrich_pending.reclaim.stale_after_ms."
       );
     }
-    const cutoff = new Date(nowMs - staleAfterMs).toISOString();
+    const cutoffMilliseconds = new Date(nowMs - staleAfterMs).toISOString();
+    // Integer millisecond TTLs do not consume the source instant's finer precision.
+    const remainingFraction = Number.isInteger(staleAfterMs) && IsoDatetimeStringSchema.safeParse(now).success
+      ? now.split(".")[1]?.slice(3, -1) ?? ""
+      : "";
+    const cutoff = `${cutoffMilliseconds.slice(0, -1)}${remainingFraction}Z`;
     try {
       const result = this.reclaimStaleStatement.run(cutoff);
       return result.changes;

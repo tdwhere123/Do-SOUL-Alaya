@@ -3,6 +3,7 @@ import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { SourceSemanticGenerationTaskSummarySchema, sourceSemanticGenerationTaskSummary } from "./source-semantic-generation-task.js";
 import { SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
+import { assertFieldIdentity, hashSourceRecordId, type FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
 import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
 import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
@@ -407,7 +408,7 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
     context.addIssue({ code: "custom", message: "delivered proof query identity differs from admitted query semantics" });
   }
   if (value.unproved_computations !== undefined) {
-    const delivered = new Set(value.index.entries.flatMap(entry => entry.target.kind === "source_evidence"
+    const delivered = new Set(value.index.entries.flatMap(entry => entry.target.kind === "source_evidence" && entry.target.root_kind === "source_record"
       ? [`${entry.target.workspace_id}\0${entry.target.root_id}\0${entry.target.source_version}\0${entry.target.content_digest}`] : []));
     for (const [position, row] of value.unproved_computations.entries()) {
       if (!delivered.has(`${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`)) {
@@ -416,6 +417,20 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
       }
     }
   }
+}
+
+/** Identity verification requires the host's SHA-256 implementation, like source-record receipts. */
+export function verifySourceSemanticLibraryDelivery<T extends LibraryDeliveryConsistency>(
+  value: T, sha256: FieldContractSha256
+): T {
+  const issues: Parameters<DeliveryRefinementContext["addIssue"]>[0][] = [];
+  refineSourceSemanticLibraryDelivery(value, { addIssue: issue => issues.push(issue) });
+  if (issues.length > 0) throw new z.ZodError(issues.map(issue => ({ ...issue, path: issue.path ?? [] })));
+  for (const computation of value.unproved_computations ?? []) {
+    assertFieldIdentity(computation.source_record.identity,
+      hashSourceRecordId(computation.source_record, sha256), "unproved source record");
+  }
+  return value;
 }
 
 /** Current native library delivery; invariant §25 major requires request binding. Generic InformationIndex stays independent. */

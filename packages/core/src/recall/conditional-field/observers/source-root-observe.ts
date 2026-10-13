@@ -44,9 +44,10 @@ export function observeSourceAwareSeed(
   let memoryCommitted = cursor.memory;
   let hintCommitted = cursor.hint;
   const sketch = sourceHintSketch(input);
-  let hintsDone = sketch === undefined || cursor.hintsDone || cursor.sourcesDone;
+  let hintsUnavailable = cursor.hintsUnavailable === true;
+  let hintsDone = !hintsUnavailable && (sketch === undefined || cursor.hintsDone || cursor.sourcesDone);
   const available = [
-    ...(!hintsDone ? ["hint"] : []),
+    ...(!hintsDone && !hintsUnavailable ? ["hint"] : []),
     ...(!cursor.sourcesDone ? ["source"] : []),
     ...(wantMemory && input.seed_query !== undefined && input.readers.lexical !== undefined ? ["memory"] : [])
   ];
@@ -73,9 +74,10 @@ export function observeSourceAwareSeed(
     bytes += hinted.bytes;
     truncated = hinted.truncated;
     hintCommitted = hinted.hintCommitted;
-    hintsDone = hinted.hintsDone || hinted.hydrationUnavailable;
+    hintsUnavailable = hinted.hydrationUnavailable;
+    hintsDone = hinted.hintsDone && !hintsUnavailable;
     if (hinted.resourceLimited) resourceLimited = true;
-    if (hintsDone) {
+    if (hintsDone || hintsUnavailable) {
       exhaustiveWork += Math.max(0, lanes.hintWork - hinted.workUnits);
       exhaustiveLimit += Math.max(0, lanes.hintLimit - hinted.observations.length);
     }
@@ -135,19 +137,28 @@ export function observeSourceAwareSeed(
   }
   const sourcesDone = cursor.sourcesDone || (pagedSources && !sourcesTruncated);
   if (wantMemory && share.memoryWork === 0) truncated = true;
-  const committed = encodeSeedCursor({
-    source: sourceCommitted,
-    memory: memoryCommitted,
-    sourcesDone,
-    hint: hintCommitted,
-    hintsDone,
-    persistHint: sketch !== undefined || wantMemory,
-    laneTurn: laneTurn + 1
-  });
+  return finishSourceSeed(input, {
+    source: sourceCommitted, memory: memoryCommitted, sourcesDone, hint: hintCommitted,
+    hintsDone, hintsUnavailable, persistHint: sketch !== undefined || wantMemory, laneTurn: laneTurn + 1
+  }, { observations, sourceRows, lookupReasons, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited });
+}
+
+/** Commit lane progress and report required source work separately from optional hint failure. */
+function finishSourceSeed(
+  input: ObserveConditionalFieldInput,
+  progress: Parameters<typeof encodeSeedCursor>[0],
+  collected: Readonly<{
+    observations: readonly TypedObservation[]; sourceRows: readonly SourceRootObserverRow[];
+    lookupReasons: readonly ProposalMatchReason[]; workUnits: number; bytes: number;
+    truncated: boolean; hydrationUnavailable: boolean; resourceLimited: boolean;
+  }>
+): ObserverActionResult {
+  const { observations, sourceRows, lookupReasons, workUnits, bytes, truncated, hydrationUnavailable, resourceLimited } = collected;
+  const committed = encodeSeedCursor(progress);
   const cursorOut = committed === null
     ? input.cursor
     : { ...input.cursor, position: committed, committed_through: committed };
-  return { ...finish({
+  const finished = finish({
     input,
     cursor: cursorOut,
     observations,
@@ -160,7 +171,18 @@ export function observeSourceAwareSeed(
         ? { status: "interrupted" as const }
         : {}),
     work: workReceipt(workUnits, workUnits, bytes, truncated || hydrationUnavailable || resourceLimited)
-  }), source_roots: sourceRows,
+  });
+  // Hint failure abandons optional lookup explanations, not exhaustive membership.
+  // Persist it independently so later source pages do not erase the failed attempt.
+  const page = !progress.hintsUnavailable ? finished.page : {
+    ...finished.page,
+    open_regions: [...finished.page.open_regions, {
+      schema_version: 1 as const, region_id: `${input.action.region_id}:source_hint`,
+      kind: "discovery" as const, status: "unavailable" as const,
+      coverage_role: "optional_accelerator" as const, semantic_effects: ["explanation" as const]
+    }]
+  };
+  return { ...finished, page, source_roots: sourceRows,
   ...(lookupReasons.length === 0 ? {} : { lookup_reasons: lookupReasons }) };
 }
 
@@ -302,6 +324,7 @@ function takeLexicalPage(
 }
 
 function parseSeedCursor(committed: string | null): Readonly<{
+  readonly hintsUnavailable?: boolean;
   readonly laneTurn?: number;
   readonly source: string | null;
   readonly memory: string | null;
@@ -330,6 +353,7 @@ function parseSeedCursor(committed: string | null): Readonly<{
 }
 
 function parseBundledSeedCursor(payload: string): Readonly<{
+  readonly hintsUnavailable?: boolean;
   readonly laneTurn?: number;
   readonly source: string | null;
   readonly memory: string | null;
@@ -349,7 +373,8 @@ function parseBundledSeedCursor(payload: string): Readonly<{
       memory: typeof record.memory === "string" && record.memory.length > 0 ? record.memory : null,
       sourcesDone: record.sourcesDone === true,
       hint: typeof record.hint === "string" && record.hint.length > 0 ? record.hint : null,
-      hintsDone: record.hintsDone === true
+      hintsDone: record.hintsDone === true,
+      hintsUnavailable: record.hintsUnavailable === true
     };
   } catch {
     return { source: null, memory: null, sourcesDone: false, hint: null, hintsDone: true };
@@ -357,6 +382,7 @@ function parseBundledSeedCursor(payload: string): Readonly<{
 }
 
 function encodeSeedCursor(input: Readonly<{
+  readonly hintsUnavailable: boolean;
   readonly laneTurn: number;
   readonly source: string | null;
   readonly memory: string | null;
@@ -372,7 +398,8 @@ function encodeSeedCursor(input: Readonly<{
       memory: input.memory,
       sourcesDone: input.sourcesDone,
       hint: input.hint,
-      hintsDone: input.hintsDone
+      hintsDone: input.hintsDone,
+      ...(input.hintsUnavailable ? { hintsUnavailable: true } : {})
     })}`;
   }
   if (!input.sourcesDone && (input.memory === null || input.memory === "")) {

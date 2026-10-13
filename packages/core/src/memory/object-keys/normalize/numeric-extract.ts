@@ -6,7 +6,7 @@ export interface NumericSurfaceHit {
 }
 
 const DIGIT = /\b(0|[1-9]\d?)\b/gu;
-const CJK_NUMERAL = /两|[零〇一二三四五六七八九十]{1,3}/gu;
+const CJK_NUMERAL = /(?<![零〇一二两三四五六七八九十百千万萬亿億兆])(?:两|[零〇一二三四五六七八九十]{1,3})(?![零〇一二两三四五六七八九十百千万萬亿億兆])/gu;
 
 const ENGLISH_BY_SURFACE = buildEnglishSurfaceMap();
 const CJK_BY_SURFACE = buildCjkSurfaceMap();

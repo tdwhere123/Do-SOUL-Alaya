@@ -416,6 +416,23 @@ describe("extraction attempt ledger transport validation", () => {
 });
 
 describe("extraction attempt ledger shard limits", () => {
+  it("exhausts the global attempt ceiling while successful shard slots remain", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
+    const lineage = "9".repeat(64);
+    const ledger = openLedger(lineage, 2, 3);
+    for (const digit of ["1", "2", "3"]) {
+      const cacheKey = key(digit);
+      ledger.reserveAttempt(cacheKey);
+      ledger.recordTransportOutcome(cacheKey, { retryCount: 0, rateLimitRetries: 0,
+        terminalRetryClassification: "failure_non_retryable_response",
+        transportFailures: [{ kind: "response_parse_error", phase: "response_parse",
+          httpStatus: null, fingerprint: digit.repeat(64), attempt: 1 }] });
+      ledger.abandonPendingShard(cacheKey);
+    }
+    expect(readLedger(lineage)).toMatchObject({ attempts: 3, successfulShards: 0 });
+    expect(() => ledger.reserveAttempt(key("4"))).toThrow(/attempt.*ceiling|attempt.*limit/iu);
+    expect(readLedger(lineage)).toMatchObject({ attempts: 3, successfulShards: 0 });
+  });
   it("enforces both the exact success ceiling and the ten-percent attempt ceiling", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
     const ledger = openLedger("b".repeat(64), 2);

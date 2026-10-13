@@ -146,10 +146,17 @@ describe("conditional-field producer-consumer counterexamples", () => {
       validity: OPEN,
       gist: "contradicts"
     });
-    await plantNeedles(slice, 4, 941);
+    const needleIds = await plantNeedles(slice, 4, 941);
     const index = runRecall(slice);
     const needles = runRecall(slice, { query_text: "needle" });
     const witnesses = [...index.entries, ...needles.entries];
+    const deploymentWitness = index.entries.find(entry => entry.object_id === MEM.r);
+    const needleWitness = needles.entries.find(entry => entry.object_id === needleIds[0]);
+    expect(deploymentWitness).toBeDefined();
+    expect(needleWitness).toBeDefined();
+    expect(deploymentWitness!.object_id).not.toBe(needleWitness!.object_id);
+    expect(deploymentWitness!.explanation_ids.length).toBeGreaterThan(0);
+    expect(needleWitness!.explanation_ids.length).toBeGreaterThan(0);
     for (const left of witnesses) {
       for (const right of witnesses) {
         if (left.object_id === right.object_id) continue;
@@ -200,7 +207,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
 
   it("native visits stay inside work_units; memory_bytes=1 is not a complete 31-entry index; tokens follow preview bytes", async () => {
     const slice = await openBoundSlice((database) => databases.add(database));
-    await plantNeedles(slice, 31, 601);
+    const planted = await plantNeedles(slice, 31, 601);
     const counted = countingReaders(slice);
     const tight = runRecall(slice, {
       query_text: "needle",
@@ -213,7 +220,7 @@ describe("conditional-field producer-consumer counterexamples", () => {
       readers: counted.readers
     });
     expect(counted.counters.nativeVisits).toBeLessThanOrEqual(101);
-    const tiny = runRecall(slice, {
+    expect(() => runRecall(slice, {
       query_text: "needle",
       budget: defaultBudget({
         work_units: 10_000,
@@ -221,17 +228,14 @@ describe("conditional-field producer-consumer counterexamples", () => {
         min_envelope: 1,
         page_budget: 800
       })
-    });
-    expect(tiny.completeness.logical_index).not.toBe("complete");
-    expect(tiny.completeness.representation).not.toBe("complete");
-    expect(tiny.entries.length).toBeLessThan(31);
+    })).toThrow(expect.objectContaining({ code: "CONFLICT", details: expect.objectContaining({ outcome: "resource_exhausted" }) }));
+    const sufficient = runRecall(slice, { query_text: "needle", budget: defaultBudget({ page_budget: 800 }) });
+    expect(sufficient.entries.map(entry => entry.object_id)).toEqual(planted);
     const longPreview = "x".repeat(1400);
-    const encoded = encodedRecall(tight, new Map(tight.entries.map((entry) => [(entry.object_id ?? ""), longPreview])));
+    const encoded = encodedRecall(sufficient, new Map(sufficient.entries.map((entry) => [(entry.object_id ?? ""), longPreview])));
     const estimates = encoded.candidates.map((candidate) => candidate.token_estimate);
-    if (estimates.length > 0) {
-      expect(estimates.every((value) => value === 1)).toBe(false);
-      expect(Math.max(...estimates)).toBeGreaterThan(1);
-    }
+    expect(estimates).toHaveLength(31);
+    expect(estimates.every((value) => value > 1)).toBe(true);
     expect(tight.completeness.observed_coverage).not.toBeUndefined();
   });
 

@@ -1,4 +1,5 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { clamp01 } from "../../shared/clamp.js";
 
 import {
   compareCandidateContent,
@@ -372,8 +373,4 @@ function estimateRelations(
 
 function isPresentString(value: string | null | undefined): value is string {
   return value !== null && value !== undefined && value.trim().length > 0;
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
 }

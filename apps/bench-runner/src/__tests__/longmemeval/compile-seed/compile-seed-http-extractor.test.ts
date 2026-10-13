@@ -53,6 +53,18 @@ describe("createGardenHttpExtractor retry policy", () => {
     });
   }
 
+  it.each(["tool_calls", "content_filter", "interrupted", "error"])(
+    "rejects valid JSON from incomplete provider finish %s", async (finishReason) => {
+      const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => makeJsonResponse({
+        choices: [{ message: { role: "assistant", content: '{"signals":[]}' }, finish_reason: finishReason }]
+      }));
+      const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+      await expect(extractor.extract({ systemPrompt: "system", userPrompt: "turn", retryMode: "disabled" }))
+        .rejects.toThrow(/not a complete extraction/u);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  );
+
   it("preserves the compatibility profile wire contract", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })

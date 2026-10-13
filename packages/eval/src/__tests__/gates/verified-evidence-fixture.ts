@@ -18,14 +18,15 @@ export async function verifiedEvidenceForPayload(
   payload: KpiPayload,
   authorityAssignments?: readonly LongMemEvalSelectionAssignment[],
   validateFullDiagnostics: LongMemEvalFullDiagnosticsValidator =
-    validateFixtureFullDiagnostics
+    validateFixtureFullDiagnostics,
+  fullDiagnostics: Uint8Array = new Uint8Array()
 ): Promise<VerifiedLongMemEvalEvidenceContext> {
   const selection = payload.selection_contract;
   const datasetSha256 = payload.dataset.checksum_sha256;
   if (selection === undefined || datasetSha256 === undefined) {
     throw new Error("verified evidence fixture requires selection and dataset identity");
   }
-  const artifacts = buildArtifacts(payload);
+  const artifacts = buildArtifacts(payload, fullDiagnostics);
   const manifest = buildFixtureManifest(payload, artifacts, selection, datasetSha256);
   const root = await mkdtemp(path.join(tmpdir(), "verified-evidence-fixture-"));
   try {
@@ -125,7 +126,7 @@ function requireArtifactContents(
   return artifact.contents;
 }
 
-function buildArtifacts(payload: KpiPayload): LongMemEvalEvidenceArtifact[] {
+function buildArtifacts(payload: KpiPayload, fullDiagnostics: Uint8Array): LongMemEvalEvidenceArtifact[] {
   const selection = payload.selection_contract!;
   const cohort = `${JSON.stringify({
     schema_version: 1,
@@ -143,7 +144,7 @@ function buildArtifacts(payload: KpiPayload): LongMemEvalEvidenceArtifact[] {
     artifact("kpi", "kpi.json", `${JSON.stringify(payload, null, 2)}\n`),
     artifact("report", "report.md", "report\n"),
     artifact("diagnostics", "longmemeval-diagnostics.json", "{}\n"),
-    artifact("full_diagnostics", "longmemeval-diagnostics.json.gz", new Uint8Array()),
+    artifact("full_diagnostics", "longmemeval-diagnostics.json.gz", fullDiagnostics),
     artifact("cohort_ledger", "longmemeval-cohort-ledger.json", cohort),
     artifact("comparison", "longmemeval-cold-warm-comparison.json", "{}\n"),
     artifact("run_provenance", "longmemeval-run-provenance.json",

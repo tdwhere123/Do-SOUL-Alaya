@@ -74,9 +74,7 @@ export function inspectCachedResponseMetadata(
       !isCompletionMetadataValid(value)) {
     throw new Error("response_metadata is invalid");
   }
-  if (value.finish_reason === "length") {
-    throw new Error("response_metadata finish_reason=length is not a complete extraction");
-  }
+  assertExtractionFinishReason(value.finish_reason);
   const responseMetadata = toBenchProviderResponseMetadata(value);
   if (providerBacked) assertProviderCompletionAuthority(responseMetadata);
   if (value.finish_reason === null && value.completion_contract_version !== 1) {
@@ -108,9 +106,16 @@ function toBenchProviderResponseMetadata(
 function assertProviderCompletionAuthority(
   response: BenchProviderResponseMetadata | undefined
 ): void {
+  if (response !== undefined) assertExtractionFinishReason(response.finishReason);
   if (response?.completionContractVersion !== 1 ||
       response.completionWitness === undefined) {
     throw new Error("provider-backed response_metadata lacks versioned completion authority");
+  }
+}
+
+export function assertExtractionFinishReason(finishReason: string | null): void {
+  if (finishReason !== null && finishReason !== "stop" && finishReason !== "STOP") {
+    throw new Error(`response_metadata finish_reason=${finishReason} is not a complete extraction`);
   }
 }
 

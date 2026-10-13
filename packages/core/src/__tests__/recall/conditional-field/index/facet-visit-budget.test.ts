@@ -7,6 +7,7 @@ import {
   type FieldValue
 } from "@do-soul/alaya-protocol";
 import { composedFacetPathId } from "../../../../recall/conditional-field/engine/path-composition-facet.js";
+import { indexEntryForValue } from "../../../../recall/conditional-field/index/project-accepting-entries.js";
 import {
   continueAcceptingIndex,
   projectAcceptingIndex
@@ -93,12 +94,21 @@ describe("facet collection visits against the request allowance", () => {
         }
       ]
     };
+    const view = { ...defaultView(), facet_obligations: [facetObligation({ obligation_id: "ob-pass" })] };
+    let incomplete: FacetVisitIndex | undefined;
     const index = projectAcceptingIndex(input(snapshot, {
-      remaining_reserve: 1,
-      view: { ...defaultView(), facet_obligations: [facetObligation({ obligation_id: "ob-pass" })] }
+      remaining_reserve: 3,
+      view,
+      on_projection_progress: (_offset, facet) => { incomplete = facet?.index; }
     }));
     expect(index.entries.map((entry) => entry.object_id)).not.toContain("fail");
     expect(index.entries.map((entry) => entry.object_id)).not.toContain("pass");
+    expect(incomplete?.complete).toBe(false);
+    for (const value of snapshot.values) {
+      expect(indexEntryForValue(value, input(snapshot, { view, projection_facet_index: incomplete }))).toBeNull();
+    }
+    const complete = projectAcceptingIndex(input(snapshot, { view, remaining_reserve: 100 }));
+    expect(complete.entries.map((entry) => entry.object_id)).toEqual(["pass"]);
   });
 
   it("does not retract a still-accepting emitted member while required facets are incomplete", () => {

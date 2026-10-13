@@ -1,4 +1,5 @@
 import {
+  IsoDatetimeStringSchema,
   serializePathAnchorRef,
   type PathAnchorRef,
   type PathRelation
@@ -36,7 +37,7 @@ export class SqliteSoftAssociationPathRepo {
     this.selectHistorical = database.connection.prepare(`
       SELECT${PATH_RELATION_SELECT_COLUMNS}
       FROM soft_association_path_relations
-      WHERE workspace_id = ? AND created_at <= ? AND updated_at <= ?
+      WHERE workspace_id = ? AND alaya_utc_compare(created_at, ?) <= 0 AND alaya_utc_compare(updated_at, ?) <= 0
       ORDER BY created_at ASC, path_id ASC
     `);
   }
@@ -107,6 +108,7 @@ export class SqliteSoftAssociationPathRepo {
 }
 
 function normalizeHistoricalAsOf(asOf: string): string {
+  if (IsoDatetimeStringSchema.safeParse(asOf).success) return asOf;
   const parsed = Date.parse(asOf);
   if (!Number.isFinite(parsed)) {
     throw new StorageError("VALIDATION_FAILED", "Soft association asOf must be valid.");

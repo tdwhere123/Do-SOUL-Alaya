@@ -245,7 +245,7 @@ describe("audit-covered route contracts", () => {
       error: "Strict confirmation required",
       strictIds: ["anchor-strict"]
     });
-    expect(projectMappingService.batchAccept).toHaveBeenCalledWith(["anchor-strict"], AcceptedBy.USER);
+    expect(projectMappingService.batchAccept).toHaveBeenCalledWith(["anchor-strict"], AcceptedBy.USER, "ws-1");
   });
 
   it("soul graph-neighbor route checks workspace scope and parses direction plus edge filters", async () => {

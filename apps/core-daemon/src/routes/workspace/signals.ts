@@ -1,3 +1,4 @@
+import { resolveRequestRun } from "../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import { CoreError, type RunService, type SignalService } from "@do-soul/alaya-core";
 import { parseJsonBody, parseListPagination, writeListPaginationHeaders } from "../shared/shared.js";
@@ -12,7 +13,8 @@ export interface SignalRouteServices {
 export function registerSignalRoutes(app: Hono, services: SignalRouteServices): void {
   app.get("/runs/:id/signals", async (context) => {
     const runId = context.req.param("id");
-    await services.runService.getById(runId);
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
     const pagination = parseListPagination(context);
     const [signals, totalCount] = await resolveListAndCount(
       services.signalService.listByRun(runId, pagination),
@@ -24,7 +26,8 @@ export function registerSignalRoutes(app: Hono, services: SignalRouteServices): 
 
   app.post("/runs/:id/signals", async (context) => {
     const runId = context.req.param("id");
-    const run = await services.runService.getById(runId);
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
     const body = await parseJsonBody(context.req.json.bind(context.req));
 
     let signal;

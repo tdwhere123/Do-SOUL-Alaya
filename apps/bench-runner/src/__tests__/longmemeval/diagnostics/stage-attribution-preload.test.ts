@@ -26,8 +26,8 @@ describe("stage attribution preload", () => {
   it("does not reread gzip when both arms already have questions", async () => {
     const outDir = await mkdtemp(path.join(tmpdir(), "stage-attr-preload-"));
     roots.push(outDir);
-    const control = [baseQuestion({ question_id: "q-a", hit_at_5: true })];
-    const treatment = [baseQuestion({ question_id: "q-a", hit_at_5: true })];
+    const control = [baseQuestion({ question_id: "q-a", gold_memory_ids: ["memory:1"] })];
+    const treatment = [baseQuestion({ question_id: "q-a", gold_memory_ids: ["memory:1"] })];
 
     const tables = await writeStageAttributionTables({
       outDir,

@@ -1,4 +1,5 @@
 import { RECALL_RANKING_IDENTITY } from "../../../../shared/version.js";
+import { overallRecallAt5 } from "../../../../runs/measurement/answerable-recall.js";
 import {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
@@ -203,7 +204,7 @@ function buildKpi(
     r_at_1: rates.rAt1,
     r_at_5: rates.rAt5,
     r_at_10: rates.rAt10,
-    ...embeddingKpiFields(input, rates.rAt5, providerSummary, rAt5EmbeddingReturned, embeddingVectorCache, queryEmbeddingCache),
+    ...embeddingKpiFields(input, providerSummary, rAt5EmbeddingReturned, embeddingVectorCache, queryEmbeddingCache),
     latency_ms_p50: rates.latencyP50,
     latency_ms_p95: rates.latencyP95,
     latency_source: "exact",
@@ -237,7 +238,6 @@ function buildKpi(
 
 function embeddingKpiFields(
   input: Parameters<typeof buildLongMemEvalRunPayload>[0],
-  rAt5: number,
   providerSummary: ReturnType<typeof summarizeProviderStates>,
   rAt5EmbeddingReturned: number | undefined,
   embeddingVectorCache: ReturnType<typeof summarizeEmbeddingVectorCache>,
@@ -245,7 +245,7 @@ function embeddingKpiFields(
 ): Partial<KpiPayload["kpi"]> {
   if (input.opts.embeddingMode !== "env") return {};
   return {
-    r_at_5_overall: rAt5,
+    r_at_5_overall: overallRecallAt5(input.aggregate.perScenario) ?? undefined,
     ...(rAt5EmbeddingReturned === undefined ? {} : { r_at_5_with_embedding_returned: rAt5EmbeddingReturned }),
     provider_returned_rate: providerSummary.provider_returned_rate,
     provider_pending_rate: providerSummary.provider_pending_rate,

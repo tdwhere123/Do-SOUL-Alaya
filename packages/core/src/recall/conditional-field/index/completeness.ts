@@ -21,6 +21,7 @@ import {
   interpretationMayEmitCompleteEmpty
 } from "../engine/interpretation-coverage.js";
 import { aggregateObserverStatus } from "../reference/accepting-projection.js";
+import { uniformCompleteness } from "../completeness-report.js";
 
 const CONTRACT_CONFLICT_REGION = "field.cap-contract-conflict";
 
@@ -496,18 +497,6 @@ function isIncompleteObserverStatus(
 ): status is IncompleteObserverStatus {
   return status !== undefined
     && (INCOMPLETE_OBSERVER_STATUSES as readonly string[]).includes(status);
-}
-
-function uniformCompleteness(status: CompletenessStatus): CompletenessReport {
-  return {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    logical_index: status,
-    observed_coverage: status,
-    interpretation_coverage: status,
-    transport: status,
-    payload: status,
-    representation: status
-  };
 }
 
 function hasRequiredCoverage(input: CertifyClosureInput): boolean {

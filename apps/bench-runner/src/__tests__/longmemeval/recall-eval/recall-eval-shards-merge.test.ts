@@ -347,11 +347,11 @@ describe("mergeRecallEvalShardArchives — shard measurement truth", () => {
     expect(result.payload.kpi.token_economy).toBeUndefined();
     expect(result.payload.kpi.qa_metrics).toBeUndefined();
     expect(result.payload.kpi.full_gold_coverage).toBeUndefined();
-    expect(result.payload.kpi).not.toHaveProperty("token_saved_ratio_vs_full_prompt");
+    expect(result.payload.kpi.token_saved_ratio_vs_full_prompt).toBeNull();
     const written = JSON.parse(
       await readFile(join(historyRoot, "public", result.slug, "kpi.json"), "utf8")
     ) as { kpi: Record<string, unknown> };
-    expect(written.kpi).not.toHaveProperty("token_saved_ratio_vs_full_prompt");
+    expect(written.kpi.token_saved_ratio_vs_full_prompt).toBeNull();
     expect(result.payload.kpi.quality_metrics?.non_monotonic_count).not.toBe(99);
     expect(result.payload.selection_contract).toBeUndefined();
   });

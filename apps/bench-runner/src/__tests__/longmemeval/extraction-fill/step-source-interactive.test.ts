@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -221,7 +222,7 @@ async function listen(
   const intercepted = vi.fn<typeof fetch>((url, init) => {
     const selected = new URL(String(url));
     expect(selected.origin).toBe("https://api.stepfun.com");
-    return nativeFetch(new URL(selected.pathname + selected.search, origin), init);
+    return fetchLoopbackProvider(nativeFetch, new URL(selected.pathname + selected.search, origin), init);
   });
   vi.stubGlobal("fetch", intercepted);
   return { calls, intercepted };
@@ -500,7 +501,7 @@ it("retains bytes received before caller cancellation and spends no second Step 
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const nativeFetch = globalThis.fetch;
   vi.stubGlobal("fetch", vi.fn<typeof fetch>((url, init) =>
-    nativeFetch(new URL(new URL(String(url)).pathname, origin), init)));
+    fetchLoopbackProvider(nativeFetch, new URL(new URL(String(url)).pathname, origin), init)));
   await expect(runExtractionFill({ ...fixture.options, signal: controller.signal })).rejects.toThrow();
   expect(calls).toBe(1);
   const raw = listProviderRawAttempts(roots.cacheRoot, fixture.selected[0]!)[0]!;

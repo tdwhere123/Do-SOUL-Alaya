@@ -21,10 +21,12 @@ import {
   committedProductStatesOf,
   committedRevisionsOf,
   productComponentState,
+  mergeCommittedProductStates,
   productUpdatesBetween
 } from "../../../../recall/conditional-field/index/product-component-diff.js";
 import {
   retainCommittedRevisions,
+  mergeCommittedRevisions,
   sealIssuedContinuation
 } from "../../../../recall/runtime/index-continuation.js";
 import { defaultView, productIndexKey } from "../reference/deployment.fixture.js";
@@ -35,6 +37,22 @@ const QUERY_ID = "failed-deployment";
 const EXPIRES_AT = "2099-01-01T00:00:00.000Z";
 
 describe("product component diffs", () => {
+  it("refuses a 4097th delivery identity without evicting the oldest revision or product state", () => {
+    const rows = Array.from({ length: 4096 }, (_, index) => entry(`member-${index}`));
+    const revisions = mergeCommittedRevisions({}, rows);
+    const products = mergeCommittedProductStates({}, rows, [], []);
+    const oldest = sharedProductIdentity(productStateKeyFromIndexEntry(rows[0]!));
+    const extra = entry("overflow");
+    expect(() => mergeCommittedRevisions(revisions, [extra])).toThrow(/capacity exhausted/u);
+    expect(() => mergeCommittedProductStates(products, [extra], [], [])).toThrow(/capacity exhausted/u);
+    expect(Object.keys(revisions)).toHaveLength(4096);
+    expect(Object.keys(products)).toHaveLength(4096);
+    expect(revisions[oldest]).toBeDefined();
+    expect(products[oldest]).toEqual(productComponentState(rows[0]!));
+    expect(mergeCommittedRevisions(revisions, [rows[0]!])).toEqual(revisions);
+    expect(productUpdatesBetween(productStateKeyFromIndexEntry(rows[0]!), products[oldest],
+      productComponentState(entry("member-0", { claim: "supported" })))).toHaveLength(1);
+  });
   it("emits unknown→supported, explanation-only, proof-only, payload-only, and multi-component rows", () => {
     const base = entry("a");
     const supported = entry("a", { claim: "supported" });

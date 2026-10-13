@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -97,7 +98,7 @@ async function listen(finish: "stop" | "length", valid = true,
   vi.stubGlobal("fetch", (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
     expect(String(url)).toBe(`${ENDPOINT}/chat/completions`);
     expect(init?.redirect).toBe("error");
-    return nativeFetch(new URL(new URL(String(url)).pathname, localOrigin), init);
+    return fetchLoopbackProvider(nativeFetch, new URL(new URL(String(url)).pathname, localOrigin), init);
   });
   return calls;
 }

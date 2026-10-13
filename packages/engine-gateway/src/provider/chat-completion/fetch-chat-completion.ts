@@ -1,5 +1,5 @@
 import { ProviderChatCompletionError } from "./errors.js";
-import { getGlobalDispatcher } from "undici";
+import type { Dispatcher } from "undici";
 import { AlayaError, isChatSemanticRequestProfile, isInternProviderRequestProfile } from "@do-soul/alaya-protocol";
 import {
   PROVIDER_FAILURE_BODY_DIGEST_BYTES,
@@ -11,7 +11,7 @@ import {
   ProviderResponseInspectionError,
   type ProviderResponseInspectionReason
 } from "./inspect-response.js";
-import { assertAllowedProviderChatUrlResolved } from "./provider-url-guard.js";
+import { createProviderTransport } from "./provider-transport.js";
 import { CALLER_ABORT, createProviderChatDeadline, resolveProviderChatTimeoutMs } from "./request-deadline.js";
 import {
   MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES,
@@ -56,7 +56,25 @@ async function runProviderChatRequest(
   observeStatus: (status: number) => void,
   observeResponse: (snapshot: () => ProviderHttpResponseEvidence) => void
 ): Promise<ProviderChatCompletionResult> {
-  const response = await postChatCompletion(request, signal);
+  const url = providerChatCompletionsUrl(request.providerUrl, request.env);
+  const transport = await createProviderTransport(url, request, signal);
+  let completed = false;
+  try {
+    const response = await postChatCompletion(request, signal, url, transport.dispatcher);
+    const result = await readChatCompletionResponse(request, response, observeStatus, observeResponse);
+    completed = true;
+    return result;
+  } finally {
+    if (transport.owned) await (completed ? transport.dispatcher.close() : transport.dispatcher.destroy());
+  }
+}
+
+async function readChatCompletionResponse(
+  request: ProviderChatCompletionRequest,
+  response: Response,
+  observeStatus: (status: number) => void,
+  observeResponse: (snapshot: () => ProviderHttpResponseEvidence) => void
+): Promise<ProviderChatCompletionResult> {
   observeStatus(response.status);
   if (isChatSemanticRequestProfile(request.profile) || isInternProviderRequestProfile(request.profile)) {
     let bodyText: string;
@@ -119,19 +137,18 @@ function publishedSuccessEvidence(
 
 async function postChatCompletion(
   request: ProviderChatCompletionRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  url: string,
+  baseDispatcher: Dispatcher
 ): Promise<Response> {
-  const url = providerChatCompletionsUrl(request.providerUrl, request.env);
-  await assertAllowedProviderChatUrlResolved(url, request.env);
   const fetchImpl = request.fetchImpl ?? fetch;
-  // The runtime owns the underlying dispatcher and its proxy policy/pools. This
-  // request-local composition owns no clients and must never close that dispatcher.
+  // Timeout composition owns no resources; its lifecycle follows the base owner.
   const timeoutMs = Math.ceil(resolveProviderChatTimeoutMs(request.timeoutMs));
   const dispatcher = (isInternProviderRequestProfile(request.profile) ||
     isChatSemanticRequestProfile(request.profile) && request.retainHttpResponseEvidence === true)
-    ? getGlobalDispatcher().compose(dispatch => (options, handler) => dispatch({
+    ? baseDispatcher.compose(dispatch => (options, handler) => dispatch({
       ...options, headersTimeout: timeoutMs, bodyTimeout: timeoutMs
-    }, handler)) : undefined;
+    }, handler)) : baseDispatcher;
   // RequestInit must not carry the caller abortSignal; timeout abort would then
   // be indistinguishable from an operator abort.
   return await fetchImpl(

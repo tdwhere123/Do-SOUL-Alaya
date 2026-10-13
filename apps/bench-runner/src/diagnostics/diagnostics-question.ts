@@ -1,4 +1,5 @@
 import { attachAbstentionConfidenceScore } from "./abstention-confidence.js";
+import { summarizeAnswerableRecall } from "../runs/measurement/answerable-recall.js";
 import type {
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
@@ -251,8 +252,7 @@ export function rAt5WithProviderReturned(
   const returned = diagnostics.filter(
     (row) => row.provider_state === "provider_returned"
   );
-  if (returned.length === 0) return undefined;
-  return returned.filter((row) => row.hit_at_5).length / returned.length;
+  return summarizeAnswerableRecall(returned).rAt5 ?? undefined;
 }
 
 function ratio(count: number, total: number): number {

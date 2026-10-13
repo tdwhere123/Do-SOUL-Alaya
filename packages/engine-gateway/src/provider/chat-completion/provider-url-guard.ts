@@ -50,9 +50,26 @@ async function assertResolvedProviderUrl(endpoint: string, env: EnvLookup): Prom
 }
 
 export async function assertProviderHostResolvesPublic(endpoint: string): Promise<void> {
+  await resolvePublicProviderAddresses(endpoint);
+}
+
+/** Resolve once for the connector owner; the dispatcher origin remains unchanged. */
+export async function resolveProviderAddressBinding(
+  endpoint: string,
+  env: EnvLookup = {}
+): Promise<Readonly<{ origin: string; hostname: string; addresses: readonly string[] }> | undefined> {
+  assertAllowedProviderChatUrl(endpoint, env);
+  if (parseEnvBoolean(env[PRIVATE_PROVIDER_OPT_IN], PRIVATE_PROVIDER_OPT_IN)) return undefined;
+  const answers = await resolvePublicProviderAddresses(endpoint);
+  const url = parseHttpProviderUrl(endpoint);
+  const hostname = url.hostname.replace(/^\[|\]$/gu, "");
+  return { origin: url.origin, hostname, addresses: answers.length === 0 ? [hostname] : answers.map(answer => answer.address) };
+}
+
+async function resolvePublicProviderAddresses(endpoint: string): Promise<readonly { address: string; family: 4 | 6 }[]> {
   const host = parseHttpProviderUrl(endpoint).hostname.replace(/^\[|\]$/gu, "");
   if (isIP(host) !== 0) {
-    return;
+    return [];
   }
   let answers: readonly { readonly address: string }[];
   try {
@@ -70,4 +87,5 @@ export async function assertProviderHostResolvesPublic(endpoint: string): Promis
       );
     }
   }
+  return answers.map(({ address }) => ({ address, family: isIP(address) === 6 ? 6 : 4 }));
 }

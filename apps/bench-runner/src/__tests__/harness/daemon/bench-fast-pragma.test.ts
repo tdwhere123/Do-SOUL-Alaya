@@ -157,8 +157,10 @@ describe("applyBenchFastPragmaIfRequested", () => {
 
   it("disables mmap when an embedding overlay is bound to the working copy", async () => {
     const dataDir = await newDataDir();
+    initDatabase({ filename: join(dataDir, "alaya.db") }).connection.pragma("mmap_size=268435456");
+    applyBenchFastPragmaIfRequested(dataDir);
+    expect(readPragmaNumber(dataDir, "mmap_size")).toBeGreaterThan(0);
     bindEmptyOverlay(dataDir);
-    truncateSync(join(dataDir, "alaya.db"), 8 * 1024 * 1024 * 1024);
     const result = applyBenchFastPragmaIfRequested(dataDir);
     expect(result.pragmas).toContain("mmap_size=0");
     expect(readPragmaNumber(dataDir, "mmap_size")).toBe(0);

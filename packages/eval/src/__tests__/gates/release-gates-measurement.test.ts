@@ -364,29 +364,25 @@ it("does not apply the embedding inference activation gate outside embedding-on 
   });
 
   it.each([
-    ["missing denominator", undefined, []],
-    ["missing rows", 500, []],
-    ["implicit scorable", 1, [
-      { id: "q-1", version: 1, hit_at_5: true, tier: "hot" as const }
-    ]]
-  ])("rejects eligible attribution with %s at the raw gate", (_label, answerable, rows) => {
+    "missing denominator", "missing rows", "implicit scorable"
+  ])("rejects eligible attribution with %s at the raw gate", async (_label) => {
+    const valid = buildReleaseGradePublic(makeSeedExtractionPath());
+    const evidence = await verifiedEvidenceForPayload(valid);
+    expect(releaseHardGateAllowsLatestPassing(valid, evidence)).toBe(true);
     const payload = {
-      ...buildLimitedTier1Payload("public", "longmemeval_s"),
-      evaluated_count: answerable === 1 ? 1 : 500,
-      answerable_evaluated_count: answerable,
-      measurement_attribution: eligibleMeasurementAttribution(),
+      ...valid,
+      ...(_label === "missing denominator" ? { answerable_evaluated_count: undefined } : {}),
       kpi: {
-        ...buildPayload("abc1234").kpi,
-        seed_extraction_path: makeSeedExtractionPath(),
-        per_scenario: rows,
-        quality_metrics: {
-          ...passingQualityMetrics(answerable === 1 ? 1 : 500),
-          abstention: zeroAbstention()
-        }
+        ...valid.kpi,
+        per_scenario: _label === "missing rows" ? [] : _label === "implicit scorable"
+          ? valid.kpi.per_scenario.map(({ scorable: _scorable, ...row }) => row)
+          : valid.kpi.per_scenario
       }
     } as KpiPayload;
 
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
+    expect(collectReleaseHardGates(payload)).toContainEqual(expect.objectContaining({
+      id: "longmemeval_measurement_attribution", passed: false
+    }));
   });
 
   it.each([

@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   bindEmbeddingOverlay,
   detachEmbeddingOverlay,
@@ -10,7 +12,7 @@ import {
   writeEmbeddingOverlayBind,
   type StorageDatabase
 } from "@do-soul/alaya-storage";
-import { copyRegularFileNoFollow } from "../../bound-file.js";
+import { copyRegularFileNoFollow, hashRegularFileNoFollow } from "../../bound-file.js";
 import {
   readEmbeddingCacheOverlay,
   type EmbeddingCacheOverlayBinding,
@@ -38,8 +40,12 @@ export async function applyEmbeddingCacheOverlay(input: {
     throw new Error("embedding cache overlay input must differ from its bound working copy");
   }
   if (reuseExistingOverlayBind(input.restoredDbPath, boundPath, loaded.binding.overlay_sha256)) {
-    // Pager recycle re-opens this working copy; Q1 may have written query rows into main.
+    if (hashRegularFileNoFollow(loaded.overlayPath) !== loaded.binding.overlay_sha256) {
+      throw new AlayaError("CONFLICT", "embedding cache overlay source digest mismatch");
+    }
+    // SQLite attach can change journal/header bytes; overlay rows remain immutable.
     assertIsolatedOverlayFile(loaded.overlayPath, boundPath);
+    assertBoundOverlayContents(loaded.overlayPath, boundPath);
     return loaded.binding;
   }
   copyRegularFileNoFollow({
@@ -57,6 +63,27 @@ export async function applyEmbeddingCacheOverlay(input: {
     rmSync(boundPath, { force: true });
     rmSync(embeddingOverlayBindPath(input.restoredDbPath), { force: true });
     throw error;
+  }
+}
+
+function assertBoundOverlayContents(sourcePath: string, boundPath: string): void {
+  const database = new BetterSqlite3(boundPath, { readonly: true, fileMustExist: true });
+  try {
+    database.prepare("ATTACH DATABASE ? AS source_overlay").run(sourcePath);
+    for (const table of ["memory_embeddings", "evidence_recall_embeddings"]) {
+      const changed = database.prepare(`
+        SELECT (SELECT sql FROM main.sqlite_schema WHERE type = 'table' AND name = '${table}')
+            IS NOT (SELECT sql FROM source_overlay.sqlite_schema WHERE type = 'table' AND name = '${table}')
+          OR (SELECT COUNT(*) FROM main.${table}) != (SELECT COUNT(*) FROM source_overlay.${table})
+          OR EXISTS(SELECT * FROM main.${table} EXCEPT SELECT * FROM source_overlay.${table})
+          OR EXISTS(SELECT * FROM source_overlay.${table} EXCEPT SELECT * FROM main.${table}) AS changed
+      `).get() as { changed: number };
+      if (changed.changed !== 0) {
+        throw new AlayaError("CONFLICT", "embedding cache overlay bound working copy content mismatch");
+      }
+    }
+  } finally {
+    database.close();
   }
 }
 

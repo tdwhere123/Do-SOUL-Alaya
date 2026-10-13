@@ -5,6 +5,7 @@ import {
 } from "./output-token-retry.js";
 import { markGardenHttpFailure } from "./garden-http-failure-attempt.js";
 import { inspectExtractionRawEnvelope } from "../../extraction/content-closure.js";
+import { assertExtractionFinishReason } from "../cache/cached-response-metadata.js";
 
 type GardenHttpResponseContent = Readonly<{
   content: string;
@@ -22,6 +23,14 @@ export function extractValidGardenHttpContent(
     ), {
       kind: "response_schema_error",
       phase: "response_schema",
+      ...(response.usage === undefined ? {} : { usage: response.usage })
+    });
+  }
+  try {
+    assertExtractionFinishReason(response.finishReason);
+  } catch (error) {
+    throw markGardenHttpFailure(error instanceof Error ? error : new Error(String(error)), {
+      kind: "response_schema_error", phase: "response_schema", rawBody: response.content,
       ...(response.usage === undefined ? {} : { usage: response.usage })
     });
   }

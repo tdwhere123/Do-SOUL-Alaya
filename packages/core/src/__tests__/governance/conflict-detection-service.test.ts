@@ -369,7 +369,7 @@ it("strictNoDrop=true rethrows LLM classifier failures instead of degrading to n
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
-it("default mode warns and degrades when the LLM classifier fails", async () => {
+it("default mode reports unavailable when the LLM classifier fails", async () => {
     const warn = vi.fn();
     const ambiguous = createMemoryEntry({
       object_id: "mem-A",
@@ -404,7 +404,7 @@ it("default mode warns and degrades when the LLM classifier fails", async () => 
         workspaceId: "workspace-1",
         runId: "run-1"
       })
-    ).resolves.toEqual({ availability: "ok" });
+    ).resolves.toEqual({ availability: "unavailable" });
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "conflict detection llm pair classify failed",

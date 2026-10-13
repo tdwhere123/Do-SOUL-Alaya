@@ -23,7 +23,7 @@ function hasModernFullGoldDiagnosticsSet(
   return questionDiagnostics.every((question) => Array.isArray(question.gold));
 }
 
-function hasExactQuestionDiagnosticsSet(
+export function hasExactQuestionDiagnosticsSet(
   questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[],
   perScenario: readonly PerScenarioRow[]
 ): boolean {

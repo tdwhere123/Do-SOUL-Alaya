@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,14 +17,20 @@ describe("extraction attempt ledger validation", () => {
     if (cacheRoot !== "") await rm(cacheRoot, { recursive: true, force: true });
   });
 
-  it("fails closed when the ledger path is a dangling symlink", async () => {
+  it("refuses a ledger symlink even when its target contains a valid ledger", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-attempt-ledger-"));
     const lineageDigest = "b".repeat(64);
     const ledgerPath = join(cacheRoot, `extraction-attempt-ledger.${lineageDigest}.json`);
-    await symlink(join(cacheRoot, "missing-ledger.json"), ledgerPath);
+    openLedger(lineageDigest, 1);
+    const original = await readFile(ledgerPath, "utf8");
+    await mkdir(join(cacheRoot, "elsewhere"));
+    const target = join(cacheRoot, "elsewhere", "external-ledger.json");
+    await rename(ledgerPath, target);
+    await symlink(target, ledgerPath);
 
-    expect(() => openLedger(lineageDigest, 1)).toThrow();
-    await expect(readFile(ledgerPath, "utf8")).rejects.toThrow();
+    // Inventory refuses non-regular entries before attempting the bounded reader.
+    expect(() => openLedger(lineageDigest, 1)).toThrow(/inventory exceeds retained input limit/u);
+    expect(await readFile(target, "utf8")).toBe(original);
   });
 
   it("rejects a provider success shard without physical transport provenance", async () => {

@@ -13,6 +13,7 @@ import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
 import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseExtensionToolProvider } from "./extension-descriptor-parsers.js";
 import { readNow } from "../shared/time.js";
+import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 type McpDiscoveredTool = ToolProviderToolSpec;
 
@@ -28,6 +29,8 @@ export interface McpToolDiscoveryDependencies {
   readonly mcpToolCatalog: McpToolCatalogPort;
   readonly eventLogWriter: {
     append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+    /** Complete entity history or an explicit error; a native default page is insufficient. */
+    queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
   };
   readonly runtimeNotifier?: {
     notifyEntry(entry: EventLogEntry): void | Promise<void>;
@@ -46,7 +49,7 @@ export class McpToolDiscoveryService {
   public async discoverAndRegister(
     mcpServers: readonly McpServerInfo[]
   ): Promise<readonly Readonly<ToolProvider>[]> {
-    this.seedKnownTools(await this.deps.extensionRegistry.listProviders());
+    await this.seedKnownTools(await this.deps.extensionRegistry.listProviders());
     const activeServers = mcpServers
       .map((rawServer) => parseMcpServerInfo(rawServer))
       .filter((server) => server.status === "active");
@@ -159,10 +162,18 @@ export class McpToolDiscoveryService {
       caused_by: SYSTEM_ACTOR,
       payload_json: payload
     });
-    await this.deps.runtimeNotifier?.notifyEntry(entry);
+    this.knownToolIds.add(toolId);
+    this.providerToolIds.set(provider.provider_id, new Set([
+      ...(this.providerToolIds.get(provider.provider_id) ?? []), toolId
+    ]));
+    if (this.deps.runtimeNotifier !== undefined) {
+      await bindEventPublisher({ eventLogRepo: this.deps.eventLogWriter,
+        runtimeNotifier: this.deps.runtimeNotifier, purpose: "McpToolDiscoveryService" })
+        .propagateCommitted([entry]);
+    }
   }
 
-  private seedKnownTools(providers: readonly Readonly<ToolProvider>[]): void {
+  private async seedKnownTools(providers: readonly Readonly<ToolProvider>[]): Promise<void> {
     let didSeed = false;
 
     for (const provider of providers) {
@@ -170,10 +181,12 @@ export class McpToolDiscoveryService {
         continue;
       }
 
-      this.providerToolIds.set(
-        provider.provider_id,
-        new Set(provider.tool_specs.map((tool) => tool.tool_id))
-      );
+      const events = await this.deps.eventLogWriter.queryByEntityAll("extension_provider", provider.provider_id);
+      const audited = new Set(events.filter(event =>
+        event.event_type === RuntimeGovernanceEventType.EXTENSION_TOOL_DISCOVERED)
+        .map(event => ExtensionToolDiscoveredPayloadSchema.parse(event.payload_json).tool_id));
+      this.providerToolIds.set(provider.provider_id,
+        new Set(provider.tool_specs.filter(tool => audited.has(tool.tool_id)).map(tool => tool.tool_id)));
       didSeed = true;
     }
 

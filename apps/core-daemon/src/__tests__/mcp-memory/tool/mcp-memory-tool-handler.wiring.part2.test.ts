@@ -90,8 +90,8 @@ describe("mcp memory tool handler wiring", () => {
 
   it("does not open memory pointers outside the caller workspace", async () => {
     const deps = createDeps();
-    // F-r2-002: handler now uses findByIdScoped; foreign workspace returns null.
-    deps.memoryService.findByIdScoped = vi.fn(async (_objectId: string, _workspaceId: string) => null);
+    deps.memoryService.findByIdScoped = vi.fn(async (_objectId: string, workspaceId: string) =>
+      workspaceId === context.workspaceId ? null : createMemory());
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -104,6 +104,7 @@ describe("mcp memory tool handler wiring", () => {
       ok: false,
       error: { code: "NOT_FOUND" }
     });
+    expect(deps.memoryService.findByIdScoped).toHaveBeenCalledWith("mem1", context.workspaceId);
   });
 
   it("falls through to evidence capsule when memory lookup misses, returning gist and excerpt", async () => {

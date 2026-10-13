@@ -36,6 +36,14 @@ export function answerableRecallAt5(
   return summarizeAnswerableRecall(diagnostics).rAt5;
 }
 
+/** Overall is the observed hit fraction of all evaluated rows, including abstentions. */
+export function overallRecallAt5(
+  rows: readonly { readonly hit_at_5: boolean }[],
+  evaluatedCount: number = rows.length
+): number | null {
+  return ratio(rows.filter((row) => row.hit_at_5).length, evaluatedCount);
+}
+
 function ratio(count: number, total: number): number | null {
   return total === 0 ? null : count / total;
 }

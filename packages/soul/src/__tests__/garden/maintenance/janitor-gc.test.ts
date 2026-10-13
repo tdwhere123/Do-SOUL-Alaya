@@ -118,7 +118,7 @@ describe("Janitor GC task kinds", () => {
     ]);
   });
 
-  it("completes an intentional S4 physical-GC deferral without calling a delete port", async () => {
+  it("completes an intentional physical-GC deferral without calling the available delete port", async () => {
     const legacyTombstoneGcPort = {
       findTombstonedMemories: vi.fn(async () => [{ memory_id: "memory-legacy" }]),
       hardDelete: vi.fn(async () => true)
@@ -134,6 +134,7 @@ describe("Janitor GC task kinds", () => {
         demoteToWarm: vi.fn(async () => undefined)
       },
       tombstoneGcDeferredReason: "temporal_assertion_provenance_required",
+      tombstoneGcPort: legacyTombstoneGcPort,
       scheduler,
       now: () => "2026-07-17T00:00:00.000Z"
     } as ConstructorParameters<typeof Janitor>[0]);

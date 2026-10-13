@@ -195,6 +195,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       if (advance.from !== from.program_state) continue;
       // One focused premise reads the row delta. The others still read the retained population.
       for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
+        asOf: input.asOf,
         query_id: input.interpretation.query_id,
         liveStates: [from],
         overlay: input.overlay,

@@ -45,7 +45,7 @@ it("discovers MCP tools, registers providers, and emits extension.tool_discovere
       mcpToolCatalog: {
         listServerTools
       },
-      eventLogWriter: { append },
+      eventLogWriter: { append, queryByEntityAll: vi.fn(async () => []) },
       runtimeNotifier: { notifyEntry },
       now: () => validTimestamp
     });
@@ -107,6 +107,7 @@ it("normalizes blank system workspace fallback and discovered_at timestamps via 
         ])
       },
       eventLogWriter: {
+        queryByEntityAll: vi.fn(async () => []),
         append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
           const persisted = {
             ...entry,
@@ -146,7 +147,7 @@ it("skips inactive servers and ignores active servers with no tools", async () =
       mcpToolCatalog: {
         listServerTools
       },
-      eventLogWriter: { append }
+      eventLogWriter: { append, queryByEntityAll: vi.fn(async () => []) }
     });
 
     const providers = await service.discoverAndRegister([
@@ -217,7 +218,7 @@ it("emits extension.tool_discovered only for genuinely new tools across refresh 
       mcpToolCatalog: {
         listServerTools
       },
-      eventLogWriter: { append },
+      eventLogWriter: { append, queryByEntityAll: vi.fn(async () => []) },
       runtimeNotifier: { notifyEntry },
       now: () => validTimestamp
     });
@@ -294,7 +295,7 @@ it("suppresses duplicate extension.tool_discovered emission across overlapping d
       mcpToolCatalog: {
         listServerTools
       },
-      eventLogWriter: { append },
+      eventLogWriter: { append, queryByEntityAll: vi.fn(async () => []) },
       runtimeNotifier: { notifyEntry },
       now: () => validTimestamp
     });
@@ -380,7 +381,7 @@ it("suppresses duplicate extension.tool_discovered emission when a stale overlap
       mcpToolCatalog: {
         listServerTools
       },
-      eventLogWriter: { append },
+      eventLogWriter: { append, queryByEntityAll: vi.fn(async () => []) },
       runtimeNotifier: { notifyEntry },
       now: () => validTimestamp
     });
@@ -453,7 +454,7 @@ it("makes a zero-tool shrink authoritative before later rediscovery", async () =
       mcpToolCatalog: {
         listServerTools
       },
-      eventLogWriter: { append },
+      eventLogWriter: { append, queryByEntityAll: vi.fn(async () => []) },
       runtimeNotifier: { notifyEntry },
       now: () => validTimestamp
     });

@@ -55,12 +55,14 @@ export function captureSealedSliceMainFileProofs(
 
 export async function reuseOrExplodeSealedSlices(input: {
   readonly snapshotDbPath: string;
+  readonly destDir?: string;
+  readonly rebuildDrifted?: boolean;
   readonly packedDbPath: string;
   readonly workspaceIds: readonly string[];
   readonly requireReuse: boolean;
   readonly onProgress?: (progress: WorkspaceSliceProgress) => void;
 }): Promise<ExplodedWorkspaceSlices> {
-  const destDir = sealedWorkspaceSliceCacheDir(input.snapshotDbPath);
+  const destDir = input.destDir ?? sealedWorkspaceSliceCacheDir(input.snapshotDbPath);
   const packedSha = hashRegularFileNoFollow(input.packedDbPath);
   const snapshotSha = hashRegularFileNoFollow(input.snapshotDbPath);
   const reused = completeSlicesOrNull(input.packedDbPath, destDir, input.workspaceIds);
@@ -68,7 +70,7 @@ export async function reuseOrExplodeSealedSlices(input: {
   if (reused !== null && identityMatches(identity, packedSha, snapshotSha, reused)) {
     return reused;
   }
-  if (identity !== null) {
+  if (identity !== null && (input.rebuildDrifted !== true || input.requireReuse)) {
     // A drifted cache must not explode: a stale slice would still score.
     throw new Error(
       "[recall-eval] sealed workspace slice identity drifted; refuse reuse"

@@ -511,7 +511,9 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
         accepts_unreviewed_conditional_results: true, original_query: ORIGINAL,
         query_semantics: querySemanticsAfter, semantic_correspondences: [semantic_correspondence],
         budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES }, reopened.context);
-      if (oldProof.operation === "recall") expect(oldProof.proofs ?? []).toEqual([]);
+      expect(oldProof.operation).toBe("recall");
+      if (oldProof.operation !== "recall") throw new Error("expected recall response");
+      expect(oldProof.proofs ?? []).toEqual([]);
     } finally {
       await closeSession(reopened, filename);
     }

@@ -1,5 +1,6 @@
-import { RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
+import { RelationFormationSourceObservationSchema, RelationValiditySchema, type RelationValidity } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
+import { StorageError } from "../../../../shared/errors.js";
 
 export interface RecallAssertionObservation {
   readonly assertionId: string;
@@ -143,19 +144,15 @@ LEFT JOIN relation_assertion_resolution_current r ON r.assertion_id = a.assertio
 }
 
 function sourceObservationsFrom(raw: unknown): readonly Readonly<{ source_id: string; source_sha256: string }>[] {
-  try {
-    const parsed = JSON.parse(String(raw ?? "null")) as { readonly source_observations?: unknown };
-    if (!Array.isArray(parsed?.source_observations)) return Object.freeze([]);
-    return Object.freeze(parsed.source_observations.flatMap((row) => {
-      if (typeof row !== "object" || row === null) return [];
-      const sourceId = (row as { readonly source_id?: unknown }).source_id;
-      const digest = (row as { readonly source_sha256?: unknown }).source_sha256;
-      if (typeof sourceId !== "string" || typeof digest !== "string") return [];
-      return [{ source_id: sourceId, source_sha256: digest }];
-    }));
-  } catch {
-    return Object.freeze([]);
+  if (raw === null || raw === undefined) return Object.freeze([]);
+  const parsed: unknown = JSON.parse(String(raw));
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new StorageError("VALIDATION_FAILED", "Invalid relation formation receipt");
   }
+  const observations = (parsed as { readonly source_observations?: unknown }).source_observations;
+  if (observations === undefined) return Object.freeze([]);
+  return Object.freeze(RelationFormationSourceObservationSchema.array().parse(observations)
+    .map(({ source_id, source_sha256 }) => ({ source_id, source_sha256 })));
 }
 
 const RELATION_CURSOR_SEP = "\u001f";

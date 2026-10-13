@@ -225,6 +225,7 @@ export function hashBundleId(
 export function hashConditionDigest(
   condition: Readonly<{
     readonly principal: string;
+    readonly workspace_id: string;
     readonly authorized_scopes: readonly string[];
     readonly explicit_bridges: readonly string[];
     readonly workspace_project: string;
@@ -241,6 +242,7 @@ export function hashConditionDigest(
 ): string {
   return hashLabeledIdentity("condition", [
     "principal", condition.principal,
+    "workspace_id", condition.workspace_id,
     "authorized_scopes", condition.authorized_scopes.length,
     ...condition.authorized_scopes,
     "explicit_bridges", condition.explicit_bridges.length,

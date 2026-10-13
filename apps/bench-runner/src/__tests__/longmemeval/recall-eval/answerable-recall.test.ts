@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/schema/diagnostics-types.js";
 import {
   answerableRecallAt5,
+  overallRecallAt5,
   summarizeAnswerableRecall
 } from "../../../runs/measurement/answerable-recall.js";
 import { cohort, streamedQuestion } from "../../cli/merge/cli-merge-evidence-fixture.js";
+import { rAt5WithProviderReturned } from "../../../diagnostics/diagnostics-question.js";
+import { buildStageAttributionTables } from "../../../diagnostics/stage-attribution/build-tables.js";
 
 describe("answerable recall", () => {
+  it("keeps overall, returned-provider and scorable stage populations distinct", () => {
+    const rows = [diagnostic("hit", "scorable", true), diagnostic("miss", "scorable", false),
+      diagnostic("abstention_abs", "abstention", false), diagnostic("identity", "identity_unscorable", false)]
+      .map((row) => ({ ...row, provider_state: "provider_returned" as const }));
+    expect(overallRecallAt5(rows)).toBe(0.25);
+    expect(rAt5WithProviderReturned(rows)).toBe(0.5);
+    expect(rAt5WithProviderReturned(rows.slice(2))).toBeUndefined();
+    expect(buildStageAttributionTables({ cell: "fixture", sourceDiagnostics: "fixture", questions: rows })
+      .summary.denominators).toMatchObject({ D_Q_evaluated: 4, D_Q_non_abstention: 3,
+        D_Q_scorable: 2, D_Q_unscorable: 1 });
+  });
   it("excludes abstention and answerable identity failures", () => {
     const diagnostics = [
       diagnostic("hit", "scorable", true),

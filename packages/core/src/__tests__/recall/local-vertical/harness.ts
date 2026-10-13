@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { vi } from "vitest";
 import {
   FormationKind,
   GardenRole,
@@ -346,11 +347,17 @@ export async function createSliceHarness(register: (database: StorageDatabase) =
   async function runRecall(input: LocalRecallInput, signal?: AbortSignal) {
     if (revoked) throw new Error("query snapshot revoked");
     const before = storage.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log").get() as { n: number };
-    const result = localTargetRecall(input, { memoryReader, recallReader, indexProjection }, signal?.aborted);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected provider fetch"));
+    let result: ReturnType<typeof localTargetRecall>;
+    let recallProviderCalls: number;
+    try {
+      result = localTargetRecall(input, { memoryReader, recallReader, indexProjection }, signal?.aborted);
+      recallProviderCalls = fetchSpy.mock.calls.length;
+    } finally { fetchSpy.mockRestore(); }
     const after = storage.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log").get() as { n: number };
     return { ...result, counters: { ...counters,
       recall_source_writes: after.n - before.n,
-      recall_provider_calls: 0,
+      recall_provider_calls: recallProviderCalls,
       row_visits: result.observation.nativeVisits,
       source_reads: result.observation.sourceReads,
       raw_bytes: result.observation.bytesRead,

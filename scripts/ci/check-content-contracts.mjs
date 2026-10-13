@@ -207,8 +207,8 @@ function checkOfficialSeedExtraction(pointerLabel, extractionPath) {
     "live_extraction_failures",
     "cached_extraction_failures"
   ]) {
-    const value = extractionPath[field] ?? 0;
-    if (value !== 0) {
+    const value = extractionPath[field];
+    if (!Number.isSafeInteger(value) || value !== 0) {
       add(`${pointerLabel}: latest-passing requires ${field}=0, got ${value}`);
     }
   }

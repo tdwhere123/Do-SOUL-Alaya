@@ -186,7 +186,7 @@ function renderDeltaSection(lines: string[], previous: KpiPayload | null, diff: 
     lines.push("|---|---|---|---|---|");
     for (const delta of diff.deltas) {
       lines.push(
-        `| ${delta.key} | ${formatNumber(delta.previous)} | ${formatNumber(delta.current)} | ${formatDelta(delta.delta)} | ${verdictBadge(delta.verdict)} ${delta.verdict.toUpperCase()} |`
+        `| ${delta.key} | ${formatNumber(delta.previous)} | ${formatNumber(delta.current)} | ${formatDelta(delta.delta)} | ${delta.comparison_status === "unavailable" ? "UNAVAILABLE" : `${verdictBadge(delta.verdict)} ${delta.verdict.toUpperCase()}`} |`
       );
     }
     lines.push("");
@@ -198,6 +198,11 @@ function renderDeltaSection(lines: string[], previous: KpiPayload | null, diff: 
       for (const id of diff.fixture_regressions) {
         lines.push(`- ${id} flipped hit→miss`);
       }
+      lines.push("");
+    }
+    if ((diff.unavailable_scenarios?.length ?? 0) > 0) {
+      lines.push("### Unavailable scenario comparisons", "");
+      for (const id of diff.unavailable_scenarios ?? []) lines.push(`- ${id}: unscorable on at least one run`);
       lines.push("");
     }
     if (diff.rebaselined_scenarios.length > 0) {
@@ -331,12 +336,14 @@ function formatHardGateName(gate: ReturnType<typeof collectReleaseHardGates>[num
   return `${gate.id} ${gate.label}`;
 }
 
-function formatNumber(value: number): string {
+function formatNumber(value: number | null): string {
+  if (value === null) return "unavailable";
   if (!Number.isFinite(value)) return "—";
   return value.toFixed(4);
 }
 
-function formatDelta(value: number): string {
+function formatDelta(value: number | null): string {
+  if (value === null) return "unavailable";
   if (!Number.isFinite(value)) return "—";
   if (value === 0) return "0";
   const sign = value > 0 ? "+" : "";

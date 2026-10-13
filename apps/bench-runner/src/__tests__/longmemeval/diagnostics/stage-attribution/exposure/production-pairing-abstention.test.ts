@@ -106,14 +106,16 @@ describe("exposure abstention disjuncts", () => {
     expect(cohortPair.comparison.canary_polarity_matrix.passed).toBe(true);
   });
 
-  it("does not skip an ordinary empty-gold id from receipts", () => {
+  it("rejects an ordinary empty-gold id without a scorable stage row instead of treating it as abstention", () => {
     const ordinary = assembledQuestion({ questionId: ORDINARY_ID });
-    const paired = pair(
+    const paired = pairTables(
       [...controlCanaryDiagnostics(), ordinary],
       [...passingTreatmentCanaryDiagnostics(), ordinary]
     );
-    expect(paired.receipts.map((receipt) => receipt.question_id))
-      .toEqual([CANARY_Q2, CANARY_Q3, ORDINARY_ID, CANARY_Q1]);
+    expect(paired.controlStages.map(row => row.question_id)).not.toContain(ORDINARY_ID);
+    expect(paired.treatmentStages.map(row => row.question_id)).not.toContain(ORDINARY_ID);
+    expect(() => buildTreatmentExposureReceipts(paired))
+      .toThrow(/missing control stage row for 58bf7951/u);
   });
 
   it("fail-closes when the same id is abstention on only one arm", () => {

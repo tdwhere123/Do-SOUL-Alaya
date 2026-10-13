@@ -11,6 +11,7 @@ import type {
 } from "./schema/diagnostics-types.js";
 import {
   answerableRecallAt5,
+  overallRecallAt5,
   summarizeAnswerableRecall
 } from "../runs/measurement/answerable-recall.js";
 import { classifyQuestionMeasurementStatus } from
@@ -158,7 +159,7 @@ function assertProviderBinding(
   }
   const kpi = payload.kpi;
   const returnedRAt5 = rAt5WithProviderReturned(diagnostics.questions);
-  const overallRAt5 = hitAt5Ratio(diagnostics.questions);
+  const overallRAt5 = overallRecallAt5(diagnostics.questions);
   if ((kpi.r_at_5_overall !== undefined && kpi.r_at_5_overall !== overallRAt5) ||
       (kpi.r_at_5_with_embedding_returned !== undefined &&
        kpi.r_at_5_with_embedding_returned !== returnedRAt5) ||
@@ -192,12 +193,4 @@ function sameProviderSummary(
     }
     return actualValue === expected[key];
   });
-}
-
-function hitAt5Ratio(rows: readonly { readonly hit_at_5: boolean }[]): number | null {
-  return ratio(rows.filter((row) => row.hit_at_5).length, rows.length);
-}
-
-function ratio(count: number, total: number): number | null {
-  return total === 0 ? null : count / total;
 }

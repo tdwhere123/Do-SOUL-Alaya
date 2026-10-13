@@ -7,7 +7,7 @@ import {
   type RunService,
   type WorkspaceService
 } from "@do-soul/alaya-core";
-import { respondIfWorkspaceGrantDenied } from "../../../runtime/request-token-binding.js";
+import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import {
   parseJsonBody,
   parseListPagination,
@@ -106,7 +106,8 @@ function registerRunCollectionRoutes(app: Hono, services: RunRouteServices): voi
     const runId = readBoundedPathParam(context, "id");
     const asserted = await assertRunWorkspace(context, services, runId);
     if (asserted instanceof Response) return asserted;
-    const run = await services.runService.getById(runId);
+    const run = await resolveRequestRun(context, services.runService, runId);
+  if (run instanceof Response) return run;
     return context.json({ success: true, data: run }, 200);
   });
 }
@@ -273,12 +274,9 @@ async function assertRunWorkspace(
   services: RunRouteServices,
   runId: string
 ): Promise<string | Response> {
-  const run = await services.runService.getById(runId);
+  const run = await resolveRequestRun(context, services.runService, runId);
+  if (run instanceof Response) return run;
   await services.workspaceService.getById(run.workspace_id);
-  const denied = respondIfWorkspaceGrantDenied(context, run.workspace_id);
-  if (denied !== undefined) {
-    return denied;
-  }
   return run.workspace_id;
 }
 

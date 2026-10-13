@@ -204,7 +204,8 @@ describe("merge-longmemeval baseline and env aggregation", () => {
     expect(merged.kpi.provider_returned_rate).toBe(0.5);
     expect(merged.kpi.provider_pending_rate).toBe(0.3);
     expect(merged.kpi.provider_failed_rate).toBe(0.2);
-    expect(merged.kpi.r_at_5_with_embedding_returned).toBe(0.8);
+    // Legacy rates do not bind the returned-and-scorable denominator.
+    expect(merged.kpi.r_at_5_with_embedding_returned).toBeUndefined();
     expect(merged.kpi.embedding_vector_cache_ready_rate).toBe(50 / 150);
     expect(merged.kpi.query_embedding_cache_ready_rate).toBe(5 / 20);
 

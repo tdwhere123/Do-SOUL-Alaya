@@ -1,11 +1,13 @@
 import { MemoryDimension, type EvidenceCapsule } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { capableRecallConsumerDeclaration, RecallService } from "../../recall/recall-service.js";
 import { createSourceBoundRecallFixture, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 const databases = new Set<StorageDatabase>();
+beforeEach(() => { vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected provider fetch")); });
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const database of databases) database.close();
   databases.clear();
 });
@@ -36,6 +38,7 @@ describe("evidence storage and conditional Recall without transient embedding", 
     expect(result.candidates.some((candidate) => candidate.object_id === MEMORY_ID)).toBe(true);
     expect(result.candidates.some((candidate) => candidate.object_id === EVIDENCE_ID)).toBe(false);
     expect(result.provider_calls).toBe(0);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(result.index.entries.some((entry) => entry.object_id === MEMORY_ID)).toBe(true);
     expect(fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get()).toEqual(before);
     expect(await fixture.storage.evidenceCapsuleRepo.findByIds("workspace-1", [EVIDENCE_ID])).toEqual([capsule]);
@@ -59,5 +62,6 @@ describe("evidence storage and conditional Recall without transient embedding", 
     });
     expect(result.index.completeness.logical_index).not.toBe("complete");
     expect(result.provider_calls).toBe(0);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

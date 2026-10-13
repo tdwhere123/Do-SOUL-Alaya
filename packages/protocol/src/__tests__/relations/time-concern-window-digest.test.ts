@@ -39,6 +39,11 @@ describe("time concern window digests", () => {
       "1969-12-31T23:59:59.999Z"
     );
 
-    expect(timeConcernWindowDigestsMatch(day, day)).toBe(true);
+    const hour = createTimeConcernWindowDigest("1969-12-31T12:00:00.000Z", "1969-12-31T13:00:00.000Z");
+    const priorDay = createTimeConcernWindowDigest("1969-12-30T00:00:00.000Z", "1969-12-30T23:59:59.999Z");
+    expect(day).toBe("time_window_v1:-86400000:-1");
+    expect(hour).toBe("time_window_v1:-43200000:-39600000");
+    expect(timeConcernWindowDigestsMatch(day, hour)).toBe(true);
+    expect(timeConcernWindowDigestsMatch(day, priorDay)).toBe(false);
   });
 });

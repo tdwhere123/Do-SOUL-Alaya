@@ -1,11 +1,11 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { runCli } from "../../cli/index.js";
 import { classifyProposalOutcome, prepareSemanticProposal } from "../../runs/semantic-proposal/fill.js";
 import { parseSemanticProposalWorkset } from "../../runs/semantic-proposal/workset.js";
-import { pinSemanticProposalAuthority } from "../../runs/semantic-proposal/authority.js";
+import { parseSemanticProposalPreflight, pinSemanticProposalAuthority } from "../../runs/semantic-proposal/authority.js";
 import { listExtractionAttemptLedgerRecords } from "../../runs/extraction/authority/attempt-ledger.js";
 
 it("retries only transport and malformed JSON proposal failures", () => {
@@ -32,9 +32,10 @@ it("rejects semantic-proposal-fill without a workset", async () => {
 it("prepares a query workset without provider calls", async () => {
   const directory = await mkdtemp(join(tmpdir(), "semantic-proposal-fill-"));
   const fetch = globalThis.fetch;
-  globalThis.fetch = async () => {
+  const fetchSpy = vi.fn(async () => {
     throw new Error("provider calls are forbidden during prepare");
-  };
+  });
+  globalThis.fetch = fetchSpy;
   try {
     const workset = join(directory, "workset.json");
     const preflight = join(directory, "preflight.json");
@@ -50,6 +51,17 @@ it("prepares a query workset without provider calls", async () => {
       "--workset", workset, "--cache-root", join(directory, "cache"),
       "--preflight-out", preflight
     ])).toBe(0);
+    const emitted = parseSemanticProposalPreflight(JSON.parse(await readFile(preflight, "utf8")));
+    expect(emitted).toMatchObject({ kind: "query", model: "gemini-3.1-flash-lite",
+      provider_calls: 0, missing: 1 });
+    const parsedWorkset = parseSemanticProposalWorkset(JSON.parse(await readFile(workset, "utf8")));
+    expect(emitted.keys).toEqual(prepareSemanticProposal(parsedWorkset,
+      join(directory, "cache"), emitted.max_output_tokens).keys);
+    expect(emitted.keys).toHaveLength(1);
+    const changed = { ...parsedWorkset, items: [{ original_query: "Who chairs ATLAS?" }] };
+    expect(prepareSemanticProposal(changed, join(directory, "cache"), emitted.max_output_tokens).keys)
+      .not.toEqual(emitted.keys);
+    expect(fetchSpy).not.toHaveBeenCalled();
   } finally {
     globalThis.fetch = fetch;
     await rm(directory, { recursive: true, force: true });

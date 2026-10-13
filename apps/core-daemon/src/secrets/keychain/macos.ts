@@ -29,7 +29,10 @@ export function readMacosKeychainSecret(
     return macosToolingUnavailable(service, account, keychainSubprocessTimeoutReason("macOS security"));
   }
 
-  if (result.code !== 0) {
+  if (result.error || result.signal || (result.code !== 0 && result.code !== 44)) {
+    return macosToolingUnavailable(service, account, "macOS security failed to read the requested item.");
+  }
+  if (result.code === 44) {
     return {
       kind: "keychain_entry_not_found",
       service,

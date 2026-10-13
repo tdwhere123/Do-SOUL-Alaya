@@ -1,9 +1,5 @@
 import type { FullGoldCoverage } from "@do-soul/alaya-eval";
 import { isAbstentionQuestionId } from "./abstention.js";
-import {
-  isGoldInField,
-  readQuestionFieldContext
-} from "./gold-field-membership.js";
 import { resolveCoreDeliveryRank } from "./miss/diagnostics-delivery-bridge.js";
 import {
   createFullGoldDeliveryAccumulator,
@@ -22,14 +18,9 @@ function deliveredWithin(gold: LongMemEvalGoldDiagnostic, k: number): boolean {
   return gold.final_rank !== null && gold.final_rank <= k;
 }
 
-function poolWithin(
-  gold: LongMemEvalGoldDiagnostic,
-  k: number,
-  question: LongMemEvalQuestionDiagnostic
-): boolean {
+function poolWithin(gold: LongMemEvalGoldDiagnostic, k: number): boolean | null {
   const poolRank = gold.pre_budget_rank ?? gold.fused_rank;
-  if (poolRank !== null) return poolRank <= k;
-  return isGoldInField(gold, readQuestionFieldContext(question));
+  return poolRank === null ? null : poolRank <= k;
 }
 
 export interface LongMemEvalFullGoldCoverageAccumulator {
@@ -41,6 +32,7 @@ export interface LongMemEvalFullGoldCoverageAccumulator {
   goldDeliveredAt10: number;
   goldPoolAt50: number;
   goldPoolAt100: number;
+  unrankedGold: number;
   coreApplicableQuestions: number;
   readonly delivery: FullGoldDeliveryAccumulator;
 }
@@ -87,6 +79,7 @@ LongMemEvalFullGoldCoverageAccumulator {
     goldDeliveredAt10: 0,
     goldPoolAt50: 0,
     goldPoolAt100: 0,
+    unrankedGold: 0,
     coreApplicableQuestions: 0,
     delivery: createFullGoldDeliveryAccumulator()
   };
@@ -106,8 +99,10 @@ export function recordLongMemEvalFullGoldCoverage(
     else allDeliveredAt5 = false;
     if (deliveredWithin(gold, 10)) accumulator.goldDeliveredAt10 += 1;
     else allDeliveredAt10 = false;
-    if (poolWithin(gold, 50, question)) accumulator.goldPoolAt50 += 1;
-    if (poolWithin(gold, 100, question)) accumulator.goldPoolAt100 += 1;
+    const at50 = poolWithin(gold, 50);
+    if (at50 === null) accumulator.unrankedGold += 1;
+    if (at50 === true) accumulator.goldPoolAt50 += 1;
+    if (poolWithin(gold, 100) === true) accumulator.goldPoolAt100 += 1;
   }
   if (allDeliveredAt5) accumulator.fullGoldAt5 += 1;
   if (allDeliveredAt10) accumulator.fullGoldAt10 += 1;
@@ -128,8 +123,8 @@ export function renderLongMemEvalFullGoldCoverage(
     full_gold_at_10: ratio(accumulator.fullGoldAt10, questions),
     gold_coverage_at_5: ratio(accumulator.goldDeliveredAt5, gold),
     gold_coverage_at_10: ratio(accumulator.goldDeliveredAt10, gold),
-    pool_recall_at_50: ratio(accumulator.goldPoolAt50, gold),
-    pool_recall_at_100: ratio(accumulator.goldPoolAt100, gold),
+    pool_recall_at_50: accumulator.unrankedGold > 0 ? null : ratio(accumulator.goldPoolAt50, gold),
+    pool_recall_at_100: accumulator.unrankedGold > 0 ? null : ratio(accumulator.goldPoolAt100, gold),
     ...(accumulator.coreApplicableQuestions > 0
       ? { delivery_contribution: renderFullGoldDeliveryContribution(accumulator.delivery) }
       : {})

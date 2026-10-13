@@ -64,10 +64,13 @@ curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scrip
 `alaya update` prints the same latest-release channel unless
 `ALAYA_VERSION` is set. Rerunning `scripts/install.sh` snapshots the
 live `alaya.db` with `VACUUM INTO` before swapping binaries. The live
-file is the same path the daemon uses: `ALAYA_CONFIG_DIR`, then
-`$XDG_CONFIG_HOME/alaya`, then `~/.config/alaya` (toml `storage.db_path`
-and `DATA_DIR` override the filename; relative values stay under that
-config dir). Snapshots land in `<config-dir>/backups/`. Restore by
+default file is `<config-dir>/alaya.db`, where config directory selection is
+`ALAYA_CONFIG_DIR`, then `$XDG_CONFIG_HOME/alaya`, then `~/.config/alaya`.
+TOML `storage.db_path` and then `DATA_DIR` override the database location.
+Relative values resolve against the launch working directory, so installer
+and daemon must use the same working directory to select the same file.
+Use an absolute configured path for upgrades independent of launch directory.
+Snapshots land separately in `<config-dir>/backups/`. Restore by
 stopping the daemon and copying that backup over the live database,
 then `mv "$ALAYA_HOME.bak" "$ALAYA_HOME"` if you also need the previous
 binary. `scripts/uninstall.sh` keeps `.bak` unless `--remove-bak` is

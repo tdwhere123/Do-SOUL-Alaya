@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { lookup } from "node:dns/promises";
@@ -325,7 +326,7 @@ it.each([
     const fetchImpl: typeof fetch = (url, init) => {
       const selected = new URL(String(url));
       expect(selected.href).toBe(`${basis.selected_provider_url}/chat/completions`);
-      return nativeFetch(new URL(selected.pathname, localOrigin), init);
+      return fetchLoopbackProvider(nativeFetch, new URL(selected.pathname, localOrigin), init);
     };
     const otherProfile = intern ? profile === INTERN_SEMANTIC_REQUEST_PROFILE
       ? "intern-agents-a1-json-schema-v1" : INTERN_SEMANTIC_REQUEST_PROFILE

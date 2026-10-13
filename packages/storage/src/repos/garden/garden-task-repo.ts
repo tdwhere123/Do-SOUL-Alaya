@@ -141,18 +141,22 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   public peekPending(
     role: GardenRoleValue,
     workspace_id?: string,
-    limit = 10
+    limit = 10,
+    kind?: GardenTaskKindValue
   ): readonly GardenTaskRow[] {
     const parsedRoleRank = roleRank(GardenRoleSchema.parse(role));
     const parsedLimit = parseLimit(limit);
+    const parsedKind = kind === undefined ? null : GardenTaskKindSchema.parse(kind);
 
     try {
       const rows =
         workspace_id === undefined
-          ? (parseRows(this.peekPendingStatement.all(parsedRoleRank, parsedLimit), GardenTaskDbRowParser, "garden task row"))
+          ? (parseRows(this.peekPendingStatement.all(parsedRoleRank, parsedKind, parsedKind, parsedLimit), GardenTaskDbRowParser, "garden task row"))
           : (parseRows(this.peekPendingByWorkspaceStatement.all(
               parsedRoleRank,
               parseNonEmptyString(workspace_id, "garden_task.workspace_id"),
+              parsedKind,
+              parsedKind,
               parsedLimit
             ), GardenTaskDbRowParser, "garden task row"));
       return rows.map((row) => parseGardenTaskRow(row));

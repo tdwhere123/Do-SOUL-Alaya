@@ -1,3 +1,4 @@
+import { MaterializationRouter, InMemoryHandoffGapHandler } from "@do-soul/alaya-soul";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,9 +6,10 @@ import {
   GardenEventType,
   GardenRole,
   GardenTaskKind,
+  GardenTier,
   SignalSource,
 } from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { EvidenceService, SignalService, fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   SqliteEvidenceCapsuleRepo,
   SqliteFieldSourceRecordRepo,
@@ -44,6 +46,24 @@ afterEach(() => {
 });
 
 describe("post-turn extract Garden task", () => {
+  it("processes post-turn work behind more than fifty unrelated librarian tasks", async () => {
+    const compile = vi.fn(async () => [createSignal()]);
+    const harness = await createRoutingHarness({ provider_kind: "official_api", officialCompile: compile });
+    for (let index = 0; index < 51; index += 1) {
+      harness.gardenTaskRepo.enqueue({ id: `unrelated-${index}`, workspace_id: "workspace-1",
+        role: GardenRole.LIBRARIAN, kind: GardenTaskKind.EDGE_CLASSIFY,
+        payload: { task_id: `unrelated-${index}`, task_kind: GardenTaskKind.EDGE_CLASSIFY, required_tier: GardenTier.TIER_2,
+          workspace_id: "workspace-1", run_id: "run-1", target_object_refs: [`edge-${index}`], priority: 20,
+          created_at: "2026-05-07T00:00:00.000Z" },
+        created_at: "2026-05-07T00:00:00.000Z" });
+    }
+    harness.enqueuePostTurnTask();
+    await harness.runScheduler();
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(harness.gardenTaskRepo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 64, GardenTaskKind.EDGE_CLASSIFY)).toHaveLength(51);
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.not.toBeNull();
+  });
 
   it("persists one evidence anchor when in-process extraction returns no candidates", async () => {
     const compile = vi.fn(async () => []);
@@ -228,33 +248,19 @@ describe("post-turn extract Garden task", () => {
       provider_kind: "local_heuristics",
       localCompile: compile,
       receiveSignal: async (signal) => {
-        const gist = typeof signal.raw_payload === "object"
-          && signal.raw_payload !== null
-          && !Array.isArray(signal.raw_payload)
-          && typeof signal.raw_payload.full_turn_content === "string"
-          ? signal.raw_payload.full_turn_content
-          : "retained original turn";
-        await new SqliteEvidenceCapsuleRepo(harness.database).create({
-          object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          object_kind: "evidence_capsule",
-          schema_version: 1,
-          lifecycle_state: "active",
-          created_at: "2026-05-07T00:10:00.000Z",
-          updated_at: "2026-05-07T00:10:00.000Z",
-          created_by: "user_action",
-          evidence_kind: "conversation_excerpt",
-          semantic_anchor: { topic: "source", keywords: ["source"], summary: gist },
-          event_anchor: null,
-          physical_anchor: null,
-          evidence_health_state: EvidenceHealthState.VERIFIED,
-          gist,
-          excerpt: gist,
-          source_hash: null,
-          run_id: signal.run_id,
-          workspace_id: signal.workspace_id,
-          surface_id: null
+        const evidenceService = new EvidenceService({
+          evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(harness.database),
+          eventLogRepo: harness.eventLogRepo,
+          runtimeNotifier: harness.runtimeNotifier
         });
-        return { signal };
+        const unused = { create: async (): Promise<never> => { throw new Error("unexpected memory materialization"); } };
+        const router = new MaterializationRouter({ evidenceService,
+          memoryService: unused, synthesisService: unused, claimService: unused,
+          handoffGapHandler: new InMemoryHandoffGapHandler(), fullTurnEvidenceExcerpt: true });
+        return new SignalService({ eventLogRepo: harness.eventLogRepo, signalRepo: harness.signalRepo,
+          runtimeNotifier: harness.runtimeNotifier,
+          postTriageMaterializer: { materialize: (candidate, context) => router.materializeSignal(candidate, context) }
+        }).receiveSignal(signal);
       }
     });
     harness.enqueuePostTurnTask();
@@ -276,7 +282,6 @@ describe("post-turn extract Garden task", () => {
     });
     expect(roots.rows.some((row) =>
       row.kind === "evidence_capsule"
-      && row.root_id === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
       && (row.content ?? "").includes("I prefer pnpm commands")
     )).toBe(true);
   });

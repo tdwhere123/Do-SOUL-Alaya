@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,13 +103,18 @@ describe("shard extraction authority references", () => {
 
   it("keeps the descriptor-open authority snapshot stable across path replacement", async () => {
     const fixture = await authorityFixture();
+    let replaced = false;
     const loaded = await loadGlobalExtractionAuthority(fixture.root, {
-      afterSnapshot: async () => writeFile(
+      afterSnapshot: async () => { await writeFile(
         join(fixture.root, LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME),
         "{}\n",
         "utf8"
-      )
+      ); replaced = true; }
     });
+
+    expect(replaced).toBe(true);
+    expect(await readFile(join(fixture.root, LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME), "utf8"))
+      .toBe("{}\n");
 
     expect(() => bindShardRunProvenanceAuthority({
       compact: fixture.compact,

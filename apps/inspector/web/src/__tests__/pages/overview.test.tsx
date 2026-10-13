@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import OverviewPage from "../../pages/overview";
@@ -34,12 +34,12 @@ function urlOf(input: FetchInput): string {
 }
 
 describe("OverviewPage", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: Mock<typeof fetch>;
 
   beforeEach(() => {
     setInspectorToken("t");
     setWorkspaceId("ws1");
-    fetchMock = vi.fn();
+    fetchMock = vi.fn<typeof fetch>();
     fetchMock.mockImplementation(async (input: FetchInput) => {
       const url = urlOf(input);
       if (url.includes("/proposals/ws1/pending")) {
@@ -85,6 +85,21 @@ describe("OverviewPage", () => {
     expect(screen.getByTestId("overview-card-proposals")).toBeTruthy();
     expect(screen.getByTestId("overview-card-recall")).toBeTruthy();
     expect(screen.queryByTestId("overview-card-tier")).toBeNull();
+  });
+
+  it.each(["partial", "request"])("renders %s benchmark failure as unavailable, not empty", async (kind) => {
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      if (!urlOf(input).includes("/bench-summary")) return original(input);
+      if (kind === "request") throw new Error("archive offline");
+      return jsonResponse({ success: true, data: { self: null, public: null,
+        public_multiturn: null, live: null, errors: { self: "archive corrupt" } } });
+    });
+    renderOverview();
+    expect((await screen.findByTestId("overview-bench-self-error")).textContent)
+      .toContain(kind === "request" ? "archive offline" : "archive corrupt");
+    expect(screen.queryByTestId("overview-bench-self-empty")).toBeNull();
+    if (kind === "partial") expect(screen.getByTestId("overview-bench-public-empty").textContent).toContain("No benchmark");
   });
 
   it("wires the recall card to the live recall-stats used-ratio", async () => {

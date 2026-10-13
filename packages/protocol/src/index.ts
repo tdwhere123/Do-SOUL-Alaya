@@ -302,7 +302,7 @@ export {
   SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
   SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
   SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
-  proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier
+  proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier, verifySourceSemanticLibraryDelivery
 } from "./garden/source-semantic-worker.js";
 export type {
   SourceSemanticQueryUnavailableReason, SourceSemanticQueryStatus, SourceSemanticQuerySupport,
@@ -312,6 +312,8 @@ export type {
 } from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-access.js";
 export * from "./garden/source-semantic-identity.js";
+export { validateSchemaGroundingForSignal, type SchemaGroundingValidationResult,
+  type SchemaGroundingValidationStatus } from "./garden/schema-grounding.js";
 export * from "./garden/normalize-source-semantics.js";
 export { assertSourceSemanticAccounting, sourceSemanticEvidenceClosure } from "./garden/source-semantic-accounting.js";
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   diffKpis,
+  buildTokenEconomy,
   KpiPayloadSchema,
   renderReport,
   type KpiPayload
@@ -14,6 +15,55 @@ import {
 } from "./cli-merge-validations-fixture.js";
 
 describe("merge LongMemEval measurement contract", () => {
+  it("conserves mixed evaluated, non-abstention, scorable and hit cohorts", () => {
+    const payloads = ["a", "b"].map((prefix) => {
+      const base = shard(prefix, 3, 1);
+      return {
+        ...base,
+        answerable_evaluated_count: 2,
+        measurement_attribution: { ...base.measurement_attribution!, evaluator_identity_status: "invalid" as const },
+        kpi: {
+          ...base.kpi,
+          r_at_1: 0.5, r_at_5: 0.5, r_at_10: 0.5,
+          quality_metrics: {
+            ...base.kpi.quality_metrics!,
+            ...makeQualityMetrics({ denominator: 2, candidateAbsent: 1 }),
+            evaluator_identity_issue_count: 1,
+            evaluator_identity_issue_denominator: 3,
+            evaluator_identity_unscorable_count: 1,
+            evaluator_identity_unscorable_denominator: 3,
+            measurement_cohort_counts: { evaluated: 4, non_abstention: 3, abstention: 1,
+              scorable_answerable: 2, unscorable_answerable: 1, hit_at_5: 1, miss_at_5: 1 },
+            unscorable_reason_distribution: { evaluator_identity_unscorable: 1, abstention_uncalibrated: 1 }
+          },
+          per_scenario: base.kpi.per_scenario.map((row, index) => ({ ...row,
+            scorable: index < 2, hit_at_1: index === 0, hit_at_5: index === 0, hit_at_10: index === 0 }))
+        }
+      };
+    });
+    const merged = buildMergedLongMemEvalPayload({ payloads, first: payloads[0]!,
+      archiveRefs: [], questionDiagnostics: [] }).payload;
+    expect(KpiPayloadSchema.parse(merged)).toMatchObject({ evaluated_count: 8, answerable_evaluated_count: 4,
+      kpi: { r_at_5: 0.5, quality_metrics: { measurement_cohort_counts: {
+        evaluated: 8, non_abstention: 6, abstention: 2, scorable_answerable: 4,
+        unscorable_answerable: 2, hit_at_5: 2, miss_at_5: 2
+      }, unscorable_reason_distribution: { evaluator_identity_unscorable: 2, abstention_uncalibrated: 2 } } } });
+  });
+
+  it.each([false, true])("preserves unknown token savings with incomplete shard evidence (first known: %s)", (firstKnown) => {
+    const first = shard("a", 1, 0);
+    const payloads = [{ ...first, kpi: { ...first.kpi,
+      ...(firstKnown ? { token_economy: buildTokenEconomy({ raw_history_tokens: 100,
+        stored_memory_tokens: 20, recalled_context_tokens_total: 10, recall_event_count: 1,
+        recalled_context_tokens_mean: 10, seed_event_count: 1 }), token_saved_ratio_vs_full_prompt: 0.9 } : {})
+    } }, shard("b", 1, 0)];
+    const merged = buildMergedLongMemEvalPayload({ payloads, first: payloads[0]!,
+      archiveRefs: [], questionDiagnostics: [] }).payload;
+    expect(merged.kpi.token_saved_ratio_vs_full_prompt).toBeNull();
+    expect(merged.kpi.token_economy).toBeUndefined();
+    expect(renderReport(merged, null, diffKpis(merged, null))).toContain("unavailable");
+  });
+
   it("preserves the 94 answerable plus 6 uncalibrated abstention contract", () => {
     const payloads = [shard("a", 47, 3), shard("b", 47, 3)];
     const build = buildMergedLongMemEvalPayload({
@@ -155,6 +205,7 @@ describe("merge LongMemEval measurement contract", () => {
         r_at_1: 0,
         r_at_5: 0,
         r_at_10: 0,
+        r_at_5_overall: 0,
         per_scenario: [
           {
             id: "legacy-hit",
@@ -177,6 +228,8 @@ describe("merge LongMemEval measurement contract", () => {
     expect(build.payload.kpi.r_at_1).toBe(0.2);
     expect(build.payload.kpi.r_at_5).toBe(0.2);
     expect(build.payload.kpi.r_at_10).toBe(0.2);
+    expect(build.payload.kpi.r_at_5_overall).toBe(0.2);
+    expect(build.payload.answerable_evaluated_count).toBeUndefined();
   });
 
   it("fails closed when R@1/R@10 cannot be recomputed from row or diagnostic booleans", () => {

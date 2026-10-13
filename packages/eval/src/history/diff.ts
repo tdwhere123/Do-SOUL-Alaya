@@ -153,6 +153,8 @@ function pushTokenEconomyDelta(
       currentEconomy.recalled_context_tokens_mean -
       previousEconomy.recalled_context_tokens_mean,
     verdict: downgradeFail(meanVerdict.verdict),
+    growth_ratio: meanVerdict.growthRatio,
+    comparison_status: meanVerdict.growthRatio === null ? "unavailable" : "comparable",
     direction: "growth_bad"
   });
 }
@@ -175,6 +177,8 @@ function pushLatencyDelta(
     previous: previous.kpi.latency_ms_p95,
     delta: current.kpi.latency_ms_p95 - previous.kpi.latency_ms_p95,
     verdict: downgradeFail(latencyVerdict.verdict),
+    growth_ratio: latencyVerdict.growthRatio,
+    comparison_status: latencyVerdict.growthRatio === null ? "unavailable" : "comparable",
     direction: "growth_bad"
   });
 }
@@ -217,18 +221,24 @@ function finalizeDiffResult(
     worst_verdict: worst,
     fixture_regressions: fixtureDiff.regressions,
     rebaselined_scenarios: fixtureDiff.rebaselined,
-    new_scenarios: fixtureDiff.new_scenarios
+    new_scenarios: fixtureDiff.new_scenarios,
+    ...(fixtureDiff.unavailable.length === 0 ? {} : { unavailable_scenarios: fixtureDiff.unavailable })
   };
 }
 
 function pushRatioDelta(
   acc: KpiDelta[],
   key: string,
-  current: number,
-  previous: number,
+  current: number | null,
+  previous: number | null,
   band: RatioBand,
   postClassify: (v: Verdict) => Verdict = (v) => v
 ): void {
+  if (current === null || previous === null) {
+    acc.push({ key, current, previous, delta: null, verdict: "warn",
+      direction: "drop_bad", comparison_status: "unavailable" });
+    return;
+  }
   const classified = classifyRatioDrop(current, previous, band);
   acc.push({
     key,
@@ -245,6 +255,7 @@ function shouldDiffHotShare(current: KpiPayload): boolean {
 }
 
 interface FixtureDiff {
+  readonly unavailable: readonly string[];
   readonly regressions: readonly string[];
   readonly rebaselined: readonly string[];
   readonly new_scenarios: readonly string[];
@@ -252,7 +263,7 @@ interface FixtureDiff {
 
 function diffFixtures(current: KpiPayload, previous: KpiPayload): FixtureDiff {
   if (current.split !== "golden") {
-    return { regressions: [], rebaselined: [], new_scenarios: [] };
+    return { regressions: [], rebaselined: [], new_scenarios: [], unavailable: [] };
   }
   const previousById = new Map<string, PerScenarioRow>();
   for (const row of previous.kpi.per_scenario) {
@@ -261,6 +272,7 @@ function diffFixtures(current: KpiPayload, previous: KpiPayload): FixtureDiff {
   const regressions: string[] = [];
   const rebaselined: string[] = [];
   const newScenarios: string[] = [];
+  const unavailable: string[] = [];
   for (const row of current.kpi.per_scenario) {
     const prev = previousById.get(row.id);
     if (prev === undefined) {
@@ -271,11 +283,15 @@ function diffFixtures(current: KpiPayload, previous: KpiPayload): FixtureDiff {
       rebaselined.push(row.id);
       continue;
     }
+    if (prev.scorable === false || row.scorable === false) {
+      unavailable.push(row.id);
+      continue;
+    }
     if (prev.hit_at_5 && !row.hit_at_5) {
       regressions.push(row.id);
     }
   }
-  return { regressions, rebaselined, new_scenarios: newScenarios };
+  return { regressions, rebaselined, new_scenarios: newScenarios, unavailable };
 }
 
 function shareOfHot(d: KpiPayload["kpi"]["tier_distribution"]): number {

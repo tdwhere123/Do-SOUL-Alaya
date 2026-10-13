@@ -80,7 +80,7 @@ describe("Garden temporal relation runtime", () => {
     const admit = vi.spyOn(RelationAssertionService.prototype, "admit");
     const harness = await createNominationHarness();
     try {
-      const created = await harness.runtime.temporalRelationAssertionPort.admit({
+      const input: Parameters<typeof harness.runtime.temporalRelationAssertionPort.admit>[0] = {
         workspaceId: "workspace-1",
         runId: "run-1",
         sourceSignalId: "signal-1",
@@ -96,12 +96,25 @@ describe("Garden temporal relation runtime", () => {
           event_id: harness.sourceEventId,
           occurred_at: "2026-07-17T01:02:03.000Z"
         }
-      });
+      };
+      const [created, replayed] = await Promise.all([
+        harness.runtime.temporalRelationAssertionPort.admit(input),
+        harness.runtime.temporalRelationAssertionPort.admit(input)
+      ]);
+      expect(replayed).toEqual(created);
 
       expect(admit).not.toHaveBeenCalled();
       expect(created.object_kind).toBe("proposal");
       expect(await harness.proposalRepo.countPending("workspace-1")).toBe(1);
       expect(harness.relationRepo.listAssertionsInCurrentTransaction()).toHaveLength(0);
+      const secondEvent = await new SqliteEventLogRepo(harness.database).append({
+        event_type: SignalEventType.SOUL_SIGNAL_EMITTED, entity_type: "candidate_memory_signal", entity_id: "signal-2",
+        workspace_id: "workspace-1", run_id: "run-1", caused_by: "garden", payload_json: { source: "test" }
+      });
+      const differentSource = await harness.runtime.temporalRelationAssertionPort.admit({ ...input, sourceSignalId: "signal-2",
+        sourceEventAnchor: { ...input.sourceEventAnchor, event_id: secondEvent.event_id } });
+      expect(differentSource.object_id).not.toBe(created.object_id);
+      expect(await harness.proposalRepo.countPending("workspace-1")).toBe(2);
     } finally {
       clearInterval(harness.runtime.pathRelationEvictionTimer);
       harness.database.close();

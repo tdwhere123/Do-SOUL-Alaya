@@ -1,3 +1,4 @@
+import { createSynthesisMemberResolver } from "../../../runtime/daemon/lifecycle/finalize-daemon-runtime-wiring.js";
 import { describe, expect, it } from "vitest";
 import {
   MemoryGovernanceEventType,
@@ -178,36 +179,21 @@ function createHarness(options: {
     synthesisEvidenceReader: {
       findGistById: async (evidenceId) => options.gistsByEvidence[evidenceId] ?? null
     },
-    synthesisMemberResolver: {
-      // Mirrors the daemon wiring: first fetch the intersection candidates
-      // (memoryEntryRepo.findByEvidenceRefs returns every memory whose
-      // evidence_refs intersect the queried set), then narrow to the SUBSET
-      // members — those whose FULL evidence_refs are contained in the capsule's
-      // evidence set (no private evidence outside the cluster). A candidate
-      // absent from memberEvidenceRefs defaults to "evidence == the intersecting
-      // refs only", so it is trivially a subset and stays armed.
-      findMemberObjectIdsByEvidenceRefs: async (_workspaceId, evidenceRefs) => {
-        const map = options.memberObjectIdsByEvidence ?? {};
-        const fullEvidence = options.memberEvidenceRefs ?? {};
-        const capsuleEvidence = new Set(evidenceRefs);
-        const candidates = new Map<string, string[]>();
-        for (const evidenceRef of evidenceRefs) {
-          for (const memberId of map[evidenceRef] ?? []) {
-            const intersecting = candidates.get(memberId) ?? [];
-            intersecting.push(evidenceRef);
-            candidates.set(memberId, intersecting);
+    synthesisMemberResolver: createSynthesisMemberResolver({
+      memoryEntryRepo: {
+        findByEvidenceRefs: async (_workspaceId: string, evidenceRefs: readonly string[]) => {
+          const map = options.memberObjectIdsByEvidence ?? {};
+          const candidates = new Map<string, string[]>();
+          for (const evidenceRef of evidenceRefs) {
+            for (const memberId of map[evidenceRef] ?? []) {
+              candidates.set(memberId, [...(candidates.get(memberId) ?? []), evidenceRef]);
+            }
           }
+          return [...candidates].map(([object_id, intersection]) => ({ object_id,
+            evidence_refs: options.memberEvidenceRefs?.[object_id] ?? intersection }));
         }
-        const armed: string[] = [];
-        for (const [memberId, intersectingRefs] of candidates) {
-          const memberEvidence = fullEvidence[memberId] ?? intersectingRefs;
-          if (memberEvidence.every((ref) => capsuleEvidence.has(ref))) {
-            armed.push(memberId);
-          }
-        }
-        return armed;
       }
-    }
+    })
   });
 
   return { workflow, events, order, capsules, proposals };

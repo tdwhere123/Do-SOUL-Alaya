@@ -9,6 +9,7 @@ import { digestOriginalQuery } from "../../recall/conditional-field/query/compil
 
 const databases = new Set<StorageDatabase>();
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const database of databases) database.close();
   databases.clear();
 });
@@ -72,9 +73,11 @@ describe("conditional Recall with real SQLite stored embeddings", () => {
   it("enumerates persisted workspace vectors without promoting vector-only objects or calling a provider", async () => {
     const fixture = await createFixture(true);
     const before = fixture.database.connection.prepare("SELECT COUNT(*) AS count FROM garden_tasks").get();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected provider fetch"));
     const result = await recall(fixture.service, "workspace-1", true);
     expect(fixture.embeddingIds).toHaveBeenCalled();
     expect(result.provider_calls).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
     const observedIds = fixture.embeddingIds.mock.results.flatMap((result) =>
       result.type === "return" ? result.value.objectIds : []);
     expect(observedIds).toContain(LEXICAL_ID);

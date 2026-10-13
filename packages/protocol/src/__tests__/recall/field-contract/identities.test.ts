@@ -31,6 +31,7 @@ import {
   hashQueryCacheKey,
   hashSourceRecordId,
   verifyFactorDescriptor,
+  verifyQueryConditionReceipt,
   verifySourceRecordIdentity
 } from "../../../recall/field-contract/index.js";
 
@@ -286,6 +287,7 @@ describe("field-contract identities", () => {
   it("preserves condition scope-stack order and isolates incidence scopes", () => {
     const canonical = {
       principal: "agent",
+      workspace_id: "workspace-1",
       authorized_scopes: ["workspace-1", "project-a"],
       explicit_bridges: ["bridge-2", "bridge-1"],
       workspace_project: "project-a",
@@ -314,6 +316,30 @@ describe("field-contract identities", () => {
     }, sha256)).toBe(hashConditionDigest(canonical, sha256));
     expect(hashConditionDigest(canonical, sha256))
       .not.toBe(hashConditionDigest(reversedScopes, sha256));
+    const identity = hashConditionDigest(canonical, sha256);
+    expect(identity).toBe(`sha256:${sha256(JSON.stringify([
+      "condition", "principal", "agent", "workspace_id", "workspace-1",
+      "authorized_scopes", 2, "workspace-1", "project-a",
+      "explicit_bridges", 2, "bridge-2", "bridge-1", "workspace_project", "project-a",
+      "effective_as_of", "2026-08-16T00:00:00.000Z", "query_task_factors", 2, "task-b", "task-a",
+      "governance_state", "open", "activation_budget", 8, "token_budget", 400
+    ]))}`);
+    const generationId = "sha256:" + "a".repeat(64);
+    const receipt = {
+      schema_version: 1 as const, producer: QUERY_CONDITION_OPERATOR_ID, consumer: "activation",
+      identity, replay_rule: "idempotent_same_identity" as const,
+      failure_disposition: "fail_closed" as const, governance_effect: "none" as const,
+      deletion_behavior: "rebuildable" as const, condition: canonical, generation_id: generationId,
+      query_operator_id: QUERY_CONDITION_OPERATOR_ID,
+      query_cache_key: hashQueryCacheKey({ generation_id: generationId,
+        condition_digest: identity, query_operator_id: QUERY_CONDITION_OPERATOR_ID }, sha256),
+      recorded_at: canonical.effective_as_of
+    } as const;
+    expect(verifyQueryConditionReceipt(receipt, sha256)).toBe(receipt);
+    expect(() => verifyQueryConditionReceipt({ ...receipt,
+      condition: { ...canonical, workspace_id: "workspace-2" }
+    }, sha256)).toThrow(/query condition/u);
+    expect(hashConditionDigest({ ...canonical, workspace_id: "workspace-2" }, sha256)).not.toBe(identity);
     expect(hashConditionDigest({
       ...canonical,
       authorized_scopes: ["workspace-1"],

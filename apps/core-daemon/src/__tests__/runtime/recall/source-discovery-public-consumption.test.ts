@@ -406,7 +406,12 @@ function assertOmittedPairExposure(
   expect(roots).toEqual(expect.arrayContaining([...expectedRoots]));
   const publicFirst = roots[0]!;
   const laterId = roots[1]!;
-  expect(result.initial.index?.completeness).toMatchObject({ transport: "partial", payload: "omitted" });
+  // Both index identities are present, but source coverage remains unresolved.
+  // Omitting a public body must preserve that open transport state.
+  expect(result.initial.index?.completeness).toMatchObject({
+    logical_index: "open", observed_coverage: "unknown", interpretation_coverage: "open",
+    transport: "open", payload: "omitted"
+  });
   expect(result.initial.index?.continuation?.capability).toEqual(expect.any(String));
   expect(result.initial.results).toHaveLength(1);
   expect(result.trace.first_page_identities).toEqual([publicFirst]);

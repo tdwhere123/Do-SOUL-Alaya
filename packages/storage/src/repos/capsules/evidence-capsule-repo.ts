@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { writeRetainedSourceChunks } from "../field/retained-source-chunks.js";
 import {
+  IsoDatetimeStringSchema,
   type EvidenceCapsule,
   type EvidenceFactFrameFormationCapture,
   type OpenSemanticFactorFormationCapture,
@@ -570,14 +571,16 @@ export function parseCapsuleCursor(cursor: string | null | undefined): Readonly<
   readonly afterCreatedAt: string | null;
   readonly afterObjectId: string | null;
 }> {
-  if (cursor == null || cursor === "" || !cursor.startsWith("c:")) {
+  if (cursor == null) {
     return { afterCreatedAt: null, afterObjectId: null };
   }
-  const payload = cursor.slice(2);
-  const split = payload.indexOf("\t");
-  if (split <= 0) return { afterCreatedAt: null, afterObjectId: null };
+  const [timestamp, objectId, extra] = cursor.slice(2).split("\t");
+  if (!cursor.startsWith("c:") || !IsoDatetimeStringSchema.safeParse(timestamp).success ||
+      objectId === undefined || objectId.length === 0 || /[\r\n]/u.test(objectId) || extra !== undefined) {
+    throw new StorageError("VALIDATION_FAILED", "Invalid evidence-capsule cursor.");
+  }
   return {
-    afterCreatedAt: payload.slice(0, split),
-    afterObjectId: payload.slice(split + 1)
+    afterCreatedAt: timestamp!,
+    afterObjectId: objectId
   };
 }

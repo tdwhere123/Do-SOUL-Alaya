@@ -4,6 +4,15 @@ import { parseSearchQuery } from "../../hooks/graph-spotlight-search-query";
 const REF = new Date(2026, 4, 15, 10, 0, 0); // 2026-05-15 10:00 local
 
 describe("parseSearchQuery", () => {
+  it.each(["2月30日", "4月31日", "2月29日"])("keeps impossible calendar day %s as keywords", async (text) => {
+    expect(await parseSearchQuery(text, REF)).toEqual({ text, since: null, until: null, windowLabel: null });
+  });
+  it("accepts February 29 only in a leap year", async () => {
+    const result = await parseSearchQuery("2月29日", new Date(2024, 4, 15));
+    expect(result.windowLabel).toBe("2月29日");
+    expect(new Date(result.since!).getDate()).toBe(29);
+    expect(new Date(result.since!).getMonth()).toBe(1);
+  });
   it("returns the identity shape for an empty string", async () => {
     const result = await parseSearchQuery("", REF);
     expect(result).toEqual({ text: "", since: null, until: null, windowLabel: null });

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { KpiPayloadSchema } from "../../contracts/kpi-schema.js";
 import { createLongMemEvalSelectionContractIdentity } from
@@ -70,14 +71,16 @@ describe("LongMemEval full diagnostics byte binding", () => {
   it("passes the hash-bound full diagnostics bytes to the required validator", async () => {
     const payload = buildReleaseGradePublic(makeSeedExtractionPath());
     let observedHash: string | null = null;
+    const retainedBytes = gzipSync(JSON.stringify({ questions: [{ question_id: "retained-full-diagnostic" }] }));
 
     await verifiedEvidenceForPayload(payload, undefined, ({ contents, payload: canonical }) => {
       observedHash = createHash("sha256").update(contents).digest("hex");
+      expect(Buffer.from(contents)).toEqual(retainedBytes);
       expect(canonical).toEqual(KpiPayloadSchema.parse(payload));
-    });
+    }, retainedBytes);
 
     expect(observedHash).toBe(
-      createHash("sha256").update(new Uint8Array()).digest("hex")
+      createHash("sha256").update(retainedBytes).digest("hex")
     );
   });
 });

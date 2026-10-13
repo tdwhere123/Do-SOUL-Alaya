@@ -261,6 +261,12 @@ describe("conditional-field lifecycle and verified usage through actual consumer
       const page = await recall(handler, continuation, pageWidth);
       expect(page.index.completeness.logical_index).not.toBe("invalidated");
       const delivery = await new SqliteTrustStateRepo(slice.database).findDeliveryById(page.delivery_id);
+      expect(delivery).not.toBeNull();
+      const memoryIds = page.results.filter((row) => row.object_kind === "memory_entry").map((row) => row.object_id);
+      if (memoryIds.length > 0) {
+        expect(delivery!.delivered_objects).toHaveLength(memoryIds.length);
+        expect(delivery!.delivered_objects?.map((row) => row.object_id).sort()).toEqual([...memoryIds].sort());
+      }
       const audit = slice.database.connection.prepare("SELECT payload_json FROM event_log WHERE event_id = ?")
         .get(delivery!.audit_event_id) as { payload_json: string };
       expect(audit.payload_json.length).toBeLessThanOrEqual(16384);

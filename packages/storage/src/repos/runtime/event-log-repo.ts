@@ -293,7 +293,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
           since,
           until,
           until,
-          DEFAULT_EVENT_LOG_PAGE.limit,
+          -1,
           DEFAULT_EVENT_LOG_PAGE.offset
         ),
         "Failed to query event log by workspace and type."

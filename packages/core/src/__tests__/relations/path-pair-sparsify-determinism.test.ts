@@ -12,6 +12,7 @@ describe("path pair semantic determinism", () => {
     const first = topologyBySemanticPosition(["a", "b", "c", "d"], [2, 0, 3, 1]);
     const second = topologyBySemanticPosition(["z", "a", "y", "b"], [1, 3, 0, 2]);
 
+    expect(first).toEqual(["0->1", "2->3"]);
     expect(second).toEqual(first);
     expect(maxDegree(first)).toBeLessThanOrEqual(1);
   });

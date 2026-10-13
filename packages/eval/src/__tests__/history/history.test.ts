@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -406,10 +406,12 @@ describe("history archive", () => {
       "report",
       null
     );
-    // writeEntry repointed the latest-run pointer to the latest write; readLatest should
-    // honour the pointer rather than re-scan the directory.
+    const pointerPath = path.join(root, "self", "latest-run.json");
+    const pointer = JSON.parse(await readFile(pointerPath, "utf8"));
+    await writeFile(pointerPath, JSON.stringify({ ...pointer,
+      slug: "2026-05-14T080000Z-0aaaaaa" }));
     const latest = await readLatest(layout, "self");
-    expect(latest?.alaya_commit).toBe("0bbbbbb");
+    expect(latest?.alaya_commit).toBe("0aaaaaa");
   });
 
 });

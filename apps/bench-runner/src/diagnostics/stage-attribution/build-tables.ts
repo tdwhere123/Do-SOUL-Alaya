@@ -1,5 +1,6 @@
 import type { LongMemEvalQuestionDiagnostic } from "../schema/diagnostics-types.js";
 import { isAbstentionDiagnostic } from "../abstention.js";
+import { classifyQuestionMeasurementStatus } from "../../runs/measurement/question-validity.js";
 import {
   classifyGoldObjectStage,
   classifyQuestionStage,
@@ -37,6 +38,8 @@ export function buildStageAttributionTables(input: {
 
   let evaluated = 0;
   let scorable = 0;
+  let nonAbstention = 0;
+  let unscorable = 0;
   let goldBearing = 0;
   let miss = 0;
   let goldAll = 0;
@@ -46,10 +49,22 @@ export function buildStageAttributionTables(input: {
   const taxonomyAbsentIds: string[] = [];
   const qualityAbsentIds: string[] = [];
   const rankAbsentIds: string[] = [];
+  const measurementUnknownIds: string[] = [];
 
   for (const question of input.questions) {
     evaluated += 1;
     if (isAbstentionDiagnostic(question)) continue;
+    nonAbstention += 1;
+    // Historical diagnostics are readable but do not establish current scoring identity.
+    if (question.cohort_ledger === undefined ||
+        question.cohort_ledger.measurement_evidence_mode === "legacy_synthesized") {
+      measurementUnknownIds.push(question.question_id);
+      continue;
+    }
+    if (classifyQuestionMeasurementStatus(question) !== "scorable") {
+      unscorable += 1;
+      continue;
+    }
     scorable += 1;
     const accounted = accumulateQuestionAttribution(question, {
       questionRows,
@@ -89,9 +104,13 @@ export function buildStageAttributionTables(input: {
   };
 
   const summary: StageAttributionSummary = {
+    measurement_unknown_question_ids: measurementUnknownIds,
     denominators: {
       D_Q_evaluated: evaluated,
       D_Q_scorable: scorable,
+      D_Q_non_abstention: nonAbstention,
+      D_Q_unscorable: unscorable,
+      D_Q_measurement_unknown: measurementUnknownIds.length,
       D_Q_gold_bearing: goldBearing,
       D_Q_miss: miss,
       D_G_all: goldAll

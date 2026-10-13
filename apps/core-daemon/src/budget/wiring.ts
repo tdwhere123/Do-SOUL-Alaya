@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { BudgetBankruptcyServiceProposalPort } from "@do-soul/alaya-core";
+import type { BudgetBankruptcyServiceProposalPort, EventPublisherInput } from "@do-soul/alaya-core";
 import {
   ControlPlaneObjectKind,
   ProposalResolutionState,
@@ -11,7 +11,7 @@ import {
 import type { ProposalRepo } from "@do-soul/alaya-storage";
 
 interface CreateBudgetProposalPortParams {
-  readonly proposalRepo: Pick<ProposalRepo, "create" | "updateResolution" | "findById" | "findPendingByRunId">;
+  readonly proposalRepo: Pick<ProposalRepo, "createProposalWithEvents" | "updateResolution" | "findById" | "findPendingByRunId">;
   readonly now: () => string;
   readonly generateProposalId?: () => string;
 }
@@ -22,14 +22,14 @@ export function createBudgetProposalPort(
   const generateProposalId = params.generateProposalId ?? (() => randomUUID());
 
   return {
-    create: async (input: {
+    createWithEvents: async (input: {
       readonly workspaceId: string;
       readonly runId: string;
       readonly dossierRef: string;
       readonly options: readonly Readonly<ProposalOption>[];
       readonly recommendedOptionId: string | null;
       readonly expiresAt: string | null;
-    }) => {
+    }, events: readonly EventPublisherInput[]) => {
       const proposalId = generateProposalId();
       const proposal = ProposalSchema.parse({
         runtime_id: proposalId,
@@ -46,7 +46,7 @@ export function createBudgetProposalPort(
         last_updated_at: params.now()
       } satisfies Proposal);
 
-      return await params.proposalRepo.create({
+      return await params.proposalRepo.createProposalWithEvents({
         proposal,
         workspace_id: input.workspaceId,
         run_id: input.runId,
@@ -57,7 +57,7 @@ export function createBudgetProposalPort(
         // decision.
         target_object_kind: "bankruptcy_dossier",
         proposed_change_summary: `Bankruptcy resolution: ${input.dossierRef}`
-      });
+      }, events);
     },
     update: async (
       proposalId: string,

@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createServer } from "node:http";
 import { MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES } from "@do-soul/alaya-engine-gateway";
 import { describe, expect, it, vi } from "vitest";
@@ -102,7 +103,7 @@ describe("provider protocol probe", () => {
     try {
       const receipt = await probeProviderProtocol({ providerUrl: "https://api.stepfun.com/v1",
         apiKey: "local-test-key", model,
-        fetchImpl: (url, init) => fetch(new URL(new URL(url).pathname, origin), init) });
+        fetchImpl: (url, init) => fetchLoopbackProvider(fetch, new URL(new URL(url).pathname, origin), init) });
       expect(receipt).toMatchObject({ model, physical_calls: 1, json_object: true,
         usage_present: true, finish_reason: "stop", usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
         http_response: { bodyComplete: true, bodyTruncated: false } });

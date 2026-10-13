@@ -125,7 +125,7 @@ function registerProjectMappingBatchAcceptRoute(
     await services.workspaceService.getById(body.workspace_id);
 
     try {
-      const anchors = await services.projectMappingService.batchAccept(body.mapping_ids, body.accepted_by);
+      const anchors = await services.projectMappingService.batchAccept(body.mapping_ids, body.accepted_by, body.workspace_id);
 
       return context.json(
         {

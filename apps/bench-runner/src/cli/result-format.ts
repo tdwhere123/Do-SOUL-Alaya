@@ -7,6 +7,7 @@ export function exitCodeForVerdicts(
   return 0;
 }
 
-export function pct(ratio: number): string {
+export function pct(ratio: number | null): string {
+  if (ratio === null) return "unavailable";
   return `${(ratio * 100).toFixed(1)}%`;
 }

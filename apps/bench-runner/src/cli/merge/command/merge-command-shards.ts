@@ -9,7 +9,8 @@ import { aggregateBenchTokenMetrics } from "../../../harness/token/token-economy
 import type { BenchTokenMetrics } from "../../../harness/daemon.js";
 import type { LongMemEvalQuestionDiagnostic } from "../../../diagnostics/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../../../shared/version.js";
-import { buildMergedFullGoldCoverage } from "../merge-full-gold.js";
+import { buildMergedFullGoldCoverage, hasExactQuestionDiagnosticsSet } from "../merge-full-gold.js";
+import { rAt5WithProviderReturned } from "../../../diagnostics/diagnostics-question.js";
 import {
   mergeSeedExtractionPath,
   ratio,
@@ -32,6 +33,8 @@ import {
 } from "../../../runs/selection/contract.js";
 import { buildMergedRates, type MergedRates } from "../merged/merged-rates.js";
 import { computeScorableHits } from "../../../runs/lifecycle/recall-eval/recall-eval-shards-merge-payload.js";
+import { overallRecallAt5 } from "../../../runs/measurement/answerable-recall.js";
+import { isAbstentionQuestionId } from "../../../diagnostics/abstention.js";
 
 export interface MergedLongMemEvalBuild {
   readonly payload: KpiPayload;
@@ -183,9 +186,8 @@ interface MergeShardAggregate {
   providerFailedTotal: number;
   providerNotRequestedTotal: number;
   providerUnusableTotal: number;
-  providerReturnedHitAt5: number;
+  returnedSubsetRAt5: number | undefined;
   hasProviderRates: boolean;
-  hasReturnedSubsetRAt5: boolean;
   evaluatedTotal: number;
   latencyP50Max: number;
   latencyP95Max: number;
@@ -214,9 +216,8 @@ function createMergeShardAggregate(): MergeShardAggregate {
     providerFailedTotal: 0,
     providerNotRequestedTotal: 0,
     providerUnusableTotal: 0,
-    providerReturnedHitAt5: 0,
+    returnedSubsetRAt5: undefined,
     hasProviderRates: false,
-    hasReturnedSubsetRAt5: false,
     evaluatedTotal: 0,
     latencyP50Max: 0,
     latencyP95Max: 0
@@ -242,6 +243,20 @@ function aggregateMergeShards(
   aggregate.totalHitAt1 = hits.hitsAt1;
   aggregate.totalHitAt5 = hits.hitsAt5;
   aggregate.totalHitAt10 = hits.hitsAt10;
+  // Legacy archives may retain only some scenario detail; their omitted rows
+  // remain in the declared denominator rather than becoming inferred successes.
+  aggregate.answerableTotal = hits.answerableCount + payloads.reduce((count, shard) =>
+    count + (shard.answerable_evaluated_count === undefined
+      ? Math.max(0, shard.evaluated_count - shard.kpi.per_scenario.length) : 0), 0);
+  // A subset rate cannot recover its denominator from all-returned availability.
+  // Historical or partial diagnostics do not establish the current scored cohort.
+  if (questionDiagnostics.length === aggregate.evaluatedTotal &&
+      hasExactQuestionDiagnosticsSet(questionDiagnostics, aggregate.perScenario) &&
+      questionDiagnostics.every((question) => question.cohort_ledger !== undefined &&
+        question.cohort_ledger.measurement_evidence_mode !== "legacy_synthesized" &&
+        question.provider_state !== undefined)) {
+    aggregate.returnedSubsetRAt5 = rAt5WithProviderReturned(questionDiagnostics);
+  }
   return aggregate;
 }
 
@@ -250,8 +265,6 @@ function addShardTotals(aggregate: MergeShardAggregate, shard: KpiPayload): void
     aggregate.shardTokenEconomies.push(shard.kpi.token_economy);
   }
   aggregate.perScenario.push(...shard.kpi.per_scenario);
-  const denominator = shard.answerable_evaluated_count ?? shard.evaluated_count;
-  aggregate.answerableTotal += denominator;
   aggregate.tierHot += shard.kpi.tier_distribution.hot;
   aggregate.tierWarm += shard.kpi.tier_distribution.warm;
   aggregate.tierCold += shard.kpi.tier_distribution.cold;
@@ -272,8 +285,9 @@ function bindLegacyUnboundRows(
     if (row.scorable !== undefined || row.measurement_cohort !== undefined) return row;
     return {
       ...row,
-      scorable: true,
-      measurement_cohort: "answerable" as const
+      scorable: !isAbstentionQuestionId(row.id),
+      measurement_cohort: isAbstentionQuestionId(row.id)
+        ? "dataset_declared_abstention" as const : "answerable" as const
     };
   });
 }
@@ -315,12 +329,6 @@ function addShardProviderTotals(
   aggregate.providerUnusableTotal += Math.round(
     (shard.kpi.query_embedding_unusable_rate ?? 0) * shard.evaluated_count
   );
-  if (shard.kpi.r_at_5_with_embedding_returned !== undefined) {
-    aggregate.hasReturnedSubsetRAt5 = true;
-    aggregate.providerReturnedHitAt5 += Math.round(
-      shard.kpi.r_at_5_with_embedding_returned * returned
-    );
-  }
 }
 
 function hasProviderRateFields(shard: KpiPayload): boolean {
@@ -401,7 +409,9 @@ function buildMergedKpi(
     r_at_1: rates.rAt1,
     r_at_5: rates.rAt5,
     r_at_10: rates.rAt10,
-    ...(first.kpi.r_at_5_overall === undefined ? {} : { r_at_5_overall: rates.rAt5 }),
+    ...(first.kpi.r_at_5_overall === undefined ? {} : {
+      r_at_5_overall: overallRecallAt5(aggregate.perScenario, aggregate.evaluatedTotal) ?? undefined
+    }),
     ...providerKpiFields(aggregate),
     latency_ms_p50: rates.latencyP50,
     latency_ms_p95: rates.latencyP95,
@@ -430,9 +440,9 @@ function buildMergedKpi(
 function buildMergedTokenEconomy(
   aggregate: MergeShardAggregate,
   shardCount: number
-): { readonly economy?: KpiPayload["kpi"]["token_economy"]; readonly savedRatio: number } {
+): { readonly economy?: KpiPayload["kpi"]["token_economy"]; readonly savedRatio: number | null } {
   if (aggregate.shardTokenEconomies.length !== shardCount) {
-    return { savedRatio: 0 };
+    return { savedRatio: null };
   }
   const input = aggregateBenchTokenMetrics(aggregate.shardTokenEconomies);
   return { economy: buildTokenEconomy(input), savedRatio: computeTokenSavedRatio(input) };
@@ -442,10 +452,9 @@ function providerKpiFields(
   aggregate: MergeShardAggregate
 ): Partial<KpiPayload["kpi"]> {
   return {
-    ...(aggregate.hasReturnedSubsetRAt5 && aggregate.providerReturnedTotal > 0
+    ...(aggregate.returnedSubsetRAt5 !== undefined
       ? {
-          r_at_5_with_embedding_returned:
-            aggregate.providerReturnedHitAt5 / aggregate.providerReturnedTotal
+          r_at_5_with_embedding_returned: aggregate.returnedSubsetRAt5
         }
       : {}),
     ...(aggregate.hasProviderRates

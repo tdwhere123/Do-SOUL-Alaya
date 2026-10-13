@@ -350,7 +350,8 @@ export function attributeSeedDrops(
   };
 }
 
-function formatRatio(value: number): string {
+function formatRatio(value: number | null): string {
+  if (value === null) return "unavailable";
   if (!Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(2)}%`;
 }

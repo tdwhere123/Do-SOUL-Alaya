@@ -11,6 +11,17 @@ afterEach(() => {
 });
 
 describe("garden task enqueue identity", () => {
+  it("filters pending task kind before applying the peek limit", () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const repo = new SqliteGardenTaskRepo(database.connection, { appendManyWithMutation: async (_events, mutate) => mutate([]) });
+    for (let index = 0; index < 51; index += 1) repo.enqueue({ id: `other-${index}`, workspace_id: "workspace-1",
+      role: GardenRole.LIBRARIAN, kind: GardenTaskKind.BULK_ENRICH, payload: { index }, created_at: "2026-09-06T00:00:00.000Z" });
+    repo.enqueue({ id: "post-turn", workspace_id: "workspace-1", role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.POST_TURN_EXTRACT, payload: {}, created_at: "2026-09-06T00:00:01.000Z" });
+    expect(repo.peekPending(GardenRole.LIBRARIAN, undefined, 1, GardenTaskKind.POST_TURN_EXTRACT).map((row) => row.id)).toEqual(["post-turn"]);
+    expect(repo.peekPending(GardenRole.LIBRARIAN, "workspace-1", 1, GardenTaskKind.POST_TURN_EXTRACT).map((row) => row.id)).toEqual(["post-turn"]);
+  });
   it("coalesces equal identity and conflicts on mismatched payload", () => {
     const database = initDatabase({ filename: ":memory:" });
     databases.add(database);

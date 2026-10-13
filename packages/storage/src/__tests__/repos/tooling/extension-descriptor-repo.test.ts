@@ -53,6 +53,16 @@ function createSkillPackage(overrides: Partial<SkillPackage> = {}): SkillPackage
 }
 
 describe("SqliteExtensionDescriptorRepo", () => {
+  it("rejects a different descriptor kind reusing an established identity", async () => {
+    const { repo } = createRepo();
+    const provider = createToolProvider();
+    await repo.registerToolProvider(provider);
+    await expect(repo.registerSkillPackage(createSkillPackage({ skill_id: provider.provider_id }))).rejects.toThrow();
+    await expect(repo.findToolProviderById(provider.provider_id)).resolves.toEqual(provider);
+    const skill = createSkillPackage();
+    await repo.registerSkillPackage(skill);
+    await expect(repo.registerToolProvider(createToolProvider({ provider_id: skill.skill_id }))).rejects.toThrow();
+  });
   it("persists and lists tool providers with descriptor metadata", async () => {
     const { database, repo } = createRepo();
     const provider = createToolProvider();

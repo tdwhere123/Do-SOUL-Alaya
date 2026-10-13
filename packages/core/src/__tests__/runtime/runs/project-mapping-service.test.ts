@@ -251,7 +251,7 @@ it("blocks batch acceptance when any anchor requires strict confirmation", async
     const service = new ProjectMappingService(dependencies);
 
     await expect(
-      service.batchAccept([safeAnchor.object_id, strictAnchor.object_id], AcceptedBy.USER)
+      service.batchAccept([safeAnchor.object_id, strictAnchor.object_id], AcceptedBy.USER, "workspace-1")
     ).rejects.toEqual(new StrictConfirmationRequired([strictAnchor.object_id]));
     expect(updateState).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();
@@ -346,7 +346,7 @@ it("treats missing and tombstoned memories as per-item safe defaults for batch a
 
     const anchors = await service.batchAccept(
       [missingAnchor.object_id, tombstonedAnchor.object_id],
-      AcceptedBy.USER
+      AcceptedBy.USER, "workspace-1"
     );
 
     expect(updateState).toHaveBeenNthCalledWith(

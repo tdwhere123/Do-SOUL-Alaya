@@ -254,7 +254,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       await this.finalizeReconciledAppend(signal, state, context);
       return this.buildReconciledMaterializationResult(signal, target, decision, state);
     } catch (error) {
-      return await this.handleReconciledMaterializationFailure(signal, target, context, error);
+      return await this.handleReconciledMaterializationFailure(signal, target, state, error);
     }
   }
 
@@ -389,7 +389,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   protected async handleReconciledMaterializationFailure(
     signal: CandidateMemorySignal,
     target: MaterializationTarget,
-    _context: MaterializationContext,
+    state: ReconciledMaterializationState,
     error: unknown
   ): Promise<MaterializationResult> {
     diagnosticWarn("materialization-router: reconciliation failed", {
@@ -402,7 +402,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         target_kind: target.kind,
         route_target: target.route_target,
         routing_reason: `${target.routing_reason} — reconciliation unavailable`,
-        created_objects: []
+        created_objects: [...state.createdObjects, ...readPartialFailureCreatedObjects(error)]
       },
       error
     );

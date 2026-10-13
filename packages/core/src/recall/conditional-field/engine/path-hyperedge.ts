@@ -23,7 +23,7 @@ import type { PathComputation } from "./path-effect-cursor.js";
 import {
   assignmentFromRow,
   groundPremiseAssignments,
-  openValidity,
+  queryPremiseValidity,
   terminalAssignment,
   type PremiseAssignment
 } from "./premise-assignment.js";
@@ -79,6 +79,7 @@ export type HyperedgeEffect = Readonly<{
 }>;
 
 type HyperedgeInput = Readonly<{
+  readonly asOf: string;
   readonly bindingContexts?: BindingContextStore;
   readonly query_id: string;
   readonly liveStates: RetainedRows<ProductStateKey>;
@@ -240,7 +241,7 @@ function* assignmentsForPremise(
   if (premise.kind === "relation") return yield* relationAssignments(premise, from, rows, input);
   if (premise.kind === "empty") return [];
   if (premise.kind === "epsilon") {
-    return [terminalAssignment(from, productEndpointId(from), MILLIGRADE_TOP, openValidity(from), "epsilon")];
+    return [terminalAssignment(from, productEndpointId(from), MILLIGRADE_TOP, queryPremiseValidity(from, input.asOf), "epsilon")];
   }
   if (premise.kind === "hyperedge") {
     return yield* nestedHyperedgeAssignments(premise, from, rows, input);
@@ -279,6 +280,7 @@ function* nestedHyperedgeAssignments(
 ): PathComputation<readonly PremiseAssignment[]> {
   const assignments: PremiseAssignment[] = [];
   for (const step of hyperedgeEffectSteps(rows, program, {
+    asOf: input.asOf,
     query_id: input.query_id,
     liveStates: [from],
     overlay: input.overlay,
@@ -406,6 +408,7 @@ function* extendSequenceState(
     // Filtering those as an old row delta drops the hyperedge.
     const nestedJoin = step.reach === "population" ? undefined : input.joinRows;
     for (const inner of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
+      asOf: input.asOf,
       query_id: input.query_id,
       liveStates: [here],
       overlay: input.overlay,
@@ -511,7 +514,7 @@ function* walkCompiledPremise(
       roots: frontier.roots, unresolved: frontier.unresolved
     });
   }
-  return yield* groundPremiseAssignments(from, starts, frontier.visited, frontier.transitions, frontier.derivations, frontier.roots);
+  return yield* groundPremiseAssignments(from, starts, frontier.visited, frontier.transitions, frontier.derivations, frontier.roots, input.asOf);
 }
 
 function* orHyperedgeEffects(

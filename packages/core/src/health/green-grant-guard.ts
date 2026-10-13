@@ -35,10 +35,10 @@ export class GreenGrantGuard {
 
   public constructor(private readonly deps: GreenGrantGuardDependencies) {}
 
-  public async getMemoryOrThrow(targetObjectId: string): Promise<Readonly<MemoryEntry>> {
+  public async getMemoryOrThrow(targetObjectId: string, workspaceId: string): Promise<Readonly<MemoryEntry>> {
     const memory = await this.deps.memoryRepo.findById(targetObjectId);
 
-    if (memory === null) {
+    if (memory === null || memory.workspace_id !== workspaceId) {
       throw new CoreError("NOT_FOUND", "Memory entry not found");
     }
 
@@ -126,7 +126,7 @@ export class GreenGrantGuard {
   private async isContested(targetObjectId: string, workspaceId: string): Promise<boolean> {
     if (this.deps.statusResolver === undefined) {
       this.warnMissingStatusResolver(workspaceId, targetObjectId);
-      return false;
+      throw new CoreError("CONFLICT", "Green governance status authority is unavailable");
     }
 
     const governanceRole = await this.deps.statusResolver.getGovernanceRole({
@@ -157,7 +157,7 @@ export class GreenGrantGuard {
     }
 
     this.hasWarnedMissingStatusResolver = true;
-    this.deps.warn("[GreenService] statusResolver missing; contested Green checks are disabled.", {
+    this.deps.warn("[GreenService] statusResolver missing; Green checks are unavailable.", {
       workspaceId,
       targetObjectId
     });

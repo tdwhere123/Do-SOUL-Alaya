@@ -94,7 +94,7 @@ const ENRICH_PENDING_SQL: SqlDefinitionMap<EnrichPendingStatements> = {
   reclaimStaleStatement: `
       UPDATE enrich_pending
       SET claimed_at = NULL
-      WHERE claimed_at IS NOT NULL AND processed_at IS NULL AND abandoned_at IS NULL AND claimed_at < ?
+      WHERE claimed_at IS NOT NULL AND processed_at IS NULL AND abandoned_at IS NULL AND alaya_utc_compare(claimed_at, ?) < 0
     `
 };
 

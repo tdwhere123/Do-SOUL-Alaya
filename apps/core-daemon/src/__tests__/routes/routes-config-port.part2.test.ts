@@ -373,7 +373,7 @@ describe("routes-config port batch", () => {
     const harness = await createServiceHarness({ tempIds: ["fixed"] });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
     const tempPath = `${secretPath}.fixed.tmp`;
-    const symlinkTarget = path.join(tmpdir(), "alaya-secret-target");
+    const symlinkTarget = path.join(harness.paths.secretsDir, "external-secret-target");
     await mkdir(harness.paths.secretsDir, { recursive: true, mode: 0o700 });
     await writeFile(symlinkTarget, "leaked-secret\n", { mode: 0o600 });
     await symlink(symlinkTarget, tempPath, "file");
@@ -398,7 +398,8 @@ describe("routes-config port batch", () => {
           embedding_enabled: true
         })
       })
-    ).rejects.toThrow();
+    ).rejects.toThrow(/Refusing to write through symlink/);
+    expect(await readFile(symlinkTarget, "utf8")).toBe("leaked-secret\n");
     await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({
       config_version: 1,
       provider_url: null,

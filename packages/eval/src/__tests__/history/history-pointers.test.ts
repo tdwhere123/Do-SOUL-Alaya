@@ -362,7 +362,7 @@ describe("history archive", () => {
     )).slug).toBe(slug);
   });
 
-  it("does not publish a file sidecar whose copied identity mismatches", async () => {
+  it.each(["hash", "bytes"])("does not publish a file sidecar whose copied %s mismatches", async (mismatch) => {
     const slug = "2026-05-15T134000Z-c0ffee0";
     const stagedEvidence = path.join(root, "staged-evidence.gz");
     await writeFile(stagedEvidence, "actual evidence");
@@ -373,8 +373,8 @@ describe("history archive", () => {
           filename: "selection-boundaries.ndjson.gz",
           sourcePath: stagedEvidence,
           identity: {
-            sha256: createHash("sha256").update("different evidence").digest("hex"),
-            bytes: Buffer.byteLength("different evidence")
+            sha256: createHash("sha256").update(mismatch === "hash" ? "wrong evidence!" : "actual evidence").digest("hex"),
+            bytes: Buffer.byteLength("actual evidence") + (mismatch === "bytes" ? 1 : 0)
           }
         }]
       }
@@ -449,7 +449,8 @@ describe("history archive", () => {
         ...buildLivePayload("c0ffee3").kpi,
         seed_extraction_path: {
           path: "no_credentials_fallback",
-          cache_hits: 0,
+          extraction_attempts: 10,
+          cache_hits: 10,
           llm_calls: 0,
           offline_fallbacks: 0,
           live_extraction_failures: 0,

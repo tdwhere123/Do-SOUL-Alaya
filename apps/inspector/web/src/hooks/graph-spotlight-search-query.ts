@@ -48,6 +48,7 @@ const ZH_DAY_PATTERNS: ReadonlyArray<{
       const month = Number.parseInt(m[1]!, 10);
       const day = Number.parseInt(m[2]!, 10);
       if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+      if (day > new Date(ref.getFullYear(), month, 0).getDate()) return null;
       return {
         year: ref.getFullYear(),
         month,
@@ -155,7 +156,7 @@ function parseZhDay(input: string, now: Date): ParsedSearchQuery | null {
     const match = matcher.regex.exec(input);
     if (!match) continue;
     const resolved = matcher.resolve(match, now);
-    if (!resolved) continue;
+    if (!resolved) return keywordOnly(input);
     const since = new Date(resolved.year, resolved.month - 1, resolved.day, 0, 0, 0, 0);
     const until = new Date(resolved.year, resolved.month - 1, resolved.day, 23, 59, 59, 999);
     return {

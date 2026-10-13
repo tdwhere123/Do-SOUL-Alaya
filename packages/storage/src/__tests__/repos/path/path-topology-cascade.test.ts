@@ -9,6 +9,7 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
+  WorkspaceRunEventType,
   type MemoryEntry,
   type PathAnchorRef,
   type PathRelation
@@ -19,8 +20,11 @@ import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
 import { SqlitePathRelationRepo } from "../../../repos/path/path-relation-repo.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
+import { insertRawPathRelationRow, seedWorkspace } from "./path-relation-repo-fixture.js";
+import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 
-// invariant: hard-deleted memory ids must not remain reachable through path topology.
+// Mutable local topology is pruned; foreign and frozen historical paths survive.
 // see also: packages/storage/src/repos/path/writes/cascade-delete.ts:pruneOrphanedPathTopology
 // see also: packages/storage/src/repos/memory-entry/writes/lifecycle-workflows.ts:hardDeleteTombstonedMemoryEntry
 // see also: packages/core/src/relations/path-relations/graph-contract-service.ts:derive
@@ -38,6 +42,53 @@ afterEach(() => {
 });
 
 describe("path topology cascade on memory hard-delete", () => {
+  it.each(["legacy", "selected", "required"])("keeps run deletion scoped, history-preserving and atomic in %s projection mode", async (projection) => {
+    const ctx = await createContext();
+    const { database } = ctx;
+    await ctx.memoryRepo.create(memoryFixture({ object_id: DELETED_MEMORY_ID, run_id: "run-1" }));
+    await ctx.memoryRepo.create(memoryFixture({ object_id: SURVIVING_MEMORY_ID, run_id: "run-2" }));
+    seedWorkspace(database, "foreign-workspace");
+    const anchorsJson = JSON.stringify({ source_anchor: { kind: "object", object_id: DELETED_MEMORY_ID },
+      target_anchor: { kind: "object", object_id: SURVIVING_MEMORY_ID } });
+    for (const [pathId, workspaceId] of [["local-path", "workspace-1"], ["foreign-path", "foreign-workspace"]] as const) {
+      insertRawPathRelationRow(database, { pathId, workspaceId, anchorsJson });
+      ctx.coUsageRepo.increment({ workspaceId, lowMemoryId: DELETED_MEMORY_ID, highMemoryId: SURVIVING_MEMORY_ID,
+        seenAt: "2026-04-17T00:00:00.000Z" });
+    }
+    database.connection.prepare(`INSERT INTO relation_assertions
+      (assertion_id,workspace_id,admission_event_id,identity_key,anchors_json,relation_kind,validity_json,formation_receipt_json,admitted_at)
+      VALUES ('preserved','workspace-1','admission','preserved',?,'supports',?,?,'2026-03-21T00:00:00.000Z')`)
+      .run(anchorsJson, JSON.stringify({ kind: "open", valid_from: "2026-03-21T00:00:00.000Z" }), "{}");
+    if (projection === "selected") markTemporalProjectionSelectedForTest(database);
+    if (projection === "required") database.connection.exec("UPDATE temporal_schema_state SET temporal_projection_selection_required=1 WHERE state_id=1");
+    const paths = () => database.connection.prepare("SELECT * FROM path_relations ORDER BY path_id").all();
+    const counters = () => database.connection.prepare("SELECT * FROM path_relation_co_usage_counters ORDER BY workspace_id").all();
+    const beforePaths = paths(), beforeCounters = counters();
+    const beforeAssertions = database.connection.prepare("SELECT * FROM relation_assertions").all();
+    const eventLog = new SqliteEventLogRepo(database);
+    const remove = () => eventLog.transactional(() => {
+      eventLog.append({ event_type: WorkspaceRunEventType.RUN_DELETED, entity_type: "run", entity_id: "run-1",
+        workspace_id: "workspace-1", run_id: "run-1", caused_by: "user_action",
+        payload_json: { run_id: "run-1", workspace_id: "workspace-1" } });
+      ctx.runRepo.delete("run-1");
+    });
+    database.connection.exec("CREATE TRIGGER refuse_run_delete BEFORE DELETE ON runs WHEN old.run_id='run-1' BEGIN SELECT RAISE(ABORT, 'injected run deletion failure'); END");
+    expect(remove).toThrow(/cascade delete run/);
+    expect(await ctx.runRepo.getById("run-1")).not.toBeNull();
+    expect(await ctx.memoryRepo.findById(DELETED_MEMORY_ID)).not.toBeNull();
+    expect(paths()).toEqual(beforePaths);
+    expect(counters()).toEqual(beforeCounters);
+    expect(database.connection.prepare("SELECT * FROM event_log").all()).toEqual([]);
+    database.connection.exec("DROP TRIGGER refuse_run_delete");
+    remove();
+    expect(await ctx.runRepo.getById("run-1")).toBeNull();
+    expect(await ctx.memoryRepo.findById(DELETED_MEMORY_ID)).toBeNull();
+    expect(await ctx.memoryRepo.findById(SURVIVING_MEMORY_ID)).not.toBeNull();
+    expect(paths()).toEqual(projection === "legacy" ? beforePaths.filter(row => (row as { workspace_id: string }).workspace_id === "foreign-workspace") : beforePaths);
+    expect(counters()).toEqual(beforeCounters.filter(row => (row as { workspace_id: string }).workspace_id === "foreign-workspace"));
+    expect(database.connection.prepare("SELECT * FROM relation_assertions").all()).toEqual(beforeAssertions);
+    expect((await eventLog.queryByType(WorkspaceRunEventType.RUN_DELETED)).events).toHaveLength(1);
+  });
   it("cascadeDeleteRun prunes path relations and co-usage counters for the run's memories", async () => {
     const ctx = await createContext();
 

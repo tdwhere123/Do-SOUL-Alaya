@@ -42,6 +42,12 @@ export function baseQuestion(
     candidates: [],
     candidate_key_collisions: [],
     gold: [],
+    cohort_ledger: {
+      dataset_cohort: overrides.is_abstention ? "abstention" : "answerable",
+      evaluator_gold_identity: { status: "present", object_ids: overrides.gold_memory_ids ?? [] },
+      extraction_materialization: { status: "memory_emitted", emitted_memory_count: 1, reason: null },
+      evaluation_issue_reason: null
+    },
     ...overrides
   } as LongMemEvalQuestionDiagnostic;
 }

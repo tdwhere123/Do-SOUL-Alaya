@@ -8,6 +8,8 @@ import { StorageError } from "../../../shared/errors.js";
 import {
   SqliteMemoryEntryRepo} from "../../../repos/memory-entry/index.js";
 import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
+import { insertRawPathRelationRow, seedWorkspace } from "../path/path-relation-repo-fixture.js";
+import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 import {
   createMemoryEntry,
   createRepo,
@@ -25,6 +27,43 @@ afterEach(() => {
 });
 
 describe("SqliteMemoryEntryRepo", () => {
+  it.each(["legacy", "selected", "required"].flatMap(projection =>
+    ["direct", "autonomous"].map(mode => ({ projection, mode }))))("keeps $mode GC scoped and atomic when temporal projection is $projection", async ({ projection, mode }) => {
+    const { repo, database } = await createRepo();
+    const entry = createMemoryEntry({ retention_state: "tombstoned", lifecycle_state: "tombstone",
+      forget_disposition: "judged_useless", evidence_refs: [], reinforcement_count: 0 });
+    await repo.create(entry);
+    seedWorkspace(database, "foreign-workspace");
+    const anchorsJson = JSON.stringify({ source_anchor: { kind: "object", object_id: entry.object_id },
+      target_anchor: { kind: "object", object_id: "target" } });
+    for (const [pathId, workspaceId] of [["local-path", "workspace-1"], ["foreign-path", "foreign-workspace"]]) {
+      insertRawPathRelationRow(database, { pathId: pathId!, workspaceId: workspaceId!, anchorsJson });
+    }
+    database.connection.prepare(`INSERT INTO relation_assertions
+      (assertion_id,workspace_id,admission_event_id,identity_key,anchors_json,relation_kind,validity_json,formation_receipt_json,admitted_at)
+      VALUES ('preserved-assertion','workspace-1','admission','preserved-identity',?,'supports',?,?,'2026-03-21T00:00:00.000Z')`)
+      .run(anchorsJson, JSON.stringify({ kind: "open", valid_from: "2026-03-21T00:00:00.000Z" }), "{}");
+    const assertionBefore = database.connection.prepare("SELECT * FROM relation_assertions").all();
+    if (projection === "selected") markTemporalProjectionSelectedForTest(database);
+    if (projection === "required") database.connection.exec("UPDATE temporal_schema_state SET temporal_projection_selection_required = 1 WHERE state_id = 1");
+    const paths = () => database.connection.prepare("SELECT path_id FROM path_relations ORDER BY path_id").all();
+    const remove = (onDeleted: () => void) => mode === "direct"
+      ? repo.hardDeleteTombstoned(entry.object_id, onDeleted)
+      : repo.hardDeleteTombstonedWithDisposition(entry.object_id, { requireJudgedUselessVerdict: true, onDeleted });
+    const audit = vi.fn(() => { throw new Error("audit failed"); });
+    await expect(remove(audit)).rejects.toThrow();
+    expect(audit).toHaveBeenCalledOnce();
+    expect(await repo.findById(entry.object_id)).not.toBeNull();
+    expect(paths()).toEqual([{ path_id: "foreign-path" }, { path_id: "local-path" }]);
+    const committed = vi.fn();
+    await remove(committed);
+    expect(committed).toHaveBeenCalledOnce();
+    expect(await repo.findById(entry.object_id)).toBeNull();
+    expect(paths()).toEqual(projection === "legacy" ? [{ path_id: "foreign-path" }]
+      : [{ path_id: "foreign-path" }, { path_id: "local-path" }]);
+    expect(database.connection.prepare("SELECT * FROM relation_assertions").all()).toEqual(assertionBefore);
+  });
+
   it("only treats retention_state tombstoned entries as GC-eligible", async () => {
     const { repo } = await createRepo();
     await repo.create(

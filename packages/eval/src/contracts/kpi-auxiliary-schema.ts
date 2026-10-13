@@ -226,11 +226,13 @@ export type TokenEconomy = z.infer<typeof TokenEconomySchema>;
 export const EdgeProposalRateSchema = z
   .object({
     schema_version: z.literal("bench-edge-proposal-rate.v1"),
-    total_proposals: z.number().int().nonnegative(),
-    per_workspace_per_day_min: z.number().nonnegative(),
-    per_workspace_per_day_max: z.number().nonnegative(),
-    per_workspace_per_day_median: z.number().nonnegative(),
-    per_trigger_source: z.record(z.string(), z.number().int().nonnegative()),
+    invalid_created_events: z.number().int().nonnegative().optional(),
+    invalid_day_records: z.number().int().nonnegative().optional(),
+    total_proposals: z.number().int().nonnegative().nullable(),
+    per_workspace_per_day_min: z.number().nonnegative().nullable(),
+    per_workspace_per_day_max: z.number().nonnegative().nullable(),
+    per_workspace_per_day_median: z.number().nonnegative().nullable(),
+    per_trigger_source: z.record(z.string(), z.number().int().nonnegative()).nullable(),
     // Optional per-question distribution: one bucket = one bench
     // question's SOUL_GRAPH_EDGE_PROPOSAL_CREATED count. Absent when the
     // aggregator caller does not pass per-question chunks (older
@@ -241,11 +243,12 @@ export const EdgeProposalRateSchema = z
     proposals_per_question: z
       .object({
         question_count: z.number().int().nonnegative(),
-        total_proposals: z.number().int().nonnegative(),
-        mean: z.number().nonnegative(),
-        p50: z.number().nonnegative(),
-        p95: z.number().nonnegative(),
-        max: z.number().nonnegative()
+        invalid_created_events: z.number().int().nonnegative().optional(),
+        total_proposals: z.number().int().nonnegative().nullable(),
+        mean: z.number().nonnegative().nullable(),
+        p50: z.number().nonnegative().nullable(),
+        p95: z.number().nonnegative().nullable(),
+        max: z.number().nonnegative().nullable()
       })
       .strict()
       .optional()

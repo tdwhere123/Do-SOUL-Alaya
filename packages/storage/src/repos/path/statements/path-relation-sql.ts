@@ -11,6 +11,21 @@ export const PATH_RELATION_SELECT_COLUMNS = `
       updated_at
 `;
 
+/** Local memory deletion cannot mutate a foreign graph or a frozen legacy projection. */
+export function memoryPathTopologyDeletionSql(memoryIdsSql: string) {
+  return {
+    relations: `DELETE FROM path_relations
+      WHERE workspace_id = ?
+        AND (${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} IN (${memoryIdsSql})
+          OR ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} IN (${memoryIdsSql}))
+        AND NOT EXISTS (SELECT 1 FROM temporal_schema_state WHERE state_id = 1
+          AND (temporal_projection_selected = 1 OR temporal_projection_selection_required = 1))`,
+    counters: `DELETE FROM path_relation_co_usage_counters
+      WHERE workspace_id = ?
+        AND (low_memory_id IN (${memoryIdsSql}) OR high_memory_id IN (${memoryIdsSql}))`
+  };
+}
+
 function anchorKeySql(anchorPath: "source_anchor" | "target_anchor"): string {
   return `CASE json_extract(anchors_json, '$.${anchorPath}.kind')
       WHEN 'object' THEN json_array('object', json_extract(anchors_json, '$.${anchorPath}.object_id'))

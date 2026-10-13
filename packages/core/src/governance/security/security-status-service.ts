@@ -54,12 +54,9 @@ export class SecurityStatusService {
   }
 
   public async initializeWorkspace(workspaceId: string): Promise<SecurityStatusContract> {
-    const initializedNow = await this.deps.zeroDayLayer.initializeWorkspaceSecurity(workspaceId);
     const status = await this.getStatus(workspaceId);
-
-    if (initializedNow) {
-      await this.reconcileObservedStatus(status, "workspace_initialized");
-    }
+    await this.reconcileObservedStatus(status, "workspace_initialized");
+    await this.deps.zeroDayLayer.initializeWorkspaceSecurity(workspaceId);
 
     return status;
   }

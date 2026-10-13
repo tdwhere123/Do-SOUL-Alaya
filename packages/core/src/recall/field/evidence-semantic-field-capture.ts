@@ -36,7 +36,7 @@ function buildChannel(result: Readonly<EvidenceCandidateScoringResult>) {
   if (result.status === "not_applicable") {
     return emptyChannel("ineligible");
   }
-  if (result.status !== "returned" || result.expectedCount !== result.scoredCount) {
+  if (result.status !== "returned") {
     return emptyChannel("unavailable");
   }
   const ranked = [...result.activationsByCandidateKey]
@@ -45,7 +45,7 @@ function buildChannel(result: Readonly<EvidenceCandidateScoringResult>) {
       right.score - left.score || leftKey.localeCompare(rightKey));
   return Object.freeze({
     channel_id: "evidence_semantic" as const,
-    status: "complete" as const,
+    status: result.expectedCount === result.scoredCount ? "complete" as const : "truncated" as const,
     depth: ranked.length,
     observations: Object.freeze(ranked.map(([candidateKey, receipt], index) =>
       Object.freeze({
@@ -58,7 +58,7 @@ function buildChannel(result: Readonly<EvidenceCandidateScoringResult>) {
         candidate_key: candidateKey,
         rank: index + 1
       }))),
-    unseen_upper_bound: 0
+    unseen_upper_bound: result.expectedCount === result.scoredCount ? 0 : 1
   });
 }
 

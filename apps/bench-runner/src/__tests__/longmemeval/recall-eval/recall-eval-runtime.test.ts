@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -198,6 +198,10 @@ describe("prepareRecallEvalDataDir", () => {
     const retained = writes.join("").match(/retained failed run evidence at (.+)\n/)?.[1];
     expect(retained).toBeDefined();
     retainedRoots.push(retained as string, fixtureRoot);
+    expect((await stat(retained!)).isDirectory()).toBe(true);
+    expect(await readFile(join(retained!, "FAILED_RUN_EVIDENCE.txt"), "utf8"))
+      .toBe("Retained failed benchmark run evidence.\n");
+    expect(await readFile(snapshotPath, "utf8")).toBe("corrupt fixture");
   });
 
   it("preserves the primary preparation error when failed-root finalization also fails", async () => {
@@ -248,6 +252,11 @@ describe("prepareRecallEvalDataDir", () => {
     const retained = writes.join("").match(/retained failed run evidence at (.+)\n/)?.[1];
     expect(retained).toBeDefined();
     retainedRoots.push(retained as string, fixtureRoot);
+    expect((await stat(retained!)).isDirectory()).toBe(true);
+    expect(await readFile(join(retained!, "FAILED_RUN_EVIDENCE.txt"), "utf8"))
+      .toBe("Retained failed benchmark run evidence.\n");
+    expect(await readFile(join(retained!, "alaya.db"), "utf8")).toBe("snapshot fixture");
+    expect(await readFile(snapshotPath, "utf8")).toBe("snapshot fixture");
   });
 
   it("does not copy the packed snapshot when skipPackedRestore is set", async () => {

@@ -340,21 +340,23 @@ it("does not treat arbitrary security-named events as high-risk guard hits", asy
     ).resolves.toBe("unchanged");
   });
 
-it("warns once when statusResolver is absent", async () => {
-    const { service, warn } = createHarness();
+it("fails closed and warns once when statusResolver is absent", async () => {
+    const { service, warn, statuses, events } = createHarness({ omitStatusResolver: true });
 
-    await service.reevaluate({
+    await expect(service.reevaluate({
       targetObjectId: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       workspaceId: "workspace-1"
-    });
-    await service.reevaluate({
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(service.reevaluate({
       targetObjectId: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
       workspaceId: "workspace-1"
-    });
+    })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(statuses.size).toBe(0);
+    expect(events).toEqual([]);
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      "[GreenService] statusResolver missing; contested Green checks are disabled.",
+      "[GreenService] statusResolver missing; Green checks are unavailable.",
       expect.objectContaining({
         workspaceId: "workspace-1",
         targetObjectId: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca"

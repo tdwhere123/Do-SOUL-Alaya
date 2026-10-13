@@ -343,6 +343,18 @@ describe("SessionOverrideService", () => {
     emitWarning.mockRestore();
   });
 
+  it("rejects malformed applied override audit instead of returning an empty active set", async () => {
+    const service = new SessionOverrideService({
+      now: () => "2026-03-24T00:00:00.000Z", generateRuntimeId: createRuntimeIdGenerator(),
+      eventLogRepo: createEventLogRepo({ queryByRunAndEntityType: vi.fn(async () => [createEventLogEntry({
+        event_type: GreenGovernanceEventType.SOUL_SESSION_OVERRIDE_APPLIED, entity_type: "session_override",
+        entity_id: "broken-override", workspace_id: "workspace-1", run_id: "run-1", caused_by: "user_action",
+        payload_json: { correction: "stop the write", priority: 0, run_id: "run-1" }
+      })]) }), runtimeNotifier: { notifyEntry: () => undefined }, runLookup: createRunLookup()
+    });
+    await expect(service.getActiveFor("run-1")).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("does not let a stale rehydration overwrite a newly applied override", async () => {
     const queryDeferred = createDeferred<readonly EventLogEntry[]>();
     const service = new SessionOverrideService({

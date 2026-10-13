@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RunCreatedPayloadSchema,
+  RuntimeGovernanceEventType,
   RunMode,
   RunState,
   WorkspaceKind,
@@ -26,6 +27,24 @@ afterEach(() => {
 });
 
 describe("EventPublisher + SqliteEventLogRepo", () => {
+  it("returns the committed mutation and records notification failure without inviting a write retry", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    databases.add(database);
+    const eventLogRepo = new SqliteEventLogRepo(database);
+    const publisher = new EventPublisher({ eventLogRepo,
+      runHotStateService: { apply: () => undefined },
+      runtimeNotifier: { notify: () => undefined, notifyEntry: () => { throw new Error("listener offline"); } }
+    });
+    const committed = await publisher.appendManyWithMutation([{
+      event_type: WorkspaceRunEventType.RUN_CREATED, entity_type: "run", entity_id: "run-notify-fail",
+      workspace_id: "ws_publisher", run_id: "run-notify-fail", caused_by: "user_action",
+      payload_json: RunCreatedPayloadSchema.parse({ run_id: "run-notify-fail", workspace_id: "ws_publisher",
+        run_mode: RunMode.CHAT, title: "notify failure" })
+    }], entries => entries[0]!);
+    const rows = await eventLogRepo.queryByRun("run-notify-fail");
+    expect(rows.filter(row => row.event_type === WorkspaceRunEventType.RUN_CREATED)).toEqual([committed]);
+    expect(rows.some(row => row.event_type === RuntimeGovernanceEventType.RUNTIME_SIDE_EFFECT_FAILED)).toBe(true);
+  });
   it("persists a published Phase 0 event and applies run hot state", async () => {
     const database = initDatabase({ filename: ":memory:" });
     databases.add(database);

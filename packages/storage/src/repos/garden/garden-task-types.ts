@@ -79,7 +79,8 @@ export interface GardenTaskRepoPort {
   peekPending(
     role: GardenRoleValue,
     workspace_id?: string,
-    limit?: number
+    limit?: number,
+    kind?: GardenTaskKindValue
   ): readonly GardenTaskRow[];
   claimAtomic(
     taskId: string,

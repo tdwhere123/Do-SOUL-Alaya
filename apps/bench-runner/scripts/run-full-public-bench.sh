@@ -210,7 +210,7 @@ case "$SIMULATE_REPORT" in
   *) echo "unknown simulate-report mode: $SIMULATE_REPORT" >&2; exit 2;;
 esac
 
-BENCH_COMMIT_SHA7="${BENCH_COMMIT_SHA7:-$(git rev-parse --short HEAD 2>/dev/null || echo 0000000)}"
+BENCH_COMMIT_SHA7="${BENCH_COMMIT_SHA7:-$(git rev-parse --short HEAD 2>/dev/null || true)}"
 export BENCH_COMMIT_SHA7
 
 mkdir -p "$LOG_DIR"

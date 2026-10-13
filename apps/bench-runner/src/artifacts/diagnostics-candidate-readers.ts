@@ -413,9 +413,8 @@ function readScoreFactors(value: unknown): DiagnosticScoreFactors | null {
       continue;
     }
     const nested = readNumberRecord(raw);
-    if (nested !== null) {
-      result[key] = nested;
-    }
+    if (nested === null) return null;
+    result[key] = nested;
   }
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
 }
@@ -427,7 +426,7 @@ export function readNumberRecord(value: unknown): Readonly<Record<string, number
   for (const [key, raw] of Object.entries(record)) {
     if (typeof raw === "number" && Number.isFinite(raw)) {
       result[key] = raw;
-    }
+    } else return null;
   }
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
 }
@@ -446,7 +445,7 @@ function readNullableNumberRecord(value: unknown): Readonly<Record<string, numbe
       result[key] = raw;
     } else if (raw === null) {
       result[key] = null;
-    }
+    } else return null;
   }
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
 }

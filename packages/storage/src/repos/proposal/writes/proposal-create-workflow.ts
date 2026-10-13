@@ -36,7 +36,7 @@ type ProposalEventLogWriter = Parameters<typeof insertEventLogEntry>[0];
 
 export interface ProposalCreateWorkflowHost extends Pick<
   ProposalStatements,
-  "createStatement" | "findPendingByDedupeKeyStatement" | "assignReviewerStatement"
+  "createStatement" | "findPendingByDedupeKeyStatement" | "findByIdStatement" | "assignReviewerStatement"
 > {
   readonly eventLogWriter: ProposalEventLogWriter;
   transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
@@ -56,12 +56,12 @@ interface ParsedProposalCreateRequest {
   readonly sourceDeliveryIds: string | null;
 }
 
-interface ParsedPendingProposalDedupeKey {
+type ParsedPendingProposalDedupeKey = {
   readonly workspaceId: string;
   readonly derivedFrom: string;
   readonly dossierRef: string;
   readonly targetObjectKind: string;
-}
+} | { readonly proposalId: string };
 
 export class ProposalCreateWorkflow {
   public constructor(private readonly host: ProposalCreateWorkflowHost) {}
@@ -130,6 +130,9 @@ export class ProposalCreateWorkflow {
   ): Promise<CreateProposalWithEventsIfAbsentResult> {
     const request = parseProposalCreateRequest(input);
     const parsedDedupeKey = parsePendingProposalDedupeKey(dedupeKey);
+    if ("proposalId" in parsedDedupeKey && parsedDedupeKey.proposalId !== request.proposal.proposal_id) {
+      throw new StorageError("VALIDATION_FAILED", "Exact proposal dedupe key must match the proposal identity.");
+    }
     const reviewerAssignment =
       options.reviewerAssignment === undefined
         ? undefined
@@ -139,7 +142,7 @@ export class ProposalCreateWorkflow {
       return this.host.transaction(() => {
         const existing = findPendingProposalByDedupeKey(this.host, parsedDedupeKey);
         if (existing !== null) {
-          return deepFreeze({ proposal: existing, events: [], status: "already_pending" as const });
+          return deepFreeze({ proposal: existing, events: [], status: "proposalId" in parsedDedupeKey ? "already_present" as const : "already_pending" as const });
         }
 
         const storedEvents = events.map((event) => insertEventLogEntry(this.host.eventLogWriter, event));
@@ -157,7 +160,7 @@ export class ProposalCreateWorkflow {
     } catch (error) {
       const existing = findPendingProposalByDedupeKey(this.host, parsedDedupeKey);
       if (isUniqueConstraintError(error) && existing !== null) {
-        return deepFreeze({ proposal: existing, events: [], status: "already_pending" as const });
+        return deepFreeze({ proposal: existing, events: [], status: "proposalId" in parsedDedupeKey ? "already_present" as const : "already_pending" as const });
       }
 
       if (error instanceof StorageError) {
@@ -187,6 +190,7 @@ export class ProposalCreateWorkflow {
 function parsePendingProposalDedupeKey(
   key: PendingProposalDedupeKey
 ): ParsedPendingProposalDedupeKey {
+  if ("proposal_id" in key) return { proposalId: parseNonEmptyString(key.proposal_id, "proposal_id") };
   return {
     workspaceId: parseWorkspaceId(key.workspace_id),
     derivedFrom: parseNonEmptyString(key.derived_from, "derived_from"),
@@ -196,9 +200,13 @@ function parsePendingProposalDedupeKey(
 }
 
 function findPendingProposalByDedupeKey(
-  statements: Pick<ProposalStatements, "findPendingByDedupeKeyStatement">,
+  statements: Pick<ProposalStatements, "findPendingByDedupeKeyStatement" | "findByIdStatement">,
   key: ParsedPendingProposalDedupeKey
 ): Readonly<Proposal> | null {
+  if ("proposalId" in key) {
+    const row = statements.findByIdStatement.get(key.proposalId) as ProposalRow | undefined;
+    return row === undefined ? null : parseProposalRow(row);
+  }
   const row = statements.findPendingByDedupeKeyStatement.get(
     key.workspaceId,
     key.targetObjectKind,

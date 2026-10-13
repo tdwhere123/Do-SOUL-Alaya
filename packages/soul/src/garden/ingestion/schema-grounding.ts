@@ -1,17 +1,12 @@
 import {
   LegacyCandidateMemorySignalSchema,
+  validateSchemaGroundingForSignal,
   type LegacyCandidateMemorySignal,
   type CandidateMemorySignal
 } from "@do-soul/alaya-protocol";
 
-export type SchemaGroundingValidationStatus = "valid" | "deferred" | "invalid";
-
-export interface SchemaGroundingValidationResult {
-  readonly declared: boolean;
-  readonly status: SchemaGroundingValidationStatus;
-  readonly reasons: readonly string[];
-  readonly field_count: number;
-}
+export { validateSchemaGroundingForSignal } from "@do-soul/alaya-protocol";
+export type { SchemaGroundingValidationStatus, SchemaGroundingValidationResult } from "@do-soul/alaya-protocol";
 
 export interface SchemaGroundedRawPayloadInput {
   readonly rawPayload: Readonly<Record<string, unknown>>;
@@ -35,7 +30,10 @@ const MAX_FIELD_EVIDENCE_CHARS = 4_000;
 export function buildSchemaGroundedRawPayload(
   input: SchemaGroundedRawPayloadInput
 ): Readonly<Record<string, unknown>> {
-  const alreadyDeclared = declaresSchemaGrounding(input.rawPayload);
+  const originalValidation = validateSchemaGroundingForSignal({
+    object_kind: input.objectKind, raw_payload: input.rawPayload
+  });
+  const alreadyDeclared = originalValidation.declared;
   const detectedObject = normalizeDetectedObject(
     input.rawPayload,
     input.objectKind,
@@ -48,11 +46,10 @@ export function buildSchemaGroundedRawPayload(
     input.confidence,
     !alreadyDeclared
   );
-  const validation = validateSchemaGroundingParts({
-    signalObjectKind: input.objectKind,
-    detectedObject,
-    fieldCandidates,
-    suppliedValidationResult: readRecord(input.rawPayload.validation_result)
+  const validation = alreadyDeclared ? originalValidation : validateSchemaGroundingForSignal({
+    object_kind: input.objectKind,
+    raw_payload: { detected_object: detectedObject, field_candidates: fieldCandidates,
+      validation_result: { status: "valid" } }
   });
 
   return Object.freeze({
@@ -92,37 +89,6 @@ export function normalizeSchemaGroundedSignal(
   });
 }
 
-export function validateSchemaGroundingForSignal(
-  signal: Readonly<CandidateMemorySignal>
-): SchemaGroundingValidationResult {
-  if (signal.interpretation_contract !== undefined) {
-    return { declared: true, status: "invalid", reasons: ["source interpretation requires its own admission"], field_count: 0 };
-  }
-  if (!declaresSchemaGrounding(signal.raw_payload)) {
-    return Object.freeze({
-      declared: false,
-      status: "valid",
-      reasons: [],
-      field_count: 0
-    });
-  }
-
-  const detectedObject = readRecord(signal.raw_payload.detected_object);
-  const fieldCandidates = readFieldCandidates(signal.raw_payload.field_candidates);
-  const validation = validateSchemaGroundingParts({
-    signalObjectKind: signal.object_kind,
-    detectedObject,
-    fieldCandidates,
-    suppliedValidationResult: readRecord(signal.raw_payload.validation_result)
-  });
-
-  return Object.freeze({
-    declared: true,
-    ...validation,
-    field_count: fieldCandidates.length
-  });
-}
-
 export function readSchemaGroundedContent(
   signal: Readonly<CandidateMemorySignal>
 ): string | null {
@@ -131,15 +97,6 @@ export function readSchemaGroundedContent(
   const contentField = fieldCandidates.find((field) => field.field_name === fieldNameForObjectKind(signal.object_kind));
   const selected = contentField ?? fieldCandidates[0] ?? null;
   return selected === null ? null : selected.value;
-}
-
-function declaresSchemaGrounding(rawPayload: Readonly<Record<string, unknown>>): boolean {
-  return (
-    rawPayload.schema_grounding !== undefined ||
-    rawPayload.detected_object !== undefined ||
-    rawPayload.field_candidates !== undefined ||
-    rawPayload.validation_result !== undefined
-  );
 }
 
 function normalizeDetectedObject(
@@ -189,48 +146,6 @@ function normalizeFieldCandidates(
       confidence: clampConfidence(confidence)
     })
   ];
-}
-
-function validateSchemaGroundingParts(input: Readonly<{
-  readonly signalObjectKind: string;
-  readonly detectedObject: Readonly<Record<string, unknown>> | null;
-  readonly fieldCandidates: readonly SchemaGroundedFieldCandidate[];
-  readonly suppliedValidationResult: Readonly<Record<string, unknown>> | null;
-}>): Omit<SchemaGroundingValidationResult, "declared" | "field_count"> {
-  const reasons: string[] = [];
-  const detectedKind = readNonEmptyString(input.detectedObject?.object_kind);
-  const suppliedStatus = readNonEmptyString(input.suppliedValidationResult?.status);
-
-  if (detectedKind === null) {
-    reasons.push("detected_object.object_kind missing");
-  } else if (detectedKind !== input.signalObjectKind) {
-    reasons.push("detected_object.object_kind does not match signal.object_kind");
-  }
-
-  if (input.fieldCandidates.length === 0) {
-    reasons.push("field_candidates missing");
-  }
-
-  for (const [index, field] of input.fieldCandidates.entries()) {
-    if (field.field_name.length === 0) {
-      reasons.push(`field_candidates[${index}].field_name missing`);
-    }
-    if (field.value.length === 0) {
-      reasons.push(`field_candidates[${index}].value missing`);
-    }
-    if (field.evidence.length === 0) {
-      reasons.push(`field_candidates[${index}].evidence missing`);
-    }
-  }
-
-  if (suppliedStatus !== null && suppliedStatus !== "valid") {
-    reasons.push(`validation_result.status is ${suppliedStatus}`);
-  }
-
-  return Object.freeze({
-    status: reasons.length === 0 ? "valid" : "deferred",
-    reasons: Object.freeze(reasons)
-  });
 }
 
 function readFieldCandidates(value: unknown): readonly SchemaGroundedFieldCandidate[] {

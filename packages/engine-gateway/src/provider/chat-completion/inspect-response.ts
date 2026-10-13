@@ -45,6 +45,10 @@ function isSseBody(bodyText: string, contentType: string | null): boolean {
 function inspectJson(bodyText: string): Omit<ProviderChatCompletionResult, "httpStatus"> {
   const payload = parseObject(bodyText, "payload");
   const choice = firstChoice(payload);
+  if (choice === undefined || typeof choice.message !== "object" || choice.message === null ||
+      Array.isArray(choice.message)) {
+    throw new ProviderResponseInspectionError("provider payload is missing a message completion", "schema");
+  }
   const content = readNestedString(choice, "message", "content");
   return {
     text: content ?? "",

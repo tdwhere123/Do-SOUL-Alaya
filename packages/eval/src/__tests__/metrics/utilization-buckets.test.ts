@@ -32,6 +32,8 @@ describe("computeUtilizationBuckets", () => {
   it("returns all zeros for empty input", () => {
     expect(computeUtilizationBuckets({ deliveries: [], reports: [] })).toEqual({
       no_recall: 0,
+      orphan_report_count: 0,
+      orphan_session_count: 0,
       empty_recall: 0,
       delivered_not_reported: 0,
       reported_skipped_or_na: 0,
@@ -54,6 +56,8 @@ describe("computeUtilizationBuckets", () => {
 
     expect(buckets).toEqual({
       no_recall: 0,
+      orphan_report_count: 0,
+      orphan_session_count: 0,
       empty_recall: 0,
       delivered_not_reported: 1,
       reported_skipped_or_na: 1,
@@ -89,13 +93,23 @@ describe("computeUtilizationBuckets", () => {
     expect(computeUtilizationBuckets({ deliveries, reports }).reported_skipped_or_na).toBe(2);
   });
 
-  it("prefers used when the same delivery has both used and skipped reports", () => {
+  it.each([
+    ["skipped", "used"], ["used", "skipped"], ["used", "not_applicable", "skipped", "used"]
+  ] as const)("retains used precedence for report order %j", (...states) => {
     const deliveries = [delivery({ delivery_id: "d1", pointer_count: 3 })];
-    const reports = [
-      report({ delivery_id: "d1", usage_state: "skipped" }),
-      report({ delivery_id: "d1", usage_state: "used" })
-    ];
-    expect(computeUtilizationBuckets({ deliveries, reports }).reported_used).toBe(1);
+    const reports = states.map((usage_state) => report({ delivery_id: "d1", usage_state }));
+    expect(computeUtilizationBuckets({ deliveries, reports })).toMatchObject({
+      reported_used: 1, reported_skipped_or_na: 0, delivered_not_reported: 0
+    });
+  });
+
+  it("keeps an orphan report separate from a valid recall in the same session", () => {
+    const buckets = computeUtilizationBuckets({
+      deliveries: [delivery({ delivery_id: "real" })],
+      reports: [report({ delivery_id: "real" }), report({ delivery_id: "orphan" })]
+    });
+    expect(buckets).toMatchObject({ no_recall: 0, orphan_report_count: 1,
+      orphan_session_count: 1, reported_used: 1 });
   });
 
   it("counts no_recall by distinct (session, turn) orphan reports", () => {

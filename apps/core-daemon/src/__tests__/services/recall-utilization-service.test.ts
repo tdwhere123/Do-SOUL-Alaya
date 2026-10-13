@@ -218,7 +218,7 @@ describe("recall-utilization-service", () => {
           queryId: "query-1",
           runId: "run-1",
           latencyMs: 120,
-          returnedCandidateCount: 2
+          returnedCandidateCount: 5
         })
       }),
       makeRow({
@@ -251,7 +251,7 @@ describe("recall-utilization-service", () => {
 
     expect(stats.embedding).toEqual({
       total_queries: 3,
-      returned_candidate_count: 3,
+      returned_candidate_count: 6,
       p50_latency_ms: 280,
       p95_latency_ms: 1250,
       p99_latency_ms: 1250,

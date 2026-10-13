@@ -116,6 +116,8 @@ export function relationRowEligible(
     if (order === undefined || order <= 0) return false;
   }
   if (row.validity === undefined) return false;
+  // Query-local derived transitions are never admitted as source relation rows.
+  if (row.validity.kind === "query_snapshot") return false;
   if (row.validity.kind === "interpretation") {
     return input.query.hypotheses.length === 1 && input.query.hypotheses[0]?.hypothesis_id === row.validity.hypothesis_id
       && row.interpretation_source?.packet_id === row.validity.packet_id

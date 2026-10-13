@@ -109,6 +109,7 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
     SqliteStrongRefRepo: makeRepo(),
     SqlitePathRelationRepo: makeRepo({
       findActive: vi.fn(async () => []),
+      findActiveAll: vi.fn(async () => ({ relations: [], truncated: false })),
       findByAnchors: vi.fn(async () => []),
       findByWorkspace: vi.fn(async () => [])
     }),

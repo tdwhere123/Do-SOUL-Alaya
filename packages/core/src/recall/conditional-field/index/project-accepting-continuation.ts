@@ -21,6 +21,7 @@ import {
 } from "../../runtime/index-continuation.js";
 import type { AcceptingProjectionInput } from "./project-accepting-index.js";
 import { facetModeForValue, facetsForCandidate } from "./project-accepting-entries.js";
+import { classifyResidualInfluence } from "./residual-influence.js";
 
 export function usesEmittedSet(input: AcceptingProjectionInput, policy: EnumerationPolicy): boolean {
   // Offset into a resorted list drops late stronger members; the continuation's
@@ -96,7 +97,10 @@ export function nextContinuation(
 ): Continuation | null {
   if (input.expires_at === undefined) return null;
   const observerOpen = input.observer?.outcome.status === "open"
-    || input.observer?.outcome.status === "interrupted";
+    || input.observer?.outcome.status === "interrupted"
+    || input.observer?.open_regions?.some(region =>
+      (region.status === "open" || region.status === "interrupted")
+      && classifyResidualInfluence(region, {}, "membership") !== "irrelevant") === true;
   if (remaining <= 0 && !observerOpen && input.resource_work !== "open" && input.support_work_status !== "open") return null;
   const emittedKeys = Object.keys(committed).sort(compareText);
   const cursor = projectionOffset === undefined

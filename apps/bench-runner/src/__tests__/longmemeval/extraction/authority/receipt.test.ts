@@ -180,6 +180,12 @@ describe("extraction authority receipt", () => {
     expect(() => assertExtractionAuthorityReceipt(legacy, observation)).not.toThrow();
   });
 
+  it.each([3, 4] as const)("rejects a re-signed schema %i receipt with a disallowed ceiling", (schemaVersion) => {
+    const legacy = signLegacyReceipt(createModernReceipt(), schemaVersion, 1);
+    expect(() => assertExtractionAuthorityReceipt(legacy, observation))
+      .toThrow(/cumulative limits/u);
+  });
+
   it("allows only monotonic in-lineage inventory progress after receipt creation", () => {
     const receipt = createExtractionAuthorityReceipt({
       action: "fill",

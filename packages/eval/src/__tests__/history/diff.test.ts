@@ -47,6 +47,27 @@ function buildPayload(overrides: Partial<KpiPayload["kpi"]>): KpiPayload {
 }
 
 describe("diffKpis", () => {
+  it.each([
+    [null, 0.9], [0.9, null], [null, null]
+  ])("preserves unavailable token comparisons (current=%s, previous=%s)", (currentValue, previousValue) => {
+    const current = buildPayload({ token_saved_ratio_vs_full_prompt: currentValue });
+    const previous = buildPayload({ token_saved_ratio_vs_full_prompt: previousValue });
+    const result = diffKpis(current, previous);
+    expect(result.deltas.find((delta) => delta.key === "token_saved_ratio_vs_full_prompt"))
+      .toMatchObject({ current: currentValue, previous: previousValue, delta: null,
+        comparison_status: "unavailable", verdict: "warn" });
+    expect(result.worst_verdict).toBe("warn");
+  });
+
+  it("retains explicit unscorability instead of declaring a semantic miss regression", () => {
+    const previous = buildPayload({});
+    const current = buildPayload({ per_scenario: [
+      { id: "f1", version: 1, hit_at_5: false, scorable: false, tier: "hot" }
+    ] });
+    expect(diffKpis(current, previous).fixture_regressions).toEqual([]);
+    expect(diffKpis(current, previous).unavailable_scenarios).toEqual(["f1"]);
+    expect(diffKpis(current, previous).worst_verdict).toBe("ok");
+  });
   it("returns ok and zero deltas when no previous baseline exists", () => {
     const current = buildPayload({});
     const result = diffKpis(current, null);

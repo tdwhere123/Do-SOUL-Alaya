@@ -18,9 +18,11 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
+import { CoreError } from "../shared/errors.js";
 import { bindEventPublisher } from "../runtime/event-publisher.js";
 
 import { GreenGrantGuard } from "./green-grant-guard.js";
+export { GreenClaimStatusResolver } from "./green-claim-status-resolver.js";
 import {
   defaultGreenWarn,
   normalizePositiveInteger
@@ -93,8 +95,7 @@ export class GreenService {
   }): Promise<Readonly<GreenStatus>> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
-    const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId, workspaceId);
     await this.guard.assertGrantPreconditions({
       memory,
       workspaceId,
@@ -103,48 +104,50 @@ export class GreenService {
       boundScopeClass: params.boundScopeClass ?? null
     });
 
-    const timestamp = this.now();
-    const status = GreenStatusSchema.parse({
-      object_id: existing?.object_id ?? this.generateObjectId(),
-      object_kind: "green_status",
-      schema_version: 1,
-      lifecycle_state: ACTIVE_LIFECYCLE,
-      created_at: existing?.created_at ?? timestamp,
-      updated_at: timestamp,
-      created_by: existing?.created_by ?? "system",
-      target_object_id: targetObjectId,
-      target_object_kind: "memory_entry",
-      green_state: GreenState.ELIGIBLE,
-      verification_basis: params.basis,
-      verified_by: resolveVerifiedBy(memory.dimension, params.verifiedBy),
-      verified_at: timestamp,
-      valid_until: params.validUntil,
-      bound_surfaces: normalizeBoundSurfaces(params.boundSurfaces, memory.surface_id),
-      bound_scope_class: params.boundScopeClass ?? memory.scope_class,
-      revoke_reason: RevokeReason.NONE,
-      last_transition_at: timestamp,
-      workspace_id: workspaceId
-    });
-    const eventInput = {
-      event_type: GreenGovernanceEventType.SOUL_GREEN_GRANTED,
-      entity_type: "green_status",
-      entity_id: status.object_id,
-      workspace_id: workspaceId,
-      run_id: memory.run_id,
-      caused_by: "system",
-      payload_json: SoulGreenGrantedPayloadSchema.parse({
-        object_id: status.object_id,
+    return await this.eventPublisher().decideAppendThenApply(() => {
+      const existing = this.dependencies.greenStatusRepo.findByTargetObjectIdSync(targetObjectId);
+      this.assertStatusWorkspace(existing, workspaceId);
+      const timestamp = this.now();
+      const status = GreenStatusSchema.parse({
+        object_id: existing?.object_id ?? this.generateObjectId(),
+        object_kind: "green_status",
+        schema_version: 1,
+        lifecycle_state: ACTIVE_LIFECYCLE,
+        created_at: existing?.created_at ?? timestamp,
+        updated_at: timestamp,
+        created_by: existing?.created_by ?? "system",
         target_object_id: targetObjectId,
-        verification_basis: status.verification_basis,
-        valid_until: status.valid_until,
-        bound_scope_class: status.bound_scope_class,
+        target_object_kind: "memory_entry",
+        green_state: GreenState.ELIGIBLE,
+        verification_basis: params.basis,
+        verified_by: resolveVerifiedBy(memory.dimension, params.verifiedBy),
+        verified_at: timestamp,
+        valid_until: params.validUntil,
+        bound_surfaces: normalizeBoundSurfaces(params.boundSurfaces, memory.surface_id),
+        bound_scope_class: params.boundScopeClass ?? memory.scope_class,
+        revoke_reason: RevokeReason.NONE,
+        last_transition_at: timestamp,
+        workspace_id: workspaceId
+      });
+      const eventInput = {
+        event_type: GreenGovernanceEventType.SOUL_GREEN_GRANTED,
+        entity_type: "green_status",
+        entity_id: status.object_id,
         workspace_id: workspaceId,
-        occurred_at: timestamp
-      })
-    };
-    return await this.eventPublisher().appendManyWithMutation([eventInput], () =>
-      this.dependencies.greenStatusRepo.upsert(status)
-    );
+        run_id: memory.run_id,
+        caused_by: "system",
+        payload_json: SoulGreenGrantedPayloadSchema.parse({
+          object_id: status.object_id,
+          target_object_id: targetObjectId,
+          verification_basis: status.verification_basis,
+          valid_until: status.valid_until,
+          bound_scope_class: status.bound_scope_class,
+          workspace_id: workspaceId,
+          occurred_at: timestamp
+        })
+      };
+      return { eventInputs: [eventInput], apply: () => this.dependencies.greenStatusRepo.upsert(status) };
+    });
   }
 
   public async pierce(params: {
@@ -156,6 +159,7 @@ export class GreenService {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
+    this.assertStatusWorkspace(existing, workspaceId);
 
     if (existing === null) {
       return null;
@@ -169,7 +173,7 @@ export class GreenService {
       return existing;
     }
 
-    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId, workspaceId);
     const timestamp = this.now();
     const next = GreenStatusSchema.parse({
       ...existing,
@@ -211,6 +215,7 @@ export class GreenService {
     const runId = params.runId === undefined ? null : parseNonEmptyString(params.runId, "runId");
     const reason = params.reason ?? "manual";
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
+    this.assertStatusWorkspace(existing, workspaceId);
 
     if (existing === null) {
       return null;
@@ -255,8 +260,9 @@ export class GreenService {
   }): Promise<GreenServiceReevaluationOutcome> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId, workspaceId);
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
+    this.assertStatusWorkspace(existing, workspaceId);
     return await reevaluateGreenStatus({
       targetObjectId,
       workspaceId,
@@ -280,7 +286,7 @@ export class GreenService {
   }): Promise<Readonly<VerificationResult>> {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
-    const memory = await this.guard.getMemoryOrThrow(targetObjectId);
+    const memory = await this.guard.getMemoryOrThrow(targetObjectId, workspaceId);
     const timestamp = this.now();
 
     return await runGreenVerification({
@@ -302,8 +308,16 @@ export class GreenService {
     });
   }
 
-  public async getStatus(targetObjectId: string): Promise<Readonly<GreenStatus> | null> {
-    return await this.dependencies.greenStatusRepo.findByTargetObjectId(parseObjectId(targetObjectId));
+  public async getStatus(targetObjectId: string, workspaceId: string): Promise<Readonly<GreenStatus> | null> {
+    const status = await this.dependencies.greenStatusRepo.findByTargetObjectId(parseObjectId(targetObjectId));
+    this.assertStatusWorkspace(status, parseNonEmptyString(workspaceId, "workspaceId"));
+    return status;
+  }
+
+  private assertStatusWorkspace(status: Readonly<GreenStatus> | null, workspaceId: string): void {
+    if (status !== null && status.workspace_id !== workspaceId) {
+      throw new CoreError("NOT_FOUND", "Green status not found");
+    }
   }
 
   public async findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {

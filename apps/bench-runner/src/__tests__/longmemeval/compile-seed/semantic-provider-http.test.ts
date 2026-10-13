@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -61,7 +62,7 @@ async function withLoopback(
     const fetchImpl: typeof fetch = (url, init) => {
       const selected = new URL(String(url));
       expect(selected.href).toBe(`${STEP_PLAN_QUOTE_BASIS.selected_provider_url}/chat/completions`);
-      return nativeFetch(new URL(selected.pathname, origin), init);
+      return fetchLoopbackProvider(nativeFetch, new URL(selected.pathname, origin), init);
     };
     await run((extractionConfig, schemaName) =>
       createSemanticProviderHttpExtractor(extractionConfig, schemaName, fetchImpl));

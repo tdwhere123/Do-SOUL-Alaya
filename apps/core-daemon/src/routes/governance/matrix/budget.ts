@@ -1,7 +1,7 @@
+import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import { CoreError, type BudgetBankruptcyService, type RunService } from "@do-soul/alaya-core";
 import { throwInvalidRequestBody } from "../../shared/shared.js";
-import { respondIfWorkspaceGrantDenied } from "../../../runtime/request-token-binding.js";
 
 export interface BudgetRouteServices {
   readonly budgetBankruptcyService: BudgetBankruptcyService;
@@ -14,22 +14,16 @@ export function registerBudgetRoutes(app: Hono, services: BudgetRouteServices): 
 
   app.get("/runs/:runId/budget-snapshot", async (context) => {
     const runId = context.req.param("runId");
-    const run = await services.runService.getById(runId);
-    const denied = respondIfWorkspaceGrantDenied(context, run.workspace_id);
-    if (denied !== undefined) {
-      return denied;
-    }
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
     const snapshot = await services.budgetBankruptcyService.getSnapshot(runId, ensureIsoDatetime(now()));
     return context.json({ success: true, data: snapshot }, 200);
   });
 
   app.post("/runs/:runId/budget-bankruptcy/resolve", async (context) => {
     const runId = context.req.param("runId");
-    const run = await services.runService.getById(runId);
-    const denied = respondIfWorkspaceGrantDenied(context, run.workspace_id);
-    if (denied !== undefined) {
-      return denied;
-    }
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
     const body = await parseResolveBody(context.req.json.bind(context.req));
     const proposal = await services.budgetBankruptcyService.resolve({
       runId,

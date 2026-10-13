@@ -320,13 +320,14 @@ describe("resolveQaChatConfig (env gating)", () => {
   });
 
   it("builds a real chat fn without firing any network call at construction", () => {
-    // constructing the fn must not touch the network; we never invoke it here.
-    const fn = createGardenChatFn({
-      url: "https://example.invalid/v1",
-      apiKey: "sk",
-      model: "m"
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      throw new Error("unexpected construction fetch");
     });
-    expect(typeof fn).toBe("function");
+    try {
+      const fn = createGardenChatFn({ url: "https://example.invalid/v1", apiKey: "sk", model: "m" });
+      expect(typeof fn).toBe("function");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
   });
 });
 

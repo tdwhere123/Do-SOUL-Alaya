@@ -162,9 +162,10 @@ function RecallLoadState({ controller }: { readonly controller: ReturnType<typeo
           {controller.t("recall:loading")}
         </p>
       ) : null}
-      {controller.error !== null && controller.data === null ? (
+      {controller.error !== null ? (
         <p data-testid="recall-error" className="font-mono text-sm text-state-error-text">
           {controller.t("recall:error", { message: controller.error })}
+          {controller.data !== null ? ` ${controller.t("recall:stale")}` : ""}
         </p>
       ) : null}
     </>

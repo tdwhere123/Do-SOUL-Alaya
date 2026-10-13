@@ -5,6 +5,7 @@ import {
   type MaxMinWorkQueue
 } from "@do-soul/alaya-graph-algorithms";
 import type { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
+import { uniformCompleteness } from "../completeness-report.js";
 import {
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
@@ -105,14 +106,7 @@ export function admitRequestBudget(budget: RequestBudget): "admit" | "resource_r
 }
 
 export function resourceRejectedCompleteness(): CompletenessReport {
-  return {
-    schema_version: 1,
-    logical_index: "resource_rejected",
-    observed_coverage: "resource_rejected",
-    transport: "resource_rejected",
-    payload: "resource_rejected",
-    representation: "resource_rejected"
-  };
+  return uniformCompleteness("resource_rejected");
 }
 
 export function bindMaxMinField(input: BindMaxMinInput): BindMaxMinResult {

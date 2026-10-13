@@ -357,13 +357,13 @@ it("forwards named scope admission to the worker instead of hard-wiring unrestri
   expect(execute).toHaveBeenCalled();
 });
 
-it("does not reinterpret an unavailable body as no eligible source", async () => {
+it.each(["source_body", "source_identity"])("preserves unavailable %s separately from no eligible source", async (reason) => {
   const unavailable = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(async () => {
     throw new CoreError("CONFLICT", "current source body is not available", {
-      details: { admission: "unavailable", unavailable: "source_body", work: WORK }
+      details: { admission: "unavailable", unavailable: reason, work: WORK }
     });
   }) }), { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET });
-  expect(unavailable).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" },
+  expect(unavailable).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason },
     coverage: { discovery: "open" }, work: WORK } });
   const absent = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(async () => {
     throw new CoreError("NOT_FOUND", "source is not currently admitted", { details: { admission: "no_eligible_source", work: WORK } });

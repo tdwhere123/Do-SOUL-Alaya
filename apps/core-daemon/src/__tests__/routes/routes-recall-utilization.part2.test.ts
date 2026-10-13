@@ -96,8 +96,11 @@ function fakeEventLogRepo(rows: readonly EventLogEntry[]): RecallUtilizationEven
       return rows.filter((row) => {
         if (row.workspace_id !== workspaceId) return false;
         if (row.event_type !== eventType) return false;
-        if (sinceIso !== undefined && !(row.created_at > sinceIso)) return false;
-        if (untilIso !== undefined && !(row.created_at <= untilIso)) return false;
+        const payload = row.payload_json as Record<string, unknown>;
+        const instant = typeof payload.reported_at === "string" ? payload.reported_at
+          : typeof payload.occurred_at === "string" ? payload.occurred_at : row.created_at;
+        if (sinceIso !== undefined && !(instant > sinceIso)) return false;
+        if (untilIso !== undefined && !(instant <= untilIso)) return false;
         return true;
       });
     }
@@ -236,15 +239,15 @@ describe("recall-utilization route", () => {
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_in",
         runId: "run-1",
-        payload: deliveredPayload({ deliveryId: "d_in", runId: "run-1", pointerCount: 3 }),
-        createdAt: "2026-05-10T12:00:00.000Z"
+        payload: { ...deliveredPayload({ deliveryId: "d_in", runId: "run-1", pointerCount: 3 }), occurred_at: "2026-05-10T12:00:00.000Z" },
+        createdAt: "2026-04-01T00:00:00.000Z"
       }),
       makeRow({
         type: RecallContextEventType.SOUL_RECALL_DELIVERED,
         entityId: "d_out",
         runId: "run-2",
-        payload: deliveredPayload({ deliveryId: "d_out", runId: "run-2", pointerCount: 7 }),
-        createdAt: "2026-04-01T00:00:00.000Z"
+        payload: { ...deliveredPayload({ deliveryId: "d_out", runId: "run-2", pointerCount: 7 }), occurred_at: "2026-04-01T00:00:00.000Z" },
+        createdAt: "2026-05-10T12:00:00.000Z"
       })
     ];
     const app = buildApp({

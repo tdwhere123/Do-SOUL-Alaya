@@ -15,6 +15,20 @@ import { ZeroDaySecurityLayer } from "../../../governance/security/zero-day-secu
 const FIXED_NOW = "2026-04-15T08:00:00.000Z";
 
 describe("SecurityStatusService", () => {
+  it("retries initial audit failure before consuming workspace initialization", async () => {
+    const zeroDayLayer = new ZeroDaySecurityLayer({ loadPolicies: async () => [], now: () => FIXED_NOW });
+    const initialize = vi.spyOn(zeroDayLayer, "initializeWorkspaceSecurity");
+    const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      ...entry, event_id: "event-retry", created_at: FIXED_NOW, revision: 0
+    }));
+    publish.mockRejectedValueOnce(new Error("audit unavailable"));
+    const service = new SecurityStatusService({ zeroDayLayer, eventPublisher: { publish } });
+    await expect(service.initializeWorkspace("workspace-retry")).rejects.toThrow("audit unavailable");
+    expect(initialize).not.toHaveBeenCalled();
+    await expect(service.initializeWorkspace("workspace-retry")).resolves.toMatchObject({ posture: "baseline" });
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(initialize).toHaveBeenCalledTimes(1);
+  });
   it("returns a surface-consumable status contract for the workspace", async () => {
     const publish = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       ...entry,

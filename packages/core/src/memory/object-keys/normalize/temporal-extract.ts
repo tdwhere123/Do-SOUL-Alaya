@@ -13,7 +13,7 @@ export interface RelativeSurfaceHit {
   readonly unit: "day" | "week" | "month" | "year";
 }
 
-const SLASH_DATE = /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/gu;
+const SLASH_DATE = /(?<![\d/])\b(\d{1,2})\/(\d{1,2})(?:\/(\d+))?\b(?![\d/])/gu;
 const ENGLISH_DATE =
   /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(\d{4}))?\b/giu;
 const CJK_MD = /(\d{1,2})月(\d{1,2})日/gu;
@@ -39,6 +39,7 @@ function matchSlashDates(text: string): readonly CalendarSurfaceHit[] {
     const second = Number(match[2]);
     const parsed = slashMonthDay(first, second);
     if (parsed === null || match[0] === undefined) return [];
+    if (match[3] !== undefined && parseOptionalYear(match[3]) === null) return [];
     return [{
       surface: match[0],
       month: parsed.month,
@@ -104,7 +105,7 @@ function relativeUnit(token: string): RelativeSurfaceHit["unit"] | null {
 }
 
 function parseOptionalYear(value: string | undefined): number | null {
-  if (value === undefined) return null;
+  if (value === undefined || value.length !== 4) return null;
   const year = Number(value);
   return year >= 1000 && year <= 9999 ? year : null;
 }

@@ -331,6 +331,28 @@ describe("workspace slice install and daemon reopen", () => {
     await attachedB.detach();
   }, 120_000);
 
+  it("rejects old local slices when their packed source changes", async () => {
+    const dataDir = join(root, "changed-source-data");
+    installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });
+    const first = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    expect(first?.workspaceIds).toEqual([WORKSPACE_A, WORKSPACE_B]);
+    await expect(explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir, requireReuse: true }))
+      .resolves.toMatchObject({ sliceSnapshotDigests: first!.sliceSnapshotDigests });
+    const packed = initDatabase({ filename: packedWorkingDbPath(dataDir) });
+    packed.connection.prepare("UPDATE memory_entries SET content = ? WHERE object_id = ?")
+      .run("changed packed source", MEMORY_A);
+    packed.close();
+    await expect(explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir, requireReuse: true }))
+      .rejects.toThrow(/identity drifted/u);
+    expect(existsSync(first!.sliceDbPaths[WORKSPACE_A]!)).toBe(true);
+    const rebuilt = await explodeRecallEvalWorkingCopyIfNeeded({ dataDirRoot: dataDir });
+    expect(rebuilt!.sliceSnapshotDigests).not.toEqual(first!.sliceSnapshotDigests);
+    const refreshed = initDatabase({ filename: rebuilt!.sliceDbPaths[WORKSPACE_A]! });
+    expect(refreshed.connection.prepare("SELECT content FROM memory_entries WHERE object_id = ?")
+      .get(MEMORY_A)).toEqual({ content: "changed packed source" });
+    refreshed.close();
+  });
+
   it("reuses packed.alaya.db after a one-workspace working copy is installed", async () => {
     const dataDir = join(root, "reopen-data");
     installWorkspaceSlice({ dataDir, sliceDbPath: packedPath });

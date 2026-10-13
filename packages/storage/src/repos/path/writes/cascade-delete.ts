@@ -1,9 +1,6 @@
 import type { SqliteConnection } from "../../../sqlite/db.js";
 import { StorageError } from "../../../shared/errors.js";
-import {
-  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
-  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
-} from "../path-relation-repo.js";
+import { memoryPathTopologyDeletionSql } from "../statements/path-relation-sql.js";
 
 /**
  * Deletes a run and all domain data scoped to it, wrapped in a single transaction.
@@ -18,29 +15,20 @@ import {
  */
 // invariant: path_relations endpoints (JSON anchors) and
 // path_relation_co_usage_counters (plain-text memory ids) carry no FK to
-// memory_entries, so SQLite cannot cascade them; this prunes every row whose
-// endpoint memory id is in `deletedMemoryIdsSql` (a SELECT of object_id values).
+// memory_entries, so SQLite cannot cascade them. The shared deletion policy
+// preserves foreign topology and frozen legacy projections.
 // `bindParams` are re-bound once per IN-match position (source, target,
 // co-usage low, co-usage high). Caller must run this inside its transaction.
 // cross-file ref: packages/storage/src/repos/path/path-relation-repo.ts backing-object-id SQL
 function pruneOrphanedPathTopology(
   connection: SqliteConnection,
+  workspaceId: string,
   deletedMemoryIdsSql: string,
   bindParams: readonly unknown[]
 ): void {
-  const deletePathRelations = connection.prepare(`
-    DELETE FROM path_relations
-    WHERE ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} IN (${deletedMemoryIdsSql})
-       OR ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} IN (${deletedMemoryIdsSql})
-  `);
-  const deleteCoUsageCounters = connection.prepare(`
-    DELETE FROM path_relation_co_usage_counters
-    WHERE low_memory_id IN (${deletedMemoryIdsSql})
-       OR high_memory_id IN (${deletedMemoryIdsSql})
-  `);
-
-  deletePathRelations.run(...bindParams, ...bindParams);
-  deleteCoUsageCounters.run(...bindParams, ...bindParams);
+  const statements = memoryPathTopologyDeletionSql(deletedMemoryIdsSql);
+  connection.prepare(statements.relations).run(workspaceId, ...bindParams, ...bindParams);
+  connection.prepare(statements.counters).run(workspaceId, ...bindParams, ...bindParams);
 }
 
 export function cascadeDeleteRun(connection: SqliteConnection, runId: string): void {
@@ -56,10 +44,14 @@ export function cascadeDeleteRun(connection: SqliteConnection, runId: string): v
 
   try {
     connection.transaction(() => {
+      const run = connection.prepare("SELECT workspace_id FROM runs WHERE run_id = ?").get(runId) as
+        { readonly workspace_id: string } | undefined;
+      if (run === undefined) return;
       // invariant: prune before deleteMemoryEntries — the subquery resolves
       // deleted ids from memory_entries, which must still hold the run's rows.
       pruneOrphanedPathTopology(
         connection,
+        run.workspace_id,
         "SELECT object_id FROM memory_entries WHERE run_id = ?",
         [runId]
       );

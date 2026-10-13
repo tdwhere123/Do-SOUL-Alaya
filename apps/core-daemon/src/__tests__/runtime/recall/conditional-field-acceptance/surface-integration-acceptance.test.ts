@@ -608,6 +608,9 @@ describe("CP09 worker MCP CLI surfaces", () => {
       result_kind_view: "memory_only"
     });
     expect(compatible.results.every((row) => row.object_kind === "memory_entry")).toBe(true);
+    expect(compatible.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ object_id: MEM.r, content_preview: expect.stringContaining(SOURCE_BODY) })
+    ]));
     expect(compatible.results.some((row) => row.object_kind === "source_evidence")).toBe(false);
     expect(mixed.results.some((row) => row.object_kind === "source_evidence")).toBe(true);
   });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CandidateMemorySignalSchema, SignalSource } from "@do-soul/alaya-protocol";
+import { CandidateMemorySignalSchema, SignalSource, validateSchemaGroundingForSignal } from "@do-soul/alaya-protocol";
 import type { GardenCompileContext } from "../../../garden/ingestion/compute-provider.js";
 import { LocalHeuristics } from "../../../garden/triage/local-heuristics.js";
 
@@ -53,6 +53,7 @@ describe("LocalHeuristics", () => {
         confidence: 0.6
       }
     ]);
+    expect(validateSchemaGroundingForSignal(signals[0]!)).toMatchObject({ declared: true, status: "valid", reasons: [] });
     expect(UUID_PATTERN.test(signals[0]!.signal_id)).toBe(true);
     expect(CandidateMemorySignalSchema.parse(signals[0])).toEqual(signals[0]);
   });

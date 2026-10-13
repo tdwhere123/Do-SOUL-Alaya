@@ -10,6 +10,18 @@ import {
 } from "./abstention-diagnostic-fixture.js";
 
 describe("stage attribution abstention exclusion", () => {
+  it("keeps historical measurement identity unknown alongside current scorable rows", () => {
+    const current = baseQuestion({ question_id: "current", gold_memory_ids: ["gold"] });
+    const { cohort_ledger: _ledger, ...legacy } = current;
+    const synthesized = { ...current, question_id: "synthesized", cohort_ledger: {
+      ...current.cohort_ledger, measurement_evidence_mode: "legacy_synthesized" } };
+    const tables = buildStageAttributionTables({ cell: "fixture", sourceDiagnostics: "fixture",
+      questions: [current, { ...legacy, question_id: "legacy" }, synthesized] });
+    expect(tables.questions.map((row) => row.question_id)).toEqual(["current"]);
+    expect(tables.summary).toMatchObject({ measurement_unknown_question_ids: ["legacy", "synthesized"],
+      denominators: { D_Q_evaluated: 3, D_Q_non_abstention: 3, D_Q_scorable: 1,
+        D_Q_unscorable: 0, D_Q_measurement_unknown: 2 } });
+  });
   it("does not change scorable stage membership when a live _abs twin is present", () => {
     const answerable = [
       baseQuestion({
@@ -75,13 +87,13 @@ describe("stage attribution abstention exclusion", () => {
     expect(tables.summary.denominators.D_Q_scorable).toBe(1);
   });
 
-  it("does not hide an ordinary empty-gold miss as abstention", () => {
+  it("retains an empty-gold answerable as unscorable rather than a retrieval miss", () => {
     const ordinary = assembledQuestion({ questionId: "58bf7951" });
     const tables = buildStageAttributionTables({
       cell: "fixture", sourceDiagnostics: "fixture", questions: [ordinary]
     });
-    expect(tables.questions.map((row) => row.question_id)).toEqual(["58bf7951"]);
-    expect(tables.summary.denominators.D_Q_scorable).toBe(1);
-    expect(tables.summary.denominators.D_Q_miss).toBe(1);
+    expect(tables.questions).toEqual([]);
+    expect(tables.summary.denominators).toMatchObject({ D_Q_evaluated: 1,
+      D_Q_non_abstention: 1, D_Q_unscorable: 1, D_Q_scorable: 0, D_Q_miss: 0 });
   });
 });

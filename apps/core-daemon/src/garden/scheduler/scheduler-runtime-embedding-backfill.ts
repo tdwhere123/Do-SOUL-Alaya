@@ -98,7 +98,6 @@ function enqueueEmbeddingBackfillTask(
   if (pendingWorkspaces.has(workspaceId)) {
     return false;
   }
-  pendingWorkspaces.add(workspaceId);
   input.gardenScheduler.enqueue({
     task_id: randomUUID(),
     task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
@@ -109,6 +108,7 @@ function enqueueEmbeddingBackfillTask(
     priority: 10,
     created_at: createdAt
   });
+  pendingWorkspaces.add(workspaceId);
   return true;
 }
 

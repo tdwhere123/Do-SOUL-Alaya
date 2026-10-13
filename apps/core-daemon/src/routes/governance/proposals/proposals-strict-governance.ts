@@ -195,7 +195,7 @@ function buildProposalCreatedEvent(
   };
 }
 
-function strictGovernanceResponse(proposalId: string, memoryId: string, status: "created" | "already_pending") {
+function strictGovernanceResponse(proposalId: string, memoryId: string, status: "created" | "already_pending" | "already_present") {
   return {
     proposal_id: proposalId,
     status,

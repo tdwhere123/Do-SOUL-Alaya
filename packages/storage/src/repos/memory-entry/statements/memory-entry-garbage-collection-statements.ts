@@ -1,8 +1,5 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
-import {
-  PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
-  PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
-} from "../../path/path-relation-repo.js";
+import { memoryPathTopologyDeletionSql } from "../../path/statements/path-relation-sql.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS } from "../mappers/row-mapper.js";
 import {
   prepareStatementGroup,
@@ -66,15 +63,8 @@ const MEMORY_ENTRY_GC_SQL: SqlDefinitionMap<MemoryEntryGarbageCollectionStatemen
         AND COALESCE(retention_state, '') NOT IN ('canon', 'consolidated')
         AND updated_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')
     `,
-  deleteOrphanedPathRelationsStatement: `
-      DELETE FROM path_relations
-      WHERE ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} = ?
-         OR ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} = ?
-    `,
-  deleteOrphanedCoUsageCountersStatement: `
-      DELETE FROM path_relation_co_usage_counters
-      WHERE low_memory_id = ? OR high_memory_id = ?
-    `
+  deleteOrphanedPathRelationsStatement: memoryPathTopologyDeletionSql("SELECT ?").relations,
+  deleteOrphanedCoUsageCountersStatement: memoryPathTopologyDeletionSql("SELECT ?").counters
 };
 
 export function prepareMemoryEntryGarbageCollectionStatements(

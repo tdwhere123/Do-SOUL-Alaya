@@ -109,6 +109,7 @@ export function aggregateEdgeProposalRatePerQuestion(
   const perQuestionCounts: number[] = [];
   let totalProposals = 0;
   let anyCreatedSeen = false;
+  let invalidCreatedEvents = 0;
   for (const chunk of perQuestionChunks) {
     let chunkCount = 0;
     for (const row of chunk) {
@@ -116,6 +117,7 @@ export function aggregateEdgeProposalRatePerQuestion(
         continue;
       }
       if (!CreatedPayloadSchema.safeParse(row.payload_json).success) {
+        invalidCreatedEvents += 1;
         continue;
       }
       chunkCount += 1;
@@ -123,6 +125,10 @@ export function aggregateEdgeProposalRatePerQuestion(
     }
     perQuestionCounts.push(chunkCount);
     totalProposals += chunkCount;
+  }
+  if (invalidCreatedEvents > 0) {
+    return { question_count: perQuestionCounts.length, invalid_created_events: invalidCreatedEvents,
+      total_proposals: null, mean: null, p50: null, p95: null, max: null };
   }
   if (!anyCreatedSeen) {
     return undefined;
@@ -141,11 +147,12 @@ export function aggregateEdgeProposalRatePerQuestion(
 /** Shape of the per-question rollup; mirrors EdgeProposalRate.proposals_per_question. */
 export interface ProposalsPerQuestionRollup {
   readonly question_count: number;
-  readonly total_proposals: number;
-  readonly mean: number;
-  readonly p50: number;
-  readonly p95: number;
-  readonly max: number;
+  readonly invalid_created_events?: number;
+  readonly total_proposals: number | null;
+  readonly mean: number | null;
+  readonly p50: number | null;
+  readonly p95: number | null;
+  readonly max: number | null;
 }
 
 /**
@@ -168,6 +175,13 @@ export function aggregateEdgeProposalRate(
   perQuestionChunks?: readonly (readonly EdgeProposalKpiEventRow[])[]
 ): EdgeProposalRate | undefined {
   const created = collectCreatedRecords(rows);
+  const invalidCreatedEvents = rows.filter((row) =>
+    row.event_type === EDGE_PROPOSAL_CREATED_EVENT_TYPE).length - created.length;
+  if (invalidCreatedEvents > 0) {
+    return { schema_version: "bench-edge-proposal-rate.v1", invalid_created_events: invalidCreatedEvents,
+      total_proposals: null, per_workspace_per_day_min: null, per_workspace_per_day_max: null,
+      per_workspace_per_day_median: null, per_trigger_source: null };
+  }
   if (created.length === 0) {
     return undefined;
   }
@@ -178,10 +192,11 @@ export function aggregateEdgeProposalRate(
   }
 
   const dayCounts = new Map<string, number>();
+  let invalidDayRecords = 0;
   for (const record of created) {
     const day = record.createdAt.slice(0, 10);
     if (!isValidIsoDay(day)) {
-      // Malformed created_at; skip rather than synthesize a bogus day bucket.
+      invalidDayRecords += 1;
       continue;
     }
     const key = `${record.workspaceId}::${day}`;
@@ -193,10 +208,10 @@ export function aggregateEdgeProposalRate(
   // figure is still a faithful per-workspace-per-day snapshot; we surface
   // it instead of `undefined` so release gates that expect a numeric do
   // not need to special-case single-bucket bench runs.
-  const min = perBucketCounts.length === 0 ? 0 : Math.min(...perBucketCounts);
-  const max = perBucketCounts.length === 0 ? 0 : Math.max(...perBucketCounts);
+  const min = invalidDayRecords > 0 || perBucketCounts.length === 0 ? null : Math.min(...perBucketCounts);
+  const max = invalidDayRecords > 0 || perBucketCounts.length === 0 ? null : Math.max(...perBucketCounts);
   const median =
-    perBucketCounts.length === 0 ? 0 : computeMedian(perBucketCounts);
+    invalidDayRecords > 0 || perBucketCounts.length === 0 ? null : computeMedian(perBucketCounts);
 
   const proposalsPerQuestion =
     perQuestionChunks === undefined
@@ -205,6 +220,7 @@ export function aggregateEdgeProposalRate(
 
   return {
     schema_version: "bench-edge-proposal-rate.v1",
+    ...(invalidDayRecords === 0 ? {} : { invalid_day_records: invalidDayRecords }),
     total_proposals: created.length,
     per_workspace_per_day_min: min,
     per_workspace_per_day_max: max,

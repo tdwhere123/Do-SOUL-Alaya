@@ -344,6 +344,7 @@ jobs:
 
       - name: Check bench-history contract
         run: |
+          node --test scripts/ci/check-content-contracts.test.mjs
           node --test scripts/ci/check-benchmark-storage.test.mjs
           node scripts/ci/check-content-contracts.mjs
 

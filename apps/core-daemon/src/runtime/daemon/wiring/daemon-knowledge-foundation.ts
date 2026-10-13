@@ -6,6 +6,7 @@ import {
   GraphContractService,
   GraphExploreService,
   GreenService,
+  GreenClaimStatusResolver,
   HealthJournalService,
   MemoryService,
   PathRelationProposalService,
@@ -157,6 +158,7 @@ function createGreenService(
     eventPublisher,
     runtimeNotifier: input.runtimeNotifier,
     leaseService: governanceLeaseService,
+    statusResolver: new GreenClaimStatusResolver(input.claimFormRepo),
     warn: input.warnLogger.warn
   });
 }

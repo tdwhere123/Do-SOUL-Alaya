@@ -1,6 +1,6 @@
 import { StorageError } from "../../shared/errors.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { canonicalJson, IsoDatetimeStringSchema } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
 import {
@@ -411,15 +411,17 @@ export function parseRecordCursor(cursor: string | null | undefined): Readonly<{
   readonly afterRecordedAt: string | null;
   readonly afterRecordId: string | null;
 }> {
-  if (cursor == null || cursor === "" || !cursor.startsWith("r:")) {
+  if (cursor == null) {
     return { afterRecordedAt: null, afterRecordId: null };
   }
-  const payload = cursor.slice(2);
-  const split = payload.indexOf("\t");
-  if (split <= 0) return { afterRecordedAt: null, afterRecordId: null };
+  const [timestamp, recordId, extra] = cursor.slice(2).split("\t");
+  if (!cursor.startsWith("r:") || !IsoDatetimeStringSchema.safeParse(timestamp).success ||
+      recordId === undefined || recordId.length === 0 || /[\r\n]/u.test(recordId) || extra !== undefined) {
+    throw new StorageError("VALIDATION_FAILED", "Invalid source-record cursor.");
+  }
   return {
-    afterRecordedAt: payload.slice(0, split),
-    afterRecordId: payload.slice(split + 1)
+    afterRecordedAt: timestamp!,
+    afterRecordId: recordId
   };
 }
 

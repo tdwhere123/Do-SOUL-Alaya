@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -246,7 +247,7 @@ it.each(["flat-carrier-v1", "nested-meaning-v1"] as const)(
     const fetchImpl: typeof fetch = (url, init) => {
       const selected = new URL(String(url));
       expect(selected.href).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
-      return nativeFetch(new URL(selected.pathname, localOrigin), init);
+      return fetchLoopbackProvider(nativeFetch, new URL(selected.pathname, localOrigin), init);
     };
     const first = await executeSemanticProposalFill({ workset: prepared, cacheRoot, authority, config: stepConfig,
       extractor: createSemanticProviderHttpExtractor(stepConfig, "source_semantic_proposal", fetchImpl) });

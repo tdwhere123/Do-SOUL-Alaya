@@ -222,7 +222,7 @@ describe("ReconciliationService projection metadata", () => {
     expect(driven.appliedVerdicts).toEqual(["update"]);
   });
 
-  it("degrades UPDATE to ADD when survivor lookup fails before the write", async () => {
+  it("does not turn UPDATE into ADD when survivor lookup fails before the write", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",
       content: "The user lives in Berlin.",
@@ -247,11 +247,9 @@ describe("ReconciliationService projection metadata", () => {
       incomingContent: "The user lives in Berlin since 2019",
       incomingDomainTags: ["residence"]
     });
-    const decision = await driven.decision;
-
-    expect(decision.kind).toBe("add");
+    await expect(driven.decision).rejects.toThrow("lookup failed before update");
     expect(update).not.toHaveBeenCalled();
-    expect(driven.appliedVerdicts).toEqual(["add"]);
+    expect(driven.appliedVerdicts).toEqual([]);
   });
 
   it("replaces stale projection metadata when UPDATE rewrites the memory content", async () => {

@@ -198,7 +198,7 @@ function replayBaseline(questions) {
 }
 
 function ratio(numerator, denominator) {
-  return denominator === 0 ? 0 : numerator / denominator;
+  return denominator === 0 ? null : numerator / denominator;
 }
 
 function replayWeightedAb(questions, weights, options) {

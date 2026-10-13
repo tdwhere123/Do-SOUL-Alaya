@@ -228,6 +228,7 @@ describe("garden runtime consolidation cycle", () => {
         legacyTopologyMutationsEnabled: true,
         pathRelationRepo: {
           findActive: vi.fn(async () => []),
+        findActiveAll: vi.fn(async () => []),
           findByAnchors: vi.fn(async () => []),
           findDormantAll
         } as unknown as GardenRuntimeInput["pathRelationRepo"]
@@ -280,6 +281,7 @@ describe("garden runtime consolidation cycle", () => {
         ...(enabled === undefined ? {} : { legacyTopologyMutationsEnabled: enabled }),
         pathRelationRepo: {
           findActive: vi.fn(async () => []),
+        findActiveAll: vi.fn(async () => []),
           findByAnchors: vi.fn(async () => []),
           findDormantAll
         } as unknown as GardenRuntimeInput["pathRelationRepo"]

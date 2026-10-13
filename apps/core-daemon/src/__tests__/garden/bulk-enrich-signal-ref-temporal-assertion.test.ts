@@ -228,16 +228,26 @@ describe("BULK_ENRICH signal-ref temporal assertion admission", () => {
       ]);
       expect(relationAssertionRepo.listAssertionsInCurrentTransaction()).toHaveLength(0);
       expect(await new SqliteProposalRepo(database).countPending(WORKSPACE_ID)).toBeGreaterThan(0);
+      const proposalsBeforeReplay = database.connection.prepare("SELECT * FROM proposals ORDER BY proposal_id").all();
+      const auditBeforeReplay = database.connection.prepare("SELECT * FROM event_log ORDER BY rowid").all();
       await expect(pathRelationRepo.findByAnchors(WORKSPACE_ID, [
         { kind: "object", object_id: SOURCE_MEMORY_ID }
       ])).resolves.toEqual([]);
 
-      await signalRefReplay.replaySignalRefs({
+      const replay = () => signalRefReplay.replaySignalRefs({
         newMemoryId: SOURCE_MEMORY_ID,
         memoryEvidenceIds: [EVIDENCE_ID],
         signal: persistedSignal!
       });
+      await Promise.all([replay(), replay()]);
       expect(relationAssertionRepo.listAssertionsInCurrentTransaction()).toHaveLength(0);
+      expect(database.connection.prepare("SELECT * FROM proposals ORDER BY proposal_id").all()).toEqual(proposalsBeforeReplay);
+      expect(database.connection.prepare("SELECT * FROM event_log ORDER BY rowid").all()).toEqual(auditBeforeReplay);
+      database.connection.prepare("UPDATE proposals SET resolution_state = 'rejected' WHERE workspace_id = ?").run(WORKSPACE_ID);
+      const terminalProposals = database.connection.prepare("SELECT * FROM proposals ORDER BY proposal_id").all();
+      await replay();
+      expect(database.connection.prepare("SELECT * FROM proposals ORDER BY proposal_id").all()).toEqual(terminalProposals);
+      expect(database.connection.prepare("SELECT * FROM event_log ORDER BY rowid").all()).toEqual(auditBeforeReplay);
     } finally {
       if (pathRelationEvictionTimer !== null) clearInterval(pathRelationEvictionTimer);
       database.close();

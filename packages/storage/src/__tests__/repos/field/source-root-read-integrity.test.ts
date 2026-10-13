@@ -8,7 +8,7 @@ import { EvidenceHealthState, sourceRecallTarget } from "@do-soul/alaya-protocol
 import { StorageDatabase, initDatabase } from "../../../sqlite/db.js";
 import { SqliteEvidenceCapsuleRepo } from "../../../repos/capsules/evidence-capsule-repo.js";
 import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js";
-import { SqliteSourceRootRecallReader } from "../../../repos/field/bounded-source-root-reader.js";
+import { SqliteSourceRootRecallReader, encodeRecordCursor, encodeCapsuleCursor } from "../../../repos/field/bounded-source-root-reader.js";
 import { SqliteIndexedRecallProjection, prepareIndexedRecallProjection } from "../../../repos/garden/indexed-recall-projection.js";
 import { fieldSha256, hashedRecord, openFieldDatabase, seedWorkspaces } from "./field-contract-fixture.js";
 
@@ -33,6 +33,60 @@ async function createCapsule(capsules: SqliteEvidenceCapsuleRepo, body: string) 
 }
 
 describe("retained source read identity", () => {
+  it("rejects malformed native and nested progress without skipping planted records, while accepting issued legacy cursors", async () => {
+    const { records, capsules, reader } = setup();
+    const planted = [records.insert(hashedRecord("workspace-1", "first retained body")),
+      records.insert(hashedRecord("workspace-1", "second retained body"))].sort((a, b) => a.record_id.localeCompare(b.record_id));
+    const input = { workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null, nativeByteLimit: 16384 };
+    expect(reader.page(input).rows.map(row => row.root_id)).toEqual(planted.map(row => row.record_id));
+    const invalidNative = ["c:bad", "r:bad", "c:\tmissing-time", "r:bad-time\tid", "r:2026-08-16T00:00:00.000Z\t",
+      "c:2026-08-16T00:00:00.000Z\tid\textra", "r:2026-08-16T00:00:00.000Z\tid\nforeign"];
+    const invalidNested = invalidNative.flatMap(cursor => [
+      `f:${JSON.stringify({ recordsAfter: cursor, capsulesAfter: null, recordsDone: true, capsulesDone: true })}`,
+      `f:${JSON.stringify({ recordsAfter: null, capsulesAfter: cursor, recordsDone: true, capsulesDone: true })}`,
+      `f:11\n${cursor}\n`
+    ]);
+    for (const afterCursor of [...invalidNative, ...invalidNested]) {
+      expect(() => reader.page({ ...input, afterCursor }), afterCursor).toThrow(/cursor/i);
+    }
+    const recordCursor = encodeRecordCursor({ afterRecordedAt: planted[0]!.recorded_at, afterRecordId: planted[0]!.record_id });
+    for (const afterCursor of [recordCursor, `f:00\n${recordCursor}\n`,
+      `f:${JSON.stringify({ recordsAfter: recordCursor, capsulesAfter: null, recordsDone: false, capsulesDone: false })}`]) {
+      expect(reader.page({ ...input, afterCursor }).rows.map(row => row.root_id)).toEqual([planted[1]!.record_id]);
+    }
+    const capsule = await createCapsule(capsules, "capsule body");
+    const capsuleCursor = encodeCapsuleCursor({ afterCreatedAt: capsule.created_at, afterObjectId: capsule.object_id });
+    for (const afterCursor of [capsuleCursor, `f:10\n${recordCursor}\n${capsuleCursor}`]) {
+      expect(reader.page({ ...input, afterCursor })).toMatchObject({ rows: [], truncated: false, unavailable: false });
+    }
+  });
+  it("checks reported spans against retained source bytes", () => {
+    const { records, reader } = setup();
+    const record = records.insert(hashedRecord("workspace-1", "retained source"));
+    const target = sourceRecallTarget({ workspace_id: "workspace-1", root_kind: "source_record", root_id: record.record_id,
+      source_version: record.source_version, content_digest: record.content_digest, evidence_object_id: null });
+    const span = { content_start: 0, content_end: 8, retained_extent: "body" as const,
+      content_complete: false, original_complete: false };
+    expect(reader.isCurrentTarget("workspace-1", { ...target, span })).toBe(true);
+    expect(reader.isCurrentTarget("workspace-1", { ...target, span: { ...span, content_end: 999 } })).toBe(false);
+  });
+
+  it("rejects malformed progress and retains a corrupt family's cursor on repeated reads", async () => {
+    const { database, capsules, reader } = setup();
+    const capsule = await createCapsule(capsules, "before");
+    const input = { workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null, nativeByteLimit: 16384 };
+    for (const afterCursor of ["f:bad", "o:bad", "unknown"]) {
+      expect(() => reader.page({ ...input, afterCursor })).toThrow(/cursor/);
+    }
+    database.connection.prepare("UPDATE evidence_capsules SET excerpt = ? WHERE object_id = ?").run("after", capsule.object_id);
+    const first = reader.page(input);
+    expect(first.unavailable).toBe(true);
+    expect(first.truncated).toBe(true);
+    const repeated = reader.page({ ...input, afterCursor: first.committedThrough });
+    expect(repeated.unavailable).toBe(true);
+    expect(repeated.truncated).toBe(true);
+    expect(repeated.committedThrough).toBe(first.committedThrough);
+  });
   it("pins retained text digest separately from the original source hash across restart and read-only reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-source-read-"));
     directories.push(directory);
@@ -44,7 +98,9 @@ describe("retained source read identity", () => {
     database.close();
     const readonly = setup(new StorageDatabase(path, new BetterSqlite3(path, { readonly: true, fileMustExist: true })));
     readonly.database.connection.pragma("query_only = ON");
-    const page = readonly.reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: "c:", byteLimit: 7, nativeByteLimit: 16384 });
+    const page = readonly.reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1,
+      afterCursor: 'f:{"recordsAfter":null,"capsulesAfter":null,"recordsDone":true,"capsulesDone":false}',
+      byteLimit: 7, nativeByteLimit: 16384 });
     expect(page.bytesRead).toBe(Buffer.byteLength("😀 retained text", "utf8"));
     const row = page.rows[0]!;
     expect(row.content).toBe("😀 re");
@@ -62,7 +118,9 @@ describe("retained source read identity", () => {
     database.connection.prepare("UPDATE evidence_capsules SET excerpt = ? WHERE object_id = ?").run("after", capsule.object_id);
     expect(projection.observablePin("workspace-1").source_revision).not.toBe(before.source_revision);
     database.connection.pragma("query_only = ON");
-    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: "c:", byteLimit: 8, nativeByteLimit: 16384 });
+    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1,
+      afterCursor: 'f:{"recordsAfter":null,"capsulesAfter":null,"recordsDone":true,"capsulesDone":false}',
+      byteLimit: 8, nativeByteLimit: 16384 });
     expect(page.unavailable).toBe(true);
     expect(page.rows).toEqual([]);
     expect(page.bytesRead).toBe(0);

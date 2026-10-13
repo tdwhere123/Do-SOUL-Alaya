@@ -46,11 +46,11 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
         registered_at
       ) VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(descriptor_id) DO UPDATE SET
-        descriptor_type = excluded.descriptor_type,
         name = excluded.name,
         source = excluded.source,
         metadata_json = excluded.metadata_json,
         registered_at = excluded.registered_at
+      WHERE extension_descriptors.descriptor_type = excluded.descriptor_type
     `);
 
     this.deleteDescriptorStatement = db.connection.prepare(`
@@ -189,7 +189,7 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
     metadata: Record<string, unknown>
   ): Promise<void> {
     try {
-      this.upsertDescriptorStatement.run(
+      const result = this.upsertDescriptorStatement.run(
         descriptorId,
         descriptorType,
         name,
@@ -197,6 +197,7 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
         JSON.stringify(metadata),
         registeredAt
       );
+      if (result.changes !== 1) throw new StorageError("VALIDATION_FAILED", "Extension descriptor kind cannot change.");
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",

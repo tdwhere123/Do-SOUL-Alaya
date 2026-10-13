@@ -1,5 +1,6 @@
 import { INTERN_SEMANTIC_REQUEST_PROFILES, INTERN_PROTOCOL_PROBE_PROFILES,
   STEP_SEMANTIC_REQUEST_PROFILES, type EnvLookup } from "@do-soul/alaya-protocol";
+import type { Agent, Dispatcher } from "undici";
 
 export const PROVIDER_REQUEST_PROFILES = [
   "provider-default-v1",
@@ -56,7 +57,17 @@ export type ProviderChatCompletionRequest = Readonly<{
   /** Retain physical response bytes for callers that settle per-request evidence. */
   readonly retainHttpResponseEvidence?: true;
   readonly fetchImpl?: typeof fetch;
-  /** Process env bind for private-provider URL opt-in; omit treats private hosts as blocked. */
+  /** Construct a request-owned Agent/EnvHttpProxyAgent with the supplied factory.
+   * Custom proxy/TLS policy belongs here; keep proxy tunneling enabled. The
+   * gateway closes this dispatcher after the response, or destroys it on error.
+   * Guarded requests do not inspect, replace, or close a custom global dispatcher. */
+  readonly transportFactory?: (options: {
+    readonly factory: NonNullable<Agent.Options["factory"]>;
+    /** Preserve this original-hostname identity when adding custom proxy TLS options. */
+    readonly requestTls: { readonly servername: string | undefined };
+  }) => Dispatcher;
+  /** Composition-root process env bind for URL opt-in and native proxy flags.
+   * Omission blocks private hosts and leaves environment proxy flags unset. */
   readonly env?: EnvLookup;
 }>;
 

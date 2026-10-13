@@ -41,6 +41,7 @@ const NON_RECOVERABLE_REVOKE_REASONS = new Set<RevokeReasonType>([
 
 export interface GreenServiceGreenStatusRepoPort {
   findByTargetObjectId(targetObjectId: string): Promise<Readonly<GreenStatus> | null>;
+  findByTargetObjectIdSync(targetObjectId: string): Readonly<GreenStatus> | null;
   findEligible(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findGrace(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]>;

@@ -55,8 +55,9 @@ describe("canonical measurement honesty", () => {
     expect(metrics.gold_rank_buckets?.candidate_absent).toBe(0);
 
     const coverage = buildLongMemEvalFullGoldCoverage([row]);
-    expect(coverage.pool_recall_at_50).toBe(1);
-    expect(coverage.pool_recall_at_100).toBe(1);
+    expect(row.gold[0]).toMatchObject({ pre_budget_rank: null, fused_rank: null });
+    expect(coverage.pool_recall_at_50).toBeNull();
+    expect(coverage.pool_recall_at_100).toBeNull();
     expect(coverage.delivery_contribution).toBeUndefined();
 
     const payload = candidateKeyOrderGatePayload(metrics, coverage);
@@ -80,7 +81,8 @@ describe("canonical measurement honesty", () => {
     }]);
     expect(repaired.questions[0]?.miss_classification).toBe("under_ranked");
     expect(repaired.quality_metrics.gold_rank_buckets?.candidate_absent).toBe(0);
-    expect(repaired.full_gold_coverage.pool_recall_at_100).toBe(1);
+    expect(repaired.quality_metrics.gold_rank_buckets?.in_field_unranked).toBe(1);
+    expect(repaired.full_gold_coverage.pool_recall_at_100).toBeNull();
     expect(repaired.full_gold_coverage.delivery_contribution).toBeUndefined();
   });
 

@@ -173,6 +173,7 @@ describe("SqliteWorkspaceRepo", () => {
     });
 
     expect(created.repo_path).toBe("/tmp/repo-path/.git-root");
+    expect((await workspaceRepo.getById("ws_repo_path"))?.repo_path).toBe("/tmp/repo-path/.git-root");
 
     database.connection
       .prepare(`

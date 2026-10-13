@@ -11,12 +11,30 @@ import {
 } from "./locomo-runner.test-support.js";
 import { readFile } from "node:fs/promises";
 import { runLocomo } from "../../datasets/locomo/runner.js";
+import { loadLocomo } from "../../datasets/locomo/fetch.js";
+import { QaChatError } from "../../runs/qa/qa-chat.js";
+import { releaseHardGateAllowsLatestPassing } from "@do-soul/alaya-eval";
 import { buildLongMemEvalQualityMetrics } from
   "../../diagnostics/quality/diagnostics-quality.js";
 import { promotionMeasurementDiagnostic } from
   "../longmemeval/recall-eval/specialized-answerable-recall-fixture.js";
 
 describe("LoCoMo runner", () => {
+  it("archives failed conversation question identities separately from completed recall", async () => {
+    const [sample] = await loadLocomo("locomo10");
+    loadLocomoMock.mockResolvedValue([sample, { ...sample, sample_id: "failed-conversation" }]);
+    startBenchDaemonMock.mockResolvedValue(buildMockDaemon({}));
+    const chat = vi.fn().mockResolvedValueOnce("Alice").mockResolvedValueOnce("yes")
+      .mockRejectedValue(new QaChatError("fixture provider unavailable"));
+    const result = await runLocomo({ variant: "locomo10", historyRoot: tmpDir, qa: { chat } });
+    const archived = JSON.parse(await readFile(result.kpiPath, "utf8"));
+    expect(archived).toMatchObject({ sample_size: 2, evaluated_count: 1,
+      execution_coverage: { completed_questions: 1, failed_conversations: 1,
+        unavailable_questions: [{ conversation_id: "failed-conversation",
+          question_id: "failed-conversation:1", status: "unavailable", reason: "fixture provider unavailable" }] } });
+    expect(archived.kpi.per_scenario.map((row: { id: string }) => row.id)).toEqual(["sample-1"]);
+    expect(releaseHardGateAllowsLatestPassing(archived)).toBe(false);
+  });
 
   it("uses the measurement cohort rather than an ID suffix for shared quality denominators", () => {
     const row = promotionMeasurementDiagnostic("locomo-row_abs", "scorable", true);

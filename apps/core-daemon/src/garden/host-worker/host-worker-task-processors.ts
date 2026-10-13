@@ -121,8 +121,7 @@ function findPendingPostTurnExtractTask(
   gardenTaskRepo: SqliteGardenTaskRepo
 ): GardenTaskRow | undefined {
   return gardenTaskRepo
-    .peekPending(GardenRole.LIBRARIAN, undefined, 50)
-    .find((candidate) => candidate.kind === GardenTaskKind.POST_TURN_EXTRACT);
+    .peekPending(GardenRole.LIBRARIAN, undefined, 1, GardenTaskKind.POST_TURN_EXTRACT)[0];
 }
 
 async function processClaimedPostTurnExtractTask(
@@ -142,13 +141,18 @@ async function processClaimedPostTurnExtractTask(
   try {
     const dispatch = await publishPostTurnExtractDispatch(task, payload, input.eventPublisher);
     const sourceObservation = resolvePostTurnCompileSourceObservation(payload, dispatch);
-    const emittedSignalIds = await emitPostTurnExtractSignals(
+    const { emittedSignalIds, incomplete } = await emitPostTurnExtractSignals(
       task.row,
       payload,
       task.provider,
       sourceObservation,
       input
     );
+    if (incomplete !== null) {
+      await failPostTurnExtractTask(task.row, payload.run_id, incomplete,
+        input.gardenTaskRepo, input.now, emittedSignalIds);
+      return;
+    }
     await completePostTurnExtractTask(
       task.row,
       payload.run_id,
@@ -246,7 +250,7 @@ async function emitPostTurnExtractSignals(
     readonly gardenTaskRepo: SqliteGardenTaskRepo;
     readonly signalReceiver: NonNullable<PostTurnExtractRuntimeInput["signalReceiver"]>;
   }
-): Promise<readonly string[]> {
+): Promise<{ readonly emittedSignalIds: readonly string[]; readonly incomplete: OfficialApiGardenCompileIncompleteError | null }> {
   const retainInput = {
     taskId: row.id,
     workspaceId: payload.workspace_id,
@@ -270,7 +274,7 @@ async function emitPostTurnExtractSignals(
     ...retainInput,
     candidates: []
   });
-  const candidateSignals = await compilePostTurnExtractTask(
+  const compilation = await compilePostTurnExtractTask(
     provider,
     payload,
     sourceObservation,
@@ -278,7 +282,7 @@ async function emitPostTurnExtractSignals(
   );
   const extraIds = await receivePostTurnCandidates({
     ...retainInput,
-    candidates: candidateSignals.map((signal, index) =>
+    candidates: compilation.signals.map((signal, index) =>
       CandidateMemorySignalSchema.parse({
         ...signal,
         signal_id: buildGardenTaskSignalId(row.id, index),
@@ -286,7 +290,7 @@ async function emitPostTurnExtractSignals(
       })
     )
   });
-  return extraIds.length > 0 ? extraIds : retainedIds;
+  return { emittedSignalIds: extraIds.length > 0 ? extraIds : retainedIds, incomplete: compilation.incomplete };
 }
 
 async function refreshPostTurnExtractClaim(
@@ -341,7 +345,8 @@ async function failPostTurnExtractTask(
   runId: string,
   error: unknown,
   gardenTaskRepo: SqliteGardenTaskRepo,
-  now: () => string
+  now: () => string,
+  emittedSignalIds: readonly string[] = []
 ): Promise<void> {
   const completedAt = now();
   await gardenTaskRepo.completeWithEvents(
@@ -359,7 +364,7 @@ async function failPostTurnExtractTask(
         workspace_id: row.workspace_id,
         run_id: runId,
         caused_by: "garden-runtime",
-        payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, false, [])
+        payload_json: buildPostTurnExtractCompletionPayload(row, runId, completedAt, false, emittedSignalIds)
       }
     ],
     IN_PROCESS_POST_TURN_CLAIMANT,
@@ -392,7 +397,7 @@ async function compilePostTurnExtractTask(
   payload: PostTurnExtractTaskPayload,
   sourceObservation: NonNullable<CandidateMemorySignal["source_observation"]> | null,
   taskId: string
-): Promise<readonly CandidateMemorySignal[]> {
+): Promise<{ readonly signals: readonly CandidateMemorySignal[]; readonly incomplete: OfficialApiGardenCompileIncompleteError | null }> {
   const context: GardenCompileContext = {
     workspace_id: payload.workspace_id,
     run_id: payload.run_id,
@@ -405,6 +410,7 @@ async function compilePostTurnExtractTask(
     })
   };
   let compiled: readonly CandidateMemorySignal[];
+  let incomplete: OfficialApiGardenCompileIncompleteError | null = null;
   try {
     compiled = await provider.compile(buildPostTurnContent(payload), context);
   } catch (error) {
@@ -413,8 +419,9 @@ async function compilePostTurnExtractTask(
       throw error;
     }
     compiled = error.signals;
+    incomplete = error;
   }
-  return Object.freeze(
+  const signals = Object.freeze(
     compiled.map((signal) => {
       const parsed = CandidateMemorySignalSchema.parse(signal);
       if (parsed.workspace_id !== payload.workspace_id || parsed.run_id !== payload.run_id) {
@@ -424,4 +431,5 @@ async function compilePostTurnExtractTask(
       return normalizeSchemaGroundedSignal(parsed);
     })
   );
+  return { signals, incomplete };
 }

@@ -14,7 +14,7 @@ import {
 
 import { createContext } from "./compute-provider-fixtures.js";
 
-describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () => {
+describe("OfficialApiGardenProvider diagnostic dump", () => {
   let diagnosticDir: string;
 
   beforeEach(() => {
@@ -25,7 +25,7 @@ describe("OfficialApiGardenProvider diagnostic dump (Phase A.1 instrument)", () 
     rmSync(diagnosticDir, { recursive: true, force: true });
   });
 
-  it("dumps a diagnostic envelope when the model returns a malformed signals shape", async () => {
+  it("rejects a malformed signals shape without writing an extractor-error dump", async () => {
     const extractor: SignalExtractor = {
       extract: vi.fn(async () => ({ rawJson: '{"not_signals":[]}' }))
     };

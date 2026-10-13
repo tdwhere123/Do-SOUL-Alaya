@@ -15,6 +15,9 @@ import { compareF0F2VsCachedF3 } from
   "../../../../diagnostics/stage-attribution/diagnostic-100q.js";
 import { classifyQuestionStage } from "../../../../diagnostics/stage-attribution/classify-question.js";
 import { buildStageAttributionTables } from "../../../../diagnostics/stage-attribution/build-tables.js";
+import { measureConditionalFieldResponse } from "../../../../runs/measurement/conditional-field-measurement.js";
+import { classifyQuestionMeasurementStatus } from "../../../../runs/measurement/question-validity.js";
+import { conditionalFieldMeasurementFixture } from "../../measurement/conditional-field-measurement-fixture.js";
 import {
   candidateAttribution,
   diagnostic,
@@ -25,13 +28,24 @@ import {
 
 describe("treatment exposure receipt authority", () => {
   it("keeps a validated miss without stage evidence inconclusive through tables and exposure comparison", async () => {
+    const measurementInput = conditionalFieldMeasurementFixture(["decoy"]);
+    const measurement = measureConditionalFieldResponse({ ...measurementInput, goldMemoryIds: ["retained-gold"] });
+    expect(measurement?.status).toBe("validated");
     const current = {
       ...(diagnostic("current-unattributed", ["candidate:f3"], true) as unknown as Record<string, unknown>),
       question_id: "current-unattributed", hit_at_5: false,
       gold_memory_ids: ["retained-gold"], gold: [],
+      cohort_ledger: {
+        dataset_cohort: "answerable",
+        evaluator_gold_identity: { status: "present", object_ids: ["retained-gold"] },
+        extraction_materialization: { status: "memory_emitted", emitted_memory_count: 1, reason: null },
+        evaluation_issue_reason: null
+      },
       miss_taxonomy: "conditional_field_unattributed",
-      conditional_field_measurement: { status: "validated" }
+      delivered_results: measurementInput.deliveredResults,
+      conditional_field_measurement: measurement
     } as never;
+    expect(classifyQuestionMeasurementStatus(current)).toBe("scorable");
     const stage = classifyQuestionStage(current);
     expect(stage).toMatchObject({ stage: "unattributed", mechanism: null });
     const tables = buildStageAttributionTables({ cell: "current", sourceDiagnostics: "injected", questions: [current] });

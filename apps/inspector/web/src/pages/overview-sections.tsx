@@ -150,10 +150,10 @@ export function BenchSummarySection(props: {
 
 function benchCards(data: BenchSummaryData, loaded: boolean, t: Translate): BenchCardProps[] {
   return [
-    benchCard("overview-bench-self", <FlaskConical className="h-4 w-4" />, "self", data.self, loaded, t),
-    benchCard("overview-bench-public", <Globe2 className="h-4 w-4" />, "public", data.public, loaded, t),
-    benchCard("overview-bench-public-multiturn", <Repeat2 className="h-4 w-4" />, "publicMultiturn", data.publicMultiturn, loaded, t),
-    benchCard("overview-bench-live", <ShieldCheck className="h-4 w-4" />, "live", data.live, loaded, t)
+    benchCard("overview-bench-self", <FlaskConical className="h-4 w-4" />, "self", data.self, loaded, t, data.errors?.self),
+    benchCard("overview-bench-public", <Globe2 className="h-4 w-4" />, "public", data.public, loaded, t, data.errors?.public),
+    benchCard("overview-bench-public-multiturn", <Repeat2 className="h-4 w-4" />, "publicMultiturn", data.publicMultiturn, loaded, t, data.errors?.publicMultiturn),
+    benchCard("overview-bench-live", <ShieldCheck className="h-4 w-4" />, "live", data.live, loaded, t, data.errors?.live)
   ];
 }
 
@@ -163,7 +163,8 @@ function benchCard(
   key: "self" | "public" | "publicMultiturn" | "live",
   summary: BenchSummaryShape | null,
   loaded: boolean,
-  t: Translate
+  t: Translate,
+  error?: string | null
 ): BenchCardProps {
   return {
     empty: t("overview:bench.empty"),
@@ -173,11 +174,13 @@ function benchCard(
     loaded,
     summary,
     t,
-    testId
+    testId,
+    error: error ?? null
   };
 }
 
 interface BenchCardProps {
+  readonly error: string | null;
   readonly empty: string;
   readonly hint: string;
   readonly icon: ReactNode;
@@ -188,14 +191,18 @@ interface BenchCardProps {
   readonly testId: string;
 }
 
-function BenchCard({ empty, hint, icon, label, loaded, summary, t, testId }: BenchCardProps) {
+function BenchCard({ empty, hint, icon, label, loaded, summary, t, testId, error }: BenchCardProps) {
   return (
     <div data-testid={testId} className="flex flex-col gap-3 rounded-lg border border-beige-200 bg-beige-50 p-5">
       <div className="flex items-center gap-2 text-ink-700/40">
         {icon}
         <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
       </div>
-      {summary === null ? (
+      {error !== null ? (
+        <div role="alert" data-testid={`${testId}-error`} className="text-[11px] text-state-error-text">
+          {t("overview:bench.error", { message: error })}
+        </div>
+      ) : summary === null ? (
         <div className="text-[11px] text-ink-700/55" data-testid={`${testId}-empty`}>
           {loaded ? empty : t("overview:bench.loading")}
         </div>

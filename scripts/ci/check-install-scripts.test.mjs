@@ -13,9 +13,9 @@ const installScript = path.join(repoRoot, "scripts/install.sh");
 const vacuumScript = path.join(repoRoot, "scripts/vacuum-into.mjs");
 const locatorScript = path.join(repoRoot, "scripts/resolve-live-db-path.mjs");
 
-function locateLiveDb(env) {
+function locateLiveDb(env, cwd = repoRoot) {
   const result = spawnSync(process.execPath, [locatorScript], {
-    cwd: repoRoot,
+    cwd,
     encoding: "utf8",
     env: { ...process.env, ...env }
   });
@@ -110,7 +110,7 @@ test("live db locator follows ALAYA_CONFIG_DIR then XDG_CONFIG_HOME then ~/.conf
   }
 });
 
-test("live db locator resolves relative toml and DATA_DIR against the config dir", () => {
+test("live db locator resolves relative toml and DATA_DIR against the launch directory", () => {
   const work = mkdtempSync(path.join(tmpdir(), "alaya-locator-rel-"));
   try {
     const configDir = path.join(work, "xdg", "alaya");
@@ -124,7 +124,9 @@ test("live db locator resolves relative toml and DATA_DIR against the config dir
       DATA_DIR: "ignored-when-toml-present"
     });
     assert.equal(fromToml.configDir, configDir);
-    assert.equal(fromToml.dbPath, path.join(configDir, "data", "live.db"));
+    assert.equal(fromToml.dbPath, path.join(repoRoot, "data", "live.db"));
+    const changedCwd = locateLiveDb({ ALAYA_CONFIG_DIR: configDir }, work);
+    assert.equal(changedCwd.dbPath, path.join(work, "data", "live.db"));
 
     rmSync(path.join(configDir, "alaya.toml"));
     const fromDataDir = locateLiveDb({
@@ -133,7 +135,7 @@ test("live db locator resolves relative toml and DATA_DIR against the config dir
       ALAYA_CONFIG_DIR: "",
       DATA_DIR: "relative-data"
     });
-    assert.equal(fromDataDir.dbPath, path.join(configDir, "relative-data", "alaya.db"));
+    assert.equal(fromDataDir.dbPath, path.join(repoRoot, "relative-data", "alaya.db"));
 
     const absoluteData = path.join(work, "abs-data");
     const fromAbsolute = locateLiveDb({
@@ -145,6 +147,44 @@ test("live db locator resolves relative toml and DATA_DIR against the config dir
     assert.equal(fromAbsolute.dbPath, path.join(absoluteData, "alaya.db"));
   } finally {
     rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("uninstall purge follows XDG and explicit config overrides, preserving the other directory", () => {
+  for (const explicit of [false, true]) {
+    const work = mkdtempSync(path.join(tmpdir(), "alaya-uninstall-"));
+    try {
+      const home = path.join(work, "home");
+      const defaultConfig = path.join(home, ".config", "alaya");
+      const xdg = path.join(work, "xdg");
+      const xdgConfig = path.join(xdg, "alaya");
+      const override = path.join(work, "override");
+      for (const dir of [defaultConfig, xdgConfig, override]) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, "alaya.db"), "fixture durable state");
+      }
+      const result = spawnSync("bash", [path.join(repoRoot, "scripts/uninstall.sh"), "--purge"], {
+        cwd: work, encoding: "utf8", env: { ...process.env, HOME: home, XDG_CONFIG_HOME: xdg,
+          ALAYA_CONFIG_DIR: explicit ? override : "", ALAYA_HOME: path.join(work, "install"),
+          ALAYA_BIN_DIR: path.join(work, "bin"), ALAYA_PURGE_YES: "1", ALAYA_DETACH_TARGETS: " " }
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(existsSync(defaultConfig), true);
+      assert.equal(existsSync(explicit ? override : xdgConfig), false);
+      assert.equal(existsSync(explicit ? xdgConfig : override), true);
+    } finally { rmSync(work, { recursive: true, force: true }); }
+  }
+});
+
+test("installer pnpm admission matches the declared version boundaries", () => {
+  const source = readFileSync(installScript, "utf8");
+  const declaration = source.match(/pnpm_version_supported\(\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(declaration);
+  const pkg = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(pkg.engines.pnpm, ">=12.3.4 <13");
+  for (const [version, accepted] of [["12.0.0", false], ["12.3.3", false], ["12.3.4", true], ["12.4.0", true], ["13.0.0", false], ["12.3.4-beta.1", false]]) {
+    const result = spawnSync("bash", ["-c", `${declaration}\npnpm_version_supported "$1"`, "version-check", version]);
+    assert.equal(result.status === 0, accepted, version);
   }
 });
 

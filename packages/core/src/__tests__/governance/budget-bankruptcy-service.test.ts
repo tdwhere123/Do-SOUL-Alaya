@@ -76,7 +76,7 @@ describe("BudgetBankruptcyService", () => {
     const createGate = createDeferred<Proposal>();
     const dependencies = createDependencies({
       proposalPort: createProposalPort({
-        create: vi.fn(async (params: Parameters<BudgetBankruptcyServiceProposalPort["create"]>[0]) => {
+        create: vi.fn(async (params: Parameters<BudgetBankruptcyServiceProposalPort["createWithEvents"]>[0]) => {
           await createGate.promise;
           return createStoredProposal({
             runtime_id: "proposal-race",

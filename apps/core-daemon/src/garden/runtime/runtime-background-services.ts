@@ -38,8 +38,7 @@ const LIBRARIAN_RUNTIME_TASK_KINDS = [
   GardenTaskKind.SYNTHESIS_REVIEW,
   GardenTaskKind.EMBEDDING_BACKFILL,
   GardenTaskKind.PATH_PLASTICITY_UPDATE,
-  GardenTaskKind.CONSOLIDATION_CYCLE,
-  GardenTaskKind.BULK_ENRICH
+  GardenTaskKind.CONSOLIDATION_CYCLE
 ] as const satisfies readonly GardenTaskKindValue[];
 
 type GardenRoleHandler = {
@@ -307,10 +306,6 @@ async function dispatchRuntimeRoleTask(
   }
   if (task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE) {
     await input.gardenSchedulerRuntime.runConsolidationCycleTask(task);
-    return;
-  }
-  if (task.task_kind === GardenTaskKind.BULK_ENRICH) {
-    await input.bulkEnrichRuntime.runTask(task);
     return;
   }
   await handler.run(task);

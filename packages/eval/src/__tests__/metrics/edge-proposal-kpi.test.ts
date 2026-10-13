@@ -158,7 +158,7 @@ describe("aggregateEdgeProposalRate", () => {
     expect(result?.per_workspace_per_day_median).toBe(3);
   });
 
-  it("skips records whose created_at is not a real YYYY-MM-DD day", () => {
+  it("retains unknown daily distribution when any proposal date is unavailable", () => {
     // created_at is read directly off the row (not the payload), so garbage
     // here must not synthesize a bogus per-day bucket. Two valid rows on the
     // same real day form the only legitimate bucket -> min == max == median.
@@ -199,10 +199,26 @@ describe("aggregateEdgeProposalRate", () => {
     // Garbage rows still count toward total_proposals (the payload is valid);
     // they are excluded only from the day-bucket aggregation.
     expect(result?.total_proposals).toBe(4);
-    // Only one valid day bucket with 2 proposals -> min == max == median == 2.
-    expect(result?.per_workspace_per_day_min).toBe(2);
-    expect(result?.per_workspace_per_day_max).toBe(2);
-    expect(result?.per_workspace_per_day_median).toBe(2);
+    expect(result?.invalid_day_records).toBe(2);
+    expect(result?.per_workspace_per_day_min).toBeNull();
+    expect(result?.per_workspace_per_day_max).toBeNull();
+    expect(result?.per_workspace_per_day_median).toBeNull();
+    expect(aggregateEdgeProposalRate(rows.slice(0, 2))).toMatchObject({
+      total_proposals: 2, invalid_day_records: 2, per_workspace_per_day_min: null,
+      per_workspace_per_day_max: null, per_workspace_per_day_median: null
+    });
+  });
+
+  it("does not publish complete totals after malformed created events", () => {
+    const valid = createdRow({ proposalId: "valid", triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+      confidence: 0.9, workspaceId: WORKSPACE_A, createdAt: "2026-05-24T12:00:00.000Z" });
+    const invalid = { ...valid, payload_json: {} };
+    for (const rows of [[invalid], [valid, invalid]]) {
+      expect(aggregateEdgeProposalRate(rows)).toMatchObject({ invalid_created_events: 1,
+        total_proposals: null, per_trigger_source: null, per_workspace_per_day_min: null });
+      expect(aggregateEdgeProposalRatePerQuestion([rows])).toMatchObject({
+        question_count: 1, invalid_created_events: 1, total_proposals: null, mean: null });
+    }
   });
 
   it("ignores reviewed events when computing the rate", () => {

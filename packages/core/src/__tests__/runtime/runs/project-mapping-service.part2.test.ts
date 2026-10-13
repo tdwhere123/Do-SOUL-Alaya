@@ -4,6 +4,17 @@ import { ProjectMappingService } from "../../../runtime/runs/project-mapping-ser
 import { createAnchor, createDependencies, createMemoryEntry } from "./project-mapping-service-test-fixtures.js";
 
 describe("ProjectMappingService", () => {
+it("rejects a mixed-workspace batch before any transition or audit", async () => {
+    const local = createAnchor({ object_id: "mapping-local" });
+    const foreign = createAnchor({ object_id: "mapping-foreign", workspace_id: "workspace-2" });
+    const { dependencies } = createDependencies();
+    dependencies.projectMappingRepo.findByIds = vi.fn(async () => [local, foreign]);
+    const service = new ProjectMappingService(dependencies);
+    await expect(service.batchAccept([local.object_id, foreign.object_id], AcceptedBy.USER, "workspace-1"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(dependencies.projectMappingRepo.updateState).not.toHaveBeenCalled();
+    expect(dependencies.eventLogRepo.append).not.toHaveBeenCalled();
+  });
 it("loads anchors and memories in batches during batchAccept", async () => {
     const firstAnchor = Object.freeze(
       createAnchor({ object_id: "mapping-batch-1", global_object_id: "memory-batch-1" })
@@ -81,7 +92,7 @@ it("loads anchors and memories in batches during batchAccept", async () => {
 
     const anchors = await service.batchAccept(
       [secondAnchor.object_id, firstAnchor.object_id],
-      AcceptedBy.USER
+      AcceptedBy.USER, "workspace-1"
     );
 
     expect(findByIds).toHaveBeenCalledWith([secondAnchor.object_id, firstAnchor.object_id]);
@@ -101,7 +112,7 @@ it("fails batchAccept when a requested anchor is missing from the batch lookup",
     });
     const service = new ProjectMappingService(dependencies);
 
-    await expect(service.batchAccept([anchor.object_id, "mapping-missing"], AcceptedBy.USER)).rejects.toMatchObject({
+    await expect(service.batchAccept([anchor.object_id, "mapping-missing"], AcceptedBy.USER, "workspace-1")).rejects.toMatchObject({
       code: "NOT_FOUND"
     });
   });

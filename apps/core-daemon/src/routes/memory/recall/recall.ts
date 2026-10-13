@@ -1,3 +1,4 @@
+import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import {
   CoreError,
@@ -19,7 +20,8 @@ export interface RecallRouteServices {
 export function registerRecallRoutes(app: Hono, services: RecallRouteServices): void {
   // Debug/inspection endpoints: each HTTP request builds a fresh TaskObjectSurface snapshot (not turn-lifecycle managed).
   app.get("/runs/:runId/task-surface", async (context) => {
-    const run = await services.runService.getById(context.req.param("runId"));
+    const run = await resolveRequestRun(context, services.runService, context.req.param("runId"));
+    if (run instanceof Response) return run;
     await services.workspaceService.getById(run.workspace_id);
 
     const taskSurface = await services.taskSurfaceBuilder.build({
@@ -32,7 +34,8 @@ export function registerRecallRoutes(app: Hono, services: RecallRouteServices): 
   });
 
   app.get("/runs/:runId/recall-candidates", async (context) => {
-    const run = await services.runService.getById(context.req.param("runId"));
+    const run = await resolveRequestRun(context, services.runService, context.req.param("runId"));
+    if (run instanceof Response) return run;
     await services.workspaceService.getById(run.workspace_id);
 
     const taskSurface = await services.taskSurfaceBuilder.build({

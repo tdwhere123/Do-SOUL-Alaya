@@ -14,7 +14,7 @@ import {
   type RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { bindEventPublisher, type EventPublisherInput } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import {
   buildBankruptcyDossier,
@@ -245,22 +245,25 @@ export class BudgetBankruptcyService {
     }
 
     const artifacts = this.buildDeclarationArtifacts(params, effectiveMode, occurredAt);
-    await this.appendDeclaredEvent(artifacts, runId, workspaceId, occurredAt);
-    const proposal = await this.dependencies.proposalService.create({
+    const committed = await this.dependencies.proposalService.createWithEvents({
       workspaceId,
       runId,
       dossierRef: artifacts.dossier.runtime_id,
       options: artifacts.options,
       recommendedOptionId: artifacts.recommendedOptionId,
       expiresAt: artifacts.initialState.expires_at
-    });
+    }, [this.declaredEventInput(artifacts, runId, workspaceId, occurredAt)]);
+    const proposal = committed.proposal;
     const entry = createStoreEntry(artifacts.initialState, artifacts.dossier, proposal.proposal_id, artifacts.pressureRatio);
+    this.setStateStoreEntry(runId, entry);
+    await bindEventPublisher({ eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier, purpose: "BudgetBankruptcyService" })
+      .propagateCommitted(committed.events);
 
     if (artifacts.kind === BankruptcyKind.SOFT) {
       return await this.autoResolveSoftDeclaration(entry, proposal, runId, workspaceId);
     }
 
-    this.setStateStoreEntry(runId, entry);
     return { state: entry.state, dossier: entry.dossier, proposal };
   }
 
@@ -389,17 +392,13 @@ export class BudgetBankruptcyService {
     return proposal;
   }
 
-  private async appendDeclaredEvent(
+  private declaredEventInput(
     artifacts: DeclarationArtifacts,
     runId: string,
     workspaceId: string,
     occurredAt: string
-  ): Promise<EventLogEntry> {
-    return await bindEventPublisher({
-      eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier,
-      purpose: "BudgetBankruptcyService"
-    }).publish({
+  ): EventPublisherInput {
+    return {
       event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_DECLARED,
       entity_type: "bankruptcy_dossier",
       entity_id: artifacts.dossier.runtime_id,
@@ -423,7 +422,7 @@ export class BudgetBankruptcyService {
         workspace_id: workspaceId,
         occurred_at: occurredAt
       })
-    });
+    };
   }
 
   private async appendResolvedEvent(

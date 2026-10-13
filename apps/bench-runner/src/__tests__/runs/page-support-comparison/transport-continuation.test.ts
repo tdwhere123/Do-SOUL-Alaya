@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -285,7 +286,7 @@ async function failedFixture(responses: Response[] = ["failure", "assessed"]) {
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const selected = new URL(input instanceof Request ? input.url : String(input));
     if (selected.origin !== "https://api.stepfun.com") throw new Error("fixture refused a foreign provider route");
-    return fetch(`${origin}${selected.pathname}`, init);
+    return fetchLoopbackProvider(fetch, new URL(selected.pathname, origin), init);
   });
   const root = mkdtempSync(join(tmpdir(), "comparison-transport-continuation-"));
   roots.push(root);

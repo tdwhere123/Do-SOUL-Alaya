@@ -1,3 +1,4 @@
+import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createServer } from "node:http";
 import { lookup } from "node:dns/promises";
 import { createHash } from "node:crypto";
@@ -168,7 +169,7 @@ async function localHttp<T>(content: string | null, finish: string | null, statu
   const fetchImpl: typeof fetch = (url, init) => {
     expect(String(url)).toBe(`${ENDPOINT}/chat/completions`);
     expect(init?.redirect).toBe("error");
-    return nativeFetch(new URL(new URL(String(url)).pathname, origin), init);
+    return fetchLoopbackProvider(nativeFetch, new URL(new URL(String(url)).pathname, origin), init);
   };
   try { return await run(fetchImpl, calls, wire); }
   finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }

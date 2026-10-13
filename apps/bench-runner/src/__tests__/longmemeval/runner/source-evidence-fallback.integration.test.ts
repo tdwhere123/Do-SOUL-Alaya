@@ -1,4 +1,7 @@
 import { installHistoricalSignalReplay } from "../../harness/seeding/historical-signal-replay-fixture.js";
+import { createHash } from "node:crypto";
+import { initDatabase, SqliteSignalRepo } from "@do-soul/alaya-storage";
+import { readGardenSourceTurnFallbackReceipt, readGardenSourceTurnFallbackArtifactSignalId } from "@do-soul/alaya-protocol";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -143,6 +146,16 @@ describe("LongMemEval source evidence fallback integration", () => {
 
     const db = new DatabaseSync(join(daemon.dataDir, "alaya.db"));
     try {
+      const signalId = state.seedRounds[0]!.directEvidenceBindings![0]!.signalId;
+      const signal = await new SqliteSignalRepo(initDatabase({
+        filename: join(daemon.dataDir, "alaya.db")
+      })).getById(signalId);
+      expect(signal).not.toBeNull();
+      const receipt = readGardenSourceTurnFallbackReceipt(signal!);
+      expect(receipt).not.toBeNull();
+      expect(receipt).toMatchObject({ signal_id: signalId, source_corpus: sourceEvidenceCorpus() });
+      const digest = createHash("sha256").update(receipt!.preimage, "utf8").digest("hex");
+      expect(receipt!.digest).toBe(digest);
       expect(db.prepare("SELECT COUNT(*) AS count FROM memory_entries")
         .get()).toEqual({ count: 0 });
       expect(db.prepare(
@@ -155,12 +168,28 @@ describe("LongMemEval source evidence fallback integration", () => {
         created_by: "garden_compile",
         evidence_kind: "conversation_excerpt",
         evidence_health_state: "verified",
-        source_hash: expect.stringMatching(
-          /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
-        ),
+        source_hash: `sha256:garden-source-turn-fallback-v2:${digest}`,
         gist: sourceEvidenceCorpus(),
         excerpt: SOURCE_EVIDENCE_USER_CONTENT
       });
+      await daemon.proposeMemoriesFromCompileSignals([{
+        signalKind: "potential_evidence_anchor", objectKind: "source_turn", confidence: 1,
+        distilledFact: "I moved the archive to Oslo.", turnContent: "User: I moved the archive to Oslo.",
+        turnMessages: [{ message_id: "different-user-turn", role: "user", content: "I moved the archive to Oslo." }],
+        evidenceRef: "q-distinct-fallback", turnSeedIndex: 2,
+        extractionProvider: "official_api_compile", evidenceFallbackReason: "empty_extraction"
+      }]);
+      const other = db.prepare("SELECT json_extract(physical_anchor, '$.artifact_ref') AS artifact_ref, source_hash FROM evidence_capsules WHERE object_id != ?")
+        .get(entries[0]!.objectId) as { artifact_ref: string; source_hash: string };
+      expect(other).toBeDefined();
+      const otherSignalId = readGardenSourceTurnFallbackArtifactSignalId(other.artifact_ref);
+      expect(otherSignalId).not.toBe(signalId);
+      const otherSignal = await new SqliteSignalRepo(initDatabase({ filename: join(daemon.dataDir, "alaya.db") }))
+        .getById(otherSignalId!);
+      const otherReceipt = readGardenSourceTurnFallbackReceipt(otherSignal!)!;
+      const otherDigest = createHash("sha256").update(otherReceipt.preimage, "utf8").digest("hex");
+      expect(other.source_hash).toBe(`sha256:garden-source-turn-fallback-v2:${otherDigest}`);
+      expect(otherDigest).not.toBe(digest);
     } finally {
       db.close();
     }

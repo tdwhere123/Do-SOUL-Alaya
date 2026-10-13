@@ -297,12 +297,18 @@ describe("history archive filtered latest pointers", () => {
       kpi: { ...payload.kpi, per_scenario: [] }
     })]
   ])("does not promote eligible attribution with %s", async (_label, forge) => {
-    const payload = forge({
+    const verifiedLayout = withVerifiedLongMemEvalEvidence(layout);
+    const valid = {
       ...buildFullLongMemEvalPayload("public", "abc1234", 0.91),
-      policy_shape: "chat"
-    });
+      policy_shape: "chat" as const
+    };
+    await writeEntry(verifiedLayout, "public", "2026-05-13T100000Z-abc1234-policy-chat", valid, "report", null);
+    expect((await readLatest(verifiedLayout, "public", {
+      split: "longmemeval-s", policyShape: "chat", pointerKind: "passing"
+    }))?.alaya_commit).toBe("abc1234");
+    const payload = forge({ ...valid, alaya_commit: "def5678" });
     await writeEntry(
-      layout,
+      verifiedLayout,
       "public",
       "2026-05-14T100000Z-abc1234-policy-chat",
       payload,
@@ -310,11 +316,11 @@ describe("history archive filtered latest pointers", () => {
       null
     );
 
-    expect(await readLatest(layout, "public", {
+    expect((await readLatest(verifiedLayout, "public", {
       split: "longmemeval-s",
       policyShape: "chat",
       pointerKind: "passing"
-    })).toBeNull();
+    }))?.alaya_commit).toBe("abc1234");
   });
 });
 

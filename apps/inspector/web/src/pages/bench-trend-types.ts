@@ -12,7 +12,7 @@ export interface BenchTrendPoint {
   readonly r_at_5: number;
   readonly r_at_10: number;
   readonly latency_ms_p95: number;
-  readonly token_saved_ratio_vs_full_prompt: number;
+  readonly token_saved_ratio_vs_full_prompt: number | null;
   readonly raw_history_tokens: number | null;
   readonly stored_memory_tokens: number | null;
   readonly recalled_context_tokens_mean: number | null;

@@ -281,6 +281,7 @@ export function createRuntimeInput(options: {
     } as unknown as GardenRuntimeInput["pathGraphSnapshotRepo"],
     pathRelationRepo: {
       findActive: vi.fn(async () => []),
+        findActiveAll: vi.fn(async () => []),
       findByAnchors: vi.fn(async () => [])
     } as unknown as GardenRuntimeInput["pathRelationRepo"],
     strongRefService: {

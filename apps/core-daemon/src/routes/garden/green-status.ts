@@ -36,7 +36,7 @@ export function registerGreenStatusRoutes(app: Hono, services: GreenStatusRouteS
     const targetObjectId = context.req.param("targetObjectId");
     await services.workspaceService.getById(workspaceId);
 
-    const status = await services.greenService.getStatus(targetObjectId);
+    const status = await services.greenService.getStatus(targetObjectId, workspaceId);
     if (status === null || status.workspace_id !== workspaceId) {
       throw new CoreError("NOT_FOUND", "Green status not found");
     }

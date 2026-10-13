@@ -195,7 +195,7 @@ describe("mcp memory tool handler wiring", () => {
       total_scanned: 2,
       coarse_filter_count: 2,
       fine_assessment_count: 2,
-      index: stubRecallIndex(["mem1"])
+      index: stubRecallIndex(["mem2", "mem1"])
     })) as typeof deps.recallService.recall;
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -221,8 +221,8 @@ describe("mcp memory tool handler wiring", () => {
       readonly results: ReadonlyArray<{ readonly object_id: string }>;
       readonly index?: { readonly entries: readonly unknown[] };
     };
-    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem1"]);
-    expect(output.index?.entries).toHaveLength(1);
+    expect(output.results.map((entry) => entry.object_id)).toEqual(["mem2", "mem1"]);
+    expect(output.index?.entries).toHaveLength(2);
     expect(deps.trustStateRecorder.recordDelivery).toHaveBeenCalled();
   });
 

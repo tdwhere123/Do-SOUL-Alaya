@@ -14,6 +14,13 @@ const buildQuestion = (
 ) => buildQuestionDiagnosticFixture({ questionId, gold });
 
 describe("buildLongMemEvalFullGoldCoverage", () => {
+  it("does not turn unranked field membership into pool at fifty or one hundred", () => {
+    const question = buildQuestion("q-unranked", [buildGold({ object_id: "field-gold",
+      final_rank: 1, pre_budget_rank: null, fused_rank: null })]);
+    expect(buildLongMemEvalFullGoldCoverage([question])).toMatchObject({
+      gold_coverage_at_5: 1, pool_recall_at_50: null, pool_recall_at_100: null
+    });
+  });
   it("full_gold_at_5 requires EVERY gold top-5, unlike official any-gold r_at_5", () => {
     // 2-gold question: one delivered top-5, the other at rank 8 → official r_at_5
     // would credit this (any gold), but full_gold@5 must NOT.

@@ -26,6 +26,9 @@ export type StageCountKey = AttributionStage;
 export interface StageAttributionDenominators {
   readonly D_Q_evaluated: number;
   readonly D_Q_scorable: number;
+  readonly D_Q_non_abstention: number;
+  readonly D_Q_unscorable: number;
+  readonly D_Q_measurement_unknown: number;
   readonly D_Q_gold_bearing: number;
   readonly D_Q_miss: number;
   readonly D_G_all: number;
@@ -81,6 +84,7 @@ export interface QuestionStageRow {
 
 export interface StageAttributionSummary {
   readonly denominators: StageAttributionDenominators;
+  readonly measurement_unknown_question_ids: readonly string[];
   readonly question_stage_counts: Readonly<Record<StageCountKey, number>>;
   readonly gold_stage_counts: Readonly<Record<StageCountKey, number>>;
   readonly kpi_pre_budget_6_10: number;

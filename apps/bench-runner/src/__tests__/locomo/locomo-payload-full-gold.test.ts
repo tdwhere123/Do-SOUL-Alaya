@@ -18,7 +18,8 @@ describe("LoCoMo KPI full-gold coverage", () => {
         totalHitAt5: 0,
         totalHitAt10: 0,
         totalQa: 0,
-        conversationFailures: 0
+        conversationFailures: 0,
+        unavailableQuestions: []
       },
       runAt: new Date("2026-07-26T00:00:00.000Z"),
       alayaVersion: "0.3.11",

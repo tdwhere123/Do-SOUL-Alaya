@@ -5,7 +5,9 @@ import {
 } from "../../../garden/ingestion/compute-provider.js";
 import { resolveSourceAssertion } from "../../../garden/triage/grounding/source-assertion.js";
 import { groundOfficialApiDraft } from "../../../garden/ingestion/official-api/source-grounding.js";
-import { buildOfficialApiSourceCorpus } from "../../../garden/triage/grounding/source-locator.js";
+import { buildOfficialApiSourceCorpus, parseOfficialApiSourceLocator, resolveOfficialApiSourceLocator } from "../../../garden/triage/grounding/source-locator.js";
+import { buildOfficialCandidateSignal } from "../../../garden/ingestion/official-api/signal-payload.js";
+import { LegacyCandidateMemorySignalSchema } from "@do-soul/alaya-protocol";
 import { withOpenSemanticFactorGraph } from "./compute-provider-fixtures.js";
 
 const CONTEXT: GardenCompileContext = {
@@ -425,10 +427,27 @@ describe("official Garden source grounding", () => {
   it("keeps a bounded verification window when the assertion occurs late in a long turn", async () => {
     const assertion = "I moved to Berlin.";
     const source = `${"Background context. ".repeat(180)}${assertion}`;
-    const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
-    const [signal] = await provider.compile(source, CONTEXT);
-    expect(signal?.raw_payload.full_turn_content).toContain(assertion);
-    expect(String(signal?.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
+    const corpus = buildOfficialApiSourceCorpus(source, []);
+    const [draft] = parseOfficialApiSignals(JSON.stringify({ signals: [withOpenSemanticFactorGraph({
+      signal_kind: "potential_claim", object_kind: "activity", confidence: 0.9,
+      matched_text: assertion, distilled_fact: assertion,
+      source_locator: { contract_version: 4, kind: "assertion_catalog", assertion_id: 181 }
+    })] }));
+    const grounded = groundOfficialApiDraft(draft!, corpus);
+    const signal = LegacyCandidateMemorySignalSchema.parse(buildOfficialCandidateSignal({
+      draft: grounded.draft, workspaceId: CONTEXT.workspace_id, runId: CONTEXT.run_id,
+      surfaceId: null, normalizedTurnContent: source, turnMessages: [], groundingSourceText: corpus,
+      confidence: 0.9, temporalProjection: undefined, distilledFact: assertion,
+      providerKind: "official_api", signalId: "late-source", createdAt: "2026-04-23T09:00:00.000Z",
+      sourceGrounding: grounded.audit
+    }));
+    expect(grounded.audit.status).toBe("grounded");
+    expect(signal.raw_payload.full_turn_content).toContain(assertion);
+    expect(String(signal.raw_payload.full_turn_content).length).toBeLessThanOrEqual(2_048);
+    expect(resolveOfficialApiSourceLocator(
+      String(signal.raw_payload.full_turn_content),
+      parseOfficialApiSourceLocator(signal.raw_payload.source_locator)!
+    )).toEqual({ status: "grounded", assertion });
   });
 });
 

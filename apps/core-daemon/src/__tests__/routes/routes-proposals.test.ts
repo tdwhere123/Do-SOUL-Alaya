@@ -412,7 +412,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     });
     const proposalService = {
       findByWorkspaceId: vi.fn(async () => []),
-      findPending: vi.fn(async () => [existingProposal])
+      findPending: vi.fn(async () => [
+        { ...existingProposal, proposal_id: "22222222-2222-4222-8222-222222222222", derived_from: "mem-other" },
+        { ...existingProposal, proposal_id: "33333333-3333-4333-8333-333333333333",
+          proposal_options: existingProposal.proposal_options.map((option) => ({ ...option, option_id: "unrelated-option" })) },
+        existingProposal
+      ])
     };
     const createProposalWithEventsIfAbsent = vi.fn();
     const notifyEntry = vi.fn();

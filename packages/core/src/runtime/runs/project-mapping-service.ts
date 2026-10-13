@@ -12,6 +12,7 @@ import {
   type ProjectMappingState as ProjectMappingStateType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { parseNonEmptyString } from "../../shared/validators.js";
 import { bindEventPublisher } from "../event-publisher.js";
 import { ProjectMappingAnchorEnsurer } from "./project-mapping-anchor-ensurer.js";
 import {
@@ -243,9 +244,10 @@ export class ProjectMappingService {
 
   public async batchAccept(
     mappingIds: readonly string[],
-    acceptedBy: AcceptedByType
+    acceptedBy: AcceptedByType,
+    workspaceId: string
   ): Promise<readonly Readonly<ProjectMappingAnchor>[]> {
-    const anchors = await this.getAnchorsByIds(mappingIds);
+    const anchors = await this.getAnchorsByIds(mappingIds, parseNonEmptyString(workspaceId, "workspaceId"));
     const memoryIdsByWorkspace = new Map<string, Set<string>>();
     for (const anchor of anchors) {
       const ids = memoryIdsByWorkspace.get(anchor.workspace_id) ?? new Set<string>();
@@ -298,7 +300,7 @@ export class ProjectMappingService {
     return resolveProjectMappingConfirmationPolicy(memory);
   }
 
-  private async getAnchorsByIds(mappingIds: readonly string[]): Promise<readonly Readonly<ProjectMappingAnchor>[]> {
+  private async getAnchorsByIds(mappingIds: readonly string[], workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchor>[]> {
     const anchors = await this.dependencies.projectMappingRepo.findByIds(mappingIds);
     const anchorsById = new Map(anchors.map((anchor) => [anchor.object_id, anchor] as const));
 
@@ -306,7 +308,7 @@ export class ProjectMappingService {
       mappingIds.map((mappingId) => {
         const anchor = anchorsById.get(mappingId);
 
-        if (anchor === undefined) {
+        if (anchor === undefined || anchor.workspace_id !== workspaceId) {
           throw new CoreError("NOT_FOUND", `Project mapping anchor ${mappingId} was not found.`);
         }
 

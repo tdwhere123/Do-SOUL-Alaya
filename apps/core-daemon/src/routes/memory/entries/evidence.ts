@@ -1,3 +1,4 @@
+import { resolveRequestRun } from "../../../runtime/request-token-binding.js";
 import type { Hono } from "hono";
 import { CoreError, projectEvidenceRead, type EvidenceService, type RunService, type WorkspaceService } from "@do-soul/alaya-core";
 import { parseListPagination } from "../../shared/shared.js";
@@ -22,7 +23,8 @@ export function registerEvidenceRoutes(app: Hono, services: EvidenceRouteService
 
   app.get("/runs/:runId/evidence", async (context) => {
     const runId = context.req.param("runId");
-    await services.runService.getById(runId);
+    const run = await resolveRequestRun(context, services.runService, runId);
+    if (run instanceof Response) return run;
     const evidence = await services.evidenceService.findByRunId(runId, parseListPagination(context));
     const evaluatedAsOf = new Date().toISOString();
     return context.json({ success: true, data: evidence.map((row) => projectEvidenceRead(row, evaluatedAsOf)) }, 200);

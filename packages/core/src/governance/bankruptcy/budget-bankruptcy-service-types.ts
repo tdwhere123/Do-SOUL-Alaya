@@ -10,6 +10,7 @@ import type {
   ProposalResolutionState as ProposalResolutionStateValue,
   RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
+import type { EventPublisherInput } from "../../runtime/event-publisher.js";
 
 export type ActiveBankruptcyKind = Exclude<BankruptcyKindValue, "none">;
 
@@ -26,14 +27,17 @@ export interface BudgetBankruptcyServiceEventLogPort {
 }
 
 export interface BudgetBankruptcyServiceProposalPort {
-  create(params: {
+  createWithEvents(params: {
     readonly workspaceId: string;
     readonly runId: string;
     readonly dossierRef: string;
     readonly options: readonly Readonly<ProposalOption>[];
     readonly recommendedOptionId: string | null;
     readonly expiresAt: string | null;
-  }): Promise<Readonly<Proposal>>;
+  }, events: readonly EventPublisherInput[]): Promise<Readonly<{
+    proposal: Readonly<Proposal>;
+    events: readonly EventLogEntry[];
+  }>>;
   update(
     proposalId: string,
     patch: {

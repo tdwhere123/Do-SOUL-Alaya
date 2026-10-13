@@ -25,8 +25,7 @@ export async function accrueAnswersWithCoRelevance(
   return new AnswersWithEdgeProducerService({
     pairSource,
     assertionPort: input.activeRuntime.services.relationAssertionAdmissionPort,
-    warn: (message, meta) => console.error(`[answers-with] ${message}`, meta),
-    failOnPairSourceError: true
+    warn: (message, meta) => console.error(`[answers-with] ${message}`, meta)
   }).crystallize({
     workspaceId: input.activeContext.workspaceId,
     runId: input.activeContext.runId,

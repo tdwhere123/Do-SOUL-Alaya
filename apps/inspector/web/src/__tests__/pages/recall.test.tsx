@@ -161,6 +161,15 @@ describe("RecallPage", () => {
     });
   });
 
+  it("shows stale data with an explicit error when a background refresh fails", async () => {
+    renderRecall();
+    await screen.findByTestId("recall-kpi-total");
+    fetchMock.mockImplementation(async () => jsonResponse({ error: "offline" }, 500));
+    await userEvent.click(screen.getByRole("button", { name: /refresh/i }));
+    expect((await screen.findByTestId("recall-error")).textContent).toContain("previously loaded data");
+    expect(screen.getByTestId("recall-kpi-total").textContent).toContain("42");
+  });
+
   it("requeries when the window toggle changes", async () => {
     renderRecall();
     await screen.findByTestId("recall-kpi-total");

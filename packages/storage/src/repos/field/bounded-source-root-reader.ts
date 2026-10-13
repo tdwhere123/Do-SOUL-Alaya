@@ -16,6 +16,7 @@ import {
 } from "./source-repo.js";
 import type { FieldSourceRecordRow } from "./ports.js";
 import { RETAINED_SOURCE_READ_RESERVATION } from "./retained-source-chunks.js";
+import { StorageError } from "../../shared/errors.js";
 
 const PAGE_MAX = 512;
 const DEFAULT_BYTE_LIMIT = 65_536;
@@ -129,14 +130,16 @@ export class SqliteSourceRootRecallReader {
         : null
     );
     if (family !== null) {
+      parseRecordCursor(family.recordsAfter);
+      parseCapsuleCursor(family.capsulesAfter);
       return this.pageFamilies(input.workspaceId, family, limit, byteLimit, input.workLimit, nativeByteLimit);
     }
     if (after !== null && after.startsWith("c:")) {
+      parseCapsuleCursor(after);
       return this.pageFamilies(input.workspaceId, { recordsAfter: null, capsulesAfter: after,
         recordsDone: true, capsulesDone: false }, limit, byteLimit, input.workLimit, nativeByteLimit);
     }
-    return this.pageFamilies(input.workspaceId, { recordsAfter: null, capsulesAfter: null,
-      recordsDone: true, capsulesDone: false }, limit, byteLimit, input.workLimit, nativeByteLimit);
+    throw new StorageError("VALIDATION_FAILED", "invalid source-root cursor");
   }
 
   public load(
@@ -282,10 +285,10 @@ export class SqliteSourceRootRecallReader {
       const page = takeCapsule ? this.pageCapsules(workspaceId, next.capsulesAfter, 1, byteLimit)
         : this.pageRecords(workspaceId, next.recordsAfter, 1, byteLimit);
       result = mergePages(result, page);
+      if (page.unavailable) break;
       next = { ...next, nextFamily: takeCapsule ? "record" : "capsule",
         ...(takeCapsule ? { capsulesAfter: page.committedThrough, capsulesDone: !page.truncated }
           : { recordsAfter: page.committedThrough, recordsDone: !page.truncated }) };
-      if (page.unavailable) break;
     }
     return { ...result, committedThrough: encodeFamilyCursor(next), truncated: !next.recordsDone || !next.capsulesDone };
   }

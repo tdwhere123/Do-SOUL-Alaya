@@ -34,105 +34,34 @@ import {
   withToolConfirmation
 } from "./tool-runtime-shared-fixture.js";
 
-function createRecordingConversationToolExecutor(toolSpec: ToolSpec): {
-  readonly appendedEntries: EventLogEntry[];
-  readonly executor: {
-    execute(request: {
-      readonly toolId: string;
-      readonly rawInput: unknown;
-      readonly workspaceRoot: string;
-      readonly affectedPathRoots?: readonly string[];
-      readonly handler: (
-        context: { readonly writableRoots: readonly string[] },
-        rawInput?: unknown
-      ) => Promise< unknown>;
-    }): Promise<{ readonly result: unknown }>;
-  };
-  readonly insertedRecords: ToolExecutionRecord[];
-} {
-  const appendedEntries: EventLogEntry[] = [];
-  const insertedRecords: ToolExecutionRecord[] = [];
-
+function createRecordingConversationToolExecutor(toolSpec: ToolSpec) {
+  const requests: Array<{ readonly rawInput: unknown; readonly affectedPathRoots?: readonly string[] }> = [];
   return {
-    appendedEntries,
-    insertedRecords,
+    requests,
     executor: {
-      execute: async (request) => {
+      execute: async (request: {
+        readonly toolId: string; readonly rawInput: unknown; readonly workspaceRoot: string;
+        readonly affectedPathRoots?: readonly string[];
+        readonly handler: (context: { readonly writableRoots: readonly string[] }, rawInput?: unknown) => Promise<unknown>;
+      }) => {
         expect(request.toolId).toBe(toolSpec.tool_id);
-        const result = await request.handler(
-          { writableRoots: [request.workspaceRoot] },
-          request.rawInput
-        );
-        const affectedPaths = extractAffectedPaths(request.rawInput, request.affectedPathRoots);
-        insertedRecords.push({
-          tool_call_id: "exec-affected-path",
-          tool_id: request.toolId,
-          run_id: "run-1",
-          workspace_id: "workspace-1",
-          status: "completed",
-          input_json: request.rawInput as Record<string, unknown>,
-          result_json: result as Record<string, unknown>,
-          started_at: "2026-04-20T00:00:00.000Z",
-          completed_at: "2026-04-20T00:00:01.000Z",
-          affected_paths: affectedPaths
-        } as unknown as ToolExecutionRecord);
-        appendedEntries.push({
-          event_id: `event-${appendedEntries.length + 1}`,
-          event_type: "tool_call.completed",
-          entity_type: "tool_call",
-          entity_id: "exec-affected-path",
-          workspace_id: "workspace-1",
-          run_id: "run-1",
-          caused_by: "tool-runtime-test",
-          revision: 1,
-          created_at: "2026-04-20T00:00:01.000Z",
-          payload_json: {
-            toolCallId: "exec-affected-path",
-            statusKind: "success",
-            ...(affectedPaths === undefined ? {} : { affected_paths: affectedPaths })
-          }
-        });
-        return { result };
+        requests.push(request);
+        return { result: await request.handler({ writableRoots: [request.workspaceRoot] }, request.rawInput) };
       }
     }
   };
-}
-
-function extractAffectedPaths(
-  rawInput: unknown,
-  affectedPathRoots: readonly string[] | undefined
-): readonly string[] | undefined {
-  if (affectedPathRoots === undefined || affectedPathRoots.length === 0) {
-    return undefined;
-  }
-
-  const pathInput = (rawInput as { readonly path?: unknown }).path;
-  if (typeof pathInput !== "string") {
-    return undefined;
-  }
-
-  const resolvedPath = path.resolve(pathInput);
-  for (const root of affectedPathRoots) {
-    const resolvedRoot = path.resolve(root);
-    const relativePath = path.relative(resolvedRoot, resolvedPath);
-    if (relativePath.length > 0 && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)) {
-      return [relativePath.split(path.sep).join("/")];
-    }
-  }
-
-  return undefined;
 }
 
 afterEach(cleanupToolRuntimeTempDirs);
 
 describe("tool-runtime relative path handling", () => {
 
-  it("extracts repo-relative affected_paths for builtin write tools", async () => {
+  it("forwards repository roots and raw input for builtin write tools", async () => {
     const workspaceDir = await createWorkspace();
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     await mkdir(path.join(repoDir, "src"), { recursive: true });
-    const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
+    const { requests, executor } = createRecordingConversationToolExecutor(
       createConversationToolSpec("tools.write_file")
     );
 
@@ -164,21 +93,16 @@ describe("tool-runtime relative path handling", () => {
     );
 
     expect(JSON.parse(result.content)).toMatchObject({ ok: true });
-    expect(insertedRecords.at(-1)?.affected_paths).toEqual(["src/index.ts"]);
-    expect(
-      appendedEntries.find((entry) => entry.event_type === "tool_call.completed")?.payload_json
-    ).toMatchObject({
-      toolCallId: "exec-affected-path",
-      statusKind: "success",
-      affected_paths: ["src/index.ts"]
-    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.affectedPathRoots).toContain(repoDir);
+    expect(requests[0]?.rawInput).toMatchObject({ path: path.join(repoDir, "src/index.ts") });
   });
 
-  it("extracts repo-relative affected_paths for external filesystem write tools", async () => {
+  it("forwards repository roots and raw input for external filesystem write tools", async () => {
     const workspaceDir = await createWorkspace();
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
-    const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
+    const { requests, executor } = createRecordingConversationToolExecutor(
       createConversationToolSpec("mcp__filesystem__write_file")
     );
 
@@ -216,21 +140,16 @@ describe("tool-runtime relative path handling", () => {
     expect(JSON.parse(result.content)).toEqual({
       content: [{ type: "text", text: "ok" }]
     });
-    expect(insertedRecords.at(-1)?.affected_paths).toEqual(["docs/notes.md"]);
-    expect(
-      appendedEntries.find((entry) => entry.event_type === "tool_call.completed")?.payload_json
-    ).toMatchObject({
-      toolCallId: "exec-affected-path",
-      statusKind: "success",
-      affected_paths: ["docs/notes.md"]
-    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.affectedPathRoots).toContain(repoDir);
+    expect(requests[0]?.rawInput).toMatchObject({ path: path.join(repoDir, "docs/notes.md") });
   });
 
-  it("omits affected_paths when a write tool path cannot be normalized against repo roots", async () => {
+  it("forwards the original outside-repository path for the executor to assess", async () => {
     const workspaceDir = await createWorkspace();
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
-    const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
+    const { requests, executor } = createRecordingConversationToolExecutor(
       createConversationToolSpec("mcp__filesystem__write_file")
     );
 
@@ -268,10 +187,9 @@ describe("tool-runtime relative path handling", () => {
     expect(JSON.parse(result.content)).toEqual({
       content: [{ type: "text", text: "ok" }]
     });
-    expect(insertedRecords.at(-1)?.affected_paths).toBeUndefined();
-    expect(
-      appendedEntries.find((entry) => entry.event_type === "tool_call.completed")?.payload_json
-    ).not.toHaveProperty("affected_paths");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.affectedPathRoots).toContain(repoDir);
+    expect(requests[0]?.rawInput).toMatchObject({ path: path.join(workspaceDir, "outside-repo.txt") });
   });
 
   it("routes dynamically registered external tools through the governed executor", async () => {
