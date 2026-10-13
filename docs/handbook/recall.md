@@ -1766,8 +1766,18 @@ retained-source fallback only within the same display and resource limits;
 window availability does not imply the original source is complete. This owner
 feeds native package selection and the public encoder. Dependencies come from
 the executed binding closures and observation origins, never returned-value text
-or the consumed-leaf summary. Packaging offers each independently executed proof
-intact and, when it fits, one combined package; it does not enumerate proof subsets.
+or the consumed-leaf summary. Baseline packaging offers each independently executed
+proof intact and, when its source window fits, one combined package. After reserving
+all baseline pages, default library delivery may use the remaining selection ledger
+to consider same-root pairs whose execution-owned evidence inputs complement each
+other. Pairs reuse an already hydrated combined window of at most 4096 bytes; they
+do not narrow, clip, or re-execute either proof. Only a strict improvement under
+the existing input-coverage selector with an exactly fitting public envelope can
+replace a reserved package. Page roots, order, counts and offsets stay unchanged;
+optional-search exhaustion preserves every reserved page. Source-access ordering
+and explicitly selected experimental selectors do not run this improvement.
+This bounded search neither enumerates arbitrary proof subsets nor promises all
+pairs, pairs without a fitting combined source window, or globally optimal coverage.
 An oversized proof does not suppress an independently deliverable proof from the
 same source. The existing selector reserves one package per root, so same-root
 alternatives are not promised on later pages. All delivered bindings for a root
