@@ -326,9 +326,10 @@ type SequenceFrontier = {
   readonly seenUnresolved: Set<string>;
 };
 
-function noteUnresolvedHop(frontier: SequenceFrontier, pair: UnresolvedHop): void {
+function* retainUnresolvedHop(frontier: SequenceFrontier, pair: UnresolvedHop): PathComputation<void> {
   const id = `${productStateNodeId(pair.node)}\0${pair.row.assertionId}\0${pair.relation.relation_kind}`;
   if (frontier.seenUnresolved.has(id)) return;
+  yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify([id, pair]), "utf8") };
   frontier.seenUnresolved.add(id);
   frontier.unresolved.push(pair);
 }
@@ -437,7 +438,7 @@ function* extendSequenceState(
       if (assignment === undefined) {
         if (row.sourceObjectId === productEndpointId(here) && relationMatches(advance.relation.relation_kind, row.predicate)
           && observedTargetRevision(row.targetObjectId, input.sourceFacts, observed) === undefined) {
-          noteUnresolvedHop(frontier, { here, node, row, relation: advance.relation, nextStates: advance.to });
+          yield* retainUnresolvedHop(frontier, { here, node, row, relation: advance.relation, nextStates: advance.to });
         }
         continue;
       }
@@ -492,10 +493,10 @@ function* walkCompiledPremise(
     for (const pair of stored.unresolved) {
       if (deltaIds?.has(pair.row.assertionId) === true) continue;
       const assignment = yield* assignmentFromRow(pair.relation, pair.here, pair.row, input);
-      if (assignment === undefined) { noteUnresolvedHop(frontier, pair); continue; }
+      if (assignment === undefined) { yield* retainUnresolvedHop(frontier, pair); continue; }
       const retained = yield* retainSequenceAssignment(frontier, pair.node, assignment, pair.nextStates, "population", input, observed);
       if (retained) input.promotedIds?.add(pair.row.assertionId);
-      else noteUnresolvedHop(frontier, pair);
+      else yield* retainUnresolvedHop(frontier, pair);
     }
   }
   for (let offset = 0; offset < frontier.queue.length; offset += 1) {

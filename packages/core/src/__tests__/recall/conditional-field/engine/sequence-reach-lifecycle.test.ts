@@ -178,6 +178,75 @@ describe("sequence reach lifecycle", () => {
     expect(sequenceReachAccountBytes(owner)).toBeGreaterThan(64);
   });
 
+  it("keeps unresolved sequence retention within memory and resumes without duplicate charge", () => {
+    const steps = [hop("p", "x", "m"), hop("q", "m", "y")];
+    const program = sequenceHyperedge(steps);
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps };
+    const state = withAutomaton(program);
+    const rows = Array.from({ length: 200 }, (_, index) => edge("p", "a", `missing${index}`, `row${index}`));
+    const source = facts(["a"]);
+    const blocked = resumeOn({ ...state, remaining_memory_bytes: 172_500 }, rows, source);
+    expect(blocked.remaining_memory_bytes).toBeGreaterThanOrEqual(0);
+    expect(blocked.memory_exhausted).toBe(true);
+    expect(blocked.pending_path_effects).toBeDefined();
+    expect(sequenceReachAccountBytes(blocked.sequence_reach_owner)).toBe(0);
+    for (let retry = 0; retry < 3; retry += 1) {
+      const repeated = resumePathEffects({ ...blocked, memory_exhausted: false });
+      expect(repeated.remaining_memory_bytes).toBe(blocked.remaining_memory_bytes);
+      expect(repeated.pending_path_effects?.retained_bytes).toBe(blocked.pending_path_effects?.retained_bytes);
+      expect(repeated.admitted_allocation_bytes).toBe(blocked.admitted_allocation_bytes);
+      expect(sequenceReachAccountBytes(repeated.sequence_reach_owner)).toBe(0);
+      expect(repeated.memory_exhausted).toBe(true);
+    }
+    const cancelled = withdrawDerivationLeaves(blocked, "row0");
+    expect(cancelled.pending_path_effects?.retained_bytes).toBe(0);
+    expect(cancelled.sequence_reach_owner).not.toBe(blocked.sequence_reach_owner);
+    expect(sequenceReachAccountBytes(cancelled.sequence_reach_owner)).toBe(0);
+    expect(cancelled.remaining_memory_bytes + (cancelled.solver_retained_bytes ?? 0)
+      - blocked.remaining_memory_bytes - (blocked.solver_retained_bytes ?? 0)).toBe(
+      blocked.pending_path_effects!.retained_bytes + (blocked.pending_path_effects?.preparation?.retained_bytes ?? 0));
+    const resumed = resumePathEffects({ ...blocked, remaining_memory_bytes: 1_000_000,
+      remaining_exploration: 200_000, memory_exhausted: false });
+    expect(resumed.remaining_memory_bytes).toBeGreaterThanOrEqual(0);
+    expect(resumed.memory_exhausted).toBe(false);
+    const owner = sequenceOwner(resumed, state.compiled_automaton!);
+    const reach = readSequenceReach(owner, sequenceReachKey(sequence, productStateNodeId(state.seen_identities.at(0)!)));
+    expect(reach?.unresolved).toHaveLength(rows.length);
+    expect(resumed.sequence_reach_bytes).toBe(64 + Buffer.byteLength(JSON.stringify(reach), "utf8"));
+    expect(resumed.sequence_reach_bytes).toBe(sequenceReachAccountBytes(owner));
+    expect(resumed.observation_gaps?.guards).toBe(true);
+    expect(leafIds(resumed)).toEqual([]);
+  });
+
+  it("releases unresolved cache retention without changing a sibling owner", () => {
+    const steps = [hop("p", "x", "m"), hop("q", "m", "y")];
+    const program = sequenceHyperedge(steps);
+    const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps };
+    const state = withAutomaton(program);
+    const rows = Array.from({ length: 32 }, (_, index) => edge("p", "a", `missing${index}`, `row${index}`));
+    const warmed = resumeOn(state, rows, facts(["a"]));
+    const key = sequenceReachKey(sequence, productStateNodeId(state.seen_identities.at(0)!));
+    const owner = sequenceOwner(warmed, state.compiled_automaton!);
+    const charge = sequenceReachAccountBytes(owner);
+    expect(readSequenceReach(owner, key)?.unresolved).toHaveLength(rows.length);
+    const withdrawn = withdrawDerivationLeaves(warmed, "row0");
+    expect(withdrawn.sequence_reach_owner).not.toBe(owner);
+    expect(readSequenceReach(owner, key)?.unresolved).toHaveLength(rows.length);
+    expect(readSequenceReach(withdrawn.sequence_reach_owner!, key)?.unresolved).toHaveLength(rows.length - 1);
+    expect(withdrawn.pending_path_effects?.retained_bytes ?? 0).toBe(0);
+    expect(withdrawn.remaining_memory_bytes + (withdrawn.solver_retained_bytes ?? 0)
+      - warmed.remaining_memory_bytes - (warmed.solver_retained_bytes ?? 0)).toBe(
+      (warmed.pending_path_effects?.retained_bytes ?? 0) + (warmed.pending_path_effects?.preparation?.retained_bytes ?? 0)
+      + charge - sequenceReachAccountBytes(withdrawn.sequence_reach_owner));
+    let released = withdrawn;
+    for (const row of rows.slice(1)) released = withdrawDerivationLeaves(released, row.assertionId);
+    expect(sequenceReachAccountBytes(released.sequence_reach_owner)).toBe(0);
+    expect(released.sequence_reach_bytes).toBe(0);
+    expect(readSequenceReach(released.sequence_reach_owner!, key)).toBeUndefined();
+    expect(sequenceReachAccountBytes(owner)).toBe(charge);
+    expect(released.remaining_memory_bytes).toBeGreaterThanOrEqual(0);
+  });
+
   it("invalidates a sequence hop when its assertion is withdrawn", () => {
     const steps = [hop("p", "x", "m"), hop("q", "m", "y")];
     const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps };
