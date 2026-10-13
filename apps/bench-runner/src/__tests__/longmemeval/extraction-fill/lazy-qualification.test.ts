@@ -1,3 +1,4 @@
+import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { join } from "node:path";
 import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
@@ -47,29 +48,43 @@ const { sourceFixture, preparedSourceFixture } = createLazyQualificationFixtures
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it("delivers a raw source outside the frozen qualification window after final native reprepare", async () => {
+it("delivers a raw source outside the frozen qualification window after final native reprepare", async (testContext) => {
+  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
+    testContext.task.timeout, testContext.signal);
+  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
   const contents = [
-    ...Array.from({ length: 10 }, (_, index) => `What was completed? I completed item ${index}. ${"details ".repeat(500)}`),
+    ...Array.from({ length: 10 }, (_, index) => `What was completed? I completed item ${index}. ${"details ".repeat(200)}`),
     "A short unrelated note.",
     "Another short unrelated note."
   ];
-  // The complete native page includes its access receipt. This cap fits two long
-  // selected previews plus a short outsider, while the next long preview does not fit.
-  const { config } = await preparedSourceFixture(contents, 17700);
+  // Long sources stay just above the 1600-byte preview boundary. The fixed byte cap
+  // keeps the real native page budget-limited to two long previews and a short outsider.
+  const fixture = await phases.phase("source-fixture", () => sourceFixture(contents, 17700));
+  const config = await phases.phase("initial-native-bind", () => fixture.bind());
   const root = join(cacheRoot, "raw-outside-stage");
-  const window = await prepareLazyQualificationWindow(config, root);
+  const window = await phases.phase("freeze-window", () => prepareLazyQualificationWindow(config, root));
   expect(window.window).toHaveLength(10);
+  expect(window.window.map(row => row.source_id).sort()).toEqual(
+    Array.from({ length: 10 }, (_, index) => `fixture:bounded-s${index}-r0`).sort());
   expect(window.window.map(row => row.record_id)).toEqual(
     window.starting_access.source_candidates.slice(0, 10).map(row => row.record_id));
   expect(window.selected_missing_keys).toHaveLength(10);
   const selected = new Set(window.window.map(row => row.record_id));
-  const final = await sealLazyQualificationFinal(root);
+  const final = await phases.phase("final-publication-reprepare", () => sealLazyQualificationFinal(root));
   expect(final.final_access?.observed_source_count).toBe(12);
   expect(final.final_access?.source_candidates).toHaveLength(12);
-  const first = await replayLazyQualifiedFirstExposure(root);
+  const first = await phases.phase("first-exposure", () => replayLazyQualifiedFirstExposure(root));
   expect(first.delivery.outside_delivered).toBeGreaterThan(0);
   const response = SoulInterpretationResponseSchema.parse(first.result.rows[0]?.response);
   if (response.operation !== "recall") throw new Error("native recall required");
+  const results = response.results ?? [];
+  const longResults = results.filter(row => row.target?.kind === "source_evidence" && selected.has(row.target.root_id));
+  const shortResults = results.filter(row => row.target?.kind === "source_evidence" && !selected.has(row.target.root_id));
+  expect(longResults).toHaveLength(2);
+  expect(shortResults).toHaveLength(1);
+  expect(longResults.every(row => Buffer.byteLength(row.content_preview) === 1600)).toBe(true);
+  expect(shortResults[0]!.content_preview).toMatch(/^User: (?:Another|A) short unrelated note\.$/u);
+  expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(config.chain.output_byte_limit);
   const outside = response.index!.entries.flatMap((entry, index) => entry.target.kind === "source_evidence"
     && !selected.has(entry.target.root_id) ? [{ entry, qualifier: response.slot_qualifiers?.[index] }] : []);
   expect(outside).toHaveLength(first.delivery.outside_delivered);
