@@ -520,14 +520,24 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("retains a multi-question native summary beyond the former fixed reservation and stops within a tighter bound", async () => {
-    const f = await fixture(false, 1, 4, 512);
+    // Real continuation receipts grow the summary just beyond 128 KiB; more
+    // source records would repeat publication and paging beyond that boundary.
+    const f = await fixture(false, 1, 4, 432);
     const config = { ...f.config, limits: { ...f.config.limits,
       max_total_work: 40000000, max_pages: 800, max_wall_ms: 180000 } };
+    const initial = await observeSourceAccessDiagnostic({ ...config,
+      limits: { ...config.limits, max_disk_bytes: 256 * 1024 } }, join(f.root, "before-native-pages"));
+    expect(initial.result.stop_reason).toBe("disk_bytes_limit");
+    expect(initial.result.attempted_pages).toBe(0);
+    expect(initial.result.observation_bytes).toBeLessThan(128 * 1024);
+    expect(initial.result.summary_reserved_bytes).toBeLessThan(128 * 1024);
     const observed = await observeSourceAccessDiagnostic(config, join(f.root, "large-observed"));
     expect(observed.result.status).toBe("complete");
     expect(observed.result.rows).toHaveLength(8);
-    expect(observed.result.total_pages).toBe(256);
-    expect(observed.result.attempted_pages).toBe(256);
+    // Four questions, two policies, and 432 records at sixteen records per native page.
+    expect(observed.result.total_pages).toBe(216);
+    expect(observed.result.attempted_pages).toBe(216);
+    expect(observed.result.settled_pages).toBe(216);
     expect(observed.result.observation_bytes).toBeGreaterThan(128 * 1024);
     expect(observed.result.observation_bytes).toBeLessThanOrEqual(observed.result.summary_reserved_bytes);
     expect(observed.result.output_bytes).toBeLessThanOrEqual(config.limits.max_output_bytes);
@@ -542,7 +552,8 @@ describe("source access diagnostic", () => {
     expect(limited.result.status).toBe("stopped");
     expect(limited.result.stop_reason).toBe("output_bytes_limit");
     expect(limited.result.total_pages).toBeGreaterThan(0);
-    expect(limited.result.total_pages).toBeLessThan(256);
+    expect(limited.result.settled_pages).toBeGreaterThan(0);
+    expect(limited.result.total_pages).toBeLessThan(216);
     expect(limited.result.rows).toHaveLength(8);
     expect(limited.result.observation_bytes).toBeLessThanOrEqual(limited.result.summary_reserved_bytes);
     expect(limited.result.output_bytes).toBeLessThanOrEqual(tightLimit);

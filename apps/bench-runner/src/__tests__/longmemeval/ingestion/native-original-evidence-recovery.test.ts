@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, type SourceSemanticCorrespondenceProposalInput } from "@do-soul/alaya-soul";
@@ -60,6 +60,26 @@ const WORLDS = [
       "Mira used CSV for the Beacon export.\n"], answer: null, support: null }
 ] as const;
 const roots: string[] = [];
+let queryFixtureRoot: string | undefined;
+const filledQueryWorksets = new Map<string, string>();
+
+// Q and its original-only review do not depend on a native source world. Each
+// world still admits their real physical evidence through the recovery stages.
+async function fillQueryFixture(worksetPath: string, cacheRoot: string, raw: () => string) {
+  const workset = parseSemanticProposalWorkset(JSON.parse(readFileSync(worksetPath, "utf8")));
+  const identity = chainIdentity(workset), previous = filledQueryWorksets.get(cacheRoot);
+  if (previous !== undefined) {
+    expect(identity).toBe(previous);
+    return;
+  }
+  await fillProposal(worksetPath, cacheRoot, raw, Q_PROFILE);
+  filledQueryWorksets.set(cacheRoot, identity);
+}
+
+afterAll(async () => {
+  await settleActiveBenchDaemonTasks();
+  if (queryFixtureRoot !== undefined) rmSync(queryFixtureRoot, { recursive: true, force: true });
+});
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -115,7 +135,12 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     .toEqual(world.bodies.map((body, index) => [body, sourceClock, sourceRecordedAt[index]]));
   if ("retainedClock" in world) expect(native.records.every(row => row.source_role === "assistant")).toBe(true);
   else expect(native.records.map(row => row.title)).toEqual(world.titles);
-  const qCache = join(root, "q-cache");
+  const queryRoot = externalStaticCaller === undefined
+    ? join(queryFixtureRoot ??= mkdtempSync(join(tmpdir(), "native-recovery-query-")), world.date ? "date" : "format")
+    : root;
+  const qCache = join(queryRoot, "q-cache");
+  const qReviewCache = externalStaticCaller === undefined
+    ? join(queryRoot, "query-review-cache") : join(recoveryRoot, "query-review-cache");
   const qWorksetPath = join(root, "initial-q.json");
   writeFileSync(qWorksetPath, JSON.stringify(parseSemanticProposalWorkset({
     contract: "source-semantic-proposal-workset-v3", kind: "query", model: MODEL,
@@ -124,6 +149,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const freezePath = join(root, "freeze.json");
   writeFileSync(freezePath, JSON.stringify({ native_snapshot_path: snapshotPath, population: "originals",
     source_model: MODEL, source_request_profile: H_PROFILE, source_cache_root: join(root, "h-cache"),
+    ...(externalStaticCaller === undefined ? { query_review_cache_root: qReviewCache } : {}),
     recorded_at: CLOCK, producer_commit: producerCommit, allowance: ALLOWANCE, chain: {
       implementation_revision: readCurrentExtractionAuthorityRevision(), interpretation_clock: CLOCK,
       workspace_id: worldId, run_id: worldId,
@@ -149,7 +175,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   }
   expect(await benchPhase("recover-declare-initial-q", () => runSemanticChainLauncher(["recover-declare-initial-q", "--config", freezePath,
     "--root", recoveryRoot]))).toBe(0);
-  await benchPhase("fill.proposal", () => fillProposal(qWorksetPath, qCache, () => queryRaw(world.date, false), Q_PROFILE));
+  await benchPhase("fill.proposal", () => fillQueryFixture(qWorksetPath, qCache, () => queryRaw(world.date, false)));
   expect(await benchPhase("recover-freeze", () => runSemanticChainLauncher(["recover-freeze", "--config", freezePath, "--root", recoveryRoot]))).toBe(0);
   const frozen = readChainArtifact(join(recoveryRoot, "recovery-window.json")) as {
     window: { source_id: string; read_bytes: number; complete: boolean }[]; selected_missing_keys: string[];
@@ -293,8 +319,8 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     || world.name === "format C-only revision" ? "recall" : undefined);
   expect(await benchPhase("recover-reason-initial", () => runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot]))).toBe(0);
   expect(await benchPhase("recover-prepare-q-review", () => runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot]))).toBe(0);
-  await benchPhase("fill.proposal", () => fillProposal(join(recoveryRoot, "query-review-workset.json"), join(recoveryRoot, "query-review-cache"),
-    () => queryRaw(world.date, true), Q_PROFILE));
+  await benchPhase("fill.proposal", () => fillQueryFixture(join(recoveryRoot, "query-review-workset.json"), qReviewCache,
+    () => queryRaw(world.date, true)));
   expect(await benchPhase("recover-settle-q-review", () => runSemanticChainLauncher(["recover-settle-q-review", "--root", recoveryRoot]))).toBe(0);
   const review = readChainArtifact(join(recoveryRoot, "query-review.json")) as { changed: boolean };
   expect(review.changed).toBe(world.date);
