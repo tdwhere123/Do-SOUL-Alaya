@@ -21,7 +21,12 @@ import { STEP_OPENAPI_QUOTE_BASIS, STEP_PLAN_QUOTE_BASIS } from "../../../runs/e
 const model = "gemini-3.1-flash-lite", requestProfile = "gemini-3.1-minimal-v1" as const;
 const rawJson = JSON.stringify({ contract: "source-semantic-query-response-v8", outcome: { status: "abstained" } });
 const roots: string[] = [];
-afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
+let processCleanup: (() => Promise<void>) | undefined;
+afterEach(async () => {
+  await processCleanup?.();
+  processCleanup = undefined;
+  roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true }));
+});
 function root() { const value = mkdtempSync(join(tmpdir(), "proposal-request-authority-")); roots.push(value); return value; }
 function workset(provider_url = "http://127.0.0.1:9", queries = ["Who reported that Lee left?"]) {
   return parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", kind: "query",
@@ -229,26 +234,47 @@ it("refuses to create a new lineage over a historical receipt's unknown reservat
   expect(listExtractionAttemptLedgerRecords(cacheRoot)).toHaveLength(1);
 });
 
-it("holds the actual fill lease across processes and preserves a killed HTTP reservation after repinning", async () => {
+it("holds the actual fill lease across processes and preserves a killed HTTP reservation after repinning", async ({ onTestFinished, signal }) => {
   const cacheRoot = root();
   let hits = 0, reached!: () => void;
   const requestReached = new Promise<void>(resolve => { reached = resolve; });
   const server = createServer((_request, _response) => { hits += 1; reached(); });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const processes: ReturnType<typeof runProcess>[] = [];
+  let cleanup: Promise<void> | undefined;
+  const stop = () => cleanup ??= (async () => {
+    for (const { child } of processes) child.kill("SIGKILL");
+    await Promise.allSettled(processes.map(({ done }) => done));
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  })();
+  // afterEach runs before onTestFinished, so release child handles before deleting their roots.
+  processCleanup = stop;
+  signal.addEventListener("abort", () => { void stop(); }, { once: true });
+  onTestFinished(stop);
+  const launch = (authorityFile: string) => {
+    signal.throwIfAborted();
+    const running = runProcess(cacheRoot, authorityFile);
+    processes.push(running);
+    return running;
+  };
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
+  });
   const prepared = workset(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
   const authority = pin(prepared, cacheRoot), repinned = pin(prepared, cacheRoot, 2);
   writeFileSync(join(cacheRoot, "workset.json"), JSON.stringify(prepared));
   writeFileSync(join(cacheRoot, "original.json"), JSON.stringify(authority));
   writeFileSync(join(cacheRoot, "repinned.json"), JSON.stringify(repinned));
-  const holder = runProcess(cacheRoot, "original.json");
+  const holder = launch("original.json");
   try {
     await Promise.race([requestReached, holder.done.then(result => { throw new Error(`holder exited before HTTP: ${result.stderr}`); })]);
-    const contender = await runProcess(cacheRoot, "repinned.json").done;
+    const contender = await launch("repinned.json").done;
     expect(contender).toMatchObject({ code: 2, stderr: expect.stringMatching(/active writer lock/u) });
     expect(hits).toBe(1);
     holder.child.kill("SIGKILL");
     await holder.done;
-    const resumed = await runProcess(cacheRoot, "repinned.json").done;
+    const resumed = await launch("repinned.json").done;
     expect(resumed).toMatchObject({ code: 0 });
     expect(JSON.parse(resumed.stdout.trim())).toMatchObject({ newly_admitted: 0, attempts: 1, terminal_failures: 0,
       unknown: 1, incomplete: 0, unattempted: 0 });
@@ -257,7 +283,7 @@ it("holds the actual fill lease across processes and preserves a killed HTTP res
     expect(snapshot.attempts).toBe(1);
     expect(snapshot.unresolvedAttempts).toEqual([{ cacheKey: authority.keys[0], attemptOrdinal: 1 }]);
     expect(listExtractionAttemptLedgerRecords(cacheRoot)).toHaveLength(1);
-  } finally { holder.child.kill("SIGKILL"); await holder.done; server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  } finally { await stop(); }
 }, 40_000);
 
 function runProcess(cacheRoot: string, authorityFile: string) {
@@ -271,7 +297,7 @@ function runProcess(cacheRoot: string, authorityFile: string) {
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });
     child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    child.on("error", reject); child.on("exit", code => resolve({ code, stdout, stderr }));
+    child.on("error", reject); child.on("close", code => resolve({ code, stdout, stderr }));
   });
   return { child, done };
 }
