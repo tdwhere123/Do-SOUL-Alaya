@@ -45,6 +45,7 @@ import {
 } from "./path-matching.js";
 import {
   readSequenceReach,
+  SEQUENCE_PROGRAM_ID_BYTES,
   sequenceProgramIsCold,
   sequenceReachKey,
   sequenceReachWithoutAssertions,
@@ -501,6 +502,7 @@ function* walkCompiledPremise(
     yield* extendSequenceState(automaton, frontier.queue[offset]!, rows, input, deltaIds, observed, frontier);
   }
   if (owner !== undefined && reachKey !== undefined) {
+    yield { kind: "work", retained_bytes: SEQUENCE_PROGRAM_ID_BYTES };
     const states: ProductStateKey[] = [];
     for (const node of frontier.visited.values()) states.push(node);
     writeSequenceReach(owner, reachKey, {

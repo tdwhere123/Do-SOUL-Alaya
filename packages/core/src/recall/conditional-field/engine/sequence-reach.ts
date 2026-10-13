@@ -1,4 +1,5 @@
 import type { Derivation, ProductStateKey, QueryProgram, Transition } from "@do-soul/alaya-protocol";
+import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { stableStringify } from "../../../shared/stable-stringify.js";
 import type { QueryRelation } from "../query/compile-query.js";
 import { transitionKey } from "./path-composition.js";
@@ -26,21 +27,15 @@ export type SequenceReach = Readonly<{
 }>;
 
 const programIds = new WeakMap<QueryProgram, string>();
-const structuralIds = new Map<string, string>();
-let nextProgramKey = 0;
 const reachByOwner = new WeakMap<object, Map<string, SequenceReach>>();
 const bytesByOwner = new WeakMap<object, number>();
+export const SEQUENCE_PROGRAM_ID_BYTES = 64;
 
 function programStorageId(program: QueryProgram): string {
   let key = programIds.get(program);
   if (key !== undefined) return key;
-  const canonical = stableStringify(program);
-  key = structuralIds.get(canonical);
-  if (key === undefined) {
-    nextProgramKey += 1;
-    key = String(nextProgramKey);
-    structuralIds.set(canonical, key);
-  }
+  // Fresh equivalent objects must reuse reach without retaining canonical bodies beyond their owner.
+  key = fieldContractSha256(`sequence-reach-program.v1\0${stableStringify(program)}`);
   programIds.set(program, key);
   return key;
 }
@@ -80,7 +75,7 @@ export function readSequenceReach(owner: object, key: string): SequenceReach | u
 }
 
 function sequenceReachFootprint(reach: SequenceReach): number {
-  return Buffer.byteLength(JSON.stringify(reach), "utf8");
+  return SEQUENCE_PROGRAM_ID_BYTES + Buffer.byteLength(JSON.stringify(reach), "utf8");
 }
 
 export function sequenceReachAccountBytes(owner: object | undefined): number {

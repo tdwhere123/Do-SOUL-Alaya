@@ -5,7 +5,7 @@ import {
   type QueryInterpretation,
   type QueryProgram
 } from "@do-soul/alaya-protocol";
-import type { AdjacencyRow } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
+import { createAdjacencyEffectCursor, type AdjacencyRow } from "../../../../recall/conditional-field/engine/path-composition-adjacency.js";
 import type { BoundSourceFacts } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import {
   createConditionalField,
@@ -150,6 +150,34 @@ function orSequenceProgram(): { program: QueryProgram; sequence: QueryProgram } 
 }
 
 describe("sequence reach lifecycle", () => {
+  it("uses a fixed-size structural program identity across fresh program objects", () => {
+    const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
+    const key = sequenceReachKey(program, "seed");
+    expect(key).toMatch(/^[a-f0-9]{64}\u0000seed$/);
+    expect(sequenceReachKey(structuredClone(program), "seed")).toBe(key);
+    expect(sequenceReachKey(sequenceHyperedge([hop("q", "x", "m"), hop("p", "m", "y")]), "seed"))
+      .not.toBe(key);
+  });
+
+  it("does not publish sequence reach before its program identity fits the cursor allowance", () => {
+    const program = sequenceHyperedge([hop("p", "x", "m"), hop("q", "m", "y")]);
+    const state = withAutomaton(program);
+    const owner = {};
+    // The traversal retains 12,965 bytes before the persistent identity reservation.
+    const memory = 12_965 + 63;
+    const cursor = createAdjacencyEffectCursor([edge("p", "a", "m", "hop-p")], {
+      interpretation: state.interpretation, asOf: AS_OF, overlay: {}, sourceFacts: facts(["a", "m", "y"]),
+      liveStates: state.seen_identities, compiledAutomaton: state.compiled_automaton, sequenceReachOwner: owner
+    }, memory);
+    expect(cursor).toBeDefined();
+    const blocked = cursor!.advance(0, 200_000, memory);
+    expect(blocked.status).toBe("memory_exhausted");
+    expect(sequenceReachAccountBytes(owner)).toBe(0);
+    const resumed = cursor!.advance(blocked.offset, 200_000, 1_000_000);
+    expect(resumed.status).toBe("complete");
+    expect(sequenceReachAccountBytes(owner)).toBeGreaterThan(64);
+  });
+
   it("invalidates a sequence hop when its assertion is withdrawn", () => {
     const steps = [hop("p", "x", "m"), hop("q", "m", "y")];
     const sequence: QueryProgram = { schema_version: 1, kind: "sequence", steps };
@@ -241,7 +269,7 @@ describe("sequence reach lifecycle", () => {
     expect(project(replayed)).toEqual(project(fresh));
     const reach = readSequenceReach(owner, sequenceReachKey(sequence, productStateNodeId(state.seen_identities.at(0)!)));
     expect(replayed.sequence_reach_bytes).toBe(sequenceReachAccountBytes(owner));
-    expect(replayed.sequence_reach_bytes).toBe(Buffer.byteLength(JSON.stringify(reach), "utf8"));
+    expect(replayed.sequence_reach_bytes).toBe(64 + Buffer.byteLength(JSON.stringify(reach), "utf8"));
     expect(replayed.sequence_reach_bytes).toBeGreaterThan(0);
   });
 
