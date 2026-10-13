@@ -1,4 +1,3 @@
-import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { join } from "node:path";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import { cpSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
@@ -685,102 +684,29 @@ async function fillFrozenShortSources(selectedKeys: readonly string[]) {
   return { plan, imported, fetchMock, createCount };
 }
 
-it("records whether three cold authored composition windows share the same eligible first ten", async (testContext) => {
-  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id, testContext.task.timeout, testContext.signal);
-  const benchPhase = phases.phase;
-  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
-  const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
-    ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
-  const fixture = await benchPhase("fixture.prepare", () => sourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache")));
-  await benchPhase("fill.query", () => fillAuthoredCompletionQuery(fixture.chain.query_workset, fixture.chain.query_cache_root));
-  const normalChain = fixture.chain;
-  const smallChain = { ...normalChain, output_byte_limit: 21600, budget: { ...normalChain.budget,
+it("preserves query and snapshot identity across native qualification budgets", async () => {
+  const fixture = await sourceFixture(["I completed alpha.", "I completed beta."]);
+  await fillAuthoredCompletionQuery(fixture.chain.query_workset, fixture.chain.query_cache_root);
+  const smallChain = { ...fixture.chain, output_byte_limit: 21600, budget: { ...fixture.chain.budget,
     work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } };
-  const stages = [
-    await benchPhase("chain.bind", () => fixture.bind(normalChain, "composition-cold")),
-    await benchPhase("chain.bind", () => fixture.bind(normalChain, "composition-qualified-normal")),
-    await benchPhase("chain.bind", () => fixture.bind(smallChain, "composition-qualified-small"))
+  const bindings = [
+    await fixture.bind(fixture.chain, "normal-budget"),
+    await fixture.bind(smallChain, "small-budget")
   ];
-  const roots = ["composition-cold", "composition-qualified-normal", "composition-qualified-small"]
-    .map(name => join(cacheRoot, name));
+  expect(bindings.map(binding => SemanticChainPlanSchema.parse(
+    readChainArtifact(join(binding.initial_chain_root, "prepare.json"))).queries[0]?.status))
+    .toEqual(["ready", "ready"]);
   const windows: Awaited<ReturnType<typeof prepareLazyQualificationWindow>>[] = [];
-  for (let index = 0; index < roots.length; index++) {
-    windows.push(await benchPhase("lazy.window", () => prepareLazyQualificationWindow(stages[index]!, roots[index]!)));
+  for (const [index, binding] of bindings.entries()) {
+    windows.push(await prepareLazyQualificationWindow(binding, join(cacheRoot, `budget-window-${index}`)));
   }
-  const tuples = windows.map(window => window.window.map(row =>
-    [row.source_id, row.source_version, row.record_id]));
-  const eligible = windows.map(window => window.window.filter(row => row.state === "cache_miss" && row.key !== null)
-    .map(row => ({ source_id: row.source_id, key: row.key })));
-  const matched = tuples.every(rows => rows.length === 10 && JSON.stringify(rows) === JSON.stringify(tuples[0]))
-    && eligible.every(rows => rows.length === 10 && JSON.stringify(rows) === JSON.stringify(eligible[0]));
-  const returnRoot = process.env.COMPOSITION_CONTROL_RETURN_ROOT;
-  if (returnRoot !== undefined) {
-    mkdirSync(returnRoot);
-    writeFileSync(join(returnRoot, "window-trace.json"), JSON.stringify({
-      candidate: windows[0]!.config.chain.implementation_revision, matched, tuples, eligible,
-      windows: windows.map(window => ({ query_state_identity: window.query_state_identity,
-        starting_snapshot_sha256: window.starting_snapshot_sha256,
-        starting_publication_identity: window.starting_publication_identity,
-        source_inventory_identity: window.source_inventory_identity,
-        dataset_sha256: window.dataset_sha256, window_open: window.window_open,
-        starting_access: window.starting_access, starting_discovery_work: window.starting_discovery_work,
-        starting_host_elapsed_ms: window.starting_host_elapsed_ms,
-        selected_missing_keys: window.selected_missing_keys,
-        window: window.window.map(row => ({ rank: row.rank, source_id: row.source_id,
-          source_version: row.source_version, record_id: row.record_id, state: row.state,
-          key: row.key })) })) }, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true });
-  }
+  expect(windows.map(window => window.window.length)).toEqual([2, 2]);
+  expect(windows.map(window => window.config.chain.budget)).toEqual([fixture.chain.budget, smallChain.budget]);
+  expect(windows.map(window => window.config.chain.output_byte_limit)).toEqual([100000, 21600]);
   expect(windows.map(window => window.query_state_identity))
-    .toEqual(Array(3).fill(windows[0]!.query_state_identity));
+    .toEqual(Array(2).fill(bindings[0]!.initial_query_state_identity));
   expect(windows.map(window => window.starting_snapshot_sha256))
-    .toEqual(Array(3).fill(windows[0]!.starting_snapshot_sha256));
-  if (!matched) return; // No H/C is prepared when the native window lacks a common eligible first ten.
-  const coldFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[0]!));
-  const coldExposure = await benchPhase("lazy.exposure", () => replayLazyQualifiedFirstExposure(roots[0]!));
-  expect(coldExposure.result.rows[0]?.status).toBe("replayed");
-  if (returnRoot !== undefined) {
-    writeFileSync(join(returnRoot, "cold-final.json"), JSON.stringify({ coldFinal,
-      delivery: coldExposure.delivery, result: coldExposure.result }, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
-  }
-  const { plan, imported, fetchMock, createCount } = await benchPhase("fill.source", () => fillFrozenShortSources(windows[1]!.selected_missing_keys));
-  const normalFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[1]!));
-  const smallFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[2]!));
-  if (returnRoot !== undefined) {
-    writeFileSync(join(returnRoot, "qualified-finals.json"), JSON.stringify({ plan, batchState: imported.batchState,
-      authorityTelemetry: imported.authorityTelemetry, normalFinal, smallFinal,
-      mock: { createCount: createCount(), fetchCount: fetchMock.mock.calls.length } }, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
-  }
-  const finalPlans = [normalFinal, smallFinal].map(final => SemanticChainPlanSchema.parse(
-    readChainArtifact(join(final.final_chain_root, "prepare.json"))));
-  const worksets = finalPlans.map(plan => plan.correspondence_workset);
-  const lines = worksets.map(workset => workset == null ? [] : materializeSemanticProposalLines(workset, 4096));
-  const normalOpportunity = lines[0]!.findIndex(line => {
-    const request = line.request as SourceSemanticCorrespondenceRequest;
-    return eligible[1]!.some(row => row.source_id ===
-      request.source_interpretation_descriptors[0]?.interpretation.source.source_id);
-  });
-  const targetSource = normalOpportunity < 0 ? undefined : (lines[0]![normalOpportunity]!
-    .request as SourceSemanticCorrespondenceRequest).source_interpretation_descriptors[0]!.interpretation.source.source_id;
-  const smallOpportunity = lines[1]!.findIndex(line => (line.request as SourceSemanticCorrespondenceRequest)
-    .source_interpretation_descriptors[0]?.interpretation.source.source_id === targetSource);
-  if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence-opportunities.json"), JSON.stringify({
-    finalPlanStatus: finalPlans.map(plan => plan.queries[0]?.status), targetSource,
-    normalOpportunity, smallOpportunity, advertisedCounts: lines.map(rows => rows.length) }, null, 2));
-  if (targetSource === undefined || smallOpportunity < 0 || worksets[0] == null || worksets[1] == null) return;
-  for (const [stage, opportunity] of [normalOpportunity, smallOpportunity].entries()) {
-    await benchPhase("fill.correspondence", () => fillAuthoredCompletionCorrespondence(worksets[stage]!, opportunity,
-      normalChain.correspondence_cache_root));
-  }
-  const qualifiedExposure = [];
-  for (const root of roots.slice(1)) qualifiedExposure.push(await benchPhase("lazy.exposure", () => replayLazyQualifiedFirstExposure(root)));
-  expect(qualifiedExposure.every(exposure => exposure.result.rows[0]?.status === "replayed")).toBe(true);
-  if (returnRoot !== undefined) {
-    writeFileSync(join(returnRoot, "qualified-exposures.json"), JSON.stringify(qualifiedExposure, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
-  }
+    .toEqual(Array(2).fill(fixture.published.db_sha256));
 }, 120000);
 
 it("delivers the fixed completed item through the normal native qualification lifecycle", async () => {

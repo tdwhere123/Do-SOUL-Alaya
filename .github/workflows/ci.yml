@@ -54,7 +54,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The command checks the whole workspace; repeat it once per OS, not per shard.
       - name: Typecheck
+        if: ${{ matrix.group == 'libraries' }}
         run: pnpm run --if-present typecheck
 
       - name: Build
