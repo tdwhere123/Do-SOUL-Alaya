@@ -104,6 +104,28 @@ function workflowJob(name) {
   return workflow.slice(start + 1).split(/\n(?=  [a-z][a-z-]*:)/u)[0];
 }
 
+test("rerun uploads replace only their shard artifacts while retained successes keep stable names", () => {
+  const job = workflowJob("test-shard-ubuntu");
+  const uploads = job.split(/\n      - /u).filter((step) => step.includes("uses: actions/upload-artifact@v7"));
+  assert.equal(uploads.length, 2);
+  for (const [index, prefix] of ["shard", "coverage"].entries()) {
+    const upload = uploads[index];
+    assert.match(upload, /^          overwrite: true$/mu);
+    assert.ok(upload.includes(`name: ${prefix}-\${{ env.SHARD_LABEL }}-\${{ matrix.group }}`));
+    assert.ok(upload.includes("matrix.shard_name"));
+    assert.doesNotMatch(upload, /run_attempt|run_id/);
+  }
+  // Every OS shares the uploader, and partial reruns still download retained successful shards.
+  for (const os of ["macos", "windows"]) {
+    assert.match(workflowJob(`test-shard-${os}`), /steps: \*shard-steps/);
+  }
+  const quality = workflowJob("quality-ubuntu");
+  for (const prefix of ["shard", "coverage"]) {
+    assert.ok(quality.includes(`pattern: ${prefix}-\${{ env.SHARD_LABEL }}-*`));
+  }
+  assert.doesNotMatch(quality, /run_attempt/);
+});
+
 test("install smoke executes independently but its existing gate requires every quality result", () => {
   const execution = workflowJob("install-smoke-check");
   assert.doesNotMatch(execution, /\n    needs:/);

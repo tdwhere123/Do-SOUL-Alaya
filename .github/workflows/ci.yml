@@ -98,6 +98,8 @@ jobs:
         with:
           name: shard-${{ env.SHARD_LABEL }}-${{ matrix.group }}${{ matrix.shard_name && format('-{0}', matrix.shard_name) || '' }}
           path: shard-manifest.json
+          # Replace this shard on rerun; untouched successful shards remain available.
+          overwrite: true
           retention-days: 14
           if-no-files-found: error
 
@@ -107,6 +109,7 @@ jobs:
         with:
           name: coverage-${{ env.SHARD_LABEL }}-${{ matrix.group }}${{ matrix.shard_name && format('-{0}', matrix.shard_name) || '' }}
           path: coverage
+          overwrite: true
           retention-days: 14
           if-no-files-found: error
 
