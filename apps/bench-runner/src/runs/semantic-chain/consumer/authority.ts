@@ -75,10 +75,26 @@ export function pinSemanticChainConsumerAuthority(input: Readonly<{
 
 /** Authorization is rederived from the admitted replay, never from saved request labels alone. */
 export function verifyConsumerAuthority(value: unknown, lease?: ExtractionCacheWriteLease) {
+  const authority = parseConsumerAuthority(value);
+  assertConsumerExecutionScope(authority, lease);
+  return verifyConsumerInputs(authority);
+}
+
+/** Re-admit mutable inputs within an already admitted, lease-owned operation. */
+export function verifyConsumerOperationInputs(authority: ConsumerAuthority, lease: ExtractionCacheWriteLease) {
+  const current = parseConsumerAuthority(authority);
+  assertConsumerExecutionRoot(current, lease);
+  return verifyConsumerInputs(current);
+}
+
+function parseConsumerAuthority(value: unknown): ConsumerAuthority {
   const authority = ConsumerAuthoritySchema.parse(value);
   const { identity_digest, ...body } = authority;
   if (identity_digest !== chainIdentity(body)) throw new AlayaError("CONFLICT", "consumer authority identity changed");
-  assertConsumerExecutionScope(authority, lease);
+  return authority;
+}
+
+function verifyConsumerInputs(authority: ConsumerAuthority) {
   const current = admitConsumerPreparation(authority.execution_scope.preparation_root);
   const { preparation, lines } = current, config = preparation.consumer_config;
   if (authority.preparation_identity !== chainIdentity(preparation) || authority.model !== config.model ||
@@ -100,6 +116,12 @@ export function assertConsumerExecutionScope(authority: ConsumerAuthority, lease
   if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "consumer executable revision changed");
   }
+  assertConsumerExecutionRoot(authority, lease);
+}
+
+/** An admitted operation rechecks its mutable root without rescanning source history. */
+function assertConsumerExecutionRoot(authority: ConsumerAuthority, lease?: ExtractionCacheWriteLease): void {
+  const scope = authority.execution_scope;
   assertExtractionTargetRootBinding({ cacheRoot: scope.execution_root_path, marker: ROOT_MARKER,
     binding: scope.execution_root_binding, purpose: "task consumer", ...(lease === undefined ? {} : { writeLease: lease }) });
 }

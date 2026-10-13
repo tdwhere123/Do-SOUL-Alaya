@@ -1,6 +1,6 @@
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { refuseRecallCampaignLiveExtraction } from "@do-soul/alaya-core";
-import { verifyConsumerAuthority, assertConsumerExecutionScope } from "./authority.js";
+import { verifyConsumerAuthority, verifyConsumerOperationInputs, assertConsumerExecutionScope } from "./authority.js";
 import { TASK_CONSUMER_SCHEMA_NAME, type ConsumerLine } from "./input.js";
 import { assertConsumerRaw, inspectConsumerResult, interpretConsumerResponse, openConsumerAttemptLedger,
   publishConsumerResult } from "./persist.js";
@@ -19,7 +19,7 @@ export async function executeSemanticChainConsumer(input: Readonly<{
   const initial = verifyConsumerAuthority(input.authority);
   const lease = acquireExtractionCacheWriteLease(initial.authority.execution_scope.execution_root_path);
   return withExtractionCacheWriteLease(lease, async () => {
-    const current = verifyConsumerAuthority(initial.authority, lease), { authority, lines } = current;
+    const current = verifyConsumerOperationInputs(initial.authority, lease), { authority, lines } = current;
     const root = lease.stableRootPath;
     const ledger = openConsumerAttemptLedger(root, authority, lines, lease);
     const context = physicalContext(root, authority, lines, ledger);
@@ -33,7 +33,7 @@ export async function executeSemanticChainConsumer(input: Readonly<{
         const config = assertDispatchConfig(input.config, line, authority.limits.max_output_tokens);
         state = await executeProviderRequestLine({ ...context, config, suppliedExtractor: false, writeLease: lease,
           extractor: createSemanticProviderHttpExtractor(config, TASK_CONSUMER_SCHEMA_NAME),
-          assertScope: () => { verifyConsumerAuthority(authority, lease); assertDispatchConfig(input.config, line, authority.limits.max_output_tokens); }
+          assertScope: () => { verifyConsumerOperationInputs(authority, lease); assertDispatchConfig(input.config, line, authority.limits.max_output_tokens); }
         }, line);
       }
       const retained = inspectConsumerResult(root, authority, line);

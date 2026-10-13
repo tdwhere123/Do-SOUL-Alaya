@@ -2,13 +2,15 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, expect, it, onTestFinished, vi } from "vitest";
 import { executeSemanticChainConsumer } from "../../../runs/semantic-chain/consumer/execute.js";
 import { admitConsumerPreparation, prepareSemanticChainConsumer } from "../../../runs/semantic-chain/consumer/input.js";
 import { consumerResultPath, openConsumerAttemptLedger } from "../../../runs/semantic-chain/consumer/persist.js";
 import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
+import * as extractionInspection from "../../../runs/extraction/authority/inspection.js";
+import * as providerHttp from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { nativeConsumerFixture, revisedQueryConsumerFixture, consumerAuthority, CONSUMER_CONFIG, QUESTION, HIDDEN_SOURCE, HIDDEN_GOLD } from "./consumer.test-support.js";
 
 let fixture: Awaited<ReturnType<typeof nativeConsumerFixture>>;
@@ -60,7 +62,12 @@ it("passes exactly the admitted public delivery and question through native HTTP
   const run = consumerAuthority(fixture, "complete", ["native_delivery", "question_only"]);
   ledgerPath = run.ledgerPath; handler = res => response(res);
   const before = hits;
+  const revisionReads = vi.spyOn(extractionInspection, "readCurrentExtractionAuthorityRevision");
+  onTestFinished(() => revisionReads.mockRestore());
   const result = await executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" });
+  // Two fresh admissions, five native-input checks, and both loop and completion checks.
+  expect(revisionReads).toHaveBeenCalledTimes(12);
+  revisionReads.mockRestore();
   expect(hits - before).toBe(2);
   expect(result).toMatchObject({ new_attempts: 2, fidelity: "unassessed", rows: [
     { status: "complete_response", result: { outcome: { answer }, fidelity: "unassessed" } },
@@ -81,7 +88,12 @@ it("passes exactly the admitted public delivery and question through native HTTP
   const raw = readProviderRawAttempt(run.root, run.key, 1)!;
   expect(raw).toMatchObject({ kind: "task_consumer", contract: "task-consumer-raw-attempt-v1",
     full_replay_possible: true, http_response: { bodyComplete: true, bodyTruncated: false } });
+  const replayRevisionReads = vi.spyOn(extractionInspection, "readCurrentExtractionAuthorityRevision");
+  onTestFinished(() => replayRevisionReads.mockRestore());
   const again = await executeSemanticChainConsumer({ authority: run.authority, mode: "execute" });
+  // Replay is a new admission, with its own current implementation and native snapshot checks.
+  expect(replayRevisionReads).toHaveBeenCalledTimes(8);
+  replayRevisionReads.mockRestore();
   expect(again.new_attempts).toBe(0); expect(hits - before).toBe(2);
 });
 
@@ -258,6 +270,36 @@ it("rejects changed dispatch, revision, authority, parent row and native snapsho
   finally { renameSync(moved, snapshot); }
   expect(hits).toBe(before);
 });
+
+it.each(["preparation", "replay", "snapshot", "query-parent"] as const)(
+  "re-admits changed %s after transport readiness before reserving an attempt", async target => {
+    const selected = target === "query-parent" ? revisedFixture : fixture;
+    const run = consumerAuthority(selected, `readiness-${target}`), before = hits;
+    const parentLedger = target === "query-parent" ? readdirSync(revisedFixture.parentRoot)
+      .find(name => name.startsWith("extraction-attempt-ledger.") && name.endsWith(".json")) : undefined;
+    if (target === "query-parent") expect(parentLedger).toBeDefined();
+    const path = target === "preparation" ? join(run.preparation.output_root, "preparation.json")
+      : target === "replay" ? selected.replayPath
+        : target === "snapshot" ? selected.admitted.plan.config.snapshot_path
+          : join(revisedFixture.parentRoot, parentLedger!);
+    const original = readFileSync(path), createExtractor = providerHttp.createSemanticProviderHttpExtractor;
+    let changed = false;
+    const factory = vi.spyOn(providerHttp, "createSemanticProviderHttpExtractor").mockImplementation((...args) => {
+      const extractor = createExtractor(...args);
+      return { ...extractor, assertTransportReady: async (...readyArgs) => {
+        await extractor.assertTransportReady?.(...readyArgs);
+        writeFileSync(path, "{}"); changed = true;
+      } };
+    });
+    try {
+      await expect(executeSemanticChainConsumer({ authority: run.authority,
+        config: CONSUMER_CONFIG, mode: "execute" })).rejects.toThrow();
+      expect(changed).toBe(true); expect(hits).toBe(before);
+    } finally { factory.mockRestore(); writeFileSync(path, original); }
+    const lines = admitConsumerPreparation(run.preparation.output_root).lines;
+    expect(openConsumerAttemptLedger(run.root, run.authority, lines).snapshot().attempts).toBe(0);
+  }
+);
 
 it("refuses native-output overlap, concurrent writers and replacement of the bound execution directory", async () => {
   const run = consumerAuthority(fixture, "roots"), before = hits;
