@@ -11,6 +11,7 @@ import { executeSemanticProposalFill, prepareSemanticProposal } from "../../runs
 import type { CompileSeedExtractionConfig } from "../../runs/compile-seed/compile-seed-types.js";
 import { isNativeGeminiRequestProfile } from "../../runs/extraction/request-profile.js";
 import { canonicalExtractionTargetRoot } from "../../runs/extraction/authority/target-root-binding.js";
+import { formatFillFailure } from "../output/fill-failure-diagnostic.js";
 
 export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>): Promise<number> {
   try {
@@ -59,9 +60,7 @@ export async function runSemanticProposalFillCommand(args: ReadonlyArray<string>
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (error) {
-    process.stderr.write(`alaya-bench-runner semantic-proposal-fill: ${
-      error instanceof Error ? error.message : String(error)
-    }\n`);
+    process.stderr.write(`alaya-bench-runner semantic-proposal-fill: ${formatFillFailure(error)}\n`);
     return 2;
   }
 }
