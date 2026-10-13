@@ -11,7 +11,7 @@ import {
 import { createSemanticProviderHttpExtractor, isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider-http.js";
 import type { BenchSignalExtractor, CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { assertAttemptInputWithinReceiptLimit } from "../extraction/authority/receipt-limits.js";
-import { acquireExtractionCacheWriteLease, type ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
+import { acquireExtractionCacheWriteLease, withExtractionCacheWriteLease, type ExtractionCacheWriteLease } from "../extraction/fill/manifest/fill-root-guard.js";
 import { canonicalExtractionTargetRoot } from "../extraction/authority/target-root-binding.js";
 import {
   readProviderRawAttempt, providerRawSuccessEvidenceState
@@ -125,7 +125,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
     return summarize(input, cacheHits, 0, 0);
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
-  try {
+  return withExtractionCacheWriteLease(lease, async () => {
     assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot, lease);
     input = { ...input, cacheRoot: lease.stableRootPath };
     const ledger = openSemanticProposalAttemptLedger({
@@ -162,9 +162,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
       }
     }
     return summarize(input, cacheHits, newlyAdmitted, attempts);
-  } finally {
-    lease.release();
-  }
+  });
 }
 
 function summarize(
