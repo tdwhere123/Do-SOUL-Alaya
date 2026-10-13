@@ -1,5 +1,8 @@
 // @ts-nocheck
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({
   createRuntime: vi.fn(),
@@ -35,7 +38,9 @@ import {
 } from "../../../runs/compile-seed.js";
 
 describe("semantic supplement run authority", () => {
-  it("is fixed when the runner is created, before any turn is seeded", () => {
+  it("is fixed when the runner is created, before any turn is seeded", async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), "semantic-supplement-authority-"));
+    onTestFinished(() => rm(cacheRoot, { recursive: true, force: true }));
     fixture.createRuntime.mockReturnValue({
       receipt: Object.freeze({}),
       binding: fixture.binding,
@@ -45,7 +50,7 @@ describe("semantic supplement run authority", () => {
     });
 
     const runner = createCompileSeedRunner({
-      cacheRoot: "/tmp/semantic-supplement-authority-primary",
+      cacheRoot,
       config: {
         providerUrl: "https://example.test/v1",
         model: "same-logical-model",
@@ -55,8 +60,8 @@ describe("semantic supplement run authority", () => {
       skipPreflight: true,
       diagnosticDir: null,
       sourceAssertionSupplement: {
-        receiptPath: "/tmp/semantic-supplement-authority-receipt.json",
-        sourceCacheRoot: "/tmp/semantic-supplement-authority-source"
+        receiptPath: join(cacheRoot, "receipt.json"),
+        sourceCacheRoot: join(cacheRoot, "source")
       }
     });
 

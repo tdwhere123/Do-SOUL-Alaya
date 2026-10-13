@@ -118,9 +118,14 @@ describe("source boundary regressions", () => {
   });
 
   it("bounds native capsule body bytes before mapping", async () => {
-    const { reader, capsules } = fixture("record");
+    const { reader, capsules, record } = fixture("record");
     const stored = await capsule(capsules, "workspace-1", "x".repeat(20000));
-    const page = reader.page({ workspaceId: "workspace-1", limit: 1, nativeLimit: 1, afterCursor: "c:", byteLimit: 8, nativeByteLimit: 65536 });
+    const input = { workspaceId: "workspace-1", limit: 1, nativeLimit: 1, byteLimit: 8, nativeByteLimit: 65536 };
+    const first = reader.page({ ...input, afterCursor: null });
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0]).toMatchObject({ kind: "source_record", root_id: record.record_id });
+    expect(first.committedThrough).not.toBeNull();
+    const page = reader.page({ ...input, afterCursor: first.committedThrough });
     // Physical reads fetch one retained 4 KiB chunk; logical delivery is eight bytes.
     expect(page.bytesRead).toBeLessThanOrEqual(4096);
     expect(page.bytesRead).toBeGreaterThan(0);

@@ -175,6 +175,8 @@ describe("LongMemEval runner", () => {
         "# findings\n- regression\n"
       );
 
+      const extractionCacheRoot = join(tmpDir, "extraction-cache");
+      await mkdir(extractionCacheRoot);
 
       const result = await runLongMemEval({
         variant,
@@ -184,7 +186,7 @@ describe("LongMemEval runner", () => {
         pinnedMetaRoot,
         policyShape: "chat",
         simulateReport: "mixed",
-        extractionCacheRoot: join(tmpDir, "extraction-cache")
+        extractionCacheRoot
       });
 
       // Slug format must match SLUG_PATTERN

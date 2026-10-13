@@ -39,7 +39,7 @@ describe("retained source read identity", () => {
       records.insert(hashedRecord("workspace-1", "second retained body"))].sort((a, b) => a.record_id.localeCompare(b.record_id));
     const input = { workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null, nativeByteLimit: 16384 };
     expect(reader.page(input).rows.map(row => row.root_id)).toEqual(planted.map(row => row.record_id));
-    const invalidNative = ["c:bad", "r:bad", "c:\tmissing-time", "r:bad-time\tid", "r:2026-08-16T00:00:00.000Z\t",
+    const invalidNative = ["c:", "r:", "c:bad", "r:bad", "c:\tmissing-time", "r:bad-time\tid", "r:2026-08-16T00:00:00.000Z\t",
       "c:2026-08-16T00:00:00.000Z\tid\textra", "r:2026-08-16T00:00:00.000Z\tid\nforeign"];
     const invalidNested = invalidNative.flatMap(cursor => [
       `f:${JSON.stringify({ recordsAfter: cursor, capsulesAfter: null, recordsDone: true, capsulesDone: true })}`,

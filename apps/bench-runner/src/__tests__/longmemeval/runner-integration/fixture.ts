@@ -44,7 +44,8 @@ export async function createRunnerFixture(input: {
   const extractionCacheRoot = join(input.root, `extraction-cache-${input.label}`);
   await Promise.all([
     mkdir(dataDir, { recursive: true }),
-    mkdir(pinnedMetaRoot, { recursive: true })
+    mkdir(pinnedMetaRoot, { recursive: true }),
+    mkdir(extractionCacheRoot, { recursive: true })
   ]);
   const datasetRaw = JSON.stringify(input.questions);
   const datasetSha256 = createHash("sha256").update(datasetRaw, "utf8").digest("hex");

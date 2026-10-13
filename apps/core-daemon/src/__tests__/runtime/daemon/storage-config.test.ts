@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -13,10 +13,11 @@ const locator = fileURLToPath(new URL("../../../../../../scripts/resolve-live-db
 
 describe("configured database path shared with installer", () => {
   it.each(["toml", "DATA_DIR"])("uses the same launch cwd for relative %s paths", async (kind) => {
-    const root = await mkdtemp(path.join(tmpdir(), "alaya-config-path-"));
+    // Child processes resolve cwd physically, including symlinked temp directories.
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), "alaya-config-path-")));
     roots.push(root);
     const configDir = path.join(root, "xdg", "alaya");
-    const env = { ...process.env, ALAYA_CONFIG_DIR: "", XDG_CONFIG_HOME: path.join(root, "xdg"), DATA_DIR: "data" };
+    const env = { ...process.env, ALAYA_CONFIG_DIR: "", XDG_CONFIG_HOME: path.join(root, "xdg"), APPDATA: path.join(root, "xdg"), DATA_DIR: "data" };
     await mkdir(configDir, { recursive: true });
     if (kind === "toml") await writeFile(path.join(configDir, "alaya.toml"), '[storage]\ndb_path = "data/custom.db"\n');
     expect(resolveAlayaConfigDir({ env })).toBe(configDir);
