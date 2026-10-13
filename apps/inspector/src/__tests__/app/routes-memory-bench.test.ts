@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createInspectorApp,
   INSPECTOR_ROUTE_SURFACE,
@@ -45,9 +45,10 @@ describe("inspector routes", () => {
   });
 
 
-  it("summarizes the latest bench-history entry when one is present", async () => {
+  it.each(["explicit", "default"])("summarizes the latest entry from the %s history root", async (mode) => {
     const root = await mkdtemp(path.join(tmpdir(), "bench-history-with-entries-"));
-    const selfRoot = path.join(root, "self", "2026-05-14T100000Z-ec44a05");
+    const historyRoot = mode === "default" ? path.join(root, ".bench-artifacts", "history") : path.join(root, "custom");
+    const selfRoot = path.join(historyRoot, "self", "2026-05-14T100000Z-ec44a05");
     await mkdir(selfRoot, { recursive: true });
     const payload = {
       bench_name: "self",
@@ -79,14 +80,16 @@ describe("inspector routes", () => {
     };
     await writeFile(path.join(selfRoot, "kpi.json"), JSON.stringify(payload), "utf8");
 
-    const app = createInspectorApp({
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(root);
+    let app: ReturnType<typeof createInspectorApp>;
+    try { app = createInspectorApp({
       token: "token",
       workspaceId: "ws1",
       daemonUrl: "http://daemon.local",
-      benchHistoryRoot: root,
-      staticRoot: await mkdtemp(path.join(tmpdir(), "inspector-static-")),
+      ...(mode === "explicit" ? { benchHistoryRoot: historyRoot } : {}),
+      staticRoot: root,
       fetchImpl: async () => Response.json({}, { status: 500 })
-    });
+    }); } finally { cwd.mockRestore(); }
 
     const response = await authenticatedRequest(app, "/api/bench-summary");
     expect(response.status).toBe(200);
@@ -96,6 +99,7 @@ describe("inspector routes", () => {
     };
     expect(body.data.self?.history_count).toBe(1);
     expect(body.data.self?.latest_slug).toBe("2026-05-14T100000Z-ec44a05");
+    await rm(root, { recursive: true, force: true });
   });
 
 

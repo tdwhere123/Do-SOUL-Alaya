@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { resolveDefaultBenchHistoryRoot } from "../packages/eval/dist/index.js";
 
 // Baseline-diff degradation gate. Works uniformly across the four bench
 // surfaces (public / public-multiturn / public-crossquestion / public-locomo):
@@ -15,9 +16,9 @@ const KNOWN_BENCHES = new Set([
 ]);
 
 const args = parseArgs(process.argv.slice(2));
-const historyRoot = args["history-root"] ?? "docs/bench-history";
+const historyRoot = args["history-root"] ?? resolveDefaultBenchHistoryRoot();
 const benchName = args.bench ?? "public";
-const backlogPath = args.backlog ?? "docs/bench-history/degradation-backlog.md";
+const backlogPath = args.backlog ?? path.join(historyRoot, "degradation-backlog.md");
 const thresholdPp = Number.parseFloat(args["threshold-pp"] ?? "5");
 
 if (!KNOWN_BENCHES.has(benchName)) {
@@ -38,7 +39,10 @@ if (delta === null || delta > -thresholdPp) {
 }
 
 const marker = `bench-degradation:auto ${benchName}/${latest.slug}`;
-const original = readFileSync(backlogPath, "utf8");
+const original = existsSync(backlogPath) ? readFileSync(backlogPath, "utf8") : [
+  "# Benchmark degradation backlog", "", "**Next available number**: `#BL-001`",
+  "", "## Open Issues", "", "No open `#BL-*` issues at this time.", ""
+].join("\n");
 if (original.includes(marker)) {
   emitJsonAndExit({ action: "noop", reason: "already_recorded", slug: latest.slug, delta });
 }
@@ -53,6 +57,7 @@ const issue = renderIssue({
   slug: latest.slug,
   delta,
   thresholdPp,
+  archivePath: path.resolve(historyRoot, benchName, latest.slug),
   payload: latest.payload,
   marker
 });
@@ -62,6 +67,7 @@ let updated = original.replace(
   `**Next available number**: \`${nextIssueId}\``
 );
 updated = insertOpenIssue(updated, issue);
+mkdirSync(path.dirname(backlogPath), { recursive: true });
 writeFileSync(backlogPath, updated, "utf8");
 emitJsonAndExit({ action: "opened", issue: issueId, slug: latest.slug, delta });
 
@@ -128,7 +134,7 @@ function readNextIssueNumber(markdown) {
   return Number.parseInt(match[1], 10);
 }
 
-function renderIssue({ issueId, benchName, slug, delta, thresholdPp, payload, marker }) {
+function renderIssue({ issueId, benchName, slug, delta, thresholdPp, archivePath, payload, marker }) {
   const previousRun = payload.diff_vs_previous?.previous_run ?? "unknown";
   const planeLines = renderPlaneCoverageLines(payload);
   return [
@@ -140,7 +146,7 @@ function renderIssue({ issueId, benchName, slug, delta, thresholdPp, payload, ma
     "",
     `**Trigger**: R@5 changed by ${formatPp(delta)}pp against \`${previousRun}\`, crossing the ${thresholdPp.toFixed(1)}pp daily degradation threshold.`,
     "",
-    `**Scope**: Inspect \`docs/bench-history/${benchName}/${slug}/\` and the prior archive, identify whether the loss is scoring, ingestion, provider, or dataset noise, then close with a verified bench rerun.`,
+    `**Scope**: Inspect \`${archivePath}\` and the prior archive, identify whether the loss is scoring, ingestion, provider, or dataset noise, then close with a verified bench rerun.`,
     ...planeLines,
     "",
     `<!-- ${marker} -->`,

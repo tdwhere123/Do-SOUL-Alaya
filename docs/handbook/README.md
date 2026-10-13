@@ -27,5 +27,5 @@ Keep implemented contracts separate from proposed task-loop capabilities.
 Historical study gates do not add universal runtime admission requirements.
 
 Ordinary engineering debt belongs in PR descriptions, not a handbook
-issue list. Bench KPI degradations belong in
-[`docs/bench-history/degradation-backlog.md`](../bench-history/degradation-backlog.md).
+issue list. Keep bench KPI degradations in local history; see the
+[benchmark reproduction policy](../bench-history/README.md).

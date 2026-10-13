@@ -1,12 +1,13 @@
 import path from "node:path";
 import process from "node:process";
+import { stat } from "node:fs/promises";
 import { ZodError } from "zod";
 import { diffKpis } from "../history/diff.js";
-import { listEntries, readEntry, readPrevious, type HistoryLayout } from "../history/history.js";
+import { listEntries, readEntry, readPrevious, resolveDefaultBenchHistoryRoot, type HistoryLayout } from "../history/history.js";
 import { renderReport } from "../reports/report.js";
 import { BenchName } from "../contracts/kpi-schema.js";
 
-const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
+const DEFAULT_HISTORY_ROOT = resolveDefaultBenchHistoryRoot();
 const SUPPORTED_BENCH_NAMES = BenchName.options.join(" | ");
 
 // invariant: @do-soul/alaya-eval is the bench-history schema + threshold diff
@@ -107,8 +108,26 @@ async function runDiffCommand(
   }
   const benchName = parsed.data;
   try {
+    if (opts.historyRoot !== undefined) {
+      const root = await stat(layout.historyRoot).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (root === null) {
+        process.stderr.write(`alaya-eval diff: explicit history root does not exist: ${layout.historyRoot}\n`);
+        return 2;
+      }
+      if (!root.isDirectory()) {
+        process.stderr.write(`alaya-eval diff: explicit history root is not a directory: ${layout.historyRoot}\n`);
+        return 2;
+      }
+    }
     const slugs = await listEntries(layout, benchName);
     if (slugs.length === 0) {
+      if (opts.historyRoot !== undefined) {
+        process.stderr.write(`alaya-eval diff: explicit history has no comparison entries under ${path.join(layout.historyRoot, benchName)}\n`);
+        return 2;
+      }
       process.stdout.write(
         `alaya-eval diff: no entries yet under ${path.join(layout.historyRoot, benchName)}\n`
       );

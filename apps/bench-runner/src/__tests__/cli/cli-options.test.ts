@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
+import { resolveDefaultBenchHistoryRoot } from "@do-soul/alaya-eval";
 import { parseFlags } from "../../cli/cli-options.js";
 
 describe("parseFlags", () => {
+  it("uses local ignored history and retains explicit history and static input paths", () => {
+    expect(parseFlags([]).historyRoot).toBe(path.resolve(process.cwd(), ".bench-artifacts/history"));
+    expect(parseFlags([]).historyRoot).toBe(resolveDefaultBenchHistoryRoot());
+    const parsed = parseFlags(["--history-root", "legacy/history", "--pinned-meta-root", "docs/bench-history/datasets",
+      "--question-manifest", "docs/bench-history/datasets/longmemeval_s.stratified-100.v1.json"]);
+    expect(parsed.historyRoot).toBe("legacy/history");
+    expect(parsed.pinnedMetaRoot).toBe("docs/bench-history/datasets");
+    expect(parsed.questionManifest).toBe("docs/bench-history/datasets/longmemeval_s.stratified-100.v1.json");
+  });
+
+  it.each([["--history-root"], ["--history-root", ""], ["--history-root", "--limit", "1"]])(
+    "rejects a history override without a path: %j", (...args) => {
+      expect(() => parseFlags(args)).toThrow("--history-root requires a path value");
+    }
+  );
+
   it("defaults the benchmark embedding provider to local ONNX", () => {
     expect(parseFlags([]).embeddingProviderKind).toBe("local_onnx");
   });

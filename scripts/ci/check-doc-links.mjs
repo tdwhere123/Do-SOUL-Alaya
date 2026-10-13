@@ -140,7 +140,8 @@ function visit(dir, onFile) {
       entry.name === "dist" ||
       entry.name === ".git" ||
       entry.name === ".pnpm-store" ||
-      entry.name === ".do-it"
+      entry.name === ".do-it" ||
+      entry.name === ".bench-artifacts"
     ) {
       continue;
     }

@@ -6,10 +6,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && { pwd -W 2>/dev/nul
 cd "$REPO_ROOT"
 
 LIMIT="${BENCH_DAILY_LIMIT:-100}"
-HISTORY_ROOT="${BENCH_DAILY_HISTORY_ROOT:-docs/bench-history}"
+HISTORY_ROOT="${BENCH_DAILY_HISTORY_ROOT:-}"
 THRESHOLD_PP="${BENCH_DAILY_DEGRADATION_THRESHOLD_PP:-5}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
+if [[ -z "$HISTORY_ROOT" ]]; then
+  HISTORY_ROOT="$("$NODE_BIN" --input-type=module -e 'import { resolveDefaultBenchHistoryRoot } from "./packages/eval/dist/index.js"; process.stdout.write(resolveDefaultBenchHistoryRoot());')"
+fi
 run_node() {
   if [[ -n "${BENCH_NODE_INTERCEPT:-}" ]]; then
     "$NODE_BIN" "$BENCH_NODE_INTERCEPT" "$@"

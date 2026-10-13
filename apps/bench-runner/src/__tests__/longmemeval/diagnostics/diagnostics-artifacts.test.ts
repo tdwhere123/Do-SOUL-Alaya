@@ -3,9 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   readExternalDiagnosticsArtifact,
+  resolveBenchDiagnosticsArtifactRoot,
   readExternalDiagnosticsSidecarArtifact,
   streamExternalDiagnosticsQuestions,
   writeExternalDiagnosticsArtifact,
@@ -21,6 +22,7 @@ import {
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -31,6 +33,20 @@ async function artifactRoot(): Promise<string> {
 }
 
 describe("LongMemEval diagnostics artifacts", () => {
+  it("resolves new, legacy and custom history layouts while retaining the artifact override", () => {
+    vi.stubEnv("ALAYA_BENCH_ARTIFACT_ROOT", "");
+    const repo = path.join(tmpdir(), "diagnostics-layout");
+    expect(resolveBenchDiagnosticsArtifactRoot(path.join(repo, ".bench-artifacts/history")))
+      .toBe(path.join(repo, ".bench-artifacts"));
+    expect(resolveBenchDiagnosticsArtifactRoot(path.join(repo, "docs/bench-history")))
+      .toBe(path.join(repo, ".bench-artifacts"));
+    expect(resolveBenchDiagnosticsArtifactRoot(path.join(repo, "custom/history")))
+      .toBe(path.join(repo, "custom/.bench-artifacts"));
+    vi.stubEnv("ALAYA_BENCH_ARTIFACT_ROOT", "explicit-artifacts");
+    expect(resolveBenchDiagnosticsArtifactRoot(path.join(repo, ".bench-artifacts/history")))
+      .toBe(path.resolve("explicit-artifacts"));
+  });
+
   it("returns a streamed identity without returning gzip contents", async () => {
     const historyRoot = await artifactRoot();
     const repeatedQuestion = {
@@ -70,7 +86,8 @@ describe("LongMemEval diagnostics artifacts", () => {
   });
 
   it("roundtrips streamed diagnostics without schema or JSON drift", async () => {
-    const historyRoot = await artifactRoot();
+    const root = await artifactRoot();
+    const historyRoot = path.join(root, ".bench-artifacts/history");
     const question = validQuestionDiagnostic();
     const sidecar = validDiagnosticsSidecar(question);
     const written = await writeExternalGzipDiagnosticsSidecarArtifact({
@@ -91,6 +108,7 @@ describe("LongMemEval diagnostics artifacts", () => {
     const parsed = await readExternalDiagnosticsSidecarArtifact(
       written.artifactPath
     );
+    expect(written.artifactPath).toBe(path.join(root, ".bench-artifacts/public/schema/longmemeval-diagnostics.json.gz"));
     expect(LongMemEvalQuestionDiagnosticSchema.parse(parsed.questions[0])).toEqual(question);
     expect(parsed).toEqual(JSON.parse(renderDiagnosticsSidecar(sidecar)));
     expect(written.sha256).toBe(repeated.sha256);

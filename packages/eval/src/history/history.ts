@@ -51,6 +51,11 @@ export {
 
 export type { HistoryPointerKind } from "./history-files.js";
 
+/** Generated history is local to the caller's working directory unless a base is supplied. */
+export function resolveDefaultBenchHistoryRoot(baseRoot = process.cwd()): string {
+  return path.resolve(baseRoot, ".bench-artifacts/history");
+}
+
 export interface HistoryLayout {
   readonly historyRoot: string;
   readonly verifyLongMemEvalEvidence?: (input: {

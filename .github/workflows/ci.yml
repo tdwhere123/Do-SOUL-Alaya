@@ -343,7 +343,9 @@ jobs:
           node-version: "24"
 
       - name: Check bench-history contract
-        run: node scripts/ci/check-content-contracts.mjs
+        run: |
+          node --test scripts/ci/check-benchmark-storage.test.mjs
+          node scripts/ci/check-content-contracts.mjs
 
   # This isolated smoke consumes only the checkout, so it need not wait for tests.
   install-smoke-check:

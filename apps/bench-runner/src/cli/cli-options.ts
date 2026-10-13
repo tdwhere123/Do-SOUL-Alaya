@@ -1,9 +1,8 @@
 import { AlayaError, ExtractionSourcePackingSchema, type ExtractionSourcePacking } from "@do-soul/alaya-protocol";
-import path from "node:path";
-import process from "node:process";
-import type {
-  BenchPolicyShape,
-  BenchSimulateReportMode
+import {
+  resolveDefaultBenchHistoryRoot,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode
 } from "@do-soul/alaya-eval";
 import {
   DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
@@ -25,7 +24,7 @@ import { consumeBooleanFlags } from "./options/boolean-flags.js";
 import { consumeRecallEvalPathFlag } from "./options/recall-eval-flags.js";
 import { finalizeParsedFlags } from "./cli-options-finalize.js";
 
-const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
+const DEFAULT_HISTORY_ROOT = resolveDefaultBenchHistoryRoot();
 
 export interface ParsedFlags {
   readonly variant: LongMemEvalVariant;
@@ -220,7 +219,10 @@ function consumeFlagToken(
     return index + 1;
   }
   if (token === "--history-root") {
-    state.historyRoot = args[index + 1] ?? DEFAULT_HISTORY_ROOT;
+    state.historyRoot = readRequiredFlagValue(args, index, token, "--history-root", "--history-root requires a path value");
+    if (state.historyRoot.trim().length === 0 || state.historyRoot.startsWith("--")) {
+      throw new AlayaError("VALIDATION", "--history-root requires a path value");
+    }
     return index + 1;
   }
   if (token === "--embedding") {

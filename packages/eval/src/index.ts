@@ -111,6 +111,7 @@ export {
   readEntryForDiff,
   readLatest,
   readPrevious,
+  resolveDefaultBenchHistoryRoot,
   reconcileHistoryEntryPointers,
   simulateReportSlug,
   writeEntry,

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { isZodValidationError } from "@do-soul/alaya-protocol";
+import { resolveDefaultBenchHistoryRoot } from "@do-soul/alaya-eval";
 import { createInspectorAuthMiddleware } from "../middleware/auth.js";
 import { createApiSecurityHeadersMiddleware } from "../middleware/security-headers.js";
 import { registerInspectorBenchSummaryRoutes } from "../routes/bench-summary.js";
@@ -199,7 +200,7 @@ function registerInspectorApiRoutes(
   registerInspectorBenchSummaryRoutes(app, {
     historyRoot:
       options.benchHistoryRoot ??
-      resolve(process.cwd(), "docs/bench-history")
+      resolveDefaultBenchHistoryRoot()
   });
   registerInspectorStaticRoutes(app, {
     staticRoot: options.staticRoot ?? defaultStaticRoot

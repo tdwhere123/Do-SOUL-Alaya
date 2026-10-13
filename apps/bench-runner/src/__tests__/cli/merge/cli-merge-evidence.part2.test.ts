@@ -32,6 +32,33 @@ import {
 afterEach(cleanupRoots);
 
 describe("merge-longmemeval evidence bundle", () => {
+  it("reads a new-layout external gzip through containment and refuses an escaping reference", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "merge-local-history-"));
+    roots.push(root);
+    const shard = path.join(root, ".bench-artifacts/history");
+    const reference = "public/2026-05-14T100000Z-abc1234/full.json.gz";
+    const artifactPath = path.join(root, ".bench-artifacts", reference);
+    await mkdir(path.dirname(artifactPath), { recursive: true });
+    const bytes = gzipSync(JSON.stringify(makeShardDiagnostics({ questions: [streamedQuestion("q-local")] })));
+    await writeFile(artifactPath, bytes);
+    const kpi = makeShardKpi({ evaluated_count: 1, kpi: { ...makeShardKpi().kpi,
+      per_scenario: [scenarioRow("q-local", true)] } });
+    const compact = makeShardDiagnostics({ compact_schema_version: 1, question_count: 1,
+      full_diagnostics_artifact_path: reference, questions: undefined });
+    await writeShardRoot(shard, kpi, compact);
+    const spool = await LongMemEvalDiagnosticsSpool.create();
+    try {
+      const loaded = await loadMergeShards([shard], spool);
+      expect(loaded.questionDiagnostics.map(question => question.question_id)).toEqual(["q-local"]);
+      expect(await readFile(artifactPath)).toEqual(bytes);
+      await writeFile(path.join(root, "outside.json.gz"), bytes);
+      await writeShardRoot(shard, kpi, { ...compact, full_diagnostics_artifact_path: "../../outside.json.gz" });
+      await expect(loadMergeShards([shard], spool)).rejects.toThrow(/artifact|contain|relative|traversal/u);
+    } finally {
+      await spool.dispose();
+    }
+  });
+
   it("streams shard full diagnostics into a compact merge spool", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "merge-evidence-spool-"));
     roots.push(root);

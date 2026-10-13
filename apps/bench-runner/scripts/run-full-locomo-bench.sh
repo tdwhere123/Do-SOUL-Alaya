@@ -19,7 +19,7 @@ EMBEDDING_PROVIDER="local_onnx"
 LIMIT=""
 OFFSET=""
 DATA_DIR="${BENCH_LOCOMO_DATA_DIR:-apps/bench-runner/data/locomo}"
-HISTORY_ROOT="${BENCH_LOCOMO_HISTORY_ROOT:-docs/bench-history}"
+HISTORY_ROOT="${BENCH_LOCOMO_HISTORY_ROOT:-}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
 NODE_RUNNER=("$NODE_BIN")
@@ -117,6 +117,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown flag: $1" >&2; exit 2;;
   esac
 done
+
+if [[ -z "$HISTORY_ROOT" ]]; then
+  HISTORY_ROOT="$("$NODE_BIN" --input-type=module -e 'import { resolveDefaultBenchHistoryRoot } from "./packages/eval/dist/index.js"; process.stdout.write(resolveDefaultBenchHistoryRoot());')"
+fi
 
 if (( EMBEDDING_SPECIFIED == 1 )); then
   case "$EMBEDDING" in

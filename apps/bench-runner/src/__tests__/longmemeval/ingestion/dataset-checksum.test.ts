@@ -402,6 +402,7 @@ describe("loadDataset checksum verification", () => {
     await seedPinnedMeta(verifiedSha);
     vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+    await mkdir(join(tmpDir, "extraction-cache"), { recursive: true });
     const spool = await LongMemEvalDiagnosticsSpool.create();
 
     try {

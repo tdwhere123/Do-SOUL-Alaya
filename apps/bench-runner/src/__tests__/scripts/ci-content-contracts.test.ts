@@ -43,7 +43,7 @@ describe("CI bench-history content contracts", () => {
     });
   });
 
-  it("rejects tracked full diagnostics in bench-history archives", async () => {
+  it("rejects full question diagnostics in a compact archive sidecar", async () => {
     const historyRoot = await createHistoryRoot();
     const slug = "2026-05-31T003312Z-5fd0836-policy-stress";
     await writeArchive(historyRoot, {
@@ -59,7 +59,7 @@ describe("CI bench-history content contracts", () => {
     );
 
     await expect(runContract(historyRoot)).rejects.toMatchObject({
-      stderr: expect.stringContaining("tracked full diagnostics"),
+      stderr: expect.stringContaining("archive diagnostics must be compact"),
       code: 1
     });
   });

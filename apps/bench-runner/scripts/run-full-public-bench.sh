@@ -39,7 +39,7 @@ SIMULATE_REPORT="none"
 SHARDS=""
 LIMIT=""
 DATA_DIR="${BENCH_DATA_DIR:-apps/bench-runner/data/longmemeval}"
-HISTORY_ROOT="${BENCH_PUBLIC_HISTORY_ROOT:-docs/bench-history}"
+HISTORY_ROOT="${BENCH_PUBLIC_HISTORY_ROOT:-}"
 LOG_DIR="${BENCH_LOG_DIR:-/tmp/alaya-bench-logs}"
 BENCH_RUNNER_CLI="apps/bench-runner/dist/cli/index.js"
 NODE_BIN="${BENCH_NODE_BIN:-node}"
@@ -141,6 +141,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown flag: $1" >&2; exit 2;;
   esac
 done
+
+if [[ -z "$HISTORY_ROOT" ]]; then
+  HISTORY_ROOT="$("$NODE_BIN" --input-type=module -e 'import { resolveDefaultBenchHistoryRoot } from "./packages/eval/dist/index.js"; process.stdout.write(resolveDefaultBenchHistoryRoot());')"
+fi
 
 if (( POLICY_SHAPE_SPECIFIED == 1 )); then
   case "$POLICY_SHAPE" in

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "../../../cli/index.js";
@@ -40,6 +40,9 @@ describe("diagnostic-loop CLI", () => {
     expect(parsed.request.cacheMode).toBe("cache_only");
     expect(parsed.request.variant).toBe("longmemeval_s");
     expect(parsed.request.limit).toBe(1);
+    expect(parsed.request.historyRoot).toBe(resolve(process.cwd(), ".bench-artifacts/history"));
+    expect(parseDiagnosticLoopArgs(requiredFlags({ extra: ["--history-root", "legacy-history"] }))
+      .request.historyRoot).toBe("legacy-history");
   });
 
   it("parses an embedding cache overlay as an operational override", () => {
@@ -183,6 +186,14 @@ describe("diagnostic-loop CLI", () => {
     ]);
     expect(parsed.request.requestedKeys).toEqual(request.requestedKeys);
     expect(parsed.request.extractionCacheRoot).toBe(cacheRoot);
+    expect(parsed.request.historyRoot).toBe(resolve(process.cwd(), ".bench-artifacts/history"));
+    const overridden = parseDiagnosticLoopArgs([
+      "--work-root", join(root, "target"), "--request-manifest", manifestPath,
+      "--history-root", "explicit-history"
+    ]);
+    expect(overridden.request.historyRoot).toBe("explicit-history");
+    expect(overridden.request.requestedKeys).toEqual(request.requestedKeys);
+    expect(overridden.request.extractionCacheRoot).toBe(cacheRoot);
   });
 });
 

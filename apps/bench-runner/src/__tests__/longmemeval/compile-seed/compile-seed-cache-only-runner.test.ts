@@ -291,6 +291,20 @@ describe("createCompileSeedRunner — credentialless cache-only path", () => {
     });
   });
 
+  it.each(["explicit", "environment"])("refuses a missing %s cache before providers even with inspection opt-out", source => {
+    vi.stubEnv("ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST", "0");
+    const missing = join(cacheRoot, "missing");
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", source === "environment" ? missing : cacheRoot);
+    const extractorFactory = vi.fn();
+    expect(() => createCompileSeedRunner({
+      config: OFFLINE_CONFIG,
+      ...(source === "explicit" ? { cacheRoot: missing } : {}),
+      extractorFactory,
+      diagnosticDir: null
+    })).toThrow(`selected extraction cache root does not exist: ${missing}`);
+    expect(extractorFactory).not.toHaveBeenCalled();
+  });
+
   function writeManifest(): void {
     writeExtractionCacheTestManifest({
       cacheRoot,

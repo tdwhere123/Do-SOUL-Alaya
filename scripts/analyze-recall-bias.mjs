@@ -7,7 +7,7 @@
 //
 // Usage: node scripts/analyze-recall-bias.mjs <diagnostics.json>
 //
-// see also: docs/bench-history/README.md (tracked recall KPI archives);
+// see also: docs/bench-history/README.md (local recall KPI archive contract);
 // scripts/compute-cohort-from-archive.mjs.
 
 import { readFileSync } from "node:fs";

@@ -2,8 +2,8 @@
 import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { execFileSync, spawnSync } from "node:child_process";
 
-const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 const BENCH_ROOTS = new Set([
   "self",
   "public",
@@ -35,7 +35,8 @@ const args = parseArgs(process.argv.slice(2));
 const errors = [];
 
 try {
-  await checkBenchHistory(args.historyRoot);
+  if (args.historyRoot === undefined) checkTrackedBenchmarkFiles();
+  else await checkBenchHistory(args.historyRoot);
 } catch (error) {
   errors.push(error instanceof Error ? error.message : String(error));
 }
@@ -50,7 +51,7 @@ if (errors.length > 0) {
 process.stdout.write("bench-history content contracts OK\n");
 
 function parseArgs(argv) {
-  let historyRoot = DEFAULT_HISTORY_ROOT;
+  let historyRoot;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--history-root") {
@@ -63,10 +64,12 @@ function parseArgs(argv) {
     } else if (token === "--help" || token === "-h") {
       process.stdout.write(
         [
-          "check-content-contracts -- validate committed bench-history pointers",
+          "check-content-contracts -- enforce tracked benchmark storage policy",
           "",
           "Usage:",
           "  node scripts/ci/check-content-contracts.mjs [--history-root <path>]",
+          "Without arguments: reject tracked files forbidden by the benchmark .gitignore policy.",
+          "With --history-root: validate that explicit local archive's pointers and diagnostics.",
           ""
         ].join("\n")
       );
@@ -76,6 +79,24 @@ function parseArgs(argv) {
     }
   }
   return { historyRoot };
+}
+
+function checkTrackedBenchmarkFiles() {
+  const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  const tracked = execFileSync("git", ["ls-files", "-z", "--", "docs/bench-history", ".bench-artifacts"], {
+    cwd: repoRoot, encoding: "utf8"
+  });
+  // Git owns the maintained-file allowlist in .gitignore. --no-index also
+  // detects generated artifacts that were force-added despite that policy.
+  const result = spawnSync("git", ["check-ignore", "--no-index", "-z", "--stdin"], {
+    cwd: repoRoot, input: tracked, encoding: "utf8"
+  });
+  if (result.error !== undefined || (result.status !== 0 && result.status !== 1)) {
+    throw result.error ?? new Error(result.stderr || "could not check tracked benchmark storage policy");
+  }
+  for (const file of result.stdout.split("\0").filter(Boolean)) {
+    add(`${file}: generated benchmark artifacts must remain untracked`);
+  }
 }
 
 async function checkBenchHistory(historyRoot) {
@@ -263,7 +284,7 @@ async function checkDiagnostics(historyRoot) {
     const diagnostics = await readJson(filePath, relative);
     if (!isObject(diagnostics)) continue;
     if (Array.isArray(diagnostics.questions)) {
-      add(`${relative}: tracked full diagnostics are forbidden; commit compact sidecars only`);
+      add(`${relative}: archive diagnostics must be compact; keep full diagnostics in the artifact root`);
     }
     const artifactPath = diagnostics.full_diagnostics_artifact_path;
     if (

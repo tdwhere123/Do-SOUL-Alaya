@@ -20,23 +20,22 @@ it("redirects to ALAYA_BENCH_EXTRACTION_CACHE_ROOT (staging) when set", async ()
   expect(pathsEqual(EXTRACTION_CACHE_ROOT, resolve(staging))).toBe(true);
 }, 15_000);
 
-it("falls back to the canonical git-tracked fixture path when unset", async () => {
+it("uses the repository-anchored ignored cache path when unset", async () => {
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", undefined as unknown as string);
   vi.resetModules();
   const { EXTRACTION_CACHE_ROOT } = await import("../../../runs/compile-seed/compile-seed-config.js");
   expect(
     pathEndsWithPosixSegments(
       EXTRACTION_CACHE_ROOT,
-      "docs",
-      "bench-history",
-      "datasets",
+      ".bench-artifacts",
+      "cache",
       "longmemeval-extraction-cache"
     )
   ).toBe(true);
   expect(
     pathsEqual(
       EXTRACTION_CACHE_ROOT,
-      resolve(repoRoot, "docs/bench-history/datasets/longmemeval-extraction-cache")
+      resolve(repoRoot, ".bench-artifacts/cache/longmemeval-extraction-cache")
     )
   ).toBe(true);
 });

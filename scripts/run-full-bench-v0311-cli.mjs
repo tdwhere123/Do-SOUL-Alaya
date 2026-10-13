@@ -6,6 +6,7 @@ export function parseArgs(argv, defaults) {
     policyShape: "chat",
     limit: undefined,
     dataDir: undefined,
+    extractionCacheRoot: undefined,
     historyRoot: defaults.defaultHistoryRoot,
     logRoot: defaults.defaultLogRoot,
     dryRun: false,
@@ -33,6 +34,12 @@ export function parseArgs(argv, defaults) {
       args.dataDir = argv[++i];
     } else if (token === "--history-root") {
       args.historyRoot = path.resolve(argv[++i] ?? args.historyRoot);
+    } else if (token === "--extraction-cache-root") {
+      const value = argv[++i];
+      if (value === undefined || value.trim() === "" || value.startsWith("--")) {
+        throw new Error("--extraction-cache-root requires a path");
+      }
+      args.extractionCacheRoot = path.resolve(value);
     } else if (token === "--log-root") {
       args.logRoot = path.resolve(argv[++i] ?? args.logRoot);
     } else if (token === "--dry-run") {

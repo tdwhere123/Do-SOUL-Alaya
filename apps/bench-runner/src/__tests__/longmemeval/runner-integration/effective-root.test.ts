@@ -36,7 +36,7 @@ afterEach(async () => {
 });
 
 describe("LongMemEval-S effective extraction root", () => {
-  it("binds the producer and provenance to one isolated v3 root", async () => {
+  it.each(["explicit", "environment"])("binds the producer and provenance to the same %s v3 root", async source => {
     const fixture = await createRunnerFixture({
       root: tmpRoot,
       label: "recall",
@@ -53,12 +53,12 @@ describe("LongMemEval-S effective extraction root", () => {
         historyRoot: fixture.historyRoot,
         dataDir: fixture.dataDir,
         pinnedMetaRoot: fixture.pinnedMetaRoot,
-        extractionCacheRoot: fixture.extractionCacheRoot,
+        ...(source === "explicit" ? { extractionCacheRoot: fixture.extractionCacheRoot } : {}),
         embeddingMode: "disabled"
       }, undefined, spool);
       const provenance = await provenanceFor(context, fixture.datasetSha256);
 
-      expect(context.opts.extractionCacheRoot).toBe(fixture.extractionCacheRoot);
+      expect(context.extractionCacheRoot).toBe(fixture.extractionCacheRoot);
       expect(provenance.extraction_cache).toMatchObject({
         schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
         source_packing: "reference-eight",

@@ -1,5 +1,5 @@
 import path from "node:path";
-import process from "node:process";
+import { resolveDefaultBenchHistoryRoot } from "@do-soul/alaya-eval";
 import { parseLongMemEvalVariant } from "../../datasets/longmemeval/comparison/dataset-identity.js";
 import {
   isDiagnosticLoopMode,
@@ -26,7 +26,7 @@ import {
 import { readCanonicalReplayRequestManifest } from
   "../provider-preflight/replay-request-manifest.js";
 
-const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
+const DEFAULT_HISTORY_ROOT = resolveDefaultBenchHistoryRoot();
 
 export interface DiagnosticLoopArgs {
   readonly workRoot: string;

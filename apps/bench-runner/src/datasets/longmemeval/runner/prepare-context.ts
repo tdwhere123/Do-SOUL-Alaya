@@ -7,7 +7,7 @@ import type { BenchRecallWeightOverrides } from
 import { resolveBenchRunnerVersion } from "../../../shared/version.js";
 import {
   createCompileSeedRunner,
-  EXTRACTION_CACHE_ROOT
+  resolveEffectiveExtractionCacheRoot
 } from "../../../runs/compile-seed.js";
 import type { LongMemEvalDiagnosticsSpool } from "../../../diagnostics/spool.js";
 import { inspectTurnContentKeySpace } from "../../../runs/extraction/turn-contents.js";
@@ -94,7 +94,7 @@ export async function prepareLongMemEvalRun(
     ? selectedQuestions
     : selectQuestionWindow(selectedQuestions, opts);
   const commitInfo = resolveCommitInfo();
-  const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const extractionCacheRoot = resolveEffectiveExtractionCacheRoot(opts.extractionCacheRoot);
   const executionPolicy = resolvePreparationExecutionPolicy(
     dataset, opts, window, extractionCacheRoot, recallWeightOverrides, process.env
   );

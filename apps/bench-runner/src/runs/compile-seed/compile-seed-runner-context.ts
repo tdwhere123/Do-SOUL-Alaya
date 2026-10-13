@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { resolve } from "node:path";
 import {
   OFFICIAL_API_SYSTEM_PROMPT,
@@ -14,7 +15,7 @@ import {
 import {
   resolveCompileSeedExtractionConfig,
   resolveExtractionSourcePacking,
-  resolveExtractionCacheRoot,
+  resolveEffectiveExtractionCacheRoot,
   resolveBenchExtractionCacheMinCoverage,
   resolveBenchRequireExtractionCacheManifest
 } from "./compile-seed-config.js";
@@ -52,7 +53,11 @@ export interface CompileSeedRunnerContext {
 export function createCompileSeedRunnerContext(
   options: CompileSeedRunnerOptions | undefined
 ): CompileSeedRunnerContext {
-  const cacheRoot = options?.cacheRoot ?? resolveExtractionCacheRoot();
+  const cacheRoot = resolveEffectiveExtractionCacheRoot(options?.cacheRoot);
+  if ((options?.cacheRoot?.trim().length ?? 0) > 0 ||
+      (process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT?.trim().length ?? 0) > 0) {
+    assertSelectedCacheRootExists(cacheRoot);
+  }
   const manifestIdentity = readExtractionCacheManifestIdentity(cacheRoot);
   const manifest = manifestIdentity?.manifest;
   const config = options?.config === undefined
@@ -99,6 +104,19 @@ export function createCompileSeedRunnerContext(
       rawShardInspector
     })
   };
+}
+
+function assertSelectedCacheRootExists(cacheRoot: string): void {
+  try {
+    if (!statSync(cacheRoot).isDirectory()) {
+      throw new AlayaError("VALIDATION", `selected extraction cache root is not a directory: ${cacheRoot}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new AlayaError("UNAVAILABLE", `selected extraction cache root does not exist: ${cacheRoot}`);
+    }
+    throw error;
+  }
 }
 
 function runExtractionCachePreflight(

@@ -23,6 +23,9 @@ export function resolveBenchDiagnosticsArtifactRoot(historyRoot: string): string
   }
   const resolvedHistoryRoot = path.resolve(historyRoot);
   const parent = path.dirname(resolvedHistoryRoot);
+  if (path.basename(resolvedHistoryRoot) === "history" && path.basename(parent) === ".bench-artifacts") {
+    return parent;
+  }
   const artifactBase =
     path.basename(resolvedHistoryRoot) === "bench-history" &&
     path.basename(parent) === "docs"

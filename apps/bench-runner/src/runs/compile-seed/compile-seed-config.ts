@@ -20,21 +20,15 @@ import type {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// The cache fixture lives beside the pinned dataset metadata under
-// docs/bench-history/datasets so that, once a credentialled run has
-// populated it, it can be committed and shared — the same repeatable-
-// fixture discipline used by the pinned dataset meta. The directory is
-// created lazily on the first credentialled run; it is empty (absent)
-// until then.
-// ALAYA_BENCH_EXTRACTION_CACHE_ROOT redirects the cache to a gitignored staging dir so a model
-// switch (e.g. alternate-model re-seed) does not pollute the git-tracked baseline fixture. Unset → canonical.
+// Generated cache bytes are repository-local and ignored; pinned dataset definitions stay tracked.
+// Relative explicit/environment overrides resolve from cwd, while the default is repo-anchored.
 export function resolveExtractionCacheRoot(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): string {
   const override = readNonEmpty(env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT);
   return override !== undefined
     ? resolve(override)
-    : resolve(__dirname, "../../../../../docs/bench-history/datasets/longmemeval-extraction-cache/");
+    : resolve(__dirname, "../../../../../.bench-artifacts/cache/longmemeval-extraction-cache/");
 }
 
 export function resolveEffectiveExtractionCacheRoot(

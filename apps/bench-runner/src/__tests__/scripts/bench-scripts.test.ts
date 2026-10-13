@@ -99,6 +99,63 @@ describe("bench maintenance scripts", () => {
     const updated = await readFile(backlogPath, "utf8");
     expect(updated).toContain(`bench-degradation:auto public/${failingSlug}`);
     expect(updated).not.toContain(`bench-degradation:auto public/${passingSlug}`);
+    expect(updated).toContain(path.join(historyRoot, "public", failingSlug));
+  });
+
+  it("initializes the backlog inside the selected history root and preserves the failure archive", async () => {
+    const historyRoot = path.join(tmpDir, "local-history");
+    const slug = "2026-05-15T080000Z-0bbbbbb";
+    const archive = path.join(historyRoot, "public", slug);
+    await mkdir(archive, { recursive: true });
+    await writeFile(path.join(archive, "kpi.json"), JSON.stringify({ diff_vs_previous: { r_at_5_delta_pp: -12 }, kpi: {} }));
+    await writeFile(path.join(archive, "findings.md"), "Preserve this failure.\n");
+    await writeFile(path.join(historyRoot, "public", "latest-run.json"), JSON.stringify({ slug, kpi_path: `${slug}/kpi.json` }));
+    const args = [path.join(repoRoot, "scripts/append-bench-degradation-backlog.mjs"), "--history-root", historyRoot];
+    const first = await execFileWithFileCapture(process.execPath, args, { env: cliScriptEnv() });
+    expect(JSON.parse(first.stdout)).toMatchObject({ action: "opened", issue: "#BL-001" });
+    const backlogPath = path.join(historyRoot, "degradation-backlog.md");
+    const backlog = await readFile(backlogPath, "utf8");
+    expect(backlog).toContain(archive);
+    expect(backlog).toContain("**Next available number**: `#BL-002`");
+    const second = await execFileWithFileCapture(process.execPath, args, { env: cliScriptEnv() });
+    expect(JSON.parse(second.stdout)).toMatchObject({ action: "noop", reason: "already_recorded" });
+    expect(await readFile(backlogPath, "utf8")).toBe(backlog);
+    expect(await readFile(path.join(archive, "findings.md"), "utf8")).toBe("Preserve this failure.\n");
+  });
+
+  it("resolves orchestrator defaults locally and checks the explicit cache before any bench spawn", async () => {
+    const script = path.join(repoRoot, "scripts/run-full-bench-v0311.mjs");
+    const envCache = path.join(tmpDir, "environment-cache");
+    const explicitCache = path.join(tmpDir, "explicit-cache");
+    await mkdir(envCache);
+    await mkdir(explicitCache);
+    await writeFile(path.join(envCache, "manifest.json"), JSON.stringify({ extraction_model: "environment-model" }));
+    await writeFile(path.join(explicitCache, "manifest.json"), JSON.stringify({ extraction_model: "explicit-model" }));
+    const env = { ...cliScriptEnv(), ALAYA_BENCH_EXTRACTION_CACHE_ROOT: envCache, OFFICIAL_API_GARDEN_MODEL: "blocked-model" };
+    const dryRun = await execFileWithFileCapture(process.execPath, [script, "--dry-run", "--log-root", path.join(tmpDir, "logs")], { env });
+    expect(dryRun.stdout).toContain(`history_root=${path.join(repoRoot, ".bench-artifacts", "history")}`);
+    expect(dryRun.stdout).toContain(`extraction_cache_root=${envCache}`);
+    const selected = await execFileRejects(process.execPath, [script, "--extraction-cache-root", explicitCache], env);
+    expect(selected.code).toBe(2);
+    expect(selected.stderr).toContain("manifest model explicit-model");
+    expect(selected.stderr).not.toContain("manifest model environment-model");
+    const missing = path.join(tmpDir, "missing-cache");
+    const absent = await execFileRejects(process.execPath, [script, "--extraction-cache-root", missing], env);
+    expect(absent.code).toBe(2);
+    expect(absent.stderr).toContain(`selected extraction cache manifest is missing: ${path.join(missing, "manifest.json")}`);
+  });
+
+  it("forwards the shared default history root through the daily wrapper without starting a bench", async () => {
+    const markerPath = path.join(tmpDir, "forwarded.json");
+    const intercept = path.join(tmpDir, "capture.cjs");
+    await writeFile(intercept, `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify(process.argv.slice(2))); process.exit(0);`);
+    await execFileWithFileCapture("bash", [path.join(repoRoot, "apps/bench-runner/scripts/run-daily-public-bench.sh")], {
+      env: { ...cliScriptEnv(), BENCH_NODE_BIN: process.execPath.replaceAll("\\", "/"), BENCH_NODE_INTERCEPT: intercept.replaceAll("\\", "/"),
+        BENCH_DAILY_HISTORY_ROOT: "", BENCH_DAILY_EMBEDDINGS: "disabled", BENCH_DAILY_POLICY_SHAPES: "stress",
+        BENCH_LOG_DIR: path.join(tmpDir, "logs").replaceAll("\\", "/") }
+    });
+    const forwarded = JSON.parse(await readFile(markerPath, "utf8")) as string[];
+    expect(forwarded[forwarded.indexOf("--history-root") + 1]).toBe(path.join(repoRoot, ".bench-artifacts", "history"));
   });
 
   it("keeps local ONNX default cache fallback outside the current working tree", async () => {

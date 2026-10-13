@@ -18,7 +18,7 @@
 // lme-mt, lme-cq, and locomo-on are deferred and are not orchestrated by this
 // script.
 //
-// Each step writes its archive under the matching docs/bench-history/<root>/
+// Each step writes its archive under the matching local history <root>/
 // subtree; the script verifies a fresh archive slug appeared and contains
 // kpi.json before continuing.
 //
@@ -64,10 +64,12 @@ import {
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatDuration, parseArgs, selectSteps } from "./run-full-bench-v0311-cli.mjs";
+import { resolveDefaultBenchHistoryRoot } from "../packages/eval/dist/index.js";
+import { resolveEffectiveExtractionCacheRoot } from "../apps/bench-runner/dist/runs/compile-seed/compile-seed-config.js";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
-const DEFAULT_HISTORY_ROOT = path.join(REPO_ROOT, "docs/bench-history");
+const DEFAULT_HISTORY_ROOT = resolveDefaultBenchHistoryRoot(REPO_ROOT);
 const LOG_ROOT = path.join(REPO_ROOT, "var/bench-logs/v0.3.11");
 const BENCH_RUNNER = path.join(
   REPO_ROOT,
@@ -76,61 +78,42 @@ const BENCH_RUNNER = path.join(
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 const BENCH_ENV_SOURCE_COMMAND =
   `export ${GARDEN_MODEL_ENV}=<model> (or source your bench environment file)`;
-const EXTRACTION_CACHE_MANIFEST_PATH = path.join(
-  REPO_ROOT,
-  "docs/bench-history/datasets/longmemeval-extraction-cache/manifest.json"
-);
 
-// Run-start env guard. A detached spawn (setsid / cron) inherits a clean env
-// where OFFICIAL_API_GARDEN_MODEL may be unset; the bench then silently falls
-// back to the production constant, misses every cache key, and degrades to a
-// full live extraction that looks like a slow run rather than an error. Fail
-// fast in the orchestrator with the exact source command, and when a cache
-// manifest exists, name the model the cache was built with so a stale env is
-// caught too.
-function assertGardenModelEnv() {
+// Detached launches must bind the same model as the selected cache before
+// spawning a bench; credentials or another cache cannot repair that identity.
+function assertGardenModelEnv(extractionCacheRoot) {
   const present =
     typeof process.env[GARDEN_MODEL_ENV] === "string" &&
     process.env[GARDEN_MODEL_ENV].trim().length > 0;
-  const manifestModel = readManifestExtractionModel();
+  const manifestModel = readManifestExtractionModel(extractionCacheRoot);
   if (!present) {
-    const detail =
-      manifestModel === null
-        ? ""
-        : ` The committed extraction cache was built with ${GARDEN_MODEL_ENV}=${manifestModel}.`;
     throw new Error(
-      `${GARDEN_MODEL_ENV} is not set; a detached bench spawn would ` +
-        "silently fall back to the production model, miss every cache key, " +
-        `and live-extract the full dataset (~466h).${detail} Source the bench ` +
-        `env before launching: ${BENCH_ENV_SOURCE_COMMAND}`
+      `${GARDEN_MODEL_ENV} is not set; the selected cache requires model ${manifestModel}. ` +
+        `Bind the matching model before launching: ${BENCH_ENV_SOURCE_COMMAND}`
     );
   }
   if (
-    manifestModel !== null &&
     process.env[GARDEN_MODEL_ENV].trim() !== manifestModel
   ) {
     throw new Error(
       `${GARDEN_MODEL_ENV}=${process.env[GARDEN_MODEL_ENV]} does not match ` +
-        `the extraction cache manifest model ${manifestModel}; the cache ` +
-        "would miss every key and this run would live-extract (~466h). " +
-        `Set ${GARDEN_MODEL_ENV}=${manifestModel} or rebuild the cache.`
+        `the extraction cache manifest model ${manifestModel}. ` +
+        `Set ${GARDEN_MODEL_ENV}=${manifestModel} or explicitly select the matching cache; no bench was started.`
     );
   }
 }
 
-function readManifestExtractionModel() {
-  if (!existsSync(EXTRACTION_CACHE_MANIFEST_PATH)) {
-    return null;
+function readManifestExtractionModel(extractionCacheRoot) {
+  const manifestPath = path.join(extractionCacheRoot, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    throw new Error(`selected extraction cache manifest is missing: ${manifestPath}; prepare this cache explicitly before running`);
   }
-  try {
-    const parsed = JSON.parse(
-      readFileSync(EXTRACTION_CACHE_MANIFEST_PATH, "utf8")
-    );
-    const model = parsed?.extraction_model;
-    return typeof model === "string" && model.trim().length > 0 ? model : null;
-  } catch {
-    return null;
+  const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const model = parsed?.extraction_model;
+  if (typeof model !== "string" || model.trim().length === 0) {
+    throw new Error(`selected extraction cache manifest has no extraction_model: ${manifestPath}`);
   }
+  return model;
 }
 
 // id is the short selector for --bench; archiveRoot is the bench-history
@@ -178,7 +161,8 @@ Flags:
   --data-dir <path>        Dataset root containing longmemeval/ and
                            locomo/ subdirs (default: $ALAYA_BENCH_DATA_DIR or
                            <repo>/apps/bench-runner/data)
-  --history-root <path>    Archive root (default: <repo>/docs/bench-history)
+  --history-root <path>    Archive root (default: <repo>/.bench-artifacts/history)
+  --extraction-cache-root <path>  Cache root (explicit, then environment, then local default)
   --log-root <path>        Log root (default: <repo>/var/bench-logs/v0.3.11)
   --dry-run                Print commands without executing
   --resume                 Skip benches whose sentinel marker already exists
@@ -232,6 +216,7 @@ function buildContext(args) {
     policyShape: args.policyShape,
     limit: args.limit,
     dataDir: path.resolve(dataDir),
+    extractionCacheRoot: resolveEffectiveExtractionCacheRoot(args.extractionCacheRoot, process.env),
     historyRoot: args.historyRoot
   };
 }
@@ -279,7 +264,7 @@ async function runStep(step, ctx, args) {
       ["--max-old-space-size=5000", BENCH_RUNNER, ...stepArgv],
       {
         cwd: REPO_ROOT,
-        env: process.env,
+        env: { ...process.env, ALAYA_BENCH_EXTRACTION_CACHE_ROOT: ctx.extractionCacheRoot },
         stdio: ["ignore", logFd, logFd]
       }
     );
@@ -361,12 +346,11 @@ function resolveRunConfig() {
 
   const ctx = buildContext(args);
 
-  // Fail fast before any detached spawn: a clean inherited env must not
-  // silently fall back to the production model and live-extract the full
-  // dataset. --dry-run only prints commands, so it skips the live-env guard.
+  // --dry-run only prints commands; every executing run validates its cache
+  // identity before a child can start.
   if (!args.dryRun) {
     try {
-      assertGardenModelEnv();
+      assertGardenModelEnv(ctx.extractionCacheRoot);
     } catch (err) {
       process.stderr.write(`run-full-bench-v0311: ${err.message}\n`);
       process.exit(2);
@@ -381,6 +365,7 @@ function printRunBanner(args, ctx, steps) {
   process.stdout.write(`  repo_root=${REPO_ROOT}\n`);
   process.stdout.write(`  data_dir=${ctx.dataDir}\n`);
   process.stdout.write(`  history_root=${ctx.historyRoot}\n`);
+  process.stdout.write(`  extraction_cache_root=${ctx.extractionCacheRoot}\n`);
   process.stdout.write(`  log_root=${args.logRoot}\n`);
   process.stdout.write(`  policy_shape=${ctx.policyShape}\n`);
   process.stdout.write(`  limit=${ctx.limit ?? "(none / full set)"}\n`);

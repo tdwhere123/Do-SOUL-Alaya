@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // must run after: pnpm --filter @do-soul/alaya-eval build
 // @anchor regen-reports — one-shot rewrite of report.md for every history
-// entry under docs/bench-history/{self,public}/. The bench harness
+// entry under the local history root's {self,public}/. The bench harness
 // already produced honest kpi.json artifacts; this script only re-renders
 // the markdown so a scoring-contract section refresh (or any non-numeric
 // renderReport change) can land without re-running the daemon. kpi.json
@@ -13,11 +13,12 @@ import { fileURLToPath } from "node:url";
 import {
   KpiPayloadSchema,
   diffKpis,
-  renderReport
+  renderReport,
+  resolveDefaultBenchHistoryRoot
 } from "@do-soul/alaya-eval";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HISTORY_ROOT = resolve(__dirname, "../../../docs/bench-history");
+const HISTORY_ROOT = resolveDefaultBenchHistoryRoot(resolve(__dirname, "../../.."));
 
 async function listEntryDirs(benchDir) {
   const names = await readdir(benchDir).catch(() => []);

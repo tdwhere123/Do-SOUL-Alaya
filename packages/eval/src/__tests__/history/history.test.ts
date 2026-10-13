@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   readEntry,
   readLatest,
   readPrevious,
+  resolveDefaultBenchHistoryRoot,
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
@@ -352,18 +353,29 @@ describe("history archive", () => {
   });
 
 
-  it("writes findings.md only when the caller passes a non-null body", async () => {
+  it("preserves findings and reachable run/passing pointers when a complete archive moves to local history", async () => {
+    const legacy = { historyRoot: path.join(root, "docs/bench-history") };
+    const moved = { historyRoot: resolveDefaultBenchHistoryRoot(root) };
+    expect(await listEntries(moved, "self")).toEqual([]);
+    expect(await readLatest(moved, "self")).toBeNull();
+    await writeEntry(legacy, "self", "2026-05-14T100000Z-aaaaaaa", buildPayload("aaaaaaa"), "# passing\n", null);
     const slug = "2026-05-15T120000Z-fafafaf";
+    const findingsBody = "# findings\n- r@5 regressed\n";
     const entry = await writeEntry(
-      layout,
-      "public",
+      legacy,
+      "self",
       slug,
       buildPayload("fafafaf"),
       "report",
-      "# findings\n- r@5 regressed\n"
+      findingsBody
     );
-    const findings = await readFile(entry.findingsPath, "utf8");
-    expect(findings).toContain("findings");
+    expect(await readFile(entry.findingsPath, "utf8")).toBe(findingsBody);
+    await mkdir(path.dirname(moved.historyRoot), { recursive: true });
+    await rename(legacy.historyRoot, moved.historyRoot);
+    expect(await readFile(path.join(moved.historyRoot, "self", slug, "findings.md"), "utf8")).toBe(findingsBody);
+    expect((await readLatest(moved, "self"))?.alaya_commit).toBe("fafafaf");
+    expect((await readLatest(moved, "self", { pointerKind: "passing" }))?.alaya_commit).toBe("aaaaaaa");
+    expect(await listEntries(legacy, "self")).toEqual([]);
   });
 
 

@@ -21,20 +21,19 @@ coverage/
 var/
 data/
 apps/bench-runner/data/
-# Regenerated bench extraction cache (hash-keyed; not source truth)
-docs/bench-history/datasets/longmemeval-extraction-cache/
-# Regenerated edge-auto-producer decision cache (content-keyed; not source truth)
-docs/bench-history/datasets/edge-auto-producer-decisions/
-# Regenerated reconciliation-decision cache (model-keyed; not source truth).
-# The upstream extraction cache is already ignored, so committing this layer
-# buys no zero-LLM reproducibility on a fresh checkout — only per-model bloat.
-docs/bench-history/datasets/reconciliation-decisions/
-# External full bench diagnostics; tracked archives keep compact sidecars only.
+# Generated benchmark history, caches, diagnostics, and migration backups.
 .bench-artifacts/
-# Per-run diagnostic detail; tracked run archives keep compact sidecars only
-# (kpi.json / report.md / findings.md / longmemeval-cold-warm-comparison.json).
-docs/bench-history/**/longmemeval-diagnostics.json
-docs/bench-history/**/locomo-diagnostics.json
+# The former artifact root retains only maintained definitions/navigation.
+docs/bench-history/*
+!docs/bench-history/README.md
+!docs/bench-history/datasets/
+docs/bench-history/datasets/*
+!docs/bench-history/datasets/README.md
+!docs/bench-history/datasets/.gitkeep
+!docs/bench-history/datasets/longmemeval_oracle.meta.json
+!docs/bench-history/datasets/longmemeval_s.meta.json
+!docs/bench-history/datasets/locomo10.meta.json
+!docs/bench-history/datasets/longmemeval_s.stratified-100.v1.json
 *.db
 *.db-journal
 *.db-wal

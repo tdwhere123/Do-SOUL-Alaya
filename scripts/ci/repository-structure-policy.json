@@ -192,15 +192,7 @@
     ".do-it/bench-runs",
     "docs/bench-history"
   ],
-  "existing_artifact_reference_exceptions": {
-    "apps/inspector/src/runtime/app.ts": {
-      "max_occurrences_by_fragment": {
-        ".do-it/bench-runs": 0,
-        "docs/bench-history": 1
-      },
-      "reason": "Inspector exposes the retained read-only benchmark trend endpoint; scratch references remain forbidden."
-    }
-  },
+  "existing_artifact_reference_exceptions": {},
   "retired_import_paths": [
     "apps/inspector/web/src/utils/parse-search-query",
     "packages/protocol/src/shared/cjk-segmentation",
@@ -1184,8 +1176,8 @@
     {
       "specifier": "@do-soul/alaya-eval",
       "path": "packages/eval/src/index.ts",
-      "expected_count": 132,
-      "expected_sha256": "0dd14484f6df3235d7abff6b7899a3544a670251c61c85ab5969507e98a44a10"
+      "expected_count": 133,
+      "expected_sha256": "ed2aca19cacb598b3150fef3754a73142a88dfe6ea011ad604c0e5068416bec0"
     },
     {
       "specifier": "@do-soul/alaya-eval/authority",

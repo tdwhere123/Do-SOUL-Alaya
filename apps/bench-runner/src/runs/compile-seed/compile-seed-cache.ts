@@ -15,7 +15,7 @@ import {
   EMPTY_INTERPRETATIONS_ENVELOPE,
   PLAN_SKIPPED_EXTRACTION_ENVELOPE
 } from "../extraction/empty-classification.js";
-import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
+import { resolveEffectiveExtractionCacheRoot } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
 import {
@@ -127,7 +127,7 @@ interface CachingSignalExtractorOptions {
 export function createCachingSignalExtractor(
   options: CachingSignalExtractorOptions
 ): BenchSignalExtractor {
-  const cacheRoot = options.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const cacheRoot = resolveEffectiveExtractionCacheRoot(options.cacheRoot);
   return {
     extract: (input) => extractWithCache(options, cacheRoot, input)
   };

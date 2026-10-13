@@ -1,89 +1,55 @@
-# Bench Dataset Checksums
+# Pinned benchmark datasets
 
-Each `<dataset>.meta.json` here pins the exact bytes a public benchmark
-was scored against. The bench-runner's `fetch-longmemeval` verb warms or
-refreshes the local JSON cache and writes a scratch meta file; the pinned
-identity is enforced by `loadDataset` and by the sharded full-bench
-preflight before scoring. That split keeps cache warmup cheap while still
-making `alaya-bench-runner longmemeval` reproducible on another machine.
+This directory contains maintained dataset identities and a fixed sampling
+manifest. Raw datasets and generated model caches remain local and ignored.
 
-## Format
+| Tracked definition | Purpose |
+| --- | --- |
+| [longmemeval_oracle.meta.json](longmemeval_oracle.meta.json) | LongMemEval Oracle identity |
+| [longmemeval_s.meta.json](longmemeval_s.meta.json) | LongMemEval-S identity |
+| [locomo10.meta.json](locomo10.meta.json) | LoCoMo10 identity |
+| [longmemeval_s.stratified-100.v1.json](longmemeval_s.stratified-100.v1.json) | Ordered 100-question LongMemEval-S cohort |
 
-```jsonc
-{
-  "name": "longmemeval_oracle",
-  "source_url": "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_oracle.json",
-  "sha256": "<filled by fetch>",
-  "fetched_at": "<ISO>",
-  "size_bytes": 0,
-  "question_count": 0
-}
-```
+The metadata files pin the source and SHA-256; preserve their exact contents
+unless intentionally changing the dataset version. LongMemEval admission checks
+`sha256`, `size_bytes`, and `question_count` against the committed pin. Other
+metadata fields retain provenance. LoCoMo has its own metadata shape; do not
+replace it with LongMemEval's field assumptions.
 
-For LongMemEval, the load-bearing committed pin fields are snake_case
-`sha256`, `size_bytes`, and `question_count`. The loader streams the local
-dataset bytes and fails closed if any of those three values differ from the
-committed meta file. Other fields, such as `name`, `source_url`,
-`upstream_filename`, `fetched_at`, `first_pinned_at`, and
-`pinned_by_commit`, are audit context.
+The sampling manifest binds its question IDs and order to `dataset_sha256`,
+`algorithm_version`, and `target_count`. Reusing a limit of 100 or drawing another
+100-question sample does not reproduce this cohort. Preserve the manifest's
+version and bytes independently of generated run results.
 
-The scratch meta file written next to the local cache by
-`fetch-longmemeval` is not a committed pin and does not replace this
-directory's meta files. It exists only to describe the local warm cache; the
-scoring path still reads this directory's committed pin before accepting
-cached bytes.
+## Local data and cache preparation
 
-## Files
+Raw dataset defaults stay under `apps/bench-runner/data/`. The fetch and scoring
+commands accept `--data-dir`; use the same explicit location in both. For example:
 
-- `longmemeval_oracle.meta.json` — committed oracle dataset identity.
-- `longmemeval_s.meta.json` — committed small dataset identity.
-- `longmemeval_m.meta.json` — committed medium dataset identity.
+    node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-longmemeval --variant s --data-dir <local-longmemeval-data>
+    node apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir <local-locomo-data>
 
-Update one of these files only as an intentional dataset-pin change; a fetch
-updates the local scratch metadata, not the committed identity.
+Fetch writes local bytes and scratch metadata. Scratch metadata does not replace
+a committed pin. Scoring/preflight must reject missing or mismatched required
+inputs; an intentional refresh uses the fetch command's `--force` option and
+still must match the committed identity. Dataset downloading does not perform
+model extraction.
 
-## Why pin checksum
+Extraction caches default to
+`.bench-artifacts/cache/longmemeval-extraction-cache/`. Historical reconciliation
+cache bytes moved to `.bench-artifacts/cache/reconciliation-decisions/`; the live
+daemon's existing `DATA_DIR/cache/reconciliation-decisions` location is unchanged.
+An explicit extraction-cache argument takes precedence over its environment
+override and default. Relative explicit/environment paths resolve from the
+process working directory; the default is anchored to the Bench installation's
+repository root. Preserve
+cache manifests, request/profile identities, receipts, and shard contents as one
+cache population; a directory's existence alone does not establish readiness.
 
-A bench number against an unpinned remote dataset is not reproducible
-across upstream edits. The contract is:
+A fresh checkout has no guaranteed model cache. An explicitly requested missing
+or invalid cache must fail clearly, without switching to another cache, inventing
+a degraded result, or automatically calling a model. Fill/rebuild remains a
+separate explicit, authorized workflow. Do not commit generated caches or results.
 
-1. The bench-runner fetches the dataset, computes sha256, and writes a
-   scratch meta-json next to the local cache bytes. The committed meta-json
-   in this directory is the source of truth and is updated only as an
-   intentional dataset pin change.
-2. Later runs read the pinned sha256 first; if the local file doesn't
-   match, the run aborts with `dataset checksum mismatch`. Heavy sharded
-   runs should pass the same explicit `--data-dir <shared-cache>/longmemeval`
-   used by the warmup fetch; missing local bytes or scratch meta fail in
-   preflight with the exact warmup command. Checksum mismatch prints a
-   `fetch-longmemeval ... --force` refresh command so stale bytes do not
-   loop through the normal cache-hit path. LoCoMo uses the same split with
-   `fetch-locomo --data-dir <shared-cache>/locomo` and
-   `run-full-locomo-bench.sh --data-dir <shared-cache>/locomo`.
-3. Bench-history entries cite the dataset checksum in their `kpi.json`
-   `dataset.source` field.
-
-## Extraction cache fixture
-
-`longmemeval-extraction-cache/` holds the on-disk cache of the LongMemEval
-bench seed path's production garden extraction. Each haystack turn is run
-through `OfficialApiGardenProvider.compile()` (one LLM call → N typed
-candidate signals); the raw LLM response is cached here keyed by a SHA-256
-of the load-bearing extraction inputs only (model + system prompt + turn
-content) — never the volatile routing context (run_id / workspace_id) —
-sharded by the first two hex
-chars.
-
-This directory is **EMPTY on a fresh checkout** — it is not pre-populated.
-The first credentialled bench run extracts via the garden LLM and writes the
-fixture; that fixture must then be committed. Only after it is committed
-does a later run (CI, other contributors) reuse it with zero LLM calls and
-become one-click repeatable. Until the fixture is committed:
-
-- a fresh checkout **with** garden credentials re-extracts live, and
-- a fresh checkout **without** credentials takes the degraded no-LLM
-  single-fact fallback (the full turn becomes one candidate fact).
-
-Those two paths produce different ingestion granularity; the bench report
-discloses which path ran. See
-`apps/bench-runner/src/longmemeval/compile-seed.ts`.
+See the [reproduction and local-history guide](../README.md) for runtime settings,
+metric definitions, archive integrity, and comparison requirements.

@@ -184,7 +184,11 @@ Do not treat as source truth: `dist/`, `var/`, `data/`, `node_modules/`.
 Policy: `docs/bench-history/README.md`.
 
 - Experiments → gitignored `.do-it/bench-runs/`; never commit.
-- Full-dataset baselines → `docs/bench-history/` via `latest-*.json` only.
+- Generated history and baselines → gitignored `.bench-artifacts/history/`.
+- Generated extraction caches → gitignored `.bench-artifacts/cache/`.
+- `docs/bench-history/` retains maintained reproduction docs, dataset pins, and
+  sampling manifests only. Preserve complete local archives, including findings
+  and latest pointers; do not commit generated results or model caches.
 
 ## CodeGraph
 
