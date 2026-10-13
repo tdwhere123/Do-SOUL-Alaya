@@ -34,6 +34,13 @@
     "tsconfig.base.json"
   ],
   "workspaces": {
+    ".": {
+      "entry": [
+        "{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
+        "src/{index,cli,main}.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
+        "scripts/configured-paths.d.mts"
+      ]
+    },
     "packages/protocol": {
       "entry": ["src/index.ts", "src/__tests__/**/*.test.ts"],
       "project": ["src/**/*.ts", "tsconfig.json"]
