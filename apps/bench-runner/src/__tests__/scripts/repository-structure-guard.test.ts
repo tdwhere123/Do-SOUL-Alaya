@@ -477,7 +477,7 @@ describe("repository structure guard", () => {
       path.join(repoRoot, "scripts/ci/repository-structure-policy.json")
     );
     const digest = createHash("sha256").update(canonicalizeLf(policyBytes)).digest("hex");
-    const pinned = "99746981cd0d7c9745a579c6db36cd301dfdcd24414762699d18c175bdb38c92";
+    const pinned = "a58c4022fc203787596ca567dd983565ecabaa5fbdc42e290700755ba4e7dfec";
     expect(
       digest,
       `repository-structure-policy.json digest changed (${pinned} -> ${digest}). ` +

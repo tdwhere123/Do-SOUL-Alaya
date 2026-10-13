@@ -4,13 +4,14 @@ import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOUR
   type SourceSemanticLibraryUnprovedComputation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
-  preparedDeliveryId, selectSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
+  preparedDeliveryId, selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
   sourceGoldRootIdentity, SOURCE_SEMANTIC_LIBRARY_ORDER, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { workOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { libraryAccessReceipt, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import { issueSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
+import { prepareLibraryPackagePairs } from "./source-semantic-library-packages.js";
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
@@ -105,6 +106,9 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
     if (finalAccess === undefined) throw new CoreError("OBLIGATION_VIOLATION", "final library page has no reserved access receipt");
     pages.push([...finalPage]); pageAccess.push(finalAccess);
   }
+  if (order === "field" && selectPage === selectSourceSemanticLibraryPage) {
+    improveReservedPackages(pages, pageAccess, candidates, meter, reservePage);
+  }
   const frozenPages = pages.length === 0 ? [[]] : pages;
   const page_access = pages.length === 0
     ? [libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids, [], meter)]
@@ -113,6 +117,34 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
   return { ...frozenBase, pages: frozenPages, page_access,
     coverage: incomplete ? { ...base.coverage, payload: "truncated" } : base.coverage,
     discovery: incomplete ? { ...base.discovery, truncated: true, open_residuals: true } : base.discovery };
+}
+
+function improveReservedPackages(pages: SourceSemanticLibraryPackage[][], access: SourceSemanticAccessReceipt[],
+  candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
+  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => {
+    access: SourceSemanticAccessReceipt; fits: boolean;
+  }): void {
+  let offset = 0;
+  try {
+    for (let position = 0; position < pages.length; position++) {
+      for (const candidate of prepareLibraryPackagePairs(candidates, pages[position]!, meter)) {
+        let replacementAccess: SourceSemanticAccessReceipt | undefined;
+        const improved = improveSourceSemanticLibraryPage({ page: pages[position]!, candidates: [candidate], meter,
+          fits: page => {
+            const reserved = reserve(page, offset, position + 1 < pages.length);
+            if (reserved.fits) replacementAccess = reserved.access;
+            return reserved.fits;
+          } });
+        if (replacementAccess !== undefined) {
+          pages[position] = [...improved]; access[position] = replacementAccess;
+        }
+      }
+      offset += pages[position]!.length;
+    }
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    // The complete baseline is already reserved; optional search cannot revoke any page.
+  }
 }
 
 type PageReservation = Readonly<{ access: SourceSemanticAccessReceipt; fits: boolean }>;

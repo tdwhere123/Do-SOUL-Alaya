@@ -216,7 +216,8 @@ export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
 export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
 export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";
-export { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
+export { selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage,
+  type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {
   SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
   proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,

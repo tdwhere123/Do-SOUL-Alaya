@@ -44,6 +44,26 @@ export function selectSourceSemanticLibraryPage(input: SelectionInput): readonly
   return selectLibraryPage(input, false);
 }
 
+/** Native delivery may improve reserved packages, retaining every occupied root and its position. */
+export function improveSourceSemanticLibraryPage(input: Pick<SelectionInput, "candidates" | "fits" | "meter"> & {
+  page: readonly SourceSemanticLibraryPackage[];
+}): readonly SourceSemanticLibraryPackage[] {
+  let selected = input.page;
+  try {
+    input.meter.charge(input.page.length + input.candidates.length,
+      (input.page.length + input.candidates.length) * 24, "reserved package improvement references");
+    const roots = new Set(input.page.map(root));
+    const candidates = input.candidates.filter(row => roots.has(root(row)));
+    const replacement = [...input.page];
+    const supports = indexSupport([...input.page, ...candidates], input.meter);
+    selected = replacement;
+    improveCoverage(replacement, { ...input, candidates }, supports, pageScore(input, supports, undefined, undefined), root);
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+  }
+  return selected;
+}
+
 /**
  * Private returned-text-tuple ranking over the shared page selector.
  * Named consumers: bounded mechanism tests and the native delivery diagnostic.
@@ -77,12 +97,7 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets
     const tuples = indexReturnedTuples(input, novelty);
     const evidence = evidenceSets ? indexEvidenceSets(input) : undefined;
     const rootKey = (row: SourceSemanticLibraryPackage) => evidence?.roots.get(row.entry) ?? root(row);
-    for (const row of input.candidates) {
-      const bindings = row.proofs.reduce((count, proof) => count + (proof.binding_results?.length ?? 0), 0);
-      const inputs = row.proofs[0]?.query.alternatives.reduce((count, alternative) => count + (alternative.evidence_inputs?.length ?? 0), 0) ?? 0;
-      input.meter.charge((bindings + 1) * (inputs + 1), inputs * 64 + bindings * 8, "selection support projection");
-      supports.set(row.entry, support(row));
-    }
+    indexSupport(input.candidates, input.meter, supports);
     const score = pageScore(input, supports, tuples, evidence);
     const proofsByRoot = new Map<string, SourceSemanticLibraryPackage[]>();
     for (const row of input.candidates) {
@@ -135,6 +150,17 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets
     // A later candidate or continuation cannot revoke an already reserved page.
   }
   return selectionReasons(selected, supports);
+}
+
+function indexSupport(candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticResourceLedger,
+  supports = new Map<IndexEntry, SourceSemanticQuerySupport | undefined>()) {
+  for (const row of candidates) {
+    const bindings = row.proofs.reduce((count, proof) => count + (proof.binding_results?.length ?? 0), 0);
+    const inputs = row.proofs[0]?.query.alternatives.reduce((count, alternative) => count + (alternative.evidence_inputs?.length ?? 0), 0) ?? 0;
+    meter.charge((bindings + 1) * (inputs + 1), inputs * 64 + bindings * 8, "selection support projection");
+    supports.set(row.entry, support(row));
+  }
+  return supports;
 }
 
 function pageScore(input: SelectionInput, supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>,
