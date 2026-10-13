@@ -27,7 +27,7 @@ import {
 } from "./workset.js";
 import {
   type SemanticProposalAuthority, buildSemanticProposalPreflight, verifySemanticProposalAuthority,
-  assertSemanticProposalExecutionScope, inspectSemanticProposalExecutionScope
+  assertSemanticProposalExecutionRoot, inspectSemanticProposalExecutionScope
 } from "./authority.js";
 import { openSemanticProposalAttemptLedger, readSemanticProposalAttemptState, assertProposalRawReservation,
   semanticProposalLookup } from "./attempt.js";
@@ -84,7 +84,7 @@ export async function executeSemanticProposalFill(input: Readonly<{
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySemanticProposalAuthority(input.authority);
-  assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot);
+  assertSemanticProposalExecutionRoot(authority.execution_scope, input.cacheRoot);
   input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
   if (authority.kind !== input.workset.kind || authority.model !== input.workset.model ||
       authority.request_profile !== input.workset.request_profile) {
@@ -126,8 +126,8 @@ export async function executeSemanticProposalFill(input: Readonly<{
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   return withExtractionCacheWriteLease(lease, async () => {
-    assertSemanticProposalExecutionScope(authority.execution_scope, input.cacheRoot, lease);
     input = { ...input, cacheRoot: lease.stableRootPath };
+    // The ledger owner checks source compatibility once, before this operation can mutate it.
     const ledger = openSemanticProposalAttemptLedger({
       cacheRoot: input.cacheRoot, authority, kind: input.workset.kind, writeLease: lease
     });
@@ -339,7 +339,7 @@ function proposalDispatchRequestContext(
     config: input.config,
     suppliedExtractor: input.extractor !== undefined,
     assertScope: () => {
-      assertSemanticProposalExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
+      assertSemanticProposalExecutionRoot(input.authority.execution_scope, input.cacheRoot, writeLease);
     }
   };
 }

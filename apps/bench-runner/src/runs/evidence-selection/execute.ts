@@ -14,7 +14,7 @@ import {
   type ProviderRequestPhysicalContext
 } from "../provider-request/execution.js";
 import {
-  assertEvidenceSelectionExecutionScope,
+  assertEvidenceSelectionExecutionRoot,
   buildEvidenceSelectionPreflight,
   inspectEvidenceSelectionExecutionScope,
   verifyEvidenceSelectionAuthority,
@@ -85,7 +85,7 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifyEvidenceSelectionAuthority(input.authority);
-  assertEvidenceSelectionExecutionScope(authority.execution_scope, input.cacheRoot);
+  assertEvidenceSelectionExecutionRoot(authority.execution_scope, input.cacheRoot);
   input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
   if (authority.model !== input.workset.model || authority.request_profile !== input.workset.request_profile) {
     throw new AlayaError("CONFLICT", "evidence selection authority does not bind this workset");
@@ -118,8 +118,8 @@ export async function executeEvidenceSelectionFill(input: Readonly<{
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
-    assertEvidenceSelectionExecutionScope(authority.execution_scope, input.cacheRoot, lease);
     input = { ...input, cacheRoot: lease.stableRootPath };
+    // The ledger owner checks source compatibility once, before this operation can mutate it.
     const ledger = openEvidenceSelectionAttemptLedger({
       cacheRoot: input.cacheRoot, authority, writeLease: lease
     });
@@ -341,7 +341,7 @@ function dispatchContext(
     config: input.config,
     suppliedExtractor: input.extractor !== undefined,
     assertScope: () => {
-      assertEvidenceSelectionExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
+      assertEvidenceSelectionExecutionRoot(input.authority.execution_scope, input.cacheRoot, writeLease);
     }
   };
 }

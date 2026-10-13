@@ -19,7 +19,7 @@ import {
   type SourceEvidencePreservationOutcome
 } from "./assess.js";
 import {
-  assertSourceEvidencePreservationExecutionScope,
+  assertSourceEvidencePreservationExecutionRoot,
   buildSourceEvidencePreservationPreflight,
   inspectSourceEvidencePreservationExecutionScope,
   verifySourceEvidencePreservationAuthority,
@@ -92,7 +92,7 @@ export async function executeSourceEvidencePreservationFill(input: Readonly<{
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySourceEvidencePreservationAuthority(input.authority);
-  assertSourceEvidencePreservationExecutionScope(authority.execution_scope, input.cacheRoot);
+  assertSourceEvidencePreservationExecutionRoot(authority.execution_scope, input.cacheRoot);
   input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
   if (authority.model !== input.workset.model || authority.request_profile !== input.workset.request_profile) {
     throw new AlayaError("CONFLICT", "evidence preservation authority does not bind this workset");
@@ -125,8 +125,8 @@ export async function executeSourceEvidencePreservationFill(input: Readonly<{
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
-    assertSourceEvidencePreservationExecutionScope(authority.execution_scope, input.cacheRoot, lease);
     input = { ...input, cacheRoot: lease.stableRootPath };
+    // The ledger owner checks source compatibility once, before this operation can mutate it.
     const ledger = openSourceEvidencePreservationAttemptLedger({
       cacheRoot: input.cacheRoot, authority, writeLease: lease
     });
@@ -400,7 +400,7 @@ function dispatchContext(
     config: input.config,
     suppliedExtractor: input.extractor !== undefined,
     assertScope: () => {
-      assertSourceEvidencePreservationExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
+      assertSourceEvidencePreservationExecutionRoot(input.authority.execution_scope, input.cacheRoot, writeLease);
     }
   };
 }

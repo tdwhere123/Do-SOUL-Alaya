@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -127,4 +128,71 @@ it("fails closed when the loaded module has no Git checkout, even from another G
   } });
   expect(result.status).not.toBe(0);
   expect(result.stderr).toMatch(/cannot establish the loaded bench-runner Git checkout/u);
+});
+
+it("reads current revisions with bounded Git processes while preserving raw untracked file identities", () => {
+  const loaded = checkout();
+  const names = ["space name.txt", "中文.txt", "-option.txt", "quote'file.txt", "binary.bin", "line-endings.txt"];
+  for (const name of names) writeFileSync(join(loaded, name), Buffer.from([0, 13, 10, 255]));
+  writeFileSync(join(loaded, ".gitattributes"), "*.txt text\n*.bin filter=forbidden\n");
+  git(loaded, ["config", "filter.forbidden.clean", "exit 1"]);
+  git(loaded, ["config", "filter.forbidden.required", "true"]);
+  if (process.platform !== "win32") {
+    writeFileSync(join(loaded, "line\nbreak\r.txt"), "raw\r\nbytes");
+    symlinkSync("binary.bin", join(loaded, "raw-link"));
+  }
+  const expected = originalRevision(loaded);
+  const modulePath = join(loaded, "apps/bench-runner/dist/runs/extraction/authority/inspection.js");
+  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `
+    import childProcess from "node:child_process";
+    import { syncBuiltinESMExports } from "node:module";
+    import { writeFileSync } from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const original = childProcess.execFileSync;
+    let processes = 0;
+    childProcess.execFileSync = function(command, ...args) {
+      if (command === "git") processes++;
+      return original(command, ...args);
+    };
+    syncBuiltinESMExports();
+    const { readCurrentExtractionAuthorityRevision: revision } = await import(pathToFileURL(process.env.MODULE));
+    const first = revision(), firstProcesses = processes;
+    writeFileSync("binary.bin", Buffer.from([0, 13, 11, 255]));
+    const second = revision();
+    writeFileSync("source.txt", "modified\\n");
+    const third = revision();
+    console.log(JSON.stringify({ first, second, third, firstProcesses, processes }));
+  `], { cwd: loaded, encoding: "utf8", env: { ...process.env, MODULE: modulePath } })) as {
+    first: string; second: string; third: string; firstProcesses: number; processes: number;
+  };
+  expect(result.first).toBe(expected);
+  expect(result.firstProcesses).toBeLessThanOrEqual(4);
+  expect(result.processes).toBeLessThanOrEqual(12);
+  expect(result.second).not.toBe(result.first);
+  expect(result.third).not.toBe(result.second);
+});
+
+// The independent oracle keeps the original one-file-at-a-time Git semantics.
+function originalRevision(root: string): string {
+  const config = ["-c", "core.autocrlf=true", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"];
+  const head = git(root, ["rev-parse", "HEAD"]).toString().trim();
+  const digest = createHash("sha256").update("git-worktree-v1\0").update(head).update("\0")
+    .update(git(root, [...config, "diff", "--no-ext-diff", "--binary", "HEAD", "--"]));
+  const files = git(root, [...config, "ls-files", "--others", "--exclude-standard", "-z"])
+    .toString().split("\0").filter(Boolean).sort((a, b) => a.localeCompare(b));
+  for (const path of files) {
+    const mode = lstatSync(join(root, path)).mode & 0o777;
+    const blob = git(root, [...config, "hash-object", "--no-filters", "--", path]).toString().trim();
+    digest.update(`\0${path}\0${mode}\0${blob}`);
+  }
+  return `git-worktree-v1:${head}:${digest.digest("hex")}`;
+}
+
+it("preserves every raw untracked blob when path arguments span multiple bounded batches", () => {
+  const loaded = checkout();
+  for (let index = 0; index < 90; index++) {
+    const name = `${index}-${"long-name-".repeat(17)}.txt`;
+    writeFileSync(join(loaded, name), `source ${index}\r\n`);
+  }
+  expect(inspect(loaded, loaded).revision).toBe(originalRevision(loaded));
 });

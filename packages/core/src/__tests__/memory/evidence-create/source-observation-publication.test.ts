@@ -22,6 +22,7 @@ import { EvidenceService } from "../../../memory/evidence-service.js";
 import { MemoryService } from "../../../memory/memory-service.js";
 import { createAuditedSourceAdmission } from "../../../memory/evidence-create/audited-source-admission.js";
 import { createInMemoryFieldStores } from "../../../memory/evidence-create/field-stores.js";
+import { resolveCurrentSource } from "../../../memory/evidence-create/source-observation-currentness.js";
 import { createSourceObservationPublication } from "../../../memory/evidence-create/source-observation-publication.js";
 import { deriveAddressableSpanViews } from "../../../memory/evidence-create/source-span-views.js";
 import { CoreError } from "../../../shared/errors.js";
@@ -201,6 +202,31 @@ describe("source observation publication", () => {
     expect(rebound.assertion_binding.context_id).toBe(located.assertion_binding.context_id);
     expect(rebound.source_target.root_id).toBe(published.bound.source_target.root_id);
     expect(rebound.source_target.evidence_object_id).toBe(sourceAlias);
+  });
+
+  it("hashes each current source body once and rechecks integrity on later reads", async () => {
+    const fixture = await openFixture();
+    const admitted = await admitSource(fixture);
+    const stored = fixture.stores.getStoredRecord(REAL_SQLITE_TEST_WORKSPACE_ID, admitted.record.identity)!;
+    const located = locatedInterpretation();
+    const sha256 = vi.fn(fieldContractSha256);
+    for (let read = 1; read <= 2; read++) {
+      expect(resolveCurrentSource(fixture.stores, REAL_SQLITE_TEST_WORKSPACE_ID, located, sha256)).toEqual(stored);
+      expect(sha256).toHaveBeenCalledTimes(read);
+      expect(sha256).toHaveBeenLastCalledWith(SOURCE);
+    }
+    sha256.mockClear();
+    expect(() => resolveCurrentSource(fixture.stores, REAL_SQLITE_TEST_WORKSPACE_ID,
+      { ...located, source_corpus_digest: "0".repeat(64) }, sha256)).toThrowError(expect.objectContaining({
+      code: "VALIDATION", message: "source digest is not current", details: { admission: "filtered" }
+    }));
+    expect(sha256).not.toHaveBeenCalled();
+    const corrupted = { ...fixture.stores, getStoredRecord: () => ({ ...stored, content_bytes: `${SOURCE} ` }) };
+    expect(() => resolveCurrentSource(corrupted, REAL_SQLITE_TEST_WORKSPACE_ID, located, sha256))
+      .toThrowError(expect.objectContaining({
+        code: "OBLIGATION_VIOLATION", message: "stored source body does not match its digest"
+      }));
+    expect(sha256).toHaveBeenCalledExactlyOnceWith(`${SOURCE} `);
   });
 
   it("retains ordinary source field admission for source observations with a currentness guard", async () => {

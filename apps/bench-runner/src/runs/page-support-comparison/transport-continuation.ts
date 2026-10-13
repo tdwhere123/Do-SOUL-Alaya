@@ -19,7 +19,7 @@ import { PAGE_SUPPORT_COMPARISON_SCHEMA_NAME } from "../provider-request/request
 import { assertAuthorizedComparisonRequest, pageSupportComparisonResultFromShard, toProviderLine,
   type PageSupportComparisonResultRow } from "./execute.js";
 import { interpretPageSupportComparisonDecoded } from "./assess.js";
-import { assertPageSupportComparisonExecutionScope } from "./authority.js";
+import { assertPageSupportComparisonExecutionScope, assertPageSupportComparisonExecutionRoot } from "./authority.js";
 import type { PageSupportComparisonWorkset } from "./input.js";
 import { assertComparisonRawReservation, assertComparisonShardRaw, buildPageSupportComparisonShard,
   hasAdmittedComparisonOutcome, inspectPageSupportComparisonContinuationShard,
@@ -47,12 +47,13 @@ export async function executePageSupportComparisonTransportContinuationFill(inpu
 }) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifyPageSupportComparisonTransportContinuationAuthority(input.authority);
-  assertPageSupportComparisonExecutionScope(authority.execution_scope, input.cacheRoot);
+  assertPageSupportComparisonExecutionRoot(authority.execution_scope, input.cacheRoot);
   const retained = assertComparisonTransportContinuationBinding(authority, input.workset, input.cacheRoot);
   assertAuthorizedComparisonRequest({ workset: input.workset, config: input.config,
     authority: retained.authority }, [retained.line], authority.max_output_tokens);
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
+    // A continuation is a new operation, including when recovering retained responses.
     assertPageSupportComparisonExecutionScope(authority.execution_scope, input.cacheRoot, lease);
     const cacheRoot = lease.stableRootPath;
     assertComparisonTransportContinuationBinding(authority, input.workset, cacheRoot, lease);
@@ -79,7 +80,7 @@ export async function executePageSupportComparisonTransportContinuationFill(inpu
       suppliedExtractor: input.extractor !== undefined,
       extractor: input.extractor ?? createSemanticProviderHttpExtractor(input.config, PAGE_SUPPORT_COMPARISON_SCHEMA_NAME),
       assertScope: () => {
-        assertPageSupportComparisonExecutionScope(authority.execution_scope, cacheRoot, lease);
+        assertPageSupportComparisonExecutionRoot(authority.execution_scope, cacheRoot, lease);
         assertComparisonTransportContinuationBinding(authority, input.workset, cacheRoot, lease);
         assertClaim(authority, cacheRoot);
       } }, toProviderLine(retained.line));

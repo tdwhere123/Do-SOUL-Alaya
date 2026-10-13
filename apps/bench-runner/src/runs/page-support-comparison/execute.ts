@@ -18,7 +18,7 @@ import {
   type PageSupportAssessed, type PageSupportComparisonOutcome
 } from "./assess.js";
 import {
-  assertPageSupportComparisonExecutionScope,
+  assertPageSupportComparisonExecutionRoot,
   buildPageSupportComparisonPreflight,
   inspectPageSupportComparisonExecutionScope,
   verifyPageSupportComparisonAuthority,
@@ -93,7 +93,7 @@ export async function executePageSupportComparisonFill(input: Readonly<{
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifyPageSupportComparisonAuthority(input.authority);
-  assertPageSupportComparisonExecutionScope(authority.execution_scope, input.cacheRoot);
+  assertPageSupportComparisonExecutionRoot(authority.execution_scope, input.cacheRoot);
   input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
   if (authority.model !== input.workset.model || authority.request_profile !== input.workset.request_profile) {
     throw new AlayaError("CONFLICT", "page-support comparison authority does not bind this workset");
@@ -126,8 +126,8 @@ export async function executePageSupportComparisonFill(input: Readonly<{
   }
   const lease = acquireExtractionCacheWriteLease(input.cacheRoot);
   try {
-    assertPageSupportComparisonExecutionScope(authority.execution_scope, input.cacheRoot, lease);
     input = { ...input, cacheRoot: lease.stableRootPath };
+    // The ledger owner checks source compatibility once, before this operation can mutate it.
     const ledger = openPageSupportComparisonAttemptLedger({
       cacheRoot: input.cacheRoot, authority, writeLease: lease
     });
@@ -344,7 +344,7 @@ function dispatchContext(
     config: input.config,
     suppliedExtractor: input.extractor !== undefined,
     assertScope: () => {
-      assertPageSupportComparisonExecutionScope(input.authority.execution_scope, input.cacheRoot, writeLease);
+      assertPageSupportComparisonExecutionRoot(input.authority.execution_scope, input.cacheRoot, writeLease);
     }
   };
 }

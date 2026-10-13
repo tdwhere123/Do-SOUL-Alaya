@@ -5,9 +5,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { executeSemanticProposalFill, prepareSemanticProposal, readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
+import * as proposalAuthority from "../../../runs/semantic-proposal/authority.js";
+import * as implementationInspection from "../../../runs/extraction/authority/inspection.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { listExtractionAttemptLedgerRecords } from "../../../runs/extraction/authority/attempt-ledger.js";
@@ -180,4 +182,31 @@ it("rejects a foreign implementation pin before creating the query execution roo
   expect(() => pinSemanticProposalAuthority({ preflight: wrong, inputUsdPerMillion: 1,
     outputUsdPerMillion: 2 })).toThrow(/executable revision changed/u);
   expect(existsSync(cacheRoot)).toBe(false);
+});
+
+it("separates operation revision validation from repeated live root validation", async () => {
+  const parent = root(), cacheRoot = join(parent, "cache"), retained = join(parent, "retained");
+  const authority = pin(workset("http://127.0.0.1:9"), cacheRoot);
+  const revision = vi.spyOn(implementationInspection, "readCurrentExtractionAuthorityRevision");
+  try {
+    proposalAuthority.assertSemanticProposalExecutionScope(authority.execution_scope, cacheRoot);
+    expect(revision).toHaveBeenCalledTimes(1);
+    revision.mockClear();
+    const earlierScope = { ...authority.execution_scope, implementation_revision: "earlier-implementation" };
+    proposalAuthority.assertSemanticProposalExecutionRoot(earlierScope, cacheRoot);
+    await Promise.resolve();
+    proposalAuthority.assertSemanticProposalExecutionRoot(earlierScope, cacheRoot);
+    expect(revision).not.toHaveBeenCalled();
+    expect(() => proposalAuthority.assertSemanticProposalExecutionScope(earlierScope, cacheRoot))
+      .toThrow(/executable revision changed/u);
+    revision.mockReturnValueOnce("later-implementation");
+    expect(() => openSemanticProposalAttemptLedger({ cacheRoot, authority, kind: "query" }))
+      .toThrow(/executable revision changed/u);
+    expect(listExtractionAttemptLedgerRecords(cacheRoot)).toEqual([]);
+    renameSync(cacheRoot, retained);
+    cpSync(retained, cacheRoot, { recursive: true });
+    await Promise.resolve();
+    expect(() => proposalAuthority.assertSemanticProposalExecutionRoot(authority.execution_scope, cacheRoot))
+      .toThrow(/target root changed/u);
+  } finally { revision.mockRestore(); }
 });

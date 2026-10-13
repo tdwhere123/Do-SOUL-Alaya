@@ -200,7 +200,7 @@ export function pinPageSupportComparisonAuthority(input: Readonly<{
       cacheRoot: scope.execution_root_path, marker: executionRootMarker, purpose: "page-support comparison"
     })
   };
-  assertPageSupportComparisonExecutionScope(executionScope, scope.execution_root_path);
+  assertPageSupportComparisonExecutionRoot(executionScope, scope.execution_root_path);
   const body = {
     contract: PAGE_SUPPORT_COMPARISON_AUTHORITY_CONTRACT,
     action: "fill" as const,

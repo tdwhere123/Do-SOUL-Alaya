@@ -92,6 +92,14 @@ export function assertSemanticProposalExecutionScope(
   if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "semantic proposal executable revision changed");
   }
+  assertSemanticProposalExecutionRoot(scope, cacheRoot, writeLease);
+}
+
+/** An already-loaded operation rechecks its mutable root without rescanning source history. */
+export function assertSemanticProposalExecutionRoot(
+  scope: SemanticProposalAuthority["execution_scope"], cacheRoot: string,
+  writeLease?: ExtractionCacheWriteLease
+): void {
   writeLease?.assertRoot(cacheRoot);
   const namedRoot = writeLease?.cacheRoot ?? cacheRoot;
   if (canonicalExtractionTargetRoot(namedRoot) !== scope.execution_root_path) {
@@ -169,7 +177,7 @@ export function pinSemanticProposalAuthority(input: Readonly<{
   const executionScope = { ...scope, execution_root_binding: binding ?? initializeExtractionTargetRoot({
     cacheRoot: scope.execution_root_path, marker: executionRootMarker, purpose: "semantic proposal"
   }) };
-  assertSemanticProposalExecutionScope(executionScope, scope.execution_root_path);
+  assertSemanticProposalExecutionRoot(executionScope, scope.execution_root_path);
   const body = {
     contract: isChatSemanticRequestProfile(preflight.request_profile)
       ? STEP_SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT : SEMANTIC_PROPOSAL_AUTHORITY_CONTRACT,

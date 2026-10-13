@@ -1,7 +1,6 @@
 import {
   compareUtcInstants,
   formatFieldContractDigest,
-  hashContentDigest,
   normalizeMemoryObjectKeySurface,
   type FieldContractSha256,
   type SourceLocatedInterpretation,
@@ -35,10 +34,11 @@ export function resolveCurrentSource(
   if (stored.record.content_digest !== expectedDigest) {
     throw new CoreError("VALIDATION", "source digest is not current", { details: { admission: "filtered" } });
   }
-  if (hashContentDigest(stored.content_bytes, sha256) !== stored.record.content_digest) {
+  const bodyDigest = sha256(stored.content_bytes);
+  if (formatFieldContractDigest(bodyDigest) !== stored.record.content_digest) {
     throw new CoreError("OBLIGATION_VIOLATION", "stored source body does not match its digest");
   }
-  if (sha256(stored.content_bytes) !== located.source_corpus_digest) {
+  if (bodyDigest !== located.source_corpus_digest) {
     throw new CoreError("VALIDATION", "located corpus digest does not match current source");
   }
   return stored;

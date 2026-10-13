@@ -334,8 +334,12 @@ export function readCurrentExtractionAuthorityRevision(): string {
   // Bind source state to the checkout that loaded this implementation, regardless of caller cwd.
   const checkoutRoot = resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../../../../../..");
   let gitRoot: string;
+  let head: string;
   try {
-    gitRoot = realpathSync(readGitText(["rev-parse", "--show-toplevel"], checkoutRoot));
+    const identity = readGitText(["rev-parse", "HEAD", "--show-toplevel"], checkoutRoot);
+    const separator = identity.indexOf("\n");
+    head = identity.slice(0, separator).trim();
+    gitRoot = realpathSync(identity.slice(separator + 1));
   } catch (cause) {
     throw new AlayaError("CONFLICT", "cannot establish the loaded bench-runner Git checkout", { cause });
   }
@@ -343,7 +347,7 @@ export function readCurrentExtractionAuthorityRevision(): string {
     throw new AlayaError("CONFLICT", "loaded bench-runner module is outside its Git checkout root");
   }
   return computeExtractionAuthorityWorktreeRevision({
-    head: readGitText(["rev-parse", "HEAD"], checkoutRoot),
+    head,
     trackedDiff: readGitBuffer([
       "diff", "--no-ext-diff", "--binary", "HEAD", "--"
     ], checkoutRoot),
@@ -380,13 +384,25 @@ function readUntrackedFileDigests(checkoutRoot: string): readonly {
   readonly mode: number;
   readonly blobDigest: string;
 }[] {
-  return readGitBuffer(["ls-files", "--others", "--exclude-standard", "-z"], checkoutRoot)
+  const files = readGitBuffer(["ls-files", "--others", "--exclude-standard", "-z"], checkoutRoot)
     .toString("utf8").split("\0").filter((path) => path.length > 0)
-    .map((path) => ({
-      path,
-      mode: lstatSync(join(checkoutRoot, path)).mode & 0o777,
-      blobDigest: readGitText(["hash-object", "--no-filters", "--", path], checkoutRoot)
-    }));
+    .map((path) => ({ path, mode: lstatSync(join(checkoutRoot, path)).mode & 0o777, blobDigest: "" }));
+  // Keep Git's raw blob hashing (including symlink handling), with bounded argv
+  // on Windows. Every inspection still reads every untracked file afresh.
+  for (let start = 0; start < files.length;) {
+    let end = start, argumentLength = 0;
+    do { argumentLength += files[end++]!.path.length + 1; }
+    while (end < files.length && argumentLength + files[end]!.path.length + 1 <= 8192);
+    const batch = files.slice(start, end);
+    const digests = readGitText(["hash-object", "--no-filters", "--", ...batch.map((file) => file.path)], checkoutRoot)
+      .split(/\r?\n/u);
+    if (digests.length !== batch.length || digests.some((digest) => !/^[a-f0-9]{40,64}$/u.test(digest))) {
+      throw new AlayaError("CONFLICT", "cannot bind untracked files to Git blob identities");
+    }
+    batch.forEach((file, index) => { file.blobDigest = digests[index]!; });
+    start = end;
+  }
+  return files;
 }
 
 const AUTHORITY_GIT_CONFIG = [

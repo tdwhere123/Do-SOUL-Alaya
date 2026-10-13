@@ -100,6 +100,14 @@ export function assertSourceEvidencePreservationExecutionScope(
   if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "evidence preservation executable revision changed");
   }
+  assertSourceEvidencePreservationExecutionRoot(scope, cacheRoot, writeLease);
+}
+
+/** An already-loaded operation rechecks its mutable root without rescanning source history. */
+export function assertSourceEvidencePreservationExecutionRoot(
+  scope: SourceEvidencePreservationAuthority["execution_scope"], cacheRoot: string,
+  writeLease?: ExtractionCacheWriteLease
+): void {
   writeLease?.assertRoot(cacheRoot);
   const namedRoot = writeLease?.cacheRoot ?? cacheRoot;
   if (canonicalExtractionTargetRoot(namedRoot) !== scope.execution_root_path) {
@@ -192,7 +200,7 @@ export function pinSourceEvidencePreservationAuthority(input: Readonly<{
       cacheRoot: scope.execution_root_path, marker: executionRootMarker, purpose: "evidence preservation"
     })
   };
-  assertSourceEvidencePreservationExecutionScope(executionScope, scope.execution_root_path);
+  assertSourceEvidencePreservationExecutionRoot(executionScope, scope.execution_root_path);
   const body = {
     contract: SOURCE_EVIDENCE_PRESERVATION_AUTHORITY_CONTRACT,
     action: "fill" as const,

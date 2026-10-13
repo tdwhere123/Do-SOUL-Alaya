@@ -100,6 +100,14 @@ export function assertEvidenceSelectionExecutionScope(
   if (scope.implementation_revision !== readCurrentExtractionAuthorityRevision()) {
     throw new AlayaError("CONFLICT", "evidence selection executable revision changed");
   }
+  assertEvidenceSelectionExecutionRoot(scope, cacheRoot, writeLease);
+}
+
+/** An already-loaded operation rechecks its mutable root without rescanning source history. */
+export function assertEvidenceSelectionExecutionRoot(
+  scope: EvidenceSelectionAuthority["execution_scope"], cacheRoot: string,
+  writeLease?: ExtractionCacheWriteLease
+): void {
   writeLease?.assertRoot(cacheRoot);
   const namedRoot = writeLease?.cacheRoot ?? cacheRoot;
   if (canonicalExtractionTargetRoot(namedRoot) !== scope.execution_root_path) {
@@ -193,7 +201,7 @@ export function pinEvidenceSelectionAuthority(input: Readonly<{
       cacheRoot: scope.execution_root_path, marker: executionRootMarker, purpose: "evidence selection"
     })
   };
-  assertEvidenceSelectionExecutionScope(executionScope, scope.execution_root_path);
+  assertEvidenceSelectionExecutionRoot(executionScope, scope.execution_root_path);
   const body = {
     contract: EVIDENCE_SELECTION_AUTHORITY_CONTRACT,
     action: "fill" as const,
