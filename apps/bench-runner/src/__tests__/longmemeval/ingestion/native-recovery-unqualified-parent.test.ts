@@ -1,9 +1,12 @@
+import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, SoulInterpretationRequestSchema,
-  SoulInterpretationResponseSchema } from "@do-soul/alaya-protocol";
+import { SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT } from "@do-soul/alaya-protocol";
+import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
+import { loadVerified } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-discovery.js";
+import { SourceSemanticReadBudget } from "../../../../../core-daemon/src/runtime/field/source-semantic-read-stores.js";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
 import { prepareNativeSourceRecordsSnapshot, readVerifiedNativeSourceSnapshot,
   sealNativeSourceRecordsSnapshotCopy } from
@@ -13,9 +16,9 @@ import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../r
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
 import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
-import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
-import { readChainArtifact, SemanticChainPlanSchema, withSemanticChainDaemon } from "../../../runs/semantic-chain/contract.js";
-import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
+import { runSemanticChainLauncher as launchSemanticChain } from "../../../runs/semantic-chain/launch.js";
+import { readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport } from
   "../../../runs/snapshot/source-records/publish.js";
 import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } from
@@ -30,9 +33,20 @@ import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 
 const roots: string[] = [];
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => {
+  // A timed-out body can still own SQLite files until its daemon has stopped.
+  await settleActiveBenchDaemonTasks();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
-it("rereads a frozen source after complete abstained H without inventing an initial H or C", async () => {
+it("rereads a frozen source after complete abstained H without inventing an initial H or C", async (testContext) => {
+  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
+    testContext.task.timeout, testContext.signal);
+  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
+  const runSemanticChainLauncher = (args: readonly string[]) =>
+    phases.phase(args[0]!, () => launchSemanticChain(args));
   const root = mkdtempSync(join(tmpdir(), "native-unqualified-parent-")); roots.push(root);
   let snapshotPath = join(root, "original.sqlite");
   const recoveryRoot = join(root, "recovery");
@@ -49,9 +63,9 @@ it("rereads a frozen source after complete abstained H without inventing an init
       content_bytes: commonBody, source_observed_at: "2026-09-20T12:00:00.000Z",
       recorded_at: "2026-09-21T09:00:10.000Z" }
   ];
-  await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
+  await phases.phase("snapshot.native", () => prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(root, "native-daemon"),
     workspaceId: "unqualified-parent", runId: "unqualified-parent", producerCommit: "0".repeat(40),
-    sources: originalSources });
+    sources: originalSources }));
   const initialRecords = readVerifiedNativeSourceSnapshot(snapshotPath).records;
   const byNativeOrder = [...initialRecords].sort((a, b) => a.record.identity.localeCompare(b.record.identity));
   const source = byNativeOrder[0]!, warmSource = byNativeOrder.at(-1)!;
@@ -63,12 +77,12 @@ it("rereads a frozen source after complete abstained H without inventing an init
   const warmOptions = { variant: "native_source_snapshot" as const,
     nativeSourcePopulation: { name: "unqualified-parent", snapshotPath }, cacheRoot: warmCache,
     sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
-  const warmInspection = await inspectExtractionAuthority({ ...warmOptions, action: "sample",
-    revision: readCurrentExtractionAuthorityRevision() });
+  const warmInspection = await phases.phase("authority.inspect", () => inspectExtractionAuthority({ ...warmOptions, action: "sample",
+    revision: readCurrentExtractionAuthorityRevision() }));
   expect(warmInspection.missingKeys).toHaveLength(1);
-  const warmPreflight = await preflightSourceSemanticInteractive({ ...warmOptions,
+  const warmPreflight = await phases.phase("source.preflight", () => preflightSourceSemanticInteractive({ ...warmOptions,
     preflightKeys: warmInspection.missingKeys, preflightOutputTokenCap: 16_384,
-    geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } });
+    geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } }));
   const warmReceipt = createExtractionAuthorityReceipt({ action: "sample",
     sampleScope: createExtractionSampleScope(warmInspection.missingKeys, warmInspection),
     sourcePreflight: warmPreflight, observation: warmInspection.observation, inspection: warmInspection,
@@ -92,18 +106,18 @@ it("rereads a frozen source after complete abstained H without inventing an init
     return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }],
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
   }));
-  expect((await runExtractionFill({ ...warmOptions, authorityReceiptPath: warmReceiptPath,
-    concurrency: 1 })).newlyExtracted).toBe(1);
+  expect((await phases.phase("fill.source", () => runExtractionFill({ ...warmOptions, authorityReceiptPath: warmReceiptPath,
+    concurrency: 1 }))).newlyExtracted).toBe(1);
   const seedSnapshotPath = snapshotPath;
   const warmSnapshotPath = join(root, "warm-native.sqlite");
-  const warmPublished = await publishSourceSemanticSnapshot({ snapshotPath: warmSnapshotPath,
+  const warmPublished = await phases.phase("snapshot.publish", () => publishSourceSemanticSnapshot({ snapshotPath: warmSnapshotPath,
     dataDirRoot: join(root, "warm-publication-daemon"), recordedAt: "2026-09-25T00:00:00.000Z",
     workspaceId: "unqualified-parent", runId: "unqualified-parent", producerCommit: "0".repeat(40),
     populations: [{ name: "unqualified-parent", nativeSnapshotPath: seedSnapshotPath,
       model: "gemini-3.1-flash-lite", requestProfile: "gemini-3.1-low-v1", cacheRoots: [warmCache],
       publicationAssociations: [{ source_id: warmSource.source_id, source_version: "1",
         generation_key: warmPreflight.ready_requests[0]!.key,
-        request_digest: warmPreflight.ready_requests[0]!.requestSha256 }] }] });
+        request_digest: warmPreflight.ready_requests[0]!.requestSha256 }] }] }));
   expect(warmPublished.sources.find(row => row.source_id === warmSource.source_id)).toMatchObject({
     source_interpretation: "interpreted", publication: "published", interpretation_id: expect.any(String) });
   sealNativeSourceRecordsSnapshotCopy(seedSnapshotPath, warmSnapshotPath);
@@ -148,8 +162,8 @@ it("rereads a frozen source after complete abstained H without inventing an init
     "--root", recoveryRoot])).toBe(0);
   const qAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(qWorkset, qCache, 16_384, 1),
     inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  await executeSemanticProposalFill({ workset: qWorkset, cacheRoot: qCache, authority: qAuthority,
-    config: qConfig, extractor: qExtractor });
+  await phases.phase("fill.query", () => executeSemanticProposalFill({ workset: qWorkset, cacheRoot: qCache, authority: qAuthority,
+    config: qConfig, extractor: qExtractor }));
   expect(await runSemanticChainLauncher(["recover-freeze", "--config", freezePath, "--root", recoveryRoot])).toBe(0);
   const frozen = readChainArtifact(join(recoveryRoot, "recovery-window.json")) as {
     window: { source_id: string }[]; selected_missing_keys: string[]; window_open: boolean };
@@ -165,11 +179,11 @@ it("rereads a frozen source after complete abstained H without inventing an init
   const options = { variant: "native_source_snapshot" as const,
     nativeSourcePopulation: { name: "unqualified-parent", snapshotPath }, cacheRoot: hCache,
     sourcePacking: "complete-source" as const, openSemantics: EXTRACTION_OPEN_SEMANTICS_GENERATION };
-  const inspection = await inspectExtractionAuthority({ ...options, action: "sample",
-    revision: readCurrentExtractionAuthorityRevision() });
-  const preflight = await preflightSourceSemanticInteractive({ ...options,
+  const inspection = await phases.phase("authority.inspect", () => inspectExtractionAuthority({ ...options, action: "sample",
+    revision: readCurrentExtractionAuthorityRevision() }));
+  const preflight = await phases.phase("source.preflight", () => preflightSourceSemanticInteractive({ ...options,
     preflightKeys: inspection.missingKeys, preflightOutputTokenCap: 16_384,
-    geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } });
+    geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } }));
   const receipt = createExtractionAuthorityReceipt({ action: "sample",
     sampleScope: createExtractionSampleScope(inspection.missingKeys, inspection),
     sourcePreflight: preflight, observation: inspection.observation, inspection,
@@ -185,7 +199,7 @@ it("rereads a frozen source after complete abstained H without inventing an init
     return Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: raw }] } }],
       usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 } });
   }));
-  const filled = await runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 });
+  const filled = await phases.phase("fill.source", () => runExtractionFill({ ...options, authorityReceiptPath: receiptPath, concurrency: 1 }));
   expect(filled.newlyExtracted).toBe(1);
   expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
     "--source-preflight", preflightPath, "--source-cache-root", hCache])).toBe(0);
@@ -196,23 +210,17 @@ it("rereads a frozen source after complete abstained H without inventing an init
   const qualifiedReport = readNativeSourcePublicationReport(qualified.snapshot_path, snapshotPath);
   expect(qualifiedReport.sources.find(row => row.source_id === warmSource.source_id)).toMatchObject({
     source_interpretation: "copied_uninspected", publication: "not_attempted" });
-  const initialPlan = SemanticChainPlanSchema.parse(readChainArtifact(join(recoveryRoot, "initial-chain", "prepare.json")));
-  const initialQuery = initialPlan.queries[0]!;
-  if (initialQuery.status !== "ready") throw new Error("fixture Q must be admitted");
-  await withSemanticChainDaemon({ ...initialPlan.config, snapshot_path: qualified.snapshot_path,
-    snapshot_sha256: qualified.snapshot_sha256 }, recoveryRoot, async (daemon) => {
-    const warmReason = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient,
-      "soul.interpretation", SoulInterpretationRequestSchema.parse({ operation: "reason",
-        accepts_unreviewed_conditional_results: true, original_query: question,
-        query_semantics: initialQuery.query_semantics,
-        source_interpretation_id: warmPublished.sources.find(row => row.source_id === warmSource.source_id)!.interpretation_id,
-        budget: initialPlan.config.budget, output_byte_limit: initialPlan.config.output_byte_limit,
-        authorized_scopes: initialPlan.config.authorized_scopes })));
-    expect(warmReason.operation).toBe("reason");
-    if (warmReason.operation !== "reason") return;
-    expect(warmReason.result?.outcome).toMatchObject({ status: "preparation_required", missing: "semantic_correspondence" });
-    expect(warmReason.interpretation).toBeDefined();
-  });
+  // The live reader proves the copied outsider is still valid without another daemon cold start.
+  // Missing-C reasoning has its own native MCP coverage in native-source-records-snapshot.test.ts.
+  const database = openReadOnlyDatabase(qualified.snapshot_path);
+  try {
+    const meter = new SourceSemanticReadBudget({ work_units: 10_000_000, memory_bytes: 200_000_000 });
+    const interpretationId = warmPublished.sources.find(row => row.source_id === warmSource.source_id)!.interpretation_id!;
+    const retained = loadVerified({ database }, "unqualified-parent", interpretationId, null, meter);
+    expect(retained.bound.interpretation_id).toBe(interpretationId);
+    expect(retained.stored.record.identity).toBe(warmSource.record.identity);
+    expect(meter.nativeWork).toBeGreaterThan(0);
+  } finally { database.close({ optimize: false }); }
   expect(await runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot])).toBe(0);
   expect(readChainArtifact(join(recoveryRoot, "initial-correspondence-binding.json"))).toMatchObject({
     workset_identity: null, source_interpretation_ids: [] });
@@ -227,8 +235,8 @@ it("rereads a frozen source after complete abstained H without inventing an init
   const qChildCache = join(recoveryRoot, "query-review-cache"); mkdirSync(qChildCache);
   const qChildAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(qChild, qChildCache, 16_384, 1),
     inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 });
-  await executeSemanticProposalFill({ workset: qChild, cacheRoot: qChildCache,
-    authority: qChildAuthority, config: qConfig, extractor: qExtractor });
+  await phases.phase("fill.query", () => executeSemanticProposalFill({ workset: qChild, cacheRoot: qChildCache,
+    authority: qChildAuthority, config: qConfig, extractor: qExtractor }));
   expect(await runSemanticChainLauncher(["recover-settle-q-review", "--root", recoveryRoot])).toBe(0);
   expect(await runSemanticChainLauncher(["recover-prepare-source", "--root", recoveryRoot])).toBe(0);
   expect(await runSemanticChainLauncher(["recover-prepare-h-revision", "--root", recoveryRoot])).toBe(0);
@@ -240,12 +248,12 @@ it("rereads a frozen source after complete abstained H without inventing an init
   const childCache = join(root, "child-h-cache"); mkdirSync(childCache);
   const childOptions = { ...options, cacheRoot: childCache,
     openSemantics: JSON.parse(readFileSync(revision.generation_path, "utf8")) };
-  const childInspection = await inspectExtractionAuthority({ ...childOptions, action: "sample",
-    revision: readCurrentExtractionAuthorityRevision() });
+  const childInspection = await phases.phase("authority.inspect", () => inspectExtractionAuthority({ ...childOptions, action: "sample",
+    revision: readCurrentExtractionAuthorityRevision() }));
   expect(childInspection.missingKeys).toEqual([revision.child_key]);
-  const childPreflight = await preflightSourceSemanticInteractive({ ...childOptions,
+  const childPreflight = await phases.phase("source.preflight", () => preflightSourceSemanticInteractive({ ...childOptions,
     preflightKeys: childInspection.missingKeys, preflightOutputTokenCap: 16_384,
-    geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } });
+    geminiQuoteRates: { inputUsdPerMillion: 0.25, outputUsdPerMillion: 1.5 } }));
   const childReceipt = createExtractionAuthorityReceipt({ action: "sample",
     sampleScope: createExtractionSampleScope(childInspection.missingKeys, childInspection),
     sourcePreflight: childPreflight, observation: childInspection.observation, inspection: childInspection,
@@ -257,8 +265,8 @@ it("rereads a frozen source after complete abstained H without inventing an init
   writeFileSync(childPreflightPath, JSON.stringify(childPreflight));
   expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
     "--source-preflight", childPreflightPath, "--source-cache-root", childCache])).toBe(2);
-  expect((await runExtractionFill({ ...childOptions, authorityReceiptPath: childReceiptPath,
-    concurrency: 1 })).newlyExtracted).toBe(1);
+  expect((await phases.phase("fill.source", () => runExtractionFill({ ...childOptions, authorityReceiptPath: childReceiptPath,
+    concurrency: 1 }))).newlyExtracted).toBe(1);
   expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
     "--source-preflight", childPreflightPath, "--source-cache-root", childCache])).toBe(0);
   expect(readChainArtifact(join(recoveryRoot, "final-qualified.json"))).toMatchObject({
