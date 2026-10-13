@@ -3,10 +3,10 @@ import { SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, source
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
 import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
+import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
 import { alternativeSelectionFixture, compatibleTaskSupport, coverageSelectionFixture, deliveredInputNumbers,
-  deploymentStatement, executedInputNumbers, feasibleSubsets, physicalRoot as root, rawSourceTwin, selectionExecutionBudget,
-  sourcePrefixExhaustionBudget
+  deploymentStatement, executedInputNumbers, feasibleSubsets, physicalRoot as root, rawSourceTwin, selectionExecutionBudget
 } from "./source-semantic-selection-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
@@ -229,10 +229,32 @@ it("keeps reserved slots when later selection work exhausts", () => {
 const coverageTask = coverageSelectionFixture(selectionExecutionBudget);
 const alternativeTask = alternativeSelectionFixture(selectionExecutionBudget);
 
-it("retains a nonempty open input prefix when source-local execution exhausts its original work allowance", () => {
-  const original = coverageSelectionFixture(sourcePrefixExhaustionBudget), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
+it("finishes this source's statements inside the default reasoning allowance", () => {
+  const original = coverageSelectionFixture(), covered = original.pool[0]!, complete = coverageTask.pool[0]!;
+  const proof = covered.proofs[0]!;
+  expect(original.execution_budget).toMatchObject({ work_units: 200_000, memory_bytes: 20_000_000,
+    page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
+  expect(root(covered)).toBe(root(complete));
+  expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
+  expect(proof.query_semantics_id).toBe(complete.proofs[0]!.query_semantics_id);
+  expect(proof.semantic_correspondence_id).toBe(complete.proofs[0]!.semantic_correspondence_id);
+  expect(proof.outcome).toEqual({ status: "interpreted", gaps: [] });
+  expect(proof.completeness).toMatchObject({ logical_index: "complete", observed_coverage: "complete", order_coverage: "complete" });
+  const executed = executedInputNumbers(covered);
+  expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  expect(deliveredInputNumbers(original, [covered])).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  expect(proof.resource_usage!.work_units).toBeLessThanOrEqual(original.execution_budget.work_units);
+  expect(proof.resource_usage!.memory_bytes).toBeLessThan(original.execution_budget.memory_bytes);
+  expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []).evidence_inputs.map(row => row.status))
+    .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
+});
+
+it("retains an ordered open prefix when the work allowance stops early", () => {
+  // Half the default allowance still stops before this source's last statement.
+  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 2 };
+  const original = coverageSelectionFixture(allowance), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
   const proof = partial.proofs[0]!;
-  expect(original.execution_budget).toMatchObject({ work_units: 150_000, memory_bytes: 20_000_000,
+  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 100_000, memory_bytes: 20_000_000,
     page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
   expect(root(partial)).toBe(root(complete));
   expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
@@ -245,8 +267,8 @@ it("retains a nonempty open input prefix when source-local execution exhausts it
   expect(executed.length).toBeLessThan(7);
   expect(executed).toEqual([1, 2, 3, 4, 5, 6, 7].slice(0, executed.length));
   expect(deliveredInputNumbers(original, [partial])).toEqual([1, 2, 3, 4, 5, 6, 7]);
-  expect(proof.resource_usage!.work_units).toBeLessThanOrEqual(original.execution_budget.work_units);
-  expect(proof.resource_usage!.memory_bytes).toBeLessThan(original.execution_budget.memory_bytes);
+  expect(proof.resource_usage!.work_units).toBeLessThanOrEqual(allowance.work_units);
+  expect(proof.resource_usage!.memory_bytes).toBeLessThan(allowance.memory_bytes);
   expect(projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []).evidence_inputs.map(row => row.status))
     .toEqual([...Array(executed.length).fill("supported"), ...Array(13 - executed.length).fill("open")]);
   // Coverage must not put this fixture back on the production allowance, which now finishes the prefix.

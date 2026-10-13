@@ -1,7 +1,5 @@
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
-  HARD_IDENTITY_TRANSFER_ID,
-  HARD_IDENTITY_TRANSFER_VERSION,
   MILLIGRADE_BOTTOM,
   MILLIGRADE_TOP,
   productEndpointId,
@@ -11,7 +9,6 @@ import {
   type Transition,
   type Witness
 } from "@do-soul/alaya-protocol";
-import { hardIdentityCapContractId } from "../cap-contract.js";
 import type { QueryRelation } from "../query/compile-query.js";
 import {
   joinHyperedgeAnd,
@@ -19,11 +16,17 @@ import {
   type HyperedgePremise
 } from "../reference/accepting-projection.js";
 import { encodeBindingContext, parseBindingContext, unifyBinding, type BoundSourceFacts, type BindingContextStore } from "./binding-environment.js";
-import { joinDerivation, leafDerivation } from "./path-derivation.js";
-import { groundedOutputDerivations } from "./output-derivations.js";
+import { joinDerivation } from "./path-derivation.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { transitionKey } from "./path-composition.js";
 import type { PathComputation } from "./path-effect-cursor.js";
+import {
+  assignmentFromRow,
+  groundPremiseAssignments,
+  openValidity,
+  terminalAssignment,
+  type PremiseAssignment
+} from "./premise-assignment.js";
 import type { RetainedRows } from "./retained-sequence.js";
 import {
   ACCEPTING_PROGRAM_STATE,
@@ -33,15 +36,22 @@ import {
   type ProgramAutomaton
 } from "./program-automaton.js";
 import {
-  inactiveResolution,
   retargetRelationProduct,
   observedTargetRevision,
   relationMatches,
   relationPhysicalCandidates,
-  admitRelationRow,
   type AdjacencyRow,
   type NamedKindOverlay
 } from "./path-matching.js";
+import {
+  readSequenceReach,
+  SEQUENCE_PROGRAM_ID_BYTES,
+  sequenceProgramIsCold,
+  sequenceReachKey,
+  sequenceReachWithoutAssertions,
+  writeSequenceReach,
+  type UnresolvedHop
+} from "./sequence-reach.js";
 
 export type HyperedgeCompletion = Readonly<{
   readonly from: ProductStateKey;
@@ -79,22 +89,15 @@ type HyperedgeInput = Readonly<{
   readonly physicalKinds?: readonly string[];
   readonly physicalKindSet?: ReadonlySet<string>;
   readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
-}>;
-
-type PremiseAssignment = HyperedgePremise & Readonly<{
-  readonly target_object_id: string;
-  readonly milligrades: number;
-  readonly validity: Transition["validity"];
-  readonly relation_kind: string;
-  readonly observation_id: string;
-  readonly leaf_id: string;
-  readonly derivation: Derivation;
-  readonly derivations: readonly Derivation[];
-  readonly cap_contract_id?: string;
-  readonly transfer_id?: string;
-  readonly transfer_version?: string;
-  readonly instance_id?: string;
-  readonly revision_id?: string;
+  readonly joinRows?: readonly AdjacencyRow[];
+  /** Stable owner for sequence reach remembered across row deltas. */
+  readonly reachOwner?: object;
+  /** Old rows whose missing target revision resolved on this pass. */
+  readonly promotedIds?: Set<string>;
+  /** Programs whose row delta started with no stored reach. Shared for the page. */
+  readonly coldPrograms?: Set<string>;
+  /** A nested premise still returns proofs this row delta did not touch. */
+  readonly retainPopulation?: boolean;
 }>;
 
 export function tryCompleteHyperedge(
@@ -134,19 +137,55 @@ export function* hyperedgeEffectSteps(
     input = { ...input, physicalKindSet: index };
   }
   const toProgramStates = input.toProgramStates ?? [ACCEPTING_PROGRAM_STATE];
+  if (input.promotedIds === undefined) input = { ...input, promotedIds: new Set() };
+  const deltaIds = input.joinRows === undefined ? undefined : new Set(input.joinRows.map((row) => row.assertionId));
+  const emitted = new Set<string>();
   for (const from of input.liveStates) {
     yield { kind: "work" };
-    const grouped: (readonly PremiseAssignment[])[] = [];
+    const roles: { readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }[] = [];
     for (const premise of program.premises) {
-      const assignments = yield* assignmentsForPremise(premise, from, rows, input);
-      grouped.push(yield* shareCompatibleAssignments(assignments));
+      roles.push(yield* premiseJoinRoles(premise, from, rows, input, deltaIds));
     }
-    if (program.join === "or") {
-      yield* orHyperedgeEffects(from, grouped, toProgramStates, input);
-    } else {
-      yield* andHyperedgeEffects(from, grouped, toProgramStates, input);
+    // A nested premise must still return proofs the sibling delta did not touch.
+    const focuses = deltaIds === undefined || input.retainPopulation === true ? [undefined] : roles.map((_, index) => index);
+    for (const focus of focuses) {
+      const grouped = roles.map((role, index) => focus !== undefined && index === focus ? role.delta : role.population);
+      if (program.join === "or") yield* orHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
+      else yield* andHyperedgeEffects(from, grouped, toProgramStates, input, deltaIds, emitted);
     }
   }
+}
+
+function* premiseJoinRoles(
+  premise: QueryProgram,
+  from: ProductStateKey,
+  rows: Iterable<AdjacencyRow>,
+  input: HyperedgeInput,
+  deltaIds: ReadonlySet<string> | undefined
+): PathComputation<{ readonly population: readonly PremiseAssignment[]; readonly delta: readonly PremiseAssignment[] }> {
+  const populationInput = { ...input, joinRows: undefined };
+  if (premise.kind === "relation") {
+    const population = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, rows, populationInput));
+    if (deltaIds === undefined || input.joinRows === undefined) return { population, delta: population };
+    const delta = yield* shareCompatibleAssignments(yield* assignmentsForPremise(premise, from, input.joinRows, input));
+    return { population, delta };
+  }
+  // Share old proofs apart from new ones. An OR across both would mark the old path as new.
+  const found = yield* assignmentsForPremise(premise, from, rows,
+    deltaIds === undefined ? input : { ...input, retainPopulation: true });
+  if (deltaIds === undefined) {
+    const population = yield* shareCompatibleAssignments(found);
+    return { population, delta: population };
+  }
+  const retained: PremiseAssignment[] = [];
+  const delta: PremiseAssignment[] = [];
+  for (const assignment of found) {
+    if (assignmentInDelta(assignment, deltaIds, input.promotedIds)) delta.push(assignment);
+    else retained.push(assignment);
+  }
+  const retainedShared = yield* shareCompatibleAssignments(retained);
+  const deltaShared = yield* shareCompatibleAssignments(delta);
+  return { population: [...retainedShared, ...deltaShared], delta: deltaShared };
 }
 
 function* shareCompatibleAssignments(assignments: readonly PremiseAssignment[]): PathComputation<readonly PremiseAssignment[]> {
@@ -190,8 +229,11 @@ function* assignmentsForPremise(
 ): PathComputation<readonly PremiseAssignment[]> {
   if (premise.kind === "alternative") {
     const assignments: PremiseAssignment[] = [];
-    for (const option of premise.options) for (const assignment of yield* assignmentsForPremise(option, from, rows, input)) {
-      yield { kind: "work", retained_bytes: 8 }; assignments.push(assignment);
+    for (const option of premise.options) {
+      // The caller chose these rows. A relation option must not replace them with the row delta.
+      for (const assignment of yield* assignmentsForPremise(option, from, rows, input)) {
+        yield { kind: "work", retained_bytes: 8 }; assignments.push(assignment);
+      }
     }
     return assignments;
   }
@@ -244,7 +286,12 @@ function* nestedHyperedgeAssignments(
     bindingContexts: input.bindingContexts,
     observedStates: input.observedStates ?? input.liveStates,
     physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
-    compiledPremises: input.compiledPremises
+    compiledPremises: input.compiledPremises,
+    ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
+    ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),
+    ...(input.coldPrograms === undefined ? {} : { coldPrograms: input.coldPrograms }),
+    ...(input.retainPopulation === true ? { retainPopulation: true } : {}),
+    ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
   })) {
     if (step.kind === "work") { yield step; continue; }
     const effect = step.effect;
@@ -267,6 +314,142 @@ function* nestedHyperedgeAssignments(
   return assignments;
 }
 
+type SequenceStep = Readonly<{ node: ProductStateKey; reach: "population" | "join" }>;
+
+type SequenceFrontier = {
+  readonly queue: SequenceStep[];
+  readonly visited: Map<string, ProductStateKey>;
+  readonly transitions: Transition[];
+  readonly derivations: Map<string, Derivation>;
+  readonly roots: Record<string, string>;
+  readonly unresolved: UnresolvedHop[];
+  readonly seenUnresolved: Set<string>;
+};
+
+function* retainUnresolvedHop(frontier: SequenceFrontier, pair: UnresolvedHop): PathComputation<void> {
+  const id = `${productStateNodeId(pair.node)}\0${pair.row.assertionId}\0${pair.relation.relation_kind}`;
+  if (frontier.seenUnresolved.has(id)) return;
+  yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify([id, pair]), "utf8") };
+  frontier.seenUnresolved.add(id);
+  frontier.unresolved.push(pair);
+}
+
+function* retainSequenceAssignment(
+  frontier: SequenceFrontier,
+  node: ProductStateKey,
+  assignment: PremiseAssignment,
+  nextStates: readonly string[],
+  successor: SequenceStep["reach"],
+  input: HyperedgeInput,
+  observed: Iterable<ProductStateKey>
+): PathComputation<boolean> {
+  const revision = observedTargetRevision(assignment.target_object_id, input.sourceFacts, observed);
+  if (revision === undefined) {
+    yield { kind: "effect", effect: { observation_id: `revision:${assignment.observation_id}:${node.program_state}`,
+      unresolved_guard: true, missing_target_revision: true } };
+    return false;
+  }
+  let retained = false;
+  for (const programState of nextStates) {
+    yield { kind: "work", retained_bytes: 1024 };
+    const to = hyperedgeTarget(node, { object_id: assignment.target_object_id, source_revision: revision,
+      program_state: programState, binding_context: assignment.binding_context }, input.sourceFacts);
+    const edge: Transition = { schema_version: 1, from: node, to, applicable: true,
+      relation_kind: assignment.relation_kind, instance_id: assignment.instance_id ?? assignment.derivation.derivation_id,
+      ...(assignment.revision_id === undefined ? {} : { revision_id: assignment.revision_id }),
+      ...(assignment.transfer_id === undefined ? {} : { transfer_id: assignment.transfer_id }),
+      ...(assignment.transfer_version === undefined ? {} : { transfer_version: assignment.transfer_version }),
+      strength_milligrades: assignment.milligrades, validity: assignment.validity,
+      ...(assignment.cap_contract_id === undefined ? {} : { cap_contract_id: assignment.cap_contract_id }) };
+    frontier.transitions.push(edge);
+    retained = true;
+    frontier.roots[transitionKey(edge)] = assignment.derivation.derivation_id;
+    for (const row of assignment.derivations) { yield { kind: "work", retained_bytes: 72 }; frontier.derivations.set(row.derivation_id, row); }
+    frontier.queue.push({ node: to, reach: successor });
+  }
+  return retained;
+}
+
+function* extendSequenceState(
+  automaton: ProgramAutomaton,
+  step: SequenceStep,
+  rows: Iterable<AdjacencyRow>,
+  input: HyperedgeInput,
+  deltaIds: ReadonlySet<string> | undefined,
+  observed: RetainedRows<ProductStateKey>,
+  frontier: SequenceFrontier
+): PathComputation<void> {
+  const node = step.node;
+  const key = productStateNodeId(node);
+  if (frontier.visited.has(key)) return;
+  frontier.visited.set(key, node);
+  yield { kind: "work", retained_bytes: Buffer.byteLength(key, "utf8") + 96 };
+  const env = parseBindingContext(node.binding_context, input.bindingContexts);
+  for (const variable of automaton.localVariables.get(node.program_state) ?? []) env.delete(variable);
+  const here = { ...node, binding_context: encodeBindingContext(env, input.bindingContexts) };
+  for (const advance of automaton.advancesByState.get(node.program_state) ?? []) {
+    yield { kind: "work" };
+    const physicalKinds = input.physicalKindSet ?? new Set<string>();
+    for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
+      yield { kind: "work" };
+      if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
+      const subject = productEndpointId(node);
+      yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
+        relation_demand: { subject, predicate } } };
+    }
+  }
+  // A state reached by old rows reads only the row delta. New information reads the population.
+  const hopRows = step.reach === "join" && input.joinRows !== undefined ? input.joinRows : rows;
+  for (const hyperedge of automaton.hyperedgeAdvances) {
+    if (hyperedge.from !== node.program_state) continue;
+    // A newly reached state must emit proofs whose hops are already retained.
+    // Filtering those as an old row delta drops the hyperedge.
+    const nestedJoin = step.reach === "population" ? undefined : input.joinRows;
+    for (const inner of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
+      query_id: input.query_id,
+      liveStates: [here],
+      overlay: input.overlay,
+      sourceFacts: input.sourceFacts,
+      bindingContexts: input.bindingContexts,
+      toProgramStates: hyperedge.to,
+      observedStates: observed,
+      physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
+      compiledPremises: input.compiledPremises,
+      ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
+      ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),
+      ...(input.coldPrograms === undefined ? {} : { coldPrograms: input.coldPrograms }),
+      ...(nestedJoin === undefined ? {} : { joinRows: nestedJoin })
+    })) {
+      if (inner.kind === "work") { yield inner; continue; }
+      const effect = inner.effect;
+      if (effect.hyperedge === undefined || effect.derivation === undefined) { yield inner; continue; }
+      const assignment = terminalAssignment(node, productEndpointId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
+        effect.hyperedge.validity, effect.hyperedge.relation_kind, effect.hyperedge.to.binding_context);
+      const carried = { ...assignment, derivation: effect.derivation, derivations: effect.derivations ?? [effect.derivation] };
+      const successor = deltaIds !== undefined && assignmentInDelta(carried, deltaIds, input.promotedIds) ? "population" : step.reach;
+      yield* retainSequenceAssignment(frontier, node, carried, hyperedge.to, deltaIds === undefined ? "population" : successor, input, observed);
+      yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify(assignment), "utf8") };
+    }
+  }
+  for (const advance of advancesFor(automaton, node.program_state, () => true)) {
+    for (const row of hopRows) {
+      const assignment = yield* assignmentFromRow(advance.relation, here, row, input);
+      yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
+      if (assignment === undefined) {
+        if (row.sourceObjectId === productEndpointId(here) && relationMatches(advance.relation.relation_kind, row.predicate)
+          && observedTargetRevision(row.targetObjectId, input.sourceFacts, observed) === undefined) {
+          yield* retainUnresolvedHop(frontier, { here, node, row, relation: advance.relation, nextStates: advance.to });
+        }
+        continue;
+      }
+      // A path that already used new information keeps reading retained rows.
+      const successor = deltaIds === undefined || step.reach === "population" || deltaIds.has(row.assertionId)
+        ? "population" : "join";
+      yield* retainSequenceAssignment(frontier, node, assignment, advance.to, successor, input, observed);
+    }
+  }
+}
+
 function* walkCompiledPremise(
   program: QueryProgram,
   from: ProductStateKey,
@@ -282,221 +465,66 @@ function* walkCompiledPremise(
     input.compiledPremises?.set(program, automaton);
   }
   const starts = automaton.start.map((program_state) => ({ ...from, program_state }));
-  const queue: ProductStateKey[] = [...starts];
-  const visited = new Map<string, ProductStateKey>();
-  const transitions: Transition[] = [];
-  const derivations = new Map<string, Derivation>();
-  const roots: Record<string, string> = {};
+  const deltaIds = input.joinRows === undefined ? undefined : new Set(input.joinRows.map((row) => row.assertionId));
+  const owner = input.reachOwner;
+  const reachKey = owner === undefined ? undefined : sequenceReachKey(program, productStateNodeId(from));
+  const prior = owner !== undefined && reachKey !== undefined && deltaIds !== undefined
+    ? readSequenceReach(owner, reachKey) : undefined;
+  const stored = prior === undefined || deltaIds === undefined ? prior : sequenceReachWithoutAssertions(prior, deltaIds);
+  const frontier: SequenceFrontier = {
+    queue: [],
+    visited: new Map(),
+    transitions: stored === undefined ? [] : [...stored.transitions],
+    derivations: new Map(stored === undefined ? [] : stored.derivations.map((row) => [row.derivation_id, row])),
+    roots: stored === undefined ? {} : { ...stored.roots },
+    unresolved: [],
+    seenUnresolved: new Set()
+  };
   const observed = input.observedStates ?? input.liveStates;
-  const retain = function* (node: ProductStateKey, assignment: PremiseAssignment, nextStates: readonly string[]): PathComputation<void> {
-    const revision = observedTargetRevision(assignment.target_object_id, input.sourceFacts, observed);
-    if (revision === undefined) {
-      yield { kind: "effect", effect: { observation_id: `revision:${assignment.observation_id}:${node.program_state}`,
-        unresolved_guard: true, missing_target_revision: true } };
-      return;
-    }
-    for (const programState of nextStates) {
-      yield { kind: "work", retained_bytes: 1024 };
-      const to = hyperedgeTarget(node, { object_id: assignment.target_object_id, source_revision: revision,
-        program_state: programState, binding_context: assignment.binding_context }, input.sourceFacts);
-      const edge: Transition = { schema_version: 1, from: node, to, applicable: true,
-        relation_kind: assignment.relation_kind, instance_id: assignment.instance_id ?? assignment.derivation.derivation_id,
-        ...(assignment.revision_id === undefined ? {} : { revision_id: assignment.revision_id }),
-        ...(assignment.transfer_id === undefined ? {} : { transfer_id: assignment.transfer_id }),
-        ...(assignment.transfer_version === undefined ? {} : { transfer_version: assignment.transfer_version }),
-        strength_milligrades: assignment.milligrades, validity: assignment.validity,
-        ...(assignment.cap_contract_id === undefined ? {} : { cap_contract_id: assignment.cap_contract_id }) };
-      transitions.push(edge);
-      roots[transitionKey(edge)] = assignment.derivation.derivation_id;
-      for (const row of assignment.derivations) { yield { kind: "work", retained_bytes: 72 }; derivations.set(row.derivation_id, row); }
-      queue.push(to);
-    }
-  };
-  for (let offset = 0; offset < queue.length; offset += 1) {
-    const node = queue[offset]!;
-    const key = productStateNodeId(node);
-    if (visited.has(key)) continue;
-    visited.set(key, node);
-    yield { kind: "work", retained_bytes: Buffer.byteLength(key, "utf8") + 96 };
-    const env = parseBindingContext(node.binding_context, input.bindingContexts);
-    for (const variable of automaton.localVariables.get(node.program_state) ?? []) env.delete(variable);
-    const here = { ...node, binding_context: encodeBindingContext(env, input.bindingContexts) };
-    for (const advance of automaton.advancesByState.get(node.program_state) ?? []) {
-      yield { kind: "work" };
-      const physicalKinds = input.physicalKindSet ?? new Set<string>();
-      for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
-        yield { kind: "work" };
-        if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
-        const subject = productEndpointId(node);
-        yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
-          relation_demand: { subject, predicate } } };
-      }
-    }
-    for (const hyperedge of automaton.hyperedgeAdvances) {
-      if (hyperedge.from !== node.program_state) continue;
-      for (const step of hyperedgeEffectSteps(rows, hyperedge.hyperedge, {
-        query_id: input.query_id,
-        liveStates: [here],
-        overlay: input.overlay,
-        sourceFacts: input.sourceFacts,
-        bindingContexts: input.bindingContexts,
-        toProgramStates: hyperedge.to,
-        observedStates: observed,
-        physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
-        compiledPremises: input.compiledPremises
-      })) {
-        if (step.kind === "work") { yield step; continue; }
-        const effect = step.effect;
-        if (effect.hyperedge === undefined || effect.derivation === undefined) { yield step; continue; }
-        const assignment = terminalAssignment(node, productEndpointId(effect.hyperedge.to), effect.hyperedge.strength_milligrades,
-          effect.hyperedge.validity, effect.hyperedge.relation_kind, effect.hyperedge.to.binding_context);
-        yield* retain(node, { ...assignment, derivation: effect.derivation, derivations: effect.derivations ?? [effect.derivation] }, hyperedge.to);
-        yield { kind: "work", retained_bytes: Buffer.byteLength(JSON.stringify(assignment), "utf8") };
-      }
-    }
-    for (const advance of advancesFor(automaton, node.program_state, () => true)) {
-      for (const row of rows) {
-        const assignment = yield* assignmentFromRow(advance.relation, here, row, input);
-        yield { kind: "work", retained_bytes: assignment === undefined ? 0 : Buffer.byteLength(JSON.stringify(assignment), "utf8") };
-        if (assignment === undefined) continue;
-        yield* retain(node, assignment, advance.to);
-      }
+  if (stored === undefined) {
+    // A program with no stored reach must not skip retained rows. A new product
+    // beside a frontier that already exists only joins the row delta.
+    const cold = deltaIds !== undefined && sequenceProgramIsCold(owner, program, input.coldPrograms);
+    const reach = deltaIds === undefined || cold ? "population" : "join";
+    for (const node of starts) frontier.queue.push({ node, reach });
+  } else {
+    // States already reached only extend along the row delta. A stored miss is rechecked alone.
+    for (const node of stored.states) frontier.queue.push({ node, reach: "join" });
+    for (const pair of stored.unresolved) {
+      if (deltaIds?.has(pair.row.assertionId) === true) continue;
+      const assignment = yield* assignmentFromRow(pair.relation, pair.here, pair.row, input);
+      if (assignment === undefined) { yield* retainUnresolvedHop(frontier, pair); continue; }
+      const retained = yield* retainSequenceAssignment(frontier, pair.node, assignment, pair.nextStates, "population", input, observed);
+      if (retained) input.promotedIds?.add(pair.row.assertionId);
+      else yield* retainUnresolvedHop(frontier, pair);
     }
   }
-  return yield* groundPremiseAssignments(from, starts, visited, transitions, derivations, roots);
-}
-
-function* groundPremiseAssignments(
-  from: ProductStateKey,
-  starts: readonly ProductStateKey[],
-  visited: ReadonlyMap<string, ProductStateKey>,
-  transitions: readonly Transition[],
-  derivations: ReadonlyMap<string, Derivation>,
-  roots: Readonly<Record<string, string>>
-): PathComputation<readonly PremiseAssignment[]> {
-  const groundDerivations: Derivation[] = [];
-  for (const row of derivations.values()) { yield { kind: "work", retained_bytes: 8 }; groundDerivations.push(row); }
-  const groundInput = { seeds: starts.map((state) => ({ schema_version: 1 as const, state, milligrades: MILLIGRADE_TOP })),
-    transitions, derivations: groundDerivations, transition_derivations: roots, allowance: 1 };
-  let grounded = groundedOutputDerivations(groundInput);
-  while (!grounded.complete) {
-    yield { kind: "work", retained_bytes: grounded.admitted_bytes };
-    grounded = groundedOutputDerivations({ ...groundInput, progress: grounded.progress });
+  for (let offset = 0; offset < frontier.queue.length; offset += 1) {
+    yield* extendSequenceState(automaton, frontier.queue[offset]!, rows, input, deltaIds, observed, frontier);
   }
-  yield { kind: "work", retained_bytes: grounded.admitted_bytes };
-  const forest: Derivation[] = [];
-  for (const row of grounded.progress.forest.values()) { yield { kind: "work", retained_bytes: 8 }; forest.push(row); }
-  const assignments: PremiseAssignment[] = [];
-  for (const [key, node] of visited) {
-    yield { kind: "work", retained_bytes: 256 };
-    if (node.program_state !== ACCEPTING_PROGRAM_STATE) continue;
-    const rootId = grounded.progress.root_map.get(key)?.[0];
-    const root = rootId === undefined ? undefined : grounded.progress.forest.get(rootId);
-    const grade = grounded.progress.grades.get(key);
-    if (root === undefined || grade === undefined) continue;
-    assignments.push({ ...terminalAssignment(from, productEndpointId(node), grade, openValidity(from), "path", node.binding_context),
-      derivation: root, derivations: forest });
+  if (owner !== undefined && reachKey !== undefined) {
+    yield { kind: "work", retained_bytes: SEQUENCE_PROGRAM_ID_BYTES };
+    const states: ProductStateKey[] = [];
+    for (const node of frontier.visited.values()) states.push(node);
+    writeSequenceReach(owner, reachKey, {
+      states, transitions: frontier.transitions, derivations: [...frontier.derivations.values()],
+      roots: frontier.roots, unresolved: frontier.unresolved
+    });
   }
-  return assignments;
-}
-
-function openValidity(from: ProductStateKey): Transition["validity"] {
-  if (from.interpretation_node !== undefined) return { kind: "interpretation",
-    packet_id: from.interpretation_node.packet_id, hypothesis_id: from.hypothesis_id };
-  return { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" };
-}
-
-function terminalAssignment(
-  from: ProductStateKey,
-  target: string,
-  milligrades: number,
-  validity: Transition["validity"],
-  relationKind: string,
-  binding = from.binding_context,
-  leafId = `${productEndpointId(from)}:${target}:${relationKind}`
-): PremiseAssignment {
-  const derivation = leafDerivation({
-    derivation_id: `leaf:${leafId}`,
-    observation_id: leafId,
-    leaf_id: leafId,
-    association_milligrades: milligrades
-  });
-  return {
-    hypothesis_id: from.hypothesis_id,
-    binding_context: binding,
-    time_state: from.time_state,
-    present: true,
-    target_object_id: target,
-    milligrades,
-    validity,
-    relation_kind: relationKind,
-    observation_id: leafId,
-    leaf_id: leafId,
-    derivation,
-    derivations: [derivation],
-    cap_contract_id: hardIdentityCapContractId(),
-    transfer_id: HARD_IDENTITY_TRANSFER_ID,
-    transfer_version: HARD_IDENTITY_TRANSFER_VERSION
-  };
-}
-
-function* assignmentFromRow(
-  relation: QueryRelation,
-  from: ProductStateKey,
-  row: AdjacencyRow,
-  input: Readonly<{
-    readonly query_id: string;
-    readonly overlay: NamedKindOverlay;
-    readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
-    readonly bindingContexts?: BindingContextStore;
-    readonly liveStates: Iterable<ProductStateKey>;
-    readonly observedStates?: Iterable<ProductStateKey>;
-  }>
-): PathComputation<PremiseAssignment | undefined> {
-  if (row.sourceObjectId !== productEndpointId(from)) return undefined;
-  if (!relationMatches(relation.relation_kind, row.predicate)) return undefined;
-  if (row.validity === undefined || inactiveResolution(row.resolutionKind)) return undefined;
-  const admitted = yield* admitRelationRow(relation, from, row, {
-    ...input, liveStates: input.observedStates ?? input.liveStates
-  });
-  if (admitted === undefined) return;
-  const { binding, revisionId, strength } = admitted;
-  const leafId = row.assertionId;
-  const derivation = leafDerivation({
-    derivation_id: `leaf:${leafId}`,
-    observation_id: leafId,
-    leaf_id: leafId,
-    association_milligrades: strength.milligrades,
-    source_revision: revisionId
-  });
-  return {
-    hypothesis_id: from.hypothesis_id,
-    binding_context: binding,
-    time_state: from.time_state,
-    present: true,
-    target_object_id: row.targetObjectId,
-    milligrades: strength.milligrades,
-    validity: row.validity,
-    relation_kind: row.predicate,
-    observation_id: leafId,
-    leaf_id: leafId,
-    derivation,
-    derivations: [derivation],
-    cap_contract_id: strength.cap_contract_id,
-    transfer_id: strength.transfer_id,
-    transfer_version: strength.transfer_version,
-    instance_id: strength.instance_id,
-    revision_id: strength.revision_id
-  };
+  return yield* groundPremiseAssignments(from, starts, frontier.visited, frontier.transitions, frontier.derivations, frontier.roots);
 }
 
 function* orHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
-  input: HyperedgeInput
+  input: HyperedgeInput,
+  deltaIds?: ReadonlySet<string>,
+  emitted?: Set<string>
 ): PathComputation<void> {
   for (const options of grouped) for (const option of options) {
+    if (deltaIds !== undefined && input.retainPopulation !== true && !assignmentInDelta(option, deltaIds, input.promotedIds)) continue;
+    if (emitted !== undefined && !claimHyperedge(emitted, from, [option])) continue;
     yield { kind: "work", retained_bytes: completionReservation([option]) };
     for (const effect of yield* completionEffects(from, [option], {
     target: option.target_object_id,
@@ -516,10 +544,15 @@ function* andHyperedgeEffects(
   from: ProductStateKey,
   grouped: readonly (readonly PremiseAssignment[])[],
   toProgramStates: readonly string[],
-  input: HyperedgeInput
+  input: HyperedgeInput,
+  deltaIds?: ReadonlySet<string>,
+  emitted?: Set<string>
 ): PathComputation<void> {
   if (grouped.some((group) => group.length === 0)) return;
   for (const combo of cartesian(grouped)) {
+    if (deltaIds !== undefined && input.retainPopulation !== true
+      && !combo.some((assignment) => assignmentInDelta(assignment, deltaIds, input.promotedIds))) continue;
+    if (emitted !== undefined && !claimHyperedge(emitted, from, combo)) continue;
     yield { kind: "work" };
     const merged = mergeAssignments(combo, input.bindingContexts);
     if (merged === undefined) continue;
@@ -540,6 +573,38 @@ function* andHyperedgeEffects(
       transfer_version: first.transfer_version
     }, toProgramStates, input)) yield { kind: "effect", effect };
   }
+}
+
+function assignmentInDelta(
+  assignment: PremiseAssignment,
+  deltaIds: ReadonlySet<string>,
+  promotedIds?: ReadonlySet<string>
+): boolean {
+  const named = (id: string) => deltaIds.has(id) || promotedIds?.has(id) === true;
+  if (named(assignment.leaf_id) || (assignment.instance_id !== undefined && named(assignment.instance_id))) return true;
+  // The shared forest is on every accepting assignment. Only this derivation's children count.
+  const nodes = new Map<string, Derivation>();
+  for (const row of assignment.derivations) nodes.set(row.derivation_id, row);
+  const pending = [assignment.derivation.derivation_id];
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = nodes.get(id) ?? (id === assignment.derivation.derivation_id ? assignment.derivation : undefined);
+    if (node === undefined) continue;
+    for (const leaf of node.leaf_ids) if (named(leaf)) return true;
+    for (const child of node.children) pending.push(child);
+  }
+  return false;
+}
+
+function claimHyperedge(emitted: Set<string>, from: ProductStateKey, premises: readonly PremiseAssignment[]): boolean {
+  // Leaf ids from a compiled path omit the binding, so two endpoints can still differ.
+  const key = `${productStateNodeId(from)}\0${premises.map((premise) => `${premise.binding_context}\0${premise.derivation.derivation_id}`).sort().join("\0")}`;
+  if (emitted.has(key)) return false;
+  emitted.add(key);
+  return true;
 }
 
 function completionReservation(premises: readonly PremiseAssignment[]): number {

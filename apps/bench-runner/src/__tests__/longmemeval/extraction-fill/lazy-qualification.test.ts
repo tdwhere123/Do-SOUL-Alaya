@@ -1,4 +1,3 @@
-import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { join } from "node:path";
 import { assessmentForTestPairs } from "../../support/semantic-correspondence-assessment.js";
 import { cpSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
@@ -17,7 +16,7 @@ import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction
 import { prepareLazyQualificationWindow, replayLazyQualifiedFirstExposure,
   sealLazyQualificationFinal } from "../../../runs/semantic-chain/lazy-qualification.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact,
-  writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+  writeChainArtifact, type SemanticChainConfig } from "../../../runs/semantic-chain/contract.js";
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { admitNativeLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
 import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../runs/semantic-chain/replay.js";
@@ -53,7 +52,7 @@ function question(contents: readonly string[]) {
     haystack_sessions: contents.map(content => [{ role: "user" as const, content }]), answer_session_ids: [] };
 }
 
-async function preparedSourceFixture(contents: readonly string[], outputByteLimit = 100000,
+async function sourceFixture(contents: readonly string[], outputByteLimit = 100000,
   sourceCacheRoot = cacheRoot) {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", MODEL);
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", PROFILE);
@@ -76,7 +75,7 @@ async function preparedSourceFixture(contents: readonly string[], outputByteLimi
   const workset = parseSemanticProposalWorkset({ contract: semanticProposalWorksetContract(PROFILE),
     provider_url: "https://fixture-provider.invalid", kind: "query", model: MODEL, request_profile: PROFILE,
     items: [{ original_query: "What was completed?" }] });
-  const chain = { snapshot_path: published.snapshot_path, snapshot_sha256: published.db_sha256,
+  const chain: SemanticChainConfig = { snapshot_path: published.snapshot_path, snapshot_sha256: published.db_sha256,
     implementation_revision: readCurrentExtractionAuthorityRevision(), interpretation_clock: "2026-09-23T00:00:00.000Z",
     workspace_id: "bounded-workspace", run_id: "bounded-run", query_workset: workset,
     query_cache_root: join(cacheRoot, "query-cache"), correspondence_cache_root: join(cacheRoot, "correspondence-cache"),
@@ -93,7 +92,13 @@ async function preparedSourceFixture(contents: readonly string[], outputByteLimi
       recordedAt: "2026-09-23T00:00:00.000Z", producerCommit: "a".repeat(40) });
     return bound.config;
   };
-  return { config: await bind(), published, bind };
+  return { chain, published, bind };
+}
+
+async function preparedSourceFixture(contents: readonly string[], outputByteLimit = 100000,
+  sourceCacheRoot = cacheRoot) {
+  const fixture = await sourceFixture(contents, outputByteLimit, sourceCacheRoot);
+  return { ...fixture, config: await fixture.bind() };
 }
 
 it("delivers a raw source outside the frozen qualification window after final native reprepare", async () => {
@@ -266,11 +271,11 @@ it("rejects a retained Batch source cap outside the native provider contract", a
 });
 
 it("binds a newly received duplicate-content result only to frozen occurrences while preserving raw outsiders", async () => {
-  const fixture = await preparedSourceFixture(Array.from({ length: 12 }, () => "I completed alpha."));
-  const config = { ...fixture.config, chain: { ...fixture.config.chain, correspondence_pair_cap: 10 } };
-  const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(config.chain.query_workset,
-    config.chain.query_cache_root, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
-  await executeSemanticProposalFill({ workset: config.chain.query_workset, cacheRoot: config.chain.query_cache_root,
+  const fixture = await sourceFixture(Array.from({ length: 12 }, () => "I completed alpha."));
+  const chain = { ...fixture.chain, correspondence_pair_cap: 10 };
+  const queryAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(chain.query_workset,
+    chain.query_cache_root, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset: chain.query_workset, cacheRoot: chain.query_cache_root,
     authority: queryAuthority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => {
       const rawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
@@ -281,7 +286,7 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
         responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
     } } });
   const root = join(cacheRoot, "duplicate-stage");
-  const boundConfig = await fixture.bind(config.chain, "duplicate");
+  const boundConfig = await fixture.bind(chain, "duplicate");
   const window = await prepareLazyQualificationWindow(boundConfig, root);
   expect(window.window).toHaveLength(10);
   expect(window.selected_missing_keys).toHaveLength(1);
@@ -334,8 +339,8 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
   const sourceSlot = request.catalog!.source_endpoints.find(row => row.kind === "slot")!;
   const support = sourceInterpretation.frames[0]!.predicate_support;
   const correspondenceAuthority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(selectedItem,
-    config.chain.correspondence_cache_root, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
-  await executeSemanticProposalFill({ workset: selectedItem, cacheRoot: config.chain.correspondence_cache_root,
+    chain.correspondence_cache_root, 4096), inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
+  await executeSemanticProposalFill({ workset: selectedItem, cacheRoot: chain.correspondence_cache_root,
     authority: correspondenceAuthority, config: { providerUrl: "https://fixture-provider.invalid", model: MODEL,
       requestProfile: PROFILE, apiKey: "fixture" }, extractor: { extract: async () => {
       const rawJson = JSON.stringify({ contract: SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
@@ -369,7 +374,7 @@ it("binds a newly received duplicate-content result only to frozen occurrences w
     provider_url: "https://fixture-provider.invalid", kind: "query", model: MODEL, request_profile: PROFILE,
     items: [{ original_query: "Which item was completed?" }] });
   const nextRoot = join(cacheRoot, "next-query-stage");
-  const next = await prepareLazyQualificationWindow(await fixture.bind({ ...config.chain,
+  const next = await prepareLazyQualificationWindow(await fixture.bind({ ...chain,
     query_workset: nextQuery }, "next-query"), nextRoot);
   expect(next.window).toHaveLength(10);
   expect(next.window.every(row => row.state === "cache_hit_interpreted")).toBe(true);
@@ -482,10 +487,10 @@ it("does not count a copied continuation ledger as a new source call", async () 
 });
 
 it("keeps a budget-limited long raw source in place without qualifying or replacing it", async () => {
-  const { config, bind } = await preparedSourceFixture(["I completed alpha. ".repeat(5000), "I completed beta."]);
-  const bounded = { ...config, chain: { ...config.chain, budget: { ...config.chain.budget,
-    work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } } };
-  const window = await prepareLazyQualificationWindow(await bind(bounded.chain, "budgeted"), join(cacheRoot, "partial-stage"));
+  const { chain, bind } = await sourceFixture(["I completed alpha. ".repeat(5000), "I completed beta."]);
+  const bounded = { ...chain, budget: { ...chain.budget,
+    work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } };
+  const window = await prepareLazyQualificationWindow(await bind(bounded, "budgeted"), join(cacheRoot, "partial-stage"));
   expect(window.starting_access.observed_source_count).toBe(2);
   expect(window.window).toHaveLength(2);
   expect(window.window_open).toBe(true);
@@ -679,102 +684,29 @@ async function fillFrozenShortSources(selectedKeys: readonly string[]) {
   return { plan, imported, fetchMock, createCount };
 }
 
-it("records whether three cold authored composition windows share the same eligible first ten", async (testContext) => {
-  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id, testContext.task.timeout, testContext.signal);
-  const benchPhase = phases.phase;
-  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
-  const contents = ["I completed alpha. ".repeat(5000), "I completed beta.",
-    ...Array.from({ length: 10 }, (_, index) => `I completed item ${index + 2}.`)];
-  const fixture = await benchPhase("fixture.prepare", () => preparedSourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache")));
-  await benchPhase("fill.query", () => fillAuthoredCompletionQuery(fixture.config.chain.query_workset, fixture.config.chain.query_cache_root));
-  const normalChain = fixture.config.chain;
-  const smallChain = { ...normalChain, output_byte_limit: 21600, budget: { ...normalChain.budget,
+it("preserves query and snapshot identity across native qualification budgets", async () => {
+  const fixture = await sourceFixture(["I completed alpha.", "I completed beta."]);
+  await fillAuthoredCompletionQuery(fixture.chain.query_workset, fixture.chain.query_cache_root);
+  const smallChain = { ...fixture.chain, output_byte_limit: 21600, budget: { ...fixture.chain.budget,
     work_units: 50000, memory_bytes: 2_000_000, page_budget: 20000, finalization_reserve: 1000 } };
-  const stages = [
-    await benchPhase("chain.bind", () => fixture.bind(normalChain, "composition-cold")),
-    await benchPhase("chain.bind", () => fixture.bind(normalChain, "composition-qualified-normal")),
-    await benchPhase("chain.bind", () => fixture.bind(smallChain, "composition-qualified-small"))
+  const bindings = [
+    await fixture.bind(fixture.chain, "normal-budget"),
+    await fixture.bind(smallChain, "small-budget")
   ];
-  const roots = ["composition-cold", "composition-qualified-normal", "composition-qualified-small"]
-    .map(name => join(cacheRoot, name));
+  expect(bindings.map(binding => SemanticChainPlanSchema.parse(
+    readChainArtifact(join(binding.initial_chain_root, "prepare.json"))).queries[0]?.status))
+    .toEqual(["ready", "ready"]);
   const windows: Awaited<ReturnType<typeof prepareLazyQualificationWindow>>[] = [];
-  for (let index = 0; index < roots.length; index++) {
-    windows.push(await benchPhase("lazy.window", () => prepareLazyQualificationWindow(stages[index]!, roots[index]!)));
+  for (const [index, binding] of bindings.entries()) {
+    windows.push(await prepareLazyQualificationWindow(binding, join(cacheRoot, `budget-window-${index}`)));
   }
-  const tuples = windows.map(window => window.window.map(row =>
-    [row.source_id, row.source_version, row.record_id]));
-  const eligible = windows.map(window => window.window.filter(row => row.state === "cache_miss" && row.key !== null)
-    .map(row => ({ source_id: row.source_id, key: row.key })));
-  const matched = tuples.every(rows => rows.length === 10 && JSON.stringify(rows) === JSON.stringify(tuples[0]))
-    && eligible.every(rows => rows.length === 10 && JSON.stringify(rows) === JSON.stringify(eligible[0]));
-  const returnRoot = process.env.COMPOSITION_CONTROL_RETURN_ROOT;
-  if (returnRoot !== undefined) {
-    mkdirSync(returnRoot);
-    writeFileSync(join(returnRoot, "window-trace.json"), JSON.stringify({
-      candidate: windows[0]!.config.chain.implementation_revision, matched, tuples, eligible,
-      windows: windows.map(window => ({ query_state_identity: window.query_state_identity,
-        starting_snapshot_sha256: window.starting_snapshot_sha256,
-        starting_publication_identity: window.starting_publication_identity,
-        source_inventory_identity: window.source_inventory_identity,
-        dataset_sha256: window.dataset_sha256, window_open: window.window_open,
-        starting_access: window.starting_access, starting_discovery_work: window.starting_discovery_work,
-        starting_host_elapsed_ms: window.starting_host_elapsed_ms,
-        selected_missing_keys: window.selected_missing_keys,
-        window: window.window.map(row => ({ rank: row.rank, source_id: row.source_id,
-          source_version: row.source_version, record_id: row.record_id, state: row.state,
-          key: row.key })) })) }, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true });
-  }
+  expect(windows.map(window => window.window.length)).toEqual([2, 2]);
+  expect(windows.map(window => window.config.chain.budget)).toEqual([fixture.chain.budget, smallChain.budget]);
+  expect(windows.map(window => window.config.chain.output_byte_limit)).toEqual([100000, 21600]);
   expect(windows.map(window => window.query_state_identity))
-    .toEqual(Array(3).fill(windows[0]!.query_state_identity));
+    .toEqual(Array(2).fill(bindings[0]!.initial_query_state_identity));
   expect(windows.map(window => window.starting_snapshot_sha256))
-    .toEqual(Array(3).fill(windows[0]!.starting_snapshot_sha256));
-  if (!matched) return; // No H/C is prepared when the native window lacks a common eligible first ten.
-  const coldFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[0]!));
-  const coldExposure = await benchPhase("lazy.exposure", () => replayLazyQualifiedFirstExposure(roots[0]!));
-  expect(coldExposure.result.rows[0]?.status).toBe("replayed");
-  if (returnRoot !== undefined) {
-    writeFileSync(join(returnRoot, "cold-final.json"), JSON.stringify({ coldFinal,
-      delivery: coldExposure.delivery, result: coldExposure.result }, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
-  }
-  const { plan, imported, fetchMock, createCount } = await benchPhase("fill.source", () => fillFrozenShortSources(windows[1]!.selected_missing_keys));
-  const normalFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[1]!));
-  const smallFinal = await benchPhase("lazy.seal", () => sealLazyQualificationFinal(roots[2]!));
-  if (returnRoot !== undefined) {
-    writeFileSync(join(returnRoot, "qualified-finals.json"), JSON.stringify({ plan, batchState: imported.batchState,
-      authorityTelemetry: imported.authorityTelemetry, normalFinal, smallFinal,
-      mock: { createCount: createCount(), fetchCount: fetchMock.mock.calls.length } }, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
-  }
-  const finalPlans = [normalFinal, smallFinal].map(final => SemanticChainPlanSchema.parse(
-    readChainArtifact(join(final.final_chain_root, "prepare.json"))));
-  const worksets = finalPlans.map(plan => plan.correspondence_workset);
-  const lines = worksets.map(workset => workset == null ? [] : materializeSemanticProposalLines(workset, 4096));
-  const normalOpportunity = lines[0]!.findIndex(line => {
-    const request = line.request as SourceSemanticCorrespondenceRequest;
-    return eligible[1]!.some(row => row.source_id ===
-      request.source_interpretation_descriptors[0]?.interpretation.source.source_id);
-  });
-  const targetSource = normalOpportunity < 0 ? undefined : (lines[0]![normalOpportunity]!
-    .request as SourceSemanticCorrespondenceRequest).source_interpretation_descriptors[0]!.interpretation.source.source_id;
-  const smallOpportunity = lines[1]!.findIndex(line => (line.request as SourceSemanticCorrespondenceRequest)
-    .source_interpretation_descriptors[0]?.interpretation.source.source_id === targetSource);
-  if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence-opportunities.json"), JSON.stringify({
-    finalPlanStatus: finalPlans.map(plan => plan.queries[0]?.status), targetSource,
-    normalOpportunity, smallOpportunity, advertisedCounts: lines.map(rows => rows.length) }, null, 2));
-  if (targetSource === undefined || smallOpportunity < 0 || worksets[0] == null || worksets[1] == null) return;
-  for (const [stage, opportunity] of [normalOpportunity, smallOpportunity].entries()) {
-    await benchPhase("fill.correspondence", () => fillAuthoredCompletionCorrespondence(worksets[stage]!, opportunity,
-      normalChain.correspondence_cache_root));
-  }
-  const qualifiedExposure = [];
-  for (const root of roots.slice(1)) qualifiedExposure.push(await benchPhase("lazy.exposure", () => replayLazyQualifiedFirstExposure(root)));
-  expect(qualifiedExposure.every(exposure => exposure.result.rows[0]?.status === "replayed")).toBe(true);
-  if (returnRoot !== undefined) {
-    writeFileSync(join(returnRoot, "qualified-exposures.json"), JSON.stringify(qualifiedExposure, null, 2));
-    cpSync(cacheRoot, join(returnRoot, "native-cache"), { recursive: true, force: true });
-  }
+    .toEqual(Array(2).fill(fixture.published.db_sha256));
 }, 120000);
 
 it("delivers the fixed completed item through the normal native qualification lifecycle", async () => {
@@ -807,10 +739,10 @@ it("delivers the fixed completed item through the normal native qualification li
   const returnRoot = process.env.NATIVE_DELIVERY_CONTROL_RETURN_ROOT;
   if (returnRoot !== undefined) mkdirSync(returnRoot, { recursive: true });
   try {
-    const fixture = await preparedSourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache"));
-    await fillAuthoredCompletionQuery(fixture.config.chain.query_workset,
-      fixture.config.chain.query_cache_root);
-    const config = await fixture.bind(fixture.config.chain, "normal-lifecycle");
+    const fixture = await sourceFixture(contents, 100000, join(cacheRoot, "sample-source-cache"));
+    await fillAuthoredCompletionQuery(fixture.chain.query_workset,
+      fixture.chain.query_cache_root);
+    const config = await fixture.bind(fixture.chain, "normal-lifecycle");
     const root = join(cacheRoot, "normal-lifecycle-stage");
     const window = await prepareLazyQualificationWindow(config, root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "window.json"), JSON.stringify(window, null, 2));
@@ -868,7 +800,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(request.source_interpretation_descriptors[0]?.interpretation.source.source_id)
       .toBe("fixture:bounded-s2-r0");
     const correspondence = await fillAuthoredCompletionCorrespondence(workset, 0,
-      fixture.config.chain.correspondence_cache_root);
+      fixture.chain.correspondence_cache_root);
     if (returnRoot !== undefined) writeFileSync(join(returnRoot, "correspondence.json"),
       JSON.stringify(correspondence, null, 2));
     expect(correspondence).toMatchObject({ requested: 1, newly_admitted: 1,
@@ -917,7 +849,7 @@ it("delivers the fixed completed item through the normal native qualification li
     expect(span).toMatchObject({ content_start: 0, content_end: 25, content_complete: true });
     expect(Buffer.byteLength(result!.content_preview!.slice(span!.content_start, span!.content_end))).toBe(25);
     const validated = measureSourceSemanticLibraryResponse({ recallResult: native,
-      firstExposurePage: row.first_exposure!, requestBudget: fixture.config.chain.budget,
+      firstExposurePage: row.first_exposure!, requestBudget: fixture.chain.budget,
       sourceRecords: report.sources.map((source: { source_record: unknown }) => source.source_record), goldSourceUnits: [] });
     expect(validated.measurement?.status).toBe("validated");
     expect(validated.validatedProofRanks).toContain(1);

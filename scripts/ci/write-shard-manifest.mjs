@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,16 +23,22 @@ if (expected === undefined) {
   process.exit(1);
 }
 let projects = [];
+let metadata = {};
 if (projectsFile !== undefined && projectsFile.length > 0) {
   try {
-    projects = JSON.parse(readFileSync(projectsFile, "utf8")).projects ?? [];
+    metadata = JSON.parse(readFileSync(projectsFile, "utf8"));
+    projects = metadata.projects ?? [];
   } catch {
     projects = [];
   }
 }
-const complete = projects.length === expected.length && projects.every((project, index) => project === expected[index]);
+const complete = projects.length === expected.length && projects.every((project, index) => project === expected[index])
+  && (shard === undefined || shard.length === 0 || metadata.partition !== undefined);
 const recorded = status === "success" && !complete ? "incomplete" : status;
-const manifest = { label, group, status: recorded, projects, platform, arch, node: version };
+const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const manifest = { label, group, status: recorded, projects, platform, arch, node: version, commit };
+if (metadata.partition !== undefined) manifest.partition = metadata.partition;
+if (metadata.coverage !== undefined) manifest.coverage = metadata.coverage;
 if (shard !== undefined && shard.length > 0) manifest.shard = shard;
 writeFileSync(output, `${JSON.stringify(manifest)}\n`);
 if (recorded !== "success") {

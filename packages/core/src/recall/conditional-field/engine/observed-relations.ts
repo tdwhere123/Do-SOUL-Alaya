@@ -13,6 +13,7 @@ export class ObservedRelations implements ObservedRelationRows {
   public constructor(private readonly rows = new PersistentStringMap<RelationObserverRow>(), public readonly bytes = 0) {}
   public get length(): number { return this.rows.size; }
   public at(index: number): RelationObserverRow | undefined { return this.rows.entryAt(index)?.[1]; }
+  public get(assertionId: string): RelationObserverRow | undefined { return this.rows.get(assertionId); }
   public [Symbol.iterator](): MapIterator<RelationObserverRow> { return this.rows.values(); }
 
   public with(row: RelationObserverRow): ObservedRelations {
@@ -28,6 +29,42 @@ export class ObservedRelations implements ObservedRelationRows {
     const previousBytes = before === undefined ? 0 : relationRowBytes(before);
     return new ObservedRelations(this.rows.with(row.assertionId, next), this.bytes + nextBytes - previousBytes);
   }
+}
+
+/** Pages admit assertion versions. Index order is by key, so a length suffix is not the delta. */
+export function retainRelationPage(
+  population: ObservedRelations,
+  captured: readonly RelationObserverRow[]
+): Readonly<{ readonly population: ObservedRelations; readonly changed: readonly RelationObserverRow[] }> {
+  const touched: string[] = [];
+  const seen = new Set<string>();
+  let next = population;
+  for (const row of captured) {
+    const stored = next.with(row);
+    if (stored === next) continue;
+    next = stored;
+    if (seen.has(row.assertionId)) continue;
+    seen.add(row.assertionId);
+    touched.push(row.assertionId);
+  }
+  const changed: RelationObserverRow[] = [];
+  for (const assertionId of touched) {
+    const admitted = next.get(assertionId);
+    if (admitted !== undefined) changed.push(admitted);
+  }
+  return { population: next, changed };
+}
+
+/** A fact change or a full id cover is a complete pass. One id is one changed row. */
+export function relationPageJoinRows(
+  population: ObservedRelations,
+  changed: readonly RelationObserverRow[],
+  factsChanged: boolean
+): readonly RelationObserverRow[] | undefined {
+  if (factsChanged) return undefined;
+  const ids = new Set(changed.map((row) => row.assertionId));
+  if (ids.size === population.length) return undefined;
+  return changed;
 }
 
 function mergeUnique(

@@ -109,24 +109,34 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly asOf: string;
     readonly liveStates: RetainedRows<ProductStateKey>;
     readonly liveStateOffset?: number;
+    // Present only for a row delta. Absence means the retained population.
+    readonly joinRows?: readonly AdjacencyRow[];
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
     readonly discoveries?: RetainedRows<RoutingDiscovery>;
     readonly physicalKinds?: readonly string[];
     readonly compiledAutomaton?: ProgramAutomaton;
+    /** Branch frontier. Absent callers keep writing the shared automaton. */
+    readonly sequenceReachOwner?: object;
     readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
   }>;
 
 export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathEffectCursor;
 export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput, memoryLimit: number): PathEffectCursor | undefined;
 export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput, memoryLimit = Number.MAX_SAFE_INTEGER): PathEffectCursor | undefined {
-  const initialBytes = 8192 + 256;
+  const initialBytes = 8192 + 256 + joinRowTableBytes(input.joinRows);
   if (initialBytes > memoryLimit) return undefined;
   // A pending computation owns this immutable input version. Producers replace
   // versions; retaining their references needs no eager element traversal.
   const bindingContexts = input.bindingContexts?.fork(memoryLimit - initialBytes);
   return new PathEffectCursor(() => adjacencyEffectSteps(rows, { ...input, bindingContexts }), initialBytes, bindingContexts);
+}
+
+function joinRowTableBytes(rows: readonly AdjacencyRow[] | undefined): number {
+  if (rows === undefined) return 0;
+  // Pointer table only; row bodies stay on the retained population.
+  return 64 + 8 * rows.length;
 }
 
 function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEffectsInput): PathComputation<void> {
@@ -147,12 +157,16 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   yield { kind: "work", retained_bytes: 256 };
   const automaton = input.compiledAutomaton ?? compileProgramAutomaton(runtime);
   const compiledPremises = input.compiledPremises ?? new Map<QueryProgram, ProgramAutomaton>();
+  const coldPrograms = new Set<string>();
   const physicalKinds = new Set<string>();
   for (const kind of input.physicalKinds ?? []) {
     yield { kind: "work", retained_bytes: 64 + Buffer.byteLength(kind, "utf8") };
     physicalKinds.add(kind);
   }
   const statesByEndpoint = new Map<string, ProductStateKey[]>();
+  // New states keep the live-state suffix against the full population.
+  // A row delta joins every state in range with joinRows only.
+  const joinedRows = input.joinRows ?? rows;
   for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
@@ -179,6 +193,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     else bucket.push(from);
     for (const advance of automaton.hyperedgeAdvances) {
       if (advance.from !== from.program_state) continue;
+      // One focused premise reads the row delta. The others still read the retained population.
       for (const step of hyperedgeEffectSteps(rows, advance.hyperedge, {
         query_id: input.interpretation.query_id,
         liveStates: [from],
@@ -187,13 +202,17 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         bindingContexts: input.bindingContexts,
         toProgramStates: advance.to,
         observedStates: input.liveStates,
-        physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises
+        physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
+        coldPrograms,
+        // The compiled automaton stays shared. A branch writes only its own frontier.
+        reachOwner: input.sequenceReachOwner ?? input.compiledAutomaton ?? input.interpretation,
+        ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
       })) yield step.kind === "work" ? step : { kind: "effect", effect: attachHyperedgeFacet(step.effect) };
     }
   }
   yield { kind: "work", retained_bytes: 128 };
   const facetLookup = new PathFacetLookup(input.facets ?? []);
-  for (const row of rows) {
+  for (const row of joinedRows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
     yield { kind: "work" };
@@ -229,7 +248,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   const emitted = new Set<string>();
   for (let grew = true; grew;) {
     grew = false;
-    for (const row of rows) {
+    for (const row of joinedRows) {
       yield { kind: "work", retained_bytes: 128 };
       if (row.validity === undefined || inactiveResolution(row.resolutionKind)
         || !origins.has(row.sourceObjectId) || emitted.has(row.assertionId)) continue;

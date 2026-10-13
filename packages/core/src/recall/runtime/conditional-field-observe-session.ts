@@ -17,7 +17,7 @@ import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditiona
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
-import { ObservedRelations } from "../conditional-field/engine/observed-relations.js";
+import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects, SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
 import {
   applyObserverPage,
@@ -177,7 +177,8 @@ function refreshPathFrontier(session: ObservationSession): boolean {
   session.state = resumePathEffects({ ...rechecking, pending_path_effects: { input: { rows: relationRows, options: {
     interpretation, asOf: input.as_of, liveStates: state.seen_identities,
     liveStateOffset: frontier === undefined || frontier.facets !== state.facets
-      || frontier.sourceFacts !== state.source_facts ? 0 : frontier.identities,
+      || frontier.sourceFacts !== state.source_facts
+      || (state.observation_gaps?.guards === true && state.seen_identities.length > frontier.identities) ? 0 : frontier.identities,
     overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries,
     bindingContexts: state.binding_contexts, physicalKinds: session.predicates,
     compiledAutomaton: state.compiled_automaton } },
@@ -242,7 +243,10 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     return false;
   }
   const captured: RelationObserverRow[] = [];
+  const factsBefore = sourceFacts.snapshot;
   const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
+  // Re-reading a withdrawn assertion OR-merges it with the sibling that must survive, and absorption then drops both.
+  omitWithdrawnRelationRows(captured, session.state.withdrawn_leaves);
   recordObserverWork(session, "adjacency", observed);
   cursors.set(action.region_id, observed.page.cursor);
   const completedPair = new ObservationPairs(pairProgress.snapshot, pairProgress.completed,
@@ -280,8 +284,12 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     pairProgress.bytes = completedPair.bytes;
     return observed.page.outcome.status === "interrupted";
   }
-  for (const row of captured) session.relationRows = session.relationRows.with(row);
+  const retained = retainRelationPage(session.relationRows, captured);
+  session.relationRows = retained.population;
   recordObservedAt(input, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]), observedAt, sourceFacts);
+  // A new endpoint fact must be visible to retained rows. The continuation
+  // still clears joinRows so new states meet the full population.
+  const joinRows = relationPageJoinRows(retained.population, retained.changed, sourceFacts.snapshot !== factsBefore);
   for (const row of captured) if (!overlayIsRoutingOnly(RELATION_ROUTING, row.predicate)) {
     addSubjects(subjects, [row.sourceObjectId, row.targetObjectId]);
   }
@@ -291,7 +299,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
       interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: RELATION_ROUTING,
       sourceFacts: sourceFacts.snapshot, facets: session.state.facets, discoveries: session.state.discoveries,
       physicalKinds: session.predicates, compiledAutomaton: session.state.compiled_automaton,
-      bindingContexts: session.state.binding_contexts } },
+      bindingContexts: session.state.binding_contexts,
+      ...(joinRows === undefined ? {} : { joinRows }) } },
       offset: 0, retained_bytes: 0,
       page: maskAdjacencyExhaustion(observed.page, completedPair.hasOpenDemand()) },
     resume_cursors: resumeCursors(cursors, completedPair) };
@@ -491,6 +500,21 @@ function rejectBindingResource(session: ObservationSession, error: unknown): tru
   return true;
 }
 
+
+function omitWithdrawnRelationRows(
+  captured: RelationObserverRow[],
+  withdrawn: readonly string[] | undefined
+): void {
+  if (withdrawn === undefined || withdrawn.length === 0) return;
+  const ids = new Set(withdrawn);
+  let write = 0;
+  for (const row of captured) {
+    if (ids.has(row.assertionId)) continue;
+    captured[write] = row;
+    write += 1;
+  }
+  captured.length = write;
+}
 
 function capturingReaders(
   readers: ObserverReaders,

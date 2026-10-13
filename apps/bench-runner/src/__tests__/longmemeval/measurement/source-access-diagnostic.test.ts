@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdtemp, mkdir, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationRequestSchema } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -19,16 +19,39 @@ import { SourceAccessDiagnosticEvaluationSchema, SourceAccessDiagnosticObservati
   type SourceAccessDiagnosticObservation } from "../../../runs/source-access-diagnostic/contract.js";
 
 const roots = new Set<string>();
+const sourceRoots = new Set<string>();
+const preparedSources = new Map<string, ReturnType<typeof prepareSourceFixture>>();
 afterEach(async () => {
   await settleActiveBenchDaemonTasks();
   for (const root of roots) await rm(root, { recursive: true, force: true });
   roots.clear();
 });
+afterAll(async () => {
+  await settleActiveBenchDaemonTasks();
+  for (const root of sourceRoots) await rm(root, { recursive: true, force: true });
+  sourceRoots.clear();
+  preparedSources.clear();
+});
 
 async function fixture(allGold = false, roundsPerSession = 1, questionCount = 1,
   sourceCount = 70, questionText = "Which source mentions tungsten?") {
-  const root = await mkdtemp(join(tmpdir(), "source-access-diagnostic-"));
+  const key = JSON.stringify([allGold, roundsPerSession, questionCount, sourceCount, questionText]);
+  let source = preparedSources.get(key);
+  if (source === undefined) {
+    source = prepareSourceFixture(allGold, roundsPerSession, questionCount, sourceCount, questionText);
+    preparedSources.set(key, source);
+  }
+  const config = await source;
+  const root = await mkdtemp(join(tmpdir(), "source-access-observation-"));
   roots.add(root);
+  // Only the sealed source inputs are shared. Each observation restores its own SQLite runtime.
+  return { root, config: structuredClone(config) };
+}
+
+async function prepareSourceFixture(allGold = false, roundsPerSession = 1, questionCount = 1,
+  sourceCount = 70, questionText = "Which source mentions tungsten?") {
+  const root = await mkdtemp(join(tmpdir(), "source-access-diagnostic-"));
+  sourceRoots.add(root);
   const dataDir = join(root, "data"), metaRoot = join(root, "meta");
   await mkdir(dataDir); await mkdir(metaRoot);
   const questions = Array.from({ length: questionCount }, (_, questionIndex) => {
@@ -72,7 +95,7 @@ async function fixture(allGold = false, roundsPerSession = 1, questionCount = 1,
     policies: ["query-conditioned-v1", "canonical-v1"], budget,
     limits: { max_total_work: 2000000, max_pages: 100, max_pages_per_observation: 32,
       max_wall_ms: 60000, max_output_bytes: 8000000, max_disk_bytes: 200000000 } };
-  return { root, config };
+  return config;
 }
 
 async function fileBytes(root: string): Promise<number> {
@@ -107,6 +130,14 @@ async function rebindRetainedResponse(root: string, observation: SourceAccessDia
 describe("source access diagnostic", () => {
   it("reopens the raw-source SQLite snapshot and retains every native MCP page without provider calls", async () => {
     const f = await fixture();
+    const isolated = await fixture();
+    expect(isolated.root).not.toBe(f.root);
+    expect(isolated.config.source_run_root).toBe(f.config.source_run_root);
+    expect(isolated.config.prepared_path).toBe(f.config.prepared_path);
+    isolated.config.budget.work_units = 1;
+    isolated.config.limits.max_pages = 1;
+    expect(f.config.budget.work_units).toBe(1000000);
+    expect(f.config.limits.max_pages).toBe(100);
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = (async () => { fetchCalls++; throw new Error("network prohibited"); }) as typeof fetch;
@@ -505,11 +536,12 @@ describe("source access diagnostic", () => {
     expect(evaluated.result.rows).toHaveLength(8);
     expect(evaluated.result.summary.every((row) => row.denominator === 4)).toBe(true);
 
-    const tightLimit = Math.max(144 * 1024, observed.result.output_bytes - 20000);
+    const tightLimit = 144 * 1024;
     const limited = await observeSourceAccessDiagnostic({ ...config,
       limits: { ...config.limits, max_output_bytes: tightLimit } }, join(f.root, "capacity-stopped"));
     expect(limited.result.status).toBe("stopped");
     expect(limited.result.stop_reason).toBe("output_bytes_limit");
+    expect(limited.result.total_pages).toBeGreaterThan(0);
     expect(limited.result.total_pages).toBeLessThan(256);
     expect(limited.result.rows).toHaveLength(8);
     expect(limited.result.observation_bytes).toBeLessThanOrEqual(limited.result.summary_reserved_bytes);
@@ -537,7 +569,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("stops before SQLite restore when the snapshot cannot fit the remaining disk allowance", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const prepared = readChainArtifact(f.config.prepared_path) as { rows: { chain_root: string }[] };
     const plan = readChainArtifact(join(prepared.rows[0]!.chain_root, "prepare.json")) as {
       config: { snapshot_path: string } };
@@ -556,7 +588,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("keeps zero page attempts unattempted through evaluation", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const observed = await observeSourceAccessDiagnostic({ ...f.config,
       limits: { ...f.config.limits, max_total_work: 1 } }, join(f.root, "work-stopped"));
     expect(observed.result.stop_reason).toBe("logical_work_limit");
@@ -569,7 +601,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("rejects output roots reached through physical aliases of source or observation trees", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const sourceAlias = join(f.root, "source-alias");
     await symlink(f.config.source_run_root, sourceAlias, "dir");
     await expect(observeSourceAccessDiagnostic(f.config, join(sourceAlias, "alias-observe")))
@@ -588,7 +620,7 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("rejects mismatched membership before reopening a source and parses CLI arguments strictly", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const observed = await observeSourceAccessDiagnostic({ ...f.config,
       expected_question_ids: ["not-the-frozen-question"] }, join(f.root, "rejected"));
     expect(observed.result.rows.map((row) => row.status)).toEqual(["unattempted", "unattempted"]);
@@ -597,16 +629,18 @@ describe("source access diagnostic", () => {
   }, 120000);
 
   it("runs the separate observe and gold-evaluate CLI operations on a synthetic snapshot", async () => {
-    const f = await fixture();
+    const f = await fixture(false, 1, 1, 1);
     const configPath = join(f.root, "access-config.json");
     await writeFile(configPath, JSON.stringify(f.config));
     const observedRoot = join(f.root, "cli-observed"), evaluatedRoot = join(f.root, "cli-evaluated");
     expect(await runSourceAccessDiagnosticLauncher(["observe", "--config", configPath, "--out", observedRoot])).toBe(0);
     const observed = SourceAccessDiagnosticObservationSchema.parse(readChainArtifact(join(observedRoot, "observation.json")));
     expect(observed.rows.map((row) => row.status)).toEqual(["observed", "observed"]);
+    expect(observed.rows.map((row) => row.retained_source_count)).toEqual([1, 1]);
     expect(await runSourceAccessDiagnosticLauncher(["evaluate", "--observation",
       join(observedRoot, "observation.json"), "--out", evaluatedRoot])).toBe(0);
     const evaluated = SourceAccessDiagnosticEvaluationSchema.parse(readChainArtifact(join(evaluatedRoot, "evaluation.json")));
     expect(evaluated.rows.every((row) => row.status === "measured")).toBe(true);
+    expect(evaluated.rows.map((row) => row.first_gold_source_rank)).toEqual([1, 1]);
   }, 120000);
 });

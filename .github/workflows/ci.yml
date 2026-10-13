@@ -20,13 +20,21 @@ jobs:
   # Separate jobs per OS so a cancelled Windows shard cannot fail Quality on macOS.
   # The 60 minute cap stays; bench-runner and core-daemon no longer share one clock with the libraries.
   test-shard-ubuntu:
-    name: Test ${{ matrix.group }} (ubuntu-node24)
+    name: Test ${{ matrix.group }}${{ matrix.shard_name && format(' {0}', matrix.shard_name) || '' }} (ubuntu-node24)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        group: [libraries, core-daemon, bench-runner]
+        include:
+          - group: libraries
+          - group: core-daemon
+          - group: bench-runner
+            vitest_shard: "1/2"
+            shard_name: "1-of-2"
+          - group: bench-runner
+            vitest_shard: "2/2"
+            shard_name: "2-of-2"
     env:
       SHARD_LABEL: ubuntu-node24
       SHARD_COVERAGE: "1"
@@ -46,7 +54,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The command checks the whole workspace; repeat it once per OS, not per shard.
       - name: Typecheck
+        if: ${{ matrix.group == 'libraries' }}
         run: pnpm run --if-present typecheck
 
       - name: Build
@@ -95,18 +105,27 @@ jobs:
         if: ${{ env.SHARD_COVERAGE == '1' && steps.vitest.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-${{ env.SHARD_LABEL }}-${{ matrix.group }}
+          name: coverage-${{ env.SHARD_LABEL }}-${{ matrix.group }}${{ matrix.shard_name && format('-{0}', matrix.shard_name) || '' }}
           path: coverage
           retention-days: 14
+          if-no-files-found: error
 
   test-shard-macos:
-    name: Test ${{ matrix.group }} (macos-node24)
+    name: Test ${{ matrix.group }}${{ matrix.shard_name && format(' {0}', matrix.shard_name) || '' }} (macos-node24)
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        group: [libraries, core-daemon, bench-runner]
+        include:
+          - group: libraries
+          - group: core-daemon
+          - group: bench-runner
+            vitest_shard: "1/2"
+            shard_name: "1-of-2"
+          - group: bench-runner
+            vitest_shard: "2/2"
+            shard_name: "2-of-2"
     env:
       SHARD_LABEL: macos-node24
       SHARD_COVERAGE: "0"
@@ -176,6 +195,15 @@ jobs:
           path: shard-coverage
           merge-multiple: false
 
+      - uses: pnpm/action-setup@v6
+        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' || env.RUN_COVERAGE == '1' }}
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' || env.RUN_COVERAGE == '1' }}
+        run: pnpm install --frozen-lockfile
+
       - name: Check shard manifests and coverage
         shell: bash
         run: |
@@ -185,26 +213,24 @@ jobs:
           fi
           node scripts/ci/check-shard-manifests.mjs "${args[@]}"
 
-      - uses: pnpm/action-setup@v6
-        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' }}
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies
-        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' }}
-        run: pnpm install --frozen-lockfile
-
       - name: Install ripgrep for hygiene guards
         if: ${{ env.RUN_HYGIENE == '1' && runner.os == 'Linux' }}
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Build
-        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' }}
+        if: ${{ env.RUN_HYGIENE == '1' || env.RUN_SMOKE == '1' || env.RUN_COVERAGE == '1' }}
         run: pnpm build
 
       - name: Hygiene
         if: ${{ env.RUN_HYGIENE == '1' }}
         run: pnpm run hygiene:unused
+
+      - name: Check CI shard contracts
+        if: ${{ env.RUN_HYGIENE == '1' }}
+        run: |
+          node --test scripts/ci/test-shards.test.mjs
+          node scripts/ci/write-shard-manifest.mjs --self-test
+          node scripts/ci/check-shard-manifests.mjs --self-test
 
       - name: Guard production console
         if: ${{ env.RUN_HYGIENE == '1' }}
@@ -319,11 +345,11 @@ jobs:
       - name: Check bench-history contract
         run: node scripts/ci/check-content-contracts.mjs
 
-  install-smoke:
-    name: CLI install surface smoke
+  # This isolated smoke consumes only the checkout, so it need not wait for tests.
+  install-smoke-check:
+    name: CLI install surface execution
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [quality-ubuntu, quality-macos, quality-windows]
     steps:
       - uses: actions/checkout@v7
 
@@ -345,3 +371,26 @@ jobs:
 
       - name: Smoke built CLI in an isolated workspace
         run: node scripts/ci/smoke-built-cli.mjs
+
+  # Preserve the existing required-check name and fail closed on every dependency.
+  install-smoke:
+    name: CLI install surface smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [quality-ubuntu, quality-macos, quality-windows, install-smoke-check]
+    if: always()
+    env:
+      QUALITY_UBUNTU_RESULT: ${{ needs.quality-ubuntu.result }}
+      QUALITY_MACOS_RESULT: ${{ needs.quality-macos.result }}
+      QUALITY_WINDOWS_RESULT: ${{ needs.quality-windows.result }}
+      INSTALL_SMOKE_RESULT: ${{ needs.install-smoke-check.result }}
+    steps:
+      - name: Require quality and install smoke success
+        shell: bash
+        run: |
+          for result in "$QUALITY_UBUNTU_RESULT" "$QUALITY_MACOS_RESULT" "$QUALITY_WINDOWS_RESULT" "$INSTALL_SMOKE_RESULT"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Required CI job finished as: $result"
+              exit 1
+            fi
+          done

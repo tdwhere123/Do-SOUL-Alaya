@@ -1,6 +1,7 @@
 import { productEndpointId, type ObserverPage } from "@do-soul/alaya-protocol";
 import { applyObserverPage, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
-import { createAdjacencyEffectCursor } from "../conditional-field/engine/path-composition-adjacency.js";
+import { forkSequenceReachOwner, transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
+import { createAdjacencyEffectCursor, type AdjacencyEffectsInput } from "../conditional-field/engine/path-composition-adjacency.js";
 import type { PathEffectPreparation } from "../conditional-field/engine/path-effect-cursor.js";
 import { pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
@@ -34,13 +35,16 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   const pending = state.pending_path_effects;
   if (pending === undefined || pending.preparation !== undefined) return state;
   if (state.remaining_exploration === 0) return interrupted(state, false);
-  const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, pending.input.options,
+  const owned = ownSequenceReach(state, pending);
+  state = owned.state;
+  const options = owned.options;
+  const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, options,
     state.remaining_memory_bytes + pending.retained_bytes);
   if (cursor === undefined) return interrupted(state, true);
   const initialBytes = pending.cursor === undefined ? Math.max(0, cursor.initialRetainedBytes - pending.retained_bytes) : 0;
   const advanced = cursor.advance(pending.offset, Math.max(0, Math.floor(state.remaining_exploration / 2)),
     state.remaining_memory_bytes + pending.retained_bytes);
-  const retained = { ...pending, cursor, retained_bytes: advanced.retained_bytes,
+  const retained = { ...pending, input: { ...pending.input, options }, cursor, retained_bytes: advanced.retained_bytes,
     completed_work: advanced.completed_work, progress_position: advanced.progress_position };
   const charged = { ...state, pending_path_effects: retained,
     remaining_exploration: state.remaining_exploration - advanced.work,
@@ -157,28 +161,41 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const prior = pending.input.options;
   const newFacets = applied.facets.length !== (prior.facets?.length ?? 0);
   const guardsSeen = pending.guards_seen === true || effects.some((effect) => effect.unresolved_guard === true);
-  // Only a complete pass can replace the prior guard result. A new source fact
-  // replays retained rows, so an obsolete unknown can clear without hiding an
-  // independent unknown encountered elsewhere in the same pass.
-  const guards = finished ? (prior.liveStateOffset ?? 0) === 0 ? guardsSeen
-    : state.observation_gaps?.guards === true || guardsSeen
-    : state.observation_gaps?.guards === true;
+  // joinRows is a row delta, not a complete population pass, even when
+  // liveStateOffset is 0. Only a complete pass may replace guard unknowns.
+  const priorUnknown = state.observation_gaps?.guards === true;
+  const completePopulation = finished && prior.joinRows === undefined && (prior.liveStateOffset ?? 0) === 0;
+  const guards = completePopulation ? guardsSeen : finished ? priorUnknown || guardsSeen : priorUnknown;
   const measurements = state.observation_gaps?.measurements === true || effects.some((effect) => effect.missing_measurement === true);
   const missingRevision = effects.some((effect) => effect.missing_target_revision === true);
-  const semanticDelta = finished && (applied.seen_identities.length > prior.liveStates.length || newFacets
-    || applied.discoveries.length > (prior.discoveries?.length ?? 0) || missingRevision);
+  const identitiesGrew = applied.seen_identities.length > prior.liveStates.length;
+  // A row delta that adds no state still skips the product a later state can promote.
+  const skippedRowsNeedRecheck = priorUnknown && prior.joinRows !== undefined && !identitiesGrew;
+  const semanticDelta = finished && (identitiesGrew || newFacets
+    || applied.discoveries.length > (prior.discoveries?.length ?? 0) || missingRevision
+    || skippedRowsNeedRecheck);
+  // A missing revision still rewinds to offset 0. An open guard plus a new
+  // state does too: the suffix never revisits the old product the revision promotes.
+  const liveStateOffset = missingRevision || skippedRowsNeedRecheck || (priorUnknown && identitiesGrew)
+    ? 0 : preparation.facet_resume_offset;
+  // A suffix after a full pass must not leave the frontier on the previous snapshot.
+  const populationChecked = completePopulation || pending.population_checked === true;
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
     bindingContexts: applied.binding_contexts,
-    liveStates: applied.seen_identities, liveStateOffset: missingRevision ? 0 : preparation.facet_resume_offset,
+    liveStates: applied.seen_identities, liveStateOffset,
+    joinRows: undefined,
     facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
+    population_checked: populationChecked,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
-  return { ...applied, resume_subjects: subjects,
+  const frontierFacts = populationChecked ? applied.source_facts : state.path_effect_frontier?.sourceFacts;
+  const committed = { ...applied, resume_subjects: subjects,
     pair_demands: preparation.pair_demands, pair_demand_bytes: state.pair_demand_bytes + preparation.pair_bytes,
     source_fact_demands: preparation.source_demands, source_fact_demand_bytes: state.source_fact_demand_bytes + preparation.source_bytes,
     source_fact_pending_count: preparation.source_pending,
     binding_context_bytes: finished ? applied.binding_contexts?.bytes : applied.binding_context_bytes,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
-      facets: applied.facets, discoveries: applied.discoveries.length, sourceFacts: applied.source_facts } } : {}),
+      facets: applied.facets, discoveries: applied.discoveries.length,
+      ...(frontierFacts === undefined ? {} : { sourceFacts: frontierFacts }) } } : {}),
     observation_gaps: { guards, measurements },
     pending_path_effects: finished ? next : { ...pending, preparation: undefined, guards_seen: guardsSeen,
       facet_resume_offset: preparation.facet_resume_offset,
@@ -187,6 +204,43 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
       - ((applied.binding_contexts?.bytes ?? 0) - (prior.bindingContexts?.bytes ?? 0)) : 0),
     ...(finished && !semanticDelta ? {} : { last_observer_status: "interrupted" as const,
       closure: { ...applied.closure, observation: "interrupted" as const, requested_index: "open" as const } }) };
+  // The cursor refunds its scratch above. The cache outlives that cursor.
+  // A suffix scheduled by the full pass is still that pass. A row delta is not.
+  const restartedPopulation = prior.joinRows === undefined
+    && ((prior.liveStateOffset ?? 0) === 0 || pending.population_checked === true);
+  const fullPass = finished && next === undefined && restartedPopulation;
+  const settled = settleRebuildObligation(committed, fullPass);
+  if (!finished) return settled;
+  return chargeSequenceReach(settled, prior.sequenceReachOwner ?? settled.sequence_reach_owner
+    ?? prior.compiledAutomaton ?? prior.interpretation);
+}
+
+function settleRebuildObligation(state: FieldEngineState, fullPass: boolean): FieldEngineState {
+  if (!fullPass || state.remaining_work.every((row) => row.kind !== "observe")) return state;
+  return { ...state, remaining_work: state.remaining_work.filter((row) => row.kind !== "observe") };
+}
+
+function ownSequenceReach(
+  state: FieldEngineState,
+  pending: NonNullable<FieldEngineState["pending_path_effects"]>
+): { readonly state: FieldEngineState; readonly options: AdjacencyEffectsInput } {
+  const options = pending.input.options;
+  if (pending.cursor !== undefined || options.sequenceReachOwner !== undefined) return { state, options };
+  const sequenceReachOwner = forkSequenceReachOwner(
+    state.sequence_reach_owner ?? options.compiledAutomaton ?? options.interpretation
+  );
+  return { state: { ...state, sequence_reach_owner: sequenceReachOwner }, options: { ...options, sequenceReachOwner } };
+}
+
+function chargeSequenceReach(state: FieldEngineState, owner: object): FieldEngineState {
+  const charge = transferSequenceReachCharge(state, owner);
+  if (charge.delta === 0 && (state.sequence_reach_bytes ?? 0) === charge.sequence_reach_bytes) return state;
+  return {
+    ...state,
+    sequence_reach_bytes: charge.sequence_reach_bytes,
+    admitted_allocation_bytes: state.admitted_allocation_bytes + Math.max(0, charge.delta),
+    remaining_memory_bytes: state.remaining_memory_bytes - charge.delta
+  };
 }
 
 function interrupted(state: FieldEngineState, memory: boolean): FieldEngineState {

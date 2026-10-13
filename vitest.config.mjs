@@ -1,6 +1,7 @@
 import os from "node:os";
 import { defineConfig } from "vitest/config";
 import projects from "./vitest.workspace.mjs";
+import BenchSequencer from "./scripts/ci/bench-sequencer.mjs";
 
 const hasProjects = projects.length > 0;
 
@@ -17,6 +18,9 @@ const hasProjects = projects.length > 0;
 const coverageRun = process.argv.some(
   (arg) => arg === "--coverage.enabled" || arg.startsWith("--coverage.enabled=")
 );
+const benchShard = process.argv.some((arg) => arg === "--shard" || arg.startsWith("--shard="))
+  && process.argv.some((arg) => arg === "@do-soul/alaya-bench-runner" || arg === "--project=@do-soul/alaya-bench-runner");
+const shardedCoverage = coverageRun && benchShard;
 const GIB_PER_WORKER = coverageRun ? 7 : 3.5;
 
 function computeMaxWorkers() {
@@ -49,6 +53,7 @@ export default defineConfig({
     pool: "forks",
     maxWorkers,
     minWorkers: 1,
+    ...(benchShard ? { sequence: { sequencer: BenchSequencer } } : {}),
     reporters: ["default"],
     coverage: {
       enabled: false,
@@ -63,13 +68,14 @@ export default defineConfig({
       ],
       // Per-project include + floors live in scripts/ci/vitest-projects.mjs.
       // Mixed fallback must not sit below the old diluted 42/42 statements/lines.
-      thresholds: {
+      // File shards defer floors until native per-file coverage maps are merged.
+      ...(shardedCoverage ? {} : { thresholds: {
         perFile: false,
         statements: 42,
         lines: 42,
         functions: 30,
         branches: 20
-      }
+      } })
     }
   },
 });

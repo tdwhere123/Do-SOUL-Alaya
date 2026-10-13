@@ -129,8 +129,12 @@ export function proposalRecoveryCases(input: {
       }
     );
 
-    it.each([true, false].flatMap(truncated => [true, false].flatMap(usageKnown =>
-      ["live", "retained recovery"].map(path => ({ truncated, usageKnown, path })))))
+    // Byte/usage combinations belong to provider-request/retained-incomplete.test.ts.
+    // Each producer still proves live publication and recovery in a fresh process.
+    it.each([
+      { truncated: false, usageKnown: true, path: "live" },
+      { truncated: true, usageKnown: false, path: "retained recovery" }
+    ])
     ("reopens escaped proposal raw through $path with truncated=$truncated usageKnown=$usageKnown", async ({ truncated, usageKnown, path }) => {
       const f = fixture(65536);
       const prefix = truncated ? input.body(f.line) : "{}";
@@ -156,7 +160,9 @@ export function proposalRecoveryCases(input: {
       const status = "incomplete";
       expect(f.read().status).toBe(status);
       expect(f.chain().received).toBeUndefined();
-      expect(JSON.parse(readFileSync(semanticProposalShardPath(f.cacheRoot, f.line.key), "utf8"))).toMatchObject({ admitted: false });
+      expect(JSON.parse(readFileSync(semanticProposalShardPath(f.cacheRoot, f.line.key), "utf8")))
+        .toMatchObject({ admitted: false, outcome: { status: "invalid",
+          reason: truncated ? "truncated_raw" : "truncated_response_body" } });
       const settled = JSON.parse(readFileSync(f.ledgerPath, "utf8"));
       expect(settled).toMatchObject({ attempts: 1, unresolved_attempts: [],
         settled_attempts: [{ cache_key: f.line.key, attempt_ordinal: 1 }], successful_shards: [],
