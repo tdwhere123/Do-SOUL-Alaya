@@ -16,7 +16,9 @@ function checkout(): string {
   roots.push(root);
   const bench = join(root, "apps/bench-runner");
   mkdirSync(bench, { recursive: true });
-  cpSync(join(benchRoot, "dist"), join(bench, "dist"), { recursive: true });
+  // Node loads the emitted runtime; declarations and source maps are not fixture inputs.
+  cpSync(join(benchRoot, "dist"), join(bench, "dist"), { recursive: true,
+    filter: path => !path.endsWith(".d.ts") && !path.endsWith(".map") });
   const scripts = join(bench, "scripts/longmemeval-replay");
   mkdirSync(scripts, { recursive: true });
   cpSync(join(benchRoot, "scripts/longmemeval-replay/measurement-status.mjs"),
@@ -172,18 +174,29 @@ it("reads current revisions with bounded Git processes while preserving raw untr
   expect(result.third).not.toBe(result.second);
 });
 
-// The independent oracle keeps the original one-file-at-a-time Git semantics.
-function originalRevision(root: string): string {
+// Small adversarial fixtures retain the original one-file-at-a-time Git oracle.
+// Long-path fixtures use Git's independent stdin framing instead of mirroring argv batching.
+function originalRevision(root: string, hashInput: "individual" | "stdin" = "individual"): string {
   const config = ["-c", "core.autocrlf=true", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"];
   const head = git(root, ["rev-parse", "HEAD"]).toString().trim();
   const digest = createHash("sha256").update("git-worktree-v1\0").update(head).update("\0")
     .update(git(root, [...config, "diff", "--no-ext-diff", "--binary", "HEAD", "--"]));
   const files = git(root, [...config, "ls-files", "--others", "--exclude-standard", "-z"])
     .toString().split("\0").filter(Boolean).sort((a, b) => a.localeCompare(b));
-  for (const path of files) {
+  let blobs: readonly string[];
+  if (hashInput === "stdin") {
+    // This fixture uses literal newline-free paths; special quoting stays in the small oracle case.
+    expect(files.every(path => !/[\r\n"]/u.test(path))).toBe(true);
+    blobs = execFileSync("git", [...config, "hash-object", "--no-filters", "--stdin-paths"], {
+      cwd: root, input: `${files.join("\n")}\n`, encoding: "utf8"
+    }).trim().split(/\r?\n/u);
+  } else {
+    blobs = files.map(path => git(root, [...config, "hash-object", "--no-filters", "--", path]).toString().trim());
+  }
+  expect(blobs).toHaveLength(files.length);
+  for (const [index, path] of files.entries()) {
     const mode = lstatSync(join(root, path)).mode & 0o777;
-    const blob = git(root, [...config, "hash-object", "--no-filters", "--", path]).toString().trim();
-    digest.update(`\0${path}\0${mode}\0${blob}`);
+    digest.update(`\0${path}\0${mode}\0${blobs[index]}`);
   }
   return `git-worktree-v1:${head}:${digest.digest("hex")}`;
 }
@@ -194,5 +207,5 @@ it("preserves every raw untracked blob when path arguments span multiple bounded
     const name = `${index}-${"long-name-".repeat(17)}.txt`;
     writeFileSync(join(loaded, name), `source ${index}\r\n`);
   }
-  expect(inspect(loaded, loaded).revision).toBe(originalRevision(loaded));
+  expect(inspect(loaded, loaded).revision).toBe(originalRevision(loaded, "stdin"));
 });
