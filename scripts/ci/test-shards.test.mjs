@@ -97,6 +97,40 @@ import { createHash } from "node:crypto";
 import { PROJECT_COVERAGE, sanitizeProjectName } from "./vitest-projects.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+function workflowJob(name) {
+  const workflow = readFileSync(path.join(repo, ".github/workflows/ci.yml"), "utf8");
+  const start = workflow.indexOf(`\n  ${name}:\n`);
+  assert.notEqual(start, -1, `workflow job ${name} is missing`);
+  return workflow.slice(start + 1).split(/\n(?=  [a-z][a-z-]*:)/u)[0];
+}
+
+test("install smoke executes independently but its existing gate requires every quality result", () => {
+  const execution = workflowJob("install-smoke-check");
+  assert.doesNotMatch(execution, /\n    needs:/);
+  assert.match(execution, /^        run: node scripts\/ci\/smoke-built-cli\.mjs$/mu);
+  const gate = workflowJob("install-smoke");
+  assert.match(gate, /name: CLI install surface smoke\n/);
+  assert.match(gate, /needs: \[quality-ubuntu, quality-macos, quality-windows, install-smoke-check\]/);
+  assert.match(gate, /if: always\(\)/);
+  const results = {
+    QUALITY_UBUNTU_RESULT: "quality-ubuntu", QUALITY_MACOS_RESULT: "quality-macos",
+    QUALITY_WINDOWS_RESULT: "quality-windows", INSTALL_SMOKE_RESULT: "install-smoke-check"
+  };
+  for (const [variable, job] of Object.entries(results)) {
+    assert.ok(gate.includes(`${variable}: \${{ needs.${job}.result }}`));
+  }
+  const run = gate.split("        run: |\n")[1];
+  assert.ok(run);
+  const success = Object.fromEntries(Object.keys(results).map((key) => [key, "success"]));
+  const execute = (env) => spawnSync("bash", ["-e", "-c", run], { encoding: "utf8", env: { ...process.env, ...env } });
+  assert.equal(execute(success).status, 0);
+  for (const key of Object.keys(results)) {
+    for (const result of ["failure", "cancelled", "skipped", "unknown", ""]) {
+      assert.equal(execute({ ...success, [key]: result }).status, 1, `${key}=${result} must fail closed`);
+    }
+  }
+});
+
 function command(cwd, script, args) {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8", env: { ...process.env, NODE_DISABLE_COMPILE_CACHE: "1" } });
 }

@@ -82,6 +82,8 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const benchPhase = phases.phase;
   testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
   const cOnly = "cOnly" in world && world.cOnly;
+  // Static recall covers source distinctions and abstained C; clock variants own recovery.
+  const compareStaticInitial = !("retainedClock" in world);
   const evidenceRoot = mkdtempSync(join(tmpdir(), "native-original-recovery-")); roots.push(evidenceRoot);
   const externalStaticCaller = world.name === "format positive" ? process.env.STATIC_CALLER_PATH : undefined;
   const worldId = externalStaticCaller === undefined ? "originals" : "2e86d7ae-6153-43ea-8c52-bb8f38f4e415";
@@ -137,12 +139,14 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
       authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 1_000_000 } }));
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   const staticIdentity = chainIdentity({ arm: "static_initial", freeze: JSON.parse(readFileSync(freezePath, "utf8")) });
-  freezeRecoveryAllowance(staticRoot, staticIdentity, ALLOWANCE, snapshotPath);
-  reserveRecoveryRead(staticRoot, "shared original Q setup and source input");
-  reserveRecoveryHostEffect(staticRoot, "original-Q-preparation", staticIdentity, false);
-  reserveRecoveryHostEffect(staticRoot, "shared-raw-publication", staticIdentity, false);
-  reserveRecoveryAction(staticRoot, "shared-raw-observation", staticIdentity,
-    BUDGET.work_units, BUDGET.memory_bytes, false);
+  if (compareStaticInitial) {
+    freezeRecoveryAllowance(staticRoot, staticIdentity, ALLOWANCE, snapshotPath);
+    reserveRecoveryRead(staticRoot, "shared original Q setup and source input");
+    reserveRecoveryHostEffect(staticRoot, "original-Q-preparation", staticIdentity, false);
+    reserveRecoveryHostEffect(staticRoot, "shared-raw-publication", staticIdentity, false);
+    reserveRecoveryAction(staticRoot, "shared-raw-observation", staticIdentity,
+      BUDGET.work_units, BUDGET.memory_bytes, false);
+  }
   expect(await benchPhase("recover-declare-initial-q", () => runSemanticChainLauncher(["recover-declare-initial-q", "--config", freezePath,
     "--root", recoveryRoot]))).toBe(0);
   await benchPhase("fill.proposal", () => fillProposal(qWorksetPath, qCache, () => queryRaw(world.date, false), Q_PROFILE));
@@ -150,7 +154,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   const frozen = readChainArtifact(join(recoveryRoot, "recovery-window.json")) as {
     window: { source_id: string; read_bytes: number; complete: boolean }[]; selected_missing_keys: string[];
     initial_discovery_work: unknown };
-  recordRecoveryNativeWork(staticRoot, "shared-raw-observation", frozen.initial_discovery_work);
+  if (compareStaticInitial) recordRecoveryNativeWork(staticRoot, "shared-raw-observation", frozen.initial_discovery_work);
   expect(frozen.window).toHaveLength(2);
   if ("retainedClock" in world) {
     const windowBytes = readFileSync(join(recoveryRoot, "recovery-window.json"));
@@ -176,16 +180,20 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", H_PROFILE);
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", URL);
   setExtractionCredentialFixture();
-  reserveRecoveryRead(staticRoot, "shared selected H source and preflight");
-  reserveRecoveryHostEffect(staticRoot, "shared-initial-H", staticIdentity, false);
+  if (compareStaticInitial) {
+    reserveRecoveryRead(staticRoot, "shared selected H source and preflight");
+    reserveRecoveryHostEffect(staticRoot, "shared-initial-H", staticIdentity, false);
+  }
   const hCache = join(root, "h-cache");
   const hPreflight = await benchPhase("fill.source", () => fillSource(root, snapshotPath, hCache, EXTRACTION_OPEN_SEMANTICS_GENERATION,
     frozen.selected_missing_keys, "initial-h", prompt => sourceRaw(prompt, cOnly)));
   expect(await benchPhase("recover-publish-initial", () => runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
     "--source-preflight", hPreflight, "--source-cache-root", hCache]))).toBe(0);
   expect(await benchPhase("recover-prepare-initial-c", () => runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot]))).toBe(0);
-  reserveRecoveryRead(staticRoot, "shared initial C workset and physical owner");
-  reserveRecoveryHostEffect(staticRoot, "shared-initial-C", staticIdentity, false);
+  if (compareStaticInitial) {
+    reserveRecoveryRead(staticRoot, "shared initial C workset and physical owner");
+    reserveRecoveryHostEffect(staticRoot, "shared-initial-C", staticIdentity, false);
+  }
   const cInitial = join(recoveryRoot, "initial-correspondence-workset.json");
   const initialCResult = await benchPhase("fill.proposal", () => fillProposal(cInitial, join(root, "c-cache"), cOnly
     ? () => JSON.stringify({ contract: "source-semantic-correspondence-response-v4", outcome: { status: "abstained" } })
@@ -242,39 +250,47 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", URL);
     setExtractionCredentialFixture();
   }
-  const initialQualified = readChainArtifact(join(recoveryRoot, "initial-qualified.json")) as {
-    snapshot_path: string; snapshot_sha256: string };
-  const staticConfig = { ...JSON.parse(readFileSync(freezePath, "utf8")).chain,
-    snapshot_path: initialQualified.snapshot_path, snapshot_sha256: initialQualified.snapshot_sha256 };
-  reserveRecoveryRead(staticRoot, "static S1 sealed source and current C");
-  reserveRecoveryAction(staticRoot, "static-S1-prepare", chainIdentity(staticConfig),
-    BUDGET.work_units, BUDGET.memory_bytes, false);
-  reserveRecoveryAction(staticRoot, "static-S1-recall", chainIdentity(staticConfig),
-    BUDGET.work_units, BUDGET.memory_bytes, false);
-  const staticReplay = await benchPhase("static.replay", () => withSemanticChainDaemon(staticConfig, staticRoot, async daemon => {
-    let handles: ReadonlyMap<string, string | undefined> = new Map();
-    const plan = await prepareSemanticChain(staticConfig, staticRoot, daemon, current => { handles = current; });
-    const preparedQuery = plan.queries[0];
-    if (preparedQuery?.status === "blocked" || preparedQuery?.discovery_trace[0] === undefined) {
-      throw new Error("static S1 lacks a completed native discovery");
-    }
-    recordRecoveryNativeWork(staticRoot, "static-S1-prepare", preparedQuery.discovery_trace[0].work);
-    return deliverLivePreparedSemanticChain(staticRoot, daemon, handles);
-  }));
-  const staticResponse = staticReplay.result.rows[0]?.response;
-  if (staticResponse === undefined) throw new Error("static S1 has no native recall response");
-  recordRecoveryNativeWork(staticRoot, "static-S1-recall", staticResponse.work);
-  const staticRows = staticReplay.result.rows as { response?: { operation: string;
-    proofs?: { binding_results?: { kind: string }[] }[];
-    slot_qualifiers?: { evidence_kind: string; selection_basis?: string }[] } }[];
-  expect(staticRows).toHaveLength(1);
-  expect(staticRows[0]?.response?.operation).toBe("recall");
-  process.stderr.write(`STATIC_INITIAL_ARM ${world.name}: ${JSON.stringify({
-    answer_bindings: (staticRows[0]?.response?.proofs ?? []).flatMap(row => row.binding_results ?? [])
-      .filter(row => row.kind === "answer").length,
-    direct_answer_qualifiers: (staticRows[0]?.response?.slot_qualifiers ?? [])
-      .filter(row => row.evidence_kind === "semantic_proof" && row.selection_basis === "direct_answer").length
-  })}\n`);
+  let staticInitialRecall: string | undefined;
+  if (compareStaticInitial) {
+    const initialQualified = readChainArtifact(join(recoveryRoot, "initial-qualified.json")) as {
+      snapshot_path: string; snapshot_sha256: string };
+    const staticConfig = { ...JSON.parse(readFileSync(freezePath, "utf8")).chain,
+      snapshot_path: initialQualified.snapshot_path, snapshot_sha256: initialQualified.snapshot_sha256 };
+    reserveRecoveryRead(staticRoot, "static S1 sealed source and current C");
+    reserveRecoveryAction(staticRoot, "static-S1-prepare", chainIdentity(staticConfig),
+      BUDGET.work_units, BUDGET.memory_bytes, false);
+    reserveRecoveryAction(staticRoot, "static-S1-recall", chainIdentity(staticConfig),
+      BUDGET.work_units, BUDGET.memory_bytes, false);
+    const staticReplay = await benchPhase("static.replay", () => withSemanticChainDaemon(staticConfig, staticRoot, async daemon => {
+      let handles: ReadonlyMap<string, string | undefined> = new Map();
+      const plan = await prepareSemanticChain(staticConfig, staticRoot, daemon, current => { handles = current; });
+      const preparedQuery = plan.queries[0];
+      if (preparedQuery?.status === "blocked" || preparedQuery?.discovery_trace[0] === undefined) {
+        throw new Error("static S1 lacks a completed native discovery");
+      }
+      recordRecoveryNativeWork(staticRoot, "static-S1-prepare", preparedQuery.discovery_trace[0].work);
+      return deliverLivePreparedSemanticChain(staticRoot, daemon, handles);
+    }));
+    const staticResponse = staticReplay.result.rows[0]?.response;
+    if (staticResponse === undefined) throw new Error("static S1 has no native recall response");
+    recordRecoveryNativeWork(staticRoot, "static-S1-recall", staticResponse.work);
+    const staticRows = staticReplay.result.rows as { response?: { operation: string;
+      proofs?: { binding_results?: { kind: string }[] }[];
+      slot_qualifiers?: { evidence_kind: string; selection_basis?: string }[] } }[];
+    expect(staticRows).toHaveLength(1);
+    staticInitialRecall = staticRows[0]?.response?.operation;
+    const answerBindings = (staticRows[0]?.response?.proofs ?? []).flatMap(row => row.binding_results ?? [])
+      .filter(row => row.kind === "answer").length;
+    // Initial format sources lack Atlas support; the C-only case instead has abstained C.
+    if (!world.date) expect(answerBindings).toBe(0);
+    process.stderr.write(`STATIC_INITIAL_ARM ${world.name}: ${JSON.stringify({
+      answer_bindings: answerBindings,
+      direct_answer_qualifiers: (staticRows[0]?.response?.slot_qualifiers ?? [])
+        .filter(row => row.evidence_kind === "semantic_proof" && row.selection_basis === "direct_answer").length
+    })}\n`);
+  }
+  expect(staticInitialRecall).toBe(WORLDS.some(original => original.name === world.name)
+    || world.name === "format C-only revision" ? "recall" : undefined);
   expect(await benchPhase("recover-reason-initial", () => runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot]))).toBe(0);
   expect(await benchPhase("recover-prepare-q-review", () => runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot]))).toBe(0);
   await benchPhase("fill.proposal", () => fillProposal(join(recoveryRoot, "query-review-workset.json"), join(recoveryRoot, "query-review-cache"),

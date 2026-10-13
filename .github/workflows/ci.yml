@@ -345,11 +345,11 @@ jobs:
       - name: Check bench-history contract
         run: node scripts/ci/check-content-contracts.mjs
 
-  install-smoke:
-    name: CLI install surface smoke
+  # This isolated smoke consumes only the checkout, so it need not wait for tests.
+  install-smoke-check:
+    name: CLI install surface execution
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [quality-ubuntu, quality-macos, quality-windows]
     steps:
       - uses: actions/checkout@v7
 
@@ -371,3 +371,26 @@ jobs:
 
       - name: Smoke built CLI in an isolated workspace
         run: node scripts/ci/smoke-built-cli.mjs
+
+  # Preserve the existing required-check name and fail closed on every dependency.
+  install-smoke:
+    name: CLI install surface smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [quality-ubuntu, quality-macos, quality-windows, install-smoke-check]
+    if: always()
+    env:
+      QUALITY_UBUNTU_RESULT: ${{ needs.quality-ubuntu.result }}
+      QUALITY_MACOS_RESULT: ${{ needs.quality-macos.result }}
+      QUALITY_WINDOWS_RESULT: ${{ needs.quality-windows.result }}
+      INSTALL_SMOKE_RESULT: ${{ needs.install-smoke-check.result }}
+    steps:
+      - name: Require quality and install smoke success
+        shell: bash
+        run: |
+          for result in "$QUALITY_UBUNTU_RESULT" "$QUALITY_MACOS_RESULT" "$QUALITY_WINDOWS_RESULT" "$INSTALL_SMOKE_RESULT"; do
+            if [[ "$result" != "success" ]]; then
+              echo "Required CI job finished as: $result"
+              exit 1
+            fi
+          done
