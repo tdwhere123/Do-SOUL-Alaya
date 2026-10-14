@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { SourceSemanticResourceLedger, type ProductStateKey, type QueryProgram } from "@do-soul/alaya-protocol";
+import {
+  canonicalProductIdentity, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+  type ProductStateKey, type QueryProgram
+} from "@do-soul/alaya-protocol";
 import { createConditionalField, type FieldEngineState } from "../../../recall/conditional-field/engine/field-engine.js";
 import { compileProgramAutomaton } from "../../../recall/conditional-field/engine/program-automaton.js";
 import { pairKey } from "../../../recall/conditional-field/engine/path-routing.js";
@@ -138,6 +141,51 @@ describe("semantic attention reached products", () => {
         applicable: false }] };
     expect(compute(input).result?.entries.map(({ state, observation, scope }) => ({ state, observation, scope })))
       .toEqual([{ state: "unknown", observation: "exhausted", scope: pairScope("a", sibling) }]);
+  });
+
+  it("debits new index containers and identity strings before a low memory budget can retain them", () => {
+    const input = fixture(relation("wanted"));
+    const product = input.products[0]!;
+    const other = productKey("other-from");
+    const key = pairKey("subject-0", "wanted");
+    const reached = {
+      ...input.state, seen_identities: [product],
+      pair_demands: input.state.pair_demands.with(key, true),
+      pair_progress: input.state.pair_progress.with(`${key}:done`, null), pair_completed_count: 1
+    };
+    const transition = {
+      schema_version: 1 as const, from: product, to: productKey("target"), relation_kind: "wanted",
+      strength_milligrades: 1000, validity: { kind: "open" as const, valid_from: "2026-01-01T00:00:00.000Z" },
+      applicable: true
+    };
+    const run = (observed: ReturnType<typeof edge>[], transitions: typeof reached.transitions) => {
+      const meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+      const result = sourceSemanticBranchAttention(admission(), input.execution,
+        { ...reached, observed_relations: observed, transitions }, new Set([0]), meter);
+      return { result, meter };
+    };
+    const base = run([edge("wanted", "subject-0", "target", "short")], [transition]);
+    const long = run([edge("wanted", "subject-0", "target", "x".repeat(8_000))], [transition]);
+    const extra = run(
+      [edge("wanted", "subject-0", "target", "short"), edge("unrelated", "other", "target", "x".repeat(8_000))],
+      [transition, { ...transition, from: other, relation_kind: "unrelated" }]
+    );
+    expect(base.result).toBeUndefined();
+    expect(long.meter.spentBytes).toBe(base.meter.spentBytes);
+    const identityBytes = 24 + 4 * canonicalProductIdentity(other).length;
+    expect(extra.meter.spentBytes - base.meter.spentBytes).toBeGreaterThanOrEqual(identityBytes + 64 + 8);
+    const low = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: base.meter.spentBytes });
+    const secondTransition = { ...reached, observed_relations: [edge("wanted", "subject-0", "target", "short")],
+      transitions: [transition, { ...transition, from: other, relation_kind: "unrelated" }] };
+    expect(() => sourceSemanticBranchAttention(admission(), input.execution, secondTransition, new Set([0]), low))
+      .toThrow(SourceSemanticResourceExhausted);
+    expect(low.spentBytes).toBeLessThan(extra.meter.spentBytes);
+    try {
+      sourceSemanticBranchAttention(admission(), input.execution, secondTransition, new Set([0]), low);
+    } catch (error) {
+      expect(error).toBeInstanceOf(SourceSemanticResourceExhausted);
+      expect((error as SourceSemanticResourceExhausted).phase).toBe("semantic attention admitted transition index");
+    }
   });
 
   it("does not index relations when closure already makes the branch unavailable", () => {

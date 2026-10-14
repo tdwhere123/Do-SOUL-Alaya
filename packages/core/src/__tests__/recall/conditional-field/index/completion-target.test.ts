@@ -26,13 +26,13 @@ describe("completion target explanation", () => {
   it("does not treat payload completion, a null continuation or an empty queue as membership", () => {
     expect(explainCompletionTarget({
       continuation_present: false, delivered_count: 0
-    })).toEqual({ achieved: "none", remaining_obligations: ["membership", "observed", "order"] });
+    })).toEqual({ achieved: "none", remaining_obligations: ["membership", "observed", "order", "interpretation"] });
   });
 
   it("does not upgrade a raw closed page or a contradictory order claim", () => {
     expect(explainCompletionTarget({
-      logical_index: "complete", observed_coverage: "complete", order_status: "complete",
-      order_coverage: "complete", delivered_count: 1, source_only: true
+      logical_index: "complete", observed_coverage: "complete", interpretation_coverage: "complete",
+      order_status: "complete", order_coverage: "complete", delivered_count: 1, source_only: true
     })).toMatchObject({ achieved: "reliable_partial", remaining_obligations: ["source_only"] });
     expect(explainCompletionTarget({
       logical_index: "complete", observed_coverage: "complete", order_status: "open",
@@ -44,7 +44,7 @@ describe("completion target explanation", () => {
     expect(explainCompletionTarget({
       logical_index: "partial", observed_coverage: "open", order_status: "certified_prefix",
       delivered_count: 1, supported_delivery: true
-    })).toMatchObject({ achieved: "certified_prefix", remaining_obligations: ["membership", "observed", "order_tail"] });
+    })).toEqual({ achieved: "certified_prefix", remaining_obligations: ["membership", "observed", "order_tail", "interpretation"] });
     expect(explainCompletionTarget({
       outcome_status: "resource_exhausted", order_status: "certified_prefix", delivered_count: 1,
       supported_delivery: true
@@ -75,6 +75,24 @@ describe("completion target explanation", () => {
     expect(explainCompletionTarget({
       logical_index: "complete", order_status: "complete", order_coverage: "complete",
       delivered_count: 1, supported_delivery: true
-    }).remaining_obligations).toContain("observed");
+    }).remaining_obligations).toEqual(["observed", "interpretation"]);
+  });
+
+  it("keeps an unsupported delivery and a non-closed interpretation out of complete membership", () => {
+    const closed = {
+      logical_index: "complete", observed_coverage: "complete", interpretation_coverage: "complete",
+      order_status: "complete", order_coverage: "complete", delivered_count: 1, supported_delivery: true
+    };
+    expect(explainCompletionTarget(closed)).toEqual({ achieved: "complete_membership", remaining_obligations: [] });
+    expect(explainCompletionTarget({ ...closed, supported_delivery: false })).toEqual({
+      achieved: "none", remaining_obligations: ["support"]
+    });
+    expect(explainCompletionTarget({ ...closed, interpretation_coverage: "not_applicable" }).achieved)
+      .toBe("complete_membership");
+    for (const interpretation_coverage of [undefined, "unavailable", "interrupted", "invalidated", "omitted"]) {
+      const account = explainCompletionTarget({ ...closed, interpretation_coverage });
+      expect(account.achieved).not.toBe("complete_membership");
+      expect(account.remaining_obligations).toContain("interpretation");
+    }
   });
 });

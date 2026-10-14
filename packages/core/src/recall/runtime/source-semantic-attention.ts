@@ -19,40 +19,80 @@ type AttentionLookups = {
   transitionsByProduct?: Map<string, Map<string, AttentionTransition[]>>;
 };
 
+/** Same logical sizes as SourceSemanticResourceLedger.retain. Raw rows are not copied or remeasured. */
+const NEW_CONTAINER_BYTES = 64;
+const NEW_REFERENCE_BYTES = 8;
+
+function newStringBytes(value: string): number {
+  return 24 + 4 * value.length;
+}
+
+function allocateCharged<T>(meter: SourceSemanticResourceLedger, phase: string, bytes: number, create: () => T): T {
+  meter.charge(0, bytes, phase);
+  return create();
+}
+
+function rememberReference<T>(meter: SourceSemanticResourceLedger, phase: string, bucket: T[], row: T): void {
+  meter.charge(0, NEW_REFERENCE_BYTES, phase);
+  bucket.push(row);
+}
+
 /** Subject and predicate are separate map keys. A concatenated pair key can collide when either contains U+0000. */
 function attentionLookups(state: FieldEngineState, meter: SourceSemanticResourceLedger,
   cache: AttentionLookups): Required<AttentionLookups> {
   if (cache.observedByEndpoint !== undefined && cache.transitionsByProduct !== undefined) {
     return { observedByEndpoint: cache.observedByEndpoint, transitionsByProduct: cache.transitionsByProduct };
   }
-  const observedByEndpoint = new Map<string, Map<string, ObservedRelationRow[]>>();
-  for (const row of state.observed_relations ?? []) {
-    meter.charge(1, 0, "semantic attention observed pair index");
-    let byPredicate = observedByEndpoint.get(row.sourceObjectId);
-    if (byPredicate === undefined) {
-      byPredicate = new Map();
-      observedByEndpoint.set(row.sourceObjectId, byPredicate);
-    }
-    const bucket = byPredicate.get(row.predicate);
-    if (bucket === undefined) byPredicate.set(row.predicate, [row]);
-    else bucket.push(row);
-  }
-  const transitionsByProduct = new Map<string, Map<string, AttentionTransition[]>>();
-  for (const transition of state.transitions) {
-    meter.charge(1, 0, "semantic attention admitted transition index");
-    const fromId = canonicalProductIdentity(transition.from);
-    let byKind = transitionsByProduct.get(fromId);
-    if (byKind === undefined) {
-      byKind = new Map();
-      transitionsByProduct.set(fromId, byKind);
-    }
-    const bucket = byKind.get(transition.relation_kind);
-    if (bucket === undefined) byKind.set(transition.relation_kind, [transition]);
-    else bucket.push(transition);
-  }
+  const observedByEndpoint = indexObservedPairs(state, meter);
+  const transitionsByProduct = indexAdmittedTransitions(state, meter);
   cache.observedByEndpoint = observedByEndpoint;
   cache.transitionsByProduct = transitionsByProduct;
   return { observedByEndpoint, transitionsByProduct };
+}
+
+function indexObservedPairs(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
+  const phase = "semantic attention observed pair index";
+  meter.charge(1, NEW_CONTAINER_BYTES, phase);
+  const observedByEndpoint = new Map<string, Map<string, ObservedRelationRow[]>>();
+  for (const row of state.observed_relations ?? []) {
+    meter.charge(1, 0, phase);
+    let byPredicate = observedByEndpoint.get(row.sourceObjectId);
+    if (byPredicate === undefined) {
+      byPredicate = allocateCharged(meter, phase, NEW_CONTAINER_BYTES + NEW_REFERENCE_BYTES, () => new Map());
+      observedByEndpoint.set(row.sourceObjectId, byPredicate);
+    }
+    let bucket = byPredicate.get(row.predicate);
+    if (bucket === undefined) {
+      bucket = allocateCharged(meter, phase, NEW_CONTAINER_BYTES + NEW_REFERENCE_BYTES, () => []);
+      byPredicate.set(row.predicate, bucket);
+    }
+    rememberReference(meter, phase, bucket, row);
+  }
+  return observedByEndpoint;
+}
+
+function indexAdmittedTransitions(state: FieldEngineState, meter: SourceSemanticResourceLedger) {
+  const phase = "semantic attention admitted transition index";
+  meter.charge(1, NEW_CONTAINER_BYTES, phase);
+  const transitionsByProduct = new Map<string, Map<string, AttentionTransition[]>>();
+  for (const transition of state.transitions) {
+    meter.charge(1, 0, phase);
+    const fromId = canonicalProductIdentity(transition.from);
+    // Identity allocation belongs to the existing function. Debit that string before the index retains it.
+    meter.charge(0, newStringBytes(fromId), phase);
+    let byKind = transitionsByProduct.get(fromId);
+    if (byKind === undefined) {
+      byKind = allocateCharged(meter, phase, NEW_CONTAINER_BYTES + NEW_REFERENCE_BYTES, () => new Map());
+      transitionsByProduct.set(fromId, byKind);
+    }
+    let bucket = byKind.get(transition.relation_kind);
+    if (bucket === undefined) {
+      bucket = allocateCharged(meter, phase, NEW_CONTAINER_BYTES + NEW_REFERENCE_BYTES, () => []);
+      byKind.set(transition.relation_kind, bucket);
+    }
+    rememberReference(meter, phase, bucket, transition);
+  }
+  return transitionsByProduct;
 }
 
 /** Pair completion is local to a reached product; it cannot close a sibling binding. */
