@@ -12,7 +12,7 @@ import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixtur
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { TrustStateRecorder } from "../../../trust/state.js";
 import { workerActualCostOf } from "../../../runtime/recall/worker-actual-cost.js";
-import { fieldSha256, hashedRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
+import { fieldSha256, hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import { createDependencies } from "../../../../../../packages/core/src/__tests__/recall/recall-service-test-fixtures.js";
 import { MEM, NOW, WS, RUN, openSourceSlice } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
 
@@ -211,7 +211,7 @@ async function sourceWorkerFixture(body: string, count = 1) {
   const filename = join(directory, "alaya.db");
   const { database } = await openSourceSlice(() => {}, filename);
   const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
-  for (let index = 0; index < count; index += 1) records.insert(hashedRecord(WS, body, `source-${index}`));
+  for (let index = 0; index < count; index += 1) records.insert(hashedOriginalRecord(WS, body, `source-${index}`));
   const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 2 })!;
   await client.ready();
   const hooks: { beforeAcknowledgment?: () => void } = {};

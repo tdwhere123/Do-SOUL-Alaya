@@ -8,6 +8,7 @@ import type { ObserveConditionalFieldInput } from "../../../../../../packages/co
 import { createConditionalFieldObserverReaders } from "../../../runtime/recall-read-worker/observer-operations.js";
 import {
   fieldSha256,
+  hashedOriginalRecord,
   hashedRecord,
   openFieldDatabase
 } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
@@ -24,7 +25,7 @@ describe("worker source-root hydrate", () => {
     const database = openFieldDatabase();
     tracked.add(database);
     const record = new SqliteFieldSourceRecordRepo(database, fieldSha256).insert({
-      ...hashedRecord("workspace-1", "Historical original body", "src-history"),
+      ...hashedOriginalRecord("workspace-1", "Historical original body", "src-history"),
       valid_from: "2026-09-01T00:00:00.000Z", valid_to: "2026-09-10T00:00:00.000Z"
     });
     const asOf = "2026-09-09T12:00:00.000Z";

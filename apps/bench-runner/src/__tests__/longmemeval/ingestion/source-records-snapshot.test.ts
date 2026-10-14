@@ -87,7 +87,7 @@ describe("source record snapshot preparation and consumer", () => {
       result.target.kind === "source_evidence" && result.target.root_id === first.sidecar.messages[2]!.record.identity);
     expect(empty?.content_preview).toBe("[empty source]");
     expect(empty?.target).toMatchObject({ span: { content_start: 0, content_end: 0,
-      content_complete: true, original_complete: true, retained_extent: "body" } });
+      content_complete: true, original_complete: false, retained_extent: "body" } });
     const db = new Database(f.input.snapshotPath, { readonly: true });
     try {
       expect(db.prepare("SELECT count(*) AS n FROM memory_entries").get()).toMatchObject({ n: 0 });

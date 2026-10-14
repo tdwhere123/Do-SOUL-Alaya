@@ -88,6 +88,19 @@ export function hashedRecord(
   };
 }
 
+/** New complete originals must qualify representation; identity includes that qualification. */
+export function hashedOriginalRecord(
+  workspaceId: string,
+  body: string,
+  sourceId = "src-1"
+) {
+  const row = {
+    ...hashedRecord(workspaceId, body, sourceId),
+    source_representation: { kind: "original_body" as const }
+  };
+  return { ...row, record_id: hashSourceRecordId(row, fieldSha256) };
+}
+
 export function hashedSpan(
   workspaceId: string,
   recordId: string,
