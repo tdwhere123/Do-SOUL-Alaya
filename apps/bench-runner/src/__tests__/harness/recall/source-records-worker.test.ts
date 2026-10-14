@@ -60,7 +60,8 @@ describe("workspace-bound source admission through the native Recall worker", ()
     try {
       const input = (id: string, content: string, eventTime: string | null) => ({ source_id: id, source_version: "fixture",
         content_bytes: content, recorded_at: NOW, event_time: eventTime, valid_from: null, valid_to: null,
-        speaker: "user" as const, scope_class: "project" as const, spans: deriveAddressableSpanViews(content) });
+        speaker: "user" as const, scope_class: "project" as const, source_representation: { kind: "original_body" as const },
+        spans: deriveAddressableSpanViews(content) });
       const request = SoulMemorySearchRequestSchema.parse({ query: "yesterday failed deployment", max_results: 50,
         scope_class: null, dimension: null, domain_tags: null, source_observed_at: NOW,
         protocol_version: 1, supports_source_evidence: true, supported_result_kinds: ["source_evidence"],

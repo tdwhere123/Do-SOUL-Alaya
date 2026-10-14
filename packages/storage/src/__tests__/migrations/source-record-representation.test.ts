@@ -81,7 +81,12 @@ it.each(["erased", "superseded"] as const)("withdraws every full and bounded pro
   expect(roots.load("workspace-1", target(projection))).toMatchObject({ row: null, unavailable: true });
   expect(roots.page({ workspaceId: "workspace-1", limit: 8, nativeLimit: 8, afterCursor: null }).rows
     .some(row => row.root_id === projection.record_id)).toBe(false);
-  expect(database.connection.prepare("SELECT * FROM source_records WHERE record_id = ?").get(projection.record_id)).toEqual(before);
+  const stored = database.connection.prepare("SELECT * FROM source_records WHERE record_id = ?").get(projection.record_id);
+  if (mode === "erased") {
+    expect(stored).toMatchObject({ source_body: null, retained_content_bytes: null });
+  } else {
+    expect(stored).toEqual(before);
+  }
 });
 
 it("reserves and charges metadata-only dependency reads before exposing any projection bytes", () => {

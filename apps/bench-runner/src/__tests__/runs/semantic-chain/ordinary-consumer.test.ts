@@ -478,7 +478,11 @@ function expandReferenceView(view: { contract: string; observation: unknown; met
     expect(seen.has(path)).toBe(false); seen.add(path);
     const parts = path.split("/").slice(1).map(part => part.replaceAll("~1", "/").replaceAll("~0", "~"));
     const key = parts.pop()!;
-    const parent = parts.reduce((value, part) => value[part], observation as Record<string, any>);
+    const parent = parts.reduce<Record<string, unknown>>((value, part) => {
+      const next = value[part];
+      if (typeof next !== "object" || next === null) throw new Error(`missing reference parent ${part}`);
+      return next as Record<string, unknown>;
+    }, observation as Record<string, unknown>);
     expect(Object.hasOwn(parent, key)).toBe(false);
     Object.defineProperty(parent, key, { value: structuredClone(entry.value), enumerable: true });
   }

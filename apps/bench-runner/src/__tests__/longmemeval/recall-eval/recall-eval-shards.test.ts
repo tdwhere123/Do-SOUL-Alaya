@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import type { LongMemEvalSnapshotManifest } from "../../../runs/snapshot/materialize.js";
@@ -16,6 +16,8 @@ import {
   REQUIRE_SLICE_REUSE_ENV,
   SEALED_SLICE_RESTORE_ENV
 } from "../../../runs/snapshot/recall-eval/workspace-slice/index.js";
+import { assertIsolatedOverlayFile } from
+  "../../../runs/snapshot/recall-eval/workspace-slice/overlay-replicate.js";
 import {
   assertExactRecallEvalShardCoverage,
   buildMergedPerQuestionDelivered,
@@ -334,12 +336,12 @@ describe("runRecallEvalSharded", () => {
     expect(result.payload.evaluated_count).toBe(4);
   });
 
-  it("materializes isolated overlay binds that do not share an inode", async () => {
+  it("materializes isolated overlay binds that do not share a working copy", async () => {
     const overlay = await plantOverlayReceipt(tmpRoot);
     const historyRoot = join(tmpRoot, "history");
     await mkdir(historyRoot, { recursive: true });
     const spawnCalls: LongMemEvalWorkerSpawnOptions[] = [];
-    const overlayInodes: string[] = [];
+    const overlayFiles: string[] = [];
     await runRecallEvalSharded({
       snapshotDbPath: join(tmpRoot, "snapshot.db"),
       variant: "longmemeval_s",
@@ -361,7 +363,9 @@ describe("runRecallEvalSharded", () => {
         const overlayFile = overlayReceipt.replace(/\.json$/u, ".sqlite");
         const metadata = lstatSync(overlayFile);
         expect(metadata.isFile()).toBe(true);
-        overlayInodes.push(`${metadata.dev}:${metadata.ino}`);
+        expect(metadata.isSymbolicLink()).toBe(false);
+        overlayFiles.push(resolve(overlayFile));
+        assertIsolatedOverlayFile(overlay.overlayPath, overlayFile);
         const hits = PLANTED_HITS.slice(offset, offset + limit);
         await writeShardRoot(
           shardRoot,
@@ -376,9 +380,8 @@ describe("runRecallEvalSharded", () => {
       call.args[call.args.indexOf("--embedding-cache-overlay") + 1]);
     expect(new Set(overlayArgs).size).toBe(2);
     expect(overlayArgs.every((path) => path !== overlay.receiptPath)).toBe(true);
-    expect(new Set(overlayInodes).size).toBe(2);
-    const sourceIno = lstatSync(overlay.overlayPath);
-    expect(overlayInodes).not.toContain(`${sourceIno.dev}:${sourceIno.ino}`);
+    expect(new Set(overlayFiles).size).toBe(2);
+    expect(overlayFiles.every((path) => path !== resolve(overlay.overlayPath))).toBe(true);
   });
 
   it("aborts and joins a sibling when another shard spawn rejects", async () => {

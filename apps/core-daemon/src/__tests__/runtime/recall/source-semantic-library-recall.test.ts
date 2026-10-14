@@ -163,18 +163,20 @@ async function withLibrary(body: (input: {
     await admission.admit({
       workspace_id: WS, source_id: "artifact-1", source_version: `obsolete-${index}`, content_bytes: `old ${index}`,
       evidence_object_id: null, recorded_at: "2026-09-17T00:00Z", event_time: null, valid_from: null, valid_to: null,
-      speaker: "user", scope_class: "project", spans: []
+      speaker: "user", scope_class: "project", source_representation: { kind: "original_body" }, spans: []
     }, { workspaceId: WS });
   }
   await admission.admit({
     workspace_id: WS, source_id: "artifact-1", source_version: "1", content_bytes: SOURCE,
     evidence_object_id: null, recorded_at: CLOCK, event_time: eventTime, ...validity,
-    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(SOURCE)
+    speaker: "user", scope_class: "project", source_representation: { kind: "original_body" },
+    spans: deriveAddressableSpanViews(SOURCE)
   }, { workspaceId: WS });
   await admission.admit({
     workspace_id: WS, source_id: "artifact-failed", source_version: "1", content_bytes: FAILED_SOURCE,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null,
-    speaker: "user", scope_class: "project", spans: deriveAddressableSpanViews(FAILED_SOURCE)
+    speaker: "user", scope_class: "project", source_representation: { kind: "original_body" },
+    spans: deriveAddressableSpanViews(FAILED_SOURCE)
   }, { workspaceId: WS });
   const catalog = catalogFor(ASSERTION);
   const allIds: string[] = [];

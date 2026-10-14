@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -7,7 +8,7 @@ import {
 } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import {
@@ -128,8 +129,19 @@ describe("A2 sealed source and private WAL/SHM", () => {
 
     expect(readFileSync(planted.sourcePath)).toEqual(sourceBytes);
     expect(first.sourceIno).toBe(planted.sourceIno);
-    expect(first.targetIno).not.toBe(first.sourceIno);
-    expect(second.targetIno).not.toBe(first.targetIno);
+    expect(resolve(first.sourcePath)).toBe(resolve(planted.sourcePath));
+    expect(resolve(first.targetPath)).not.toBe(resolve(planted.sourcePath));
+    expect(resolve(second.targetPath)).not.toBe(resolve(first.targetPath));
+    const firstTarget = lstatSync(first.targetPath);
+    const secondTarget = lstatSync(second.targetPath);
+    expect(firstTarget.isFile()).toBe(true);
+    expect(secondTarget.isFile()).toBe(true);
+    expect(firstTarget.isSymbolicLink()).toBe(false);
+    expect(secondTarget.isSymbolicLink()).toBe(false);
+    const secondBytes = readFileSync(second.targetPath);
+    writeFileSync(first.targetPath, "mutated worker copy");
+    expect(readFileSync(planted.sourcePath)).toEqual(sourceBytes);
+    expect(readFileSync(second.targetPath)).toEqual(secondBytes);
     expect(first.walPath).toBe(`${first.targetPath}-wal`);
     expect(first.shmPath).toBe(`${first.targetPath}-shm`);
     expect(first.walPath).not.toBe(second.walPath);

@@ -324,7 +324,10 @@ it("rolls back failed archive, rejects wrong source/workspace/currentness, and m
       return fn();
     }));
     await expect(session.publication.invalidate!({ request: currentRequest, budget: BUDGET })).rejects.toThrow(/source binding/u);
-    expect(getCurrent).toHaveBeenCalledWith(WS, SOURCE_ID, 1);
+    expect(getCurrent).toHaveBeenCalledWith(WS, SOURCE_ID, 1, 0, expect.objectContaining({
+      nativeByteLimit: expect.any(Number),
+      workLimit: expect.any(Number)
+    }));
     expect(session.stores.getCurrentRecord(WS, SOURCE_ID)?.identity).not.toBe(revised.identity);
     run.mockRestore(); getCurrent.mockRestore();
     expect(auditRows(session)).toHaveLength(1);
