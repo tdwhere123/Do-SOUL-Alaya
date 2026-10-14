@@ -4,6 +4,7 @@ import {
   hashAddressableSourceSpanId,
   hashContentDigest,
   hashSourceRecordId,
+  verifySourceRecordIdentity,
   UTTERANCE_ATTRIBUTION_CONTRACT,
   type SourceAdmissionRequest
 } from "@do-soul/alaya-protocol";
@@ -86,6 +87,66 @@ describe("source admission", () => {
         utf8_span: [0, BODY.length] as const, conversation_ref: "conversation-1", author_ref: "person-1" }] };
     expect(() => admission.admit(request({ attribution_context: attribution }))).toThrow(/replay mismatch/);
     expect(stores.getStoredRecord("workspace-1", first.record.identity)?.record).toEqual(first.record);
+  });
+
+  it("keeps historical identity material and binds new representation and ordered source dependencies", () => {
+    const stores = createInMemoryFieldStores();
+    const admission = createSourceAdmissionPort({ sha256: fieldSha256, stores });
+    const legacy = admission.admit(request()).record;
+    expect(legacy.identity).toBe(`sha256:${fieldSha256(JSON.stringify([
+      "source_record", "src-1", "v1", hashContentDigest(BODY, fieldSha256)
+    ]))}`);
+    expect(legacy.source_representation).toBeUndefined();
+    expect(() => admission.admit(request({ source_representation: { kind: "original_body" } })))
+      .toThrow(/later recorded time and new source revision/u);
+    expect(stores.getRecord("workspace-1", legacy.identity)).toEqual(legacy);
+    const first = admission.admit(request({ source_id: "raw-a", speaker: "assistant", scope_class: "project",
+      source_representation: { kind: "retained_excerpt" } })).record;
+    const second = admission.admit(request({ source_id: "raw-b", speaker: "assistant", scope_class: "project",
+      source_representation: { kind: "original_body" } })).record;
+    const projection = request({ source_id: "projection", speaker: "assistant", scope_class: "project",
+      source_representation: { kind: "canonical_projection", source_record_ids: [first.identity, second.identity] } });
+    const admitted = admission.admit(projection).record;
+    expect(admission.admit(projection).record).toEqual(admitted);
+    expect(hashSourceRecordId({ ...admitted, source_representation: { kind: "canonical_projection",
+      source_record_ids: [second.identity, first.identity] } }, fieldSha256)).not.toBe(admitted.identity);
+    const { source_representation: _representation, ...stripped } = admitted;
+    expect(() => verifySourceRecordIdentity(stripped, fieldSha256)).toThrow(/identity mismatch/u);
+    expect(stores.getStoredRecord("workspace-1", first.identity)?.content_bytes).toBe(BODY);
+  });
+
+  it("rejects projection dependencies that are missing, historical, foreign, stale or differently scoped", () => {
+    const stores = createInMemoryFieldStores();
+    const admission = createSourceAdmissionPort({ sha256: fieldSha256, stores });
+    const raw = admission.admit(request({ source_id: "raw", speaker: "assistant", scope_class: "project",
+      source_representation: { kind: "retained_excerpt" } })).record;
+    const projection = request({ source_id: "projection", speaker: "assistant", scope_class: "project",
+      source_representation: { kind: "canonical_projection", source_record_ids: [raw.identity] } });
+    expect(() => admission.admit({ ...projection, workspace_id: "foreign" })).toThrow(/current retained sources/u);
+    expect(() => admission.admit({ ...projection, scope_class: "global_core" })).toThrow(/current retained sources/u);
+    expect(() => admission.admit({ ...projection, speaker: "user" })).toThrow(/speaker/u);
+    const historical = admission.admit(request({ source_id: "historical", speaker: "assistant", scope_class: "project" })).record;
+    expect(() => admission.admit({ ...projection, source_representation: {
+      kind: "canonical_projection", source_record_ids: [historical.identity]
+    } })).toThrow(/current retained sources/u);
+    expect(() => admission.admit({ ...projection, source_representation: {
+      kind: "canonical_projection", source_record_ids: [`sha256:${"f".repeat(64)}`]
+    } })).toThrow(/current retained sources/u);
+    const admitted = admission.admit(projection).record;
+    admission.admit(request({ source_id: "raw", source_version: "v2", recorded_at: "2026-08-17T00:00:00.000Z",
+      speaker: "assistant", scope_class: "project", source_representation: { kind: "retained_excerpt" } }));
+    expect(stores.getStoredRecord("workspace-1", admitted.identity)).toBeNull();
+    expect(stores.getRecord("workspace-1", admitted.identity)).toEqual(admitted);
+    expect(stores.listStoredRecords("workspace-1").map(row => row.record.identity)).not.toContain(admitted.identity);
+    expect(() => admission.admit(projection)).toThrow(/current retained sources/u);
+  });
+
+  it("rejects changing a retained raw speaker or scope on exact identity replay", () => {
+    const admission = createPort();
+    const input = request({ speaker: "assistant", scope_class: "project", source_representation: { kind: "retained_excerpt" } });
+    admission.admit(input);
+    expect(() => admission.admit({ ...input, speaker: "user" })).toThrow(/replay mismatch/u);
+    expect(() => admission.admit({ ...input, scope_class: "global_core" })).toThrow(/replay mismatch/u);
   });
 
   it("admits a record-only root with null evidence_object_id and no minted capsule", () => {

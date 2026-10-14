@@ -221,14 +221,17 @@ function restrictedSource(runtime: SourceSemanticReadRuntime, workspace: string,
 }
 
 function readSourceText(repo: SqliteFieldSourceRecordRepo, record: SourceRecordIdentity, policy: Policy,
-  meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number): Pick<SourceObservation, "read_bytes" | "body_bytes" | "complete" | "signal"> {
-  let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false;
+  meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number): Pick<SourceObservation, "read_bytes" | "body_bytes" | "complete" | "signal">
+    & { resourceLimited?: boolean } {
+  let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false, resourceLimited = false;
   const chunks: string[] = [];
   try {
     meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "access source extent metadata");
-    const extent = repo.findByIdBounded(record.workspace_id, record.identity, 1, 0);
-    meter.read(5, extent === null ? 0 : extent.nativeBytes + extent.metadataBytes);
+    const extent = repo.findByIdBounded(record.workspace_id, record.identity, 1, 0,
+      { workLimit: meter.work, nativeByteLimit: meter.bytes });
+    meter.read(5 + (extent?.dependencyWork ?? 0), extent === null ? 0 : extent.nativeBytes + extent.metadataBytes);
     bodyBytes = extent?.bodyBytes ?? null;
+    if (extent?.resourceLimited) throw new SourceSemanticResourceExhausted("access source dependencies");
     if (extent?.record?.source_body == null) return { read_bytes: 0, body_bytes: bodyBytes, complete: false, signal: UNKNOWN };
     if (bodyBytes === 0) complete = true;
     while (true) {
@@ -237,8 +240,11 @@ function readSourceText(repo: SqliteFieldSourceRecordRepo, record: SourceRecordI
       if (chunkBytes <= 0) break;
       const reserve = policy.sourceCost(characters + chunkBytes);
       meter.reserve(chunkBytes + 5 + reserve.work_units, RETAINED_SOURCE_READ_RESERVATION + 2 * reserve.memory_bytes + 8 * chunkBytes, "access source extent");
-      const page = repo.findByIdBounded(record.workspace_id, record.identity, chunkBytes, offset);
-      meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      const page = repo.findByIdBounded(record.workspace_id, record.identity, chunkBytes, offset,
+        { workLimit: meter.work - chunkBytes - reserve.work_units,
+          nativeByteLimit: meter.bytes - 2 * reserve.memory_bytes - 8 * chunkBytes });
+      meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      if (page?.resourceLimited) throw new SourceSemanticResourceExhausted("access source dependencies");
       if (page === null) break;
       bodyBytes = page.bodyBytes;
       if (page.record?.source_body == null || page.invalidOffset) break;
@@ -248,10 +254,10 @@ function readSourceText(repo: SqliteFieldSourceRecordRepo, record: SourceRecordI
       if (offset >= bodyBytes) { complete = true; break; }
       if (chunk.length === 0) break;
     }
-  } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; }
+  } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; resourceLimited = true; }
   meter.charge(0, 4 * characters, "access source assembly");
   const signal = offset === 0 && !complete ? UNKNOWN : policy.source(chunks.join(""), meter);
-  return { read_bytes: offset, body_bytes: bodyBytes, complete, signal };
+  return { read_bytes: offset, body_bytes: bodyBytes, complete, signal, resourceLimited };
 }
 
 function observeInterpretations(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
@@ -294,7 +300,8 @@ function observeInterpretations(runtime: SourceSemanticReadRuntime, payload: Sou
         if (sources.get(record.identity)?.complete === true) continue;
         const extent = sourcePreviewExtents === undefined ? undefined : previewExtent(record, sourcePreviewExtents);
         sourceReader ??= new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
-        const observation = readSourceText(sourceReader, record, policy, meter, extent);
+        const { resourceLimited, ...observation } = readSourceText(sourceReader, record, policy, meter, extent);
+        if (resourceLimited) stops.add("budget");
         sources.set(record.identity, { source_id: record.source_id, record_id: record.identity,
           ...observation });
         policy.associateSourceHint(record.content_digest, observation.signal, meter);

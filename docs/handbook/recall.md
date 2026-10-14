@@ -831,6 +831,35 @@ first-page envelope before optional source time is included. An absent
 `source_time` means time was not disclosed, including when the byte or work
 budget omits it; it does not mean the original record lacked source time.
 
+Source records may explicitly qualify their `source_representation` as
+`original_body`, `retained_excerpt`, or `canonical_projection`. Missing historical
+metadata remains unknown; current read disclosures do not infer original fidelity
+from a source-record row. `original_complete` is true only for an explicitly
+qualified original body. `content_complete` separately reports whether the
+retained record's own bytes were completely read. Existing records and retained
+response receipts are not relabeled.
+
+Post-turn capture preserves each supplied message's exact excerpt, including
+indentation, line endings, and leading or trailing whitespace, in a separate
+`retained_excerpt` record. It keeps the existing normalized extraction corpus as
+a `canonical_projection` with an ordered list of the exact retained record
+identities. The projection can be read only while every origin body is available
+and remains current in the same workspace and scope. A projection cannot depend
+on another projection. Dependency checks share the Protocol qualification owner
+across in-memory and SQLite stores. Representation metadata participates in new
+record identities; absent metadata keeps the historical identity preimage.
+Correcting a representation requires a later recorded time and a new revision.
+
+Each raw message retains its supplied speaker and scope. Conversation capture
+uses each message's own observation time; report-context excerpts have unknown
+event time. Native source-semantic request preparation uses the retained record's
+supported speaker as its `sourceRole`; an assistant's quoted `User:` line remains
+assistant material. Reference catalogs contain text locations, not speaker
+authority, so public catalog preparation alone does not establish an author.
+The legacy normalized projection and historical records retain their existing
+role-marker interpretation. Speaker roles do not establish a person's identity
+or replace utterance attribution.
+
 ## Opt-in open source semantics
 
 The `soul.interpretation` channel retains its source-local source interpretation, source-independent

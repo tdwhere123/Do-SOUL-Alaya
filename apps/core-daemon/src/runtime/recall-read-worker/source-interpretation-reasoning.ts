@@ -55,8 +55,10 @@ function boundedSourceStores(database: StorageDatabase, workspace: string, artif
     getCurrentRecord: (workspaceId, sourceId) => {
       if (workspaceId !== workspace || sourceId !== artifact) throw new CoreError("VALIDATION", "source binding mismatch");
       meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-      const page = repo.findCurrentBounded(workspace, artifact, 1);
-      meter.charge(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      const page = repo.findCurrentBounded(workspace, artifact, 1, 0, { workLimit: meter.work, nativeByteLimit: meter.bytes });
+      meter.charge(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      if (page?.resourceLimited) throw new CoreError("CONFLICT", "interpretation source dependencies budget exhausted",
+        { subCode: "RETRYABLE_BACKPRESSURE" });
       if (page === null) return null;
       if (page.record === null) throw new CoreError("CONFLICT", "source metadata is unavailable");
       return sourceRecordFromRow(page.record);
@@ -70,8 +72,10 @@ function boundedSourceStores(database: StorageDatabase, workspace: string, artif
       let record: SourceRecordIdentity | undefined;
       while (true) {
         meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-        const page = repo.findByIdBounded(workspace, id, 4096, offset);
-        meter.charge(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+        const page = repo.findByIdBounded(workspace, id, 4096, offset, { workLimit: meter.work, nativeByteLimit: meter.bytes });
+        meter.charge(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+        if (page?.resourceLimited) throw new CoreError("CONFLICT", "interpretation source dependencies budget exhausted",
+          { subCode: "RETRYABLE_BACKPRESSURE" });
         if (page?.record == null || page.record.source_body === null || page.invalidOffset) return null;
         record = sourceRecordFromRow(page.record);
         if (record.scope_class == null || (authorized !== null && !authorized.includes(record.scope_class))) {

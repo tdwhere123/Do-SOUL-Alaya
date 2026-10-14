@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { GardenRole, GardenTaskKind } from "@do-soul/alaya-protocol";
+import { createInMemoryFieldStores, createSourceAdmissionPort, fieldContractSha256 } from "@do-soul/alaya-core";
 import { initDatabase, SqliteGardenTaskRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createMessage } from "../../../../../packages/core/src/__tests__/conversation/conversation-service.test-support.js";
 import { createConversationGardenCompileQueue } from "../../garden/conversation-compile-queue-adapter.js";
@@ -23,6 +24,22 @@ function createRepo(): SqliteGardenTaskRepo {
 }
 
 describe("conversation garden compile queue", () => {
+  it("dates each retained message with its own observation time", () => {
+    const stores = createInMemoryFieldStores();
+    const queue = createConversationGardenCompileQueue({ gardenTaskRepo: createRepo(),
+      now: () => "2026-09-16T01:00:00.000Z", sourceAdmission: createSourceAdmissionPort({ stores, sha256: fieldContractSha256 }) });
+    const userAt = "2026-09-16T00:00:00.000Z", assistantAt = "2026-09-16T00:00:10.000Z";
+    queue.enqueue({ workspaceId: "workspace-1", runId: "run-1",
+      userMessage: { ...createMessage("msg-user", "user", "  Question?\r\n"), created_at: userAt },
+      assistantMessage: { ...createMessage("msg-assistant", "assistant", "  Answer.\n"), created_at: assistantAt } });
+    const sources = stores.listStoredRecords("workspace-1");
+    expect(sources.find(row => row.record.source_representation?.kind === "retained_excerpt" && row.record.speaker === "user"))
+      .toMatchObject({ content_bytes: "  Question?\r\n", record: { event_time: userAt } });
+    expect(sources.find(row => row.record.source_representation?.kind === "retained_excerpt" && row.record.speaker === "assistant"))
+      .toMatchObject({ content_bytes: "  Answer.\n", record: { event_time: assistantAt } });
+    expect(sources.find(row => row.record.source_representation?.kind === "canonical_projection")?.record.event_time).toBe(userAt);
+  });
+
   it("persists a POST_TURN_EXTRACT task and treats a second enqueue as duplicate", () => {
     const gardenTaskRepo = createRepo();
     const queue = createConversationGardenCompileQueue({

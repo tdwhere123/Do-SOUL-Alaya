@@ -1,5 +1,5 @@
 import {
-  type SourceEvidenceTarget
+  type SourceEvidenceTarget, type SourceRepresentation
 } from "@do-soul/alaya-protocol";
 import type { BoundedCapsuleSource, BoundedCapsuleSourceReader } from "../capsules/reads/bounded-capsule-source-reader.js";
 import {
@@ -16,6 +16,7 @@ import {
 } from "./source-repo.js";
 import type { FieldSourceRecordRow } from "./ports.js";
 import { RETAINED_SOURCE_READ_RESERVATION } from "./retained-source-chunks.js";
+import type { SourceRecordReadAllowance } from "./source-representation-read.js";
 import { StorageError } from "../../shared/errors.js";
 
 const PAGE_MAX = 512;
@@ -39,6 +40,7 @@ export type SourceRootRow = Readonly<{
   readonly content_complete: boolean;
   readonly original_complete: boolean;
   readonly retained_extent: "body" | "excerpt" | "gist";
+  readonly source_representation?: SourceRepresentation;
   readonly scope_class?: string;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
@@ -117,7 +119,8 @@ export class SqliteSourceRootRecallReader {
     const pinned = parseContentCursor(after);
     if (pinned !== null) {
       if ((input.workLimit ?? Infinity) < 5) return emptyPage(true, after);
-      return this.pageFromContentCursor(input.workspaceId, pinned, limit, byteLimit);
+      return this.pageFromContentCursor(input.workspaceId, pinned, after!, byteLimit,
+        { workLimit: input.workLimit, nativeByteLimit });
     }
     const family = parseFamilyCursor(after) ?? (
       after === null || after.startsWith("r:")
@@ -163,19 +166,21 @@ export class SqliteSourceRootRecallReader {
     target: SourceEvidenceTarget,
     byteLimit = DEFAULT_BYTE_LIMIT,
     offset = 0,
-    nativeByteLimit = byteLimit
+    nativeByteLimit = byteLimit,
+    workLimit = Number.MAX_SAFE_INTEGER
   ): SourceRootHydratePage {
     if (!Number.isSafeInteger(nativeByteLimit) || nativeByteLimit < 0) throw new Error("invalid source-root native byte limit");
-    if (nativeByteLimit < RETAINED_SOURCE_READ_RESERVATION) return {
+    if (nativeByteLimit < RETAINED_SOURCE_READ_RESERVATION || workLimit < 5) return {
       row: null, rowsRead: 0, bytesRead: 0, unavailable: false, resourceLimited: true };
-    return this.read(workspaceId, target, byteLimit, offset);
+    return this.read(workspaceId, target, byteLimit, offset, { nativeByteLimit, workLimit });
   }
 
   private read(
     workspaceId: string,
     target: SourceEvidenceTarget,
     byteLimit: number,
-    offset: number
+    offset: number,
+    allowance?: SourceRecordReadAllowance
   ): SourceRootHydratePage {
     if (
       !Number.isSafeInteger(byteLimit) || byteLimit < 1 || byteLimit > DEFAULT_BYTE_LIMIT
@@ -186,13 +191,15 @@ export class SqliteSourceRootRecallReader {
       return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
     }
     if (target.root_kind === "source_record") {
-      const bounded = this.records.findByIdBounded(workspaceId, target.root_id, byteLimit, offset);
+      const bounded = this.records.findByIdBounded(workspaceId, target.root_id, byteLimit, offset, allowance);
       if (bounded === null) {
         return { row: null, rowsRead: 0, bytesRead: 0, unavailable: true };
       }
       const mapped = mapBoundedRecord(bounded, offset);
+      if (bounded.resourceLimited) return { row: null, rowsRead: 1, bytesRead: bounded.nativeBytes,
+        metadataBytes: bounded.metadataBytes, nativeWork: 5 + bounded.dependencyWork, unavailable: false, resourceLimited: true };
       return { ...hydrateMapped(mapped, target, bounded.nativeBytes), metadataBytes: bounded.metadataBytes,
-        nativeWork: 5 };
+        nativeWork: 5 + bounded.dependencyWork };
     }
     const capsule = this.boundedCapsules.read(workspaceId, target.root_id, byteLimit, offset);
     if (capsule === null) {
@@ -217,35 +224,42 @@ export class SqliteSourceRootRecallReader {
   private pageFromContentCursor(
     workspaceId: string,
     pin: ContentCursor,
-    limit: number,
-    byteLimit: number
+    originalCursor: string,
+    byteLimit: number,
+    allowance?: SourceRecordReadAllowance
   ): SourceRootPage {
-    const continued = this.readPinnedChunk(workspaceId, pin, byteLimit);
-    void limit;
-    if (continued === null) return { ...emptyPage(true, encodeContentCursor(pin)), unavailable: true };
+    const continued = this.readPinnedChunk(workspaceId, pin, byteLimit, allowance);
+    if (continued === null) return { ...emptyPage(true, originalCursor), unavailable: true };
     return { ...continued.page, truncated: true,
-      committedThrough: pin.afterCursor ?? continued.collectionCursor };
+      // Refused content work must retain the observer's opaque literal and pending-root state.
+      committedThrough: continued.page.resourceLimited || continued.page.unavailable
+        ? originalCursor : pin.afterCursor ?? continued.collectionCursor };
   }
 
   private readPinnedChunk(
     workspaceId: string,
     pin: ContentCursor,
-    byteLimit: number
+    byteLimit: number,
+    allowance?: SourceRecordReadAllowance
   ): Readonly<{
     readonly page: SourceRootPage;
     readonly collectionCursor: string | null;
   }> | null {
     if (pin.kind === "source_record") {
-      const bounded = this.records.findByIdBounded(workspaceId, pin.rootId, byteLimit, pin.offset);
-      if (bounded === null || bounded.record === null) return null;
+      const bounded = this.records.findByIdBounded(workspaceId, pin.rootId, byteLimit, pin.offset, allowance);
+      if (bounded === null) return null;
       const mapped = mapBoundedRecord(bounded, pin.offset);
-      if (mapped === null) return null;
+      if (mapped === null || bounded.record === null) return { page: { ...emptyPage(true, pin.afterCursor ?? null),
+        nativeVisits: 1, rowsRead: 1, nativeWork: 5 + bounded.dependencyWork, metadataBytes: bounded.metadataBytes,
+        nativeBytes: bounded.nativeBytes, bytesRead: bounded.nativeBytes,
+        resourceLimited: bounded.resourceLimited === true, unavailable: bounded.resourceLimited !== true },
+        collectionCursor: pin.afterCursor ?? null };
       const collectionCursor = encodeRecordCursor({
         afterRecordedAt: bounded.record.recorded_at,
         afterRecordId: bounded.record.record_id
       });
       return { page: { ...singleRowPage(mapped, bounded.nativeBytes, collectionCursor), metadataBytes: bounded.metadataBytes,
-        nativeWork: 5 }, collectionCursor };
+        nativeWork: 5 + bounded.dependencyWork }, collectionCursor };
     }
     const capsule = this.boundedCapsules.read(workspaceId, pin.rootId, byteLimit, pin.offset);
     if (capsule === null) {
@@ -283,9 +297,10 @@ export class SqliteSourceRootRecallReader {
         break;
       }
       const page = takeCapsule ? this.pageCapsules(workspaceId, next.capsulesAfter, 1, byteLimit)
-        : this.pageRecords(workspaceId, next.recordsAfter, 1, byteLimit);
+        : this.pageRecords(workspaceId, next.recordsAfter, 1, byteLimit, {
+          workLimit: workLimit - (result.nativeWork ?? 0), nativeByteLimit: nativeByteLimit - result.bytesRead - (result.metadataBytes ?? 0) });
       result = mergePages(result, page);
-      if (page.unavailable) break;
+      if (page.unavailable || page.resourceLimited) break;
       next = { ...next, nextFamily: takeCapsule ? "record" : "capsule",
         ...(takeCapsule ? { capsulesAfter: page.committedThrough, capsulesDone: !page.truncated }
           : { recordsAfter: page.committedThrough, recordsDone: !page.truncated }) };
@@ -297,14 +312,15 @@ export class SqliteSourceRootRecallReader {
     workspaceId: string,
     after: string | null,
     limit: number,
-    byteLimit: number
+    byteLimit: number,
+    allowance?: SourceRecordReadAllowance
   ): SourceRootPage {
     const cursor = parseRecordCursor(after);
     const page = this.records.listPageBounded(workspaceId, {
       limit,
       afterRecordedAt: cursor.afterRecordedAt,
       afterRecordId: cursor.afterRecordId
-    }, byteLimit);
+    }, byteLimit, allowance);
     const rows = page.rows.flatMap((read) => {
       const mapped = mapBoundedRecord(read, 0);
       return mapped === null ? [] : [mapped];
@@ -317,10 +333,11 @@ export class SqliteSourceRootRecallReader {
       rowsRead: page.rows.length,
       bytesRead,
       metadataBytes: page.rows.reduce((sum, row) => sum + row.metadataBytes, 0),
-      nativeWork: Math.max(1, page.rows.length * 5),
+      nativeWork: Math.max(1, page.rows.reduce((sum, row) => sum + 5 + row.dependencyWork, 0)),
       truncated: page.truncated,
       committedThrough: page.committedThrough,
-      unavailable: page.unavailable === true
+      unavailable: page.unavailable === true && !page.rows.some(row => row.resourceLimited),
+      resourceLimited: page.rows.some(row => row.resourceLimited)
     };
   }
 
@@ -369,6 +386,7 @@ function mergePages(left: SourceRootPage, right: SourceRootPage): SourceRootPage
     truncated: left.truncated || right.truncated,
     committedThrough: right.committedThrough ?? left.committedThrough,
     unavailable: left.unavailable || right.unavailable
+    , resourceLimited: left.resourceLimited || right.resourceLimited
   };
 }
 
@@ -430,8 +448,9 @@ function sourceRecordRoot(row: FieldSourceRecordRow, evidenceVerified: boolean):
     ...(evidenceVerified ? { evidence_verified: true } : {}),
     event_time: row.event_time,
     ...(role === undefined ? {} : { role }),
-    original_complete: true,
+    original_complete: row.source_representation?.kind === "original_body",
     retained_extent: "body",
+    ...(row.source_representation === undefined ? {} : { source_representation: row.source_representation }),
     ...(scopeClass === undefined ? {} : { scope_class: scopeClass }),
     valid_from: row.valid_from,
     valid_to: row.valid_to

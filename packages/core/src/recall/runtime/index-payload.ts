@@ -11,7 +11,8 @@ import {
   type ManifestationState,
   type PayloadContinuationRequest,
   type SourceDeliveredSpan,
-  type SourceEvidenceTarget
+  type SourceEvidenceTarget,
+  type SourceRepresentation
 } from "@do-soul/alaya-protocol";
 import { sourceFactKey, type BoundSourceFacts } from "../conditional-field/engine/binding-environment.js";
 import type { ObserverReaders } from "../conditional-field/observers/observe.js";
@@ -196,6 +197,7 @@ export class BoundedIndexPayload {
       evidenceObjectId: target.evidence_object_id,
       byteLimit,
       nativeByteLimit: this.remainingMemoryBytes,
+      workLimit: Math.max(0, remaining - 2),
       offset
     });
     const nextRemaining = remaining - Math.max(1, page.nativeWork ?? page.rowsRead) - 2;
@@ -313,6 +315,7 @@ function sourceMetadataFrom(row: Readonly<{
   readonly dimension?: string;
   readonly scope_class?: string;
   readonly retained_extent?: "body" | "excerpt" | "gist";
+  readonly source_representation?: SourceRepresentation;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
 }>, asOf?: string, rootKind?: "source_record" | "evidence_capsule"): RecallSourceMetadata {

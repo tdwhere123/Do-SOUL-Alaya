@@ -2,6 +2,7 @@ import type {
   AddressableSourceSpan,
   AddressableSourceSpanPurpose,
   SourceRecordIdentity,
+  SourceRepresentation,
   SourceScopeClass,
   SourceSpeakerRole
 } from "./source-span.js";
@@ -32,6 +33,7 @@ export type SourceAdmissionRequest = Readonly<{
   readonly scope_class?: SourceScopeClass | null;
   /** Null only re-admits an exact existing historical record to attach spans. */
   readonly attribution_context?: UtteranceAttribution | null;
+  readonly source_representation?: SourceRepresentation;
   readonly spans: readonly Readonly<{
     readonly start_offset: number;
     readonly end_offset: number;

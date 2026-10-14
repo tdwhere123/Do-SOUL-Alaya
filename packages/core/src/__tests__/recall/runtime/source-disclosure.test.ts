@@ -6,6 +6,21 @@ const source = { valid_from: "2026-09-25T10:00:00.0000001Z",
   valid_to: "2026-09-25T10:00:00.0000003Z" };
 
 describe("source disclosure", () => {
+  it("derives source material from checked representation while preserving exact projection lineage", () => {
+    const evaluated_as_of = "2026-09-25T10:00:00Z";
+    const source_record_ids = [`sha256:${"a".repeat(64)}`, `sha256:${"b".repeat(64)}`];
+    expect(projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of, source }))
+      .toMatchObject({ material_kind: "unknown" });
+    for (const kind of ["original_body", "retained_excerpt"] as const) {
+      expect(projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of,
+        source: { ...source, source_representation: { kind } } })).toMatchObject({ material_kind: kind, source_representation: { kind } });
+    }
+    expect(projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of,
+      source: { ...source, source_representation: { kind: "canonical_projection", source_record_ids } } }))
+      .toMatchObject({ material_kind: "canonical_projection", source_binding: "checked_record",
+        source_representation: { kind: "canonical_projection", source_record_ids } });
+  });
+
   it.each([
     ["2026-09-25T10:00:00Z", "before_start"],
     ["2026-09-25T10:00:00.0000001Z", "within_interval"],

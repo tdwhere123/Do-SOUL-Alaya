@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSourceReferenceCatalog, sourceReferenceResolver, UNKNOWN_UTTERANCE_ATTRIBUTION,
   SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceSemanticResourceBudget,
-  type SourceSemanticQuery, type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
+  type SourceSemanticQuery, type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult,
+  type SourceRepresentation, type SourceSpeakerRole } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
@@ -23,6 +24,7 @@ export const ACCESS_BUDGET = { schema_version: 1 as const, work_units: 10_000_00
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
 export type AccessFixtureSource = Readonly<{ id: string; text: string; reading?: string; person?: string;
   count?: number; scope?: "project" | "global_core"; verbatim?: boolean;
+  speaker?: SourceSpeakerRole; source_representation?: SourceRepresentation;
   recordedAt?: string; eventTime?: string; publicationAt?: string;
   authoredDraft?: (catalog: ReturnType<typeof buildSourceReferenceCatalog>) => unknown }>;
 type Execute = NonNullable<RecallReadWorkerClient["sourceSemanticsPort"]>["execute"];
@@ -125,7 +127,9 @@ async function admitAndPublishFixture(fixture: AccessFixtureSource, owners: {
   await owners.admission.admit({ workspace_id: WS, source_id: fixture.id, source_version: "1", content_bytes: source,
     evidence_object_id: null, recorded_at: fixture.recordedAt ?? CLOCK, event_time: fixture.eventTime ?? null,
     valid_from: null, valid_to: null,
-    speaker: "user", scope_class: fixture.scope ?? "project", spans: deriveAddressableSpanViews(source) }, { workspaceId: WS });
+    speaker: fixture.speaker ?? "user", scope_class: fixture.scope ?? "project",
+    ...(fixture.source_representation === undefined ? {} : { source_representation: fixture.source_representation }),
+    spans: deriveAddressableSpanViews(source) }, { workspaceId: WS });
   progress.admittedSourceIds.push(fixture.id);
   if (fixture.reading === undefined && fixture.authoredDraft === undefined) return;
   const units = fixture.authoredDraft === undefined ? [] : indexSourceSemanticUnits(source);

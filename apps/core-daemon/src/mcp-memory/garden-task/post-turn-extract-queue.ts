@@ -49,6 +49,7 @@ export function enqueuePostTurnExtractTask(
   const deliveredObjectIds = resolveDeliveredObjectIds(request);
   const lastMessages = normalizeTurnDigestMessages(request.turn_digest?.last_messages ?? []);
   const taskId = buildPostTurnExtractTaskId(workspaceId, runId, turnIndex);
+  if (params.deps.gardenTaskRepo.findByIdInWorkspace(taskId, workspaceId) !== null) return;
   const createdAt = params.now();
   const sourceObservation = linkedDelivery === null
     ? null
@@ -131,7 +132,8 @@ export function enqueueConversationGardenCompileTask(
     taskId,
     workspaceId: input.workspaceId,
     createdAt,
-    lastMessages,
+    lastMessages: lastMessages.map((message, index) => ({ ...message,
+      event_time: index === 0 ? input.userMessage.created_at : input.assistantMessage.created_at })),
     eventTime: input.userMessage.created_at ?? null
   });
 
@@ -202,7 +204,7 @@ function persistAdmittedTurnRoot(
     readonly taskId: string;
     readonly workspaceId: string;
     readonly createdAt: string;
-    readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string }[];
+    readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string; readonly event_time?: string }[];
     readonly eventTime: string | null;
   }>
 ): string | undefined {
@@ -210,6 +212,22 @@ function persistAdmittedTurnRoot(
     return undefined;
   }
   const speaker = retainedSourceSpeaker(input.lastMessages.map((message) => message.role));
+  const sourceRecordIds = input.lastMessages.flatMap((message, index) => {
+    const role = retainedSourceSpeaker([message.role]);
+    const raw = admitPostTurnSourceRoot({
+      admission,
+      workspaceId: input.workspaceId,
+      sourceId: `post-turn:${input.taskId}:message:${index}`,
+      content: message.content_excerpt,
+      recordedAt: input.createdAt,
+      eventTime: message.event_time ?? null,
+      ...(role === undefined ? {} : { speaker: role }),
+      scope_class: "project",
+      source_representation: { kind: "retained_excerpt" }
+    });
+    return raw === null ? [] : [raw.identity];
+  });
+  if (sourceRecordIds.length === 0) return undefined;
   const record = admitPostTurnSourceRoot({
     admission,
     workspaceId: input.workspaceId,
@@ -221,7 +239,8 @@ function persistAdmittedTurnRoot(
     recordedAt: input.createdAt,
     eventTime: input.eventTime,
     ...(speaker === undefined ? {} : { speaker }),
-    scope_class: "project"
+    scope_class: "project",
+    source_representation: { kind: "canonical_projection", source_record_ids: sourceRecordIds }
   });
   return record?.identity;
 }

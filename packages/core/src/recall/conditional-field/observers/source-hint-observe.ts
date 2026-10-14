@@ -102,7 +102,7 @@ function takeProposalHintPage(
     if (reason === undefined) continue;
     const hydrated = hydrateHintTarget(input, bound.source_target.root_kind, bound.source_target.root_id,
       bound.source_target.source_version, bound.source_target.content_digest,
-      bound.source_target.evidence_object_id);
+      bound.source_target.evidence_object_id, nativeLimit - (page.nativeWork ?? page.nativeVisits) - hydrateWork);
     hydrateWork += hydrated.workUnits;
     hydrateBytes += hydrated.bytes;
     if (hydrated.resourceLimited) { pending = true; break; }
@@ -161,7 +161,8 @@ function takeTextHintPage(
   const scopeUnsupported = proposalScopeUnsupported(input.query);
   for (const nativeRow of page.rows) {
     const hydrated = hydrateHintTarget(input, nativeRow.kind, nativeRow.root_id,
-      nativeRow.revision, nativeRow.digest, nativeRow.evidence_object_id);
+      nativeRow.revision, nativeRow.digest, nativeRow.evidence_object_id,
+      nativeLimit - (page.nativeWork ?? page.nativeVisits) - hydrateWork);
     hydrateWork += hydrated.workUnits;
     hydrateBytes += hydrated.bytes;
     if (hydrated.resourceLimited) { pending = true; break; }
@@ -188,7 +189,8 @@ function hydrateHintTarget(
   rootId: string,
   revision: string,
   digest: string,
-  evidenceObjectId: string | null
+  evidenceObjectId: string | null,
+  workLimit: number
 ): Readonly<{
   readonly observation?: TypedObservation;
   readonly row?: SourceRootObserverRow;
@@ -205,6 +207,7 @@ function hydrateHintTarget(
     revision,
     digest,
     evidenceObjectId,
+    workLimit,
     byteLimit: input.source_byte_limit ?? DEFAULT_SOURCE_BYTE_LIMIT
   });
   const workUnits = Math.max(1, page.nativeWork ?? page.rowsRead);

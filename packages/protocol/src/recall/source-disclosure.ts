@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { IsoDatetimeStringSchema } from "../shared/schema-primitives.js";
+import { SourceRepresentationSchema } from "./field-contract/source-span.js";
 
 /** A read-time qualification of delivered text. It does not change source or proof admission. */
 export const SourceDisclosureSchema = z.object({
-  material_kind: z.enum(["original_body", "retained_excerpt", "retained_gist", "interpretation"]),
+  material_kind: z.enum(["original_body", "retained_excerpt", "retained_gist", "interpretation", "canonical_projection", "unknown"]),
   source_binding: z.enum(["checked_record", "unbound"]),
+  source_representation: SourceRepresentationSchema.optional(),
   evaluated_as_of: IsoDatetimeStringSchema,
   /** Stored source observation/event time. Absence means undisclosed, not missing source metadata or event occurrence. */
   source_time: z.discriminatedUnion("kind", [
@@ -23,6 +25,10 @@ export const SourceDisclosureSchema = z.object({
     z.object({ kind: z.literal("conditional_support"), qualification: z.literal("not_world_claim") }).strict()
   ])
 }).strict().superRefine((value, context) => {
+  if (value.material_kind === "canonical_projection" && (value.source_binding !== "checked_record" ||
+      value.source_representation?.kind !== "canonical_projection")) {
+    context.addIssue({ code: "custom", path: ["source_representation"], message: "canonical projection requires checked source lineage" });
+  }
   if (value.source_time?.kind === "known" && value.source_binding !== "checked_record") {
     context.addIssue({ code: "custom", path: ["source_time"], message: "source time requires a checked record" });
   }

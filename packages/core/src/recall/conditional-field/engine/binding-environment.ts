@@ -8,7 +8,8 @@ import {
   type RecallTargetRef,
   type InterpretationNodeCoordinate,
   type Guard,
-  type QueryHypothesis
+  type QueryHypothesis,
+  type SourceRepresentation
 } from "@do-soul/alaya-protocol";
 import { compareText } from "../../../shared/compare-text.js";
 import {
@@ -97,6 +98,7 @@ export type BoundSourceFacts = Readonly<{
   readonly content_complete?: boolean;
   readonly original_complete?: boolean;
   readonly retained_extent?: "body" | "excerpt" | "gist";
+  readonly source_representation?: SourceRepresentation;
   readonly valid_from?: string | null;
   readonly valid_to?: string | null;
   readonly content_start?: number;

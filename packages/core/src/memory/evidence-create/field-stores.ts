@@ -1,6 +1,7 @@
 import {
   sameFactorDescriptorFields,
-  canonicalJson,
+  sourceProjectionDependenciesAvailable,
+  sameSourceRecordFields,
   type AddressableSourceSpan,
   type DerivationJobReceipt,
   type FactorDescriptor,
@@ -68,15 +69,7 @@ function bindFieldStores(maps: Readonly<{
   return {
     runAtomic: (work) => runInMemoryAtomic(maps, work),
     getRecord: (workspaceId, recordId) => maps.records.get(key(workspaceId, recordId)) ?? null,
-    getCurrentRecord: (workspaceId, sourceId) => {
-      let current: SourceRecordIdentity | null = null;
-      for (const record of maps.records.values()) {
-        if (record.workspace_id === workspaceId && record.source_id === sourceId) {
-          current = current === null ? record : newerSourceRecord(current, record);
-        }
-      }
-      return current;
-    },
+    getCurrentRecord: (workspaceId, sourceId) => currentRecord(maps.records, workspaceId, sourceId),
     getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),
     putRecord: (record, contentBytes) => putRecordWithBinding(maps, record, contentBytes),
     getSpan: (workspaceId, spanId) => maps.spans.get(key(workspaceId, spanId)) ?? null,
@@ -89,12 +82,11 @@ function bindFieldStores(maps: Readonly<{
     ),
     ...bindFactorStores(maps),
     listRecords: (workspaceId) => listFor(maps.records, workspaceId),
-    listStoredRecords: (workspaceId) => listFor(maps.records, workspaceId).map((record) => {
+    listStoredRecords: (workspaceId) => listFor(maps.records, workspaceId).flatMap((record) => {
       const stored = storedRecord(maps, workspaceId, record.identity);
-      if (stored === null) {
-        throw new CoreError("OBLIGATION_VIOLATION", "source body is unavailable");
-      }
-      return stored;
+      if (stored === null && !projectionSourcesCurrent(maps, record)) return [];
+      if (stored === null) throw new CoreError("OBLIGATION_VIOLATION", "source body is unavailable");
+      return [stored];
     }),
     listSpans: (workspaceId) => listFor(maps.spans, workspaceId),
     listFactors: (workspaceId) => listFor(maps.factors, workspaceId),
@@ -117,7 +109,7 @@ function putRecordWithBinding(
     maps.records,
     key(record.workspace_id, record.identity),
     record,
-    sameRecord,
+    sameSourceRecordFields,
     "source record"
   );
   putSame(
@@ -151,9 +143,36 @@ function storedRecord(
 ): StoredSourceRecord | null {
   const record = maps.records.get(key(workspaceId, recordId));
   const content = maps.recordBodies.get(key(workspaceId, recordId));
+  if (record !== undefined && !projectionSourcesCurrent(maps, record)) return null;
   return record === undefined || content === undefined
     ? null
     : Object.freeze({ record, content_bytes: content });
+}
+
+function projectionSourcesCurrent(maps: Readonly<{
+  records: ReadonlyMap<string, SourceRecordIdentity>; recordBodies: ReadonlyMap<string, string>;
+}>, record: SourceRecordIdentity): boolean {
+  return sourceProjectionDependenciesAvailable(record,
+    record.source_representation?.kind !== "canonical_projection" ? [] : record.source_representation.source_record_ids.map((id) => {
+      const origin = maps.records.get(key(record.workspace_id, id));
+      return origin === undefined ? null : { identity: origin.identity,
+        workspace_id: origin.workspace_id,
+        ...(origin.scope_class === undefined ? {} : { scope_class: origin.scope_class }),
+        current_identity: currentRecord(maps.records, record.workspace_id, origin.source_id)?.identity ?? null,
+        body_available: maps.recordBodies.has(key(record.workspace_id, id)),
+        ...(origin.source_representation === undefined ? {} : { source_representation: origin.source_representation })
+      };
+    }));
+}
+
+function currentRecord(records: ReadonlyMap<string, SourceRecordIdentity>, workspaceId: string, sourceId: string): SourceRecordIdentity | null {
+  let current: SourceRecordIdentity | null = null;
+  for (const record of records.values()) {
+    if (record.workspace_id === workspaceId && record.source_id === sourceId) {
+      current = current === null ? record : newerSourceRecord(current, record);
+    }
+  }
+  return current;
 }
 
 function runInMemoryAtomic<T>(
@@ -246,17 +265,6 @@ function listFor<T extends { readonly workspace_id: string }>(
   workspaceId: string
 ): readonly T[] {
   return [...store.values()].filter((row) => row.workspace_id === workspaceId);
-}
-
-function sameRecord(existing: SourceRecordIdentity, incoming: SourceRecordIdentity): boolean {
-  return existing.source_id === incoming.source_id &&
-    existing.source_version === incoming.source_version &&
-    existing.content_digest === incoming.content_digest &&
-    existing.operator_id === incoming.operator_id &&
-    existing.event_time === incoming.event_time &&
-    existing.valid_from === incoming.valid_from &&
-    existing.valid_to === incoming.valid_to &&
-    canonicalJson(existing.attribution_context ?? null) === canonicalJson(incoming.attribution_context ?? null);
 }
 
 function sameSpan(existing: AddressableSourceSpan, incoming: AddressableSourceSpan): boolean {

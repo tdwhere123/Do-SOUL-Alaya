@@ -81,7 +81,8 @@ describe("post-turn extract Garden task", () => {
     expect(payload.admitted_source_root_id).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(pageWorkspaceSourceRoots(harness.database).rows.some((row) =>
       row.kind === "source_record"
-      && row.original_complete === true
+      && row.original_complete === false
+      && row.root_id === payload.admitted_source_root_id
       && row.scope_class === "project"
       && row.event_time === null
       && row.role === undefined

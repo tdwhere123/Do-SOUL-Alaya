@@ -22,8 +22,9 @@ export function sourceSemanticReadStores(database: StorageDatabase, workspace: s
     getCurrentRecord: (workspaceId, sourceId) => {
       if (workspaceId !== workspace || sourceId !== artifact) throw new CoreError("VALIDATION", "source binding mismatch");
       meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-      const page = repo.findCurrentBounded(workspace, artifact, 1);
-      meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      const page = repo.findCurrentBounded(workspace, artifact, 1, 0, { workLimit: meter.work, nativeByteLimit: meter.bytes });
+      meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+      if (page?.resourceLimited) throw new SourceSemanticResourceExhausted("source projection dependencies");
       if (page === null) return null;
       if (page.record === null) throw new CoreError("CONFLICT", "source metadata is unavailable", {
         details: { admission: "unavailable", unavailable: "metadata" }
@@ -38,8 +39,9 @@ export function sourceSemanticReadStores(database: StorageDatabase, workspace: s
       const chunks: string[] = [];
       while (true) {
         meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
-        const page = repo.findByIdBounded(workspace, id, 4096, offset);
-        meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+        const page = repo.findByIdBounded(workspace, id, 4096, offset, { workLimit: meter.work, nativeByteLimit: meter.bytes });
+        meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+        if (page?.resourceLimited) throw new SourceSemanticResourceExhausted("source projection dependencies");
         if (page?.record == null || page.record.source_body === null || page.invalidOffset) return null;
         record = sourceRecordFromRow(page.record);
         authorizeSemanticScope(record.scope_class, authorized);
@@ -71,6 +73,7 @@ export function listEligibleSemanticSources(
   const stoppingReasons = new Set<"budget" | "source_limit" | "unavailable">();
   let afterSourceId: string | null = null, pages = 0, truncated = true, open = false;
   const append = (page: NonNullable<ReturnType<typeof repo.findCurrentBounded>>) => {
+    if (page.resourceLimited) { open = true; stoppingReasons.add("budget"); return "budget" as const; }
     if (page.record === null) { open = true; stoppingReasons.add("unavailable"); return "unavailable" as const; }
     const record = sourceRecordFromRow(page.record);
     if (page.record.source_body === null || page.invalidOffset) {
@@ -94,8 +97,8 @@ export function listEligibleSemanticSources(
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       open = true; stoppingReasons.add("budget"); exhausted = true; break;
     }
-    const page = repo.findCurrentBounded(workspace, sourceId, 1);
-    meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+    const page = repo.findCurrentBounded(workspace, sourceId, 1, 0, { workLimit: meter.work, nativeByteLimit: meter.bytes });
+    meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
     pages += 1;
     if (page !== null && append(page) === "budget") { exhausted = true; break; }
   }
@@ -106,8 +109,8 @@ export function listEligibleSemanticSources(
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       open = true; truncated = true; stoppingReasons.add("budget"); break;
     }
-    const page = repo.findNextCurrentBounded(workspace, afterSourceId, 1);
-    meter.read(5, page === null ? 0 : page.nativeBytes + page.metadataBytes);
+    const page = repo.findNextCurrentBounded(workspace, afterSourceId, 1, { workLimit: meter.work, nativeByteLimit: meter.bytes });
+    meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
     pages += 1;
     if (page === null) { truncated = false; break; }
     if (page.record === null) { open = true; stoppingReasons.add("unavailable"); break; }

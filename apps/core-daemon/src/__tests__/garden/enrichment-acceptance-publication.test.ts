@@ -188,10 +188,11 @@ describe("enrichment acceptance ordinary SQLite publication", () => {
       expect(gardenTaskRepo.findById(taskId!)?.status).toBe("completed");
 
       const sourceRows = database.connection.prepare(
-        "SELECT source_body FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'"
-      ).all() as { source_body: string }[];
-      expect(sourceRows).toHaveLength(1);
-      expect(sourceRows[0]!.source_body).toContain(LONG_ASSERTION);
+        "SELECT source_body, json_extract(source_representation_json, '$.kind') AS kind FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'"
+      ).all() as { source_body: string; kind: string }[];
+      expect(sourceRows).toHaveLength(2);
+      expect(sourceRows.find(row => row.kind === "retained_excerpt")?.source_body).toBe(LONG_ASSERTION);
+      expect(sourceRows.find(row => row.kind === "canonical_projection")?.source_body).toContain(LONG_ASSERTION);
       expect(database.connection.prepare("SELECT count(*) AS n FROM claim_forms").get()).toMatchObject({ n: 0 });
       const memories = database.connection.prepare("SELECT object_id FROM memory_entries").all() as { object_id: string }[];
       expect(memories).toHaveLength(1);

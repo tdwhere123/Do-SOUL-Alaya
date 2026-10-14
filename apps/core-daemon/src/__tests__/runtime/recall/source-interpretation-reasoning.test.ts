@@ -17,7 +17,7 @@ import { createAuditedSourceAdmission, createSourceInterpretationPacketPublicati
   fieldContractSha256 } from "@do-soul/alaya-core";
 import { buildSourceReferenceCatalog, sourceReferenceResolver, sourceReferencePreparationCost, assertSourceInterpretationPacketProfile, hashLabeledIdentity, SourceInterpretationPacketSchema, SourceInterpretationReasoningResultSchema, sourceInterpretationProfileIdentity, sourceInterpretationRelationKey, type QueryProgram,
   type SourceInterpretationPacket, type SourceInterpretationReasoningRequest, type SourceInterpretationReasoningResult } from "@do-soul/alaya-protocol";
-import { closeCachedDatabase, SqliteFieldEraseBarrierRepo, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
+import { closeCachedDatabase, SqliteFieldEraseBarrierRepo, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { createRecallRealStorage, REAL_SQLITE_TEST_WORKSPACE_ID as WS, REAL_SQLITE_TEST_RUN_ID as RUN }
   from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
@@ -26,6 +26,8 @@ import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { encodeIndexResults } from "../../../mcp-memory/recall/recall-result.js";
+import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
+import { runSourceInterpretationReasoning } from "../../../runtime/recall-read-worker/source-interpretation-reasoning.js";
 
 const CLOCK = "2026-09-18T00:00:00.000Z";
 const SENTENCES = ["Orion sent parcel P to Vega.", "Vega promised to inspect P.", "Parcel Q remained untouched: 中文🙂."];
@@ -86,7 +88,7 @@ async function withPublishedPackets(packets: readonly SourceInterpretationPacket
   ids: readonly string[]; filename: string; client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>; sourceRecordId: string;
   reason: (request: SourceInterpretationReasoningRequest) => Promise<SourceInterpretationReasoningResult>
 }) => Promise<void>, options: Readonly<{ valid_from?: string; valid_to?: string; state?: "retired" | "erased" | "superseded";
-  scope?: "project" | "global_core"; profile?: typeof PROFILE }> = {}) {
+  scope?: "project" | "global_core"; profile?: typeof PROFILE; projection?: boolean }> = {}) {
   const profile = options.profile ?? PROFILE;
   const directory = await mkdtemp(join(tmpdir(), "source-interpretation-reasoning-"));
   const filename = join(directory, "memory.sqlite");
@@ -97,8 +99,12 @@ async function withPublishedPackets(packets: readonly SourceInterpretationPacket
   const evidenceService = new EvidenceService({ eventLogRepo, runtimeNotifier,
     evidenceCapsuleRepo: new SqliteEvidenceCapsuleRepo(database), now: () => CLOCK });
   const admission = createAuditedSourceAdmission({ stores, eventLogRepo, runtimeNotifier, sha256: fieldContractSha256 });
+  const origin = options.projection ? await admission.admit({ workspace_id: WS, source_id: "raw-parcel-source", source_version: "1", content_bytes: SOURCE,
+    evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: null, valid_to: null, speaker: "user", scope_class: "project",
+    source_representation: { kind: "retained_excerpt" }, spans: [] }, { workspaceId: WS }) : undefined;
   const admitted = await admission.admit({ workspace_id: WS, source_id: "orion-parcel-source", source_version: "1", content_bytes: SOURCE,
     evidence_object_id: null, recorded_at: CLOCK, event_time: null, valid_from: options.valid_from ?? null, valid_to: options.valid_to ?? null,
+    ...(origin === undefined ? {} : { source_representation: { kind: "canonical_projection" as const, source_record_ids: [origin.record.identity] } }),
     speaker: "user", scope_class: options.scope ?? "project", spans: deriveAddressableSpanViews(SOURCE) }, { workspaceId: WS });
   const publisher = createSourceInterpretationPacketPublication({ stores, evidenceService, sha256: fieldContractSha256 });
   const ids = [];
@@ -154,6 +160,32 @@ function request(packet_id: string, program = PROGRAM): SourceInterpretationReas
     packet_id, profile_id: PROFILE_ID, original_query: "Which sent parcel has a recipient who promised to inspect that same parcel?",
     seed_nodes: ["sending"], program, budget: BUDGET, output_byte_limit: 1000000 };
 }
+
+it.each(["current", "content"] as const)("preserves retryable refusal when a published packet's projection %s read cannot admit origin work", async phase => {
+  await withPublishedPackets([packet()], async ({ ids, filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const current = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findCurrentBounded");
+    const content = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+    try {
+      const runtime = createRecallReadWorkerRuntime(database), original = request(ids[0]!);
+      const reason = (selected: SourceInterpretationReasoningRequest) => runSourceInterpretationReasoning(runtime,
+        { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: selected });
+      const complete = reason(original);
+      expect(complete.work.native_work).toBeGreaterThan(0);
+      expect(current.mock.results[0]!.value).toMatchObject({ dependencyWork: 2 });
+      expect(content.mock.results[0]!.value).toMatchObject({ dependencyWork: 2, record: { source_body: SOURCE } });
+      const allowance = phase === "current" ? current.mock.calls[0]![4]! : content.mock.calls[0]![4]!;
+      current.mockClear(); content.mockClear();
+      const limited = { ...original, budget: { ...BUDGET,
+        work_units: BUDGET.work_units - allowance.workLimit! + 6, finalization_reserve: 0 } };
+      let failure: unknown;
+      try { reason(limited); } catch (error) { failure = error; }
+      expect(failure).toMatchObject({ message: "interpretation source dependencies budget exhausted", subCode: "RETRYABLE_BACKPRESSURE" });
+      const refused = phase === "current" ? current.mock.results[0]!.value : content.mock.results[0]!.value;
+      expect(refused).toMatchObject({ resourceLimited: true, dependencyWork: 0, nativeBytes: 0, record: { source_body: null } });
+    } finally { current.mockRestore(); content.mockRestore(); database.close(); }
+  }, { projection: true });
+});
 
 it("waits for an independent packet request and rejects erasure committed during another snapshot", async () => {
   await withPublishedPackets([packet()], async ({ ids, reason, filename, client, sourceRecordId }) => {

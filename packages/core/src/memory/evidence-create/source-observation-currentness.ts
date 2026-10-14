@@ -128,6 +128,7 @@ export async function admitLocatedSpans(
     ...(stored.record.speaker === undefined ? {} : { speaker: stored.record.speaker }),
     ...(stored.record.scope_class === undefined ? {} : { scope_class: stored.record.scope_class }),
     attribution_context: stored.record.attribution_context ?? null,
+    ...(stored.record.source_representation === undefined ? {} : { source_representation: stored.record.source_representation }),
     spans: uniqueSpans(spanDrafts(durable))
   }, { workspaceId: stored.record.workspace_id });
 }

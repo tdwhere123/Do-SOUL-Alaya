@@ -429,9 +429,15 @@ it("binds sibling generation_task after source validation and leaves task-absent
   expect(expired).toMatchObject({ ok: true, output: { outcome: { status: "invalid", reason: "expired_handle" } } });
 });
 
-it("accepts a located no-proposition disposition without publishing a fictitious source interpretation", async () => {
+it.each(["original_body", "retained_excerpt", "canonical_projection"] as const)("retains %s lineage on a no-proposition disposition", async kind => {
   const publish = vi.fn<SourceSemanticPublicationPort["publish"]>(async () => { throw new Error("no source interpretation should be published"); });
-  const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
+  const source_representation = kind === "canonical_projection"
+    ? { kind, source_record_ids: [`sha256:${"a".repeat(64)}`] } : { kind };
+  const handler = createHandler({ sourceSemanticsPort: createPort(async ({ request }) => {
+    const result = workerResult(request);
+    return result.kind !== "validate_source" ? result : { ...result,
+      source_disclosure: { ...result.source_disclosure, material_kind: kind, source_representation } };
+  }), publication: { publish } });
   const row = CATALOG.assertions[0]!;
   const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle",
     disposition: { status: "no_executable_proposition", description: "Producer disposition under an unreviewed interpretation",
@@ -440,7 +446,8 @@ it("accepts a located no-proposition disposition without publishing a fictitious
     producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET });
   expect(result).toMatchObject({ ok: true, output: { outcome: { status: "no_executable_proposition" },
     semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" },
-    source_disclosure: { source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }, provider_attempts: 0 } });
+    source_disclosure: { material_kind: "interpretation", source_representation,
+      source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }, provider_attempts: 0 } });
   expect(publish).not.toHaveBeenCalled();
 });
 

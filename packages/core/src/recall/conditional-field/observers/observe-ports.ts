@@ -8,6 +8,7 @@ import {
   type RecallTargetRef,
   type SnapshotReadLease,
   type SourceEvidenceRootKind,
+  type SourceRepresentation,
   type StagedWarningArray,
   type StoredCosineObligation,
   type TypedObservation
@@ -75,6 +76,7 @@ export type SourceRootObserverRow = Readonly<{
   readonly content_start?: number;
   readonly content_end?: number;
   readonly retained_extent?: "body" | "excerpt" | "gist";
+  readonly source_representation?: SourceRepresentation;
   readonly literal_verdicts?: Readonly<Record<string, "true" | "false" | "unresolved">>;
   readonly original_complete?: boolean;
   readonly scope_class?: string;
@@ -198,6 +200,7 @@ export type ObserverReaders = Readonly<{
     readonly revision?: string;
     readonly digest?: string;
     readonly evidenceObjectId?: string | null;
+    readonly workLimit?: number;
     readonly byteLimit?: number;
     readonly nativeByteLimit?: number;
     readonly offset?: number;

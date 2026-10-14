@@ -321,12 +321,13 @@ describe("post-turn extract Garden task", () => {
     const roots = pageWorkspaceSourceRoots(harness.database);
     expect(roots.rows.some((row) =>
       row.kind === "source_record"
-      && row.original_complete === true
+      && row.original_complete === false
+      && row.content_complete === true
       && (row.content ?? "").includes(tail)
       && (row.content ?? "").length > 800
     )).toBe(true);
     expect(roots.rows.some((row) =>
-      row.original_complete === true
+      row.content_complete === true
       && (row.content ?? "").length > 0
       && !(row.content ?? "").includes(tail)
     )).toBe(false);

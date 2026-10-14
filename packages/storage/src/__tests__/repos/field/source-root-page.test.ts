@@ -273,7 +273,7 @@ describe("bounded source-root pages", () => {
       nativeByteLimit: 16384
     });
     const found = roots.rows.find((candidate) => candidate.root_id === row.record_id);
-    expect(found?.original_complete).toBe(true);
+    expect(found?.original_complete).toBe(false);
     expect(found?.retained_extent).toBe("body");
     expect(found?.content_complete).toBe(false);
     expect(Buffer.byteLength(found?.content ?? "", "utf8")).toBeLessThanOrEqual(64);

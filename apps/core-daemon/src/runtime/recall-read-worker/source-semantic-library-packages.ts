@@ -2,7 +2,7 @@ import { SourceSemanticResourceExhausted, projectSourceSemanticQuerySupport, typ
   type SourceSemanticLibrarySlotQualifier } from "@do-soul/alaya-protocol";
 import { CoreError, authorizeSemanticScope, hydrateUtf8Chunk, sourceSemanticSupportWindow, sourceSemanticLibraryRawPreview,
   sourceGoldRootIdentity, fieldContractSha256, projectSourceDisclosure, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
-import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION } from "@do-soul/alaya-storage";
+import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION, type FieldSourceRecordRow } from "@do-soul/alaya-storage";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { admissionOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
@@ -153,16 +153,17 @@ function hydrate(meter: SourceSemanticReadBudget, source: string, offset: number
 }
 function readSource(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, entry: IndexEntry): { text: string; bytes: number;
-    record: { event_time: string | null; valid_from: string | null; valid_to: string | null } } | undefined {
+    record: FieldSourceRecordRow } | undefined {
   if (entry.target.kind !== "source_evidence") return undefined;
   meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "library raw prefix");
   const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
-  const stored = repo.findByIdBounded(payload.workspace_id, entry.target.root_id, DISPLAY_BYTES, 0);
-  meter.read(5, stored === null ? 0 : stored.nativeBytes + stored.metadataBytes);
+  const stored = repo.findByIdBounded(payload.workspace_id, entry.target.root_id, DISPLAY_BYTES, 0,
+    { workLimit: meter.work, nativeByteLimit: meter.bytes });
+  meter.read(5 + (stored?.dependencyWork ?? 0), stored === null ? 0 : stored.nativeBytes + stored.metadataBytes);
+  if (stored?.resourceLimited) throw new SourceSemanticResourceExhausted("library source dependencies");
   const record = stored?.record;
   if (stored === null || record == null || record.source_body === null || record.record_id !== entry.target.root_id
     || record.source_version !== entry.target.source_version || record.content_digest !== entry.target.content_digest) return undefined;
   authorizeSemanticScope(record.scope_class, authorized);
-  return { text: record.source_body, bytes: stored.bodyBytes,
-    record: { event_time: record.event_time, valid_from: record.valid_from, valid_to: record.valid_to } };
+  return { text: record.source_body, bytes: stored.bodyBytes, record };
 }

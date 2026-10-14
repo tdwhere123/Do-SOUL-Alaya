@@ -107,6 +107,7 @@ function recordToRow(
     speaker: record.speaker ?? null,
     scope_class: record.scope_class ?? null,
     attribution_context: record.attribution_context ?? null,
+    ...(record.source_representation === undefined ? {} : { source_representation: record.source_representation }),
     source_body: contentBytes
   };
 }

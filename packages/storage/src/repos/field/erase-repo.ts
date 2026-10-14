@@ -138,7 +138,8 @@ export class SqliteFieldEraseBarrierRepo implements FieldEraseBarrierRepo {
         ? subjects
         : [...subjects, ...this.discoverGenerations(row.workspace_id)],
       evidenceIds: row.subject_kind === "source_record"
-        ? this.discoverEvidenceIds(row.workspace_id, row.subject_id)
+        ? [...new Set(subjects.filter(subject => subject.subject_kind === "source_record")
+          .flatMap(subject => this.discoverEvidenceIds(row.workspace_id, subject.subject_id)))].sort()
         : []
     };
   }
@@ -311,18 +312,36 @@ function prepareEraseStatements(database: StorageDatabase) {
 
 function descendantSql(kind: ProjectionEraseSubjectKind): string | null {
   if (kind === "source_record") return `
-    SELECT 'source_span' AS subject_kind, span_id AS subject_id FROM source_spans
-      WHERE workspace_id = @workspaceId AND record_id = @subjectId
+    WITH RECURSIVE records_to_erase(record_id) AS (
+      SELECT @subjectId
+      UNION
+      SELECT projection.record_id
+      FROM source_records AS projection
+      JOIN json_each(CASE WHEN json_valid(projection.source_representation_json)
+        THEN projection.source_representation_json ELSE '{}' END, '$.source_record_ids') AS dependency
+      JOIN records_to_erase AS origin ON dependency.value = origin.record_id
+      WHERE projection.workspace_id = @workspaceId
+        AND CASE WHEN json_valid(projection.source_representation_json)
+          THEN json_extract(projection.source_representation_json, '$.kind') = 'canonical_projection'
+          ELSE 0 END
+    )
+    SELECT 'source_record' AS subject_kind, record_id AS subject_id FROM records_to_erase
+      WHERE record_id <> @subjectId
+    UNION SELECT 'source_span', span.span_id FROM source_spans AS span
+      JOIN records_to_erase AS record ON record.record_id = span.record_id
+      WHERE span.workspace_id = @workspaceId
     UNION SELECT 'incidence', incidence.incidence_id
       FROM factor_incidences AS incidence
       JOIN source_spans AS span
         ON span.workspace_id = incidence.workspace_id AND span.span_id = incidence.span_id
-      WHERE span.workspace_id = @workspaceId AND span.record_id = @subjectId
+      JOIN records_to_erase AS record ON record.record_id = span.record_id
+      WHERE span.workspace_id = @workspaceId
     UNION SELECT 'factor', incidence.factor_id
       FROM factor_incidences AS incidence
       JOIN source_spans AS span
         ON span.workspace_id = incidence.workspace_id AND span.span_id = incidence.span_id
-      WHERE span.workspace_id = @workspaceId AND span.record_id = @subjectId
+      JOIN records_to_erase AS record ON record.record_id = span.record_id
+      WHERE span.workspace_id = @workspaceId
     ORDER BY subject_kind, subject_id
   `;
   if (kind === "source_span") return `

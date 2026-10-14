@@ -100,6 +100,7 @@ export function recordSourceRootFacts(
       content_complete: row?.content_complete === true,
       original_complete: row?.original_complete === true,
       ...(row?.retained_extent === undefined ? {} : { retained_extent: row.retained_extent }),
+      ...(row?.source_representation === undefined ? {} : { source_representation: row.source_representation }),
       ...(row?.valid_from === undefined ? {} : { valid_from: row.valid_from }),
       ...(row?.valid_to === undefined ? {} : { valid_to: row.valid_to }),
       ...(row?.content_start === undefined ? {} : { content_start: row.content_start }),

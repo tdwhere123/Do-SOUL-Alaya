@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { NonEmptyStringSchema } from "../../shared/schema-primitives.js";
+import type { SourceRepresentation } from "./source-span.js";
 
 export const FIELD_CONTRACT_DIGEST_PREFIX = "sha256:";
 export const FIELD_CONTRACT_HEX_PATTERN = /^[0-9a-f]{64}$/u;
@@ -87,13 +88,19 @@ export function hashSourceRecordId(
     readonly source_id: string;
     readonly source_version: string;
     readonly content_digest: string;
+    readonly source_representation?: SourceRepresentation;
   }>,
   sha256: FieldContractSha256
 ): string {
   return hashLabeledIdentity("source_record", [
     input.source_id,
     input.source_version,
-    input.content_digest
+    input.content_digest,
+    ...(input.source_representation === undefined ? [] : [JSON.stringify(
+      input.source_representation.kind === "canonical_projection"
+        ? { kind: input.source_representation.kind, source_record_ids: input.source_representation.source_record_ids }
+        : { kind: input.source_representation.kind }
+    )])
   ], sha256);
 }
 

@@ -216,9 +216,11 @@ describe("ordinary extraction source interpretation adapters", () => {
         await process();
         expect(gardenTaskRepo.findById(compileTaskId!)?.status).toBe("completed");
       }
-      const sourceRows = database.connection.prepare("SELECT source_body FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'").all() as { source_body: string }[];
-      expect(sourceRows).toHaveLength(1);
-      expect(sourceRows[0]!.source_body).toContain(LONG_ASSERTION);
+      const sourceRows = database.connection.prepare("SELECT source_body, json_extract(source_representation_json, '$.kind') AS kind FROM source_records WHERE source_id LIKE 'post-turn:%' OR source_id LIKE 'garden-compile:%'")
+        .all() as { source_body: string; kind: string }[];
+      expect(sourceRows).toHaveLength(mode === "post-turn" ? 2 : 3);
+      expect(sourceRows.find(row => row.kind === "retained_excerpt" && row.source_body === LONG_ASSERTION)).toBeDefined();
+      expect(sourceRows.find(row => row.kind === "canonical_projection")?.source_body).toContain(LONG_ASSERTION);
       const memories = database.connection.prepare("SELECT object_id FROM memory_entries").all() as { object_id: string }[];
       expect(memories).toHaveLength(1);
       received.memoryId = memories[0]!.object_id;

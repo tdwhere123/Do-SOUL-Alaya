@@ -8,13 +8,31 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 17.0.0, engine gateway 1.2.0
+## Unreleased — protocol 18.0.0, engine gateway 1.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 17.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 18.0.0 can move
 independently of the app semver.
+
+Protocol 18.0.0 makes source representation explicit. Post-turn capture retains
+exact supplied message excerpts with their roles, while Garden keeps its existing
+canonical extraction projection bound to those originals. Optional representation
+metadata participates in new source identities; records without it preserve
+their old identities and remain immutable. Current reads disclose missing
+historical representation as `unknown` and canonical material as
+`canonical_projection`. Full delivery of retained bytes no longer implies a
+complete original body. Projection reads depend on the referenced source records
+remaining available and current under the existing scope rules.
+
+This changes public delivery qualification and is a major under invariant §25.
+Consumers must accept the additional material kinds and projection provenance,
+and distinguish `content_complete` from `original_complete`. Existing records
+are not relabeled or backfilled; old archived responses retain their original
+bytes and producer versions. The ordinary source-only archive reader also
+accepts current version 18 while recording the reader version independently.
+This source-capture migration performs no release or provider execution.
 
 Protocol 17.0.0 restricts query alternative `purpose: "counterexample"` to
 universal (`evaluation.kind: "forall"`) bodies. One Protocol purpose rule owns

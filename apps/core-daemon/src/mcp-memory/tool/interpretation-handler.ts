@@ -196,15 +196,17 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
 }
 
 function checkedSourceFromDisclosure(disclosure: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
-  { event_time?: string | null; valid_from?: string | null; valid_to?: string | null } | undefined {
+  Parameters<typeof projectSourceDisclosure>[0]["source"] {
   if (disclosure.source_binding === "unbound") return undefined;
   const sourceTime = disclosure.source_time;
   const event_time = sourceTime?.kind === "known" ? { event_time: sourceTime.at }
     : sourceTime?.reason === "not_recorded" ? { event_time: null } : {};
+  const metadata = { ...event_time,
+    ...(disclosure.source_representation === undefined ? {} : { source_representation: disclosure.source_representation }) };
   const validity = disclosure.validity;
-  if (validity.kind === "bounded") return { ...event_time, valid_from: validity.from, valid_to: validity.to_exclusive };
-  if (validity.kind === "open") return { ...event_time, valid_from: validity.from, valid_to: null };
-  return validity.reason === "not_recorded" ? { ...event_time, valid_from: null, valid_to: null } : event_time;
+  if (validity.kind === "bounded") return { ...metadata, valid_from: validity.from, valid_to: validity.to_exclusive };
+  if (validity.kind === "open") return { ...metadata, valid_from: validity.from, valid_to: null };
+  return validity.reason === "not_recorded" ? { ...metadata, valid_from: null, valid_to: null } : metadata;
 }
 
 async function executeWorker(input: Dependencies, context: McpMemoryToolCallContext, request: SourceSemanticWorkerRequest,

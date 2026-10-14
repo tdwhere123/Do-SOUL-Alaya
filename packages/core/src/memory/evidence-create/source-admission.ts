@@ -1,6 +1,8 @@
 import {
   SOURCE_SPAN_IDENTITY_OPERATOR_ID,
   SourceRecordIdentitySchema,
+  SourceRepresentationSchema,
+  sourceProjectionDependenciesAvailable,
   fieldReceiptContractFields,
   hashAddressableSourceSpanId,
   hashContentDigest,
@@ -53,10 +55,14 @@ function persistRecord(
   stores: FieldFormationStores
 ): SourceRecordIdentity {
   const contentDigest = hashContentDigest(request.content_bytes, sha256);
+  const representation = request.source_representation === undefined ? undefined
+    : SourceRepresentationSchema.parse(request.source_representation);
+  verifyProjectionSources(request, stores);
   const identity = hashSourceRecordId({
     source_id: request.source_id,
     source_version: request.source_version,
-    content_digest: contentDigest
+    content_digest: contentDigest,
+    ...(representation === undefined ? {} : { source_representation: representation })
   }, sha256);
   const speaker = retainedSourceSpeaker(
     request.speaker === undefined || request.speaker === null ? [] : [request.speaker]
@@ -68,10 +74,11 @@ function persistRecord(
   const current = stores.getCurrentRecord(request.workspace_id, request.source_id);
   const retained = stores.getStoredRecord(request.workspace_id, identity);
   if (retained === null && current !== null &&
-      canonicalJson(current.attribution_context ?? null) !== canonicalJson(attribution) &&
+      (canonicalJson(current.attribution_context ?? null) !== canonicalJson(attribution) ||
+        canonicalJson(current.source_representation ?? null) !== canonicalJson(representation ?? null)) &&
       (current.source_version === request.source_version ||
         compareUtcInstants(request.recorded_at, current.recorded_at) !== 1)) {
-    throw new CoreError("CONFLICT", "source attribution correction requires a later recorded time and new source revision");
+    throw new CoreError("CONFLICT", "source attribution or representation correction requires a later recorded time and new source revision");
   }
   const record = verifySourceRecordIdentity(SourceRecordIdentitySchema.parse({
     ...receiptFields(identity),
@@ -88,7 +95,8 @@ function persistRecord(
     operator_id: SOURCE_SPAN_IDENTITY_OPERATOR_ID,
     ...(speaker === undefined ? {} : { speaker }),
     ...(scopeClass === undefined ? {} : { scope_class: scopeClass }),
-    attribution_context: attribution
+    attribution_context: attribution,
+    ...(representation === undefined ? {} : { source_representation: representation })
   }), sha256);
   if (attribution === null) {
     if (retained === null || (retained.record.attribution_context !== null &&
@@ -98,6 +106,25 @@ function persistRecord(
     }
   }
   return stores.putRecord(record, request.content_bytes);
+}
+
+function verifyProjectionSources(request: SourceAdmissionRequest, stores: FieldFormationStores): void {
+  if (request.source_representation?.kind !== "canonical_projection") return;
+  const sources = request.source_representation.source_record_ids.map(id => stores.getStoredRecord(request.workspace_id, id));
+  if (!sourceProjectionDependenciesAvailable(request, sources.map(source => source === null ? null : ({
+    identity: source.record.identity,
+    workspace_id: source.record.workspace_id,
+    ...(source.record.scope_class === undefined ? {} : { scope_class: source.record.scope_class }),
+    current_identity: stores.getCurrentRecord(request.workspace_id, source.record.source_id)?.identity ?? null,
+    body_available: true,
+    ...(source.record.source_representation === undefined ? {} : { source_representation: source.record.source_representation })
+  }))) || sources.some(source => source === null || source.record.source_id === request.source_id)) {
+    throw new CoreError("VALIDATION", "projection requires current retained sources in the same workspace and scope");
+  }
+  const roles = sources.map(source => source!.record.speaker ?? "unknown");
+  if ((retainedSourceSpeaker(roles) ?? null) !== (request.speaker ?? null)) {
+    throw new CoreError("VALIDATION", "projection speaker differs from its retained excerpts");
+  }
 }
 
 export function retainedSourceSpeaker(
