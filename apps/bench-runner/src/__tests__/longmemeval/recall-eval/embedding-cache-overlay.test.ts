@@ -2,7 +2,7 @@
 import { lstatSync } from "node:fs";
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import {
   MemoryDimension,
@@ -35,6 +35,8 @@ import {
 } from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/emit.js";
 import { sha256File } from
   "../../../runs/snapshot/integrity.js";
+import { assertIsolatedOverlayFile } from
+  "../../../runs/snapshot/recall-eval/workspace-slice/overlay-replicate.js";
 import { prepareRecallEvalDataRoot } from
   "../../../runs/lifecycle/recall-eval/recall-eval-runtime.js";
 import { openRecallEvalWorkingSqlite, recallEvalWorkingDbPath } from
@@ -165,7 +167,7 @@ describe("source-bound embedding cache overlay", () => {
     target.close();
   });
 
-  it("binds two restored copies to overlay files that do not share an inode", async () => {
+  it("binds two restored copies to independent overlay files", async () => {
     const written = await writeFixtureOverlay();
     const firstDb = join(root, "worker-a", "alaya.db");
     const secondDb = join(root, "worker-b", "alaya.db");
@@ -183,6 +185,7 @@ describe("source-bound embedding cache overlay", () => {
       restoredDbPath: secondDb,
       expected: expectedBinding()
     });
+    const sourceOverlay = join(root, "overlay-receipt.sqlite");
     const firstOverlay = join(
       root,
       "worker-a",
@@ -197,7 +200,18 @@ describe("source-bound embedding cache overlay", () => {
     const second = lstatSync(secondOverlay);
     expect(first.isFile()).toBe(true);
     expect(second.isFile()).toBe(true);
-    expect(`${first.dev}:${first.ino}`).not.toBe(`${second.dev}:${second.ino}`);
+    expect(first.isSymbolicLink()).toBe(false);
+    expect(second.isSymbolicLink()).toBe(false);
+    expect(resolve(firstOverlay)).not.toBe(resolve(secondOverlay));
+    assertIsolatedOverlayFile(sourceOverlay, firstOverlay);
+    assertIsolatedOverlayFile(sourceOverlay, secondOverlay);
+    const firstBytes = await readFile(firstOverlay);
+    const secondBytes = await readFile(secondOverlay);
+    const sourceBytes = await readFile(sourceOverlay);
+    expect(firstBytes.equals(secondBytes)).toBe(true);
+    await writeFile(firstOverlay, "mutated worker overlay");
+    expect(await readFile(secondOverlay)).toEqual(secondBytes);
+    expect(await readFile(sourceOverlay)).toEqual(sourceBytes);
   });
 
   it("applies the overlay after snapshot restore and exposes its receipt", async () => {

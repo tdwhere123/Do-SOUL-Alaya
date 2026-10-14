@@ -80,8 +80,8 @@ export function assertIsolatedOverlayFile(sourcePath: string, destPath: string):
     throw new Error("embedding overlay working copy must be an isolated regular file");
   }
   const source = lstatSync(sourcePath);
-  if (source.dev === dest.dev && source.ino === dest.ino) {
-    throw new Error("embedding overlay working copy must not share an inode");
+  if (overlaysShareWorkingCopy(sourcePath, source, destPath, dest)) {
+    throw new Error("embedding overlay working copy must not share the source file");
   }
 }
 
@@ -92,12 +92,32 @@ export function assertDistinctOverlayInodes(overlayPaths: readonly string[]): vo
     if (!metadata.isFile()) {
       throw new Error("embedding overlay working copy must be an isolated regular file");
     }
-    const key = `${metadata.dev}:${metadata.ino}`;
+    const key = overlayWorkingCopyKey(overlayPath, metadata);
     if (seen.has(key)) {
-      throw new Error("embedding overlay shard copies must not share an inode");
+      throw new Error("embedding overlay shard copies must not share a working copy");
     }
     seen.add(key);
   }
+}
+
+/** Windows `lstat` file indexes collide for independent copies; Unix inodes still catch hardlinks. */
+function overlaysShareWorkingCopy(
+  leftPath: string,
+  left: { readonly dev: number; readonly ino: number },
+  rightPath: string,
+  right: { readonly dev: number; readonly ino: number }
+): boolean {
+  if (resolve(leftPath) === resolve(rightPath)) return true;
+  if (process.platform === "win32") return false;
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function overlayWorkingCopyKey(
+  overlayPath: string,
+  metadata: { readonly dev: number; readonly ino: number }
+): string {
+  if (process.platform === "win32") return resolve(overlayPath);
+  return `${metadata.dev}:${metadata.ino}`;
 }
 
 function replicateOneSlice(
