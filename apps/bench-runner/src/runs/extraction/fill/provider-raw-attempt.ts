@@ -458,10 +458,12 @@ function assertCompletePhysicalResponse(raw: ProviderRawAttempt, httpBytes: Buff
     throw new ProviderRawAttemptIdentityError(`provider physical response cannot be decoded: ${raw.cache_key}`);
   }
   if (decoded === undefined) return;
-  const bytes = Buffer.from(decoded.text, "utf8");
-  if (bytes.length !== raw.original_byte_length ||
-      createHash("sha256").update(bytes).digest("hex") !== raw.decoded_text_digest ||
-      raw.full_replay_possible && decoded.text !== raw.decoded_text ||
+  // Complete retained text already passed its digest and byte-length checks.
+  // Exact physical text equality carries that binding; truncated text still needs the full digest.
+  const textMatches = raw.full_replay_possible ? decoded.text === raw.decoded_text :
+    Buffer.byteLength(decoded.text, "utf8") === raw.original_byte_length &&
+      createHash("sha256").update(decoded.text, "utf8").digest("hex") === raw.decoded_text_digest;
+  if (!textMatches ||
       decoded.finishReason !== raw.finish_reason ||
       canonicalJson(decoded.usage ?? null) !== canonicalJson(raw.usage)) {
     throw new ProviderRawAttemptIdentityError(`provider physical response differs from decoded attempt: ${raw.cache_key}`);

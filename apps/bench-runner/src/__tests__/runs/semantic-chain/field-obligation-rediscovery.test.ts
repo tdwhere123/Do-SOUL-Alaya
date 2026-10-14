@@ -178,7 +178,7 @@ async function runArm(root: string, fixture: Fixture, arm: Arm, handler: Handler
     selectedHint = arm === "B" ? "consignment shipment sent dispatched inspection inspected examined"
       : arm === "M" ? candidates[0]!.access_hint : decision?.selected?.access_hint;
     stop = arm === "F" && decision?.selected === null ? decision.status : "one_optional_access";
-    console.info("FIELD_REDISCOVERY_DECISION " + JSON.stringify({ fixture: fixture.name, arm, candidates,
+    if (process.env.ALAYA_TEST_FIELD_REDISCOVERY_DIAGNOSTICS === "1") console.info("FIELD_REDISCOVERY_DECISION " + JSON.stringify({ fixture: fixture.name, arm, candidates,
       initial_reason: initialReason ?? null, decision: decision ?? null, selected_hint: selectedHint ?? null }));
     if (arm !== "F" || decision?.selected !== null) {
       second = await observe(root, "second", handler, arm === "F" ? BUDGETS.common : BUDGETS.baseline,
@@ -378,7 +378,7 @@ async function runFixture(fixture: Fixture, bounded = false) {
       expect([...ids.values()].flat()).toHaveLength(sources.length);
       setups.push({ arm, publication_usage: [...publicationUsage], ...setup });
       if (bounded) checkBoundedManifest(fixture, manifest);
-      console.info("FIELD_REDISCOVERY_MANIFEST " + JSON.stringify({ fixture: fixture.name, arm, ...execution,
+      if (process.env.ALAYA_TEST_FIELD_REDISCOVERY_DIAGNOSTICS === "1") console.info("FIELD_REDISCOVERY_MANIFEST " + JSON.stringify({ fixture: fixture.name, arm, ...execution,
         protocol, conditioning: manifest.conditioning,
         sources: manifest.sources, semantics, capsule_metadata: manifest.capsule_metadata,
         known_initial_source_id: initialSourceId, query: QUERY, original_query: ORIGINAL_QUERY, candidates,
@@ -394,14 +394,14 @@ async function runFixture(fixture: Fixture, bounded = false) {
         reserveRecoveryRead(root, "partial source and publication manifest after setup exhaustion", [filename]);
         reserveRecoveryHostEffect(root, "result-output", chainIdentity({ fixture: fixture.name, arm }), false);
         setups.push({ arm, publication_usage: [...publicationUsage], ...setup });
-        console.info("FIELD_REDISCOVERY_SETUP " + JSON.stringify({ fixture: fixture.name, arm, ...execution, protocol,
+        if (process.env.ALAYA_TEST_FIELD_REDISCOVERY_DIAGNOSTICS === "1") console.info("FIELD_REDISCOVERY_SETUP " + JSON.stringify({ fixture: fixture.name, arm, ...execution, protocol,
           setup: setups.at(-1), acknowledged_publications: [...ids], partial_manifest: readHealthyManifest(filename),
           allowance: allowanceLedger(join(root, "recovery-allowance.sqlite")), worker_started: false, native_access_calls: 0,
           source_admission_and_authoring_actual_cost: "unknown", total_lifecycle_cost: "unknown" }));
       } } : undefined);
     if (setups.at(-1)?.status === "resource_exhausted") break;
   }
-  console.info("FIELD_REDISCOVERY_REPORT " + JSON.stringify({ fixture: fixture.name, ...execution, arms: reports,
+  if (process.env.ALAYA_TEST_FIELD_REDISCOVERY_DIAGNOSTICS === "1") console.info("FIELD_REDISCOVERY_REPORT " + JSON.stringify({ fixture: fixture.name, ...execution, arms: reports,
     finite_reference: finiteReference(fixture), protocol, source_count: sources.length, setups,
     comparison: bounded ? compareBoundedAccess(fixture, reports) : null,
     native_provider_calls: 0, automatic_clue_generation: "not_exercised", natural_source_utility: "not_exercised",

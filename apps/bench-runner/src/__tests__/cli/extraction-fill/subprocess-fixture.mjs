@@ -1,94 +1,64 @@
-import { createRequire } from "node:module";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 
-const repoRoot = process.cwd();
 const fixtureRoot = process.env.EXTRACTION_FILL_FIXTURE_ROOT;
 const mode = process.env.EXTRACTION_FILL_FIXTURE_MODE;
 if (fixtureRoot === undefined || mode === undefined) {
   throw new Error("extraction-fill subprocess fixture environment is incomplete");
 }
 
-const require = createRequire(import.meta.url);
-const vitestPackage = require.resolve("vitest/package.json");
-const viteEntry = createRequire(vitestPackage).resolve("vite");
-const { createServer } = await import(pathToFileURL(viteEntry).href);
-const workspace = await import(pathToFileURL(join(repoRoot, "vitest.workspace.mjs")).href);
-const benchProject = workspace.default.find(
-  (project) => project?.test?.name === "@do-soul/alaya-bench-runner"
-);
-if (benchProject === undefined) throw new Error("bench-runner Vite project is unavailable");
-
-const server = await createServer({
-  root: repoRoot,
-  configFile: false,
-  appType: "custom",
-  server: { middlewareMode: true },
-  resolve: benchProject.resolve
+// Requires a fresh pnpm build, as CI performs; use the actual runtime without a second compiler.
+const runtimeRoot = new URL("../../../../dist/", import.meta.url);
+const fill = await import(new URL("runs/extraction/extraction-fill.js", runtimeRoot));
+const cli = await import(new URL("cli/extraction-fill/command-core.js", runtimeRoot));
+const authorityInspection = await import(new URL("runs/extraction/authority/inspection.js", runtimeRoot));
+const authorityReceipt = await import(new URL("runs/extraction/authority/receipt.js", runtimeRoot));
+const inspection = await authorityInspection.inspectExtractionAuthority({
+  variant: "longmemeval_oracle",
+  cacheRoot: join(fixtureRoot, "cache"),
+  dataDir: join(fixtureRoot, "data"),
+  pinnedMetaRoot: join(fixtureRoot, "pinned"),
+  revision: authorityInspection.readCurrentExtractionAuthorityRevision(),
+  action: "fill"
 });
-try {
-  const fill = await server.ssrLoadModule(
-    "/apps/bench-runner/src/runs/extraction/extraction-fill.ts"
-  );
-  const cli = await server.ssrLoadModule(
-    "/apps/bench-runner/src/cli/extraction-fill/command-core.ts"
-  );
-  const authorityInspection = await server.ssrLoadModule(
-    "/apps/bench-runner/src/runs/extraction/authority/inspection.ts"
-  );
-  const authorityReceipt = await server.ssrLoadModule(
-    "/apps/bench-runner/src/runs/extraction/authority/receipt.ts"
-  );
-  const inspection = await authorityInspection.inspectExtractionAuthority({
-    variant: "longmemeval_oracle",
-    cacheRoot: join(fixtureRoot, "cache"),
-    dataDir: join(fixtureRoot, "data"),
-    pinnedMetaRoot: join(fixtureRoot, "pinned"),
-    revision: authorityInspection.readCurrentExtractionAuthorityRevision(),
-    action: "fill"
-  });
-  const receiptPath = join(fixtureRoot, "extraction-authority.json");
-  authorityReceipt.writeExtractionAuthorityReceipt(receiptPath,
-    authorityReceipt.createExtractionAuthorityReceipt({
-      action: "fill",
-      observation: inspection.observation,
-      outputTokenCap: { field: "max_tokens", value: 512 },
-      priceEstimate: {
-        inputUsdPerMillion: 1,
-        outputUsdPerMillion: 2,
-        maximumInputTokensPerAttempt: 100_000
-      },
-      diskFloorBytes: 0,
-      inspection: {
-        writerLock: inspection.writerLock,
-        disk: inspection.disk,
-        credentialStatus: inspection.credentialStatus,
-        modelReadiness: inspection.modelReadiness
-      }
-    })
-  );
-  const exitCode = await cli.runExtractionFillCommand(
-    {
-      variant: "longmemeval_oracle",
-      concurrency: 2,
-      extractionAuthority: receiptPath
+const receiptPath = join(fixtureRoot, "extraction-authority.json");
+authorityReceipt.writeExtractionAuthorityReceipt(receiptPath,
+  authorityReceipt.createExtractionAuthorityReceipt({
+    action: "fill",
+    observation: inspection.observation,
+    outputTokenCap: { field: "max_tokens", value: 512 },
+    priceEstimate: {
+      inputUsdPerMillion: 1,
+      outputUsdPerMillion: 2,
+      maximumInputTokensPerAttempt: 100_000
     },
-    {
-      signalSource: process,
-      runExtractionFill: (options) => fill.runExtractionFill({
-        ...options,
-        cacheRoot: join(fixtureRoot, "cache"),
-        dataDir: join(fixtureRoot, "data"),
-        pinnedMetaRoot: join(fixtureRoot, "pinned"),
-        extractorFactory: () => createFixtureExtractor(mode)
-      })
+    diskFloorBytes: 0,
+    inspection: {
+      writerLock: inspection.writerLock,
+      disk: inspection.disk,
+      credentialStatus: inspection.credentialStatus,
+      modelReadiness: inspection.modelReadiness
     }
-  );
-  process.exitCode = exitCode;
-  process.stdout.write("FIXTURE_SETTLED\n");
-} finally {
-  await server.close();
-}
+  })
+);
+const exitCode = await cli.runExtractionFillCommand(
+  {
+    variant: "longmemeval_oracle",
+    concurrency: 2,
+    extractionAuthority: receiptPath
+  },
+  {
+    signalSource: process,
+    runExtractionFill: (options) => fill.runExtractionFill({
+      ...options,
+      cacheRoot: join(fixtureRoot, "cache"),
+      dataDir: join(fixtureRoot, "data"),
+      pinnedMetaRoot: join(fixtureRoot, "pinned"),
+      extractorFactory: () => createFixtureExtractor(mode)
+    })
+  }
+);
+process.exitCode = exitCode;
+process.stdout.write("FIXTURE_SETTLED\n");
 
 function createFixtureExtractor(fixtureMode) {
   let calls = 0;

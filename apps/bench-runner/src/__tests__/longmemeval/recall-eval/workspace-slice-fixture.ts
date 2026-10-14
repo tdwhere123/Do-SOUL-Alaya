@@ -39,7 +39,11 @@ import {
 } from "@do-soul/alaya-storage";
 import BetterSqlite3 from "better-sqlite3";
 import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { assertQuiescentMainDb } from "../../../runs/snapshot/recall-eval/workspace-slice/slice-snapshot.js";
+import { removeTempDirectory } from "../../support/temp-cleanup.js";
 import { createOverlaySchema } from "../../../runs/snapshot/recall-eval/embedding-cache-overlay/overlay-schema.js";
 
 export const WORKSPACE_A = "workspace-a";
@@ -55,23 +59,49 @@ const CLOCK = "2026-08-10T00:00:00.000Z";
 const fieldSha256: FieldContractSha256 = (preimage) =>
   createHash("sha256").update(preimage, "utf8").digest("hex");
 
+// Only closed main-file bytes cross cases; connections and path-bound sidecars never do.
+let packedSeedBytes: Promise<Buffer> | undefined;
+
 export async function createPackedTwoWorkspaceDb(path: string): Promise<void> {
+  packedSeedBytes ??= readPackedSeedBytes().catch((error: unknown) => {
+    packedSeedBytes = undefined;
+    throw error;
+  });
+  await writeFile(path, await packedSeedBytes, { flag: "wx" });
+}
+
+async function readPackedSeedBytes(): Promise<Buffer> {
+  const directory = await mkdtemp(join(tmpdir(), "workspace-slice-seed-"));
+  const path = join(directory, "packed.alaya.db");
+  try {
+    await seedPackedTwoWorkspaceDb(path);
+    assertQuiescentMainDb(path);
+    return await readFile(path);
+  } finally {
+    await removeTempDirectory(directory);
+  }
+}
+
+async function seedPackedTwoWorkspaceDb(path: string): Promise<void> {
   const database = initDatabase({ filename: path });
-  await seedHaystack(database, {
-    workspaceId: WORKSPACE_A,
-    runId: "run-a",
-    memoryId: MEMORY_A,
-    evidenceId: EVIDENCE_A,
-    token: TOKEN_A
-  });
-  await seedHaystack(database, {
-    workspaceId: WORKSPACE_B,
-    runId: "run-b",
-    memoryId: MEMORY_B,
-    evidenceId: EVIDENCE_B,
-    token: TOKEN_B
-  });
-  database.close();
+  try {
+    await seedHaystack(database, {
+      workspaceId: WORKSPACE_A,
+      runId: "run-a",
+      memoryId: MEMORY_A,
+      evidenceId: EVIDENCE_A,
+      token: TOKEN_A
+    });
+    await seedHaystack(database, {
+      workspaceId: WORKSPACE_B,
+      runId: "run-b",
+      memoryId: MEMORY_B,
+      evidenceId: EVIDENCE_B,
+      token: TOKEN_B
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function plantPackedPathProjections(path: string): Promise<void> {

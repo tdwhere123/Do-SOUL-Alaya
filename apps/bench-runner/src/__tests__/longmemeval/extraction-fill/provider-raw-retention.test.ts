@@ -103,6 +103,27 @@ it("retains missing and truncated Gemini body witnesses without inventing decode
   });
 });
 
+it.each([false, true])("rejects changed decoded digests and physical text with truncated=%s", truncated => {
+  const input = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1", finishReason: "stop" };
+  const content = truncated ? "x".repeat(RAW_CAP) + "A" : "{}";
+  const changed = truncated ? "x".repeat(RAW_CAP) + "B" : "[]";
+  const response = (text: string) => {
+    const wire = JSON.stringify({ choices: [{ message: { content: text }, finish_reason: "stop" }] });
+    return { contentType: "application/json", bodyBase64: Buffer.from(wire).toString("base64"),
+      bodyByteLength: Buffer.byteLength(wire), bodySha256: digest(wire), bodyTruncated: false, bodyComplete: true };
+  };
+  const written = writeProviderRawAttempt({ ...input, decodedText: content, httpResponse: response(content) });
+  expect(readProviderRawAttempt(input.root, input.cacheKey, 1)).toEqual(written);
+  const path = providerRawAttemptPath(input.root, input.cacheKey, 1);
+  writeFileSync(path, JSON.stringify({ ...written, decoded_text_digest: "0".repeat(64) }));
+  expect(() => readProviderRawAttempt(input.root, input.cacheKey, 1)).toThrow(/integrity mismatch|physical response differs/u);
+  writeFileSync(path, JSON.stringify({ ...written, decoded_text_digest: digest(changed),
+    decoded_text: truncated ? written.decoded_text : changed }));
+  expect(() => readProviderRawAttempt(input.root, input.cacheKey, 1)).toThrow(/physical response differs/u);
+  writeFileSync(path, JSON.stringify({ ...written, http_response: response(changed) }));
+  expect(() => readProviderRawAttempt(input.root, input.cacheKey, 1)).toThrow(/physical response differs/u);
+});
+
 it("requires a Step HTTP witness for completed output but keeps a witness-free failure readable", () => {
   const input = { ...fixture(), requestProfile: "step-3.5-2603-low-json-schema-v1" };
   expect(() => writeProviderRawAttempt({ ...input, decodedText: "{}" })).toThrow(/integrity mismatch/u);

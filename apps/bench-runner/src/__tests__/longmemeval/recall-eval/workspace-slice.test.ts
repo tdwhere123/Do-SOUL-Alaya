@@ -64,6 +64,43 @@ afterEach(async () => {
 });
 
 describe("packed workspace slice explode", () => {
+  it("keeps packed fixture copies independently writable with original workspace FTS", async () => {
+    const originalBytes = readFileSync(packedPath);
+    const first = initDatabase({ filename: packedPath });
+    try {
+      first.connection.prepare("UPDATE memory_entries SET content = ? WHERE object_id = ?")
+        .run("mutatedfixturetoken", MEMORY_A);
+      expect(matchObjectIds(first, "memory_content_fts_porter", TOKEN_A)).toEqual([]);
+      const copyPath = join(root, "independent.alaya.db");
+      await createPackedTwoWorkspaceDb(copyPath);
+      expect(readFileSync(copyPath)).toEqual(originalBytes);
+      expect(existsSync(`${copyPath}-wal`)).toBe(false);
+      expect(existsSync(`${copyPath}-shm`)).toBe(false);
+      const second = initDatabase({ filename: copyPath });
+      try {
+        expect(first.connection.name).toBe(packedPath);
+        expect(second.connection.name).toBe(copyPath);
+        expect(second).not.toBe(first);
+        for (const [workspace, token, memory, evidence] of [
+          [WORKSPACE_A, TOKEN_A, MEMORY_A, EVIDENCE_A],
+          [WORKSPACE_B, TOKEN_B, MEMORY_B, EVIDENCE_B]
+        ] as const) {
+          expect(countTableWhere(second, "memory_entries", workspace)).toBe(1);
+          expect(matchObjectIds(second, "memory_content_fts_porter", token)).toEqual([memory]);
+          expect(matchObjectIds(second, "evidence_capsule_fts", token)).toEqual([evidence]);
+        }
+        second.connection.prepare("UPDATE memory_entries SET content = ? WHERE object_id = ?")
+          .run("independentfixturetoken", MEMORY_B);
+        expect(matchObjectIds(first, "memory_content_fts_porter", TOKEN_B)).toEqual([MEMORY_B]);
+        expect(matchObjectIds(second, "memory_content_fts_porter", TOKEN_B)).toEqual([]);
+      } finally {
+        second.close();
+      }
+    } finally {
+      first.close();
+    }
+  });
+
   it("copies workspace-scoped rows so each slice matches packed WHERE workspace_id", async () => {
     const destDir = join(root, "slices");
     const exploded = await explodePackedWorkingCopy({

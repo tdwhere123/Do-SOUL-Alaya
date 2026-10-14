@@ -1,7 +1,8 @@
 import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { beforeEach, onTestFinished, vi } from "vitest";
+import { afterAll, beforeEach, onTestFinished, vi } from "vitest";
 import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal, settleActiveBenchDaemonTasks } from "../harness/daemon-task.js";
 
 const PHASE_FILE = /(?:complete-query-fill|correspondence-fill-admission|retained-native-source-snapshot)\.test\.ts$/u;
@@ -38,9 +39,18 @@ vi.mock("node:dns/promises", () => ({
 process.env.ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST = "0";
 // Keep vitest runs off the operator's local LongMemEval extraction cache so
 // preflight drift checks do not bind tests to a particular model/manifest.
-process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT = mkdtempSync(
+const extractionCacheRoot = mkdtempSync(
   join(tmpdir(), "alaya-bench-vitest-cache-")
 );
+process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT = extractionCacheRoot;
+afterAll(async () => {
+  await settleActiveBenchDaemonTasks();
+  // Tests may replace the environment binding; only this setup's directory belongs here.
+  await rm(extractionCacheRoot, {
+    recursive: true, force: true,
+    maxRetries: process.platform === "win32" ? 8 : 0, retryDelay: 100
+  });
+});
 // Mock-extractor suites still resolve a complete cache identity. Keep that
 // identity explicit and non-routable after production stopped guessing a URL.
 process.env.OFFICIAL_API_GARDEN_PROVIDER_URL = "https://fixture-provider.invalid/v1";
