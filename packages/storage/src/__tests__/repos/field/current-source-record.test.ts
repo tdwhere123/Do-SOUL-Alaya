@@ -43,6 +43,29 @@ describe("indexed current source records", () => {
     expect(records.findById("workspace-1", older.record_id)).toEqual(older);
   });
 
+  it("reuses the source seek statement while observing new revisions and erased bodies", () => {
+    const { database, records } = fixture();
+    const original = records.insert(hashedRecord("workspace-1", "original", "a-source"));
+    const second = records.insert(hashedRecord("workspace-1", "second", "b-source"));
+    const prepare = vi.spyOn(database.connection, "prepare");
+    expect(records.findNextCurrentBounded("workspace-1", null, 8)?.record)
+      .toMatchObject({ record_id: original.record_id, source_body: "original" });
+    expect(records.findNextCurrentBounded("workspace-1", "a-source")?.record?.record_id).toBe(second.record_id);
+    expect(records.findNextCurrentBounded("workspace-1", "b-source")).toBeNull();
+    expect(records.findNextCurrentBounded("workspace-2", null)).toBeNull();
+    const current = records.insert({ ...hashedRecord("workspace-1", "replacement", "a-source"), recorded_at: "2026-09-22T00:00Z" });
+    expect(records.findNextCurrentBounded("workspace-1", null, 11)?.record)
+      .toMatchObject({ record_id: current.record_id, source_body: "replacement" });
+    new SqliteFieldEraseBarrierRepo(database, fieldSha256).apply({
+      identity: hashLabeledIdentity("erase_barrier", ["workspace-1", "source_record", current.record_id, ""], fieldSha256),
+      barrier_id: "erase-seek-current", workspace_id: "workspace-1", generation_id: null,
+      subject_kind: "source_record", subject_id: current.record_id, erased_at: "2026-09-22T01:00Z"
+    });
+    expect(records.findNextCurrentBounded("workspace-1", null, 11))
+      .toMatchObject({ record: { record_id: current.record_id, source_body: null }, bodyBytes: 0 });
+    expect(prepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id > ?"))).toHaveLength(1);
+  });
+
   it("seeks past more than 512 obsolete versions using the actual current-source query index", () => {
     const { database, records } = fixture();
     database.connection.transaction(() => {
@@ -91,17 +114,37 @@ describe("indexed current source records", () => {
     const database = initDatabase({ filename });
     databases.push(database);
     seedWorkspaces(database);
+    const initialPrepare = vi.spyOn(database.connection, "prepare");
     const records = new SqliteFieldSourceRecordRepo(database, fieldSha256);
     records.insert({ ...hashedRecord("workspace-1", "older"), recorded_at: "2026-09-22T00:00Z" });
     const current = records.insert({ ...hashedRecord("workspace-1", "current"), recorded_at: "2026-09-22T00:00:00.00000000001Z" });
+    expect(initialPrepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id > ?"))).toHaveLength(0);
+    expect(records.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(records.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(initialPrepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id > ?"))).toHaveLength(1);
+    database.close({ optimize: false });
+    const reopen = vi.spyOn(database, "reopenIfClosed");
+    expect(() => records.findNextCurrentBounded("workspace-1", null, 0)).toThrow();
+    expect(reopen).not.toHaveBeenCalled();
+    expect(records.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    const reopenedPrepare = vi.spyOn(database.connection, "prepare");
+    expect(records.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(reopenedPrepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id > ?"))).toHaveLength(0);
     database.close({ optimize: false });
     expect(records.findCurrentBounded("workspace-1", "src-1")?.record).toMatchObject({ record_id: current.record_id, recorded_at: current.recorded_at });
+    const externallyReopenedPrepare = vi.spyOn(database.connection, "prepare");
+    expect(records.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(records.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(externallyReopenedPrepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id > ?"))).toHaveLength(1);
     database.close({ optimize: false });
     const readonly = openReadOnlyDatabase(filename);
     databases.push(readonly);
     const reader = new SqliteFieldSourceRecordRepo(readonly, fieldSha256);
     expect(reader.findCurrent("workspace-1", "src-1")).toEqual(current);
+    const readonlyPrepare = vi.spyOn(readonly.connection, "prepare");
     expect(reader.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(reader.findNextCurrentBounded("workspace-1", null)?.record?.record_id).toBe(current.record_id);
+    expect(readonlyPrepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id > ?"))).toHaveLength(1);
     expect(() => readonly.connection.prepare("UPDATE source_records SET recorded_at = ?").run(CLOCK)).toThrow(/readonly/u);
   });
 

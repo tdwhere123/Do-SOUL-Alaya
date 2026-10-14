@@ -124,6 +124,45 @@ function workflowJob(name) {
   return workflow.slice(start + 1).split(/\n(?=  [a-z][a-z-]*:)/u)[0];
 }
 
+test("CI enables compile caching only outside coverage even with an inherited disable sentinel", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ci-compile-cache-"));
+  temporary.push(root);
+  const step = workflowJob("test-shard-ubuntu").split("      - name: Test\n")[1]
+    .split("\n      - name:")[0];
+  const run = step.split("        run: |\n")[1].replaceAll("${{ matrix.group }}", "bench-runner");
+  assert.ok(run);
+  assert.ok(step.includes("NODE_COMPILE_CACHE: ${{ env.SHARD_COVERAGE == '0' && matrix.group == 'bench-runner'"));
+  mkdirSync(path.join(root, "scripts/ci"), { recursive: true });
+  const probe = `import { getCompileCacheDir } from 'node:module';
+    console.log(JSON.stringify({ enabled: getCompileCacheDir() !== undefined,
+      disabled: Object.hasOwn(process.env, 'NODE_DISABLE_COMPILE_CACHE') }));`;
+  writeFileSync(path.join(root, "scripts/ci/run-vitest-projects.mjs"), `
+    import { spawnSync } from 'node:child_process';
+    import { createVitestEnv } from ${JSON.stringify(new URL("./vitest-projects.mjs", import.meta.url).href)};
+    const coverage = process.argv.includes('--coverage.enabled');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', ${JSON.stringify(probe)}],
+      { encoding: 'utf8', env: createVitestEnv(coverage) });
+    if (child.status !== 0) throw new Error(child.stderr);
+    console.log(JSON.stringify({ ...JSON.parse(child.stdout), coverage }));
+  `);
+  for (const coverage of ["0", "1"]) {
+    for (const sentinel of ["", "1"]) {
+      const env = { ...process.env, SHARD_COVERAGE: coverage, VITEST_SHARD: "",
+        NODE_COMPILE_CACHE: path.join(root, "cache"), NODE_DISABLE_COMPILE_CACHE: sentinel };
+      const baseline = spawnSync(process.execPath, ["--input-type=module", "-e", probe],
+        { encoding: "utf8", env });
+      expectSuccess(baseline);
+      assert.deepEqual(JSON.parse(baseline.stdout), { enabled: false, disabled: true });
+      const result = spawnSync("bash", ["-e", "-c", run], { cwd: root, encoding: "utf8", env });
+      expectSuccess(result);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        enabled: coverage === "0", disabled: coverage === "1", coverage: coverage === "1"
+      }, `coverage=${coverage}, inherited disable=${JSON.stringify(sentinel)}`);
+    }
+  }
+  assert.doesNotMatch(step, /^          NODE_DISABLE_COMPILE_CACHE:/mu);
+});
+
 test("rerun uploads replace only their shard artifacts while retained successes keep stable names", () => {
   const job = workflowJob("test-shard-ubuntu");
   const uploads = job.split(/\n      - /u).filter((step) => step.includes("uses: actions/upload-artifact@v7"));

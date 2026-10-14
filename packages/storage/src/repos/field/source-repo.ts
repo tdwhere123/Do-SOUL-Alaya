@@ -2,6 +2,7 @@ import { StorageError } from "../../shared/errors.js";
 import type { FieldContractSha256 } from "@do-soul/alaya-protocol";
 import { canonicalJson, IsoDatetimeStringSchema } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { readRetainedSourceChunk, writeRetainedSourceChunks } from "./retained-source-chunks.js";
 import {
   parseOptionalRow,
@@ -85,6 +86,7 @@ const SPAN_SELECT = `
 `;
 
 export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
+  private readonly nextCurrentBoundedStatement;
   private readonly insertStatement;
   private readonly selectStatement;
   private readonly listStatement;
@@ -98,6 +100,11 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     private readonly database: StorageDatabase,
     private readonly sha256: FieldContractSha256
   ) {
+    this.nextCurrentBoundedStatement = new RefreshableStatementHolder(database, (activeDatabase) =>
+      activeDatabase.connection.prepare(`${RECORD_BOUNDED_SELECT}
+        INDEXED BY idx_source_records_current
+        WHERE source_records.workspace_id = ? AND source_records.source_id > ?
+        ORDER BY source_records.source_id ASC, ${CURRENT_RECORD_ORDER} LIMIT 1`));
     this.insertStatement = database.connection.prepare(`
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
@@ -228,13 +235,8 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
     workspaceId: string, afterSourceId: string | null, byteLimit = 1
   ): BoundedSourceRecordRead | null {
     assertSourceBodyByteLimit(byteLimit);
-    this.database.reopenIfClosed();
     // Each source-id seek skips that source's entire obsolete-version range.
-    const raw = this.database.connection.prepare(`${RECORD_BOUNDED_SELECT}
-      INDEXED BY idx_source_records_current
-      WHERE source_records.workspace_id = ? AND source_records.source_id > ?
-      ORDER BY source_records.source_id ASC, ${CURRENT_RECORD_ORDER} LIMIT 1`)
-      .get(workspaceId, afterSourceId ?? "");
+    const raw = this.nextCurrentBoundedStatement.active().get(workspaceId, afterSourceId ?? "");
     return raw == null ? null : this.readBoundedBody(raw, byteLimit, 0);
   }
 
