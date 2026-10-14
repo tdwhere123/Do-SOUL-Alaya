@@ -247,7 +247,10 @@ function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: Sou
               world_claim: executed.result.world_claim,
               source_record: { workspace_id: checked.stored.record.workspace_id,
                 source_id: checked.stored.record.source_id, identity: checked.stored.record.identity,
-                source_version: checked.stored.record.source_version, content_digest: checked.stored.record.content_digest },
+                source_version: checked.stored.record.source_version, content_digest: checked.stored.record.content_digest,
+                ...(checked.stored.record.source_representation === undefined ? {} : {
+                  source_representation: checked.stored.record.source_representation
+                }) },
               source_interpretation_id: aligned.interpretation_id,
               query_semantics_id: aligned.query_id, semantic_correspondence_id: aligned.semantic_correspondence_id,
               conditional_computation_id: executed.result.conditional_computation_id,

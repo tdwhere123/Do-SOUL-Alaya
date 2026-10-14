@@ -314,7 +314,8 @@ export const SourceSemanticLibraryUnprovedComputationSchema = z.object({
   source_record: z.object({
     workspace_id: SourceRecordFields.workspace_id, source_id: SourceRecordFields.source_id,
     identity: SourceRecordFields.identity, source_version: SourceRecordFields.source_version,
-    content_digest: SourceRecordFields.content_digest
+    content_digest: SourceRecordFields.content_digest,
+    source_representation: SourceRecordFields.source_representation
   }).strict().readonly(),
   source_interpretation_id: Sha256DigestSchema,
   query_semantics_id: Sha256DigestSchema,
