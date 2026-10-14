@@ -131,8 +131,11 @@ it("restarts an accepted job after SIGKILL without resubmission, fills remaining
   const fixture = await setup();
   fixture.provider.complete = false;
   const first = launch(fixture.manifestPath);
-  await vi.waitFor(() => expect(fixture.provider.creates).toBe(1), { timeout: 20_000 });
-  await vi.waitFor(() => expect(state().phase).toBe("resume"));
+  // Durable submit→resume can exceed the default 1s waitFor after creates=1 on NTFS.
+  await vi.waitFor(() => {
+    expect(fixture.provider.creates).toBe(1);
+    expect(state().phase).toBe("resume");
+  }, { timeout: 20_000 });
   first.child.kill("SIGKILL"); await first.closed;
   fixture.provider.complete = true;
   const resumed = launch(fixture.manifestPath);
