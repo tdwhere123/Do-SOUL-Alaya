@@ -8,7 +8,8 @@ import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
 import { withCachedSqliteSnapshot } from "../../snapshot/bound-file.js";
 import { admitEmittedSourcePreview } from "../replay.js";
 import { exposureSlots, firstExposureMismatch, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
-import { OrdinaryRecallObservationSchema, type OrdinaryRecallArchiveConfig, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";
+import { OrdinaryRecallObservationSchema, RepresentationAwareRecallProtocolVersionSchema,
+  type OrdinaryRecallArchiveConfig, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";
 import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
 
 type Observation = z.infer<typeof OrdinaryRecallObservationSchema>;
@@ -52,7 +53,7 @@ export function resolveCapturedSource(config: OrdinaryRecallArchiveConfig, targe
 export function capturedSourceDisclosure(config: OrdinaryRecallArchiveConfig, source: SourceRecordIdentity) {
   const disclosure = projectSourceDisclosure({ material_kind: "original_body",
     evaluated_as_of: config.first_request.source_observed_at!, source });
-  if (config.protocol_package_version === "18.0.0") return disclosure;
+  if (RepresentationAwareRecallProtocolVersionSchema.safeParse(config.protocol_package_version).success) return disclosure;
   if (source.source_representation !== undefined) conflict("historical capture contains later source representation metadata");
   // Prior producers called every retained source-record body original; never rewrite their archived output.
   return { ...disclosure, material_kind: "original_body" as const };
@@ -179,7 +180,7 @@ export function verifyCapturedSourceResult(config: OrdinaryRecallArchiveConfig, 
         target.span.content_complete && target.span.content_end !== Buffer.byteLength(source)) {
       conflict("public source extent overstates delivered bytes or completeness");
     }
-    if (config.protocol_package_version === "18.0.0" &&
+    if (RepresentationAwareRecallProtocolVersionSchema.safeParse(config.protocol_package_version).success &&
         target.span.original_complete !== (disclosure.material_kind === "original_body")) {
       conflict("public original completeness differs from source representation");
     }

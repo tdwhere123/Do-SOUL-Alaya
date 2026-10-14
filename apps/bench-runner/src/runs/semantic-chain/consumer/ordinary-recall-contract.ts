@@ -9,7 +9,10 @@ import { isAuthorityRevision } from "../../extraction/authority/receipt.js";
 export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v1";
 export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
-export const OrdinaryRecallProtocolVersionSchema = z.enum(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0"]);
+export const RepresentationAwareRecallProtocolVersionSchema = z.enum(["18.0.0", "18.1.0"]);
+export const OrdinaryRecallProtocolVersionSchema = z.enum([
+  "14.1.0", "15.0.0", "16.0.0", "17.0.0", ...RepresentationAwareRecallProtocolVersionSchema.options
+]);
 
 /** Historical captures retain their original qualification; version 18 records explicit source representation. */
 export function ordinaryRecallReaderProtocolVersion() {
@@ -49,7 +52,7 @@ export type OrdinaryRecallCaptureConfig = z.infer<typeof OrdinaryRecallCaptureCo
 const { expected_target: _singleTarget, expected_source_bytes: _singleSourceBytes, ...CaptureShape } = OrdinaryRecallCaptureConfigSchema.shape;
 export const OrdinaryRecallMultiSourceConfigSchema = z.object({ ...CaptureShape,
   capture_contract: z.literal(ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT),
-  protocol_package_version: z.literal("18.0.0"),
+  protocol_package_version: RepresentationAwareRecallProtocolVersionSchema,
   expected_target: z.never().optional(), expected_source_bytes: z.never().optional()
 }).passthrough().superRefine((config, context) => {
   if (!validInitialContract(config)) {

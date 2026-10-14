@@ -134,7 +134,7 @@ it.each(["complete", "prefix", "prefix_error"] as const)("passes the exact order
 
 it("keeps producer provenance while binding preparation and execution to the current verifier", async () => {
   const capture = captures.prefix, producer = capture.config.implementation_revision;
-  expect(capture.config.protocol_package_version).toBe("18.0.0");
+  expect(capture.config.protocol_package_version).toBe("18.1.0");
   const verifier = "b".repeat(40), next = "c".repeat(40);
   const revision = vi.spyOn(revisionOwner, "readCurrentExtractionAuthorityRevision").mockReturnValue(verifier);
   try {
@@ -150,11 +150,11 @@ it("keeps producer provenance while binding preparation and execution to the cur
   } finally { revision.mockRestore(); }
 });
 
-it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
+it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
   const { root, config } = captureWithProtocolVersion(`historical-${protocolVersion}`, protocolVersion);
   const original = readFileSync(join(root, "config.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "18.0.0",
+  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "18.1.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision };
   expect(observation.binding).toMatchObject(binding);
   expect(observation.state).toBe("partial");
@@ -164,9 +164,9 @@ it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0"])("admits a %s archive with the 
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
 });
 
-it("refuses legacy original-body qualification relabeled as a current capture", () => {
-  const { root, config } = captureWithProtocolVersion("original-overclaim", "17.0.0");
-  config.protocol_package_version = "18.0.0";
+it.each(["18.0.0", "18.1.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
+  const { root, config } = captureWithProtocolVersion(`original-overclaim-${protocolVersion}`, "17.0.0");
+  config.protocol_package_version = protocolVersion;
   writeJson(join(root, "config.json"), config);
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
@@ -315,7 +315,7 @@ it.each([
   expect(hits).toBe(before);
 });
 
-it.each(["15.0.1", "19.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
+it.each(["15.0.1", "18.2.0", "19.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
   const { root } = captureWithProtocolVersion(`unsupported-producer-${protocolVersion}`, protocolVersion);
   expect(() => prepare(root, `unsupported-consumer-${protocolVersion}`)).toThrow();
 });
@@ -390,7 +390,7 @@ it("removes only verified mirrors from a complete Protocol 15 archive while pres
   expect(derived.consumer_config).toMatchObject({ evidence_view: "verified_mirror_removal" });
   expect(derived.observation_binding).toEqual(original.observation_binding);
   expect(derived.observation_binding).toMatchObject({ observation_identity: observation.binding.observation_identity,
-    protocol_package_version: "15.0.0", reader_protocol_package_version: "18.0.0", producer_candidate: config.candidate });
+    protocol_package_version: "15.0.0", reader_protocol_package_version: "18.1.0", producer_candidate: config.candidate });
   expect(line.userPrompt).toBe(JSON.stringify({ original_query: QUESTION, query_as_of: config.first_request.source_observed_at,
     evidence: { ...observation.evidence, calls: observation.evidence.calls.map((call, index) =>
       ({ ...call, envelope: expectedEnvelopes[index] })) } }));
