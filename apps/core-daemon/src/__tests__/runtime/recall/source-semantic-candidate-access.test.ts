@@ -304,6 +304,37 @@ it("verifies a lexical nominee beyond an unavailable census row and reuses its c
   });
 });
 
+it("reuses one source reader within an observation and creates a fresh reader for the next observation", async () => {
+  await withAccessLibrary([{ id: "orchard", text: "Orchid irrigation." },
+    { id: "garden", text: "Jasmine pruning." }, { id: "courtyard", text: "Granite walls." }], async ({ filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const reads = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+    try {
+      const observe = () => {
+        const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
+        const pool = database.connection.transaction(() => observeSourceSemanticAccess({ database },
+          { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: prepare(orchid) },
+          ["project"], meter, orchid, accessQuery(orchid), "query-conditioned-v1", ACCESS_BUDGET))();
+        return { pool, work: { native_work: meter.nativeWork, native_bytes: meter.nativeBytes,
+          logical_work: meter.spentWork, logical_memory_bytes: meter.spentBytes } };
+      };
+      const first = observe();
+      expect(first.pool.access).toMatchObject({ observed_source_count: 3, unvisited_sources: false });
+      expect(first.pool.access.source_candidates.map(row => row.source_id).sort()).toEqual(["courtyard", "garden", "orchard"]);
+      expect(first.pool.access.source_candidates.every(row => row.complete && row.read_bytes === row.body_bytes)).toBe(true);
+      expect(new Set(reads.mock.calls.map(([, identity]) => identity)).size).toBe(3);
+      const firstReaders = new Set(reads.mock.contexts);
+      expect(firstReaders.size).toBe(1);
+      reads.mockClear();
+      const second = observe();
+      expect(second).toEqual(first);
+      const secondReaders = new Set(reads.mock.contexts);
+      expect(secondReaders.size).toBe(1);
+      expect([...secondReaders][0]).not.toBe([...firstReaders][0]);
+    } finally { reads.mockRestore(); database.close(); closeCachedDatabase(filename); }
+  });
+});
+
 // This pool is about 3.4s locally and crossed Vitest's 5s default under Ubuntu coverage.
 it("orders the complete observed pool for two queries before native descriptor pages and keeps raw sources without interpretations", async () => {
   await withAccessLibrary([

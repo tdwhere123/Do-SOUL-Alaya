@@ -44,7 +44,6 @@ import { providerBackedResponseResult } from
   "../extraction/extraction-cache-test-fixture.js";
 import { writeAuthorityReceipt } from "./authority-runtime/fixture.js";
 import {
-  registerCatalogRefillCrashChild,
   registerCatalogRefillRecoveryCases
 } from "./cache-key-allowlist-runtime/recovery/cases.js";
 
@@ -56,15 +55,13 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
   ({ cacheRoot, dataDir, pinnedMetaRoot } = roots);
   targetSelectionPath = join(cacheRoot, "..", "target-selection.json");
 });
-const CRASH_CHILD_ENV = "ALAYA_TEST_CATALOG_REFILL_CRASH_CHILD";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const parentDescribe = process.env[CRASH_CHILD_ENV] === undefined ? describe : describe.skip;
 
-parentDescribe("cache-key allowlist runtime completion", () => {
+describe("cache-key allowlist runtime completion", () => {
   it("completes the full window when the allowlist is the exact remaining set", async () => {
     setCredentialFixture();
     const questions = [
@@ -141,7 +138,7 @@ parentDescribe("cache-key allowlist runtime completion", () => {
   });
 });
 
-parentDescribe("cache-key allowlist runtime authority", () => {
+describe("cache-key allowlist runtime authority", () => {
   it("rejects a programmatic runtime allowlist even with a catalog refill receipt", async () => {
     setCredentialFixture();
     const questions = [
@@ -174,7 +171,7 @@ parentDescribe("cache-key allowlist runtime authority", () => {
   });
 });
 
-parentDescribe("cache-key allowlist runtime resume", () => {
+describe("cache-key allowlist runtime resume", () => {
   it("resumes only the remaining receipt-bound keys after a partial provider failure", async () => {
     setCredentialFixture();
     const questions = [
@@ -294,9 +291,8 @@ parentDescribe("cache-key allowlist runtime resume", () => {
   });
 });
 
-parentDescribe("cache-key allowlist runtime recovery", () => {
+describe("cache-key allowlist runtime recovery", () => {
   registerCatalogRefillRecoveryCases({
-    entryUrl: import.meta.url,
     variant: EXTRACTION_FILL_VARIANT,
     roots: () => ({ cacheRoot, dataDir, pinnedMetaRoot }),
     setCredentialFixture,
@@ -315,10 +311,6 @@ parentDescribe("cache-key allowlist runtime recovery", () => {
     groundedResponse: buildGroundedInterpretationResponse
   });
 });
-
-registerCatalogRefillCrashChild(
-  EXTRACTION_FILL_VARIANT, buildGroundedInterpretationResponse, providerTimeoutFailure
-);
 
 async function prefillFirstQuestion(): Promise<void> {
   await createInitialTargetSelection();

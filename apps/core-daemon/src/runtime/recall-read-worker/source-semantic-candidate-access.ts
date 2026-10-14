@@ -220,9 +220,8 @@ function restrictedSource(runtime: SourceSemanticReadRuntime, workspace: string,
   return { sources: record === null ? [] : [record], pages: 1, open: false, truncated: false, stopping_reasons: [] };
 }
 
-function readSourceText(runtime: SourceSemanticReadRuntime, record: SourceRecordIdentity, policy: Policy,
+function readSourceText(repo: SqliteFieldSourceRecordRepo, record: SourceRecordIdentity, policy: Policy,
   meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number): Pick<SourceObservation, "read_bytes" | "body_bytes" | "complete" | "signal"> {
-  const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
   let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false;
   const chunks: string[] = [];
   try {
@@ -265,6 +264,7 @@ function observeInterpretations(runtime: SourceSemanticReadRuntime, payload: Sou
   // A retained header is still pending; null records a consumed identity across both producers.
   const seen = new Map<string, InterpretationHeader | null>();
   let after: string | null = null, pages = 0, sourceOffset = 0, headersDone = false, open = false;
+  let sourceReader: SqliteFieldSourceRecordRepo | undefined;
   try {
     const navigation = readInterpretationNavigation(runtime, payload.workspace_id, meter, policy);
     appendInterpretationHeaders(pending, navigation.rows, seen, meter);
@@ -292,8 +292,9 @@ function observeInterpretations(runtime: SourceSemanticReadRuntime, payload: Sou
         const record = records[sourceOffset++]!;
         meter.charge(1, 0, "access observed source check");
         if (sources.get(record.identity)?.complete === true) continue;
-        const observation = readSourceText(runtime, record, policy, meter,
-          sourcePreviewExtents === undefined ? undefined : previewExtent(record, sourcePreviewExtents));
+        const extent = sourcePreviewExtents === undefined ? undefined : previewExtent(record, sourcePreviewExtents);
+        sourceReader ??= new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
+        const observation = readSourceText(sourceReader, record, policy, meter, extent);
         sources.set(record.identity, { source_id: record.source_id, record_id: record.identity,
           ...observation });
         policy.associateSourceHint(record.content_digest, observation.signal, meter);
