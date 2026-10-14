@@ -1,7 +1,7 @@
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   closeCachedDatabase,
   EMBEDDING_OVERLAY_BIND_FILENAME,
@@ -34,6 +34,8 @@ import {
   writeOverlayBindBeside,
   writeRealMemoryOverlayBeside
 } from "./workspace-slice-fixture.js";
+import { assertIsolatedOverlayFile } from
+  "../../../runs/snapshot/recall-eval/workspace-slice/overlay-replicate.js";
 
 const OVERLAY_SHA = "a".repeat(64);
 const previousWriteQueue = process.env.ALAYA_SQLITE_WRITE_QUEUE;
@@ -185,18 +187,20 @@ describe("packed workspace slice explode", () => {
       });
       expect(existsSync(copiedOverlay)).toBe(true);
       const copied = lstatSync(copiedOverlay);
-      const source = lstatSync(overlayPath);
       expect(copied.isFile()).toBe(true);
       expect(copied.isSymbolicLink()).toBe(false);
-      expect(`${copied.dev}:${copied.ino}`).not.toBe(`${source.dev}:${source.ino}`);
+      assertIsolatedOverlayFile(overlayPath, copiedOverlay);
       expect(readFileSync(copiedOverlay, "utf8")).toBe("overlay-sidecar\n");
     }
     const sliceOverlays = [WORKSPACE_A, WORKSPACE_B].map((workspaceId) => {
       const sliceDir = dirname(exploded.sliceDbPaths[workspaceId]!);
-      return lstatSync(join(sliceDir, `.embedding-cache-overlay-${OVERLAY_SHA}.sqlite`));
+      return join(sliceDir, `.embedding-cache-overlay-${OVERLAY_SHA}.sqlite`);
     });
-    expect(`${sliceOverlays[0]!.dev}:${sliceOverlays[0]!.ino}`)
-      .not.toBe(`${sliceOverlays[1]!.dev}:${sliceOverlays[1]!.ino}`);
+    expect(resolve(sliceOverlays[0]!)).not.toBe(resolve(sliceOverlays[1]!));
+    const firstBytes = readFileSync(sliceOverlays[0]!);
+    writeFileSync(sliceOverlays[0]!, "mutated slice overlay");
+    expect(readFileSync(sliceOverlays[1]!)).toEqual(firstBytes);
+    expect(readFileSync(overlayPath, "utf8")).toBe("overlay-sidecar\n");
   });
 
   it("fails when a product table is neither workspace-scoped nor handled", async () => {

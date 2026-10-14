@@ -851,11 +851,13 @@ it("clones the sealed raw fixture without sharing mutable files or path-bound pr
   const second = await sourceFixture(contents);
   expect(second.published.snapshot_path).not.toBe(first.published.snapshot_path);
   expect(second.published.db_sha256).toBe(first.published.db_sha256);
-  expect(statSync(second.published.snapshot_path).ino).not.toBe(statSync(first.published.snapshot_path).ino);
+  expect(statSync(second.published.snapshot_path).isSymbolicLink()).toBe(false);
+  expect(statSync(first.published.snapshot_path).isSymbolicLink()).toBe(false);
   expect(second.chain.query_cache_root).not.toBe(first.chain.query_cache_root);
   const secondPreflight = join(cacheRoot, "source-preflight.json");
   const secondPreparation = readFileSync(secondPreflight, "utf8");
-  expect(statSync(secondPreflight).ino).not.toBe(statSync(firstPreflight).ino);
+  expect(statSync(secondPreflight).isSymbolicLink()).toBe(false);
+  expect(statSync(firstPreflight).isSymbolicLink()).toBe(false);
   writeFileSync(firstPreflight, "damaged first preparation");
   expect(readFileSync(secondPreflight, "utf8")).toBe(secondPreparation);
   writeFileSync(first.published.snapshot_path, "damaged first case");
