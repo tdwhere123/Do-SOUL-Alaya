@@ -1,8 +1,8 @@
 /** Explains an existing response. It does not add a public field or change stopping. */
 
-export type CompletionTarget = "none" | "reliable_partial" | "certified_prefix" | "complete_membership";
+type CompletionTarget = "none" | "reliable_partial" | "certified_prefix" | "complete_membership";
 
-export type CompletionObligation =
+type CompletionObligation =
   | "membership"
   | "observed"
   | "order"

@@ -22,16 +22,19 @@ function admission() {
   return result;
 }
 
-function fixture(program: QueryProgram) {
+function fixture(program: QueryProgram): {
+  execution: SourceSemanticExecutionPlan; products: ProductStateKey[]; state: FieldEngineState;
+} {
   const automaton = compileProgramAutomaton(program);
   const products = automaton.advances.map((advance, index) => productKey(`subject-${index}`, "h0", "unbound", advance.from));
-  const state = createConditionalField({ interpretation: fieldQuery(program), budget: defaultBudget(), seeds: [] });
+  const created = createConditionalField({ interpretation: fieldQuery(program), budget: defaultBudget(), seeds: [] });
   const execution: SourceSemanticExecutionPlan = { program, missingOperands: false, branches: [{
     purpose: "support", alternative: 0, obligations: [{ relation_kind: "wanted", source_variable: "x",
       alternative: 0, frame: "query-frame", obligation: "predicate" }]
   }] };
-  return { execution, products, state: { ...state, compiled_automaton: automaton, seen_identities: products,
-    closure: { ...state.closure, observation: "open" as const } } };
+  const state: FieldEngineState = { ...created, compiled_automaton: automaton, seen_identities: products,
+    closure: { ...created.closure, observation: "open" } };
+  return { execution, products, state };
 }
 
 function compute(input: ReturnType<typeof fixture>, work = 100_000) {
@@ -177,15 +180,15 @@ describe("semantic attention reached products", () => {
     const low = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: base.meter.spentBytes });
     const secondTransition = { ...reached, observed_relations: [edge("wanted", "subject-0", "target", "short")],
       transitions: [transition, { ...transition, from: other, relation_kind: "unrelated" }] };
-    expect(() => sourceSemanticBranchAttention(admission(), input.execution, secondTransition, new Set([0]), low))
-      .toThrow(SourceSemanticResourceExhausted);
-    expect(low.spentBytes).toBeLessThan(extra.meter.spentBytes);
+    let exhausted: unknown;
     try {
       sourceSemanticBranchAttention(admission(), input.execution, secondTransition, new Set([0]), low);
     } catch (error) {
-      expect(error).toBeInstanceOf(SourceSemanticResourceExhausted);
-      expect((error as SourceSemanticResourceExhausted).phase).toBe("semantic attention admitted transition index");
+      exhausted = error;
     }
+    expect(exhausted).toBeInstanceOf(SourceSemanticResourceExhausted);
+    expect((exhausted as SourceSemanticResourceExhausted).phase).toBe("semantic attention admitted transition index");
+    expect(low.spentBytes).toBeLessThan(extra.meter.spentBytes);
   });
 
   it("does not index relations when closure already makes the branch unavailable", () => {
