@@ -8,13 +8,20 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 18.0.0, engine gateway 1.2.0
+## Unreleased — protocol 18.1.0, engine gateway 1.2.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 18.0.0 can move
+heading (currently `## v0.3.11` below). Protocol 18.1.0 can move
 independently of the app semver.
+
+Protocol 18.1.0 includes source representation in unproved-delivery source
+identity. Verification uses the same source-record hash as receipts, so a
+substituted source id or a relabeled representation is a different record.
+Historical unproved rows without representation keep their previous identities.
+The 18.0.0 representation identity rule remains the major under invariant §25;
+this package increment records the unproved-delivery identity close.
 
 Protocol 18.0.0 makes source representation explicit. Post-turn capture retains
 exact supplied message excerpts with their roles, while Garden keeps its existing
