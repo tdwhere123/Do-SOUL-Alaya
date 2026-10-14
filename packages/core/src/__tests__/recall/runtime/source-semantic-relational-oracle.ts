@@ -1,6 +1,7 @@
 import type { SourceSemanticCorrespondence, SourceSemanticConsumedLeaf, SourceSemanticInterpretation,
   SourceSemanticQuery, SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
 import { semanticAssignmentProofs, semanticLeafKey } from "./source-semantic-oracle-obligations.js";
+import { createDerivationAlternativeExpander } from "../conditional-field/evidence/derivation-alternatives.oracle.js";
 
 export type SourceSemanticOracleAssignment = Readonly<{ bindings: Readonly<Record<string, string>>; leaves: readonly SourceSemanticConsumedLeaf[] }>;
 export type SourceSemanticOracleResult = Readonly<{ assignments: readonly SourceSemanticOracleAssignment[] }>;
@@ -45,21 +46,8 @@ export function oracleBindingsMatchEngine(oracle: SourceSemanticOracleResult, de
 export function oracleProofsMatchEngine(oracle: SourceSemanticOracleResult, result: SourceSemanticReasoningResult): boolean {
   const rows = new Map((result.derivations ?? []).map((row) => [row.derivation_id, row]));
   const leaves = new Map((result.evidence_leaves ?? []).map((row) => [row.observation_id, row.leaf]));
-  let visits = 0;
-  const expand = (id: string, active = new Set<string>()): Set<string>[] => {
-    if (++visits > 100000) throw new Error("independent proof expansion bound exceeded");
-    if (active.has(id)) throw new Error("cyclic delivered proof");
-    const row = rows.get(id); if (row === undefined) throw new Error("missing delivered derivation");
-    const next = new Set(active).add(id);
-    const local = new Set(row.observation_ids.flatMap((key) => leaves.has(key) ? [leafKey(leaves.get(key)!)] : []));
-    if (row.children.length === 0) return [local];
-    const children = row.children.map((child) => expand(child, next));
-    if (row.kind === "or") return children.flat().map((set) => new Set([...local, ...set]));
-    return children.reduce<Set<string>[]>((acc, options) => {
-      if (acc.length * options.length > 10000) throw new Error("independent proof product bound exceeded");
-      return acc.flatMap((set) => options.map((option) => new Set([...set, ...option])));
-    }, [local]);
-  };
+  const expand = createDerivationAlternativeExpander(rows, (row) =>
+    row.observation_ids.flatMap((key) => leaves.has(key) ? [leafKey(leaves.get(key)!)] : []));
   const bindingKey = (bindings: Readonly<Record<string, string>>) => JSON.stringify(Object.entries(bindings).sort(([a], [b]) => a.localeCompare(b)));
   for (const answer of result.binding_results ?? []) {
     const binding = Object.fromEntries(Object.entries(answer.bindings).map(([key, value]) => [key, value.node_id]));
