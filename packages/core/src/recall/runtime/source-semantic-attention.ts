@@ -12,10 +12,52 @@ type Entry = ComputedAttention["entries"][number];
 
 type Scope = NonNullable<Entry["scope"]>;
 type Emit = (status: Entry["state"], observation: Entry["observation"], scope: Scope) => void;
+type ObservedRelationRow = NonNullable<FieldEngineState["observed_relations"]> extends Iterable<infer Row> ? Row : never;
+type AttentionTransition = FieldEngineState["transitions"] extends Iterable<infer Row> ? Row : never;
+type AttentionLookups = {
+  observedByEndpoint?: Map<string, Map<string, ObservedRelationRow[]>>;
+  transitionsByProduct?: Map<string, Map<string, AttentionTransition[]>>;
+};
+
+/** Subject and predicate are separate map keys. A concatenated pair key can collide when either contains U+0000. */
+function attentionLookups(state: FieldEngineState, meter: SourceSemanticResourceLedger,
+  cache: AttentionLookups): Required<AttentionLookups> {
+  if (cache.observedByEndpoint !== undefined && cache.transitionsByProduct !== undefined) {
+    return { observedByEndpoint: cache.observedByEndpoint, transitionsByProduct: cache.transitionsByProduct };
+  }
+  const observedByEndpoint = new Map<string, Map<string, ObservedRelationRow[]>>();
+  for (const row of state.observed_relations ?? []) {
+    meter.charge(1, 0, "semantic attention observed pair index");
+    let byPredicate = observedByEndpoint.get(row.sourceObjectId);
+    if (byPredicate === undefined) {
+      byPredicate = new Map();
+      observedByEndpoint.set(row.sourceObjectId, byPredicate);
+    }
+    const bucket = byPredicate.get(row.predicate);
+    if (bucket === undefined) byPredicate.set(row.predicate, [row]);
+    else bucket.push(row);
+  }
+  const transitionsByProduct = new Map<string, Map<string, AttentionTransition[]>>();
+  for (const transition of state.transitions) {
+    meter.charge(1, 0, "semantic attention admitted transition index");
+    const fromId = canonicalProductIdentity(transition.from);
+    let byKind = transitionsByProduct.get(fromId);
+    if (byKind === undefined) {
+      byKind = new Map();
+      transitionsByProduct.set(fromId, byKind);
+    }
+    const bucket = byKind.get(transition.relation_kind);
+    if (bucket === undefined) byKind.set(transition.relation_kind, [transition]);
+    else bucket.push(transition);
+  }
+  cache.observedByEndpoint = observedByEndpoint;
+  cache.transitionsByProduct = transitionsByProduct;
+  return { observedByEndpoint, transitionsByProduct };
+}
 
 /** Pair completion is local to a reached product; it cannot close a sibling binding. */
 function obligationState(obligation: SourceSemanticLoweredObligation, state: FieldEngineState,
-  pairs: ObservationPairs, meter: SourceSemanticResourceLedger, emit: Emit): void {
+  pairs: ObservationPairs, meter: SourceSemanticResourceLedger, emit: Emit, cache: AttentionLookups): void {
   if (state.closure.observation === "unavailable") { emit("unavailable", "unavailable", { kind: "branch" }); return; }
   if (state.closure.observation === "unknown" || state.closure.observation === "invalidated") {
     emit("unknown", state.closure.observation, { kind: "branch" }); return;
@@ -55,7 +97,10 @@ function obligationState(obligation: SourceSemanticLoweredObligation, state: Fie
       continue;
     }
     let observed = false;
-    for (const row of state.observed_relations ?? []) {
+    const lookups = attentionLookups(state, meter, cache);
+    meter.charge(1, 0, "semantic attention observed pair lookup");
+    const observedRows = lookups.observedByEndpoint.get(subject)?.get(obligation.relation_kind) ?? [];
+    for (const row of observedRows) {
       meter.charge(1, 0, "semantic attention observed pair");
       if (row.sourceObjectId === subject && row.predicate === obligation.relation_kind) observed = true;
     }
@@ -67,10 +112,12 @@ function obligationState(obligation: SourceSemanticLoweredObligation, state: Fie
     meter.charge(1, 512, "semantic attention product identity");
     const fromId = canonicalProductIdentity(live);
     let transitionAccepted = false;
-    for (const transition of state.transitions) {
+    meter.charge(1, 0, "semantic attention admitted transition lookup");
+    const admitted = lookups.transitionsByProduct.get(fromId)?.get(obligation.relation_kind) ?? [];
+    for (const transition of admitted) {
       meter.charge(1, 0, "semantic attention admitted transition");
-      if (transition.relation_kind === obligation.relation_kind &&
-          canonicalProductIdentity(transition.from) === fromId) transitionAccepted = true;
+      if (transition.relation_kind === obligation.relation_kind
+        && canonicalProductIdentity(transition.from) === fromId) transitionAccepted = true;
     }
     if (!transitionAccepted) emit("unknown", "exhausted", scope);
     // A successful atom can still fail a later binding or join.
@@ -85,6 +132,7 @@ export function sourceSemanticBranchAttention(admission: Admission, execution: S
   const target = admission.interpretation.source;
   const pairs = new ObservationPairs(state.pair_progress, state.pair_completed_count,
     state.pair_revision, state.pair_demands, state.pair_progress_bytes);
+  const lookups: AttentionLookups = {};
   const entries: Entry[] = [];
   let truncated = false;
   for (const [branchIndex, branch] of execution.branches.entries()) {
@@ -104,7 +152,7 @@ export function sourceSemanticBranchAttention(admission: Admission, execution: S
           obligation: obligation.obligation, ...(obligation.role === undefined ? {} : { role: obligation.role }),
           ...(obligation.variable === undefined ? {} : { variable: obligation.variable }),
           ...(phase === undefined ? {} : { phase }), state: status, observation, scope });
-      });
+      }, lookups);
       if (entries.length === 64) { truncated = true; break; }
     }
     if (entries.length === beforeBranch && !acceptedBranchIndices.has(branchIndex)) {

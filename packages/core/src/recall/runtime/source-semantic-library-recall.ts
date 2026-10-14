@@ -11,6 +11,7 @@ import {
   type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier,
   verifySourceSemanticLibraryDelivery
 } from "@do-soul/alaya-protocol";
+import { libraryPageOrder } from "../conditional-field/index/completion-target.js";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
@@ -131,12 +132,17 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
   });
   const offset = Math.max(0, input.offset ?? 0);
   const page = occupied.slice(offset, offset + SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
-  const occupancyRemaining = input.more_roots ?? occupied.length > offset + page.length;
+  const localRemainder = occupied.length > offset + page.length;
+  const occupancyRemaining = input.more_roots === true || localRemainder;
   const remaining = occupancyRemaining || input.open_residuals || input.truncated;
   const pageRoots = new Set(page.flatMap(entry => entry.target.kind === "source_evidence" ? [sourceGoldRootIdentity(entry.target)] : []));
   const witnesses = merged.entries.filter(entry => entry.target.kind === "source_evidence" && pageRoots.has(sourceGoldRootIdentity(entry.target)));
   const explanations = reachableExplanations(merged.explanations, witnesses);
   const nextOffset = (input.emitted_offset ?? offset) + page.length;
+  const order = libraryPageOrder({
+    open_residuals: input.open_residuals, truncated: input.truncated,
+    more_roots: input.more_roots === true, page_remainder: localRemainder
+  });
   return {
     omitted_duplicate_bindings: omitted,
     occupied,
@@ -152,7 +158,8 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
         interpretation_coverage: "open", transport: "complete", payload: "complete",
         representation: "complete", claim_coverage: "not_applicable",
         explanation_coverage: explanations.length === 0 ? "not_applicable" : remaining ? "partial" : "complete",
-        order_coverage: "complete", pending_computation: remaining ? "open" : "complete"
+        order_coverage: order.order_coverage,
+        pending_computation: remaining ? "open" : "complete"
       },
       continuation: occupancyRemaining ? libraryOccupancyContinuation(input, nextOffset) : null,
       representation: {
@@ -161,7 +168,7 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
         page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET,
         identity_tie_break: "serialization"
       },
-      order_status: remaining ? "open" : "complete",
+      order_status: order.order_status,
       page_purpose: "membership"
     })
   };

@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   canonicalProductIdentityOfEntry, IndexEntrySchema, sourceIndexEntry, type IndexEntry
 } from "@do-soul/alaya-protocol";
+import { explainCompletionTarget } from "../../../recall/conditional-field/index/completion-target.js";
 import {
   assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity
 } from "../../../recall/runtime/source-semantic-library-recall.js";
@@ -59,6 +60,16 @@ it("pages occupied membership after the first page budget", () => {
   expect(first.index.continuation).not.toBeNull();
   expect(first.index.continuation?.cursor).toBe("offset-5");
   expect(first.index.completeness.logical_index).toBe("partial");
+  expect(first.index.order_status).toBe("open");
+  expect(first.index.completeness.order_coverage).toBe("open");
+  expect(explainCompletionTarget({
+    logical_index: first.index.completeness.logical_index,
+    observed_coverage: first.index.completeness.observed_coverage,
+    interpretation_coverage: first.index.completeness.interpretation_coverage,
+    order_status: first.index.order_status, order_coverage: first.index.completeness.order_coverage,
+    continuation_present: first.index.continuation !== null, delivered_count: first.index.entries.length,
+    source_only: true
+  }).achieved).toBe("reliable_partial");
   const second = assembleSourceSemanticLibraryIndex({
     query_id: "library-query", snapshot_id: SNAPSHOT, interpretation_id: "library-interpretation",
     as_of: CLOCK, proof_groups: [], source_entries: sources, truncated: false, open_residuals: false, offset: 10
@@ -66,6 +77,16 @@ it("pages occupied membership after the first page budget", () => {
   expect(second.index.entries).toHaveLength(2);
   expect(second.index.continuation).toBeNull();
   expect(second.index.completeness.logical_index).toBe("complete");
+  expect(second.index.order_status).toBe("complete");
+  expect(second.index.completeness.order_coverage).toBe("complete");
+  expect(explainCompletionTarget({
+    logical_index: second.index.completeness.logical_index,
+    observed_coverage: second.index.completeness.observed_coverage,
+    interpretation_coverage: second.index.completeness.interpretation_coverage,
+    order_status: second.index.order_status, order_coverage: second.index.completeness.order_coverage,
+    continuation_present: second.index.continuation !== null, delivered_count: second.index.entries.length,
+    source_only: true
+  })).toMatchObject({ achieved: "reliable_partial", remaining_obligations: ["interpretation", "source_only"] });
   const firstIds = new Set(first.index.entries.map(canonicalProductIdentityOfEntry));
   expect(second.index.entries.some((entry) => firstIds.has(canonicalProductIdentityOfEntry(entry)))).toBe(false);
 });
