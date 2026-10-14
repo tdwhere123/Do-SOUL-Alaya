@@ -58,3 +58,7 @@ Thumbs.db
 .gitnexus
 .codegraph/
 .pi-subagents/
+
+# Generated CI shard execution evidence
+/shard-projects.json
+/shard-manifest.json

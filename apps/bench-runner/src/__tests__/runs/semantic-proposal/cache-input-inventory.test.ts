@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, opendirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { admitEvaluatorOutputRoot } from "../../../runs/measurement/evaluator-output.js";
 import { retainedSourceRequestInputKeys, sourceCacheInputPaths } from "../../../runs/extraction/cache/source-cache-inputs.js";
@@ -14,8 +14,17 @@ import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "
 import { providerRawAttemptInputPaths, readSingleSourceRawAttempt } from
   "../../../runs/extraction/fill/provider-raw-attempt.js";
 
+vi.mock("node:fs", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, opendirSync: vi.fn(fs.opendirSync) };
+});
+
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(opendirSync).mockReset();
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 it("protects consumed shard, raw attempt, and ledger aliases despite invalid cache evidence", () => {
   const root = mkdtempSync(join(tmpdir(), "proposal-cache-inputs-"));
@@ -114,7 +123,7 @@ it("protects source raw, shard, and ledger aliases despite unavailable sibling e
     .toThrow(/separate from producer and input roots/u);
 });
 
-it("rejects an oversized physical raw directory before Q and source result reads or input inventory", () => {
+it("bounds raw directory enumeration and propagates overflow through Q and source reads and inventories", async () => {
   const root = mkdtempSync(join(tmpdir(), "proposal-raw-inventory-")); roots.push(root);
   const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3",
     kind: "query", model: "gemini-3.1-flash-lite", request_profile: "gemini-3.1-minimal-v1",
@@ -124,9 +133,41 @@ it("rejects an oversized physical raw directory before Q and source result reads
   const cacheRoot = join(root, "cache");
   const directory = join(cacheRoot, "provider-raw", key.slice(0, 2));
   mkdirSync(directory, { recursive: true });
-  for (let index = 0; index <= 32_768; index++) writeFileSync(join(directory, `other-${index}.txt`), "");
-  expect(() => readSemanticProposalResults(workset, cacheRoot, 16_384)).toThrow(/bounded inventory/u);
-  expect(() => semanticProposalCacheInputPaths(workset, cacheRoot, 16_384)).toThrow(/bounded inventory/u);
-  expect(() => providerRawAttemptInputPaths(cacheRoot, key)).toThrow(/bounded inventory/u);
-  expect(() => readSingleSourceRawAttempt(cacheRoot, key)).toThrow(/bounded inventory/u);
+  writeFileSync(join(directory, "other.txt"), "");
+  const fs = await vi.importActual<typeof import("node:fs")>("node:fs");
+  let entryCount = 32_768;
+  const enumerations: { read: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }[] = [];
+  vi.mocked(opendirSync).mockImplementation((path, options) => {
+    const handle = fs.opendirSync(path, options);
+    if (path !== directory) return handle;
+    const entry = handle.readSync();
+    if (entry === null) throw new Error("real raw directory fixture must contain an entry");
+    let visited = 0;
+    const read = vi.spyOn(handle, "readSync").mockImplementation(() => {
+      if (visited === entryCount) return null;
+      entry.name = `other-${visited++}.txt`;
+      return entry;
+    });
+    const close = vi.spyOn(handle, "closeSync");
+    enumerations.push({ read, close });
+    return handle;
+  });
+  expect(providerRawAttemptInputPaths(cacheRoot, key)).toEqual([directory]);
+  expect(enumerations).toHaveLength(1);
+  expect(enumerations[0]!.read).toHaveBeenCalledTimes(32_769);
+  expect(enumerations[0]!.close).toHaveBeenCalledTimes(1);
+
+  entryCount = 32_769;
+  for (const consume of [
+    () => readSemanticProposalResults(workset, cacheRoot, 16_384),
+    () => semanticProposalCacheInputPaths(workset, cacheRoot, 16_384),
+    () => providerRawAttemptInputPaths(cacheRoot, key),
+    () => readSingleSourceRawAttempt(cacheRoot, key)
+  ]) {
+    enumerations.length = 0;
+    expect(consume).toThrow(/bounded inventory/u);
+    expect(enumerations).toHaveLength(1);
+    expect(enumerations[0]!.read).toHaveBeenCalledTimes(32_769);
+    expect(enumerations[0]!.close).toHaveBeenCalledTimes(1);
+  }
 });

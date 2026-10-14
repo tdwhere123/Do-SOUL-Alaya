@@ -97,6 +97,26 @@ import { createHash } from "node:crypto";
 import { PROJECT_COVERAGE, sanitizeProjectName } from "./vitest-projects.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+test("only root CI shard metadata is excluded from untracked source discovery", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ci-shard-ignore-"));
+  temporary.push(root);
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
+  git("init", "--quiet");
+  copyFileSync(path.join(repo, ".gitignore"), path.join(root, ".gitignore"));
+  git("add", ".gitignore");
+  mkdirSync(path.join(root, "src"));
+  const generated = ["shard-projects.json", "shard-manifest.json"];
+  const sources = ["src/shard-projects.json", "src/shard-manifest.json", "source.json", "source.ts"];
+  for (const name of [...generated, ...sources]) writeFileSync(path.join(root, name), "{}\n");
+  assert.deepEqual(git("check-ignore", "--", ...generated, ...sources).trim().split("\n"), generated);
+  assert.deepEqual(git("ls-files", "--others", "--exclude-standard", "-z").split("\0").filter(Boolean).sort(),
+    sources.sort());
+  // Ignore rules must not hide modifications to files already tracked by Git.
+  git("add", "--force", "--", ...generated, ...sources);
+  for (const name of [...generated, ...sources]) writeFileSync(path.join(root, name), "changed\n");
+  assert.deepEqual(git("diff", "--name-only").trim().split("\n").sort(), [...generated, ...sources].sort());
+});
+
 function workflowJob(name) {
   const workflow = readFileSync(path.join(repo, ".github/workflows/ci.yml"), "utf8");
   const start = workflow.indexOf(`\n  ${name}:\n`);

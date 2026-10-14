@@ -204,7 +204,7 @@ it.each(ACCESS_CASES)("records authored access contrast without requiring a clue
       expect(manifest.map(source => source.source_body)).toEqual(sources.map(source => source.text));
       expect(manifest).toHaveLength(34);
       expect([...ids.values()].flat()).toHaveLength(fixture.interpreted ? 1 : 0);
-      console.info("SOURCE_ACCESS_MANIFEST " + JSON.stringify({ case: fixture.name, arm: arm.name, ...execution,
+      if (process.env.ALAYA_TEST_SOURCE_ACCESS_DIAGNOSTICS === "1") console.info("SOURCE_ACCESS_MANIFEST " + JSON.stringify({ case: fixture.name, arm: arm.name, ...execution,
         query: ORIGINAL_QUERY, query_semantics: query, sources: manifest, published_interpretations: Object.fromEntries(ids),
         request_budget: REQUEST_BUDGET, task_allowance: TASK_ALLOWANCE, reservation_schedule: RESERVATION_SCHEDULE,
         worker_isolation: "fresh_database_and_worker_per_arm",
@@ -216,7 +216,7 @@ it.each(ACCESS_CASES)("records authored access contrast without requiring a clue
     });
   }
   const reports = observations.map(observation => observation.report);
-  console.info("SOURCE_ACCESS_REPORT " + JSON.stringify({ case: fixture.name, arms: reports, ...execution,
+  if (process.env.ALAYA_TEST_SOURCE_ACCESS_DIAGNOSTICS === "1") console.info("SOURCE_ACCESS_REPORT " + JSON.stringify({ case: fixture.name, arms: reports, ...execution,
     c_outperformed_both_on_new_candidate_discovery: compareCandidateDiscovery(reports),
     worker_isolation: "fresh_database_and_worker_per_arm",
     a_operation: "fresh preparation under unchanged original query; not a true cursor continuation",
