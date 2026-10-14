@@ -183,7 +183,11 @@ Do not treat as source truth: `dist/`, `var/`, `data/`, `node_modules/`.
 
 Policy: `docs/bench-history/README.md`.
 
-- Experiments → gitignored `.do-it/bench-runs/`; never commit.
+- Experiments → gitignored `.do-it/bench-runs/`; never commit. Put new
+  evidence in an existing collection (`source-access`, `source-delivery`,
+  `semantic-production`, `native-chain`, `finite-evaluation`, or `archive`).
+  Do not add a top-level directory. Maintenance rules are in
+  `.do-it/bench-runs/README.md`.
 - Generated history and baselines → gitignored `.bench-artifacts/history/`.
 - Generated extraction caches → gitignored `.bench-artifacts/cache/`.
 - `docs/bench-history/` retains maintained reproduction docs, dataset pins, and

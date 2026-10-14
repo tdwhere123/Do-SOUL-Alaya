@@ -8,7 +8,7 @@ import { measureSqliteBlockingOnEventLoop } from "../packages/storage/dist/diagn
 
 const require = createRequire(import.meta.url);
 const sqlitePackage = require("better-sqlite3/package.json");
-const outDir = join(process.cwd(), ".do-it/bench-runs");
+const outDir = join(process.cwd(), ".do-it/bench-runs/archive/storage-maintenance/sqlite-concurrency");
 mkdirSync(outDir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/gu, "-");
 const outPath = join(outDir, `sqlite-concurrency-${stamp}.json`);
