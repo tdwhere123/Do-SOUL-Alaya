@@ -150,7 +150,8 @@ function observeWithinMemory(
     });
   }
   const subjects = new ObservationSubjects(state.resume_subjects);
-  let relationRows = state.observed_relations instanceof ObservedRelations ? state.observed_relations : new ObservedRelations();
+  let relationRows = state.observed_relations instanceof ObservedRelations ? state.observed_relations
+    : state.observed_relations === undefined ? new ObservedRelations() : ObservedRelations.unindexed();
   if (state.observed_relations !== undefined && !(state.observed_relations instanceof ObservedRelations)) {
     for (const row of state.observed_relations) relationRows = relationRows.with(row);
   }

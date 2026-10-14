@@ -224,7 +224,7 @@ function consumeMeasurementPage(session: ObservationSession, action: Observation
 }
 
 function consumeAdjacencyPage(session: ObservationSession, action: ObservationAction): boolean {
-  const { input, interpretation, lease, cursors, pairProgress, subjects, observedAt, sourceFacts } = session;
+  const { input, interpretation, cursors, pairProgress, subjects, sourceFacts } = session;
   const minimum = 4 + (input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK);
   const scanned = pairProgress.nextDemand(session.pairIndex,
     Math.max(0, session.state.remaining_exploration - minimum));
@@ -243,8 +243,9 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     return false;
   }
   const captured: RelationObserverRow[] = [];
-  const factsBefore = sourceFacts.snapshot;
-  const observed = observeAdjacency(input, interpretation, lease, action, cursors, pair, captured, pairProgress, observedAt, sourceFacts);
+  const tracked = observeTrackedAdjacency(session, action, pair, captured);
+  if (tracked === undefined) { session.state = interruptObservedField(session.state); return true; }
+  const { value: observed, changes } = tracked;
   // Re-reading a withdrawn assertion OR-merges it with the sibling that must survive, and absorption then drops both.
   omitWithdrawnRelationRows(captured, session.state.withdrawn_leaves);
   recordObserverWork(session, "adjacency", observed);
@@ -255,6 +256,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   completedPair.set(key, observed.page.cursor.committed_through);
   if (observed.page.outcome.status === "exhausted") completedPair.set(`${key}:done`, "1");
   if (captured.length === 0) {
+    changes.keys = undefined;
     const pairBytes = completedPair.bytes - pairProgress.bytes;
     if (pairBytes > session.state.remaining_memory_bytes) {
       session.state = { ...interruptObservedField(session.state), memory_exhausted: true,
@@ -287,9 +289,12 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   const priorRelations = session.relationRows;
   const retained = retainRelationPage(priorRelations, captured);
   session.relationRows = retained.population;
-  recordObservedAt(input, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]), observedAt, sourceFacts);
-  const factsChanged = sourceFacts.snapshot !== factsBefore;
-  const populationChecked = factsChanged && priorRelationFactsUnchanged(session, priorRelations, factsBefore, observed.work.work_units);
+  session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - retained.work };
+  input.cost?.add("adjacency", { joins: retained.work });
+  const factsChanged = changes.after !== changes.before;
+  const populationChecked = factsChanged && priorRelationFactsUnchanged(session, priorRelations, changes,
+    observed.work.work_units, tracked.bytes);
+  changes.keys = undefined;
   // A new endpoint fact must reach old rows unless their dependencies are proven unchanged.
   // New states still meet the full population through the existing continuation.
   const joinRows = relationPageJoinRows(retained.population, retained.changed, factsChanged && !populationChecked);
@@ -330,16 +335,41 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   return false;
 }
 
+function observeTrackedAdjacency(session: ObservationSession, action: ObservationAction,
+  pair: Readonly<{ subject: string; predicate: string }>, captured: RelationObserverRow[]) {
+  const { input, interpretation, lease, cursors, pairProgress, observedAt, sourceFacts } = session;
+  // Each row can write two facts and replace four endpoint counts (read + write).
+  const pin = input.readers.snapshotPin === undefined ? 0 : SNAPSHOT_PIN_NATIVE_WORK;
+  const pageSize = Math.min(ADJACENCY_PAGE_SIZE, Math.floor((session.state.remaining_exploration - pin) / 14));
+  if (pageSize < 1) return undefined;
+  const captureBytes = Math.min(4096, Math.floor(session.memoryBox.remaining / 4));
+  const bounded = { ...action, work_limit: Math.min(action.work_limit, session.state.remaining_exploration - pageSize * 10) };
+  session.memoryBox.remaining -= captureBytes;
+  let tracked;
+  try {
+    tracked = sourceFacts.captureChanges(() => observeAdjacency(input, interpretation, lease, bounded, cursors,
+      pair, captured, pairProgress, observedAt, sourceFacts, pageSize), { work: pageSize * 2, bytes: captureBytes });
+  } finally { session.memoryBox.remaining += captureBytes; }
+  session.state = { ...session.state, remaining_exploration: session.state.remaining_exploration - tracked.work,
+    admitted_allocation_bytes: session.state.admitted_allocation_bytes + tracked.bytes };
+  input.cost?.add("adjacency", { joins: tracked.work, charged_retained_bytes: tracked.bytes });
+  return tracked;
+}
+
 function priorRelationFactsUnchanged(session: ObservationSession, rows: ObservedRelations,
-  before: ObservedSourceFacts["snapshot"], observedWork: number): boolean {
+  changes: NonNullable<ReturnType<typeof observeTrackedAdjacency>>["changes"], observedWork: number, scratchBytes: number): boolean {
+  const before = changes.before;
   const { state, interpretation, sourceFacts } = session, frontier = state.path_effect_frontier;
   if (rows.length === 0 || frontier === undefined || frontier.sourceFacts !== before
     || frontier.identities !== state.seen_identities.length || frontier.facets !== state.facets
     || frontier.discoveries !== state.discoveries.length || state.pending_path_effects !== undefined
     || state.observation_gaps?.guards === true || state.remaining_work.some((row) => row.kind === "observe")
     || interpretation.source_guard !== undefined || (interpretation.interpretation_proposal?.conditions?.length ?? 0) > 0) return false;
-  const checked = checkRetainedRelationFacts({ rows, program: interpretation.program, before, after: sourceFacts.snapshot,
-    work_limit: Math.max(0, state.remaining_exploration - observedWork), memory_limit: state.remaining_memory_bytes });
+  const pendingBytes = Math.max(0, session.relationRows.bytes - (state.observed_relation_bytes ?? 0))
+    + Math.max(0, sourceFacts.bytes - (state.source_fact_bytes ?? 0));
+  const checked = checkRetainedRelationFacts({ rows, program: interpretation.program, before, after: sourceFacts.snapshot, changes,
+    work_limit: Math.max(0, state.remaining_exploration - observedWork),
+    memory_limit: state.remaining_memory_bytes - scratchBytes - pendingBytes });
   session.state = { ...state, remaining_exploration: state.remaining_exploration - checked.work,
     admitted_allocation_bytes: state.admitted_allocation_bytes + checked.admitted_bytes };
   session.input.cost?.add("adjacency", { joins: checked.work, charged_retained_bytes: checked.admitted_bytes });
@@ -435,7 +465,8 @@ function observeAdjacency(
   captured: RelationObserverRow[],
   pairProgress: ObservationPairs,
   observedAt: Record<string, string>,
-  sourceFacts: ObservedSourceFacts
+  sourceFacts: ObservedSourceFacts,
+  pageSize: number
 ) {
   const key = pairKey(pair.subject, pair.predicate);
   const cursor = {
@@ -450,7 +481,7 @@ function observeAdjacency(
     workspace_id: input.workspace_id,
     readers: capturingReaders(input.readers, captured),
     relation_subject: pair.subject,
-    page_limit: observerPageLimit(ADJACENCY_PAGE_SIZE, action.work_limit, input),
+    page_limit: observerPageLimit(pageSize, action.work_limit, input),
     relation_kind: pair.predicate,
     authorized_scopes: input.authorized_scopes,
     object_observed_at: observedAt,

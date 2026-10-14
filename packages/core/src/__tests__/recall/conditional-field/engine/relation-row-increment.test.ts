@@ -1,12 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   productSubjectId,
-  type Guard,
   type ObserverPage,
-  type QueryInterpretation,
   type QueryProgram
 } from "@do-soul/alaya-protocol";
-import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import {
   adjacencyEffectsForRows,
   createAdjacencyEffectCursor,
@@ -24,7 +21,6 @@ import { seedProgramStates } from "../../../../recall/conditional-field/engine/p
 import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
 import { readSequenceReach, sequenceReachKey, writeSequenceReach } from "../../../../recall/conditional-field/engine/sequence-reach.js";
 import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../../../../recall/conditional-field/engine/observed-relations.js";
-import * as observedRelations from "../../../../recall/conditional-field/engine/observed-relations.js";
 import { RetainedSequence } from "../../../../recall/conditional-field/engine/retained-sequence.js";
 import {
   applyObserverPage,
@@ -33,39 +29,11 @@ import {
   type FieldEngineState
 } from "../../../../recall/conditional-field/engine/field-engine.js";
 import type { BoundSourceFacts } from "../../../../recall/conditional-field/engine/binding-environment.js";
-import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
 import { resumePathEffects } from "../../../../recall/runtime/pending-path-effects.js";
 import { restoredFieldFootprint } from "../../../../recall/runtime/request-cost-engine-snapshot.js";
-import { RequestCostLedger } from "../../../../recall/runtime/request-cost-ledger.js";
-import type { ObserverReaders } from "../../../../recall/conditional-field/observers/observe.js";
 import { productStateNodeId } from "../../../../recall/conditional-field/reference/bind-max-min.js";
-import { defaultBudget, defaultView, productKey, SNAPSHOT_ID } from "../reference/deployment.fixture.js";
-
-const AS_OF = "2026-09-10T00:00:00.000Z";
-const OPEN_GUARD = { schema_version: 1, kind: "query_predicate", verdict: "true", time_scope: "none" } as const;
-const AUTH_GUARD: Guard = { schema_version: 1, kind: "authorization", variable: "c",
-  authorization_scope: "project", time_scope: "none", verdict: "unresolved" };
-
-function relation(name: string, target = "y", guard: Guard = OPEN_GUARD): QueryProgram {
-  return { schema_version: 1, kind: "relation", relation_kind: name, source_variable: "x", target_variable: target,
-    facet_mode: "same_path", threshold_milligrades: 0, guard };
-}
-
-function query(program: QueryProgram, patch: Partial<QueryInterpretation> = {}): QueryInterpretation {
-  return { schema_version: 1, query_id: "relation-row-increment", snapshot_id: SNAPSHOT_ID, status: "resolved",
-    holes: [], hypotheses: [], program, view: defaultView(), ...patch };
-}
-
-function edge(predicate: string, source: string, target: string, id: string): AdjacencyRow & { resultObjectId: string } {
-  return { assertionId: id, sourceObjectId: source, targetObjectId: target, resultObjectId: target, predicate,
-    source_revision: "rev", validity: { kind: "open", valid_from: "2026-01-01T00:00:00.000Z" } };
-}
-
-function facts(ids: readonly string[], scope?: Readonly<Record<string, string>>): Map<string, BoundSourceFacts> {
-  return new Map(ids.map((object_id) => [object_id, {
-    object_id, source_revision: "rev", ...(scope?.[object_id] === undefined ? {} : { scope_class: scope[object_id] })
-  }]));
-}
+import { defaultBudget, productKey } from "../reference/deployment.fixture.js";
+import { AS_OF, OPEN_GUARD, AUTH_GUARD, relation, query, edge, facts, project, sequenceHyperedge, storedFacts } from "./relation-grounding.fixture.js";
 
 function seeded(program: QueryProgram, variants: readonly Readonly<{ hypothesis?: string; binding?: string }>[] = [{}]): FieldEngineState {
   const starts = seedProgramStates(program);
@@ -126,31 +94,6 @@ function byPages(
   return current;
 }
 
-function project(state: FieldEngineState) {
-  const bindings = state.binding.kind !== "bound" ? state.binding.kind : state.binding.snapshot.values.map((value) => ({
-    subject: productSubjectId(value.state), hypothesis: value.state.hypothesis_id, binding: value.state.binding_context,
-    program: value.state.program_state, accepting: value.accepting === true, grade: value.milligrades ?? null
-  })).sort(byJson);
-  const transitions = state.transitions.map((row) => ({
-    instance: row.instance_id ?? null, kind: row.relation_kind, grade: row.strength_milligrades,
-    from: productSubjectId(row.from), fromHypothesis: row.from.hypothesis_id, fromBinding: row.from.binding_context,
-    to: productSubjectId(row.to), toHypothesis: row.to.hypothesis_id, toBinding: row.to.binding_context
-  })).sort(byJson);
-  const derivations = state.derivations.map((row) => ({
-    id: row.derivation_id, leaves: [...row.leaf_ids].sort(), grade: row.association_milligrades ?? null
-  })).sort(byJson);
-  const facets = state.facets.map((row) => ({
-    path: row.path_id, coordinates: [...row.coordinates],
-    obligations: [...row.obligations ?? []].map((item) => item.obligation_id).sort()
-  })).sort(byJson);
-  return { bindings, transitions, derivations, facets, guards: state.observation_gaps?.guards === true,
-    pending: state.pending_path_effects !== undefined };
-}
-
-function byJson(left: unknown, right: unknown): number {
-  return JSON.stringify(left).localeCompare(JSON.stringify(right));
-}
-
 function counting(rows: readonly AdjacencyRow[], visits: { count: number }): Iterable<AdjacencyRow> {
   return { *[Symbol.iterator]() { for (const row of rows) { visits.count += 1; yield row; } } };
 }
@@ -160,12 +103,6 @@ function hop(kind: string, source: string, target: string): QueryProgram {
     facet_mode: "same_path", threshold_milligrades: 0, guard: OPEN_GUARD };
 }
 
-function sequenceHyperedge(steps: readonly QueryProgram[]): QueryProgram {
-  return { schema_version: 1, kind: "hyperedge", join: "and", premises: [
-    { schema_version: 1, kind: "alternative", options: [{ schema_version: 1, kind: "sequence", steps }] }
-  ] };
-}
-
 function hyperLeaves(effects: ReturnType<typeof adjacencyEffectsForRows>): Set<string>[] {
   return effects.filter((effect) => effect.hyperedge !== undefined).map((effect) =>
     new Set((effect.derivations ?? []).flatMap((row) => row.leaf_ids)));
@@ -173,12 +110,6 @@ function hyperLeaves(effects: ReturnType<typeof adjacencyEffectsForRows>): Set<s
 
 function hyperSubjects(effects: ReturnType<typeof adjacencyEffectsForRows>): string[] {
   return effects.flatMap((effect) => effect.hyperedge === undefined ? [] : [productSubjectId(effect.hyperedge.to)]);
-}
-
-function storedFacts(ids: readonly string[]): PersistentStringMap<BoundSourceFacts> {
-  let stored = new PersistentStringMap<BoundSourceFacts>();
-  for (const object_id of ids) stored = stored.with(object_id, { object_id, source_revision: "rev" });
-  return stored;
 }
 
 function drain<T>(steps: Generator<unknown, T>): T {
@@ -814,138 +745,5 @@ describe("incremental relation-row join", () => {
     expect({ charged, counted, cacheBytes, remainingDrop }).toEqual({
       charged: cacheBytes, counted: cacheBytes, cacheBytes, remainingDrop: cacheBytes
     });
-  });
-});
-
-describe("observed relation pages", () => {
-  const program: QueryProgram = { schema_version: 1, kind: "alternative", options: [relation("p", "y", AUTH_GUARD), relation("q")] };
-
-  function run(rows: readonly ReturnType<typeof edge>[], options: Readonly<{
-    lexicalIds?: readonly string[];
-    unavailable?: ReadonlySet<string>;
-    scopes?: Readonly<Record<string, string>>;
-    resume?: FieldEngineState;
-    cost?: RequestCostLedger;
-    work?: number;
-    memory?: number;
-    program?: QueryProgram;
-    pageSize?: number;
-  }> = {}) {
-    const readers: ObserverReaders = {
-      lexical: () => ({ ids: options.lexicalIds ?? ["a"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
-      source: ({ objectId }) => options.unavailable?.has(objectId) === true
-        ? { row: null, rowsRead: 0, bytesRead: 0, unavailable: true }
-        : { row: { object_id: objectId, sourceRevision: "rev", lifecycle_state: "active", scope_class: options.scopes?.[objectId] ?? "project" },
-          rowsRead: 1, bytesRead: 32, unavailable: false },
-      relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit }) => {
-        const remaining = rows.filter((row) => row.sourceObjectId === subject && row.predicate === predicate
-          && row.assertionId > (afterAssertionId ?? "")).sort((left, right) => left.assertionId.localeCompare(right.assertionId));
-        const observations = remaining.slice(0, Math.min(limit, nativeLimit, options.pageSize ?? Infinity));
-        return { observations, nativeVisits: observations.length, nativeBytes: observations.length, rowsRead: observations.length,
-          bytesRead: observations.length, truncated: observations.length < remaining.length,
-          committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId };
-      }
-    };
-    const state = observeField(query(options.program ?? program, { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
-      bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] }), {
-      workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers, authorized_scopes: null,
-      ...(options.resume === undefined ? {} : { resume_field: options.resume }),
-      ...(options.cost === undefined ? {} : { cost: options.cost }),
-      budget: defaultBudget({ work_units: options.work ?? 200_000, memory_bytes: options.memory ?? 2_000_000, finalization_reserve: 0, min_envelope: 0 })
-    });
-    const accepted = state.binding.kind === "bound" ? state.binding.snapshot.values
-      .filter((value) => value.accepting && (value.milligrades ?? 0) > 0).map((value) => productSubjectId(value.state)).sort() : [];
-    return { state, accepted };
-  }
-
-  it("preserves independent endpoint additions with less work than the full-replay fallback", () => {
-    const rows = Array.from({ length: 32 }, (_, index) => {
-      const id = String(index).padStart(2, "0");
-      return edge("p", "a", `target-${id}`, `p-${id}`);
-    });
-    const options = { program: relation("p"), pageSize: 1, work: 50_000, memory: 20_000_000 };
-    const observed = run(rows, options);
-    const fallback = vi.spyOn(observedRelations, "checkRetainedRelationFacts")
-      .mockReturnValue({ unaffected: false, work: 0, admitted_bytes: 0 });
-    let conservative: ReturnType<typeof run>;
-    try { conservative = run(rows, options); }
-    finally { fallback.mockRestore(); }
-    expect(observed.accepted).toEqual(rows.map((row) => row.targetObjectId));
-    expect(conservative.accepted).toEqual(rows.map((row) => row.targetObjectId));
-    expect(project(observed.state)).toEqual(project(conservative.state));
-    expect(observed.state.remaining_exploration).toBeGreaterThan(conservative.state.remaining_exploration);
-    expect(observed.state.remaining_exploration).toBeGreaterThan(0);
-    expect(observed.state.pending_path_effects).toBeUndefined();
-    expect(observed.state.observation_gaps?.guards).not.toBe(true);
-  });
-
-  it("keeps changed endpoint identities and nested bound-variable guards on the conservative path", () => {
-    const rows = new ObservedRelations().with(edge("p", "a", "b", "retained"));
-    const before = storedFacts(["a", "b"]), after = before.with("new", { object_id: "new", source_revision: "rev" });
-    const check = (program: QueryProgram, facts = after, work = 100) => observedRelations.checkRetainedRelationFacts({
-      rows, program, before, after: facts, work_limit: work, memory_limit: 1024
-    });
-    expect(check(relation("p")).unaffected).toBe(true);
-    expect(check(relation("p", "y", { ...OPEN_GUARD, predicate_name: "named-predicate" })).unaffected).toBe(false);
-    expect(check(sequenceHyperedge([relation("p", "y", AUTH_GUARD)])).unaffected).toBe(false);
-    expect(check(relation("p"), after.with("a", { object_id: "a", source_revision: "new-revision" })).unaffected).toBe(false);
-    expect(check(relation("p"), after.with("b", { object_id: "b", source_revision: "rev",
-      interpretation_node: { packet_id: "new-packet", hypothesis_id: "h", node_id: "b" } })).unaffected).toBe(false);
-    expect(check(relation("p"), after, 1)).toMatchObject({ unaffected: false, work: 1 });
-  });
-
-  it("keeps an unknown from an earlier page when later pages arrive", () => {
-    const guarded = edge("p", "a", "b", "p-row");
-    const plain = Array.from({ length: 20 }, (_, index) => edge("q", "a", `q-${String(index).padStart(2, "0")}`, `q-${String(index).padStart(2, "0")}`));
-    const cost = new RequestCostLedger();
-    const observed = run([guarded, ...plain], { unavailable: new Set(["x"]), cost });
-    expect(observed.state.observation_gaps?.guards).toBe(true);
-    expect(observed.accepted).toEqual(plain.map((row) => row.targetObjectId));
-    expect(cost.snapshot().phases.adjacency.joins).toBeGreaterThan(0);
-    const reopened = { ...observed.state,
-      residuals: observed.state.residuals.map((region) => region.kind === "seed" ? { ...region, status: "open" as const } : region),
-      resume_cursors: { ...observed.state.resume_cursors, seed: null } };
-    const known = run([guarded, ...plain], { resume: reopened, lexicalIds: ["x"], scopes: { x: "project" }, memory: 20_000_000 });
-    expect(known.state.observation_gaps?.guards).toBe(false);
-    expect(known.accepted).toEqual(["b", ...plain.map((row) => row.targetObjectId)].sort());
-    const unrelated = run([guarded, ...plain], { unavailable: new Set(["x"]), resume: reopened, lexicalIds: ["other"], memory: 20_000_000 });
-    expect(unrelated.state.source_facts?.has("other")).toBe(true);
-    expect(unrelated.state.observation_gaps?.guards).toBe(true);
-    expect(unrelated.accepted).toEqual(observed.accepted);
-  });
-
-  it("rechecks an old row when a later page learns its endpoint fact", () => {
-    const early = edge("p", "a", "b", "p-00");
-    const fillers = Array.from({ length: 15 }, (_, index) => edge("p", "a", `t-${String(index).padStart(2, "0")}`, `p-${String(index + 1).padStart(2, "0")}`));
-    const later = edge("p", "a", "x", "p-16");
-    let release = false;
-    const readers: ObserverReaders = {
-      lexical: () => ({ ids: ["a"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
-      source: ({ objectId }) => objectId === "x" && !release
-        ? { row: null, rowsRead: 0, bytesRead: 0, unavailable: true }
-        : { row: { object_id: objectId, sourceRevision: "rev", lifecycle_state: "active", scope_class: "project" },
-          rowsRead: 1, bytesRead: 32, unavailable: false },
-      relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit }) => {
-        const pool = release ? [early, ...fillers, later] : [early, ...fillers];
-        const remaining = pool.filter((row) => row.sourceObjectId === subject && row.predicate === predicate
-          && row.assertionId > (afterAssertionId ?? "")).sort((left, right) => left.assertionId.localeCompare(right.assertionId));
-        const observations = remaining.slice(0, Math.min(limit, nativeLimit));
-        const hidden = !release && subject === "a" && predicate === "p";
-        return { observations, nativeVisits: observations.length, nativeBytes: observations.length, rowsRead: observations.length,
-          bytesRead: observations.length, truncated: hidden || observations.length < remaining.length,
-          committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId };
-      }
-    };
-    const interpretation = query(program, { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
-      bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] });
-    const request = { workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers, authorized_scopes: null,
-      budget: defaultBudget({ work_units: 200_000, memory_bytes: 20_000_000, finalization_reserve: 0, min_envelope: 0 }) };
-    const held = observeField(interpretation, request);
-    expect(held.transitions.some((row) => row.instance_id === "p-00")).toBe(false);
-    expect(held.observation_gaps?.guards).toBe(true);
-    release = true;
-    const learned = observeField(interpretation, { ...request, resume_field: held });
-    expect(learned.transitions.some((row) => row.instance_id === "p-00")).toBe(true);
-    expect(learned.observation_gaps?.guards).toBe(false);
   });
 });

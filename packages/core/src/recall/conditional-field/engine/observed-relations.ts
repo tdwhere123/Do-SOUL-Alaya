@@ -13,11 +13,21 @@ type SourceObservation = NonNullable<RelationObserverRow["sourceObservations"]>[
 
 /** Native pages replace one assertion version without copying retained history. */
 export class ObservedRelations implements ObservedRelationRows {
-  public constructor(private readonly rows = new PersistentStringMap<RelationObserverRow>(), public readonly bytes = 0) {}
+  public constructor(
+    private readonly rows = new PersistentStringMap<RelationObserverRow>(),
+    public readonly bytes = 0,
+    private readonly endpoints: PersistentStringMap<number> | null = rows.size === 0 ? new PersistentStringMap() : null,
+    public readonly index_work = 0
+  ) {}
+  /** Withdrawal restores plain rows. Missing index coverage must never imply independence. */
+  public static unindexed(): ObservedRelations { return new ObservedRelations(undefined, 0, null); }
   public get length(): number { return this.rows.size; }
   public at(index: number): RelationObserverRow | undefined { return this.rows.entryAt(index)?.[1]; }
   public get(assertionId: string): RelationObserverRow | undefined { return this.rows.get(assertionId); }
   public [Symbol.iterator](): MapIterator<RelationObserverRow> { return this.rows.values(); }
+  public hasEndpoint(id: string): boolean | undefined {
+    return this.endpoints === null ? undefined : (this.endpoints.get(id) ?? 0) > 0;
+  }
 
   public with(row: RelationObserverRow): ObservedRelations {
     const before = this.rows.get(row.assertionId);
@@ -30,7 +40,20 @@ export class ObservedRelations implements ObservedRelationRows {
     if (before !== undefined && sameRelationRow(before, next)) return this;
     const nextBytes = relationRowBytes(next);
     const previousBytes = before === undefined ? 0 : relationRowBytes(before);
-    return new ObservedRelations(this.rows.with(row.assertionId, next), this.bytes + nextBytes - previousBytes);
+    let endpoints = this.endpoints, indexBytes = 0, indexWork = 0;
+    if (endpoints !== null && (before?.sourceObjectId !== next.sourceObjectId || before?.targetObjectId !== next.targetObjectId)) {
+      const adjust = (id: string, delta: number): void => {
+        const count = endpoints!.get(id);
+        // Zero-count keys remain allocated in the persistent map and keep their charge.
+        if (count === undefined) indexBytes += 64 + Buffer.byteLength(id, "utf8");
+        endpoints = endpoints!.with(id, (count ?? 0) + delta);
+        indexWork += 2;
+      };
+      if (before !== undefined) { adjust(before.sourceObjectId, -1); adjust(before.targetObjectId, -1); }
+      adjust(next.sourceObjectId, 1); adjust(next.targetObjectId, 1);
+    }
+    return new ObservedRelations(this.rows.with(row.assertionId, next), this.bytes + nextBytes - previousBytes + indexBytes,
+      endpoints, this.index_work + indexWork);
   }
 }
 
@@ -38,7 +61,7 @@ export class ObservedRelations implements ObservedRelationRows {
 export function retainRelationPage(
   population: ObservedRelations,
   captured: readonly RelationObserverRow[]
-): Readonly<{ readonly population: ObservedRelations; readonly changed: readonly RelationObserverRow[] }> {
+): Readonly<{ readonly population: ObservedRelations; readonly changed: readonly RelationObserverRow[]; readonly work: number }> {
   const touched: string[] = [];
   const seen = new Set<string>();
   let next = population;
@@ -55,7 +78,7 @@ export function retainRelationPage(
     const admitted = next.get(assertionId);
     if (admitted !== undefined) changed.push(admitted);
   }
-  return { population: next, changed };
+  return { population: next, changed, work: next.index_work - population.index_work };
 }
 
 /** A fact change or a full id cover is a complete pass. One id is one changed row. */
@@ -74,6 +97,10 @@ export function relationPageJoinRows(
 export function checkRetainedRelationFacts(input: Readonly<{
   rows: ObservedRelationRows; program: QueryProgram;
   before: ReadonlyMap<string, BoundSourceFacts>; after: ReadonlyMap<string, BoundSourceFacts>;
+  changes?: Readonly<{
+    before: ReadonlyMap<string, BoundSourceFacts>; after: ReadonlyMap<string, BoundSourceFacts>;
+    keys: ReadonlySet<string> | undefined;
+  }>;
   work_limit: number; memory_limit: number;
 }>): Readonly<{ unaffected: boolean; work: number; admitted_bytes: number }> {
   const scratchBytes = 512;
@@ -95,6 +122,18 @@ export function checkRetainedRelationFacts(input: Readonly<{
       if (node.guard.variable !== undefined) env.set(node.guard.variable, node.guard.variable);
       if (guardSourceFactDependency(node.guard, env, endpoints) !== undefined) throw stop;
     });
+    const changes = input.changes;
+    if (input.rows instanceof ObservedRelations && changes?.keys !== undefined
+      && changes.before === input.before && changes.after === input.after) {
+      let covered = true;
+      for (const id of changes.keys) {
+        charge(1);
+        const used = input.rows.hasEndpoint(id);
+        if (used === undefined) { covered = false; break; }
+        if (used) throw stop;
+      }
+      if (covered) return { unaffected: true, work, admitted_bytes: scratchBytes };
+    }
     for (const row of input.rows) {
       charge(4);
       // Target facts carry revision and interpretation identity; source facts can supply the revision fallback.

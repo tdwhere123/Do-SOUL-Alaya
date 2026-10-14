@@ -7,6 +7,7 @@ import { sourceFactEligible } from "../conditional-field/observers/observation-a
 type FactWriter = Readonly<{ has(id: string): boolean; set(id: string, facts: BoundSourceFacts): unknown }>;
 
 export class ObservedSourceFacts {
+  private changed: ((id: string) => void) | undefined;
   public constructor(public snapshot: PersistentStringMap<BoundSourceFacts> = new PersistentStringMap(), public bytes = 0) {}
   public has(id: string): boolean { return this.snapshot.has(id); }
   public set(id: string, facts: BoundSourceFacts): this {
@@ -14,10 +15,32 @@ export class ObservedSourceFacts {
     if (facts.source_lookup_reasons === undefined && before?.source_lookup_reasons !== undefined) {
       facts = { ...facts, source_lookup_reasons: before.source_lookup_reasons };
     }
+    if (before === facts) return this;
     this.bytes += Buffer.byteLength(JSON.stringify([id, facts]), "utf8")
       - (before === undefined ? 0 : Buffer.byteLength(JSON.stringify([id, before]), "utf8"));
     this.snapshot = this.snapshot.with(id, facts);
+    this.changed?.(id);
     return this;
+  }
+
+  /** Capture actual writes, including facts learned from rows later rejected by a caller. */
+  public captureChanges<T>(operation: () => T, limits: Readonly<{ work: number; bytes: number }>) {
+    const before = this.snapshot, previous = this.changed;
+    let keys: Set<string> | undefined = new Set(), work = 0, bytes = 0;
+    this.changed = (id) => {
+      previous?.(id);
+      if (keys === undefined) return;
+      if (work >= limits.work) { keys = undefined; return; }
+      work += 1;
+      if (keys.has(id)) return;
+      const retained = 32 + Buffer.byteLength(id, "utf8");
+      if (bytes + retained > limits.bytes) { keys = undefined; return; }
+      keys.add(id); bytes += retained;
+    };
+    try {
+      const value = operation();
+      return { value, changes: { before, after: this.snapshot, keys: keys as ReadonlySet<string> | undefined }, work, bytes };
+    } finally { this.changed = previous; }
   }
 }
 
