@@ -7,10 +7,11 @@ import { isAuthorityRevision } from "../../extraction/authority/receipt.js";
 
 /** Offline support for the reviewed local capture protocol, not an authorization to execute Recall. */
 export const ORDINARY_RECALL_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v1";
+export const ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT = "ordinary-recall-local-capture-v2";
 export const ORDINARY_RECALL_PUBLIC_SEMANTICS = "conditional-field-source-only-v1";
-export const OrdinaryRecallProtocolVersionSchema = z.enum(["14.1.0", "15.0.0", "16.0.0", "17.0.0"]);
+export const OrdinaryRecallProtocolVersionSchema = z.enum(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0"]);
 
-/** Versions 15/16/17 change semantic catalog/query schemas; this source-only public contract is unchanged. */
+/** Historical captures retain their original qualification; version 18 records explicit source representation. */
 export function ordinaryRecallReaderProtocolVersion() {
   const entry = fileURLToPath(import.meta.resolve("@do-soul/alaya-protocol"));
   const manifest = JSON.parse(readFileSync(resolve(dirname(entry), "../package.json"), "utf8")) as { version?: unknown };
@@ -38,19 +39,37 @@ export const OrdinaryRecallCaptureConfigSchema = z.object({
   }).passthrough(),
   provider_calls: z.literal(0), consumer_calls: z.literal(0)
 }).passthrough().superRefine((config, context) => {
-  const request = config.first_request;
-  if (request.result_kind_view !== "source_only" || request.enumeration_policy !== "canonical" ||
-      request.protocol_version !== 1 || request.supports_source_evidence !== true ||
-      request.continuation != null || request.payload_continuation != null ||
-      request.scope_class !== "project" || !Time.safeParse(request.source_observed_at).success ||
-      config.expected_target.workspace_id !== config.workspace_id || config.expected_target.root_kind !== "source_record" ||
-      config.expected_target.span !== undefined ||
-      config.implementation_revision !== config.candidate &&
-        !config.implementation_revision.startsWith(`git-worktree-v1:${config.candidate}:`)) {
+  if (!validInitialContract(config) || config.expected_target.workspace_id !== config.workspace_id ||
+      config.expected_target.root_kind !== "source_record" || config.expected_target.span !== undefined) {
     context.addIssue({ code: "custom", message: "unsupported ordinary Recall producer or initial public contract" });
   }
 });
 export type OrdinaryRecallCaptureConfig = z.infer<typeof OrdinaryRecallCaptureConfigSchema>;
+
+const { expected_target: _singleTarget, expected_source_bytes: _singleSourceBytes, ...CaptureShape } = OrdinaryRecallCaptureConfigSchema.shape;
+export const OrdinaryRecallMultiSourceConfigSchema = z.object({ ...CaptureShape,
+  capture_contract: z.literal(ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT),
+  protocol_package_version: z.literal("18.0.0"),
+  expected_target: z.never().optional(), expected_source_bytes: z.never().optional()
+}).passthrough().superRefine((config, context) => {
+  if (!validInitialContract(config)) {
+    context.addIssue({ code: "custom", message: "unsupported multi-source Recall producer or initial public contract" });
+  }
+});
+export type OrdinaryRecallMultiSourceConfig = z.infer<typeof OrdinaryRecallMultiSourceConfigSchema>;
+export const OrdinaryRecallArchiveConfigSchema = z.discriminatedUnion("capture_contract", [
+  OrdinaryRecallCaptureConfigSchema, OrdinaryRecallMultiSourceConfigSchema
+]);
+export type OrdinaryRecallArchiveConfig = z.infer<typeof OrdinaryRecallArchiveConfigSchema>;
+
+function validInitialContract(config: Pick<OrdinaryRecallCaptureConfig, "first_request" | "implementation_revision" | "candidate">): boolean {
+  const request = config.first_request;
+  return request.result_kind_view === "source_only" && request.enumeration_policy === "canonical" &&
+    request.protocol_version === 1 && request.supports_source_evidence === true &&
+    request.continuation == null && request.payload_continuation == null &&
+    request.scope_class === "project" && Time.safeParse(request.source_observed_at).success &&
+    (config.implementation_revision === config.candidate || config.implementation_revision.startsWith(`git-worktree-v1:${config.candidate}:`));
+}
 
 export const OrdinaryRecallPreparationSchema = z.object({
   status: z.literal("prepared_not_executed"), prepared_at: Time,
@@ -90,6 +109,11 @@ export const OrdinaryRecallObservationSchema = z.object({
   trusted_principal: OrdinaryRecallContextSchema.nullable(), query_identity: z.array(z.unknown()).nullable(),
   remaining_tail_bytes: Count
 }).strict();
+export const OrdinaryRecallSourceStateSchema = z.object({ target: SourceEvidenceTargetSchema,
+  contiguous_delivered_bytes: Count, source_complete: z.boolean(), remaining_tail_bytes: Count }).strict();
+export const OrdinaryRecallMultiSourceObservationSchema = OrdinaryRecallObservationSchema.omit({
+  contiguous_delivered_bytes: true, remaining_tail_bytes: true
+}).extend({ source_states: z.array(OrdinaryRecallSourceStateSchema), membership_complete: z.boolean() }).strict();
 export const OrdinaryRecallProcessResultSchema = z.object({
   status: z.enum(["closed", "failed_or_interrupted"]),
   close: z.object({ code: z.number().int().nullable(), signal: z.string().nullable() }).strict(),

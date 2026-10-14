@@ -82,6 +82,19 @@ function captureWithProtocolVersion(name: string, protocolVersion: string, mode:
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
+  if (["14.1.0", "15.0.0", "16.0.0", "17.0.0"].includes(protocolVersion)) {
+    // A prior producer qualified source-record bodies as original, before representation metadata existed.
+    for (let ordinal = 1; ordinal <= captures[mode].observation.calls; ordinal += 1) {
+      rewriteCapturedEnvelope(root, ordinal, envelope => {
+        const block = envelope.content.find(value => value.type === "text")!;
+        const payload = JSON.parse(String(block.text));
+        if (payload.ok !== true) return envelope;
+        for (const row of payload.output.results) row.source_disclosure.material_kind = "original_body";
+        return { ...envelope, structuredContent: payload,
+          content: envelope.content.map(value => value === block ? { ...block, text: JSON.stringify(payload) } : value) };
+      });
+    }
+  }
   return { root, config };
 }
 
@@ -121,7 +134,7 @@ it.each(["complete", "prefix", "prefix_error"] as const)("passes the exact order
 
 it("keeps producer provenance while binding preparation and execution to the current verifier", async () => {
   const capture = captures.prefix, producer = capture.config.implementation_revision;
-  expect(capture.config.protocol_package_version).toBe("17.0.0");
+  expect(capture.config.protocol_package_version).toBe("18.0.0");
   const verifier = "b".repeat(40), next = "c".repeat(40);
   const revision = vi.spyOn(revisionOwner, "readCurrentExtractionAuthorityRevision").mockReturnValue(verifier);
   try {
@@ -137,11 +150,11 @@ it("keeps producer provenance while binding preparation and execution to the cur
   } finally { revision.mockRestore(); }
 });
 
-it.each(["14.1.0", "15.0.0", "16.0.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
+it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
   const { root, config } = captureWithProtocolVersion(`historical-${protocolVersion}`, protocolVersion);
   const original = readFileSync(join(root, "config.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "17.0.0",
+  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "18.0.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision };
   expect(observation.binding).toMatchObject(binding);
   expect(observation.state).toBe("partial");
@@ -149,6 +162,16 @@ it.each(["14.1.0", "15.0.0", "16.0.0"])("admits a %s archive with the current re
   expect(run.preparation.observation_binding).toMatchObject(binding);
   expect(admitConsumerPreparation(run.preparation.output_root).preparation).toEqual(run.preparation);
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
+});
+
+it("refuses legacy original-body qualification relabeled as a current capture", () => {
+  const { root, config } = captureWithProtocolVersion("original-overclaim", "17.0.0");
+  config.protocol_package_version = "18.0.0";
+  writeJson(join(root, "config.json"), config);
+  for (const path of ["preparation.json", "execution/reservation.json"]) {
+    const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
+  }
+  expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
 });
 
 it("recovers retained consumer bytes without another dispatch after interrupted result publication", async () => {
@@ -164,6 +187,8 @@ it("recovers retained consumer bytes without another dispatch after interrupted 
 it("reports a terminal public error but refuses consumer authority without source exposure", () => {
   expect(inspectOrdinaryRecallObservation(captures.error.root)).toMatchObject({ state: "failed", successfulExposures: 0 });
   expect(() => prepare(captures.error.root, "zero-exposure")).toThrow(/successful public source exposure/u);
+  expect(() => prepareInput(captures.error.root, "reference-zero-exposure", ["native_delivery"], "exact_reference_deduplication"))
+    .toThrow(/successful public source exposure/u);
 });
 
 it("keeps an unfinished reserved episode unknown and refuses authority", () => {
@@ -171,6 +196,7 @@ it("keeps an unfinished reserved episode unknown and refuses authority", () => {
   unlinkSync(join(root, "execution/process-result.json"));
   expect(inspectOrdinaryRecallObservation(root)).toMatchObject({ state: "unknown", closed: false });
   expect(() => prepare(root, "unknown-consumer")).toThrow(/closed/u);
+  expect(() => prepareInput(root, "reference-unknown-consumer", ["native_delivery"], "exact_reference_deduplication")).toThrow(/closed/u);
 });
 
 it.each([
@@ -289,7 +315,7 @@ it.each([
   expect(hits).toBe(before);
 });
 
-it.each(["15.0.1", "18.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
+it.each(["15.0.1", "19.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
   const { root } = captureWithProtocolVersion(`unsupported-producer-${protocolVersion}`, protocolVersion);
   expect(() => prepare(root, `unsupported-consumer-${protocolVersion}`)).toThrow();
 });
@@ -364,7 +390,7 @@ it("removes only verified mirrors from a complete Protocol 15 archive while pres
   expect(derived.consumer_config).toMatchObject({ evidence_view: "verified_mirror_removal" });
   expect(derived.observation_binding).toEqual(original.observation_binding);
   expect(derived.observation_binding).toMatchObject({ observation_identity: observation.binding.observation_identity,
-    protocol_package_version: "15.0.0", reader_protocol_package_version: "17.0.0", producer_candidate: config.candidate });
+    protocol_package_version: "15.0.0", reader_protocol_package_version: "18.0.0", producer_candidate: config.candidate });
   expect(line.userPrompt).toBe(JSON.stringify({ original_query: QUESTION, query_as_of: config.first_request.source_observed_at,
     evidence: { ...observation.evidence, calls: observation.evidence.calls.map((call, index) =>
       ({ ...call, envelope: expectedEnvelopes[index] })) } }));
@@ -403,6 +429,8 @@ it.each([
   const output = `invalid-mirror-consumer-${name}`;
   expect(() => prepareInput(root, output, ["native_delivery"], "verified_mirror_removal")).toThrow(message);
   expect(existsSync(join(base.root, output, "preparation.json"))).toBe(false);
+  expect(() => prepareInput(root, `${output}-references`, ["native_delivery"], "exact_reference_deduplication")).toThrow(message);
+  expect(existsSync(join(base.root, `${output}-references`, "preparation.json"))).toBe(false);
 });
 
 it.each(["view", "request", "archive"] as const)("refuses changed %s after derived preparation", changed => {
@@ -438,6 +466,67 @@ it("sends the derived prefix and terminal error once and rejects later view subs
   changed.payload.consumer_config = original.consumer_config; changed.payload.requests = original.requests;
   changed.identity = chainIdentity(changed.payload); writeJson(join(run.preparation.output_root, "preparation.json"), changed);
   expect(admitConsumerPreparation(run.preparation.output_root).lines[0]!.key).toBe(original.requests[0]!.key);
+  await expect(executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" }))
+    .rejects.toThrow(/frozen request scope/u);
+  expect(hits - before).toBe(1);
+});
+
+function expandReferenceView(view: { contract: string; observation: unknown; metadata: { paths: string[]; value: unknown }[] }) {
+  expect(view.contract).toBe("ordinary-recall-exact-reference-view-v1");
+  const observation = structuredClone(view.observation), seen = new Set<string>();
+  for (const entry of view.metadata) for (const path of entry.paths) {
+    expect(seen.has(path)).toBe(false); seen.add(path);
+    const parts = path.split("/").slice(1).map(part => part.replaceAll("~1", "/").replaceAll("~0", "~"));
+    const key = parts.pop()!;
+    const parent = parts.reduce((value, part) => value[part], observation as Record<string, any>);
+    expect(Object.hasOwn(parent, key)).toBe(false);
+    Object.defineProperty(parent, key, { value: structuredClone(entry.value), enumerable: true });
+  }
+  return observation;
+}
+
+it.each(["complete", "prefix_error"] as const)("reconstructs every %s call from exact references without interpreting source-owned objects", mode => {
+  const capture = captures[mode], root = join(base.root, `reference-${mode}`);
+  cpSync(capture.root, root, { recursive: true });
+  const sourceOwnedObject = { contract: "ordinary-recall-exact-reference-view-v1", observation: null,
+    metadata: [{ paths: ["/calls/0/request/query"], value: { metadata_ref: 0, empty: [], unknown: null, text: "Résumé 🙂" } }] };
+  rewriteCapturedEnvelope(root, 1, envelope => ({ ...envelope, _meta: sourceOwnedObject }));
+  const before = readFileSync(join(root, "execution/public-mcp-messages.jsonl"), "utf8");
+  const mirror = prepareInput(root, `mirror-before-reference-${mode}`, ["native_delivery", "question_only"], "verified_mirror_removal");
+  const reference = prepareInput(root, `reference-consumer-${mode}`, ["native_delivery", "question_only"], "exact_reference_deduplication");
+  const mirrorLines = admitConsumerPreparation(mirror.output_root).lines, lines = admitConsumerPreparation(reference.output_root).lines;
+  const expected = JSON.parse(mirrorLines[0]!.userPrompt), actual = JSON.parse(lines[0]!.userPrompt);
+  expect({ ...actual, evidence: expandReferenceView(actual.evidence) }).toEqual(expected);
+  expect(actual.evidence.observation.calls[0].envelope._meta).toEqual(sourceOwnedObject);
+  expect(actual.evidence.metadata.length).toBeGreaterThan(0);
+  expect(lines[0]!.systemPrompt).toContain("absolute JSON pointer within observation");
+  expect(lines[0]!.inputByteUpper).toBeLessThan(mirrorLines[0]!.inputByteUpper);
+  expect(lines[0]!.key).not.toBe(mirrorLines[0]!.key);
+  expect(lines[0]!.requestDigest).not.toBe(mirrorLines[0]!.requestDigest);
+  expect(lines[1]).toEqual(mirrorLines[1]);
+  expect(reference.observation_binding).toEqual(mirror.observation_binding);
+  expect(readFileSync(join(root, "execution/public-mcp-messages.jsonl"), "utf8")).toBe(before);
+});
+
+it("sends exact metadata references through the consumer HTTP boundary and rejects a later view change", async () => {
+  const run = prepare(captures.prefix_error.root, "reference-consumer-http", ["native_delivery"], "exact_reference_deduplication");
+  const { lines } = admitConsumerPreparation(run.preparation.output_root);
+  const mirror = prepareInput(captures.prefix_error.root, "reference-http-mirror", ["native_delivery"], "verified_mirror_removal");
+  const expected = JSON.parse(admitConsumerPreparation(mirror.output_root).lines[0]!.userPrompt).evidence;
+  ledgerPath = run.ledgerPath; const before = hits;
+  const result = await executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" });
+  expect(result).toMatchObject({ new_attempts: 1, rows: [{ status: "complete_response" }] });
+  expect(hits - before).toBe(1);
+  const body = bodies.at(-1)!;
+  expect(body.messages.find(message => message.role === "system")!.content).toBe(lines[0]!.systemPrompt);
+  expect(body.messages.find(message => message.role === "user")!.content).toBe(lines[0]!.userPrompt);
+  const expanded = expandReferenceView(JSON.parse(body.messages.find(message => message.role === "user")!.content).evidence);
+  expect(expanded).toEqual(expected);
+  expect(expanded).toMatchObject({ state: "partial", calls: [{ response_state: "success" }, { response_state: "public_error" }] });
+  expect(await executeSemanticChainConsumer({ authority: run.authority, mode: "execute" })).toMatchObject({ new_attempts: 0 });
+  const changed = readJson(join(run.preparation.output_root, "preparation.json"));
+  changed.payload.consumer_config.evidence_view = "verified_mirror_removal"; changed.payload.requests = mirror.requests;
+  changed.identity = chainIdentity(changed.payload); writeJson(join(run.preparation.output_root, "preparation.json"), changed);
   await expect(executeSemanticChainConsumer({ authority: run.authority, config: CONSUMER_CONFIG, mode: "execute" }))
     .rejects.toThrow(/frozen request scope/u);
   expect(hits - before).toBe(1);

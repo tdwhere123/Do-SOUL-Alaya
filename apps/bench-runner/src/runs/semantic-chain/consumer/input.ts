@@ -9,7 +9,7 @@ import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "..
 import { PROVIDER_REQUEST_TIMEOUT_POLICY, providerRequestTimeout, type ProviderRequestLine } from "../../provider-request/execution.js";
 import type { ExtractionTransportProvenance } from "../../extraction/transport-route.js";
 import { admitOrdinaryRecallObservation } from "./ordinary-recall.js";
-import { ORDINARY_RECALL_CAPTURE_CONTRACT, ORDINARY_RECALL_PUBLIC_SEMANTICS,
+import { ORDINARY_RECALL_CAPTURE_CONTRACT, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT, ORDINARY_RECALL_PUBLIC_SEMANTICS,
   OrdinaryRecallProtocolVersionSchema } from "./ordinary-recall-contract.js";
 
 export const TASK_CONSUMER_KIND = "task_consumer" as const;
@@ -23,7 +23,7 @@ export const ConsumerConfigSchema = z.object({
 }).strict();
 export type ConsumerConfig = z.infer<typeof ConsumerConfigSchema>;
 const OrdinaryConsumerConfigSchema = ConsumerConfigSchema.extend({
-  evidence_view: z.enum(["original_public_envelopes", "verified_mirror_removal"]).optional()
+  evidence_view: z.enum(["original_public_envelopes", "verified_mirror_removal", "exact_reference_deduplication"]).optional()
 }).strict();
 type OrdinaryConsumerConfig = z.infer<typeof OrdinaryConsumerConfigSchema>;
 
@@ -48,6 +48,11 @@ export const CONSUMER_SYSTEM_PROMPT = [
   "A useful qualified partial answer is permitted. Mark your own task_completion as complete, partial or unresolved.",
   "Return only JSON with answer, task_completion and remaining_conditions. Your report remains unreviewed."
 ].join("\n");
+const REFERENCE_VIEW_PROMPT = [
+  "An ordinary-recall-exact-reference-view-v1 evidence object is a lossless presentation of its observation after verified text-mirror removal.",
+  "For each metadata entry, insert its exact value at every listed absolute JSON pointer within observation; only those fields were removed.",
+  "References preserve each separate occurrence, call order, qualifications and states. They do not combine evidence or establish missing facts."
+].join("\n");
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const SourceSchema = z.object({ chain_root: z.string().min(1), replay_path: z.string().min(1), query_key: Digest }).strict();
@@ -69,7 +74,7 @@ const OrdinaryConsumerPreparationSchema = LibraryConsumerPreparationSchema.omit(
   consumer_config: OrdinaryConsumerConfigSchema,
   observation_binding: z.object({ observation_identity: Digest, producer_revision: z.string().min(1),
     producer_candidate: z.string().regex(/^[a-f0-9]{40}$/u),
-    capture_contract: z.literal(ORDINARY_RECALL_CAPTURE_CONTRACT), public_semantics: z.literal(ORDINARY_RECALL_PUBLIC_SEMANTICS),
+    capture_contract: z.enum([ORDINARY_RECALL_CAPTURE_CONTRACT, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT]), public_semantics: z.literal(ORDINARY_RECALL_PUBLIC_SEMANTICS),
     protocol_package_version: OrdinaryRecallProtocolVersionSchema, reader_protocol_package_version: OrdinaryRecallProtocolVersionSchema,
     verification_revision: z.string().min(1) }).strict()
 }).strict();
@@ -148,9 +153,11 @@ function materializeOrdinary(source: z.infer<typeof OrdinaryConsumerSourceSchema
   const root = assertSeparateConsumerOutputRoot(outputRoot, admitted.protectedPaths);
   const original_query = admitted.config.first_request.query;
   const query_as_of = admitted.config.first_request.source_observed_at!;
-  const evidence = ordinaryConsumerEvidenceView(admitted.evidence, config.evidence_view);
+  const mirrored = ordinaryConsumerEvidenceView(admitted.evidence, config.evidence_view);
+  const evidence = config.evidence_view === "exact_reference_deduplication" ? exactMetadataReferenceView(mirrored) : mirrored;
   const lines = config.arms.map(arm => consumerLine(config, arm, { original_query, query_as_of,
-    evidence: arm === "native_delivery" ? evidence : null }));
+    evidence: arm === "native_delivery" ? evidence : null },
+  arm === "native_delivery" && config.evidence_view === "exact_reference_deduplication" ? REFERENCE_VIEW_PROMPT : undefined));
   const preparation = OrdinaryConsumerPreparationSchema.parse({ contract: "ordinary-recall-consumer-preparation-v1",
     provider_calls: 0, output_root: root, source, consumer_config: config, original_query, query_as_of,
     request_timeout: providerRequestTimeout(config.max_output_tokens), observation_binding: admitted.binding,
@@ -162,7 +169,7 @@ function materializeOrdinary(source: z.infer<typeof OrdinaryConsumerSourceSchema
 /** A consumer presentation derived after archive admission; it is not another native envelope. */
 function ordinaryConsumerEvidenceView(evidence: ReturnType<typeof admitOrdinaryRecallObservation>["evidence"],
   view: OrdinaryConsumerConfig["evidence_view"]) {
-  if (view !== "verified_mirror_removal") return evidence;
+  if (view !== "verified_mirror_removal" && view !== "exact_reference_deduplication") return evidence;
   return { ...evidence, calls: evidence.calls.map(call => {
     const envelope = call.envelope;
     if (envelope === null || envelope.structuredContent === undefined) return call;
@@ -174,6 +181,46 @@ function ordinaryConsumerEvidenceView(evidence: ReturnType<typeof admitOrdinaryR
       return metadata;
     }) } };
   }) };
+}
+
+/** Paths are out-of-band: no source-provided object can be mistaken for a reference marker. */
+function exactMetadataReferenceView(evidence: ReturnType<typeof ordinaryConsumerEvidenceView>) {
+  const observation = structuredClone(evidence);
+  type Slot = { owner: Record<string, unknown>; key: string; path: string };
+  const groups = new Map<string, { value: unknown; slots: Slot[] }>();
+  const collect = (owner: unknown, key: string, path: string) => {
+    if (owner === null || typeof owner !== "object" || Array.isArray(owner)) return;
+    const object = owner as Record<string, unknown>, value = object[key];
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) return;
+    const group = groups.get(encoded) ?? { value, slots: [] };
+    group.slots.push({ owner: object, key, path }); groups.set(encoded, group);
+  };
+  for (const [ordinal, call] of observation.calls.entries()) {
+    const path = `/calls/${ordinal}`;
+    collect(call.request, "query", `${path}/request/query`);
+    collect(call.request, "continuation", `${path}/request/continuation`);
+    if (call.response_state !== "success") continue;
+    const output = (call.envelope?.structuredContent as {
+      output?: { index?: unknown; results?: unknown[] };
+    } | undefined)?.output;
+    const outputPath = `${path}/envelope/structuredContent/output`;
+    collect(output?.index, "continuation", `${outputPath}/index/continuation`);
+    collect(output?.index, "completeness", `${outputPath}/index/completeness`);
+    for (const [index, result] of (output?.results ?? []).entries()) {
+      collect(result, "source_disclosure", `${outputPath}/results/${index}/source_disclosure`);
+    }
+  }
+  const metadata: { paths: string[]; value: unknown }[] = [];
+  for (const [encoded, group] of groups) {
+    if (group.slots.length < 2) continue;
+    const entry = { paths: group.slots.map(slot => slot.path), value: group.value };
+    // Count the complete side-table entry; small or merely similar values stay inline.
+    if (Buffer.byteLength(JSON.stringify(entry)) + 1 >= Buffer.byteLength(encoded) * group.slots.length) continue;
+    metadata.push(entry);
+    for (const slot of group.slots) delete slot.owner[slot.key];
+  }
+  return { contract: "ordinary-recall-exact-reference-view-v1" as const, observation, metadata };
 }
 
 function assertConsumerOutputRoot(outputRoot: string, source: z.infer<typeof SourceSchema>,
@@ -193,11 +240,12 @@ function assertSeparateConsumerOutputRoot(outputRoot: string, protectedPaths: re
 
 function consumerLine(config: ConsumerConfig, arm: ConsumerLine["arm"], input: {
   original_query: string; query_as_of: string; evidence: unknown;
-}): ConsumerLine {
+}, presentationPrompt?: string): ConsumerLine {
   if (!isStepSemanticRequestProfile(config.request_profile) || config.model !== stepSemanticRequestModel(config.request_profile)) {
     throw new AlayaError("VALIDATION", "consumer model must match its native chat request profile");
   }
-  const systemPrompt = CONSUMER_SYSTEM_PROMPT, userPrompt = JSON.stringify(input);
+  const systemPrompt = presentationPrompt === undefined ? CONSUMER_SYSTEM_PROMPT : `${CONSUMER_SYSTEM_PROMPT}\n${presentationPrompt}`;
+  const userPrompt = JSON.stringify(input);
   const responseJsonSchema = consumerResponseJsonSchema();
   const wire = bindSemanticProviderRequest({ model: config.model, requestProfile: config.request_profile,
     providerUrl: config.provider_url, apiKey: null },

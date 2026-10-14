@@ -11,13 +11,14 @@ import { hashRegularFileNoFollow } from "../../snapshot/bound-file.js";
 import { FirstExposurePageSchema, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
 import { ConditionalFieldExecutionReceiptSchema, executionBindingMismatch } from "../../measurement/conditional-field-request-binding.js";
 import {
-  OrdinaryRecallCaptureConfigSchema, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema,
+  OrdinaryRecallArchiveConfigSchema, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT, OrdinaryRecallContextSchema, OrdinaryRecallEnvelopeSchema,
   OrdinaryRecallObservationSchema, OrdinaryRecallPreparationSchema, OrdinaryRecallProcessResultSchema,
   OrdinaryRecallRequestRecordSchema, OrdinaryRecallReservationSchema, OrdinaryRecallShutdownSchema,
-  OrdinaryRecallWireRecordSchema, ordinaryRecallReaderProtocolVersion, type OrdinaryRecallCaptureConfig, type OrdinaryRecallContext,
+  OrdinaryRecallWireRecordSchema, OrdinaryRecallMultiSourceObservationSchema, ordinaryRecallReaderProtocolVersion, type OrdinaryRecallArchiveConfig, type OrdinaryRecallContext,
   type OrdinaryRecallEnvelope, type OrdinaryRecallRequestRecord, type OrdinaryRecallWireRecord
 } from "./ordinary-recall-contract.js";
-import { verifyOrdinaryRecallDelivery } from "./ordinary-recall-delivery.js";
+import { terminal, verifyOrdinaryRecallDelivery } from "./ordinary-recall-delivery.js";
+import { verifyOrdinaryMultiSourceDelivery } from "./ordinary-multi-source-delivery.js";
 
 export type CapturedOrdinaryRecallCall = Readonly<{
   request: OrdinaryRecallRequestRecord; envelope: OrdinaryRecallEnvelope | null;
@@ -30,7 +31,7 @@ const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 /** The caller selects a trusted local operator archive; this is not a public arbitrary-JSON admission API. */
 export function inspectOrdinaryRecallObservation(observationRoot: string) {
   const archive = new CaptureArchive(observationRoot);
-  const config = OrdinaryRecallCaptureConfigSchema.parse(archive.json("config.json"));
+  const config = OrdinaryRecallArchiveConfigSchema.parse(archive.json("config.json"));
   const preparation = OrdinaryRecallPreparationSchema.parse(archive.json("preparation.json"));
   const reservationValue = archive.json("execution/reservation.json", true);
   const reservation = reservationValue === undefined ? undefined : OrdinaryRecallReservationSchema.parse(reservationValue);
@@ -43,23 +44,25 @@ export function inspectOrdinaryRecallObservation(observationRoot: string) {
   const wire = readWire(archive);
   const calls = readCalls(archive, config, wire, reservation?.reserved_at);
   const observationValue = archive.json("execution/observation-final-state.json", true);
-  const observation = observationValue === undefined ? undefined : OrdinaryRecallObservationSchema.parse(observationValue);
+  const { observation, delivery } = readDelivery(config, calls, observationValue);
   const returned = archive.json("execution/observation.json", true);
   if (returned !== undefined) same(returned, observation, "returned observation differs from its final state");
   const closure = readClosure(archive, config, calls.length);
   if (reservation === undefined && calls.length !== 0) conflict("public calls lack their episode reservation");
-  const delivery = verifyOrdinaryRecallDelivery(config, calls, observation);
   const closed = reservation !== undefined && observation !== undefined && closure === "closed";
   const state = closure === "failed" ? "failed" as const
     : !closed || calls.some(call => call.responseState === "unknown") ? "unknown" as const
     : delivery.complete ? "complete" as const
       : delivery.successfulExposures > 0 ? "partial" as const
-        : calls.some(call => call.responseState !== "success") ? "failed" as const : "empty" as const;
-  const evidence = { contract: "ordinary-recall-public-observation-v1" as const,
+        : calls.some(call => call.responseState !== "success" || call.output?.index !== undefined && terminal(call.output.index))
+          ? "failed" as const : completeEmptyMembership(calls) ? "empty" as const : "unknown" as const;
+  const evidence = { contract: config.capture_contract === ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT
+    ? "ordinary-recall-public-observation-v2" as const : "ordinary-recall-public-observation-v1" as const,
     calls: calls.map(call => ({ request: call.request.arguments, envelope: call.envelope,
       response_state: call.responseState, transport_error: call.transportError })),
     state, stop_reason: observation?.stop_reason ?? "capture_incomplete" };
   return { config, state, closed, evidence, successfulExposures: delivery.successfulExposures,
+    sources: "sources" in delivery ? delivery.sources : undefined,
     firstExposure: delivery.firstExposure, protectedPaths: archive.protectedPaths,
     binding: { observation_identity: chainIdentity(archive.identities),
       producer_revision: config.implementation_revision, producer_candidate: config.candidate,
@@ -67,6 +70,21 @@ export function inspectOrdinaryRecallObservation(observationRoot: string) {
       protocol_package_version: config.protocol_package_version,
       reader_protocol_package_version: ordinaryRecallReaderProtocolVersion(),
       verification_revision: readCurrentExtractionAuthorityRevision() } };
+}
+
+function completeEmptyMembership(calls: readonly CapturedOrdinaryRecallCall[]): boolean {
+  const index = calls.filter(call => call.request.phase === "membership").at(-1)?.output?.index;
+  return index?.completeness.logical_index === "complete" && index.completeness.transport === "complete" &&
+    calls.every(call => call.output?.index?.entries.length === 0 && call.output.results.length === 0);
+}
+
+function readDelivery(config: OrdinaryRecallArchiveConfig, calls: readonly CapturedOrdinaryRecallCall[], value: unknown) {
+  if (config.capture_contract === ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT) {
+    const observation = value === undefined ? undefined : OrdinaryRecallMultiSourceObservationSchema.parse(value);
+    return { observation, delivery: verifyOrdinaryMultiSourceDelivery(config, calls, observation) };
+  }
+  const observation = value === undefined ? undefined : OrdinaryRecallObservationSchema.parse(value);
+  return { observation, delivery: verifyOrdinaryRecallDelivery(config, calls, observation) };
 }
 
 export function admitOrdinaryRecallObservation(observationRoot: string) {
@@ -77,7 +95,7 @@ export function admitOrdinaryRecallObservation(observationRoot: string) {
   return observation;
 }
 
-function verifyProducer(config: OrdinaryRecallCaptureConfig, preparation: z.infer<typeof OrdinaryRecallPreparationSchema>,
+function verifyProducer(config: OrdinaryRecallArchiveConfig, preparation: z.infer<typeof OrdinaryRecallPreparationSchema>,
   reservation: z.infer<typeof OrdinaryRecallReservationSchema> | undefined, operatorDigest: string): void {
   if (preparation.candidate !== config.candidate || preparation.tree !== config.tree ||
       preparation.native_implementation_revision !== config.implementation_revision ||
@@ -91,7 +109,7 @@ function verifyProducer(config: OrdinaryRecallCaptureConfig, preparation: z.infe
   }
 }
 
-function readClosure(archive: CaptureArchive, config: OrdinaryRecallCaptureConfig,
+function readClosure(archive: CaptureArchive, config: OrdinaryRecallArchiveConfig,
   callCount: number): "closed" | "failed" | "unknown" {
   const resultValue = archive.json("execution/process-result.json", true);
   const shutdownValue = archive.json("execution/shutdown.json", true);
@@ -123,7 +141,7 @@ function readWire(archive: CaptureArchive): OrdinaryRecallWireRecord[] {
   return records;
 }
 
-function readCalls(archive: CaptureArchive, config: OrdinaryRecallCaptureConfig,
+function readCalls(archive: CaptureArchive, config: OrdinaryRecallArchiveConfig,
   wire: readonly OrdinaryRecallWireRecord[], reservedAt: string | undefined): CapturedOrdinaryRecallCall[] {
   const execution = join(archive.root, "execution");
   const names = boundedArtifactEntryExists(execution) ? readdirSync(execution).filter(name => /^\d+-request\.json$/u.test(name)).sort() : [];
@@ -162,7 +180,7 @@ function readCalls(archive: CaptureArchive, config: OrdinaryRecallCaptureConfig,
   });
 }
 
-function verifyNativeDiagnostics(value: unknown, config: OrdinaryRecallCaptureConfig, output: SoulMemorySearchResponse | null): void {
+function verifyNativeDiagnostics(value: unknown, config: OrdinaryRecallArchiveConfig, output: SoulMemorySearchResponse | null): void {
   if (value === undefined) return;
   const diagnostics = z.object({ receipts: z.array(z.unknown()).max(1) }).passthrough().parse(value);
   for (const retained of diagnostics.receipts) {

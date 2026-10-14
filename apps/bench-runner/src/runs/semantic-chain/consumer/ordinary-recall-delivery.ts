@@ -3,12 +3,12 @@ import { z } from "zod";
 import { StorageDatabase } from "@do-soul/alaya-storage";
 import { authorizeSemanticScope, fieldContractSha256, projectSourceDisclosure, resolveCurrentSource } from "@do-soul/alaya-core";
 import { AlayaError, canonicalJson, sameSourceEvidenceRoot, sourceRecallTarget,
-  type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+  type SoulMemorySearchResponse, type SourceRecordIdentity, type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
 import { withCachedSqliteSnapshot } from "../../snapshot/bound-file.js";
 import { admitEmittedSourcePreview } from "../replay.js";
 import { exposureSlots, firstExposureMismatch, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
-import { OrdinaryRecallObservationSchema, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";
+import { OrdinaryRecallObservationSchema, type OrdinaryRecallArchiveConfig, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";
 import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
 
 type Observation = z.infer<typeof OrdinaryRecallObservationSchema>;
@@ -24,21 +24,38 @@ export function verifyOrdinaryRecallDelivery(config: OrdinaryRecallCaptureConfig
       try {
         connection.pragma("query_only = ON");
         const stores = sourceLookupStores(new StorageDatabase(databasePath, connection));
-        const retained = stores.getStoredRecord(config.workspace_id, config.expected_target.root_id);
-        if (retained === null) conflict("expected source is absent from the sealed snapshot");
-        const source = resolveCurrentSource(stores, config.workspace_id, { artifact_key: retained.record.source_id,
-          source_corpus_digest: config.expected_target.content_digest.replace(/^sha256:/u, "") }, fieldContractSha256);
-        same(config.expected_target, sourceRecallTarget({ workspace_id: source.record.workspace_id, root_kind: "source_record",
-          root_id: source.record.identity, source_version: source.record.source_version,
-          content_digest: source.record.content_digest, evidence_object_id: source.record.evidence_object_id }),
-        "expected source identity changed");
-        authorizeSemanticScope(source.record.scope_class, ["project"]);
+        const source = resolveCapturedSource(config, config.expected_target, stores);
         if (Buffer.byteLength(source.content_bytes) !== config.expected_source_bytes) conflict("complete source length differs from the capture");
-        const disclosure = projectSourceDisclosure({ material_kind: "original_body",
-          evaluated_as_of: config.first_request.source_observed_at!, source: source.record });
+        const disclosure = capturedSourceDisclosure(config, source.record);
         return verifySequence(config, calls, observation, source.content_bytes, disclosure);
       } finally { connection.close(); }
     } });
+}
+
+/** Both archive versions bind each emitted root to the same sealed current-source authority. */
+export function resolveCapturedSource(config: OrdinaryRecallArchiveConfig, target: SourceEvidenceTarget,
+  stores: ReturnType<typeof sourceLookupStores>) {
+  if (target.workspace_id !== config.workspace_id || target.root_kind !== "source_record") conflict("public source escaped its sealed workspace or root kind");
+  const retained = stores.getStoredRecord(config.workspace_id, target.root_id);
+  if (retained === null) conflict("expected source is absent from the sealed snapshot");
+  const source = resolveCurrentSource(stores, config.workspace_id, { artifact_key: retained.record.source_id,
+    source_corpus_digest: target.content_digest.replace(/^sha256:/u, "") }, fieldContractSha256);
+  const { span: _span, ...root } = target;
+  same(root, sourceRecallTarget({ workspace_id: source.record.workspace_id, root_kind: "source_record",
+    root_id: source.record.identity, source_version: source.record.source_version,
+    content_digest: source.record.content_digest, evidence_object_id: source.record.evidence_object_id }), "expected source identity changed");
+  authorizeSemanticScope(source.record.scope_class, ["project"]);
+  return source;
+}
+
+/** Offline compatibility for admitted 14.1–17 captures; remove when those producer formats retire. */
+export function capturedSourceDisclosure(config: OrdinaryRecallArchiveConfig, source: SourceRecordIdentity) {
+  const disclosure = projectSourceDisclosure({ material_kind: "original_body",
+    evaluated_as_of: config.first_request.source_observed_at!, source });
+  if (config.protocol_package_version === "18.0.0") return disclosure;
+  if (source.source_representation !== undefined) conflict("historical capture contains later source representation metadata");
+  // Prior producers called every retained source-record body original; never rewrite their archived output.
+  return { ...disclosure, material_kind: "original_body" as const };
 }
 
 function verifySequence(config: OrdinaryRecallCaptureConfig, calls: readonly CapturedOrdinaryRecallCall[],
@@ -131,7 +148,7 @@ function verifyCallRequest(config: OrdinaryRecallCaptureConfig, call: CapturedOr
   }
 }
 
-function verifyExposure(call: CapturedOrdinaryRecallCall, index: ResponseIndex, first: FirstExposurePage | null): void {
+export function verifyExposure(call: CapturedOrdinaryRecallCall, index: ResponseIndex, first: FirstExposurePage | null): void {
   const page = call.firstExposure;
   if (page === null || firstExposureMismatch(page, { query_id: index.query_id, snapshot_id: index.snapshot_id,
     interpretation_id: index.interpretation_id!, as_of: index.as_of! }, exposureSlots(call.output!), call.output!.delivery_id)) {
@@ -149,19 +166,28 @@ function verifySourcePage(config: OrdinaryRecallCaptureConfig, output: SoulMemor
   for (const [position, row] of output.results.entries()) {
     const target = entries[position]!.target;
     if (target.kind !== "source_evidence" || !sameSourceEvidenceRoot(target, config.expected_target)) conflict("public target differs from the sealed source");
-    admitEmittedSourcePreview(target.span, row, undefined, target, source, false);
-    if (target.span !== undefined && row.content_preview !== "[payload omitted]") {
-      const deliveredBytes = row.content_preview === "[empty source]" ? 0 : Buffer.byteLength(row.content_preview);
-      if (target.span.content_end - target.span.content_start !== deliveredBytes ||
-          target.span.content_complete && target.span.content_end !== config.expected_source_bytes) {
-        conflict("public source extent overstates delivered bytes or completeness");
-      }
-    }
-    same(row.source_disclosure, disclosure, "public source qualifications differ from sealed metadata");
+    verifyCapturedSourceResult(config, target, row, source, disclosure);
   }
 }
 
-function terminal(index: ResponseIndex): boolean {
+export function verifyCapturedSourceResult(config: OrdinaryRecallArchiveConfig, target: SourceEvidenceTarget,
+  row: SoulMemorySearchResponse["results"][number], source: string, disclosure: ReturnType<typeof projectSourceDisclosure>): void {
+  admitEmittedSourcePreview(target.span, row, undefined, target, source, false);
+  if (target.span !== undefined && row.content_preview !== "[payload omitted]") {
+    const deliveredBytes = row.content_preview === "[empty source]" ? 0 : Buffer.byteLength(row.content_preview);
+    if (target.span.content_end - target.span.content_start !== deliveredBytes ||
+        target.span.content_complete && target.span.content_end !== Buffer.byteLength(source)) {
+      conflict("public source extent overstates delivered bytes or completeness");
+    }
+    if (config.protocol_package_version === "18.0.0" &&
+        target.span.original_complete !== (disclosure.material_kind === "original_body")) {
+      conflict("public original completeness differs from source representation");
+    }
+  }
+  same(row.source_disclosure, disclosure, "public source qualifications differ from sealed metadata");
+}
+
+export function terminal(index: ResponseIndex): boolean {
   return TERMINAL.has(index.completeness.logical_index) || TERMINAL.has(index.completeness.payload);
 }
 function same(actual: unknown, expected: unknown, message: string): void {

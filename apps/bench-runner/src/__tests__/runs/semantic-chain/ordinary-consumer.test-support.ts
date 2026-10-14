@@ -20,6 +20,7 @@ import type { nativeConsumerFixture } from "./consumer.test-support.js";
 export const writeJson = (path: string, value: unknown) => writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 export const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 type Mode = "complete" | "prefix" | "prefix_error" | "error";
+export type RecallResponseCase = "invalidated" | "resource_rejected" | "interrupted" | "open" | "unknown" | "transport_partial" | "indexed_without_preview" | "complete_empty";
 
 /** Match publicRecall finally files when await callTool rejects before observe updates its summary. */
 export function captureFailedCallFixture(capture: Awaited<ReturnType<typeof captureOrdinaryFixture>>, root: string,
@@ -147,7 +148,8 @@ export async function captureOrdinaryFixture(base: Awaited<ReturnType<typeof nat
   return { root, config, observation, execution, body: stored.content_bytes };
 }
 
-function observeTransport(daemon: BenchDaemonHandle, execution: string, contexts: unknown[], mode: Mode) {
+export function observeTransport(daemon: BenchDaemonHandle, execution: string, contexts: unknown[], mode: Mode,
+  responseCase?: RecallResponseCase) {
   const transport = daemon.mcpClient.transport; assert(transport);
   const send = transport.send, receive = transport.onmessage; assert(receive);
   const handler = daemon.runtime.services.mcpMemoryToolHandler, originalCall = handler.call;
@@ -164,7 +166,18 @@ function observeTransport(daemon: BenchDaemonHandle, execution: string, contexts
     if (mode === "error" || mode === "prefix_error" && calls === 2) {
       return { ok: false, tool_name: "soul.recall", error: { code: "UNAVAILABLE", message: "fixture terminal failure" } };
     }
-    return Reflect.apply(originalCall, this, [input]);
+    const result = await Reflect.apply(originalCall, this, [input]);
+    if (responseCase === undefined || !result.ok || result.tool_name !== "soul.recall") return result;
+    const output = SoulMemorySearchResponseSchema.parse(result.output);
+    assert(output.index);
+    const completeness = responseCase === "complete_empty"
+      ? { ...output.index.completeness, logical_index: "complete" as const, transport: "complete" as const, payload: "complete" as const }
+      : responseCase === "transport_partial" || responseCase === "indexed_without_preview"
+      ? { ...output.index.completeness, transport: "partial" as const }
+      : { ...output.index.completeness, logical_index: responseCase, payload: responseCase };
+    return { ...result, output: { ...output, results: [], index: { ...output.index,
+      entries: responseCase === "indexed_without_preview" ? output.index.entries : [], continuation: null,
+      page_purpose: undefined, completeness } } };
   };
   return () => { transport.send = send; transport.onmessage = receive; handler.call = originalCall; };
 }
