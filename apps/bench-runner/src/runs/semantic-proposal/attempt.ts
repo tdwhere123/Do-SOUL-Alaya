@@ -1,4 +1,4 @@
-import { inspectExtractionAttemptLedger, ledgerPath, openExtractionAttemptLedger,
+import { classifyRetainedExtractionAttemptState, inspectExtractionAttemptLedger, ledgerPath, openExtractionAttemptLedger,
   type ExtractionAttemptLedgerSnapshot } from "../extraction/authority/attempt-ledger.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
 import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
@@ -69,18 +69,9 @@ export function readSemanticProposalAttemptState(
     if (raw === undefined) throw new SemanticProposalIdentityError("proposal shard lacks its reserved raw attempt");
     assertProposalShardRaw(shard, raw);
   }
-  const unresolved = ledger?.unresolvedAttempts.filter(attempt => attempt.cacheKey === cacheKey) ?? [];
-  const settled = [...(ledger?.settledAttempts ?? []), ...(ledger?.transportFailures ?? [])]
-    .filter(attempt => attempt.cacheKey === cacheKey).sort((left, right) => right.attemptOrdinal - left.attemptOrdinal)[0];
-  let status: "unknown" | "pending" | "transport_failure" | "incomplete" | "accounting_invalid" | "settled" = "settled";
-  if (ledger !== undefined && !ledger.historyComplete) status = "incomplete";
-  else if (unresolved.some(attempt => !raws.some(raw => raw.attempt_ordinal === attempt.attemptOrdinal))) status = "unknown";
-  else if (unresolved.length > 0 || shard === undefined && raws.length > 0) status = "pending";
-  else if (shard === undefined && settled !== undefined) {
-    status = ledger?.transportFailures.some(attempt => attempt.attemptOrdinal === settled.attemptOrdinal)
-      ? "transport_failure" : "incomplete";
-  } else if (ledger?.pendingKeys.includes(cacheKey)) status = "pending";
-  if (unresolved.length === 0 && ledger?.settledAttempts.some(attempt =>
+  let status: ReturnType<typeof classifyRetainedExtractionAttemptState> | "accounting_invalid" =
+    classifyRetainedExtractionAttemptState(ledger, cacheKey, raws.map(raw => raw.attempt_ordinal), shard !== undefined);
+  if (!ledger?.unresolvedAttempts.some(attempt => attempt.cacheKey === cacheKey) && ledger?.settledAttempts.some(attempt =>
     attempt.cacheKey === cacheKey && attempt.usageAccounting === "invalid")) status = "accounting_invalid";
   if (shard !== undefined && hasAdmittedProposalOutcome(shard) && status === "settled") {
     const success = ledger?.successfulEntries.find(entry => entry.cacheKey === cacheKey);

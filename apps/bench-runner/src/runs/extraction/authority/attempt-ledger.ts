@@ -179,6 +179,24 @@ export function inspectExtractionAttemptLedger(input: {
   return toSnapshot(envelope.record, path, envelope.rawSha256);
 }
 
+/** Projects already-validated retained evidence; callers still own raw/shard binding and admission. */
+export function classifyRetainedExtractionAttemptState(
+  snapshot: ExtractionAttemptLedgerSnapshot | undefined, cacheKey: string,
+  rawAttemptOrdinals: readonly number[], shardPresent: boolean
+): "unknown" | "pending" | "transport_failure" | "incomplete" | "settled" {
+  const unresolved = snapshot?.unresolvedAttempts.filter(attempt => attempt.cacheKey === cacheKey) ?? [];
+  const settled = [...(snapshot?.settledAttempts ?? []), ...(snapshot?.transportFailures ?? [])]
+    .filter(attempt => attempt.cacheKey === cacheKey).sort((left, right) => right.attemptOrdinal - left.attemptOrdinal)[0];
+  if (snapshot !== undefined && !snapshot.historyComplete) return "incomplete";
+  if (unresolved.some(attempt => !rawAttemptOrdinals.includes(attempt.attemptOrdinal))) return "unknown";
+  if (unresolved.length > 0 || !shardPresent && rawAttemptOrdinals.length > 0) return "pending";
+  if (!shardPresent && settled !== undefined) {
+    return snapshot?.transportFailures.some(attempt => attempt.attemptOrdinal === settled.attemptOrdinal)
+      ? "transport_failure" : "incomplete";
+  }
+  return snapshot?.pendingKeys.includes(cacheKey) ? "pending" : "settled";
+}
+
 export function assertExtractionAttemptReservation(
   snapshot: ExtractionAttemptLedgerSnapshot | undefined, cacheKey: string, attemptOrdinal: number
 ): void {

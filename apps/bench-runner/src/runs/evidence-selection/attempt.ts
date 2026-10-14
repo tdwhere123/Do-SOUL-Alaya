@@ -1,6 +1,6 @@
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import {
-  inspectExtractionAttemptLedger, openExtractionAttemptLedger
+  classifyRetainedExtractionAttemptState, inspectExtractionAttemptLedger, openExtractionAttemptLedger
 } from "../extraction/authority/attempt-ledger.js";
 import { settledAttemptUsageDigest } from "../extraction/authority/attempt-ledger/outcome.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
@@ -65,19 +65,8 @@ export function readEvidenceSelectionAttemptState(
     if (raw === undefined) throw new EvidenceSelectionIdentityError("evidence selection shard lacks its reserved raw attempt");
     assertSelectionShardRaw(shard, raw);
   }
-  const unresolved = ledger?.unresolvedAttempts.filter((attempt) => attempt.cacheKey === cacheKey) ?? [];
-  const settled = [...(ledger?.settledAttempts ?? []), ...(ledger?.transportFailures ?? [])]
-    .filter((attempt) => attempt.cacheKey === cacheKey)
-    .sort((left, right) => right.attemptOrdinal - left.attemptOrdinal)[0];
-  let status: "unknown" | "pending" | "transport_failure" | "incomplete" | "settled" = "settled";
-  if (ledger !== undefined && !ledger.historyComplete) status = "incomplete";
-  else if (unresolved.some((attempt) => !raws.some((raw) => raw.attempt_ordinal === attempt.attemptOrdinal))) {
-    status = "unknown";
-  } else if (unresolved.length > 0 || shard === undefined && raws.length > 0) status = "pending";
-  else if (shard === undefined && settled !== undefined) {
-    status = ledger?.transportFailures.some((attempt) => attempt.attemptOrdinal === settled.attemptOrdinal)
-      ? "transport_failure" : "incomplete";
-  } else if (ledger?.pendingKeys.includes(cacheKey)) status = "pending";
+  const status = classifyRetainedExtractionAttemptState(
+    ledger, cacheKey, raws.map(raw => raw.attempt_ordinal), shard !== undefined);
   if (shard !== undefined && hasAdmittedSelectionOutcome(shard) && status === "settled") {
     const success = ledger?.successfulEntries.find((entry) => entry.cacheKey === cacheKey);
     if (success?.successKind !== "provider" || success.rawJsonSha256 !== shard.raw_digest ||
