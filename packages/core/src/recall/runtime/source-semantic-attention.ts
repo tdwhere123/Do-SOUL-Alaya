@@ -38,9 +38,10 @@ function obligationState(obligation: SourceSemanticLoweredObligation, state: Fie
   for (const live of state.seen_identities) {
     meter.charge(1, 0, "semantic attention live product");
     let advancesHere = false;
-    for (const advance of advances) {
+    meter.charge(1, 0, "semantic attention program state lookup");
+    for (const advance of state.compiled_automaton?.advancesByState.get(live.program_state) ?? []) {
       meter.charge(1, 0, "semantic attention product advance");
-      if (advance.relation === relation && advance.from === live.program_state) advancesHere = true;
+      if (advance.relation === relation) advancesHere = true;
     }
     if (!advancesHere) continue;
     reached = true;
