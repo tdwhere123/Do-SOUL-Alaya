@@ -17,7 +17,7 @@ import { hasMeasurementProducer, requiresStoredMeasurement } from "../conditiona
 import { measurementEffectsFor, measurementIsMissing } from "./measurement-effects.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { BindingContextStore, BindingContextResourceError } from "../conditional-field/engine/binding-environment.js";
-import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
+import { checkRetainedRelationFacts, ObservedRelations, relationPageJoinRows, retainRelationPage } from "../conditional-field/engine/observed-relations.js";
 import { ObservationPairs, ObservationSubjects, SourceFactDemands } from "../conditional-field/engine/observation-frontier.js";
 import {
   applyObserverPage,
@@ -284,12 +284,15 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     pairProgress.bytes = completedPair.bytes;
     return observed.page.outcome.status === "interrupted";
   }
-  const retained = retainRelationPage(session.relationRows, captured);
+  const priorRelations = session.relationRows;
+  const retained = retainRelationPage(priorRelations, captured);
   session.relationRows = retained.population;
   recordObservedAt(input, captured.flatMap((row) => [row.sourceObjectId, row.targetObjectId]), observedAt, sourceFacts);
-  // A new endpoint fact must be visible to retained rows. The continuation
-  // still clears joinRows so new states meet the full population.
-  const joinRows = relationPageJoinRows(retained.population, retained.changed, sourceFacts.snapshot !== factsBefore);
+  const factsChanged = sourceFacts.snapshot !== factsBefore;
+  const populationChecked = factsChanged && priorRelationFactsUnchanged(session, priorRelations, factsBefore, observed.work.work_units);
+  // A new endpoint fact must reach old rows unless their dependencies are proven unchanged.
+  // New states still meet the full population through the existing continuation.
+  const joinRows = relationPageJoinRows(retained.population, retained.changed, factsChanged && !populationChecked);
   for (const row of captured) if (!overlayIsRoutingOnly(RELATION_ROUTING, row.predicate)) {
     addSubjects(subjects, [row.sourceObjectId, row.targetObjectId]);
   }
@@ -302,6 +305,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
       bindingContexts: session.state.binding_contexts,
       ...(joinRows === undefined ? {} : { joinRows }) } },
       offset: 0, retained_bytes: 0,
+      ...(populationChecked ? { population_checked: true } : {}),
       page: maskAdjacencyExhaustion(observed.page, completedPair.hasOpenDemand()) },
     resume_cursors: resumeCursors(cursors, completedPair) };
   session.state = retainObservedContext(before, session.state, sourceFacts, session.relationRows, subjects, completedPair);
@@ -324,6 +328,22 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     session.state = { ...session.state, last_observer_status: "open" };
   }
   return false;
+}
+
+function priorRelationFactsUnchanged(session: ObservationSession, rows: ObservedRelations,
+  before: ObservedSourceFacts["snapshot"], observedWork: number): boolean {
+  const { state, interpretation, sourceFacts } = session, frontier = state.path_effect_frontier;
+  if (rows.length === 0 || frontier === undefined || frontier.sourceFacts !== before
+    || frontier.identities !== state.seen_identities.length || frontier.facets !== state.facets
+    || frontier.discoveries !== state.discoveries.length || state.pending_path_effects !== undefined
+    || state.observation_gaps?.guards === true || state.remaining_work.some((row) => row.kind === "observe")
+    || interpretation.source_guard !== undefined || (interpretation.interpretation_proposal?.conditions?.length ?? 0) > 0) return false;
+  const checked = checkRetainedRelationFacts({ rows, program: interpretation.program, before, after: sourceFacts.snapshot,
+    work_limit: Math.max(0, state.remaining_exploration - observedWork), memory_limit: state.remaining_memory_bytes });
+  session.state = { ...state, remaining_exploration: state.remaining_exploration - checked.work,
+    admitted_allocation_bytes: state.admitted_allocation_bytes + checked.admitted_bytes };
+  session.input.cost?.add("adjacency", { joins: checked.work, charged_retained_bytes: checked.admitted_bytes });
+  return checked.unaffected;
 }
 
 export function interruptObservedField(state: FieldEngineState): FieldEngineState {

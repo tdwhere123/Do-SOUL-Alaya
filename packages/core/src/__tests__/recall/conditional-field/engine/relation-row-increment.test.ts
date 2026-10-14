@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   productSubjectId,
   type Guard,
@@ -24,6 +24,7 @@ import { seedProgramStates } from "../../../../recall/conditional-field/engine/p
 import { compileProgramAutomaton } from "../../../../recall/conditional-field/engine/program-automaton.js";
 import { readSequenceReach, sequenceReachKey, writeSequenceReach } from "../../../../recall/conditional-field/engine/sequence-reach.js";
 import { ObservedRelations, relationPageJoinRows, retainRelationPage } from "../../../../recall/conditional-field/engine/observed-relations.js";
+import * as observedRelations from "../../../../recall/conditional-field/engine/observed-relations.js";
 import { RetainedSequence } from "../../../../recall/conditional-field/engine/retained-sequence.js";
 import {
   applyObserverPage,
@@ -827,6 +828,8 @@ describe("observed relation pages", () => {
     cost?: RequestCostLedger;
     work?: number;
     memory?: number;
+    program?: QueryProgram;
+    pageSize?: number;
   }> = {}) {
     const readers: ObserverReaders = {
       lexical: () => ({ ids: options.lexicalIds ?? ["a"], nativeVisits: 1, nativeBytes: 1, rowsRead: 1, bytesRead: 1, truncated: false }),
@@ -837,13 +840,13 @@ describe("observed relation pages", () => {
       relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit }) => {
         const remaining = rows.filter((row) => row.sourceObjectId === subject && row.predicate === predicate
           && row.assertionId > (afterAssertionId ?? "")).sort((left, right) => left.assertionId.localeCompare(right.assertionId));
-        const observations = remaining.slice(0, Math.min(limit, nativeLimit));
+        const observations = remaining.slice(0, Math.min(limit, nativeLimit, options.pageSize ?? Infinity));
         return { observations, nativeVisits: observations.length, nativeBytes: observations.length, rowsRead: observations.length,
           bytesRead: observations.length, truncated: observations.length < remaining.length,
           committedThrough: observations.at(-1)?.assertionId ?? afterAssertionId };
       }
     };
-    const state = observeField(query(program, { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
+    const state = observeField(query(options.program ?? program, { hypotheses: [{ schema_version: 1, hypothesis_id: "h",
       bindings: [{ schema_version: 1, variable: "c", value: "x" }] }] }), {
       workspace_id: "workspace-1", query_text: "a", as_of: AS_OF, readers, authorized_scopes: null,
       ...(options.resume === undefined ? {} : { resume_field: options.resume }),
@@ -854,6 +857,42 @@ describe("observed relation pages", () => {
       .filter((value) => value.accepting && (value.milligrades ?? 0) > 0).map((value) => productSubjectId(value.state)).sort() : [];
     return { state, accepted };
   }
+
+  it("preserves independent endpoint additions with less work than the full-replay fallback", () => {
+    const rows = Array.from({ length: 32 }, (_, index) => {
+      const id = String(index).padStart(2, "0");
+      return edge("p", "a", `target-${id}`, `p-${id}`);
+    });
+    const options = { program: relation("p"), pageSize: 1, work: 50_000, memory: 20_000_000 };
+    const observed = run(rows, options);
+    const fallback = vi.spyOn(observedRelations, "checkRetainedRelationFacts")
+      .mockReturnValue({ unaffected: false, work: 0, admitted_bytes: 0 });
+    let conservative: ReturnType<typeof run>;
+    try { conservative = run(rows, options); }
+    finally { fallback.mockRestore(); }
+    expect(observed.accepted).toEqual(rows.map((row) => row.targetObjectId));
+    expect(conservative.accepted).toEqual(rows.map((row) => row.targetObjectId));
+    expect(project(observed.state)).toEqual(project(conservative.state));
+    expect(observed.state.remaining_exploration).toBeGreaterThan(conservative.state.remaining_exploration);
+    expect(observed.state.remaining_exploration).toBeGreaterThan(0);
+    expect(observed.state.pending_path_effects).toBeUndefined();
+    expect(observed.state.observation_gaps?.guards).not.toBe(true);
+  });
+
+  it("keeps changed endpoint identities and nested bound-variable guards on the conservative path", () => {
+    const rows = new ObservedRelations().with(edge("p", "a", "b", "retained"));
+    const before = storedFacts(["a", "b"]), after = before.with("new", { object_id: "new", source_revision: "rev" });
+    const check = (program: QueryProgram, facts = after, work = 100) => observedRelations.checkRetainedRelationFacts({
+      rows, program, before, after: facts, work_limit: work, memory_limit: 1024
+    });
+    expect(check(relation("p")).unaffected).toBe(true);
+    expect(check(relation("p", "y", { ...OPEN_GUARD, predicate_name: "named-predicate" })).unaffected).toBe(false);
+    expect(check(sequenceHyperedge([relation("p", "y", AUTH_GUARD)])).unaffected).toBe(false);
+    expect(check(relation("p"), after.with("a", { object_id: "a", source_revision: "new-revision" })).unaffected).toBe(false);
+    expect(check(relation("p"), after.with("b", { object_id: "b", source_revision: "rev",
+      interpretation_node: { packet_id: "new-packet", hypothesis_id: "h", node_id: "b" } })).unaffected).toBe(false);
+    expect(check(relation("p"), after, 1)).toMatchObject({ unaffected: false, work: 1 });
+  });
 
   it("keeps an unknown from an earlier page when later pages arrive", () => {
     const guarded = edge("p", "a", "b", "p-row");

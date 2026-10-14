@@ -179,6 +179,8 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const liveStateOffset = missingRevision || skippedRowsNeedRecheck || (priorUnknown && identitiesGrew)
     ? 0 : preparation.facet_resume_offset;
   // A suffix after a full pass must not leave the frontier on the previous snapshot.
+  // A relation page may also prove the prior population's fact dependencies unchanged;
+  // its delta and every resulting suffix must finish before publishing that frontier.
   const populationChecked = completePopulation || pending.population_checked === true;
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
     bindingContexts: applied.binding_contexts,

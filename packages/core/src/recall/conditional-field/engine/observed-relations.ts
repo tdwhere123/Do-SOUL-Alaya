@@ -1,5 +1,8 @@
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
+import type { QueryProgram } from "@do-soul/alaya-protocol";
 import type { RelationObserverRow } from "../observers/observe.js";
+import { visitQueryProgram } from "../query/query-admission.js";
+import { guardSourceFactDependency, type BoundSourceFacts } from "./binding-environment.js";
 
 export type ObservedRelationRows = Iterable<RelationObserverRow> & Readonly<{
   length: number; at(index: number): RelationObserverRow | undefined;
@@ -65,6 +68,44 @@ export function relationPageJoinRows(
   const ids = new Set(changed.map((row) => row.assertionId));
   if (ids.size === population.length) return undefined;
   return changed;
+}
+
+/** A changed snapshot can leave every prior row admission unchanged. Unknown dependencies keep the full pass. */
+export function checkRetainedRelationFacts(input: Readonly<{
+  rows: ObservedRelationRows; program: QueryProgram;
+  before: ReadonlyMap<string, BoundSourceFacts>; after: ReadonlyMap<string, BoundSourceFacts>;
+  work_limit: number; memory_limit: number;
+}>): Readonly<{ unaffected: boolean; work: number; admitted_bytes: number }> {
+  const scratchBytes = 512;
+  if (input.memory_limit < scratchBytes || input.work_limit < 1) return { unaffected: false, work: 0, admitted_bytes: 0 };
+  const stop = {}, env = new Map<string, string>(), endpoints = { sourceId: "source", targetId: "target" };
+  let work = 0;
+  const charge = (units: number): void => {
+    if (work + units > input.work_limit) throw stop;
+    work += units;
+  };
+  try {
+    visitQueryProgram(input.program, (node) => {
+      charge(1);
+      if (node.kind !== "relation") return;
+      // Named predicates can decode source filters; the bounded optional check leaves them to the full pass.
+      if (node.guard.predicate_name !== undefined) throw stop;
+      // Give the guard owner a bound object so a missing variable cannot hide a dependency.
+      env.clear();
+      if (node.guard.variable !== undefined) env.set(node.guard.variable, node.guard.variable);
+      if (guardSourceFactDependency(node.guard, env, endpoints) !== undefined) throw stop;
+    });
+    for (const row of input.rows) {
+      charge(4);
+      // Target facts carry revision and interpretation identity; source facts can supply the revision fallback.
+      if (input.before.get(row.sourceObjectId) !== input.after.get(row.sourceObjectId)
+        || input.before.get(row.targetObjectId) !== input.after.get(row.targetObjectId)) throw stop;
+    }
+    return { unaffected: true, work, admitted_bytes: scratchBytes };
+  } catch (error) {
+    if (error !== stop) throw error;
+    return { unaffected: false, work, admitted_bytes: scratchBytes };
+  }
 }
 
 function mergeUnique(
