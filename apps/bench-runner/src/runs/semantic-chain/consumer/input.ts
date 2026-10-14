@@ -9,6 +9,7 @@ import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "..
 import { PROVIDER_REQUEST_TIMEOUT_POLICY, providerRequestTimeout, type ProviderRequestLine } from "../../provider-request/execution.js";
 import type { ExtractionTransportProvenance } from "../../extraction/transport-route.js";
 import { admitOrdinaryRecallObservation } from "./ordinary-recall.js";
+import { exactLibraryProofReferenceView, exactOrdinaryMetadataReferenceView } from "./evidence-reference-view.js";
 import { ORDINARY_RECALL_CAPTURE_CONTRACT, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT, ORDINARY_RECALL_PUBLIC_SEMANTICS,
   OrdinaryRecallProtocolVersionSchema } from "./ordinary-recall-contract.js";
 
@@ -22,6 +23,10 @@ export const ConsumerConfigSchema = z.object({
   arms: z.array(ConsumerArmSchema).min(1).max(2).refine(arms => new Set(arms).size === arms.length)
 }).strict();
 export type ConsumerConfig = z.infer<typeof ConsumerConfigSchema>;
+const LibraryConsumerConfigSchema = ConsumerConfigSchema.extend({
+  evidence_view: z.enum(["original_public_envelopes", "exact_reference_deduplication"]).optional()
+}).strict();
+type LibraryConsumerConfig = z.infer<typeof LibraryConsumerConfigSchema>;
 const OrdinaryConsumerConfigSchema = ConsumerConfigSchema.extend({
   evidence_view: z.enum(["original_public_envelopes", "verified_mirror_removal", "exact_reference_deduplication"]).optional()
 }).strict();
@@ -53,6 +58,11 @@ const REFERENCE_VIEW_PROMPT = [
   "For each metadata entry, insert its exact value at every listed absolute JSON pointer within observation; only those fields were removed.",
   "References preserve each separate occurrence, call order, qualifications and states. They do not combine evidence or establish missing facts."
 ].join("\n");
+const LIBRARY_REFERENCE_VIEW_PROMPT = [
+  "A semantic-library-exact-reference-view-v1 evidence object is a lossless presentation of the admitted native delivery.",
+  "For each metadata entry, insert its exact value at every listed absolute JSON pointer within observation; only those fields were removed.",
+  "References preserve every proof occurrence, array order, source text, qualifications and states. They do not combine evidence or establish missing facts."
+].join("\n");
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const SourceSchema = z.object({ chain_root: z.string().min(1), replay_path: z.string().min(1), query_key: Digest }).strict();
@@ -62,7 +72,7 @@ export const ConsumerRequestTimeoutSchema = z.object({ policy: z.literal(PROVIDE
   timeout_ms: z.number().int().positive() }).strict();
 const LibraryConsumerPreparationSchema = z.object({
   contract: z.literal("semantic-chain-consumer-preparation-v1"), provider_calls: z.literal(0),
-  output_root: z.string().min(1), source: SourceSchema, consumer_config: ConsumerConfigSchema,
+  output_root: z.string().min(1), source: SourceSchema, consumer_config: LibraryConsumerConfigSchema,
   request_timeout: ConsumerRequestTimeoutSchema,
   native_binding: z.object({ plan_identity: Digest, replay_identity: Digest, row_identity: Digest }).strict(),
   original_query: z.string().min(1), query_as_of: z.string().datetime(),
@@ -95,7 +105,7 @@ export function prepareSemanticChainConsumer(input: Readonly<{
 }>, outputRoot: string): z.infer<typeof LibraryConsumerPreparationSchema> {
   const source = SourceSchema.parse({ chain_root: resolve(input.chainRoot),
     replay_path: resolve(input.replayPath), query_key: input.queryKey });
-  const prepared = materialize(source, ConsumerConfigSchema.parse(input.consumerConfig), outputRoot);
+  const prepared = materialize(source, LibraryConsumerConfigSchema.parse(input.consumerConfig), outputRoot);
   writeChainArtifact(join(prepared.preparation.output_root, "preparation.json"), prepared.preparation);
   return prepared.preparation;
 }
@@ -122,7 +132,7 @@ export function admitConsumerPreparation(preparationRoot: string) {
   return current;
 }
 
-function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfig, outputRoot: string) {
+function materialize(source: z.infer<typeof SourceSchema>, config: LibraryConsumerConfig, outputRoot: string) {
   const admitted = admitSemanticChainReplay(source.chain_root, source.replay_path);
   const query = admitted.plan.queries.find(row => row.query_key === source.query_key);
   const row = admitted.replay.rows.find(candidate => candidate.query_key === source.query_key);
@@ -131,10 +141,12 @@ function materialize(source: z.infer<typeof SourceSchema>, config: ConsumerConfi
     throw new AlayaError("CONFLICT", "consumer requires an admitted native first exposure for its exact query");
   }
   const root = assertConsumerOutputRoot(outputRoot, source, admitted);
+  const references = config.evidence_view === "exact_reference_deduplication";
+  const evidence = references && config.arms.includes("native_delivery") ? exactLibraryProofReferenceView(row.response) : row.response;
   const lines = config.arms.map(arm => consumerLine(config, arm, {
     original_query: query.original_query, query_as_of: admitted.plan.config.interpretation_clock,
-    evidence: arm === "native_delivery" ? row.response : null
-  }));
+    evidence: arm === "native_delivery" ? evidence : null
+  }, arm === "native_delivery" && references ? LIBRARY_REFERENCE_VIEW_PROMPT : undefined));
   const preparation = LibraryConsumerPreparationSchema.parse({
     contract: "semantic-chain-consumer-preparation-v1", provider_calls: 0, output_root: root,
     source, consumer_config: config, original_query: query.original_query,
@@ -154,7 +166,7 @@ function materializeOrdinary(source: z.infer<typeof OrdinaryConsumerSourceSchema
   const original_query = admitted.config.first_request.query;
   const query_as_of = admitted.config.first_request.source_observed_at!;
   const mirrored = ordinaryConsumerEvidenceView(admitted.evidence, config.evidence_view);
-  const evidence = config.evidence_view === "exact_reference_deduplication" ? exactMetadataReferenceView(mirrored) : mirrored;
+  const evidence = config.evidence_view === "exact_reference_deduplication" ? exactOrdinaryMetadataReferenceView(mirrored) : mirrored;
   const lines = config.arms.map(arm => consumerLine(config, arm, { original_query, query_as_of,
     evidence: arm === "native_delivery" ? evidence : null },
   arm === "native_delivery" && config.evidence_view === "exact_reference_deduplication" ? REFERENCE_VIEW_PROMPT : undefined));
@@ -181,46 +193,6 @@ function ordinaryConsumerEvidenceView(evidence: ReturnType<typeof admitOrdinaryR
       return metadata;
     }) } };
   }) };
-}
-
-/** Paths are out-of-band: no source-provided object can be mistaken for a reference marker. */
-function exactMetadataReferenceView(evidence: ReturnType<typeof ordinaryConsumerEvidenceView>) {
-  const observation = structuredClone(evidence);
-  type Slot = { owner: Record<string, unknown>; key: string; path: string };
-  const groups = new Map<string, { value: unknown; slots: Slot[] }>();
-  const collect = (owner: unknown, key: string, path: string) => {
-    if (owner === null || typeof owner !== "object" || Array.isArray(owner)) return;
-    const object = owner as Record<string, unknown>, value = object[key];
-    const encoded = JSON.stringify(value);
-    if (encoded === undefined) return;
-    const group = groups.get(encoded) ?? { value, slots: [] };
-    group.slots.push({ owner: object, key, path }); groups.set(encoded, group);
-  };
-  for (const [ordinal, call] of observation.calls.entries()) {
-    const path = `/calls/${ordinal}`;
-    collect(call.request, "query", `${path}/request/query`);
-    collect(call.request, "continuation", `${path}/request/continuation`);
-    if (call.response_state !== "success") continue;
-    const output = (call.envelope?.structuredContent as {
-      output?: { index?: unknown; results?: unknown[] };
-    } | undefined)?.output;
-    const outputPath = `${path}/envelope/structuredContent/output`;
-    collect(output?.index, "continuation", `${outputPath}/index/continuation`);
-    collect(output?.index, "completeness", `${outputPath}/index/completeness`);
-    for (const [index, result] of (output?.results ?? []).entries()) {
-      collect(result, "source_disclosure", `${outputPath}/results/${index}/source_disclosure`);
-    }
-  }
-  const metadata: { paths: string[]; value: unknown }[] = [];
-  for (const [encoded, group] of groups) {
-    if (group.slots.length < 2) continue;
-    const entry = { paths: group.slots.map(slot => slot.path), value: group.value };
-    // Count the complete side-table entry; small or merely similar values stay inline.
-    if (Buffer.byteLength(JSON.stringify(entry)) + 1 >= Buffer.byteLength(encoded) * group.slots.length) continue;
-    metadata.push(entry);
-    for (const slot of group.slots) delete slot.owner[slot.key];
-  }
-  return { contract: "ordinary-recall-exact-reference-view-v1" as const, observation, metadata };
 }
 
 function assertConsumerOutputRoot(outputRoot: string, source: z.infer<typeof SourceSchema>,

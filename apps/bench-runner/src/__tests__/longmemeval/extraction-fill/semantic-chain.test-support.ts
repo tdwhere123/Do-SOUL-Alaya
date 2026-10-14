@@ -25,6 +25,7 @@ import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.
 import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposure-session.js";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
 import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
+import { assertSemanticLibraryConsumerReferences } from "../../runs/semantic-chain/library-consumer-reference.test-support.js";
 
 function syntheticGeminiExtract(rawJson: string) {
   const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
@@ -252,6 +253,8 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
   expect(proof.proofs?.length).toBeGreaterThan(0);
   expect(proof.discovery?.access?.policy).toBe("canonical-v1");
   expect(proof.index?.as_of).toBe(config.interpretation_clock);
+  assertSemanticLibraryConsumerReferences({ chainRoot: root, replayPath: proofReplay.path, queryKey: ready.query_key },
+    join(cacheRoot, "..", "semantic-library-consumer"));
   const selectedSource = ready.descriptors.find((row) => row.interpretation_id === ready.selected_source_interpretation_ids[0])!;
   const gold = plan.queries.map((row) => ({
     query_key: row.query_key, source_units: row.query_key !== ready.query_key ? [] : [{
