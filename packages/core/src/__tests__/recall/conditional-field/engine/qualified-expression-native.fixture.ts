@@ -1,6 +1,8 @@
 import { productEndpointId, type Derivation, type ProductStateKey, type QueryHypothesis,
   type QueryProgram } from "@do-soul/alaya-protocol";
 import { observeField } from "../../../../recall/runtime/conditional-field-observe.js";
+import { projectFromField } from "../../../../recall/runtime/recall-field-projection.js";
+import { RequestCostLedger } from "../../../../recall/runtime/request-cost-ledger.js";
 import { compileConditionalFieldQuery } from "../../../../recall/conditional-field/query/compile-query.js";
 import { parseBindingContext } from "../../../../recall/conditional-field/engine/binding-environment.js";
 import type { FieldEngineState } from "../../../../recall/conditional-field/engine/field-engine.js";
@@ -22,6 +24,8 @@ type NativeOptions = Readonly<{
   pageSize?: number;
   work?: number;
   resume?: FieldEngineState;
+  seedDomainOpen?: boolean;
+  unavailableRelations?: readonly string[];
 }>;
 type PhysicalOrigins = ReadonlyMap<string, Readonly<{ id: string; revision: string }>>;
 
@@ -45,6 +49,15 @@ export function observeQualifiedExpression(
     ...(options.resume === undefined ? {} : { resume_field: options.resume }) });
 }
 
+/** Uses the runtime owner so residual, resource and grounding state reach public claims unchanged. */
+export function projectQualifiedExpression(state: FieldEngineState, options: NativeOptions = {}) {
+  const asOf = state.interpretation.interpretation_clock ?? "2026-09-10T00:00:00.000Z";
+  return projectFromField(state, { workspace_id: "ws", query_text: "qualified expression",
+    budget: state.budget, snapshot_id: state.snapshot_id, interpretation_clock: asOf, as_of: asOf,
+    expires_at: "2099-01-01T00:00:00.000Z", readers: fixtureReaders([], options),
+    authorized_scopes: options.authorizedScopes ?? null }, state.interpretation, undefined, new RequestCostLedger());
+}
+
 function fixtureReaders(rows: readonly RelationObserverRow[], options: NativeOptions): ObserverReaders {
   const seeds = [...options.seeds ?? ["A", "B"]].sort();
   const pageSize = options.pageSize ?? 100;
@@ -54,7 +67,8 @@ function fixtureReaders(rows: readonly RelationObserverRow[], options: NativeOpt
       const remaining = seeds.filter((id) => id > (afterObjectId ?? ""));
       const { values: ids, bytes } = boundedPage(remaining, Math.min(pageSize, limit, nativeLimit));
       return { ids, nativeVisits: ids.length, nativeBytes: bytes, rowsRead: ids.length, bytesRead: bytes,
-        truncated: ids.length < remaining.length, committedThrough: ids.at(-1) ?? afterObjectId };
+        truncated: options.seedDomainOpen === true || ids.length < remaining.length,
+        committedThrough: ids.at(-1) ?? afterObjectId };
     },
     source: ({ objectId, byteLimit }) => {
       const row = options.sources?.[objectId] ?? { object_id: objectId, sourceRevision: `rev-${objectId}`,
@@ -65,6 +79,9 @@ function fixtureReaders(rows: readonly RelationObserverRow[], options: NativeOpt
     },
     sourceRoots: () => ({ rows: [], nativeVisits: 0, nativeBytes: 0, rowsRead: 0, bytesRead: 0, truncated: false }),
     relation: ({ subject, predicate, afterAssertionId, limit, nativeLimit, byteLimit }) => {
+      if (options.unavailableRelations?.includes(predicate)) return { observations: [], nativeVisits: 0,
+        nativeBytes: 0, rowsRead: 0, bytesRead: 0, truncated: true, unavailable: true,
+        committedThrough: afterAssertionId };
       const remaining = rows.filter((row) => row.sourceObjectId === subject && row.predicate === predicate
         && row.assertionId > (afterAssertionId ?? "")).sort((left, right) => left.assertionId.localeCompare(right.assertionId));
       const { values: observations, bytes } = boundedPage(remaining, Math.min(pageSize, limit, nativeLimit), byteLimit);
