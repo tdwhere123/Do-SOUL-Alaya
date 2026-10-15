@@ -105,7 +105,7 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
     throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
   }
   const units = stored.content_bytes.length === 0 ? [] : indexSourceSemanticUnits(stored.content_bytes);
-  const assertions = units.map((unit) => ({ assertion_id: unit.assertion_id, text: unit.text, source_role: unit.source_role }));
+  const assertions = units.map((unit) => ({ assertion_id: unit.assertion_id, text: unit.text }));
   const cost = sourceReferencePreparationCost(assertions);
   meter.charge(cost.work_units, cost.memory_bytes, "source references");
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(stored.content_bytes), assertions, fieldContractSha256);

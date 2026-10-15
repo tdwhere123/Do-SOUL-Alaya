@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { SourceSemanticPublishedInterpretationSchema, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, EvidenceService, fieldContractSha256,
   verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
-import { buildSourceSemanticRequest, receiveSourceSemantics, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
+import { buildSourceSemanticRequest, prepareSourceSemanticRequest, receiveSourceSemantics, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
@@ -45,7 +45,7 @@ async function openSource(count: number) {
   return { directory, filename, database, source, stores, eventLogRepo, runtimeNotifier };
 }
 
-it.each([128, 129])("preserves preparation and capacity outcomes for %i units through the native read worker", async count => {
+it.each([128, 129, 383, 386])("preserves preparation and capacity outcomes for %i units through the native read worker", async count => {
   await withSource(count, async ({ database, filename, source }) => {
     database.close(); closeCachedDatabase(filename);
     const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
@@ -55,9 +55,14 @@ it.each([128, 129])("preserves preparation and capacity outcomes for %i units th
         workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request
       });
       const request = { kind: "prepare_source" as const, source_id: SOURCE_ID, budget: BUDGET };
-      if (count === 129) {
+      if (count > 128) {
+        expect(prepareSourceSemanticRequest({ sourceCorpus: source, sourceScope: "complete-source",
+          assertionIds: Array.from({ length: count }, (_, i) => i + 1), sourceRole: "user",
+          source_id: SOURCE_ID, source_version: "1", producer_id: "capacity-control", producer_version: "1" }))
+          .toMatchObject({ status: "unsupported_source", assertion_count: count,
+            reason: { dimension: "assertions", actual: count, limit: 128 } });
         await expect(execute(request)).rejects.toMatchObject({ code: "VALIDATION", details: {
-          admission: "unsupported_source", capacity: { dimension: "assertions", actual: 129, limit: 128 }
+          admission: "unsupported_source", capacity: { dimension: "assertions", actual: count, limit: 128 }
         } });
       } else {
         const prepared = await execute(request);
@@ -75,20 +80,21 @@ it.each([128, 129])("preserves preparation and capacity outcomes for %i units th
   });
 }, 30000);
 
-it("publishes a bounded interpretation with every omitted unit retained and verifies it after SQLite reopen", async () => {
+it.each([4, 128])("publishes %i source units with exact omissions and verifies them after SQLite reopen", async count => {
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () => { throw new Error("provider forbidden"); });
   try {
-    await withSource(128, async ({ database, filename, source, eventLogRepo, runtimeNotifier }) => {
-      const input = { sourceCorpus: source, assertionIds: Array.from({ length: 128 }, (_, i) => i + 1),
+    await withSource(count, async ({ database, filename, source, eventLogRepo, runtimeNotifier }) => {
+      const input = { sourceCorpus: source, assertionIds: Array.from({ length: count }, (_, i) => i + 1),
         sourceScope: "complete-source" as const, source_id: SOURCE_ID, source_version: "1",
         producer_id: "authored-capacity", producer_version: "1" };
       const request = buildSourceSemanticRequest(input);
+      const represented = count === 4 ? [1, 3, 4] : [1];
       const received = receiveSourceSemantics(JSON.stringify({ contract: "source-semantic-proposal-v8",
         outcome: { status: "interpreted" }, content: {
-          roots: [{ act: "assertion", expression: { kind: "content_ref", key: "run" } }], entities: [],
-          nodes: [{ kind: "statement", key: "run", predicate: {
-            kind: "explicit", reading: "run", support: { assertion_id: 1, text: "runs" }
-          }, arguments: [], qualifications: [] }], gaps: []
+          roots: represented.map(id => ({ act: "assertion", expression: { kind: "content_ref", key: `unit${id}` } })), entities: [],
+          nodes: represented.map(id => ({ kind: "statement", key: `unit${id}`, predicate: {
+            kind: "explicit", reading: "recorded", support: { assertion_id: id, text: id === 1 ? "runs" : `Unit ${id}` }
+          }, arguments: [], qualifications: [] })), gaps: []
         }
       }), request, input);
       expect(received.outcome.status).toBe("interpreted");
@@ -101,9 +107,12 @@ it("publishes a bounded interpretation with every omitted unit retained and veri
         assertion_locations: request.source_request.assertion_locations!, provenance: { producer_id: input.producer_id },
         producer_version: "1", contract_version: "source-interpretation-v4", draft: received.draft, budget: BUDGET
       });
-      expect(published.bound.interpretation.source.assertion_locations).toHaveLength(128);
-      expect(published.bound.interpretation.mentions).toHaveLength(128);
-      expect(published.bound.interpretation.gaps).toHaveLength(127);
+      expect(published.bound.interpretation.source.assertion_locations).toHaveLength(count);
+      expect(published.bound.interpretation.mentions).toHaveLength(count);
+      expect(published.bound.interpretation.gaps).toHaveLength(count - represented.length);
+      const gapIds = new Set(published.bound.interpretation.gaps.flatMap(gap => gap.affected_ids));
+      expect(published.bound.interpretation.mentions.filter(mention => gapIds.has(mention.id)).map(mention => mention.assertion_id))
+        .toEqual(input.assertionIds.filter(id => !represented.includes(id)));
       expect(published.resource_usage!.work_units).toBeLessThanOrEqual(BUDGET.work_units);
       expect(published.resource_usage!.memory_bytes).toBeLessThanOrEqual(BUDGET.memory_bytes);
       database.close(); closeCachedDatabase(filename);
