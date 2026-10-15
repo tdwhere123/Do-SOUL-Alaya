@@ -23,7 +23,6 @@ import {
 import { PathEffectCursor, type PathComputation } from "./path-effect-cursor.js";
 import type { RetainedRows } from "./retained-sequence.js";
 import {
-  alignOutgoingBinding,
   type BindingContextStore,
   type BoundSourceFacts
 } from "./binding-environment.js";
@@ -32,7 +31,6 @@ import {
   relationMatches,
   relationPhysicalCandidates,
   admitRelationRow,
-  retargetRelationProduct,
   type AdjacencyRow,
   type AdmittedRelationStrength,
   type NamedKindOverlay
@@ -48,6 +46,7 @@ import {
   compileProgramAutomaton,
   type ProgramAutomaton
 } from "./program-automaton.js";
+import { advanceProducts, relationTransition } from "./local-advance.js";
 import { runtimeProgram } from "./path-composition-seed.js";
 import { composedFacetPathId, extendFacets, PathFacetLookup, type FacetIdentityIndex } from "./path-composition-facet.js";
 import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
@@ -330,20 +329,13 @@ function* effectsForAdvance(
   const { binding: unifiedBinding, targetRevision, revisionId, strength } = admitted;
   for (const programState of advance.to) {
     yield { kind: "work" };
-    const binding = alignOutgoingBinding(
-      unifiedBinding,
-      row.targetObjectId,
-      automaton,
-      programState,
-      input.bindingContexts
-    );
-    if (binding === undefined) continue;
-    const to = retargetRelationProduct(from, row.targetObjectId, targetRevision, {
-      program_state: programState,
-      binding_context: binding
-    }, input.sourceFacts);
+    const [product] = advanceProducts(automaton, { to: [programState] }, row, from, {
+      binding: unifiedBinding,
+      targetRevision
+    }, { bindingContexts: input.bindingContexts, sourceFacts: input.sourceFacts });
+    if (product === undefined) continue;
     yield* compiledEffects({ ...row, source_revision: revisionId },
-      from, to, strength, "true", input.facetLookup);
+      from, product.to, strength, "true", input.facetLookup);
   }
 }
 
@@ -355,21 +347,8 @@ function* compiledEffects(
   decision: "true" | "unresolved",
   facetLookup: PathFacetLookup
 ): PathComputation<void> {
-  if (row.validity === undefined) return;
-  const transition: Transition = {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    from,
-    to,
-    relation_kind: row.predicate,
-    instance_id: strength.instance_id,
-    revision_id: strength.revision_id,
-    transfer_id: strength.transfer_id,
-    transfer_version: strength.transfer_version,
-    strength_milligrades: strength.milligrades,
-    validity: row.validity,
-    applicable: true,
-    cap_contract_id: strength.cap_contract_id
-  };
+  const transition = relationTransition(row, from, to, strength);
+  if (transition === undefined) return;
   const vectors = yield* extendFacets(facetLookup, from, to, `${from.program_state}:${to.program_state}:${row.predicate}`, strength.milligrades);
   const derivation = leafDerivation({
     derivation_id: `leaf:${row.assertionId}:${from.program_state}:${to.program_state}`,
