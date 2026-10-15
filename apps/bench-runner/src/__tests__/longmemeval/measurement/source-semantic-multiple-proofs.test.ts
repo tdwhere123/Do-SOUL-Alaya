@@ -1,12 +1,9 @@
-import { afterEach, expect, it, vi } from "vitest";
-vi.hoisted(() => {
-  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
-  const nativeFetch = globalThis.fetch;
-  vi.stubGlobal("fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (new URL(String(input)).hostname !== "127.0.0.1" || init?.redirect !== "error") throw new Error("only no-redirect loopback transport allowed");
-    return nativeFetch(input, init);
-  });
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
 });
+afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
 import * as core from "@do-soul/alaya-core";
 import { REQUEST, nativeMultiProofResponseFixture } from "./source-semantic-library-measurement-fixture.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
