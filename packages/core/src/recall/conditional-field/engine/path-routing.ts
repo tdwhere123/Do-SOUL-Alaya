@@ -59,3 +59,17 @@ export function mergeDiscoveries(
 export function pairKey(subject: string, predicate: string): string {
   return `${subject}\0${predicate}`;
 }
+
+/** Demands the field registry already holds; an undefined registry suppresses nothing. */
+export type RegisteredDemands = Readonly<{
+  readonly pairs: Readonly<{ has(key: string): boolean }>;
+  readonly sources: Readonly<{ has(id: string): boolean }>;
+}>;
+
+export function pairInRegistry(pairs: Readonly<{ has(key: string): boolean }>, subject: string, predicate: string): boolean {
+  return pairs.has(pairKey(subject, predicate));
+}
+
+export function pairDemandRegistered(registered: RegisteredDemands | undefined, subject: string, predicate: string): boolean {
+  return registered !== undefined && pairInRegistry(registered.pairs, subject, predicate);
+}

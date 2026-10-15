@@ -38,7 +38,9 @@ import {
   type NamedKindOverlay
 } from "./path-matching.js";
 import {
+  pairDemandRegistered,
   routingDiscoveryEffect,
+  type RegisteredDemands,
   type RoutingDiscovery
 } from "./path-routing.js";
 import {
@@ -116,6 +118,8 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly facets?: RetainedRows<FacetVector>;
     readonly discoveries?: RetainedRows<RoutingDiscovery>;
     readonly physicalKinds?: readonly string[];
+    /** Registry snapshot at cursor creation; registered demands are not emitted again, undefined suppresses nothing. */
+    readonly registeredDemands?: RegisteredDemands;
     readonly compiledAutomaton?: ProgramAutomaton;
     /** Branch frontier. Absent callers keep writing the shared automaton. */
     readonly sequenceReachOwner?: object;
@@ -133,6 +137,13 @@ export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input:
   return new PathEffectCursor(() => adjacencyEffectSteps(rows, { ...input, bindingContexts }), initialBytes, bindingContexts);
 }
 
+function claimDemandRegistered(
+  registered: RegisteredDemands | undefined,
+  claim: Readonly<{ subject: string; predicate: string }>
+): boolean {
+  return pairDemandRegistered(registered, claim.subject, claim.predicate) && registered?.sources.has(claim.subject) === true;
+}
+
 function joinRowTableBytes(rows: readonly AdjacencyRow[] | undefined): number {
   if (rows === undefined) return 0;
   // Pointer table only; row bodies stay on the retained population.
@@ -147,7 +158,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       yield { kind: "work" };
       const claim = claimEvidenceDemandForState(input.liveStates.at(index)!, input.interpretation.view,
         input.bindingContexts);
-      if (claim !== undefined) yield { kind: "effect", effect: {
+      if (claim !== undefined && !claimDemandRegistered(input.registeredDemands, claim)) yield { kind: "effect", effect: {
         observation_id: `claim-demand:${claim.subject}:${claim.predicate}`,
         relation_demand: claim, source_fact_demand: claim.subject
       } };
@@ -176,12 +187,13 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
         yield { kind: "work" };
         if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
+        if (pairDemandRegistered(input.registeredDemands, endpoint, predicate)) continue;
         yield { kind: "effect", effect: { observation_id: `demand:${endpoint}:${predicate}`,
           relation_demand: { subject: endpoint, predicate } } };
       }
     }
     const claim = claimEvidenceDemandForState(from, input.interpretation.view, input.bindingContexts);
-    if (claim !== undefined) yield { kind: "effect", effect: {
+    if (claim !== undefined && !claimDemandRegistered(input.registeredDemands, claim)) yield { kind: "effect", effect: {
       observation_id: `claim-demand:${claim.subject}:${claim.predicate}`,
       relation_demand: claim,
       source_fact_demand: claim.subject
@@ -205,6 +217,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         observedStates: input.liveStates,
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
         coldPrograms,
+        registeredDemands: input.registeredDemands,
         // The compiled automaton stays shared. A branch writes only its own frontier.
         reachOwner: input.sequenceReachOwner ?? input.compiledAutomaton ?? input.interpretation,
         ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
@@ -242,6 +255,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     for (const [predicate, routing] of Object.entries(input.overlay)) {
       yield { kind: "work" };
       if (!routing.applicable || routing.role !== "routing_only") continue;
+      if (pairDemandRegistered(input.registeredDemands, origin, predicate)) continue;
       yield { kind: "effect", effect: { observation_id: `routing-demand:${origin}:${predicate}`,
         relation_demand: { subject: origin, predicate } } };
     }

@@ -3,7 +3,7 @@ import { applyObserverPage, type FieldEngineState } from "../conditional-field/e
 import { forkSequenceReachOwner, transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
 import { createAdjacencyEffectCursor, type AdjacencyEffectsInput } from "../conditional-field/engine/path-composition-adjacency.js";
 import type { PathEffectPreparation } from "../conditional-field/engine/path-effect-cursor.js";
-import { pairKey } from "../conditional-field/engine/path-routing.js";
+import { pairInRegistry, pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 
 const PREPARATION_BASE_BYTES = 128;
@@ -37,7 +37,9 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   if (state.remaining_exploration === 0) return interrupted(state, false);
   const owned = ownSequenceReach(state, pending);
   state = owned.state;
-  const options = owned.options;
+  const options = pending.cursor === undefined
+    ? { ...owned.options, registeredDemands: { pairs: state.pair_demands, sources: state.source_fact_demands } }
+    : owned.options;
   const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, options,
     state.remaining_memory_bytes + pending.retained_bytes);
   if (cursor === undefined) return interrupted(state, true);
@@ -90,8 +92,8 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       if (demand !== undefined) {
         if (work === 0) break;
         work -= 1;
-        const key = pairKey(demand.subject, demand.predicate);
-        if (!pairs.has(key)) {
+        if (!pairInRegistry(pairs, demand.subject, demand.predicate)) {
+          const key = pairKey(demand.subject, demand.predicate);
           const bytes = 96 + Buffer.byteLength(key, "utf8");
           if (bytes > memory) { memoryBlocked = true; break; }
           pairs = pairs.with(key, true); pairBytes += bytes; memory -= bytes;
