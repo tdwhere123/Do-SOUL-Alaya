@@ -10,8 +10,10 @@ import {
 import {
   startObserverCursor,
   type ObserverReaders,
-  type SourceObserverPage
+  type SourceObserverPage,
+  type SourceObserverRow
 } from "../conditional-field/observers/observe.js";
+import { sourceFactEligible } from "../conditional-field/observers/observation-admission.js";
 import { requiresStoredMeasurement } from "../conditional-field/observers/measure-stored.js";
 import { resumePathEffects } from "./pending-path-effects.js";
 import { bindEngineState } from "../conditional-field/engine/field-update.js";
@@ -29,7 +31,7 @@ import { routingOverlayKinds } from "../conditional-field/engine/path-routing.js
 import { authorizedScopesMismatch } from "../conditional-field/query/compile-query-identity.js";
 import { stableStringify } from "../../shared/stable-stringify.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
-import { ObservedSourceFacts } from "./observed-source-facts.js";
+import { ObservedSourceFacts, retainSourceFact } from "./observed-source-facts.js";
 import {
   openResiduals,
   type SourceDomainCoverage
@@ -55,6 +57,8 @@ export type ObserveFieldInput = Readonly<{
   readonly cancelled?: boolean;
   readonly resume_cursors?: Readonly<Record<string, string | null>>;
   readonly resume_field?: FieldEngineState;
+  /** Already-observed rows to merge on resume. Not a retry of an unavailable read. */
+  readonly observed_source_facts?: Readonly<Record<string, SourceObserverRow>>;
   readonly expected_source_revision?: string;
   readonly model_id?: string;
   readonly expected_model_id?: string;
@@ -123,6 +127,15 @@ function observeWithinMemory(
     state = { ...state, remaining_exploration: state.remaining_exploration - SNAPSHOT_PIN_NATIVE_WORK };
   }
   const lease = activeLease(interpretation);
+  const observedAt: Record<string, string> = {};
+  const sourceFacts = new ObservedSourceFacts(state.source_facts, state.source_fact_bytes);
+  state = retainObservedSourceFacts(state, sourceFacts, observedAt, input);
+  if (state.memory_exhausted) return state;
+  const pending = state.pending_path_effects;
+  if (pending !== undefined && pending.input.options.sourceFacts !== sourceFacts.snapshot) {
+    state = { ...state, pending_path_effects: { ...pending, input: { ...pending.input,
+      options: { ...pending.input.options, sourceFacts: sourceFacts.snapshot } } } };
+  }
   if (state.pending_path_effects !== undefined) {
     const beforePathWork = state.remaining_exploration;
     state = resumePathEffects(state);
@@ -155,8 +168,6 @@ function observeWithinMemory(
   if (state.observed_relations !== undefined && !(state.observed_relations instanceof ObservedRelations)) {
     for (const row of state.observed_relations) relationRows = relationRows.with(row);
   }
-  const observedAt: Record<string, string> = {};
-  const sourceFacts = new ObservedSourceFacts(state.source_facts, state.source_fact_bytes);
   const memoryBox = { remaining: state.remaining_memory_bytes, cachedBytes: 0 };
   const sourceCache = new Map<string, SourceObserverPage>();
   const observedInput: ObserveFieldInput = {
@@ -193,6 +204,35 @@ function observeWithinMemory(
     subjects, relationRows, observedAt, sourceFacts, memoryBox, predicates, seedUnitCost,
     storedKindsOpen: storedKinds.open, pairIndex: state.pair_scan_offset, unresolvedGuard, missingMeasurement,
     sourceFamilyUnavailable: false });
+}
+
+function retainObservedSourceFacts(
+  state: FieldEngineState,
+  sourceFacts: ObservedSourceFacts,
+  observedAt: Record<string, string>,
+  input: ObserveFieldInput
+): FieldEngineState {
+  const supplied = input.observed_source_facts;
+  if (supplied === undefined) return state;
+  const beforeBytes = sourceFacts.bytes;
+  for (const objectId of Object.keys(supplied)) {
+    const row = supplied[objectId];
+    if (row === undefined || !sourceFactEligible(row, input.authorized_scopes, input.as_of)) continue;
+    retainSourceFact(sourceFacts, objectId, row, input.workspace_id, observedAt);
+  }
+  if (sourceFacts.snapshot === state.source_facts) return state;
+  const retainedBytes = sourceFacts.bytes - beforeBytes;
+  if (retainedBytes > state.remaining_memory_bytes) {
+    return { ...interruptObservedField(state), memory_exhausted: true };
+  }
+  return {
+    ...state,
+    remaining_memory_bytes: state.remaining_memory_bytes - retainedBytes,
+    admitted_allocation_bytes: (state.admitted_allocation_bytes ?? 0) + retainedBytes,
+    source_facts: sourceFacts.snapshot,
+    source_fact_bytes: sourceFacts.bytes,
+    last_observer_status: state.last_observer_status === "unavailable" ? "open" : state.last_observer_status
+  };
 }
 
 function startObservedField(

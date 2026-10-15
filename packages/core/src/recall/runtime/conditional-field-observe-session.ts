@@ -321,6 +321,7 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   pairProgress.completed = completedPair.completed;
   pairProgress.revision = completedPair.revision;
   pairProgress.bytes = completedPair.bytes;
+  if (closeUnavailableAdjacency(session, observed.page, completedPair.hasOpenDemand())) return false;
   const beforePathWork = session.state.remaining_exploration;
   session.state = resumePathEffects(session.state);
   input.cost?.add("adjacency", { joins: Math.max(0, beforePathWork - session.state.remaining_exploration) });
@@ -335,6 +336,18 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
     session.state = { ...session.state, last_observer_status: "open" };
   }
   return false;
+}
+
+function closeUnavailableAdjacency(
+  session: ObservationSession,
+  observedPage: ReturnType<typeof observeConditionalField>["page"],
+  stillOpen: boolean
+): boolean {
+  if (observedPage.outcome.status !== "unavailable") return false;
+  const page = session.state.pending_path_effects?.page ?? maskAdjacencyExhaustion(observedPage, stillOpen);
+  session.state = applyObserverPage({ ...session.state, pending_path_effects: undefined }, {
+    page, resume_cursors: session.state.resume_cursors });
+  return true;
 }
 
 function observeTrackedAdjacency(session: ObservationSession, action: ObservationAction,
@@ -491,7 +504,10 @@ function observeAdjacency(
     ...pinExpectation(input)
   });
   const kept = new Set(observed.page.observations.map((row) => row.observation_id));
-  const eligible = captured.filter((row) => kept.has(`${action.region_id}:${row.assertionId}`));
+  // An unavailable target fact must not drop the relation row. A later observed fact admits it.
+  const eligible = observed.page.outcome.status === "unavailable"
+    ? [...captured]
+    : captured.filter((row) => kept.has(`${action.region_id}:${row.assertionId}`));
   captured.length = 0;
   captured.push(...eligible);
   recordObservedAt(
