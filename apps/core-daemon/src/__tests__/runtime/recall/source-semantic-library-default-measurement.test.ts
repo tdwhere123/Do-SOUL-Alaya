@@ -71,7 +71,8 @@ function observe(context: NativeSubsetContext, candidates: readonly SourceSemant
     pages: nativePages.map((page, index) => ({ encoded_bytes: Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse(page))),
       public_sha256_excluding_rss_and_fresh_capabilities: fieldContractSha256(canonicalJson(publicPages[index])), index: page.index,
       proofs: (page.proofs ?? []).map(proof => ({ id: proof.conditional_computation_id, sha256: fieldContractSha256(canonicalJson(proof)) })),
-      previews: page.previews, qualifiers: page.slot_qualifiers, coverage: page.coverage, discovery: page.discovery })),
+      previews: page.previews, qualifiers: page.slot_qualifiers, coverage: page.coverage, discovery: page.discovery,
+      exposure: run.exposure_pages[index] })),
     truncated: run.plan.discovery.truncated } };
 }
 
@@ -179,6 +180,7 @@ const measurementSources = [
   "apps/core-daemon/src/__tests__/runtime/recall/source-semantic-library-default-measurement.test.ts",
   "apps/core-daemon/src/__tests__/runtime/recall/source-semantic-library-selection-gap.test-support.ts",
   "apps/core-daemon/src/__tests__/runtime/recall/source-semantic-library-subset-packing.test-support.ts",
+  "apps/core-daemon/src/__tests__/runtime/recall/source-semantic-library-exposure.test-support.ts",
   "apps/core-daemon/src/__tests__/runtime/recall/source-semantic-library-text-recall.test-support.ts",
   "packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.ts"] as const;
 function measurementProvenance() {

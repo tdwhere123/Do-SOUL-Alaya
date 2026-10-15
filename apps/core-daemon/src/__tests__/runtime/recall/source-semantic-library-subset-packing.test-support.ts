@@ -21,6 +21,7 @@ import { createRecallRealStorage } from "../../../../../../packages/core/src/__t
 import { CLOCK } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { compatibleTaskSupport, physicalRoot, selectionExecutionBudget, type SelectionTaskFixture }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
+import { createLibraryExposureMeter, type ExposureSource } from "./source-semantic-library-exposure.test-support.js";
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
@@ -104,6 +105,7 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
       source_version: "1", content_bytes: source.body, evidence_object_id: null, recorded_at: CLOCK,
       event_time: null, valid_from: null, valid_to: null, speaker: null, scope_class: "project", spans: [] }, { workspaceId: WS });
     const runtime = createRecallReadWorkerRuntime(database), setupMeter = new SourceSemanticReadBudget(selectionExecutionBudget);
+    const exposure_sources: ExposureSource[] = [];
     const observations = fixture.sources.map(source => {
       const stores = sourceSemanticReadStores(database, WS, source.id, setupMeter, SCOPES);
       const current = stores.getCurrentRecord(WS, source.id), proofRecord = source.package.proofs[0]!.source_record;
@@ -111,6 +113,8 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
       expect(current?.content_digest).toBe(proofRecord.content_digest);
       const stored = stores.getStoredRecord(WS, proofRecord.identity);
       expect(stored?.content_bytes).toBe(source.body);
+      if (current === null || stored === null) throw new Error("admitted exposure source expected");
+      exposure_sources.push({ record: current, body: stored.content_bytes });
       const bytes = Buffer.byteLength(source.body);
       return { source_id: source.id, record_id: proofRecord.identity, source_version: proofRecord.source_version,
         content_digest: proofRecord.content_digest, read_bytes: bytes, body_bytes: bytes, complete: true,
@@ -119,7 +123,7 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
     const records = bindVerifiedResearchSourceRecords(runtime, WS, SCOPES, setupMeter, observations);
     const pool = bindResearchSourceAccessPool(runtime, WS, SCOPES, setupMeter, fixture.original,
       fixture.semantics, selectionExecutionBudget, records, observations, [], []);
-    return { fixture, runtime, pool, setup_work: work(setupMeter), close: async () => {
+    return { fixture, runtime, pool, exposure_sources, setup_work: work(setupMeter), close: async () => {
       database.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true });
     } };
   } catch (error) {
@@ -205,8 +209,11 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
   const encoded = encodeSourceSemanticLibraryResponse(native);
   if (encoded.operation !== "recall" || encoded.results === undefined) throw new Error("public membership page expected");
   reserved ??= meter.reservations.get(native.delivery_id);
-  const delivered = deliveredPackages(context.fixture, encoded);
+  const delivered = fixtureTaskSupportPackages(context.fixture, encoded);
+  const exposure_meter = createLibraryExposureMeter();
+  const exposure = exposure_meter.observe(native, encoded, context.exposure_sources);
   return { plan, request, native, encoded, reserved, probe, delivered, delivery_runtime,
+    exposure, exposure_meter, exposure_pages: [exposure],
     selected_roots: delivered.map(physicalRoot), selected_sources: sourceNames(context.fixture, delivered),
     desired_sources: desired === undefined ? null : sourceNames(context.fixture, desired),
     reserved_bytes: reserved === undefined ? null : bytes(reserved),
@@ -219,7 +226,9 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
 }
 
 export type NativeMeasurement = ReturnType<typeof measureNativeSubset>;
-function deliveredPackages(fixture: SelectionTaskFixture, encoded: PublicRecall) {
+// Authored task-support controls need fixture metadata. This root-only reconstruction
+// is not an authority for delivered spans or proofs; exposure reads native/public output.
+function fixtureTaskSupportPackages(fixture: SelectionTaskFixture, encoded: PublicRecall) {
   return (encoded.results ?? []).map(result => {
     if (result.target?.kind !== "source_evidence") throw new Error("source evidence target expected");
     const identity = sourceGoldRootIdentity(result.target);
@@ -262,7 +271,11 @@ export function measurementSummary(measurement: NativeMeasurement) {
   const { selected_roots, selected_sources, desired_sources, reserved_bytes, probe_bytes, encoded_bytes,
     preparation_work, delivery_work, support, qualifiers, limit, actual_subset, probe, native } = measurement;
   return { selected_roots, selected_sources, desired_sources, reserved_bytes, probe_bytes, encoded_bytes,
-    preparation_work, delivery_work, support, qualifiers, limit, actual_subset, probe_fits: probe?.fits ?? null,
+    preparation_work, delivery_work, support, support_basis: "authored_fixture_statements_and_alternative_completeness" as const,
+    qualifiers, limit, actual_subset, probe_fits: probe?.fits ?? null,
+    first_page_exposure: measurement.exposure, exposure_pages: [...measurement.exposure_pages],
+    planned_pages: measurement.plan.pages.length, exposure_pages_observed: measurement.exposure_pages.length,
+    reserved_plan_fully_observed: measurement.exposure_pages.length === measurement.plan.pages.length,
     coverage: native.coverage, discovery: native.discovery, continuation: native.index.continuation };
 }
 
@@ -289,6 +302,9 @@ export function deliverAllPages(context: NativeSubsetContext, measurement: Nativ
     const result = deliverFrozenLibraryPage(measurement.delivery_runtime, { workspace_id: WS, as_of: CLOCK,
       authorized_scopes: { mode: "named", scopes: SCOPES }, request: measurement.request },
     meter, measurement.request, measurement.plan, offset);
+    const encoded = encodeSourceSemanticLibraryResponse(result);
+    if (encoded.operation !== "recall") throw new Error("public recall exposure page expected");
+    measurement.exposure_pages[index] ??= measurement.exposure_meter.observe(result, encoded, context.exposure_sources);
     observe?.(result, work(meter));
     offset += page.length;
     return result;

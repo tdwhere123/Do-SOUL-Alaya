@@ -6,7 +6,8 @@ import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPai
 import { deploymentStatement, physicalRoot, type SelectionTaskFixture }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
 import type { LibraryPageSelector } from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
-import { deliverAllPages, measureNativeSubset, type NativeSubsetContext } from "./source-semantic-library-subset-packing.test-support.js";
+import { deliverAllPages, measureNativeSubset, measurementSummary, type NativeSubsetContext } from "./source-semantic-library-subset-packing.test-support.js";
+import { compareSourcePositionExposure } from "./source-semantic-library-exposure.test-support.js";
 
 const rawOnly: LibraryPageSelector = input => selectSourceSemanticLibraryPage({ ...input,
   candidates: input.candidates.filter(row => row.proofs.length === 0), order: "source_access" });
@@ -74,14 +75,10 @@ export function freezeTextGold(fixture: SelectionTaskFixture) {
 
 /** Source-position coverage is independent of text novelty, gold relevance and proof claims. */
 export function compareSourceExposure(baseline: ReturnType<typeof measureTextRecall>, candidate: ReturnType<typeof measureTextRecall>) {
-  return baseline.eventual_source_exposure.map(before => {
-    const after = candidate.eventual_source_exposure.find(row => row.root === before.root);
-    if (before.span === null || after?.span === null) return { root: before.root, status: "unknown" as const, lost_bytes: null };
-    const intersection = after === undefined ? 0 : Math.max(0,
-      Math.min(before.span.content_end, after.span.content_end) - Math.max(before.span.content_start, after.span.content_start));
-    const lost_bytes = before.span.content_end - before.span.content_start - intersection;
-    return { root: before.root, status: lost_bytes === 0 ? "retained" as const : "lost" as const, lost_bytes };
-  });
+  if (!baseline.reserved_plan_fully_observed || !candidate.reserved_plan_fully_observed) {
+    return [{ root: null, status: "unknown" as const, lost_bytes: null }];
+  }
+  return compareSourcePositionExposure(baseline.exposure_pages.at(-1)!.position, candidate.exposure_pages.at(-1)!.position);
 }
 
 export function measureTextRecall(context: NativeSubsetContext, candidates: readonly SourceSemanticLibraryPackage[], limit: number,
@@ -99,10 +96,9 @@ export function measureTextRecall(context: NativeSubsetContext, candidates: read
     return (encoded.results ?? []).map(result => {
       const target = result.target;
       if (target?.kind !== "source_evidence") throw new Error("source evidence expected");
-      const root = sourceGoldRootIdentity(target), source = context.fixture.sources.find(row => physicalRoot(row.package) === root);
-      const span = target.span ?? (result.content_preview === source?.body
-        ? { content_start: 0, content_end: Buffer.byteLength(source.body) } : null);
-      if (span !== null) expect(result.content_preview).toBe(Buffer.from(source!.body).subarray(span.content_start, span.content_end).toString("utf8"));
+      const root = sourceGoldRootIdentity(target);
+      const observed = measurement.exposure_pages[index]!.position.intervals.find(row => row.root === root);
+      const span = observed === undefined ? null : { content_start: observed.start, content_end: observed.end };
       return { root, page: index + 1, span, text: result.content_preview };
     });
   });
@@ -117,9 +113,11 @@ export function measureTextRecall(context: NativeSubsetContext, candidates: read
     cumulative.push(...text);
     if (allGoldPage === null && gold.statements.every(statement => contains(cumulative, statement))) allGoldPage = index + 1;
   }
+  const { planned_pages, first_page_exposure, exposure_pages, exposure_pages_observed, reserved_plan_fully_observed } = measurementSummary(measurement);
   return { recall_at_5: covered.length / gold.statements.length, covered_gold: covered,
+    first_page_exposure, exposure_pages, exposure_pages_observed, reserved_plan_fully_observed,
     best_alternative_completeness: Math.max(...gold.alternatives.map(alt => alt.filter(statement => contains(first, statement)).length / alt.length)),
-    any_at_5: covered.length > 0, pages_for_all_gold: allGoldPage, planned_pages: pages.length,
+    any_at_5: covered.length > 0, pages_for_all_gold: allGoldPage, planned_pages,
     encoded_bytes: measurement.encoded_bytes, selector_work: measurement.selector_work.logical_work,
     selector_bytes: measurement.selector_work.logical_bytes, selector_regions: measurement.selector_regions,
     preparation_work: measurement.preparation_work, preparation_phases: measurement.preparation_phases,

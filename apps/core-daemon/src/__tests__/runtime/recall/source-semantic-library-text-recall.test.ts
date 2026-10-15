@@ -38,6 +38,16 @@ it.each([false, true])("freezes text gold before measuring source windows (long 
     expect(raw.recall_at_5).toBe(long ? 0.8 : 1);
     expect(semantic.recall_at_5).toBe(1);
     expect(semantic.retained_proof_claims).toHaveLength(5);
+    for (const measured of [raw, semantic]) {
+      expect(measured.exposure_pages_observed).toBe(measured.planned_pages);
+      expect(measured.reserved_plan_fully_observed).toBe(true);
+      expect(measured.first_page_exposure.contract).toBe("source-position-exposure-v1");
+      expect(measured.first_page_exposure.position.status).toBe("complete");
+      expect(measured.exposure_pages.at(-1)!.position.cumulative_known).toBe(measured.eventual_source_exposure.reduce(
+        (sum, row) => sum + Buffer.byteLength(row.text === "[empty source]" ? "" : row.text), 0));
+    }
+    expect(compareSourceExposure(raw, { ...raw, reserved_plan_fully_observed: false })).toEqual([
+      { root: null, status: "unknown", lost_bytes: null }]);
     const novel = measureTextRecall(context, candidates, roomyDeliveryBytes, textRecallPolicies.new_text_per_byte, gold);
     expect(novel.recall_at_5).toBe(1);
     expect(novel.retained_proof_claims).toHaveLength(long ? 1 : 0);
@@ -139,7 +149,9 @@ it.each(["partial_overlap", "repeated_lines", "irrelevant_novel"] as const)(
       const limits = selectionGapLimits(context, candidates.filter(row => row.proofs.length > 0));
       const rows = limits.map(limit => ({ limit, policies: Object.fromEntries(Object.entries(textRecallPolicies).map(([name, selector]) =>
         [name, measureTextRecall(context, candidates, limit, selector, gold)])) }));
-      await persistArtifact("text-recall-controls", `${control}.json`, { limits, heuristic_novel_bytes: previewNoveltyBytes(raw.preview, proof.preview),
+      await persistArtifact("text-recall-controls", `${control}.json`, { limits, legacy_line_novelty: {
+        unit: "nonmatching_line_bytes", value: previewNoveltyBytes(raw.preview, proof.preview),
+        role: "private_ranking_control_not_source_position_exposure" },
         rows: rows.map(row => ({ ...row, baseline_exposure: compareSourceExposure(row.policies["original_default"]!, row.policies["deferred_new_text"]!) })) });
       expect(rows.every(row => row.policies["deferred_new_text"]!.selector_work <= row.policies["original_default"]!.selector_work * 3)).toBe(true);
     } finally { await context.close(); }
