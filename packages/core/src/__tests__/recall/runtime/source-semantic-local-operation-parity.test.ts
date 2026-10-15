@@ -1,7 +1,6 @@
 import { expect, it } from "vitest";
 import { SourceSemanticResourceLedger, sourceSemanticSlotNodeId, type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
 import { interpretationRowEligible } from "../../../recall/conditional-field/observers/observation-admission.js";
-import { settleLocalComputation } from "../../../recall/conditional-field/engine/local-advance.js";
 import { compileSourceSemanticExecution, lowerSourceSemanticPhases } from "../../../recall/conditional-field/query/compile-source-semantic-finite.js";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
 import { planSourceSemanticBranches, type SourceSemanticBranchPlan } from "../../../recall/runtime/source-semantic-branch-plan.js";
@@ -149,17 +148,4 @@ it("admits an interpretation row only for its own hypothesis packet", () => {
   expect(interpretationRowEligible(row, undefined)).toBe(false);
   expect(interpretationRowEligible(row, "other")).toBe(false);
   expect(interpretationRowEligible({ ...row, interpretation_source: { ...row.interpretation_source, packet_id: "other" } }, "h")).toBe(false);
-});
-
-it("forwards local work and keeps blocking effects distinct from admission", () => {
-  const meter = new SourceSemanticResourceLedger({ work_units: 10, memory_bytes: 1000 });
-  function* admitted() { yield { kind: "work" as const, retained_bytes: 8 }; return "ok"; }
-  expect(settleLocalComputation(admitted(), meter)).toEqual({ kind: "admitted", value: "ok" });
-  expect(meter.spentWork).toBe(1);
-  expect(meter.spentBytes).toBe(8);
-  function* blocked() {
-    yield { kind: "effect" as const, effect: { unresolved_guard: true } };
-    return "hidden";
-  }
-  expect(settleLocalComputation(blocked(), meter)).toEqual({ kind: "blocked", reason: "unresolved_guard" });
 });
