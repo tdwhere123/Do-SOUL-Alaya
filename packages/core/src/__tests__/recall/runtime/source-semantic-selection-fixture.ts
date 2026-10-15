@@ -54,6 +54,33 @@ export function textWindowSelectionFixture(longSource: boolean, longRoots = 1): 
     prefix: longSource && input <= longRoots ? "Unrelated source introduction.\n".repeat(200) : "" })), selectionExecutionBudget);
 }
 
+/** Three separately executed interpretations of one root, with complementary input support. */
+export function complementaryProofSelectionFixture() {
+  const original = `For ${DEPLOYMENT}, collect these required source statements: ${deploymentPredicates.slice(0, 3).join("; ")}.`;
+  const base = selectionFixture(original, [[1, 2, 3]], [
+    { id: "complementary", inputs: [1, 2, 3] }, { id: "later", inputs: [1] }
+  ], selectionExecutionBudget);
+  const source = base.sources[0]!, full = deploymentInterpretation(source.id, source.inputs, source.body);
+  const branches = source.inputs.map(input => {
+    const interpretation: SourceSemanticInterpretation = { ...full,
+      frames: full.frames.filter(row => row.id === `fInput${input}`),
+      mentions: full.mentions.filter(row => row.id === `mDeployment${input}` || row.id === `mPredicate${input}`),
+      referents: full.referents.map(row => ({ ...row, mentions: [`mDeployment${input}`] })),
+      entry_roots: [`fInput${input}`], asserted_at_scope: [`fInput${input}`] };
+    const { actual } = measuredProof({ interpretation, semantics: base.semantics,
+      correspondence: deploymentCorrespondence(interpretation, base.semantics, base.alternatives, [input]),
+      original, library: true, budget: selectionExecutionBudget });
+    const group: SourceSemanticLibraryPackage = { ...source.package, entry: actual.entry,
+      entries: actual.index.entries, explanations: actual.index.explanations ?? [], proofs: [actual.proof] };
+    return { proof: actual.proof, group, source: source.body, dependencies: actual.source_dependencies };
+  });
+  const later = base.sources[1]!;
+  return { fixture: { ...base, sources: [{ ...source, package: branches[0]!.group }, later],
+    pool: [...branches.map(row => row.group), later.package] } satisfies SelectionTaskFixture,
+  branches: [...branches, { proof: later.package.proofs[0]!, group: later.package,
+    source: later.body, dependencies: later.dependencies }] };
+}
+
 /** Authored nuisance text belongs to source bytes, never to evaluator gold or query inputs. */
 export function previewNoveltySelectionFixture(control: "partial_overlap" | "repeated_lines" | "irrelevant_novel"): SelectionTaskFixture {
   const original = `For ${DEPLOYMENT}, collect these required source statements: ${deploymentPredicates.slice(0, 5).join("; ")}.`;

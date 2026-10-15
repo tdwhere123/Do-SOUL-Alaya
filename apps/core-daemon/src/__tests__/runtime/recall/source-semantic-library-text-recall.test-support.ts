@@ -1,5 +1,5 @@
-import { expect, vi } from "vitest";
-import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { expect } from "vitest";
+import { SourceSemanticResourceExhausted } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse, sourceGoldRootIdentity } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPairExchange,
   type SourceSemanticLibraryPackage } from "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
@@ -86,29 +86,9 @@ export function compareSourceExposure(baseline: ReturnType<typeof measureTextRec
 
 export function measureTextRecall(context: NativeSubsetContext, candidates: readonly SourceSemanticLibraryPackage[], limit: number,
   selector: LibraryPageSelector, gold: ReturnType<typeof freezeTextGold>) {
-  let selectorWork = 0, selectorBytes = 0;
-  const budgetRejections: { phase: string; work: number; bytes: number; remaining_work: number; remaining_bytes: number }[] = [];
-  const reserve = SourceSemanticResourceLedger.prototype.reserve;
-  const observe = vi.spyOn(SourceSemanticResourceLedger.prototype, "reserve").mockImplementation(
-    function (this: SourceSemanticResourceLedger, work, bytes, phase = "preparation") {
-      try { return reserve.call(this, work, bytes, phase); }
-      catch (error) {
-        if (error instanceof SourceSemanticResourceExhausted) budgetRejections.push({ phase, work, bytes,
-          remaining_work: this.work, remaining_bytes: this.bytes });
-        throw error;
-      }
-    });
-  let measurement: ReturnType<typeof measureNativeSubset>, pages: ReturnType<typeof deliverAllPages>;
+  const measurement = measureNativeSubset(context, limit, undefined, candidates, selector);
   const deliveryCosts: ReturnType<typeof measureNativeSubset>["delivery_work"][] = [];
-  try {
-    measurement = measureNativeSubset(context, limit, undefined, candidates, input => {
-      const work = input.meter.spentWork, bytes = input.meter.spentBytes;
-      const page = selector(input);
-      selectorWork += input.meter.spentWork - work; selectorBytes += input.meter.spentBytes - bytes;
-      return page;
-    });
-    pages = deliverAllPages(context, measurement, (_page, cost) => deliveryCosts.push(cost));
-  } finally { observe.mockRestore(); }
+  const pages = deliverAllPages(context, measurement, (_page, cost) => deliveryCosts.push(cost));
   const pageBytes: number[] = [];
   const exposures = pages.flatMap((page, index) => {
     const encoded = encodeSourceSemanticLibraryResponse(page);
@@ -140,13 +120,17 @@ export function measureTextRecall(context: NativeSubsetContext, candidates: read
   return { recall_at_5: covered.length / gold.statements.length, covered_gold: covered,
     best_alternative_completeness: Math.max(...gold.alternatives.map(alt => alt.filter(statement => contains(first, statement)).length / alt.length)),
     any_at_5: covered.length > 0, pages_for_all_gold: allGoldPage, planned_pages: pages.length,
-    encoded_bytes: measurement.encoded_bytes, selector_work: selectorWork, selector_bytes: selectorBytes,
-    preparation_work: measurement.preparation_work,
-    delivery_costs: deliveryCosts, encoded_page_bytes: pageBytes, eventual_source_exposure: exposures,
+    encoded_bytes: measurement.encoded_bytes, selector_work: measurement.selector_work.logical_work,
+    selector_bytes: measurement.selector_work.logical_bytes, selector_regions: measurement.selector_regions,
+    preparation_work: measurement.preparation_work, preparation_phases: measurement.preparation_phases,
+    // One preparation ledger freezes the whole plan. Each logical delivery page
+    // has its own ledger; their sum is not a shared end-to-end task budget.
+    first_page_delivery_work: measurement.delivery_work,
+    delivery_work: deliveryCosts, encoded_page_bytes: pageBytes, eventual_source_exposure: exposures,
     eventual_proof_claims: pages.flatMap((page, index) => (page.proofs ?? []).map(proof => ({ page: index + 1,
       id: proof.conditional_computation_id, world_claim: proof.world_claim, semantic_status: proof.semantic_status }))),
     // Caller exhaustion is recorded by the enclosing scan's catch. A returned partial plan is distinct.
-    exhausted: false, delivery_truncated: measurement.plan.discovery.truncated, budget_rejections: budgetRejections,
+    exhausted: false, delivery_truncated: measurement.plan.discovery.truncated, budget_rejections: measurement.budget_rejections,
     first_page_roots: measurement.plan.pages[0]!.map(physicalRoot),
     retained_proof_claims: measurement.plan.pages[0]!.flatMap(row => row.proofs.map(proof => ({
       id: proof.conditional_computation_id, world_claim: proof.world_claim, semantic_status: proof.semantic_status }))) };

@@ -16,7 +16,7 @@ type SelectionGap = Readonly<{
   limit: number; selected: PageFacts; feasible: number; optimum: ObjectiveVector; optimal_pages: readonly string[];
   selector_is_optimal: boolean; best_any_at_k: boolean; best_complete: boolean; best_text_inputs: number;
   complete_pages: readonly string[]; selected_fits_in_pool_order: boolean;
-  /** Reservation-meter charge of the first selector call, including the fit oracle it invokes. */
+  /** Frozen-plan selector regions, including fit encoding and the native same-root post-pass. */
   selector_work: SelectionWork; preparation_work: SelectionWork;
   /** Whether a root-exclusive feasible page has an alternative whose every input is proof-qualified. */
   best_proof_complete: boolean;
@@ -108,19 +108,19 @@ export function measureSelectionGap(context: NativeSubsetContext, limit: number,
   candidates: readonly SourceSemanticLibraryPackage[] = context.fixture.pool.flatMap(row => [rawSourceTwin(row), row]),
   selector: LibraryPageSelector = selectSourceSemanticLibraryPage,
   reference: SelectionReference = exhaustiveReference(context, limit, candidates)): SelectionGap {
-  let selected: readonly SourceSemanticLibraryPackage[] | undefined, probeFits = false;
-  let selectorWork: SelectionWork = { logical_work: 0, logical_bytes: 0 };
-  const run = measureNativeSubset(context, limit, undefined, candidates, input => {
-    if (selected !== undefined) return selector(input);
-    const work = input.meter.spentWork, bytes = input.meter.spentBytes;
-    const page = selector(input);
-    selectorWork = { logical_work: input.meter.spentWork - work, logical_bytes: input.meter.spentBytes - bytes };
-    selected = page;
-    const position = (row: SourceSemanticLibraryPackage) => input.candidates.findIndex(item => item.entry === row.entry);
-    probeFits = input.fits([...page].sort((a, b) => position(a) - position(b)));
-    return page;
+  const run = measureNativeSubset(context, limit, undefined, candidates, selector);
+  const selected = run.plan.pages[0]!;
+  let probeFits = false, probed = false;
+  // The independent pool-order fit probe must not replace the measured selector
+  // or spend its continuation-planning ledger.
+  measureNativeSubset(context, limit, undefined, candidates, input => {
+    if (!probed) {
+      probed = true;
+      const position = (row: SourceSemanticLibraryPackage) => input.candidates.findIndex(item => item.entry === row.entry);
+      probeFits = input.fits([...selected].sort((a, b) => position(a) - position(b)));
+    }
+    return [];
   });
-  if (selected === undefined) throw new Error("selector was not invoked");
   const { facts, optimum } = reference;
   const chosen = pageFacts(context.fixture, selected);
   return { limit, selected: chosen, feasible: facts.length, optimum,
@@ -130,5 +130,5 @@ export function measureSelectionGap(context: NativeSubsetContext, limit: number,
     best_proof_complete: facts.some(row => row.proof_complete),
     best_text_inputs: Math.max(0, ...facts.map(row => row.text_inputs)),
     complete_pages: facts.filter(row => row.complete).map(row => row.label).sort(), selected_fits_in_pool_order: probeFits,
-    selector_work: selectorWork, preparation_work: { logical_work: run.preparation_work.logical_work, logical_bytes: run.preparation_work.logical_bytes } };
+    selector_work: run.selector_work, preparation_work: { logical_work: run.preparation_work.logical_work, logical_bytes: run.preparation_work.logical_bytes } };
 }

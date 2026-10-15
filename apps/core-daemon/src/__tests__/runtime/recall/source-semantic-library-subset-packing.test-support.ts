@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
-  WorkspaceKind, WorkspaceState, type SoulInterpretationResponse, type SourceSemanticWorkerRequest,
+  SourceSemanticResourceExhausted, WorkspaceKind, WorkspaceState, type SoulInterpretationResponse, type SourceSemanticWorkerRequest,
   type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   selectSourceSemanticLibraryPage, sourceGoldRootIdentity, sourceSemanticLibraryQueryIdentity,
@@ -28,15 +28,61 @@ type PublicRecall = Extract<SoulInterpretationResponse, { operation: "recall" }>
 const WS = "ws", SCOPES = ["project"], ROOMY_BYTES = 1_000_000;
 export const roomyDeliveryBytes = ROOMY_BYTES;
 
-/** Observe the actual reservation object after its normal resource charge. */
+type Work = ReturnType<typeof work>;
+type SelectionRegion = "baseline" | "final_envelope" | "same_root_post_pass";
+
+/** Observe existing debit boundaries, never the selector's function identity. */
 class ReservationMeter extends SourceSemanticReadBudget {
   public encoded: PublicRecall | undefined;
+  readonly reservations = new Map<string, PublicRecall>();
+  readonly phases: Record<string, { logical_work: number; logical_bytes: number }> = {};
+  readonly regions: { region: SelectionRegion; logical_work: number; logical_bytes: number }[] = [];
+  readonly rejections: { phase: string; work: number; bytes: number; remaining_work: number; remaining_bytes: number }[] = [];
+  private region: SelectionRegion | undefined;
+  private before = { logical_work: 0, logical_bytes: 0 };
+  private trailingAccess = { logical_work: 0, logical_bytes: 0 };
+
+  override reserve(work: number, bytes: number, phase = "preparation"): void {
+    try { super.reserve(work, bytes, phase); }
+    catch (error) {
+      if (error instanceof SourceSemanticResourceExhausted) this.rejections.push({ phase, work, bytes,
+        remaining_work: this.work, remaining_bytes: this.bytes });
+      throw error;
+    }
+  }
+  override charge(units: number, bytes: number, phase = "preparation"): void {
+    const boundary = phase === "library page root census" ? "baseline"
+      : phase === "final proof candidates" ? "final_envelope" : undefined;
+    if (boundary !== undefined) this.finish();
+    if (phase === "library pair source identity" && this.region !== "same_root_post_pass") {
+      this.finish(); this.begin("same_root_post_pass");
+    }
+    super.charge(units, bytes, phase);
+    const total = this.phases[phase] ??= { logical_work: 0, logical_bytes: 0 };
+    total.logical_work += units; total.logical_bytes += bytes;
+    if (phase === "access trace selection" || phase === "access trace delivery") {
+      this.trailingAccess.logical_work += units; this.trailingAccess.logical_bytes += bytes;
+    } else this.trailingAccess = { logical_work: 0, logical_bytes: 0 };
+    if (boundary !== undefined) this.begin(boundary);
+  }
+  private begin(region: SelectionRegion): void {
+    this.region = region; this.before = { logical_work: this.spentWork, logical_bytes: this.spentBytes };
+  }
+  finish(emptyPlan = false): void {
+    if (this.region === undefined) return;
+    // An empty plan projects one access receipt outside the last selector call.
+    const tail = emptyPlan ? this.trailingAccess : { logical_work: 0, logical_bytes: 0 };
+    this.regions.push({ region: this.region, logical_work: this.spentWork - this.before.logical_work - tail.logical_work,
+      logical_bytes: this.spentBytes - this.before.logical_bytes - tail.logical_bytes });
+    this.region = undefined;
+  }
   override retain(value: unknown, phase?: string): void {
     super.retain(value, phase);
     if (phase === "candidate delivery encoding" || phase === "candidate partial delivery encoding") {
       const encoded = value as SoulInterpretationResponse;
       if (encoded.operation !== "recall") throw new Error("library recall reservation expected");
       this.encoded = encoded;
+      if (encoded.delivery_id !== undefined) this.reservations.set(encoded.delivery_id, encoded);
     }
   }
 }
@@ -143,20 +189,30 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
     reserved = seen.get(reservationKey(selected));
     return selected;
   };
-  const plan = prepareLibraryDelivery(base, candidates, request, meter, "field", select);
+  // Forced-subset probes deliberately remain custom selectors. Ordinary measurements
+  // must pass the exact selector object so production's same-root post-pass runs.
+  const plan = prepareLibraryDelivery(base, candidates, request, meter, "field", desired === undefined ? selector : select);
+  meter.finish(plan.pages.every(page => page.length === 0));
+  const selector_work = meter.regions.reduce((sum, row) => ({ logical_work: sum.logical_work + row.logical_work,
+    logical_bytes: sum.logical_bytes + row.logical_bytes }), { logical_work: 0, logical_bytes: 0 });
   const preparation_work = work(meter), deliveryMeter = new SourceSemanticReadBudget(selectionExecutionBudget);
   const payload = { workspace_id: WS, as_of: CLOCK,
     authorized_scopes: { mode: "named" as const, scopes: SCOPES }, request };
-  const native = deliverFrozenLibraryPage(context.runtime, payload, deliveryMeter, request, plan, 0);
+  // Pair policies against the same empty process-local lease inventory. Reuse
+  // this runtime for their continuation pages, not leases left by an earlier arm.
+  const delivery_runtime = createRecallReadWorkerRuntime(context.runtime.database);
+  const native = deliverFrozenLibraryPage(delivery_runtime, payload, deliveryMeter, request, plan, 0);
   const encoded = encodeSourceSemanticLibraryResponse(native);
   if (encoded.operation !== "recall" || encoded.results === undefined) throw new Error("public membership page expected");
+  reserved ??= meter.reservations.get(native.delivery_id);
   const delivered = deliveredPackages(context.fixture, encoded);
-  return { plan, request, native, encoded, reserved, probe, delivered,
+  return { plan, request, native, encoded, reserved, probe, delivered, delivery_runtime,
     selected_roots: delivered.map(physicalRoot), selected_sources: sourceNames(context.fixture, delivered),
     desired_sources: desired === undefined ? null : sourceNames(context.fixture, desired),
     reserved_bytes: reserved === undefined ? null : bytes(reserved),
     probe_bytes: probe === undefined ? null : bytes(probe.encoded),
-    encoded_bytes: bytes(encoded), preparation_work, delivery_work: work(deliveryMeter),
+    encoded_bytes: bytes(encoded), preparation_work, delivery_work: work(deliveryMeter), selector_work,
+    selector_regions: meter.regions, preparation_phases: meter.phases, budget_rejections: meter.rejections,
     support: compatibleTaskSupport(context.fixture, delivered),
     qualifiers: native.slot_qualifiers.map(row => row.support),
     limit, actual_subset: desired === undefined || membership(delivered) === membership(desired) };
@@ -219,11 +275,18 @@ export async function persistArtifact(caseName: string, name: string, value: unk
 }
 
 export function deliverAllPages(context: NativeSubsetContext, measurement: NativeMeasurement,
-  observe?: (page: Recall, cost: ReturnType<typeof work>) => void): readonly Recall[] {
+  observe?: (page: Recall, cost: Work) => void): readonly Recall[] {
+  // The first public call already happened in measureNativeSubset: reuse it and
+  // its actual cost instead of issuing and charging page 1 a second time.
   let offset = 0;
-  return measurement.plan.pages.map(page => {
+  return measurement.plan.pages.map((page, index) => {
+    if (index === 0) {
+      observe?.(measurement.native, measurement.delivery_work);
+      offset += page.length;
+      return measurement.native;
+    }
     const meter = new SourceSemanticReadBudget(selectionExecutionBudget);
-    const result = deliverFrozenLibraryPage(context.runtime, { workspace_id: WS, as_of: CLOCK,
+    const result = deliverFrozenLibraryPage(measurement.delivery_runtime, { workspace_id: WS, as_of: CLOCK,
       authorized_scopes: { mode: "named", scopes: SCOPES }, request: measurement.request },
     meter, measurement.request, measurement.plan, offset);
     observe?.(result, work(meter));
