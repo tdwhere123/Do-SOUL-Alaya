@@ -1,4 +1,5 @@
 export * from "./runtime/config/index.js";
+export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";
 export * from "./governance/bankruptcy/budget-bankruptcy-service.js";
