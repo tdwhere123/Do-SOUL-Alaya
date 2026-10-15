@@ -1,5 +1,4 @@
-import { CoreError } from "@do-soul/alaya-core";
-import { Worker } from "node:worker_threads";
+import type { Worker } from "node:worker_threads";
 import { indexEntryCacheKey, type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
@@ -15,16 +14,10 @@ import type {
 import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
-import {
-  RECALL_READ_WORKER_PROTOCOL_VERSION,
-  type RecallReadWorkerOperation,
-  type RecallReadWorkerRequest,
-  type RecallReadWorkerResponse
-} from "../recall-read-worker/protocol.js";
-import { type WorkerOperationPayload, parseWorkerOperationResult } from "../recall-read-worker/operation-schemas.js";
+import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.js";
+import { type WorkerOperationPayload, parseWorkerOperationPayload } from "../recall-read-worker/operation-schemas.js";
 import {
   isPathAffinityOperation,
-  isRecallReadWorkerResponse,
   normalizeRequestTimeoutMs,
   normalizeWorkerCount,
   resolveDefaultWorkerUrl
@@ -35,8 +28,7 @@ import {
   createWorkerMemoryRepo,
   type WorkerTierWindowResult
 } from "../recall-read-worker/memory-client.js";
-import { createRecallReadSnapshotSession } from "../recall-read-worker/snapshot-session.js";
-type SuccessConsumption = Readonly<{ readonly done: boolean; readonly value?: unknown }>;
+import { RecallReadWorkerLifecycle, type SuccessConsumption } from "./recall-read-worker-lifecycle.js";
 
 export interface RecallReadWorkerClient {
   readonly memoryRepo: RecallServiceMemoryRepoPort;
@@ -91,32 +83,11 @@ export function createRecallReadWorkerClient(input: {
 }
 
 class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
-  private readonly workers: (Worker | null)[];
-  private readonly databaseFilename: string;
-  private readonly requestTimeoutMs: number;
+  private readonly lifecycle: RecallReadWorkerLifecycle;
   private readonly pathReadBind: RecallPathReadBind | undefined;
   private readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
-  private readonly warn?: (message: string, meta: Record<string, unknown>) => void;
-  private readonly workerUrl: URL;
-  private nextWorkerIndex = 0;
-  private nextRequestId = 1;
   private readonly deliveryOwners = new Map<string, Worker>();
-  private readonly pending = new Map<
-    number,
-    {
-      readonly resolve: (value: unknown) => void;
-      readonly reject: (error: unknown) => void;
-      readonly timeout: ReturnType<typeof setTimeout>;
-      readonly worker: Worker;
-      readonly consumeSuccess?: (value: unknown) => SuccessConsumption;
-      readonly operation: RecallReadWorkerOperation;
-    }
-  >();
-  private closed = false;
-  private closeStarted = false;
-  private closePromise: Promise<void> | null = null;
   private readyPromise: Promise<void> | null = null;
-  private readonly snapshotSession: ReturnType<typeof createRecallReadSnapshotSession>;
   public readonly readSnapshot: RecallReadSnapshotPort;
 
   public readonly memoryRepo: RecallServiceMemoryRepoPort = createWorkerMemoryRepo({
@@ -213,32 +184,34 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   public readonly conditionalFieldPort: ConditionalFieldRecallPort = {
     acknowledge: async (preparationId, index, previews) => {
-      return await this.dispatchToWorker(this.deliveryOwner(preparationId), "conditionalField.acknowledge", {
+      return await this.lifecycle.request("conditionalField.acknowledge", {
         preparation_id: preparationId,
         issued_entry_ids: index.entries.map(indexEntryCacheKey),
         previews: Object.fromEntries(previews)
-      });
+      }, undefined, this.deliveryOwner(preparationId));
     },
     discard: async (preparationId) => {
       const owner = this.deliveryOwners.get(preparationId);
-      if (owner !== undefined && this.workers.includes(owner)) {
-        await this.dispatchToWorker(owner, "conditionalField.discard", { preparation_id: preparationId });
+      if (owner !== undefined && this.lifecycle.isAvailable(owner)) {
+        await this.lifecycle.request("conditionalField.discard", { preparation_id: preparationId }, undefined, owner);
       }
       this.deliveryOwners.delete(preparationId);
     },
     recall: async (input) => {
       const preferred = input.continuation == null ? undefined : this.deliveryOwners.get(input.continuation.continuation_id);
-      const worker = this.snapshotSession.pinnedWorker()
-        ?? (preferred !== undefined && this.workers.includes(preferred) ? preferred : this.requireWorker("conditionalField.recall"));
-      const parsed = await this.dispatchToWorker(worker, "conditionalField.recall", {
-        ...input,
-        authorized_scopes: encodeAuthorizedScopesAdmission(input.authorized_scopes)
-      }) as ConditionalFieldRecallPortResult;
-      for (const key of [parsed.preparation_id, parsed.index.continuation?.continuation_id]) {
-        if (key !== undefined) this.deliveryOwners.set(key, worker);
-      }
-      while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
-      return parsed;
+      return await this.lifecycle.withinDeadline("conditionalField.recall", async () =>
+        await this.lifecycle.isolate(async () => {
+          const worker = this.lifecycle.pinnedWorker()!;
+          const parsed = await this.lifecycle.request<ConditionalFieldRecallPortResult>("conditionalField.recall", {
+            ...input,
+            authorized_scopes: encodeAuthorizedScopesAdmission(input.authorized_scopes)
+          });
+          for (const key of [parsed.preparation_id, parsed.index.continuation?.continuation_id]) {
+            if (key !== undefined) this.deliveryOwners.set(key, worker);
+          }
+          while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
+          return parsed;
+        }, preferred, 0));
     }
   };
 
@@ -251,75 +224,70 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
-    this.databaseFilename = input.databaseFilename;
-    this.requestTimeoutMs = normalizeRequestTimeoutMs(input.requestTimeoutMs);
     this.pathReadBind = input.pathReadBind;
     if (this.pathReadBind === "temporal" && input.prepareTemporalProjection === undefined) {
       throw new Error("selected temporal recall worker requires parent projection preparation");
     }
     this.prepareTemporalProjection = input.prepareTemporalProjection;
-    this.warn = input.warn;
-    this.workerUrl = input.workerUrl;
-    const workerCount = normalizeWorkerCount(input.workerCount);
-    this.workers = Array.from({ length: workerCount }, () => null);
-    this.workers[0] = this.spawnWorker(0);
-    this.snapshotSession = createRecallReadSnapshotSession({
-      workerCount,
-      affinityWorkerIndex: (affinity) => {
-        const owner = this.deliveryOwners.get(affinity);
-        const index = owner === undefined ? -1 : this.workers.indexOf(owner);
-        return index < 0 ? undefined : index;
-      },
-      getWorker: (index) => this.workerAt(index),
-      dispatch: async (worker, operation) =>
-        await this.dispatchToWorker(worker, operation, {})
+    this.lifecycle = new RecallReadWorkerLifecycle({
+      ...input,
+      workerCount: normalizeWorkerCount(input.workerCount),
+      requestTimeoutMs: normalizeRequestTimeoutMs(input.requestTimeoutMs),
+      onUnavailable: (worker) => {
+        for (const [handle, owner] of this.deliveryOwners) {
+          if (owner === worker) this.deliveryOwners.delete(handle);
+        }
+        this.readyPromise = null;
+      }
     });
-    this.readSnapshot = this.snapshotSession.port;
+    this.readSnapshot = {
+      ...this.lifecycle.readSnapshot,
+      isolate: async (work, affinity) => await this.lifecycle.isolate(work,
+        affinity === undefined ? undefined : this.deliveryOwner(affinity))
+    };
   }
 
   public readonly sourceInterpretationPort = {
     reason: async (input: WorkerOperationPayload<"conditionalField.interpretation">): Promise<SourceInterpretationReasoningResult> => {
       const run = async () => await this.request<SourceInterpretationReasoningResult>("conditionalField.interpretation", input);
-      return this.snapshotSession.pinnedWorker() === undefined
-        ? await this.readSnapshot.isolate!(run) : await run();
+      return await this.lifecycle.withinDeadline("conditionalField.interpretation", async () =>
+        await this.lifecycle.isolate(run));
     }
   };
 
   public readonly sourceSemanticsPort = {
-    execute: async (input: WorkerOperationPayload<"conditionalField.sourceSemantics">): Promise<SourceSemanticWorkerResult> => {
-      const handle = input.request.kind === "reason" ? input.request.query_handle
-        : input.request.kind === "recall" ? input.request.continuation?.continuation_id ?? input.request.query_handle
-        : input.request.kind === "prepare_query" ? input.request.continuation_handle ?? input.request.source_handle
-        : input.request.kind === "validate_source" ? input.request.source_handle : undefined;
-      if (handle !== undefined) this.deliveryOwner(handle);
-      // Independent requests acquire the owner's worker; same-request reads keep their pin.
-      const run = async (): Promise<SourceSemanticWorkerResult> => {
-        const worker = this.requireWorker("conditionalField.sourceSemantics");
-        if (handle !== undefined && this.deliveryOwner(handle) !== worker) {
-          throw new CoreError("VALIDATION", "preparation handle belongs to another snapshot worker");
-        }
-        const parsed = await this.dispatchToWorker<SourceSemanticWorkerResult>(
-          worker, "conditionalField.sourceSemantics", input);
-        const issued = parsed.kind === "prepare_source" ? parsed.source_handle
-          : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
-        if (issued !== undefined) this.deliveryOwners.set(issued, worker);
-        if (parsed.kind === "prepare_query" && parsed.continuation_handle !== undefined) this.deliveryOwners.set(parsed.continuation_handle, worker);
-        if (parsed.kind === "recall") {
-          this.deliveryOwners.set(parsed.delivery_id, worker);
-          if (parsed.index.continuation !== null) this.deliveryOwners.set(parsed.index.continuation.continuation_id, worker);
-        }
-        while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
-        return parsed;
-      };
-      return this.snapshotSession.pinnedWorker() === undefined
-        ? await this.readSnapshot.isolate!(run, handle) : await run();
-    }
+    execute: async (input: WorkerOperationPayload<"conditionalField.sourceSemantics">): Promise<SourceSemanticWorkerResult> =>
+      await this.lifecycle.withinDeadline("conditionalField.sourceSemantics", async () => {
+        // Capture all schema-owned data before acquisition can wait. Parsing readonly
+        // schemas must never freeze caller data; the actual snapshot lease stays in ALS.
+        const captured = parseWorkerOperationPayload("conditionalField.sourceSemantics", structuredClone(input));
+        const request = captured.request;
+        const handle = request.kind === "reason" ? request.query_handle
+          : request.kind === "recall" ? request.continuation?.continuation_id ?? request.query_handle
+          : request.kind === "prepare_query" ? request.continuation_handle ?? request.source_handle
+          : request.kind === "validate_source" ? request.source_handle : undefined;
+        const owner = handle === undefined ? undefined : this.deliveryOwner(handle);
+        return await this.lifecycle.isolate(async () => {
+          const worker = this.lifecycle.pinnedWorker()!;
+          const parsed = await this.lifecycle.request<SourceSemanticWorkerResult>(
+            "conditionalField.sourceSemantics", captured);
+          const issued = parsed.kind === "prepare_source" ? parsed.source_handle
+            : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
+          if (issued !== undefined) this.deliveryOwners.set(issued, worker);
+          if (parsed.kind === "prepare_query" && parsed.continuation_handle !== undefined) this.deliveryOwners.set(parsed.continuation_handle, worker);
+          if (parsed.kind === "recall") {
+            this.deliveryOwners.set(parsed.delivery_id, worker);
+            if (parsed.index.continuation !== null) this.deliveryOwners.set(parsed.index.continuation.continuation_id, worker);
+          }
+          while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
+          return parsed;
+        }, owner);
+      })
   };
 
   public async ready(): Promise<void> {
     if (this.readyPromise === null) {
-      const worker = this.workers[0] ?? this.requireWorker("ready");
-      const pending = this.dispatchToWorker(worker, "ready", {}).then(() => undefined);
+      const pending = this.lifecycle.request("ready", {}).then(() => undefined);
       this.readyPromise = pending;
       pending.catch(() => {
         if (this.readyPromise === pending) this.readyPromise = null;
@@ -328,71 +296,14 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     await this.readyPromise;
   }
 
-  private spawnWorker(index: number): Worker {
-    const worker = new Worker(this.workerUrl, {
-      execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
-      workerData: {
-        databaseFilename: this.databaseFilename,
-        ...(this.pathReadBind === undefined
-          ? {}
-          : { pathReadBind: this.pathReadBind })
-      }
-    });
-    worker.on("message", (message: unknown) => {
-      if (this.workers[index] === worker) {
-        this.handleMessage(worker, message);
-      }
-    });
-    worker.on("error", (error) => {
-      this.warn?.("recall read worker failed", {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      this.recoverWorker(index, worker, error);
-    });
-    worker.on("exit", (code) => {
-      if (this.workers[index] !== worker || this.closeStarted) {
-        return;
-      }
-      const error = new Error(`recall read worker exited with code ${code}`);
-      this.warn?.("recall read worker exited unexpectedly", { code });
-      this.recoverWorker(index, worker, error);
-    });
-    return worker;
-  }
-
   public async close(): Promise<void> {
-    this.closePromise ??= this.closeOnce();
-    await this.closePromise;
-  }
-
-  private async closeOnce(): Promise<void> {
-    this.closeStarted = true;
-    try {
-      if (!this.closed) {
-        await Promise.all(this.workers.map(async (worker) => {
-          if (worker === null) return;
-          try {
-            await this.dispatchToWorker(worker, "close", {});
-          } catch {
-            // close is best-effort; terminate below is the bounded cleanup path.
-          }
-        }));
-      }
-    } finally {
-      this.closed = true;
-      this.rejectPending(new Error("recall read worker closed"));
-      const workers = this.workers.splice(0, this.workers.length);
-      await Promise.all(workers.map(async (worker) => await worker?.terminate()));
-    }
+    await this.lifecycle.close();
   }
 
   private async request<T = unknown>(
     operation: RecallReadWorkerOperation,
     payload: unknown
   ): Promise<T> {
-    if (this.closed) {
-      throw new Error("recall read worker is closed");
-    }
     return await this.dispatch<T>(operation, payload);
   }
 
@@ -410,156 +321,19 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     payload: unknown,
     consumeSuccess?: (value: unknown) => SuccessConsumption
   ): Promise<T> {
-    if (this.closed && operation !== "close") {
-      throw new Error("recall read worker is closed");
-    }
-    if (this.pathReadBind === "temporal" && isPathAffinityOperation(operation)) {
-      const asOf = (payload as { readonly asOf?: string }).asOf;
-      await this.prepareTemporalProjection?.(asOf === undefined ? {} : { asOf });
-    }
-    const worker = this.requireWorker(operation);
-    return await this.dispatchToWorker<T>(worker, operation, payload, consumeSuccess);
-  }
-
-  private async dispatchToWorker<T>(
-    worker: Worker,
-    operation: RecallReadWorkerOperation,
-    payload: unknown,
-    consumeSuccess?: (value: unknown) => SuccessConsumption
-  ): Promise<T> {
-    const id = this.nextRequestId;
-    this.nextRequestId += 1;
-    return await new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const pending = this.pending.get(id);
-        if (pending === undefined) {
-          return;
-        }
-        this.pending.delete(id);
-        const error = new Error(
-          `recall read worker ${operation} timed out after ${this.requestTimeoutMs}ms`
-        );
-        pending.reject(error);
-        this.recoverWorker(this.workers.indexOf(worker), worker, error);
-      }, this.requestTimeoutMs);
-      this.pending.set(id, {
-        resolve: (value) => {
-          clearTimeout(timeout);
-          resolve(value as T);
-        },
-        reject: (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
-        timeout,
-        worker,
-        operation,
-        ...(consumeSuccess === undefined ? {} : { consumeSuccess })
-      });
-      try {
-        worker.postMessage({
-          protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
-          id,
-          operation,
-          payload
-        } satisfies RecallReadWorkerRequest);
-      } catch (error) {
-        const pending = this.pending.get(id);
-        this.pending.delete(id);
-        if (pending === undefined) {
-          reject(error);
-        } else {
-          pending.reject(error);
-        }
-        this.recoverWorker(this.workers.indexOf(worker), worker, error);
+    return await this.lifecycle.withinDeadline(operation, async () => {
+      if (this.pathReadBind === "temporal" && isPathAffinityOperation(operation)) {
+        const asOf = (payload as { readonly asOf?: string }).asOf;
+        await this.prepareTemporalProjection?.(asOf === undefined ? {} : { asOf });
       }
+      return await this.lifecycle.request<T>(operation, payload, consumeSuccess);
     });
-  }
-
-  private requireWorker(operation: RecallReadWorkerOperation): Worker {
-    if (this.closed || this.closeStarted) {
-      throw new Error("recall read worker is closed");
-    }
-    const pinned = this.snapshotSession.pinnedWorker();
-    if (pinned !== undefined) return pinned;
-    const index = isPathAffinityOperation(operation) || operation.startsWith("conditionalField.")
-      ? 0
-      : this.nextWorkerIndex++ % this.workers.length;
-    return this.workerAt(index);
   }
 
   private deliveryOwner(preparationId: string): Worker {
     const owner = this.deliveryOwners.get(preparationId);
-    if (owner === undefined || !this.workers.includes(owner)) throw new Error("Recall delivery worker unavailable");
+    if (owner === undefined || !this.lifecycle.isAvailable(owner)) throw new Error("Recall delivery worker unavailable");
     return owner;
-  }
-
-  private workerAt(index: number): Worker {
-    if (this.closed || this.closeStarted) throw new CoreError("CONFLICT", "recall read worker is closed");
-    const existing = this.workers[index] ?? null;
-    if (existing !== null) return existing;
-    const worker = this.spawnWorker(index);
-    this.workers[index] = worker;
-    return worker;
-  }
-
-  private recoverWorker(index: number, worker: Worker, error: unknown): void {
-    if (index < 0 || this.workers[index] !== worker || this.closed) return;
-    this.workers[index] = null;
-    this.rejectPendingForWorker(worker, error);
-    void worker.terminate().catch(() => undefined);
-  }
-
-  private handleMessage(worker: Worker, message: unknown): void {
-    if (!isRecallReadWorkerResponse(message)) {
-      return;
-    }
-    const pending = this.pending.get(message.id);
-    if (pending === undefined || pending.worker !== worker) {
-      return;
-    }
-    if (message.ok) {
-      let consumed: SuccessConsumption | undefined;
-      let parsed: unknown;
-      try {
-        parsed = parseWorkerOperationResult(pending.operation, message.result);
-        consumed = pending.consumeSuccess?.(parsed);
-      } catch (error) {
-        this.pending.delete(message.id);
-        pending.reject(error);
-        this.recoverWorker(this.workers.indexOf(worker), worker, error);
-        return;
-      }
-      if (consumed !== undefined && !consumed.done) return;
-      this.pending.delete(message.id);
-      pending.resolve(consumed?.value ?? parsed);
-      return;
-    }
-    this.pending.delete(message.id);
-    const error = message.error.core === undefined ? new Error(message.error.message)
-      : new CoreError(message.error.core.code, message.error.message, { subCode: message.error.core.subCode, details: message.error.core.details });
-    error.name = message.error.name;
-    if (message.error.stack !== undefined) {
-      error.stack = message.error.stack;
-    }
-    pending.reject(error);
-  }
-
-  private rejectPending(error: unknown): void {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-
-  private rejectPendingForWorker(worker: Worker, error: unknown): void {
-    for (const [id, pending] of this.pending.entries()) {
-      if (pending.worker !== worker) continue;
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-      this.pending.delete(id);
-    }
   }
 }
 
