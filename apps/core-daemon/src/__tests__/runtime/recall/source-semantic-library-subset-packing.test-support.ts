@@ -218,12 +218,15 @@ export async function persistArtifact(caseName: string, name: string, value: unk
   await writeFile(join(directory, name), JSON.stringify(value), { encoding: "utf8", flag: "wx" });
 }
 
-export function deliverAllPages(context: NativeSubsetContext, measurement: NativeMeasurement): readonly Recall[] {
+export function deliverAllPages(context: NativeSubsetContext, measurement: NativeMeasurement,
+  observe?: (page: Recall, cost: ReturnType<typeof work>) => void): readonly Recall[] {
   let offset = 0;
   return measurement.plan.pages.map(page => {
+    const meter = new SourceSemanticReadBudget(selectionExecutionBudget);
     const result = deliverFrozenLibraryPage(context.runtime, { workspace_id: WS, as_of: CLOCK,
       authorized_scopes: { mode: "named", scopes: SCOPES }, request: measurement.request },
-    new SourceSemanticReadBudget(selectionExecutionBudget), measurement.request, measurement.plan, offset);
+    meter, measurement.request, measurement.plan, offset);
+    observe?.(result, work(meter));
     offset += page.length;
     return result;
   });

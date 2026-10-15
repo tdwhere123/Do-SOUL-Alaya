@@ -47,15 +47,27 @@ export function alternativeSelectionFixture(executionBudget: RequestBudget = SOU
 }
 
 /** Text gold is declared independently of package selection: five required statements, one per source. */
-export function textWindowSelectionFixture(longSource: boolean): SelectionTaskFixture {
+export function textWindowSelectionFixture(longSource: boolean, longRoots = 1): SelectionTaskFixture {
   const inputs = [1, 2, 3, 4, 5];
   const original = `For ${DEPLOYMENT}, collect these required source statements: ${inputs.map(input => deploymentPredicates[input - 1]).join("; ")}.`;
   return selectionFixture(original, [inputs], inputs.map(input => ({ id: `statement-${input}`, inputs: [input],
-    prefix: longSource && input === 1 ? "Unrelated source introduction.\n".repeat(200) : "" })), selectionExecutionBudget);
+    prefix: longSource && input <= longRoots ? "Unrelated source introduction.\n".repeat(200) : "" })), selectionExecutionBudget);
+}
+
+/** Authored nuisance text belongs to source bytes, never to evaluator gold or query inputs. */
+export function previewNoveltySelectionFixture(control: "partial_overlap" | "repeated_lines" | "irrelevant_novel"): SelectionTaskFixture {
+  const original = `For ${DEPLOYMENT}, collect these required source statements: ${deploymentPredicates.slice(0, 5).join("; ")}.`;
+  const gap = control === "partial_overlap" ? "x".repeat(1_200)
+    : control === "repeated_lines" ? "Repeated unrelated annotation.\n".repeat(40)
+      : Array.from({ length: 40 }, (_, i) => `Unrelated annotation number ${i}.\n`).join("");
+  return selectionFixture(original, [[1, 2, 3, 4, 5]], [
+    { id: "window-overlap", inputs: [1, 2], prefix: "Unrelated introduction.\n".repeat(50), gap },
+    ...[3, 4, 5].map(input => ({ id: `statement-${input}`, inputs: [input] }))
+  ], selectionExecutionBudget);
 }
 
 function selectionFixture(original: string, alternatives: readonly (readonly number[])[],
-  declarations: readonly Readonly<{ id: string; inputs: readonly number[]; prefix?: string }>[], executionBudget: RequestBudget): SelectionTaskFixture {
+  declarations: readonly Readonly<{ id: string; inputs: readonly number[]; prefix?: string; gap?: string }>[], executionBudget: RequestBudget): SelectionTaskFixture {
   const inputs = [...new Set(alternatives.flat())];
   const semantics: SourceSemanticQuery = { ...query(original), return_variables: [],
     requested_operation: { reading: alternatives.length === 1
@@ -72,8 +84,10 @@ function selectionFixture(original: string, alternatives: readonly (readonly num
       answer_frames: [], evidence_inputs: inputs.map(input => ({ frames: [`qInput${input}`] }))
     })) };
   const sources = declarations.map(declaration => {
-    const body = (declaration.prefix ?? "") + declaration.inputs.map(deploymentStatement).join("\n");
-    const interpretation = deploymentInterpretation(declaration.id, declaration.inputs, body, Buffer.byteLength(declaration.prefix ?? ""));
+    const separator = `\n${declaration.gap ?? ""}`;
+    const body = (declaration.prefix ?? "") + declaration.inputs.map(deploymentStatement).join(separator);
+    const interpretation = deploymentInterpretation(declaration.id, declaration.inputs, body,
+      Buffer.byteLength(declaration.prefix ?? ""), Buffer.byteLength(separator));
     const correspondence = deploymentCorrespondence(interpretation, semantics, alternatives, declaration.inputs);
     const { actual, budget_rejections } = measuredProof({ interpretation, semantics, correspondence, original,
       library: true, budget: executionBudget });
@@ -104,7 +118,7 @@ function measuredProof(input: Parameters<typeof deliveredProofFixture>[0]) {
   finally { observe.mockRestore(); }
 }
 
-function deploymentInterpretation(id: string, inputs: readonly number[], body: string, prefixBytes = 0): SourceSemanticInterpretation {
+function deploymentInterpretation(id: string, inputs: readonly number[], body: string, prefixBytes = 0, separatorBytes = 1): SourceSemanticInterpretation {
   const digest = fieldContractSha256(body);
   const assertions = inputs.map((input, index) => ({ assertion_id: index + 1, text: deploymentStatement(input) }));
   const catalog = buildSourceReferenceCatalog(digest, assertions, fieldContractSha256);
@@ -121,7 +135,7 @@ function deploymentInterpretation(id: string, inputs: readonly number[], body: s
         source_ref: resolver.referenceForSpan(assertion_id, [start, start + text.length]),
         utf8_span: [offset + start, offset + start + text.length] });
     }
-    offset += Buffer.byteLength(sentence) + 1;
+    offset += Buffer.byteLength(sentence) + separatorBytes;
     return { id: `fInput${input}`, assertion_ids: [assertion_id],
       context_owner: { kind: "source_act", source_act: "assertion" }, additional_support: [],
       predicate_support: { kind: "explicit", reading: deploymentPredicates[input - 1]!, mentions: [`mPredicate${input}`] },
