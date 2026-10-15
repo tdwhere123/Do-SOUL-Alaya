@@ -150,7 +150,7 @@ function budgetForPair(ctx: Context) {
 it("delivers complementary whole proofs when their same-root union exceeds the envelope", () => {
   const candidates = packages(context), limit = budgetForPair(context);
   expect(candidates.incomplete).toBe(false);
-  expect(candidates.packages.map(row => row.proofs.length)).toEqual([3, 1, 1, 1, 0]);
+  expect(candidates.packages.map(row => row.proofs.length)).toEqual([3, 1, 1, 1, 0, 0]);
   const baseline = deliver(context, candidates.packages, limit, { baseline: true });
   expect(baseline.result.proofs).toHaveLength(1);
   const actual = deliver(context, candidates.packages, limit);

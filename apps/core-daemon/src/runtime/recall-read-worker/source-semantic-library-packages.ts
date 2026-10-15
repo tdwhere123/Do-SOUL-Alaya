@@ -1,6 +1,7 @@
 import { SourceSemanticResourceExhausted, projectSourceSemanticQuerySupport, type IndexEntry, type SourceSemanticLibraryProof,
   type SourceSemanticLibrarySlotQualifier } from "@do-soul/alaya-protocol";
 import { CoreError, authorizeSemanticScope, hydrateUtf8Chunk, sourceSemanticSupportWindow, sourceSemanticLibraryRawPreview,
+  sourceSemanticLibrarySourceEntry,
   sourceGoldRootIdentity, fieldContractSha256, projectSourceDisclosure, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION, type FieldSourceRecordRow } from "@do-soul/alaya-storage";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
@@ -18,7 +19,7 @@ export type LibraryExecutedSupport = Readonly<{
 export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   sources: readonly IndexEntry[], executed: readonly LibraryExecutedSupport[]) {
-  const packages: SourceSemanticLibraryPackage[] = [];
+  const prepared: ReturnType<typeof supportPackages>[] = [];
   let incomplete = false;
   for (const [position, entry] of sources.entries()) {
     if (entry.target.kind !== "source_evidence") continue;
@@ -30,14 +31,14 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
       const disclosure = projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: payload.as_of,
         source: retained.record });
       const semantic = supportPackages(position, branches[0]?.source ?? retained.text, retained.bytes, branches, meter, disclosure);
-      packages.push(...semantic.packages);
+      prepared.push(semantic);
       incomplete ||= semantic.reason === "resource_budget";
       const chunk = hydrate(meter, retained.text, 0, DISPLAY_BYTES);
       if (chunk.status !== "chunk") { incomplete = true; continue; }
       const preview = sourceSemanticLibraryRawPreview(chunk.text, sources.length);
       const previewBytes = Buffer.byteLength(preview);
       const raw = spanEntry(entry, 0, previewBytes, previewBytes === retained.bytes);
-      packages.push({ entry: raw, entries: [raw], explanations: [], proofs: [], preview,
+      semantic.packages.push({ entry: raw, entries: [raw], explanations: [], proofs: [], preview,
         access_position: position, payload_support: semantic.reason, source_disclosure: disclosure });
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)
@@ -46,27 +47,63 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
       if (error instanceof SourceSemanticResourceExhausted) break;
     }
   }
+  const packages = prepared.flatMap(row => row.packages);
+  try { if (executed.length > 0) appendLocatedSourcePackages(packages, prepared, sources, meter); }
+  catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    incomplete = true;
+  }
   return { packages, incomplete };
+}
+
+/** Optional materialization follows every root's baseline and reuses its exact hydrated chunk. */
+function appendLocatedSourcePackages(packages: SourceSemanticLibraryPackage[], prepared: readonly ReturnType<typeof supportPackages>[],
+  sources: readonly IndexEntry[], meter: SourceSemanticReadBudget): void {
+  meter.charge(prepared.length, prepared.length * 8, "library source-only candidates");
+  const roots = new Set<string>();
+  for (const { located } of prepared) {
+    if (located === undefined || located.entry.target.kind !== "source_evidence") continue;
+    meter.retain(located.entry.target, "library source-only source identity");
+    const root = sourceGoldRootIdentity(located.entry.target), span = located.entry.target.span;
+    meter.charge(1, 64 + root.length * 2, "library source-only root enumeration");
+    if (roots.has(root) || span === undefined) continue;
+    roots.add(root);
+    const admitted = sources[located.access_position];
+    if (admitted?.target.kind !== "source_evidence") continue;
+    meter.charge(1, 1024, "library source-only package references");
+    // Reconstruct from the admitted tuple/hypothesis, never from a proof representative.
+    const source = sourceSemanticLibrarySourceEntry({ workspaceId: admitted.target.workspace_id,
+      root_id: admitted.target.root_id, source_version: admitted.target.source_version,
+      content_digest: admitted.target.content_digest, evidence_object_id: admitted.target.evidence_object_id,
+      hypothesis_id: admitted.hypothesis_id });
+    const entry = spanEntry(source, span.content_start, span.content_end, span.content_complete);
+    meter.charge(1, 8, "library source-only insertion");
+    packages.push({ entry, entries: [entry], explanations: [], proofs: [], preview: located.preview,
+      access_position: located.access_position, payload_support: "envelope_budget", source_disclosure: located.source_disclosure });
+  }
 }
 
 function supportPackages(position: number, source: string, sourceBytes: number, branches: readonly LibraryExecutedSupport[],
   meter: SourceSemanticReadBudget, source_disclosure: SourceSemanticLibraryPackage["source_disclosure"]): {
-    packages: SourceSemanticLibraryPackage[]; reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]>
+    packages: SourceSemanticLibraryPackage[]; reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]>;
+    located?: SourceSemanticLibraryPackage;
   } {
   const packages: SourceSemanticLibraryPackage[] = [], available: LibraryExecutedSupport[] = [];
   let reason: NonNullable<SourceSemanticLibrarySlotQualifier["payload_support"]> = "not_applicable";
-  let start = Infinity, end = 0;
+  let start = Infinity, end = 0, exact = branches.length > 0;
   try {
     for (const row of branches) {
       const window = sourceSemanticSupportWindow({ source, interpretation: row.proof.interpretation,
         dependency_ids: row.dependencies, max_bytes: DISPLAY_BYTES, meter });
       if (window.status !== "available") {
+        exact = false;
         reason = window.reason;
         if (reason === "resource_budget") return { packages, reason };
         continue;
       }
+      exact &&= window.kind === "support_window";
       const chunk = hydrate(meter, source, window.start_offset, window.end_offset - window.start_offset);
-      if (chunk.status !== "chunk" || chunk.end_offset !== window.end_offset) { reason = "location_missing"; continue; }
+      if (chunk.status !== "chunk" || chunk.end_offset !== window.end_offset) { exact = false; reason = "location_missing"; continue; }
       packages.push(proofPackage(position, window.start_offset === 0 && window.end_offset === sourceBytes, [row],
         { text: chunk.text, start_offset: window.start_offset, end_offset: window.end_offset }, meter, source_disclosure));
       available.push(row);
@@ -78,9 +115,11 @@ function supportPackages(position: number, source: string, sourceBytes: number, 
       if (chunk.status === "chunk" && chunk.end_offset === end) {
         packages.unshift(proofPackage(position, start === 0 && end === sourceBytes, available,
           { text: chunk.text, start_offset: start, end_offset: end }, meter, source_disclosure));
-      }
+      } else exact = false;
     }
-    return { packages, reason: packages.length > 0 ? "envelope_budget" : reason };
+    // A single exact branch also qualifies. For multiple branches packages[0] is the hydrated hull.
+    const located = exact && end - start <= DISPLAY_BYTES ? packages[0] : undefined;
+    return { packages, reason: packages.length > 0 ? "envelope_budget" : reason, located };
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     return { packages, reason: "resource_budget" };

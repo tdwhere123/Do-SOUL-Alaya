@@ -1796,8 +1796,19 @@ window availability does not imply the original source is complete. This owner
 feeds native package selection and the public encoder. Dependencies come from
 the executed binding closures and observation origins, never returned-value text
 or the consumed-leaf summary. Baseline packaging offers each independently executed
-proof intact and, when its source window fits, one combined package. After reserving
-all baseline pages, default library delivery may use the remaining selection ledger
+proof intact and, when its source window fits, one combined package. After all
+roots' baseline packages are prepared, the same producer may add one source-only
+hull per root when every executed branch has an exact located support window and
+the complete hull fits 4096 bytes. Missing locations, whole-source fallbacks,
+interrupted enumeration and oversized hulls do not produce this alternative.
+It reuses the hydrated window, preserves the admitted source tuple, and carries
+unknown source qualification without proof metadata; interstitial text is not
+additional proof support. Optional materialization is metered, and exhaustion
+retains constructed baseline packages while reporting incomplete preparation.
+This expands the candidate set, not O1 or root occupancy; it does not promise
+unchanged selected content or total selection cost. It does not add independent
+lexical/vector localization or arbitrary-tail source reads.
+After reserving all baseline pages, default library delivery may use the remaining selection ledger
 to consider same-root pairs whose execution-owned evidence inputs complement each
 other. Pairs reuse an already hydrated combined window of at most 4096 bytes; they
 do not narrow, clip, or re-execute either proof. Only a strict improvement under
