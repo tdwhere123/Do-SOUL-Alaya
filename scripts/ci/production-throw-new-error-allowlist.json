@@ -1131,10 +1131,6 @@
     "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/provenance/embedding/local-onnx.ts": {
-    "max": 5,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/provenance/evidence-manifest.ts": {
     "max": 5,
     "reason": "remaining production throw new Error; convert to AlayaError family"

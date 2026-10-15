@@ -61,7 +61,8 @@ export function guardSourceIndexTarget(database: StorageDatabase, records: Sqlit
       WHERE workspace_id = ? AND subject_kind = 'source_record' AND subject_id = ? LIMIT 1`)
       .get(source.target.workspace_id, id) !== undefined) return { status: "stale" as const, reason: "source_erased", resources };
   }
-  return { status: "ready" as const, resources, dependencies: dependencies?.kind === "canonical_projection"
+  return { status: "ready" as const, resources, scope_class: read.record.scope_class ?? null,
+    dependencies: dependencies?.kind === "canonical_projection"
     ? dependencies.source_record_ids : [] };
 }
 

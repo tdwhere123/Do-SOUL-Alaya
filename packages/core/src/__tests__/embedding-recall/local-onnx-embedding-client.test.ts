@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { sourceIndexProfileId, type SourceIndexProfile } from "@do-soul/alaya-protocol";
+import type { SourceEmbeddingBinding, SourceEmbeddingResult } from "../../embedding-recall/source-embedding-runtime.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -120,6 +123,32 @@ describe("LocalOnnxEmbeddingClient", () => {
       expect(vector.length).toBe(LOCAL_ONNX_EMBEDDING_DIMENSIONS);
     }
     expect(calls[0]).toMatchObject({ pooling: "mean", normalize: true });
+  });
+
+  it("captures caller texts before awaiting the pipeline load", async () => {
+    let finishLoad!: (extractor: LocalOnnxFeatureExtractor) => void;
+    const { extractor, calls } = stubExtractor([[dimRow(7)]]);
+    const client = new LocalOnnxEmbeddingClient({
+      pipelineLoader: () => new Promise((resolve) => { finishLoad = resolve; })
+    });
+    const texts = ["original 你好🙂"];
+    const pending = client.embedTexts(texts, { timeoutMs: 5_000 });
+    texts[0] = "mutated";
+    texts.push("extra");
+    await vi.waitFor(() => expect(finishLoad).toBeTypeOf("function"));
+    finishLoad(extractor);
+    await expect(pending).resolves.toHaveLength(1);
+    expect(calls[0]!.texts).toEqual(["original 你好🙂"]);
+    await client.close();
+  });
+
+  it.each([NaN, Infinity, -Infinity, Number.MAX_VALUE])("rejects components that cannot remain finite in embedTexts float32 vectors (%s)", async (value) => {
+    const row = [...dimRow(1)];
+    row[0] = value;
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => stubExtractor([[row]]).extractor });
+    try {
+      await expect(client.embedTexts(["probe"], { timeoutMs: 5_000 })).rejects.toThrow(/non-finite|float32/i);
+    } finally { await client.close(); }
   });
 
   it("produces a deterministic vector for repeated identical input via the loaded model", async () => {
@@ -385,6 +414,108 @@ describe("LocalOnnxEmbeddingClient", () => {
     expect(loader).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("LocalOnnxEmbeddingClient Source capability (mock loaded runtime)", () => {
+  it.each(["custom extractor", "legacy importer"])("keeps %s vector-only without manufacturing Source provenance", async (kind) => {
+    const { extractor } = stubExtractor([[dimRow(1)]]);
+    const client = new LocalOnnxEmbeddingClient(kind === "custom extractor"
+      ? { pipelineLoader: async () => extractor }
+      : { transformersImporter: async () => ({ env: { allowRemoteModels: true }, pipeline: async () => extractor }) });
+    try {
+      const binding = await client.bindSourceEmbedding({ window_bytes: 1024 });
+      expect(binding).toEqual({ status: "unsupported", reason: "loaded_tokenizer_evidence_unavailable" });
+      expect(binding).not.toHaveProperty("profile");
+      expect(binding).not.toHaveProperty("embedInputs");
+      await expect(client.embedTexts(["legacy"], { timeoutMs: 5_000 })).resolves.toHaveLength(1);
+    } finally { await client.close(); }
+  });
+
+  it("captures bind options and raw Source inputs before their first await", async () => {
+    const fixture = mockSourceExtractor();
+    let finishLoad!: (extractor: LocalOnnxFeatureExtractor) => void;
+    const client = new LocalOnnxEmbeddingClient({ modelId: "fixture-model", pipelineLoader: () => new Promise((resolve) => { finishLoad = resolve; }) });
+    const options = { window_bytes: 1024, max_input_tokens: 32 };
+    const pending = client.bindSourceEmbedding(options);
+    options.window_bytes = 4096;
+    options.max_input_tokens = 64;
+    finishLoad(fixture.extractor);
+    const binding = await pending;
+    expect(fixture.bind).toHaveBeenCalledWith({ window_bytes: 1024, max_input_tokens: 32 });
+    expect(binding.status).toBe("ready");
+    if (binding.status !== "ready") throw new Error("mock capability must bind");
+    const inputs = [{ input_id: "raw", text: "  原文🙂\r\n " }];
+    const callOptions = { profile_id: binding.profile_id, timeoutMs: 5_000 };
+    const result = binding.embedInputs(inputs, callOptions);
+    inputs[0]!.text = "changed";
+    inputs[0]!.input_id = "changed";
+    inputs.push({ input_id: "extra", text: "extra" });
+    callOptions.profile_id = "changed";
+    const rows = await result;
+    expect(fixture.embed.mock.calls[0]![0]).toEqual([{ input_id: "raw", text: "  原文🙂\r\n " }]);
+    expect(fixture.embed.mock.calls[0]![1].profile_id).toBe(binding.profile_id);
+    expect(rows).toMatchObject([{ status: "embedded", input_id: "raw", input_digest: `sha256:${sha256("  原文🙂\r\n ")}`, truncated: false }]);
+    await client.close();
+    expect(fixture.close).toHaveBeenCalledTimes(1);
+    await expect(binding.embedInputs([{ input_id: "closed", text: "raw" }], { profile_id: binding.profile_id, timeoutMs: 5_000 }))
+      .resolves.toEqual([{ status: "not_embedded", input_id: "closed", input_digest: `sha256:${sha256("raw")}`, reason: "runtime_closed", token_count: null }]);
+    expect(fixture.embed).toHaveBeenCalledTimes(1);
+    await expect(client.bindSourceEmbedding({ window_bytes: 1024 })).resolves.toEqual({ status: "unsupported", reason: "runtime_closed" });
+  });
+
+  it.each(["timeout", "abort"])("retains physical Source occupancy after caller %s until live work ends", async (cancellation) => {
+    const root = mkdtempSync(path.join(tmpdir(), "alaya-source-occupancy-"));
+    const env = { ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT: "1", ALAYA_LOCAL_ONNX_LOCK_PATH: path.join(root, "inference.lock") };
+    const fixture = mockSourceExtractor();
+    let release!: (rows: readonly SourceEmbeddingResult[]) => void;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    fixture.embed.mockImplementation(() => new Promise((resolve) => { release = resolve; started(); }));
+    const client = new LocalOnnxEmbeddingClient({ modelId: "fixture-model", pipelineLoader: async () => fixture.extractor, env });
+    let next: Promise<readonly Float32Array[]> | undefined;
+    try {
+      const binding = await client.bindSourceEmbedding({ window_bytes: 1024 });
+      if (binding.status !== "ready") throw new Error("mock capability must bind");
+      const controller = new AbortController();
+      const pending = binding.embedInputs([{ input_id: "source", text: "raw" }], {
+        profile_id: binding.profile_id, timeoutMs: cancellation === "timeout" ? 100 : 20_000, signal: controller.signal
+      });
+      const refused = expect(pending).rejects.toThrow(cancellation === "timeout" ? /timed out/ : /caller cancelled/);
+      await ready;
+      if (cancellation === "abort") controller.abort(new Error("caller cancelled"));
+      await refused;
+      next = client.embedTexts(["successor"], { timeoutMs: 20_000 });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(fixture.calls).toEqual([]);
+      release([]);
+      await expect(next).resolves.toHaveLength(1);
+      expect(fixture.calls).toHaveLength(1);
+    } finally {
+      release?.([]);
+      await next?.catch(() => undefined);
+      await client.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+function sha256(text: string): string { return createHash("sha256").update(text, "utf8").digest("hex"); }
+
+function mockSourceExtractor() {
+  const profile: SourceIndexProfile = { provider_kind: "local_onnx", model_id: "fixture-model", model_revision: "fixture-only",
+    artifact_digest: `sha256:${"a".repeat(64)}`, tokenizer_revision: "fixture-tokenizer", dimensions: 384,
+    preprocessing: "fixture-raw", normalization: "fixture-unit", max_input_tokens: 32,
+    windowing: "utf8-byte-windows.v1", window_bytes: 1024 };
+  const { extractor, calls } = stubExtractor([[dimRow(1)]]);
+  const embed = vi.fn<SourceEmbeddingBinding["embedInputs"]>(async (inputs) => inputs.map((input) => ({
+    status: "embedded", input_id: input.input_id, input_digest: `sha256:${sha256(input.text)}`,
+    vector: new Float32Array(dimRow(2)), token_count: 3, truncated: false
+  })));
+  const bind = vi.fn((): SourceEmbeddingBinding => ({ status: "ready", profile,
+    profile_id: sourceIndexProfileId(profile, sha256), embedInputs: embed }));
+  const close = vi.fn(async () => undefined);
+  Object.assign(extractor, { sourceRuntime: { bind, close } });
+  return { extractor, calls, bind, embed, close };
+}
 
 // Real-model smoke check. Runs only when the model weights have been
 // pre-fetched into the worktree cache; otherwise skipped so CI without the

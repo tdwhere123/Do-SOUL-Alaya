@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetCjkSegmentationStateForTests,
   __setCjkSegmentationLoaderForTests,
+  readCjkSegmentationStatus,
   segmentCjkRun,
   warmCjkSegmentation
 } from "../index.js";
@@ -23,6 +24,7 @@ describe("CJK segmentation fallback", () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     __setCjkSegmentationLoaderForTests(() => new Promise(() => undefined));
     expect(segmentCjkRun("我喜欢咖啡")).toEqual(["我喜欢咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("loading");
     expect(emitWarning).toHaveBeenCalledWith(
       "[CjkSegmentation] @node-rs/jieba not ready; using surface-token fallback for this call",
       expect.objectContaining({
@@ -31,6 +33,34 @@ describe("CJK segmentation fallback", () => {
     );
     segmentCjkRun("我喜欢咖啡");
     expect(emitWarning).toHaveBeenCalledTimes(1);
+    expect(readCjkSegmentationStatus()).toBe("loading");
+  });
+
+  it("does not start loading when initialize is false, but uses a warm segmenter", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    let loads = 0;
+    __setCjkSegmentationLoaderForTests(async () => {
+      loads += 1;
+      return { cut: () => ["喜欢", "咖啡"] };
+    });
+    expect(segmentCjkRun("我喜欢咖啡", { initialize: false })).toEqual(["我喜欢咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("uninitialized");
+    expect(loads).toBe(0);
+    expect(emitWarning).not.toHaveBeenCalled();
+    await expect(warmCjkSegmentation()).resolves.toBe(true);
+    expect(readCjkSegmentationStatus()).toBe("ready");
+    expect(segmentCjkRun("我喜欢咖啡", { initialize: false })).toEqual(["喜欢", "咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("ready");
+    expect(loads).toBe(1);
+  });
+
+  it("keeps an in-flight load in loading when initialize is false", () => {
+    vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    __setCjkSegmentationLoaderForTests(() => new Promise(() => undefined));
+    expect(segmentCjkRun("我喜欢咖啡")).toEqual(["我喜欢咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("loading");
+    expect(segmentCjkRun("我爱北京", { initialize: false })).toEqual(["我爱北京"]);
+    expect(readCjkSegmentationStatus()).toBe("loading");
   });
 
   it("emits a structured warning once when jieba native loading fails", async () => {

@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  __resetCjkSegmentationStateForTests,
+  __setCjkSegmentationLoaderForTests,
+  readCjkSegmentationStatus,
+  warmCjkSegmentation
+} from "@do-soul/alaya-cjk-segmentation";
 import {
   buildAnchorScopedFtsMatch,
   buildFtsMatchExpression,
@@ -8,6 +14,11 @@ import {
   tokenizeFtsQuery as tokenizeLaneQuery
 } from "../../../repos/shared/fts-lane-routing.js";
 import { tokenizeFtsQuery as tokenizeKeywordQuery } from "../../../repos/memory-entry/reads/keyword-search.js";
+
+afterEach(() => {
+  __resetCjkSegmentationStateForTests();
+  vi.restoreAllMocks();
+});
 
 describe("buildFtsMatchExpression", () => {
   it("ORs quoted tokens and escapes embedded quotes", () => {
@@ -86,5 +97,39 @@ describe("FTS token sets across keyword and lane routing", () => {
     for (const query of queries) {
       expect(tokenizeKeywordQuery(query)).toEqual(tokenizeLaneQuery(query));
     }
+  });
+});
+
+describe("tokenizeFtsQuery CJK initialization", () => {
+  it("keeps default lazy initialization from a cold segmenter", () => {
+    vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    let loads = 0;
+    __setCjkSegmentationLoaderForTests(() => {
+      loads += 1;
+      return new Promise(() => undefined);
+    });
+    expect(readCjkSegmentationStatus()).toBe("uninitialized");
+    expect(tokenizeLaneQuery("我喜欢咖啡")).toEqual(["我喜欢咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("loading");
+    expect(loads).toBe(1);
+  });
+
+  it("suppresses init when initializeCjk is false and still uses a warm segmenter", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    let loads = 0;
+    __setCjkSegmentationLoaderForTests(async () => {
+      loads += 1;
+      return { cut: () => ["喜欢", "咖啡"] };
+    });
+    expect(tokenizeLaneQuery("我喜欢咖啡", { initializeCjk: false })).toEqual(["我喜欢咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("uninitialized");
+    expect(loads).toBe(0);
+    expect(emitWarning).not.toHaveBeenCalled();
+    await expect(warmCjkSegmentation()).resolves.toBe(true);
+    expect(readCjkSegmentationStatus()).toBe("ready");
+    expect(tokenizeLaneQuery("我喜欢咖啡", { initializeCjk: false }))
+      .toEqual(["我喜欢咖啡", "喜欢", "咖啡"]);
+    expect(readCjkSegmentationStatus()).toBe("ready");
+    expect(loads).toBe(1);
   });
 });

@@ -1,10 +1,8 @@
 import { createRequire } from "node:module";
 import type { LocalOnnxEmbeddingTransformersModule } from "./local-onnx-embedding-client.js";
 
-// Optional extra, not a package.json dependency: this workspace's
-// autoInstallPeers would otherwise pull ~640MiB ONNX (including ORT-web)
-// on every default install. Non-literal specifier so typecheck stays green
-// without the extra.
+// Maintained, exactly pinned Core runtime dependency; import lazily so API-only
+// consumers do not initialize ONNX. Package presence is not model readiness.
 const TRANSFORMERS_PACKAGE: string = "@huggingface/transformers";
 
 export type LocalOnnxTransformersAvailability = "available" | "unavailable";
@@ -51,7 +49,7 @@ export async function importLocalOnnxTransformers(): Promise<LocalOnnxEmbeddingT
     // Packaging miss, not an unreadable model artifact.
     if (isLocalOnnxTransformersModuleNotFound(error)) {
       throw new Error(
-        "@huggingface/transformers is required for the local ONNX embedding provider. Install the optional extra: pnpm add @huggingface/transformers --filter @do-soul/alaya-core",
+        "@huggingface/transformers is required for the local ONNX embedding provider. Repair the normal installation with pnpm install",
         { cause: error }
       );
     }

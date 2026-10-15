@@ -3,7 +3,8 @@ import {
   prepareSourceIndexDocument, prepareSourceIndexLexical, sourceIndexConfigurationId, sourceIndexGenerationId,
   sourceIndexProfileId, type FieldContractSha256, type SourceIndexBudget, type SourceIndexCaptureResult,
   type SourceIndexConfiguration, type SourceIndexDocument, type SourceIndexGeneration, type SourceIndexGuardedWriteResult,
-  type SourceIndexReadResult,
+  type SourceIndexReadResult, type SourceIndexQueryRepository, type SourceIndexVectorBinding,
+  type SourceIndexVectorCursor, type SourceSemanticResourceBudget,
   type SourceIndexRepository, type SourceIndexSelection, type SourceIndexState, type SourceIndexTarget,
   type SourceIndexVector, type SourceIndexWriteResult
 } from "@do-soul/alaya-protocol";
@@ -16,14 +17,32 @@ import { SOURCE_INDEX_STANDALONE_BUDGET, assertIndexBudget, assertIndexPageLimit
   sourceReadCost, sourceTargetFromRead } from "./native-source.js";
 import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndexGeneration,
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
+import { admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
+  readSourceIndexVectorCandidates } from "./source-index-query-reader.js";
 
 /** Mechanical CAS/materialization for Core's SourceIndexLifecycle. No inference or truth promotion. */
-export class SqliteSourceIndexRepository implements SourceIndexRepository {
+export class SqliteSourceIndexRepository implements SourceIndexRepository, SourceIndexQueryRepository {
   private records: SqliteFieldSourceRecordRepo;
   private connectionVersion: number;
   public constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256) {
     this.records = new SqliteFieldSourceRecordRepo(database, sha256);
     this.connectionVersion = database.getConnectionVersion();
+  }
+
+  public readLexicalCandidates(workspaceId: string, navigationText: string, limit: number, budget: SourceSemanticResourceBudget) {
+    BoundedIdSchema.parse(workspaceId);
+    return this.atomic(() => readSourceIndexLexicalCandidates(this.database, workspaceId, navigationText, limit, budget, this.sha256), "read");
+  }
+
+  public readVectorCandidates(workspaceId: string, cursor: SourceIndexVectorCursor | null, limit: number,
+    budget: SourceSemanticResourceBudget) {
+    BoundedIdSchema.parse(workspaceId);
+    return this.atomic(() => readSourceIndexVectorCandidates(this.database, workspaceId, cursor, limit, budget), "read");
+  }
+
+  public admitQueryCandidate(source: SourceIndexTarget, vectorBinding: SourceIndexVectorBinding | null,
+    budget: SourceSemanticResourceBudget) {
+    return this.atomic(() => admitSourceIndexQueryCandidate(this.database, this.records, source, vectorBinding, budget), "read");
   }
 
   public select(workspaceId: string, configuration: SourceIndexConfiguration): SourceIndexSelection {

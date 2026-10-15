@@ -1,5 +1,6 @@
 export * from "./runtime/config/index.js";
 export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
+export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";
 export * from "./governance/bankruptcy/budget-bankruptcy-service.js";
@@ -43,6 +44,11 @@ export {
 } from "./embedding-recall/constants.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
+export { resolveLocalArtifactTreeSha256 } from "./embedding-recall/local-onnx-artifacts.js";
+export type {
+  SourceEmbeddingInput, SourceEmbeddingOptions, SourceEmbeddingBindingOptions,
+  SourceEmbeddingResult, SourceEmbeddingBinding, SourceEmbeddingBindingResult,
+} from "./embedding-recall/source-embedding-runtime.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export {
   importLocalOnnxTransformers,

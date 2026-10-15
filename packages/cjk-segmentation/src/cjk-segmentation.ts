@@ -125,9 +125,10 @@ export function readCjkSegmentationStatus(): CjkSegmentationStatus {
  * Synchronously segment a CJK-bearing run into word-level pieces. Warm
  * jieba returns cut pieces. The cold path is an atom-split fallback via
  * protocol interrogative atoms; other CJK stays one surface piece so
- * sync tokenizers never block or invent a full lexicon.
+ * sync tokenizers never block or invent a full lexicon. Snapshot-bound readers
+ * can set initialize=false to reuse warm segmentation without starting native loading.
  */
-export function segmentCjkRun(text: string): readonly string[] {
+export function segmentCjkRun(text: string, options: Readonly<{ initialize?: boolean }> = {}): readonly string[] {
   if (text.length === 0) {
     return [];
   }
@@ -137,11 +138,9 @@ export function segmentCjkRun(text: string): readonly string[] {
       .filter((piece) => piece.length > 0);
     return pieces.length === 0 ? [text] : pieces;
   }
-  if (jiebaState.kind === "uninitialized") {
-    void ensureSegmenter();
-  }
-  if (jiebaState.kind !== "unavailable") {
-    emitCjkSegmentationColdFallbackWarning();
+  if (options.initialize !== false) {
+    if (jiebaState.kind === "uninitialized") void ensureSegmenter();
+    if (jiebaState.kind !== "unavailable") emitCjkSegmentationColdFallbackWarning();
   }
   return fallbackCjkRunPieces(text);
 }

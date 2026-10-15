@@ -34,6 +34,9 @@ export interface EmbeddingProviderPort {
       readonly signal?: AbortSignal;
     }
   ): Promise<readonly Float32Array[]>;
+  /** Optional strict Source capability. Absence is unsupported, never vector-only evidence. */
+  bindSourceEmbedding?(options: import("./source-embedding-runtime.js").SourceEmbeddingBindingOptions):
+    Promise<import("./source-embedding-runtime.js").SourceEmbeddingBindingResult>;
   // Isolated ONNX children outlive JS GC; daemon shutdown must reap them.
   close?(): Promise<void>;
 }

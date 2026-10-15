@@ -76,6 +76,11 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
+    // Source/query preparation uses the same provider, independently of memory backfill storage.
+    bindSourceEmbedding: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
+      providerState.embeddingProvider?.bindSourceEmbedding?.(structuredClone(options)) ??
+        Promise.resolve({ status: "unsupported" as const, reason: providerState.embeddingProvider === null
+          ? "embedding_provider_unavailable" : "provider_source_evidence_pending" }),
     getProviderDimensions: () => providerState.readiness.dimensions,
     getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status),
     closeProvider: () => closeEmbeddingProvider(providerState.embeddingProvider)
@@ -326,7 +331,7 @@ function resolveEmbeddingProvider(input: {
   readonly localSchemaVersion: number | null;
   readonly providerOverride?: EmbeddingProviderPort | null;
 }): EmbeddingProviderPort | null {
-  if (!input.storageAvailable || !input.optInEnabled || input.providerKind === "off") {
+  if ((!input.storageAvailable && input.providerKind !== "local_onnx") || !input.optInEnabled || input.providerKind === "off") {
     return null;
   }
   if (input.providerOverride !== undefined) {
