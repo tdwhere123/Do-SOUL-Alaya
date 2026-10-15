@@ -18,6 +18,9 @@ import { planSourceSemanticBranches } from "./source-semantic-branch-plan.js";
 import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 import { sourceSemanticProofDependencies } from "./source-semantic-delivery.js";
+import {
+  checkSourceSemanticPositiveCertificate, type SourceSemanticPositiveCertificate
+} from "./source-semantic-positive-certificate.js";
 import { unexecutedGroupAttention } from "./source-semantic-attention.js";
 import {
   attachOptionalAttention, groupedOptionalAttention, singleOptionalAttention,
@@ -37,6 +40,8 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
   source_target?: SourceEvidenceTarget;
   /** Offline causal diagnostics only; never enabled by normal recall. */
   withdrawal_trial_limit?: number;
+  /** Core-internal relation+sequence comparison; omitted like source_dependencies when absent. */
+  record_positive_certificate?: true;
 }>;
 type Prepared = Readonly<{
   body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace;
@@ -55,6 +60,7 @@ export type SourceSemanticInterpretationExecution = Readonly<{
   /** Source coordinates from actual selected binding closures, for native support hydration only. */
   source_dependencies?: readonly string[];
   withdrawal_trace?: SourceSemanticWithdrawalTrace;
+  positive_certificate?: SourceSemanticPositiveCertificate;
 }>;
 
 /** One budget and one fixed conditional computation; missing semantic preparation never calls a provider. */
@@ -100,10 +106,21 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
     if ((body.binding_results?.length ?? 0) > 0 && sourceDependencies === undefined) index = null;
   }
   const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
-  return { result, index: result.outcome.status === "truncated"
+  const execution: SourceSemanticInterpretationExecution = { result, index: result.outcome.status === "truncated"
     || result.outcome.status === "resource_exhausted" && result.binding_results === undefined ? null : index,
     ...(result.binding_results === undefined || sourceDependencies === undefined ? {} : { source_dependencies: sourceDependencies }),
     ...(withdrawalTrace === undefined ? {} : { withdrawal_trace: withdrawalTrace }) };
+  if (input.record_positive_certificate !== true) return execution;
+  return {
+    ...execution,
+    positive_certificate: checkSourceSemanticPositiveCertificate({
+      source_interpretation: input.source_interpretation, query_semantics: input.query_semantics,
+      semantic_correspondence: input.semantic_correspondence, original_query: original ?? "",
+      workspaceId: input.workspaceId, scope: input.scope, authorizedScopes: input.authorizedScopes, asOf: input.asOf,
+      sourceValidity: input.sourceValidity, source_target: input.source_target, claimed: result,
+      budget: request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET
+    })
+  };
 }
 
 function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original: string,
