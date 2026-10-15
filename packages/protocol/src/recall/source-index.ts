@@ -45,7 +45,9 @@ export type SourceIndexState = Readonly<{ status: "unknown" }> | Readonly<{
   status: SourceIndexGenerationStatus | "unbound"; selection: SourceIndexSelection;
   active_generation_id: string | null;
 }>;
-/** Native read/dependency work, not model-token or process-RSS accounting. Preparation has separate fixed byte/window caps. */
+/** Instrumented native source/dependency/pending-row reads, not SQLite-internal CPU or SQL write work.
+ * Preparation also has fixed body/window safety caps; model input limits are separate.
+ */
 export type SourceIndexResources = Readonly<{ work: number; native_bytes: number }>;
 export type SourceIndexCaptureResult = Readonly<{
   generation: SourceIndexGeneration; added: number; resources: SourceIndexResources;
@@ -70,6 +72,38 @@ export type SourceIndexVector = Readonly<{
   token_count: number; truncated: false;
 }>;
 export type SourceIndexBudget = Readonly<{ work: number; native_bytes: number }>;
+/** Ordinals address the deterministic prepared manifest, never a caller-owned resume cursor. */
+export type SourceIndexPendingResult = Readonly<{ status: "ready"; ordinals: readonly number[]; resources: SourceIndexResources }> |
+  Exclude<SourceIndexReadResult, { status: "ready" }>;
+export type SourceIndexBackfillBudget = SourceIndexBudget & Readonly<{
+  model_inputs: number; input_bytes: number; max_body_bytes: number;
+}>;
+export type SourceIndexBackfillResult = Readonly<{
+  status: "root_complete" | "partial" | "resource_exhausted" | "token_limit" | "unsupported" | "stale" | "superseded" |
+    "unbound" | "failed" | "cancelled" | "deadline";
+  reason: string;
+  /** Confirmed accepts in this invocation, not a durable root count. Retry pending access reconciles uncertain commits. */
+  accepted_vectors: number;
+  resources: SourceIndexResources & Readonly<{
+    native_accounting: "complete" | "partial"; sql_internal_work: "unknown";
+    model_inputs_submitted: number; model_input_bytes_submitted: number;
+    token_count_observed: number; inputs_without_token_count: number; model_execution_work: "not_run" | "unknown";
+  }>;
+}>;
+/** Known native costs survive exceptions; a failing native operation may have additional unknown costs.
+ * The cause retains the original failure. Resources are a lower bound when accounting is partial.
+ */
+export class SourceIndexOperationError extends AlayaError {
+  public readonly resources: SourceIndexResources;
+  public constructor(cause: unknown, completed: SourceIndexResources) {
+    super(cause instanceof AlayaError ? cause.code : "SOURCE_INDEX_FAILED",
+      cause instanceof Error ? cause.message : "Source index operation failed",
+      { cause, statusCode: cause instanceof AlayaError ? cause.statusCode : undefined });
+    this.name = "SourceIndexOperationError";
+    const nested = cause instanceof SourceIndexOperationError ? cause.resources : { work: 0, native_bytes: 0 };
+    this.resources = Object.freeze({ work: completed.work + nested.work, native_bytes: completed.native_bytes + nested.native_bytes });
+  }
+}
 
 /** Imminent consumer: Core SourceIndexLifecycle, followed by native acquisition backfill/query preparation. */
 export interface SourceIndexRepository {
@@ -85,7 +119,15 @@ export interface SourceIndexRepository {
   writeLexical(source: SourceIndexTarget, body: string, budget?: SourceIndexBudget): SourceIndexGuardedWriteResult;
   writeDocument(workspaceId: string, generationId: string, document: SourceIndexDocument,
     budget?: SourceIndexBudget): SourceIndexGuardedWriteResult;
+  /** Transaction-free caller required. Always selects the first unaccepted windows of this captured root;
+   * [] says nothing about generation readiness. Row/byte budgets do not bound SQLite-internal anti-join work.
+   */
+  pendingWindows(workspaceId: string, generationId: string, rootKey: string, limit: number,
+    budget: SourceIndexBudget): SourceIndexPendingResult;
+  /** Compatibility shape for standalone callers; the same guard uses the standalone allowance. */
   writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector): SourceIndexWriteResult;
+  writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector,
+    budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
   activate(workspaceId: string, generationId: string): SourceIndexWriteResult;
   fail(workspaceId: string, generationId: string, reason: string): void;
 }

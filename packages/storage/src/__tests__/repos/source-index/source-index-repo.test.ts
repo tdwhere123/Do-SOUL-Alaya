@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { prepareSourceIndexDocument, type SourceIndexVector } from "@do-soul/alaya-protocol";
+import { SourceIndexOperationError, prepareSourceIndexDocument, type SourceIndexVector } from "@do-soul/alaya-protocol";
 import { SqliteFieldSourceRecordRepo } from "../../../repos/field/source-repo.js";
 import {
   BUDGET, WORKSPACE, buildReady, captureDocuments, configuration, eraseSource, fieldSha256,
@@ -190,7 +190,18 @@ describe("native retained Source document read boundaries", () => {
     const error = new Error("injected native reader failure");
     const current = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findCurrentBounded")
       .mockImplementationOnce(() => { throw error; });
-    expect(() => environment.index.readDocument(WORKSPACE, generation.generation_id, document.source.root_key, 1024, BUDGET)).toThrow(error);
+    try {
+      environment.index.readDocument(WORKSPACE, generation.generation_id, document.source.root_key, 1024, BUDGET);
+      expect.unreachable("expected the native reader failure");
+    } catch (failure) {
+      expect(failure).toBeInstanceOf(SourceIndexOperationError);
+      if (!(failure instanceof SourceIndexOperationError)) throw failure;
+      expect(failure.resources).toEqual({ work: 0, native_bytes: 0 });
+      expect(failure.cause).toBeInstanceOf(SourceIndexOperationError);
+      if (!(failure.cause instanceof SourceIndexOperationError)) throw failure.cause;
+      expect(failure.cause.resources).toEqual({ work: 0, native_bytes: 0 });
+      expect(failure.cause.cause).toBe(error);
+    }
     expect(environment.index.readDocument(WORKSPACE, generation.generation_id, document.source.root_key, 1024, BUDGET))
       .toMatchObject({ status: "ready", body: "guarded vector input" });
     expect(current).toHaveBeenCalledTimes(2);

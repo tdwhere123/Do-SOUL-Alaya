@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SourceIndexOperationError } from "@do-soul/alaya-protocol";
 import { SourceIndexLifecycle } from "../../source-index/source-index-lifecycle.js";
 import {
   BUDGET, WORKSPACE, configuration, fieldPointer, fieldSha256, fixture, lexicalRows,
@@ -96,7 +97,15 @@ describe("preparation read failures and generation disappearance", () => {
     const read = vi.spyOn(environment.index, "readDocument").mockImplementationOnce(() => { throw error; });
     const lexical = vi.spyOn(environment.index, "writeLexical");
     const document = vi.spyOn(environment.index, "writeDocument");
-    expect(() => environment.lifecycle.prepare(WORKSPACE, generation.generation_id, source!.root_key, BUDGET)).toThrow(error);
+    try {
+      environment.lifecycle.prepare(WORKSPACE, generation.generation_id, source!.root_key, BUDGET);
+      expect.unreachable("expected preparation to retain the read failure");
+    } catch (failure) {
+      expect(failure).toBeInstanceOf(SourceIndexOperationError);
+      if (!(failure instanceof SourceIndexOperationError)) throw failure;
+      expect(failure.resources).toEqual({ work: 0, native_bytes: 0 });
+      expect(failure.cause).toBe(error);
+    }
     expect(lexical).not.toHaveBeenCalled();
     expect(document).not.toHaveBeenCalled();
     expect(environment.lifecycle.prepare(WORKSPACE, generation.generation_id, source!.root_key, BUDGET))

@@ -1,5 +1,6 @@
 export * from "./runtime/config/index.js";
 export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
+export { SourceIndexBackfill, type SourceIndexBackfillInput } from "./source-index/source-index-backfill.js";
 export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";

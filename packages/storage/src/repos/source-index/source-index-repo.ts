@@ -1,12 +1,12 @@
 import {
-  SourceIndexConfigurationSchema, SourceIndexTargetSchema, BoundedIdSchema, canonicalJson,
+  SourceIndexConfigurationSchema, SourceIndexTargetSchema, SourceIndexOperationError, BoundedIdSchema, canonicalJson,
   prepareSourceIndexDocument, prepareSourceIndexLexical, sourceIndexConfigurationId, sourceIndexGenerationId,
   sourceIndexProfileId, type FieldContractSha256, type SourceIndexBudget, type SourceIndexCaptureResult,
   type SourceIndexConfiguration, type SourceIndexDocument, type SourceIndexGeneration, type SourceIndexGuardedWriteResult,
   type SourceIndexReadResult, type SourceIndexQueryRepository, type SourceIndexVectorBinding,
   type SourceIndexVectorCursor, type SourceSemanticResourceBudget,
   type SourceIndexRepository, type SourceIndexSelection, type SourceIndexState, type SourceIndexTarget,
-  type SourceIndexVector, type SourceIndexWriteResult
+  type SourceIndexVector, type SourceIndexWriteResult, type SourceIndexPendingResult
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
@@ -195,15 +195,21 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     budget: SourceIndexBudget = SOURCE_INDEX_STANDALONE_BUDGET): SourceIndexGuardedWriteResult {
     const captured = structuredClone({ source, body, budget });
     const lexical = prepareSourceIndexLexical(captured, this.sha256);
-    return this.atomic(() => {
-      const guard = guardSourceIndexTarget(this.database, this.records, lexical.source, captured.budget);
-      if (guard.status !== "ready") return { status: "rejected",
-        reason: guard.status === "partial" ? guard.reason : "stale", resources: guard.resources };
-      if (!this.persistLexical(lexical.source, lexical.body, guard.dependencies, captured.budget, guard.resources)) {
-        return { status: "rejected", reason: "read_budget", resources: guard.resources };
-      }
-      return { status: "accepted", resources: guard.resources };
-    });
+    let completed = { work: 0, native_bytes: 0 };
+    try {
+      return this.atomic(() => {
+        const guard = guardSourceIndexTarget(this.database, this.records, lexical.source, captured.budget);
+        completed = guard.resources;
+        if (guard.status !== "ready") return { status: "rejected",
+          reason: guard.status === "partial" ? guard.reason : "stale", resources: guard.resources };
+        if (!this.persistLexical(lexical.source, lexical.body, guard.dependencies, captured.budget, guard.resources)) {
+          return { status: "rejected", reason: "read_budget", resources: guard.resources };
+        }
+        return { status: "accepted", resources: guard.resources };
+      });
+    } catch (error) {
+      throw new SourceIndexOperationError(error, completed);
+    }
   }
 
   private persistRoot(source: SourceIndexTarget, dependencies: readonly string[], budget: SourceIndexBudget,
@@ -240,81 +246,142 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
   public writeDocument(workspaceId: string, generationId: string, document: SourceIndexDocument,
     budget: SourceIndexBudget = SOURCE_INDEX_STANDALONE_BUDGET): SourceIndexGuardedWriteResult {
     const input = structuredClone({ workspaceId, generationId, document, budget });
-    return this.atomic(() => {
-      const resources = { work: 0, native_bytes: 0 };
-      const generation = readSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
-      if (generation === null) return { status: "rejected", reason: "missing_generation", resources };
-      const stale = sourceIndexBuildGuard(this.database, generation);
-      if (stale !== null) return { status: "rejected", reason: stale, resources };
-      if (generation.status === "failed") return { status: "rejected", reason: "incomplete", resources };
-      const source = this.target(input.workspaceId, input.generationId, input.document.source.root_key);
-      if (source === null) return { status: "rejected", reason: "missing_target", resources };
-      if (canonicalJson(source) !== canonicalJson(input.document.source)) return { status: "rejected", reason: "stale", resources };
-      const expected = prepareSourceIndexDocument({ source, body: input.document.body,
-        profile: generation.selection.configuration.profile }, this.sha256);
-      if (canonicalJson(expected) !== canonicalJson(input.document)) {
-        throw new StorageError("VALIDATION_FAILED", "source index window manifest mismatch");
-      }
-      const guard = guardSourceIndexTarget(this.database, this.records, source, input.budget);
-      if (guard.status !== "ready") return { status: "rejected",
-        reason: guard.status === "partial" ? guard.reason : "stale", resources: guard.resources };
-      if (!this.persistLexical(source, expected.body, guard.dependencies, input.budget, guard.resources)) {
-        return { status: "rejected", reason: "read_budget", resources: guard.resources };
-      }
-      const insert = this.database.connection.prepare(`INSERT INTO source_index_windows
-        (workspace_id,generation_id,root_key,window_id,ordinal,start_byte,end_byte,content_digest,body)
-        VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
-      for (const window of expected.windows) insert.run(input.workspaceId, input.generationId, source.root_key,
-        window.window_id, window.ordinal, window.start_byte, window.end_byte, window.content_digest, window.text);
-      this.database.connection.prepare(`UPDATE source_index_targets SET expected_windows=?
-        WHERE workspace_id=? AND generation_id=? AND root_key=?`).run(expected.windows.length,
-        input.workspaceId, input.generationId, source.root_key);
-      verifySourceIndexTargetCoverage(this.database, input.workspaceId, input.generationId, source.root_key);
-      return { status: "accepted", resources: guard.resources };
-    });
+    let completed = { work: 0, native_bytes: 0 };
+    try {
+      return this.atomic(() => {
+        const resources = { work: 0, native_bytes: 0 };
+        const generation = readSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
+        if (generation === null) return { status: "rejected", reason: "missing_generation", resources };
+        const stale = sourceIndexBuildGuard(this.database, generation);
+        if (stale !== null) return { status: "rejected", reason: stale, resources };
+        if (generation.status === "failed") return { status: "rejected", reason: "incomplete", resources };
+        const source = this.target(input.workspaceId, input.generationId, input.document.source.root_key);
+        if (source === null) return { status: "rejected", reason: "missing_target", resources };
+        if (canonicalJson(source) !== canonicalJson(input.document.source)) return { status: "rejected", reason: "stale", resources };
+        const expected = prepareSourceIndexDocument({ source, body: input.document.body,
+          profile: generation.selection.configuration.profile }, this.sha256);
+        if (canonicalJson(expected) !== canonicalJson(input.document)) {
+          throw new StorageError("VALIDATION_FAILED", "source index window manifest mismatch");
+        }
+        const guard = guardSourceIndexTarget(this.database, this.records, source, input.budget);
+        completed = guard.resources;
+        if (guard.status !== "ready") return { status: "rejected",
+          reason: guard.status === "partial" ? guard.reason : "stale", resources: guard.resources };
+        if (!this.persistLexical(source, expected.body, guard.dependencies, input.budget, guard.resources)) {
+          return { status: "rejected", reason: "read_budget", resources: guard.resources };
+        }
+        const insert = this.database.connection.prepare(`INSERT INTO source_index_windows
+          (workspace_id,generation_id,root_key,window_id,ordinal,start_byte,end_byte,content_digest,body)
+          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`);
+        // A deterministic same-generation manifest is insert-only: preparation retries retain accepted vectors.
+        for (const window of expected.windows) insert.run(input.workspaceId, input.generationId, source.root_key,
+          window.window_id, window.ordinal, window.start_byte, window.end_byte, window.content_digest, window.text);
+        this.database.connection.prepare(`UPDATE source_index_targets SET expected_windows=?
+          WHERE workspace_id=? AND generation_id=? AND root_key=?`).run(expected.windows.length,
+          input.workspaceId, input.generationId, source.root_key);
+        verifySourceIndexTargetCoverage(this.database, input.workspaceId, input.generationId, source.root_key);
+        return { status: "accepted", resources: guard.resources };
+      });
+    } catch (error) {
+      throw new SourceIndexOperationError(error, completed);
+    }
   }
 
-  public writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector): SourceIndexWriteResult {
-    const input = structuredClone({ workspaceId, generationId, vector });
-    return this.atomic(() => {
-      const generation = readSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
-      if (generation === null) return rejected("missing_generation");
-      const stale = sourceIndexBuildGuard(this.database, generation);
-      if (stale !== null) return rejected(stale);
-      if (generation.status === "failed") return rejected("incomplete");
-      const window = this.database.connection.prepare(`SELECT root_key,content_digest FROM source_index_windows
-        WHERE workspace_id=? AND generation_id=? AND window_id=?`).get(input.workspaceId, input.generationId, input.vector.window_id);
-      if (window === undefined) return rejected("missing_target");
-      const row = readRecord(window, "source index window");
-      const source = this.target(input.workspaceId, input.generationId, readStringField(row, "root_key"));
-      if (source === null) return rejected("missing_target");
-      const guard = guardSourceIndexTarget(this.database, this.records, source);
-      if (guard.status !== "ready") return rejected(guard.status === "partial" ? "incomplete" : "stale");
-      const profile = generation.selection.configuration.profile;
-      const value = input.vector;
-      if (!(value.embedding instanceof Float32Array) || value.embedding.length !== profile.dimensions ||
-          !isFiniteNonzeroEmbedding(value.embedding) || value.truncated !== false ||
-          !Number.isSafeInteger(value.token_count) || value.token_count < 1 || value.token_count > profile.max_input_tokens ||
-          value.input_digest !== readStringField(row, "content_digest")) {
-        throw new StorageError("VALIDATION_FAILED", "source vector requires compatible complete window input");
+  public pendingWindows(workspaceId: string, generationId: string, rootKey: string, limit: number,
+    budget: SourceIndexBudget): SourceIndexPendingResult {
+    const input = structuredClone({ workspaceId, generationId, rootKey, limit, budget });
+    assertIndexPageLimit(input.limit); assertIndexBudget(input.budget);
+    const resources = { work: 0, native_bytes: 0 };
+    try {
+      this.database.reopenIfClosed();
+      if (this.database.connection.inTransaction) {
+        throw new StorageError("CONFLICT", "Source backfill requires a transaction-free caller");
       }
-      const blob = encodeEmbeddingBlob(value.embedding);
-      const previous = this.database.connection.prepare(`SELECT dimensions,embedding_blob,token_count FROM source_index_vectors
-        WHERE workspace_id=? AND generation_id=? AND window_id=?`).get(input.workspaceId, input.generationId, value.window_id);
-      if (previous !== undefined) {
-        const persisted = readRecord(previous, "source index vector");
-        if (readIntegerField(persisted, "dimensions") !== profile.dimensions ||
-            readIntegerField(persisted, "token_count") !== value.token_count || !readBufferField(persisted, "embedding_blob").equals(blob)) {
-          throw new StorageError("CONFLICT", "source index vector retry differs from its persisted result");
+      return this.atomic(() => {
+        const generation = readSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
+        if (generation === null) return { status: "unbound", reason: "missing_generation", resources };
+        const stale = sourceIndexBuildGuard(this.database, generation);
+        if (stale !== null) return { status: stale, reason: stale, resources };
+        if (generation.status === "failed") return { status: "partial", reason: "generation_failed", resources };
+        const raw = this.database.connection.prepare(`SELECT expected_windows FROM source_index_targets
+          WHERE workspace_id=? AND generation_id=? AND root_key=?`).get(input.workspaceId, input.generationId, input.rootKey);
+        if (raw === undefined) return { status: "unbound", reason: "missing_target", resources };
+        if (readRecord(raw, "source index manifest").expected_windows === null) {
+          return { status: "partial", reason: "manifest_unprepared", resources };
         }
-        return { status: "accepted" };
-      }
-      this.database.connection.prepare(`INSERT INTO source_index_vectors
-        (workspace_id,generation_id,root_key,window_id,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
-        .run(input.workspaceId, input.generationId, source.root_key, value.window_id, profile.dimensions, blob, value.token_count);
-      verifySourceIndexTargetCoverage(this.database, input.workspaceId, input.generationId, source.root_key);
-      return { status: "accepted" };
-    });
+        const count = Math.min(input.limit, input.budget.work, Math.floor(input.budget.native_bytes / 8));
+        if (count === 0) return { status: "partial", reason: "read_budget", resources };
+        // The SQL anti-join may inspect accepted rows internally: its CPU is unknown, not bounded by count.
+        const rows = this.database.connection.prepare(`SELECT w.ordinal FROM source_index_windows w
+          WHERE w.workspace_id=? AND w.generation_id=? AND w.root_key=? AND NOT EXISTS (
+            SELECT 1 FROM source_index_vectors v WHERE v.workspace_id=w.workspace_id
+              AND v.generation_id=w.generation_id AND v.window_id=w.window_id AND v.root_key=w.root_key)
+          ORDER BY w.ordinal LIMIT ?`).all(input.workspaceId, input.generationId, input.rootKey, count);
+        resources.work = Math.max(1, rows.length); resources.native_bytes = 8 * rows.length;
+        return { status: "ready", ordinals: rows.map(row => readIntegerField(readRecord(row, "pending window"), "ordinal")), resources };
+      }, "read");
+    } catch (error) {
+      throw new SourceIndexOperationError(error, resources);
+    }
+  }
+
+  public writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector): SourceIndexWriteResult;
+  public writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector,
+    budget: SourceIndexBudget): SourceIndexGuardedWriteResult;
+  public writeVector(workspaceId: string, generationId: string, vector: SourceIndexVector,
+    budget?: SourceIndexBudget): SourceIndexWriteResult | SourceIndexGuardedWriteResult {
+    const input = structuredClone({ workspaceId, generationId, vector, budget: budget ?? SOURCE_INDEX_STANDALONE_BUDGET });
+    assertIndexBudget(input.budget);
+    let resources = { work: 0, native_bytes: 0 };
+    try {
+      const result: SourceIndexGuardedWriteResult = this.atomic(() => {
+        const generation = readSourceIndexGeneration(this.database, input.workspaceId, input.generationId);
+        if (generation === null) return { status: "rejected", reason: "missing_generation", resources };
+        const stale = sourceIndexBuildGuard(this.database, generation);
+        if (stale !== null) return { status: "rejected", reason: stale, resources };
+        if (generation.status === "failed") return { status: "rejected", reason: "incomplete", resources };
+        const window = this.database.connection.prepare(`SELECT root_key,content_digest FROM source_index_windows
+          WHERE workspace_id=? AND generation_id=? AND window_id=?`).get(input.workspaceId, input.generationId, input.vector.window_id);
+        if (window === undefined) return { status: "rejected", reason: "missing_target", resources };
+        const row = readRecord(window, "source index window");
+        const source = this.target(input.workspaceId, input.generationId, readStringField(row, "root_key"));
+        if (source === null) return { status: "rejected", reason: "missing_target", resources };
+        const guard = guardSourceIndexTarget(this.database, this.records, source, input.budget);
+        resources = guard.resources;
+        if (guard.status !== "ready") return { status: "rejected",
+          reason: guard.status === "partial" ? guard.reason : "stale", resources };
+        const profile = generation.selection.configuration.profile;
+        const value = input.vector;
+        if (!(value.embedding instanceof Float32Array) || value.embedding.length !== profile.dimensions ||
+            !isFiniteNonzeroEmbedding(value.embedding) || value.truncated !== false ||
+            !Number.isSafeInteger(value.token_count) || value.token_count < 1 || value.token_count > profile.max_input_tokens ||
+            value.input_digest !== readStringField(row, "content_digest")) {
+          throw new StorageError("VALIDATION_FAILED", "source vector requires compatible complete window input");
+        }
+        const blob = encodeEmbeddingBlob(value.embedding);
+        const previous = this.database.connection.prepare(`SELECT dimensions,embedding_blob,token_count FROM source_index_vectors
+          WHERE workspace_id=? AND generation_id=? AND window_id=?`).get(input.workspaceId, input.generationId, value.window_id);
+        if (previous !== undefined) {
+          const persisted = readRecord(previous, "source index vector");
+          if (readIntegerField(persisted, "dimensions") !== profile.dimensions ||
+              readIntegerField(persisted, "token_count") !== value.token_count || !readBufferField(persisted, "embedding_blob").equals(blob)) {
+            throw new StorageError("CONFLICT", "source index vector retry differs from its persisted result");
+          }
+          return { status: "accepted", resources };
+        }
+        this.database.connection.prepare(`INSERT INTO source_index_vectors
+          (workspace_id,generation_id,root_key,window_id,dimensions,embedding_blob,token_count) VALUES(?,?,?,?,?,?,?)`)
+          .run(input.workspaceId, input.generationId, source.root_key, value.window_id, profile.dimensions, blob, value.token_count);
+        verifySourceIndexTargetCoverage(this.database, input.workspaceId, input.generationId, source.root_key);
+        return { status: "accepted", resources };
+      });
+      if (budget !== undefined) return result;
+      // Retain the established standalone result shape and incomplete mapping, not a second write route.
+      return result.status === "accepted" ? { status: "accepted" } : rejected(
+        result.reason === "read_budget" || result.reason === "native_source_unavailable" ? "incomplete" : result.reason);
+    } catch (error) {
+      throw new SourceIndexOperationError(error, resources);
+    }
   }
 
   public activate(workspaceId: string, generationId: string): SourceIndexWriteResult {
