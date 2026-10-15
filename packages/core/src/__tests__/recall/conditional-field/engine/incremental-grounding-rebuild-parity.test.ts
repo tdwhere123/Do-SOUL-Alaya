@@ -25,8 +25,8 @@ type Row = ReturnType<typeof edge>;
 type ObserveOptions = Readonly<{
   resume?: FieldEngineState; work?: number; pageSize?: number; lexicalIds?: readonly string[];
   holdOpen?: boolean; unavailable?: ReadonlySet<string>;
+  authorizedScopes?: readonly string[] | null;
   sources?: Readonly<Record<string, Partial<SourceObserverRow>>>; hypotheses?: readonly QueryHypothesis[];
-  observed_source_facts?: Readonly<Record<string, SourceObserverRow>>;
 }>;
 
 function hop(kind: string, source: string, target: string, guard: Guard = OPEN_GUARD): QueryProgram {
@@ -62,9 +62,9 @@ function observe(program: QueryProgram, rows: readonly Row[], options: ObserveOp
     }
   };
   return observeField(query(program, { hypotheses }), {
-    workspace_id: "ws", query_text: "incremental-grounding", as_of: AS_OF, readers, authorized_scopes: null,
+    workspace_id: "ws", query_text: "incremental-grounding", as_of: AS_OF, readers,
+    authorized_scopes: options.authorizedScopes === undefined ? null : options.authorizedScopes,
     ...(options.resume === undefined ? {} : { resume_field: options.resume }),
-    ...(options.observed_source_facts === undefined ? {} : { observed_source_facts: options.observed_source_facts }),
     budget: defaultBudget({ work_units: options.work ?? 200_000, memory_bytes: MEMORY,
       finalization_reserve: 0, min_envelope: 0 })
   });
@@ -84,15 +84,6 @@ function view(state: FieldEngineState, rows: readonly Row[]) {
   return extractQualifiedResults(state, new Map(rows.map((row) => [row.assertionId, {
     id: row.assertionId, revision: row.source_revision ?? "rev"
   }])));
-}
-
-function hydrate(program: QueryProgram, rows: readonly Row[], first: ObserveOptions, objectId: string,
-  source: Partial<SourceObserverRow>, extra: ObserveOptions = {}): FieldEngineState {
-  const held = observe(program, rows, first);
-  const row: SourceObserverRow = { object_id: objectId, sourceRevision: source.sourceRevision ?? "rev",
-    lifecycle_state: source.lifecycle_state ?? "active", scope_class: source.scope_class ?? "project", ...source };
-  return observe(program, rows, { ...extra, resume: held, unavailable: first.unavailable,
-    observed_source_facts: { [objectId]: row } });
 }
 
 describe("incremental grounding matches a fresh rebuild", () => {
@@ -124,7 +115,7 @@ describe("incremental grounding matches a fresh rebuild", () => {
     expect(view(live, [row])).toEqual(view(fresh, [row]));
   });
 
-  it("re-admits after a non-endpoint guard fact arrives", () => {
+  it("keeps an unavailable non-endpoint guard unresolved on resume", () => {
     const program: QueryProgram = { schema_version: 1, kind: "sequence",
       steps: [hop("p", "x", "m"), hop("q", "m", "y", INTERVAL)] };
     const rows = [edge("p", "A", "M", "p-M"), edge("q", "M", "Y", "q-Y")];
@@ -132,36 +123,38 @@ describe("incremental grounding matches a fresh rebuild", () => {
     const held = observe(program, rows, first);
     // Hand-derived: G is not an endpoint; without its observed_at the interval stays unresolved.
     expect(members(held)).toEqual([]);
-    const live = hydrate(program, rows, first, "G", { observed_at: AS_OF }, { hypotheses: H0 });
+    const live = observe(program, rows, { ...first, resume: held });
     const fresh = observe(program, rows, { hypotheses: H0, sources: { G: { observed_at: AS_OF } } });
-    expect(members(live)).toEqual(["Y"]);
-    expect(view(live, rows)).toEqual(view(fresh, rows));
+    expect(members(live)).toEqual([]);
+    expect(members(fresh)).toEqual(["Y"]);
   });
 
-  it("re-admits after a named predicate fact arrives", () => {
+  it("keeps an unavailable named predicate unresolved on resume", () => {
     const program = relation("p", "y", NAMED);
     const rows = [edge("p", "A", "T", "p-T")];
     const first = { hypotheses: H0, unavailable: new Set(["G"]) };
     const held = observe(program, rows, first);
     // Hand-derived: the filter reads G, which is not a row endpoint, so T stays out until G is a fact.
     expect(members(held)).toEqual([]);
-    const live = hydrate(program, rows, first, "G", { dimension: MemoryDimension.FACT }, { hypotheses: H0 });
+    const live = observe(program, rows, { ...first, resume: held });
     const fresh = observe(program, rows, { hypotheses: H0, sources: { G: { dimension: MemoryDimension.FACT } } });
-    expect(members(live)).toEqual(["T"]);
-    expect(view(live, rows)).toEqual(view(fresh, rows));
+    expect(members(live)).toEqual([]);
+    expect(members(fresh)).toEqual(["T"]);
   });
 
-  it("re-admits after an endpoint source fact arrives", () => {
+  it("does not retain a relation rejected for an unavailable endpoint", () => {
     const program = relation("p");
     const rows = [edge("p", "A", "B", "p-B")];
     const first = { unavailable: new Set(["B"]) };
     const held = observe(program, rows, first);
-    // Hand-derived: missing target revision blocks B; hydrating B is the source-fact change.
+    // Hand-derived: missing target revision blocks B and cannot become a retained relation.
     expect(members(held)).toEqual([]);
-    const live = hydrate(program, rows, first, "B", { sourceRevision: "rev" });
+    const live = observe(program, rows, { ...first, resume: held });
     const fresh = observe(program, rows);
-    expect(members(live)).toEqual(["B"]);
-    expect(view(live, rows)).toEqual(view(fresh, rows));
+    expect(members(live)).toEqual([]);
+    expect(assertionIds(held)).toEqual([]);
+    expect(assertionIds(live)).toEqual([]);
+    expect(members(fresh)).toEqual(["B"]);
   });
 
   it("resumes a budget interruption with the same proof alternatives", () => {
@@ -183,5 +176,32 @@ describe("incremental grounding matches a fresh rebuild", () => {
     expect(members(live)).toEqual(["T"]);
     expect(view(live, rows)).toEqual(view(fresh, rows));
     expect(view(fresh, rows)[0]?.supports).toHaveLength(2);
+  });
+
+  it.each([
+    { name: "out-of-scope", source: { scope_class: "private" }, row: {} },
+    { name: "inactive source", source: { lifecycle_state: "archived" }, row: {} },
+    { name: "inactive resolution", source: {}, row: { resolutionKind: "retracted", resolvedAt: AS_OF } },
+    { name: "invalid interpretation", source: {}, row: { validity: {
+      kind: "interpretation" as const, hypothesis_id: "foreign", packet_id: "foreign"
+    } } },
+    { name: "outside validity", source: {}, row: { validity: {
+      kind: "open" as const, valid_from: "2027-01-01T00:00:00.000Z"
+    } } }
+  ])("does not retain $name rows from an unavailable page", ({ source, row }) => {
+    const program = relation("p");
+    const rows = [
+      { ...edge("p", "A", "T", "a-rejected"), ...row },
+      edge("p", "A", "B", "b-unavailable")
+    ];
+    const options = { authorizedScopes: ["project"], sources: { T: source }, unavailable: new Set(["B"]) };
+    const held = observe(program, rows, options);
+    expect(members(held)).toEqual([]);
+    expect(assertionIds(held)).toEqual([]);
+    expect(held.observed_relation_bytes ?? 0).toBe(0);
+    const resumed = observe(program, rows, { ...options, resume: held });
+    expect(members(resumed)).toEqual([]);
+    expect(assertionIds(resumed)).toEqual([]);
+    expect(resumed.observed_relation_bytes ?? 0).toBe(0);
   });
 });
