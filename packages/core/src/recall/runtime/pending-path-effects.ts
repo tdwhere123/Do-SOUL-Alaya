@@ -3,6 +3,7 @@ import { applyObserverPage, type FieldEngineState } from "../conditional-field/e
 import { forkSequenceReachOwner, transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
 import { createAdjacencyEffectCursor, type AdjacencyEffectsInput } from "../conditional-field/engine/path-composition-adjacency.js";
 import type { PathEffectPreparation } from "../conditional-field/engine/path-effect-cursor.js";
+import { facetIdentityIndexOf } from "../conditional-field/engine/field-retention-index.js";
 import { pairInRegistry, pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
 
@@ -59,7 +60,7 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   if (charged.remaining_memory_bytes < scratchBytes) return interrupted(charged, true);
   const preparation: PathEffectPreparation = {
     effects: advanced.effects, next_offset: advanced.offset, status: advanced.status,
-    effect_index: 0, stage: "start", facet_scan_index: 0,
+    effect_index: 0, stage: "start",
     facet_resume_offset: pending.facet_resume_offset ?? pending.input.options.liveStates.length,
     pair_demands: state.pair_demands, pair_bytes: 0,
     source_demands: state.source_fact_demands, source_pending: state.source_fact_pending_count, source_bytes: 0,
@@ -73,8 +74,7 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
 function preparePathEffects(state: FieldEngineState): FieldEngineState {
   const pending = state.pending_path_effects!;
   const preparation = pending.preparation!;
-  const priorStates = pending.input.options.liveStates;
-  let { effect_index: index, stage, facet_scan_index: scan, facet_resume_offset: facetOffset,
+  let { effect_index: index, stage, facet_resume_offset: facetOffset,
     pair_demands: pairs, pair_bytes: pairBytes, source_demands: sources,
     source_pending: sourcePending, source_bytes: sourceBytes } = preparation;
   let work = state.remaining_exploration;
@@ -119,19 +119,17 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       const target = effect.transition?.to ?? effect.hyperedge?.to;
       if (target === undefined) facetOffset = 0;
       else {
-        const targetId = productStateNodeId(target);
-        while (scan < facetOffset && work > 0) {
-          const position = scan;
-          scan += 1; work -= 1;
-          if (productStateNodeId(priorStates.at(position)!) === targetId) facetOffset = position;
-        }
-        if (scan < facetOffset && work === 0) break;
+        if (work === 0) break;
+        work -= 1;
+        // The earliest prior state of the target is where later states must rejoin.
+        const position = state.identity_positions?.get(productStateNodeId(target));
+        if (position !== undefined && position < facetOffset) facetOffset = position;
       }
     }
-    index += 1; stage = "start"; scan = 0;
+    index += 1; stage = "start";
   }
   const next: PathEffectPreparation = { ...preparation, effect_index: index, stage,
-    facet_scan_index: scan, facet_resume_offset: facetOffset, pair_demands: pairs,
+    facet_resume_offset: facetOffset, pair_demands: pairs,
     pair_bytes: pairBytes, source_demands: sources, source_pending: sourcePending, source_bytes: sourceBytes,
     retained_bytes: preparationBytes(preparation.effects.length) + pairBytes + sourceBytes };
   const charged = { ...state, pending_path_effects: { ...pending, preparation: next },
@@ -188,7 +186,7 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
     bindingContexts: applied.binding_contexts,
     liveStates: applied.seen_identities, liveStateOffset,
     joinRows: undefined,
-    facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
+    facets: applied.facets, facetIndex: facetIdentityIndexOf(applied), discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
     population_checked: populationChecked,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   const frontierFacts = populationChecked ? applied.source_facts : state.path_effect_frontier?.sourceFacts;

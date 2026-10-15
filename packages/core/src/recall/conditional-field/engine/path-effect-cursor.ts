@@ -14,7 +14,6 @@ export type PathEffectPreparation = Readonly<{
   status: "open" | "complete";
   effect_index: number;
   stage: "start" | "pair" | "source" | "facet";
-  facet_scan_index: number;
   facet_resume_offset: number;
   pair_demands: PersistentStringMap<true>;
   pair_bytes: number;

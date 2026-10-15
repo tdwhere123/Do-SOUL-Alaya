@@ -32,6 +32,9 @@ class ObservationCostTrace extends RequestCostLedger {
   }
 }
 
+// Smaller than the work a full pass needs, so the first request stops early and the second resumes it.
+const REDUCED_ALLOWANCE = 400;
+
 describe("native consumer-directed observation", () => {
   it.each(["a", "b"] as const)("uses the frozen SQLite variant %s", async (variant) => {
     let database: Awaited<ReturnType<typeof openSourceSlice>>["database"] | undefined;
@@ -52,7 +55,7 @@ describe("native consumer-directed observation", () => {
         });
       }
       const native = createConditionalFieldObserverReaders(database!);
-      for (const workUnits of [10_000, 500]) {
+      for (const workUnits of [10_000, REDUCED_ALLOWANCE]) {
         const cost = new ObservationCostTrace();
         const trace: { subject: string; predicate: string; rows: number; bytes: number }[] = [];
         const request: ObserveFieldInput = {
@@ -93,7 +96,7 @@ describe("native consumer-directed observation", () => {
         expect(trace.filter((row) => row.rows > 0)).toHaveLength(2);
         expect(trace.every((row) => ["observed_log", "config_direct", "service_history", "uses_service"].includes(row.predicate))).toBe(true);
         expect(state.remaining_exploration).toBeGreaterThanOrEqual(0);
-        if (workUnits === 500) {
+        if (workUnits === REDUCED_ALLOWANCE) {
           const completed = new Set(trace.map((row) => `${row.subject}\0${row.predicate}`));
           trace.length = 0;
           const prior = state;
@@ -107,7 +110,7 @@ describe("native consumer-directed observation", () => {
             value.accepting && productSubjectId(value.state) === (variant === "a" ? MEM.c : MEM.p))).toBe(true);
           console.info(JSON.stringify({ label: `native-demand-${variant}-resume`, trace,
             adjacency: state.residuals.find((row) => row.kind === "adjacency")?.status,
-            workConsumed: 400 - state.remaining_exploration,
+            workConsumed: REDUCED_ALLOWANCE - 100 - state.remaining_exploration,
             chargedRetainedBytes: continuedCost.charged_retained_bytes,
             retainedBytes: retainedFieldLevels(state, 1_000_000).retained_bytes_current }));
         }

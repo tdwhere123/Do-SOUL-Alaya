@@ -50,7 +50,7 @@ import type { BoundSourceFacts } from "./binding-environment.js";
 import type { GroundingProgress } from "./output-derivations.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import type { FieldGraphAdditions } from "./field-graph-preparation.js";
-import type { FieldRetentionIndex } from "./field-retention-index.js";
+import { facetIdentityIndexOf, type FieldRetentionIndex } from "./field-retention-index.js";
 import {
   affectedSubjectsOf,
   productSccs,
@@ -166,6 +166,8 @@ export type FieldEngineState = Readonly<{
   readonly seen_identities: RetainedRows<ProductStateKey>;
   readonly identity_index?: PersistentStringMap<ProductStateKey>;
   readonly ordered_identities?: PersistentStringMap<ProductStateKey>;
+  /** Offset of each node id in `seen_identities`; kept with `identity_index`. */
+  readonly identity_positions?: PersistentStringMap<number>;
   readonly retained_index?: FieldRetentionIndex;
   readonly identity_spool: RetainedRows<ProductStateKey>;
   readonly observations: RetainedRows<TypedObservation>;
@@ -495,6 +497,7 @@ function rebuildPendingPathEffects(
           liveStateOffset: 0,
           liveStates: state.seen_identities,
           facets: state.facets,
+          facetIndex: facetIdentityIndexOf(state),
           discoveries: state.discoveries,
           bindingContexts: state.binding_contexts,
           ...(state.compiled_automaton === undefined ? {} : { compiledAutomaton: state.compiled_automaton })

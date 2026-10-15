@@ -49,7 +49,7 @@ import {
   type ProgramAutomaton
 } from "./program-automaton.js";
 import { runtimeProgram } from "./path-composition-seed.js";
-import { composedFacetPathId, extendFacets, PathFacetLookup } from "./path-composition-facet.js";
+import { composedFacetPathId, extendFacets, PathFacetLookup, type FacetIdentityIndex } from "./path-composition-facet.js";
 import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
@@ -116,6 +116,8 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
+    /** Identity index of exactly `facets`; absent callers build one per generator. */
+    readonly facetIndex?: FacetIdentityIndex;
     readonly discoveries?: RetainedRows<RoutingDiscovery>;
     readonly physicalKinds?: readonly string[];
     /** Registry snapshot at cursor creation; registered demands are not emitted again, undefined suppresses nothing. */
@@ -225,7 +227,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     }
   }
   yield { kind: "work", retained_bytes: 128 };
-  const facetLookup = new PathFacetLookup(input.facets ?? []);
+  const facetLookup = new PathFacetLookup(input.facets ?? [], input.facetIndex);
   for (const row of joinedRows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
