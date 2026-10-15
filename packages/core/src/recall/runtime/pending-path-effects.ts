@@ -115,12 +115,15 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       stage = "facet";
     }
     // Admission keeps the first path_id, so a retained facet cannot widen the frontier.
+    // The identity insert is one unit, paid here with the offset lookup. Spend
+    // both only when both are available so a later commit cannot reject the page.
     if (stage === "facet" && effect.facet !== undefined && !state.retained_index?.facets.has(effect.facet.path_id)) {
       const target = effect.transition?.to ?? effect.hyperedge?.to;
+      const units = target === undefined ? 1 : 2;
+      if (work < units) break;
+      work -= units;
       if (target === undefined) facetOffset = 0;
       else {
-        if (work === 0) break;
-        work -= 1;
         // The earliest prior state of the target is where later states must rejoin.
         const position = state.identity_positions?.get(productStateNodeId(target));
         if (position !== undefined && position < facetOffset) facetOffset = position;

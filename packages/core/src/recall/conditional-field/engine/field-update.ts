@@ -393,7 +393,9 @@ function absorbEffects(
     }
     if (effect.facet !== undefined && !quota.facetIds.has(effect.facet.path_id) && retainFacet(effect.facet, quota)) {
       facets.push(effect.facet); quota.facetIds = quota.facetIds.with(effect.facet.path_id, true);
-      exploration = indexRetainedFacet(effect.facet, exploration, remainingWork, quota);
+      // Insert work is paid before this effect is committed. Recording it as
+      // unpaid join debt here rejects transitions that already fit.
+      indexRetainedFacet(effect.facet, quota);
     }
     if (effect.discovery !== undefined && !quota.discoveryIds.has(effect.discovery.assertion_id) && retainPayload(effect.discovery, quota)) {
       discoveries.push(effect.discovery);
@@ -543,11 +545,9 @@ function retainFacet(facet: FacetVector, quota: MemoryQuota): boolean {
   return retainPayload(facet, quota);
 }
 
-function indexRetainedFacet(facet: FacetVector, exploration: number, remainingWork: RemainingWork[], quota: MemoryQuota): number {
+function indexRetainedFacet(facet: FacetVector, quota: MemoryQuota): void {
   quota.remaining -= facetIdentityEntryBytes(quota.facetsByIdentity, facet);
   quota.facetsByIdentity = withFacetIdentity(quota.facetsByIdentity, facet);
-  if (exploration < 1) { remainingWork.push({ kind: "join", units: 1 }); return exploration; }
-  return exploration - 1;
 }
 
 function payloadBytes(value: unknown): number {
