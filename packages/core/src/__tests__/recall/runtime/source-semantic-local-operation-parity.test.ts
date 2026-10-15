@@ -1,11 +1,11 @@
 import { expect, it } from "vitest";
-import { SourceSemanticResourceLedger, type SourceSemanticConsumedLeaf } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, sourceSemanticSlotNodeId, type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
 import { interpretationRowEligible } from "../../../recall/conditional-field/observers/observation-admission.js";
 import { settleLocalComputation } from "../../../recall/conditional-field/engine/local-advance.js";
 import { compileSourceSemanticExecution, lowerSourceSemanticPhases } from "../../../recall/conditional-field/query/compile-source-semantic-finite.js";
 import { admitSourceSemanticCorrespondence } from "../../../recall/conditional-field/query/source-semantic-correspondence-admission.js";
-import { planSourceSemanticBranches } from "../../../recall/runtime/source-semantic-branch-plan.js";
-import { compileSourceSemanticPremises, PremiseBuilder } from "../../../recall/runtime/source-semantic-premises.js";
+import { planSourceSemanticBranches, type SourceSemanticBranchPlan } from "../../../recall/runtime/source-semantic-branch-plan.js";
+import { compileSourceSemanticPremises, populateCorrespondence, PremiseBuilder } from "../../../recall/runtime/source-semantic-premises.js";
 import { premiseRow, PremiseRowIndex, type PremiseRowSink } from "../../../recall/runtime/source-semantic-premise-rows.js";
 import { BUDGET, correspondenceFor, query, source } from "./source-semantic-proof-fixture.js";
 
@@ -32,6 +32,48 @@ function fillShared(sink: PremiseRowSink): void {
   sink.edge("a", "b", "p", { leaf_kind: "source_interpretation_content", occurrence: "@derived", parent: "a" });
   sink.self("a", ["accept"]);
 }
+
+function installInterpretationNodes(sink: PremiseBuilder | PremiseRowIndex, interpretation: SourceSemanticInterpretation): void {
+  for (const row of [...interpretation.referents, ...interpretation.frames, ...interpretation.operators]) sink.node(row.id);
+  for (const [frameIndex, frame] of interpretation.frames.entries()) for (const [slotIndex, slot] of frame.slots.entries()) {
+    const id = sourceSemanticSlotNodeId(frameIndex, slotIndex);
+    sink.slotNodes.set(JSON.stringify([frame.id, slot.id]), id);
+    sink.node(id);
+  }
+}
+
+it("populates the same correspondence rows through either sink", () => {
+  const { interpretation, semantics, correspondence, admitted, target } = admittedFixture();
+  const branches = planSourceSemanticBranches(semantics, correspondence, new SourceSemanticResourceLedger(BUDGET));
+  const base = {
+    context_id: admitted.context_id, interpretation_id: admitted.interpretation_id, scope: "project",
+    source_target: target
+  };
+  for (const branchSet of [undefined, branches] satisfies readonly (readonly SourceSemanticBranchPlan[] | undefined)[]) {
+    const builder = new PremiseBuilder({
+      ...base, branches: branchSet, meter: new SourceSemanticResourceLedger(BUDGET),
+      interpretation, semantic_correspondence: correspondence
+    });
+    const index = new PremiseRowIndex({ ...base, branches: branchSet, meter: new SourceSemanticResourceLedger(BUDGET) });
+    installInterpretationNodes(builder, interpretation);
+    installInterpretationNodes(index, interpretation);
+    for (const sink of [builder, index]) {
+      sink.node("@alias");
+      sink.aliases.set("@alias", "fAlice");
+      for (const slot of ["agent", "theme"]) {
+        const slotId = `@alias:${slot}`;
+        sink.node(slotId);
+        sink.slotNodes.set(JSON.stringify(["@alias", slot]), slotId);
+      }
+    }
+    populateCorrespondence(builder, correspondence);
+    populateCorrespondence(index, correspondence);
+    expect(index.rows).toEqual(builder.rows);
+    expect([...index.origins.entries()]).toEqual([...builder.origins.entries()]);
+    expect(builder.rows.some((row) => row.predicate.includes("semantic_correspondence"))).toBe(true);
+    expect([...builder.origins.values()].some((leaf) => leaf.derived_node === "@alias")).toBe(true);
+  }
+});
 
 it("builds the same premise rows and ordinals through the shared sink", () => {
   const { admitted, target, correspondence, interpretation } = admittedFixture();
