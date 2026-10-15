@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import { SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
-import { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
+import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPairExchange,
+  type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
 import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
@@ -306,7 +307,7 @@ it("executes only the distinct source-bound deployment inputs without claiming t
   }
 });
 
-it("retains a strict one-exchange local maximum below the finite two-root coverage optimum", () => {
+it("keeps the default local maximum and measures the private bounded pair improvement", () => {
   const { pool } = coverageTask;
   const coverage = (rows: readonly SourceSemanticLibraryPackage[]) => deliveredInputNumbers(coverageTask, rows).length;
   expect(pool.map(row => coverage([row]))).toEqual([7, 4, 6, 6]);
@@ -317,14 +318,17 @@ it("retains a strict one-exchange local maximum below the finite two-root covera
   expect(optimum).toBe(12);
   expect(subsets.every(rows => compatibleTaskSupport(coverageTask, rows).complete_alternatives === 0)).toBe(true);
   for (const candidates of [pool, [...pool].reverse(), [...pool.slice(1), pool[0]!]]) {
-    const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
-    expect(selected.map(root)).toEqual([root(pool[0]!), root(pool[1]!)]);
+    const baseline = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
+    expect(baseline.map(root)).toEqual([root(pool[0]!), root(pool[1]!)]);
+    expect(coverage(baseline)).toBe(11);
+    const selected = selectSourceSemanticLibraryPageWithPairExchange({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
+    expect(selected.map(root).sort()).toEqual([root(pool[2]!), root(pool[3]!)].sort());
     expect(selected.map(row => row.selection_basis)).toEqual(["new_input", "new_input"]);
-    expect(coverage(selected)).toBe(11);
-    expect(new Set(selected.flatMap(executedInputNumbers)).size).toBe(11);
+    expect(coverage(selected)).toBe(12);
+    expect(new Set(selected.flatMap(executedInputNumbers)).size).toBe(12);
     for (const replacement of [pool[2]!, pool[3]!]) {
-      expect(coverage([selected[0]!, replacement])).toBeLessThan(11);
-      expect(coverage([replacement, selected[1]!])).toBeLessThan(11);
+      expect(coverage([pool[0]!, replacement])).toBeLessThan(11);
+      expect(coverage([replacement, pool[1]!])).toBeLessThan(11);
     }
     expect(compatibleTaskSupport(coverageTask, selected).complete_alternatives).toBe(0);
   }

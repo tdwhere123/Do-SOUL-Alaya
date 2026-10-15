@@ -3,7 +3,7 @@ import { selectSourceSemanticLibraryPage } from "@do-soul/alaya-core";
 import { physicalRoot, rawSourceTwin, type SelectionTaskFixture }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
 import type { LibraryPageSelector } from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
-import { measureNativeSubset, type NativeSubsetContext } from "./source-semantic-library-subset-packing.test-support.js";
+import { measureNativeSubset, roomyDeliveryBytes, type NativeSubsetContext } from "./source-semantic-library-subset-packing.test-support.js";
 
 type Fits = (page: readonly SourceSemanticLibraryPackage[]) => boolean;
 /** Declared objective: [direct answer, covered evidence inputs, qualified (proof-bearing) roots]. */
@@ -24,6 +24,20 @@ type SelectionGap = Readonly<{
 
 const compareObjective = (left: ObjectiveVector, right: ObjectiveVector) =>
   left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
+
+/** Exact proof-subset size clusters with the original 200-byte boundary margin. */
+export function selectionGapLimits(context: NativeSubsetContext, pool = context.fixture.pool): readonly number[] {
+  const sizes: number[] = [];
+  for (let mask = 1; mask < 1 << pool.length; mask++) {
+    sizes.push(measureNativeSubset(context, roomyDeliveryBytes, pool.filter((_, index) => mask & 1 << index)).reserved_bytes!);
+  }
+  const clusters: [number, number][] = [];
+  for (const size of sizes.sort((a, b) => a - b)) {
+    const last = clusters[clusters.length - 1];
+    if (last !== undefined && size - last[1] <= 200) last[1] = size; else clusters.push([size, size]);
+  }
+  return clusters.flatMap(([low, high]) => [low - 200, high + 200]);
+}
 
 /** Facts come from the hand-declared source statements, never from the selector or the proof output. */
 function pageFacts(fixture: SelectionTaskFixture, page: readonly SourceSemanticLibraryPackage[]): PageFacts {

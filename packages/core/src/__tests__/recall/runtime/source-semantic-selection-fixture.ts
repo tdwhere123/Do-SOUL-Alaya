@@ -21,7 +21,7 @@ export const deploymentStatement = (input: number) => `${DEPLOYMENT} ${deploymen
 type BudgetRejection = Readonly<{ phase: string; requested_work: number; requested_bytes: number;
   remaining_work: number; remaining_bytes: number; spent_work: number; spent_bytes: number }>;
 type AuthoredSource = Readonly<{ id: string; inputs: readonly number[]; body: string; package: SourceSemanticLibraryPackage;
-  budget_rejections: readonly BudgetRejection[] }>;
+  budget_rejections: readonly BudgetRejection[]; dependencies: readonly string[] }>;
 export type SelectionTaskFixture = Readonly<{
   original: string; semantics: SourceSemanticQuery; alternatives: readonly (readonly number[])[];
   execution_budget: RequestBudget;
@@ -46,11 +46,21 @@ export function alternativeSelectionFixture(executionBudget: RequestBudget = SOU
   ], executionBudget);
 }
 
+/** Text gold is declared independently of package selection: five required statements, one per source. */
+export function textWindowSelectionFixture(longSource: boolean): SelectionTaskFixture {
+  const inputs = [1, 2, 3, 4, 5];
+  const original = `For ${DEPLOYMENT}, collect these required source statements: ${inputs.map(input => deploymentPredicates[input - 1]).join("; ")}.`;
+  return selectionFixture(original, [inputs], inputs.map(input => ({ id: `statement-${input}`, inputs: [input],
+    prefix: longSource && input === 1 ? "Unrelated source introduction.\n".repeat(200) : "" })), selectionExecutionBudget);
+}
+
 function selectionFixture(original: string, alternatives: readonly (readonly number[])[],
-  declarations: readonly Readonly<{ id: string; inputs: readonly number[] }>[], executionBudget: RequestBudget): SelectionTaskFixture {
+  declarations: readonly Readonly<{ id: string; inputs: readonly number[]; prefix?: string }>[], executionBudget: RequestBudget): SelectionTaskFixture {
   const inputs = [...new Set(alternatives.flat())];
   const semantics: SourceSemanticQuery = { ...query(original), return_variables: [],
-    requested_operation: { reading: alternatives.length === 1 ? "collect all thirteen required source statements" : "establish either complete alternative",
+    requested_operation: { reading: alternatives.length === 1
+      ? alternatives[0]!.length === 13 ? "collect all thirteen required source statements" : "collect all required source statements"
+      : "establish either complete alternative",
       support: { kind: "query_text", excerpt: original } },
     variables: [{ id: "deployment", sort: "entity", reference: { kind: "query_text", excerpt: DEPLOYMENT } },
       ...inputs.map(input => ({ id: `input${input}`, sort: "proposition" as const }))],
@@ -62,8 +72,8 @@ function selectionFixture(original: string, alternatives: readonly (readonly num
       answer_frames: [], evidence_inputs: inputs.map(input => ({ frames: [`qInput${input}`] }))
     })) };
   const sources = declarations.map(declaration => {
-    const body = declaration.inputs.map(deploymentStatement).join("\n");
-    const interpretation = deploymentInterpretation(declaration.id, declaration.inputs, body);
+    const body = (declaration.prefix ?? "") + declaration.inputs.map(deploymentStatement).join("\n");
+    const interpretation = deploymentInterpretation(declaration.id, declaration.inputs, body, Buffer.byteLength(declaration.prefix ?? ""));
     const correspondence = deploymentCorrespondence(interpretation, semantics, alternatives, declaration.inputs);
     const { actual, budget_rejections } = measuredProof({ interpretation, semantics, correspondence, original,
       library: true, budget: executionBudget });
@@ -72,7 +82,7 @@ function selectionFixture(original: string, alternatives: readonly (readonly num
       payload_support: "available", source_disclosure: { material_kind: "original_body", source_binding: "unbound",
         evaluated_as_of: CLOCK, validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
         proof_use: { kind: "conditional_support", qualification: "not_world_claim" } } };
-    return { ...declaration, body, package: row, budget_rejections };
+    return { ...declaration, body, package: row, budget_rejections, dependencies: actual.source_dependencies };
   });
   return { original, semantics, alternatives, execution_budget: executionBudget, sources, pool: sources.map(row => row.package) };
 }
@@ -94,12 +104,12 @@ function measuredProof(input: Parameters<typeof deliveredProofFixture>[0]) {
   finally { observe.mockRestore(); }
 }
 
-function deploymentInterpretation(id: string, inputs: readonly number[], body: string): SourceSemanticInterpretation {
+function deploymentInterpretation(id: string, inputs: readonly number[], body: string, prefixBytes = 0): SourceSemanticInterpretation {
   const digest = fieldContractSha256(body);
   const assertions = inputs.map((input, index) => ({ assertion_id: index + 1, text: deploymentStatement(input) }));
   const catalog = buildSourceReferenceCatalog(digest, assertions, fieldContractSha256);
   const resolver = sourceReferenceResolver(catalog, fieldContractSha256);
-  let offset = 0;
+  let offset = prefixBytes;
   const mentions: SourceSemanticInterpretation["mentions"][number][] = [];
   const assertion_locations: NonNullable<SourceSemanticInterpretation["source"]["assertion_locations"]>[number][] = [];
   const frames: SourceSemanticInterpretation["frames"] = inputs.map((input, index) => {
