@@ -50,6 +50,7 @@ import { advanceProducts, relationTransition } from "./local-advance.js";
 import { runtimeProgram } from "./path-composition-seed.js";
 import { composedFacetPathId, extendFacets, PathFacetLookup, type FacetIdentityIndex } from "./path-composition-facet.js";
 import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
+import type { StateEndpointIndex } from "./state-endpoint-index.js";
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
 export { tryCompleteHyperedge };
@@ -121,6 +122,8 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly physicalKinds?: readonly string[];
     /** Registry snapshot at cursor creation; registered demands are not emitted again, undefined suppresses nothing. */
     readonly registeredDemands?: RegisteredDemands;
+    /** Exact completed row-delta population; its state and routing demands are already registered. */
+    readonly settledStateEndpoints?: StateEndpointIndex;
     readonly compiledAutomaton?: ProgramAutomaton;
     /** Branch frontier. Absent callers keep writing the shared automaton. */
     readonly sequenceReachOwner?: object;
@@ -179,7 +182,9 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   // New states keep the live-state suffix against the full population.
   // A row delta joins every state in range with joinRows only.
   const joinedRows = input.joinRows ?? rows;
-  for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
+  const indexed = input.settledStateEndpoints;
+  for (let index = indexed === undefined ? input.liveStateOffset ?? 0 : input.liveStates.length;
+    index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
     const endpoint = productEndpointId(from), bucket = statesByEndpoint.get(endpoint);
@@ -231,7 +236,8 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
     yield { kind: "work" };
-    for (const from of statesByEndpoint.get(row.sourceObjectId) ?? []) {
+    if (indexed !== undefined) yield { kind: "work" };
+    for (const from of (indexed?.endpoints ?? statesByEndpoint).get(row.sourceObjectId) ?? []) {
       yield { kind: "work" };
       yield* effectsForLiveRow(automaton, row, from, {
         query_id: input.interpretation.query_id,
@@ -244,7 +250,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     }
   }
   const origins = new Set<string>();
-  for (const state of input.liveStates) {
+  if (indexed === undefined) for (const state of input.liveStates) {
     yield { kind: "work", retained_bytes: 64 };
     origins.add(productEndpointId(state));
   }
@@ -252,7 +258,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     yield { kind: "work", retained_bytes: 64 };
     origins.add(discovery.subject_id);
   }
-  if ((input.physicalKinds?.length ?? 0) > 0) for (const origin of origins) {
+  if (indexed === undefined && (input.physicalKinds?.length ?? 0) > 0) for (const origin of origins) {
     for (const [predicate, routing] of Object.entries(input.overlay)) {
       yield { kind: "work" };
       if (!routing.applicable || routing.role !== "routing_only") continue;
@@ -267,10 +273,13 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     for (const row of joinedRows) {
       yield { kind: "work", retained_bytes: 128 };
       if (row.validity === undefined || inactiveResolution(row.resolutionKind)
-        || !origins.has(row.sourceObjectId) || emitted.has(row.assertionId)) continue;
+        || !(origins.has(row.sourceObjectId) || indexed?.endpoints.has(row.sourceObjectId))
+        || emitted.has(row.assertionId)) continue;
       for (const effect of routingDiscoveryEffect(row, input.overlay)) {
         emitted.add(row.assertionId);
-        if (!origins.has(effect.discovery.subject_id)) { origins.add(effect.discovery.subject_id); grew = true; }
+        if (!origins.has(effect.discovery.subject_id) && !indexed?.endpoints.has(effect.discovery.subject_id)) {
+          origins.add(effect.discovery.subject_id); grew = true;
+        }
         yield { kind: "effect", effect };
       }
     }

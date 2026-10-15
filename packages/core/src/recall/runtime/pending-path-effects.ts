@@ -6,6 +6,7 @@ import type { PathEffectPreparation } from "../conditional-field/engine/path-eff
 import { facetIdentityIndexOf } from "../conditional-field/engine/field-retention-index.js";
 import { pairInRegistry, pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
+import { settledEndpointIndex } from "../conditional-field/engine/state-endpoint-index.js";
 
 const PREPARATION_BASE_BYTES = 128;
 
@@ -39,7 +40,8 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   const owned = ownSequenceReach(state, pending);
   state = owned.state;
   const options = pending.cursor === undefined
-    ? { ...owned.options, registeredDemands: { pairs: state.pair_demands, sources: state.source_fact_demands } }
+    ? { ...owned.options, settledStateEndpoints: settledEndpointIndex(state, pending),
+      registeredDemands: { pairs: state.pair_demands, sources: state.source_fact_demands } }
     : owned.options;
   const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, options,
     state.remaining_memory_bytes + pending.retained_bytes);
@@ -188,7 +190,7 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
     bindingContexts: applied.binding_contexts,
     liveStates: applied.seen_identities, liveStateOffset,
-    joinRows: undefined,
+    joinRows: undefined, settledStateEndpoints: undefined,
     facets: applied.facets, facetIndex: facetIdentityIndexOf(applied), discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
     population_checked: populationChecked,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
@@ -200,6 +202,8 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
     binding_context_bytes: finished ? applied.binding_contexts?.bytes : applied.binding_context_bytes,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
       facets: applied.facets, discoveries: applied.discoveries.length,
+      ...(applied.state_endpoint_index !== undefined && applied.state_endpoint_index.rows.length > 0
+        ? { demand_context: { interpretation: prior.interpretation, overlay: prior.overlay, physicalKinds: prior.physicalKinds } } : {}),
       ...(frontierFacts === undefined ? {} : { sourceFacts: frontierFacts }) } } : {}),
     observation_gaps: { guards, measurements },
     pending_path_effects: finished ? next : { ...pending, preparation: undefined, guards_seen: guardsSeen,

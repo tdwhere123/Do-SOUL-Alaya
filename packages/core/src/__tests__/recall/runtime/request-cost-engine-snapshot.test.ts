@@ -152,8 +152,8 @@ describe("request-cost engine work snapshot", () => {
       }
     };
     const request = { workspace_id: "ws", query_text: "a", as_of: asOf, authorized_scopes: null, readers };
-    // The single automaton edge charges two index-construction visits before path preparation.
-    const first = observeField(interpretation, { ...request, budget: defaultBudget({ work_units: 129, memory_bytes: 1_000_000 }) });
+    // Include the endpoint index insertion to stop at the same pending preparation boundary.
+    const first = observeField(interpretation, { ...request, budget: defaultBudget({ work_units: 130, memory_bytes: 1_000_000 }) });
     expect(first.pending_path_effects?.preparation?.retained_bytes).toBe(136);
     const before = snapshotRestoredEngineWork(first, 1_000_000);
     calls.length = 0;

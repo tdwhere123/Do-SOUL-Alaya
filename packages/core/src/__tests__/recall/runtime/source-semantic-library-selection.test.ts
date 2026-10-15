@@ -250,11 +250,11 @@ it("finishes this source's statements inside the default reasoning allowance", (
 });
 
 it("retains an ordered open prefix when the work allowance stops early", () => {
-  // A third of the default allowance still stops before this source's last statement.
-  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: Math.floor(SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 3) };
+  // A quarter of the default allowance stops before the last statement with indexed row deltas.
+  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: Math.floor(SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 4) };
   const original = coverageSelectionFixture(allowance), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
   const proof = partial.proofs[0]!;
-  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 66_666, memory_bytes: 20_000_000,
+  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 50_000, memory_bytes: 20_000_000,
     page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
   expect(root(partial)).toBe(root(complete));
   expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);

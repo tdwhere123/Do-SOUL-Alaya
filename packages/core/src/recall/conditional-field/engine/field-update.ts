@@ -37,6 +37,7 @@ import { RetainedRowDraft, RetainedSequence, type RetainedRows } from "./retaine
 import { collectIdentities, observationIsGuaranteed, productStateFromObservation, seedFromObservation } from "./path-composition-seed.js";
 import { mergeTransitions, transitionKey } from "./path-composition.js";
 import { facetIdentityEntryBytes, withFacetIdentity, type FacetIdentityIndex } from "./path-composition-facet.js";
+import { appendEndpointState, endpointIndexEntryBytes, indexedIdentityWork } from "./state-endpoint-index.js";
 import { tryCompleteHyperedge } from "./path-hyperedge.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import type {
@@ -469,6 +470,9 @@ function chargeIdentities(state: BindableState): BindableState {
   let charged = state.identity_index ?? new PersistentStringMap<ProductStateKey>();
   let ordered = state.ordered_identities ?? new PersistentStringMap<ProductStateKey>();
   let positions = state.identity_positions ?? new PersistentStringMap<number>();
+  let endpoints = state.state_endpoint_index ?? (indexedIdentityWork(state) === 2
+    ? { rows: RetainedSequence.empty<ProductStateKey>(), endpoints: new PersistentStringMap<RetainedSequence<ProductStateKey>>() }
+    : undefined);
   let subjects = state.resume_subjects;
   let memory = state.remaining_memory_bytes;
   let exploration = state.remaining_exploration;
@@ -478,15 +482,17 @@ function chargeIdentities(state: BindableState): BindableState {
   let keptIdentities = state.identity_index === undefined ? RetainedSequence.empty<ProductStateKey>() : RetainedSequence.from(state.seen_identities);
   let processed = 0;
   for (const identity of incoming) {
-    if (exploration < 1) { remainingWork.push({ kind: "state_create", units: 1 }); break; }
+    const units = endpoints === undefined ? 1 : 2;
+    if (exploration < units) { remainingWork.push({ kind: "state_create", units }); break; }
     const nodeId = productStateNodeId(identity);
     if (charged.has(nodeId)) {
       processed += 1;
       continue;
     }
-    // Identity payload plus its position entry.
-    const cost = payloadBytes(identity) + 32 + nodeId.length;
-    exploration -= 1;
+    // Retain the identity, position and endpoint entry atomically.
+    const cost = payloadBytes(identity) + 32 + nodeId.length
+      + (endpoints === undefined ? 0 : endpointIndexEntryBytes(endpoints, identity));
+    exploration -= units;
     if (memory < cost) {
       exhausted = true;
       remainingWork.push({ kind: "state_create", units: 1 });
@@ -498,6 +504,7 @@ function chargeIdentities(state: BindableState): BindableState {
     subjects = subjects.with(productEndpointId(identity), true);
     positions = positions.with(nodeId, keptIdentities.length);
     keptIdentities = keptIdentities.append(identity);
+    if (endpoints !== undefined) endpoints = appendEndpointState(endpoints, identity, keptIdentities);
     processed += 1;
   }
   const pending = incoming.slice(processed);
@@ -512,6 +519,7 @@ function chargeIdentities(state: BindableState): BindableState {
     identity_index: charged,
     ordered_identities: ordered,
     identity_positions: positions,
+    state_endpoint_index: endpoints === undefined ? undefined : { ...endpoints, rows: keptIdentities },
     resume_subjects: subjects,
     ...(exhausted ? { seeds: [], guaranteed_seeds: [], transitions: [], guaranteed_transitions: [], facets: [], derivations: [] } : {}),
     seen_identities: keptIdentities,
