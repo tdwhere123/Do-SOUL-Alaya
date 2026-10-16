@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+import { sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { projectSourceSemanticQuerySupport, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
@@ -31,7 +31,7 @@ async function prepare(call: PublicCall, original: string, semantics: SourceSema
   const output = await call({ operation: "prepare_query", original_query: original, query_semantics: semantics,
     budget: ACCESS_BUDGET, authorized_scopes: SCOPES });
   if (output.operation !== "prepare_query" || output.query_handle === undefined) throw new Error("public preparation expected");
-  expect(output.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(output.execution).query_preparation.external_api_attempts).toBe(0);
   return output;
 }
 
@@ -46,7 +46,7 @@ async function recall(call: PublicCall, original: string, semantics: SourceSeman
   if (output.operation !== "recall" || output.index === undefined || output.slot_qualifiers === undefined) {
     throw new Error("public library recall expected");
   }
-  expect(output.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(output.execution).query_preparation.external_api_attempts).toBe(0);
   return { ...output, index: output.index, slot_qualifiers: output.slot_qualifiers };
 }
 

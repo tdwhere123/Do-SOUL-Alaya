@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import {
-  RunMode, RunState, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+  sourceSemanticExecutionPhases, RunMode, RunState, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   sourceReferenceResolver, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity,
   type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticGenerationTask,
   type SourceSemanticPublishedInterpretation, type SourceSemanticQuery
@@ -93,7 +93,7 @@ async function output(session: Session, context: Context, args: Record<string, u
   expect(response.isError, JSON.stringify(response)).not.toBe(true);
   if (response.structuredContent === undefined || !("output" in response.structuredContent)) throw new Error("public output required");
   const parsed = SoulInterpretationResponseSchema.parse(response.structuredContent.output);
-  expect(parsed.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(parsed.execution).query_preparation.external_api_attempts).toBe(0);
   return parsed;
 }
 

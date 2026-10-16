@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SourceRecordIdentitySchema, SourceSemanticAccessReceiptSchema,
+import { AlayaError, canonicalJson, SourceRecordIdentitySchema, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema,
   SourceSemanticCorrespondencePreparationOptionsSchema } from "@do-soul/alaya-protocol";
 import { censusNativeSourceRecords } from "../snapshot/source-records/census.js";
 import { readVerifiedNativeSourceSnapshot } from "../snapshot/source-records/native.js";
@@ -57,12 +57,14 @@ const WindowSourceSchema = z.object({ rank: z.number().int().min(1).max(10),
   read_bytes: z.number().int().nonnegative(), complete: z.boolean(),
   initial_key: Digest.nullable(), initial_cache_status: z.enum(["hit", "missing", "invalid", "unsupported"])
 }).strict();
-const RecoveryWindowSchema = z.object({ contract: z.literal("source-semantic-recovery-window-v1"),
+// Historic v1/v1-access windows are unsupported; remove this cutover boundary after archive retirement.
+const RecoveryWindowSchema = z.object({ contract: z.literal("source-semantic-recovery-window-v2"),
   input_identity: Digest, native_snapshot_path: z.string(), native_manifest_identity: Digest,
   source_census_identity: Digest, raw_publication_identity: Digest,
   raw_snapshot_path: z.string(), raw_snapshot_sha256: Digest,
   initial_chain_root: z.string(), initial_plan_identity: Digest,
   query_key: Digest, query_state_identity: Digest, initial_access: SourceSemanticAccessReceiptSchema,
+  initial_query_execution: SourceSemanticExecutionSchema,
   initial_discovery_work: z.unknown(), initial_host_elapsed_ms: z.number().nonnegative(),
   source_cache_root: z.string(), population: z.string(), source_model: z.string(),
   query_review_cache_root: z.string(),
@@ -261,13 +263,13 @@ export async function freezeNativeRecoveryWindow(value: unknown, rootInput: stri
   reserveRecoveryHostEffect(root, "initial-H-preparation", chainIdentity(initialHStage),
     readChainArtifact(initialHStagePath) !== undefined);
   writeChainArtifact(initialHStagePath, initialHStage);
-  const result = RecoveryWindowSchema.parse({ contract: "source-semantic-recovery-window-v1",
+  const result = RecoveryWindowSchema.parse({ contract: "source-semantic-recovery-window-v2",
     input_identity: inputIdentity, native_snapshot_path: resolve(input.native_snapshot_path),
     native_manifest_identity: nativeSnapshot.manifest.identity, source_census_identity: census.dataset_sha256,
     raw_publication_identity: chainIdentity(report), raw_snapshot_path: rawPath,
     raw_snapshot_sha256: report.db_sha256, initial_chain_root: planRoot,
     initial_plan_identity: chainIdentity(plan), query_key: query.query_key,
-    query_state_identity: plan.input_identity, initial_access: first.access,
+    query_state_identity: plan.input_identity, initial_access: first.access, initial_query_execution: first.execution,
     initial_discovery_work: first.work, initial_host_elapsed_ms: query.initial_discovery_elapsed_ms,
     source_cache_root: resolve(input.source_cache_root), population: input.population,
     query_review_cache_root: resolve(input.query_review_cache_root ?? join(root, "query-review-cache")),

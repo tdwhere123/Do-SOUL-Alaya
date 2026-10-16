@@ -1,4 +1,4 @@
-import { SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
+import { SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
   type SourceSemanticAccessPolicy, type SourceSemanticAccessReceipt, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 
 type Stops = SourceSemanticAccessReceipt["stopping_reasons"];
@@ -11,8 +11,16 @@ type Pageable = Readonly<{
 export function sourceSemanticAccessReceiptValue<Source, Interpretation, Unvisited>(policy: SourceSemanticAccessPolicy, inputId: string,
   sources: readonly Source[], interpretations: readonly Interpretation[],
   unvisitedSources: Unvisited, unvisitedInterpretations: Unvisited, stops: Stops,
-  sourcePreviewExtents?: SourceSemanticPreviewExtents) {
-  return { contract: "source-semantic-access-v1" as const, policy, input_id: inputId,
+  sourcePreviewExtents?: SourceSemanticPreviewExtents,
+  phases?: Pick<SourceSemanticAccessReceipt, "preparation" | "acquisition" | "phase_accounting">) {
+  return { contract: "source-semantic-access-v2" as const,
+    preparation: phases?.preparation ?? unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
+    acquisition: phases?.acquisition ?? sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
+    phase_accounting: phases?.phase_accounting ?? {
+      observation: null,
+      completion: "included_in_worker_work_not_separately_measured" as const,
+      native_cpu: "unknown" as const, deadline: "soft_quarantine_until_exit" as const },
+    policy, input_id: inputId,
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }),
     observed_source_count: sources.length, observed_interpretation_count: interpretations.length,
     source_candidates: sources, interpretation_candidates: interpretations,

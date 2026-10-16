@@ -230,7 +230,9 @@ export async function deliverPreparedSemanticChainQuery(input: Readonly<{
 function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof discoverSemanticChainQuery>>["discovery"],
   actual: Awaited<ReturnType<typeof discoverSemanticChainQuery>>["discovery"]): boolean {
   const comparable = (value: typeof actual) => ({ descriptors: value.descriptors,
-    access: value.discovery_trace.map(({ access: { pool_id: _connectionPoolId, ...observation } }) => observation) });
+    access: value.discovery_trace.map(({ access: { pool_id: _connectionPoolId, preparation, ...observation } }) => ({
+      ...observation, preparation: { ...preparation, elapsed_ms: undefined }
+    })) });
   return canonicalJson(comparable(expected)) === canonicalJson(comparable(actual));
 }
 
@@ -392,7 +394,7 @@ function admitReplayRow(root: string, plan: SemanticChainPlan, replay: z.infer<t
   if (trace == null || trace.length === 0 || !sameSealedSnapshotObservation(query, { ...query, discovery_trace: trace })
     || access === undefined || access.pool_id !== trace.at(-1)!.access.pool_id || access.policy !== config.access_policy
     || access.input_id !== sourceSemanticAccessInputIdentity({ original_query: query.original_query, query_semantics: querySemantics,
-      budget: config.budget, policy: config.access_policy,
+      budget: config.budget, policy: config.access_policy, contract: "source-semantic-access-v2",
       ...(config.source_preview_extents === undefined ? {} : { source_preview_extents: config.source_preview_extents })
     })) throw new AlayaError("CONFLICT", "native delivery does not bind the prepared access pool");
   if (query.status === "raw_ready" && (response.proofs?.length ?? 0) > 0) {

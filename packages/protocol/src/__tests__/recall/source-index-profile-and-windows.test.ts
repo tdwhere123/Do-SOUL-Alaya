@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { sourceGoldRootIdentity } from "../../garden/source-semantic-worker.js";
+import { sourceGoldRootIdentity } from "../../recall/conditional-field/product-identity.js";
 import { sourceRecallTarget } from "../../recall/conditional-field/product-identity.js";
 import { hashContentDigest } from "../../recall/field-contract/canonical-identity.js";
 import {

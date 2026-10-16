@@ -6,6 +6,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { LocalOnnxTransformersProbeResult } from "@do-soul/alaya-core";
+
 import {
   createDeferred,
   getToolRuntimeWiringFixture,
@@ -117,6 +119,19 @@ describe("daemon tool runtime bootstrap", () => {
     delete process.env.ALAYA_MISSING_OPENAI_KEY;
     delete process.env.ALAYA_OPENAI_SECRET_REF;
 
+    const { createDaemonEmbeddingRuntime } = await vi.importActual<
+      typeof import("../../ai/daemon-embedding-runtime.js")
+    >("../../ai/daemon-embedding-runtime.js");
+    const missingLocalOnnxTransformersProbe = vi.fn((): LocalOnnxTransformersProbeResult => ({
+      availability: "unavailable",
+      code: "ERR_MODULE_NOT_FOUND"
+    }));
+    hoisted.createDaemonEmbeddingRuntimeOverride = (input) =>
+      createDaemonEmbeddingRuntime({
+        ...(input as Parameters<typeof createDaemonEmbeddingRuntime>[0]),
+        localOnnxTransformersProbe: missingLocalOnnxTransformersProbe
+      });
+
     const runtime = await bootDaemonRuntime() as Awaited<ReturnType<typeof bootDaemonRuntime>> & {
       readonly services: {
         readonly embeddingStatusService: {
@@ -137,6 +152,7 @@ describe("daemon tool runtime bootstrap", () => {
       effective_mode: "keyword_only",
       degraded_reason: null
     });
+    expect(missingLocalOnnxTransformersProbe).toHaveBeenCalled();
   }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it("rejects malformed embedding secret refs during daemon bootstrap", async () => {

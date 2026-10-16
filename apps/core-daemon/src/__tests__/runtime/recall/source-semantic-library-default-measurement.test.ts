@@ -117,7 +117,23 @@ it("measures a real same-root improvement over three complementary independent p
   try {
     const branches = authored.branches.slice(0, 3), candidates = windows(context, branches);
     expect(new Set(branches.map(row => row.proof.source_interpretation_id)).size).toBe(3);
-    expect(candidates.map(row => row.proofs.length)).toEqual([3, 1, 1, 1, 0]);
+    expect(candidates.map(row => row.proofs.length)).toEqual([3, 1, 1, 1, 0, 0]);
+    const admitted = rawSourceTwin(context.fixture.sources[0]!.package).entry, union = candidates[0]!, hull = candidates.at(-1)!;
+    if (admitted.target.kind !== "source_evidence") throw new Error("admitted source tuple expected");
+    expect(union.proofs).toHaveLength(3);
+    expect(hull.proofs).toEqual([]);
+    expect(hull.entries).toEqual([hull.entry]);
+    expect(hull.explanations).toEqual([]);
+    expect(hull.entry.target).toMatchObject({ kind: "source_evidence",
+      span: { content_start: 0, content_end: Buffer.byteLength(authored.fixture.sources[0]!.body) } });
+    expect(hull.entry).toMatchObject({ hypothesis_id: admitted.hypothesis_id, claim: "unknown", explanation_ids: [] });
+    expect(hull.entry.hypothesis_id).not.toBe(union.entry.hypothesis_id);
+    expect(hull.entry).not.toHaveProperty("interpretation_node");
+    expect(hull.entry.target).not.toHaveProperty("interpretation_node");
+    expect(hull.entry.target).toMatchObject({ workspace_id: admitted.target.workspace_id, root_id: admitted.target.root_id,
+      source_version: admitted.target.source_version, content_digest: admitted.target.content_digest,
+      evidence_object_id: admitted.target.evidence_object_id });
+    expect(hull.source_disclosure.proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
     const [two] = [...prepareLibraryPackagePairs(candidates, [candidates.find(row => row.proofs.length === 1)!],
       new SourceSemanticReadBudget(selectionExecutionBudget))];
     expect(two).toBeDefined();

@@ -2,10 +2,16 @@ import { authoredQuerySemantics, receiveAuthoredCorrespondence } from "./source-
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
 import * as core from "@do-soul/alaya-core";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, hashLabeledIdentity,
   indexEntryCacheKey, materializeSourceSemanticTableProposal,
   type SourceSemanticCorrespondence, type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
@@ -258,7 +264,7 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
     budget: BUDGET, authorized_scopes: SCOPES
   }, context);
   if (output.operation !== "propose" || output.published === undefined) {
-    throw new Error(`propose failed: ${JSON.stringify(output.outcome)}`);
+    throw new Error(`propose failed: ${JSON.stringify(output)}`);
   }
   return output.published;
 }
@@ -311,7 +317,7 @@ it("delivers an unchanged question from current raw sources when query semantics
       if (absent.operation !== "recall" || absent.index === undefined || absent.results === undefined) throw new Error("raw delivery expected");
       expect(absent.query_semantics_status).toEqual({ status: "unavailable", reason: "absent" });
       expect(absent.coverage).toMatchObject({ query_semantics: "unexercised", conditional_computation: "unexercised" });
-      expect(absent.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(absent.execution).query_preparation.external_api_attempts).toBe(0);
       expect(absent.proofs ?? []).toHaveLength(0);
       expect(absent.slot_qualifiers?.every((slot) => slot.evidence_kind === "source_evidence")).toBe(true);
       expect(absent.results.some((row) => row.target.kind === "source_evidence"
@@ -336,7 +342,8 @@ it("delivers an unchanged question from current raw sources when query semantics
       const invalidQuery = { ...admittedQuery,
         original_query_digest: `sha256:${"0".repeat(64)}` };
       const invalid = await callInterpretation(session.handler, { ...request, query_semantics: invalidQuery }, session.context);
-      expect(invalid).toMatchObject({ operation: "recall", query_semantics_status: { status: "unavailable", reason: "invalid" }, provider_attempts: 0 });
+      expect(invalid).toMatchObject({ operation: "recall", query_semantics_status: { status: "unavailable", reason: "invalid" } });
+      expect(sourceSemanticExecutionPhases(invalid.execution).query_preparation.external_api_attempts).toBe(0);
       if (invalid.operation !== "recall") throw new Error("invalid semantics must still recall raw sources");
       expect(invalid.results?.some((row) => row.target.kind === "source_evidence" && row.target.root_id === roots["artifact-alice"])).toBe(true);
       expect(invalid.request_identity).not.toBe(absent.request_identity);
@@ -370,7 +377,7 @@ it("delivers an unchanged question from current raw sources when query semantics
       const leased = await callInterpretation(session.handler, { operation: "recall", accepts_unreviewed_conditional_results: true,
         query_handle: prepared.query_handle, budget: BUDGET, output_byte_limit: 1_000_000,
         authorized_scopes: SCOPES }, session.context);
-      expect(leased).toMatchObject({ operation: "recall", query_semantics_status: { status: "unavailable", reason: "producer_failure" }, provider_attempts: 0 });
+      expect(leased).toMatchObject({ operation: "recall", query_semantics_status: { status: "unavailable", reason: "producer_failure" }, execution: "native_reasoning_only" });
       if (leased.operation !== "recall") throw new Error("leased raw recall expected");
       expect(leased.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
       expect(leased.request_identity).not.toBe(absent.request_identity);
@@ -403,7 +410,8 @@ it("reports native query preparation resource exhaustion and still prepares a la
       original_query: longQuestion, budget, authorized_scopes: SCOPES }, session.context);
     if (exhausted.operation !== "prepare_query") throw new Error("preparation response expected");
     expect(exhausted).toMatchObject({ outcome: { status: "resource_exhausted" },
-      query_semantics_status: { status: "unavailable", reason: "absent" }, provider_attempts: 0 });
+      query_semantics_status: { status: "unavailable", reason: "absent" } });
+    expect(sourceSemanticExecutionPhases(exhausted.execution).query_preparation.external_api_attempts).toBe(0);
     expect(exhausted.query_handle).toBeUndefined();
     const short = await callInterpretation(session.handler, { operation: "prepare_query",
       original_query: ORIGINAL, budget, authorized_scopes: SCOPES }, session.context);
@@ -491,7 +499,7 @@ it.each([0, 5000])("measures a published source through reopened public recall a
       const unavailableProof = { ...withCorrespondence,
         query_semantics_status: { status: "unavailable" as const, reason: "absent" as const } };
       expect(SoulInterpretationResponseSchema.safeParse(unavailableProof).success).toBe(false);
-      const { operation: _operation, results: _results, provider_attempts: _providerAttempts, ...workerPage } = unavailableProof;
+      const { operation: _operation, results: _results, ...workerPage } = unavailableProof;
       expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...workerPage,
         query_semantics_status: withCorrespondence.query_semantics_status }).success).toBe(true);
       expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...workerPage }).success).toBe(false);

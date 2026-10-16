@@ -916,7 +916,37 @@ delivered source records as bounded `unproved_computations`. Each control binds 
 current source and Q/H/C/computation identities, logical completeness, and any
 keyed attention. It conveys no answer binding or source fact. Conditional
 computation coverage follows actual execution; missing dependencies remain
-unexercised, while resource-limited execution remains open. Frozen continuation
+unexercised, while resource-limited execution remains open. In the unreleased
+Protocol 19 major, current-request `execution` may be the `native_reasoning_only`
+literal only for exact canonical not-requested/not-run receipts
+(`query_preparation` reason `operation_does_not_prepare`, `acquisition` reason
+`operation_does_not_acquire`, `semantic_generation_attempts: 0`). That compact
+form excludes model/index acquisition attempts, not native reads or computation,
+and does not mean zero native work. Any other reason, resource evidence or
+unknown measurement stays expanded `source-semantic-execution-v2`.
+`sourceSemanticExecutionPhases` expands the literal to that same phase authority;
+`sourceSemanticExecution` emits the literal only on exact canonical equality.
+Public consumers derive external attempts from execution (preserving `null`),
+not a duplicate `provider_attempts` field or semantic-generation count. Frozen
+access receipts retain their original preparation/acquisition provenance.
+
+Reason delivery tries the complete v5 result and all premises against the actual
+native/public UTF-8 envelope cap for every outcome. Full results and premises
+are retained whenever they fit. Only an oversized envelope may carry
+`no_conclusion`: an explicit no-delivered-conclusion receipt with the original
+`outcome`, available H/Q/C/computation identities and restrictions, intact
+disclosure including `proof_use`, actual coverage and measured work, but no
+result, bindings or premises (`coverage.payload: truncated` when clipped). It is
+not delivered proof or attention, not a failed or uncomputed kernel result, and
+carries no world claim. Complete computation coverage remains complete when only
+payload delivery is clipped. Mandatory evidence that does not fit fails closed;
+there is no universal 1024-byte evidence guarantee. The compact receipt tuple
+holds `[outcome, [H, Q, C, computation], optional query gaps]`; `null` in its
+identity tuple means no available result identity, never proof of uncomputed
+work. The outcome object and complete identity digests stay intact; only field
+names are contracted. Recovery expands it through `sourceSemanticReasonControl`,
+retaining computation identity, restrictions, coverage and disclosure without
+inventing attention or treating omitted premises as never computed. Frozen continuation
 pages and the immutable first-exposure row retain only controls for their
 delivered source records.
 
@@ -1433,9 +1463,11 @@ must reserve and account for both calls and delivery in its outer total budget;
 this parameter does not establish a cross-request allowance or generate clues.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
-and the benchmark. Original query and authorized scope enter once. Host operations
-remain provider-free; query semantics and semantic correspondence are supplied by explicit producers or a prepared
-cache. Discovery pages current source records and published source interpretations beyond a single
+and the benchmark. Original query and authorized scope enter once. After snapshot,
+host observation and conditional computation remain provider-free; query semantics
+and semantic correspondence are supplied by explicit producers or a prepared
+cache. Query embedding is prepared outside the snapshot and is not that guarantee.
+Discovery pages current source records and published source interpretations beyond a single
 16-row descriptor page, records the eligible population, visited pages, candidate
 prefix and open residuals, and does not treat query hints as semantic membership.
 Absent or unadmitted query semantics retains the unchanged original question for
@@ -1460,7 +1492,24 @@ The exact signed-64-bit cursors bind workspace and query. Empty seeks and all
 metadata/filter attempts count against the same observation ledger, including
 inactive or cross-workspace matches. Native work counts logical indexed
 operations and returned bytes, not SQLite posting comparisons, physical I/O or
-CPU. SQL failures remain unavailable. No new index or model field is involved.
+CPU. SQL failures remain unavailable. That capsule path adds no index or model
+field.
+
+Separately, unscoped query-conditioned `prepare_query` / library `recall` may run
+one snapshot-owned `source-index-interleaved-prefix.v1` join: bounded BM25 lexical
+rows and inspected vector windows (`ranking: exact_over_inspected_subset`, not
+full-library nearest neighbor). This Source-index pass nominates at most 16 roots;
+canonical observation is separate, so this is not a total candidate-union ceiling.
+Query embedding is `SourceIndexAcquisition.prepareQuery` under `beforeSnapshotPreparation`; a begun
+snapshot reports `snapshot_already_begun` without inference, and an unwired binder
+is `embedding_preparation_unwired`. Access `phase_accounting` uses nullable
+`observation`, `completion: included_in_worker_work_not_separately_measured`,
+`native_cpu: unknown`, and `deadline: soft_quarantine_until_exit`. Soft worker
+deadlines bound caller latency; a quarantined slot stays owned until actual exit.
+Native resource accounting stays truthful and request budgets are not increased;
+holding a canonical-observation quote does not prove that every previous envelope
+still fits. Source index and backfill mechanisms exist; daemon scheduling,
+provisioning, default useful recall and natural-corpus effects are not established.
 
 Access progressively interleaves source-text observation, bounded header pages
 through the existing capsule cursor index, and whole interpretation verification

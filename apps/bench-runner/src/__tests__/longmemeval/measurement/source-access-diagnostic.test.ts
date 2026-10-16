@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
-import { SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationRequestSchema } from "@do-soul/alaya-protocol";
+import { SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationRequestSchema,
+  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
@@ -118,11 +119,19 @@ async function rebindRetainedResponse(root: string, observation: SourceAccessDia
   const pagePath = join(root, evidence.page!.path), resultPath = join(root, evidence.result!.path);
   const page = readChainArtifact(pagePath) as { response: unknown; wall_ms: number };
   const result = readChainArtifact(resultPath) as { response_identity: string; work: unknown;
-    provider_attempts: number; wall_ms: number };
-  const native = response as { work: unknown; provider_attempts: number };
+    execution?: unknown; provider_attempts: number | null; wall_ms: number };
+  const native = response as { work: unknown; execution?: unknown };
+  const parsed = SourceSemanticExecutionSchema.safeParse(native.execution);
   page.response = response;
   result.response_identity = chainIdentity(response);
-  result.work = native.work; result.provider_attempts = native.provider_attempts;
+  result.work = native.work;
+  if (parsed.success) {
+    result.execution = parsed.data;
+    result.provider_attempts = sourceSemanticExecutionPhases(parsed.data).query_preparation.external_api_attempts;
+  } else {
+    delete result.execution;
+    result.provider_attempts = null;
+  }
   await replaceAuthoredArtifact(pagePath, page); evidence.page!.identity = chainIdentity(page);
   await replaceAuthoredArtifact(resultPath, result); evidence.result!.identity = chainIdentity(result);
 }
@@ -155,9 +164,10 @@ describe("source access diagnostic", () => {
         expect(row.source_read_bytes).toBeGreaterThan(0);
         for (const path of row.page_paths) {
           const page = readChainArtifact(join(f.root, "observed", path)) as { response: {
-            provider_attempts: number; query_handle?: string;
+            execution: unknown; query_handle?: string;
             query_semantics_status: unknown; outcome: unknown } };
-          expect(page.response.provider_attempts).toBe(0);
+          expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(page.response.execution))
+            .query_preparation.external_api_attempts).toBe(0);
           expect(page.response.query_handle).toEqual(expect.any(String));
           expect(page.response.query_semantics_status).toEqual({ status: "unavailable", reason: "absent" });
           expect(page.response.outcome).toMatchObject({ status: "preparation_required", missing: "query_semantics" });
@@ -305,7 +315,8 @@ describe("source access diagnostic", () => {
       });
     } finally { globalThis.fetch = originalFetch; }
     expect(fetchCalls).toBe(0);
-    expect(responses.every((response) => response.provider_attempts === 0)).toBe(true);
+    expect(responses.every((response) =>
+      sourceSemanticExecutionPhases(response.execution).query_preparation.external_api_attempts === 0)).toBe(true);
     const goldSource = readLongMemEvalSemanticFreeze(f.config.source_run_root).selected[0]!.source_manifest
       .find((source) => source.session_id === "session-69")!.source_id;
     expect(responses[0]?.access?.source_candidates[0]?.source_id).toBe(goldSource);
@@ -508,8 +519,10 @@ describe("source access diagnostic", () => {
     for (const attempt of attempts) {
       expect(attempt.result).not.toBeNull();
       const result = readChainArtifact(join(f.root, "output-limited", attempt.result!.path)) as {
-        work: { logical_work: number }; provider_attempts: number };
+        work: { logical_work: number }; execution: unknown; provider_attempts: number | null };
       expect(result.work.logical_work).toBeGreaterThan(0);
+      expect(result.provider_attempts).toBe(sourceSemanticExecutionPhases(
+        SourceSemanticExecutionSchema.parse(result.execution)).query_preparation.external_api_attempts);
       expect(result.provider_attempts).toBe(0);
       retainedLogicalWork += result.work.logical_work;
     }
@@ -637,6 +650,44 @@ describe("source access diagnostic", () => {
     expect(observed.result.rows.map((row) => row.status)).toEqual(["unattempted", "unattempted"]);
     expect(observed.result.stop_reason).toContain("source_identity:");
     expect(await runSourceAccessDiagnosticLauncher(["observe", "--config", "missing"])).toBe(2);
+  }, 120000);
+
+  it("rejects a historic access v1 page and missing execution as unknown without adding provider dispatch", async () => {
+    const f = await fixture(false, 1, 1, 1);
+    const observed = await observeSourceAccessDiagnostic(f.config, join(f.root, "v2-observed"));
+    expect(observed.result.rows.every((row) => row.status === "observed")).toBe(true);
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => { fetchCalls++; throw new Error("provider network prohibited"); }) as typeof fetch;
+    try {
+      for (const kind of ["historic-v1", "missing-execution"] as const) {
+        const alteredRoot = join(f.root, `rejected-${kind}`);
+        await cp(join(f.root, "v2-observed"), alteredRoot, { recursive: true });
+        const altered = readChainArtifact(join(alteredRoot, "observation.json")) as SourceAccessDiagnosticObservation;
+        const evidence = altered.rows[0]!.attempt_evidence[0]!;
+        const retained = readChainArtifact(join(alteredRoot, evidence.page!.path)) as { response: unknown };
+        const response = structuredClone(retained.response) as {
+          execution?: unknown; provider_attempts: number | null;
+          access: { contract: string; preparation?: unknown; acquisition?: unknown; phase_accounting?: unknown }
+        };
+        if (kind === "historic-v1") {
+          response.access.contract = "source-semantic-access-v1";
+          delete response.access.preparation;
+          delete response.access.acquisition;
+          delete response.access.phase_accounting;
+        } else {
+          delete response.execution;
+        }
+        await rebindRetainedResponse(alteredRoot, altered, 0, 0, response);
+        await replaceAuthoredArtifact(join(alteredRoot, "observation.json"), altered);
+        const evaluated = await evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"),
+          join(f.root, `rejected-${kind}-evaluated`));
+        expect(evaluated.result.rows[0]).toMatchObject({ status: "unknown", discovery_complete: null,
+          pool_at_5: "unknown", first_gold_source_rank: null });
+        expect(evaluated.result.summary.every((item) => item.denominator === 1)).toBe(true);
+      }
+      expect(fetchCalls).toBe(0);
+    } finally { globalThis.fetch = originalFetch; }
   }, 120000);
 
   it("runs the separate observe and gold-evaluate CLI operations on a synthetic snapshot", async () => {

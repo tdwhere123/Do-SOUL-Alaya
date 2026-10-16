@@ -16,6 +16,8 @@ type Resource = {
   readonly finishExit: () => void;
   readonly invalidated: AbortController;
   state: "active" | "quarantined" | "exited";
+  snapshotBegun?: boolean;
+  preparingQuery?: boolean;
   failure?: unknown;
   lease?: symbol;
 };
@@ -80,6 +82,28 @@ export class RecallReadWorkerLifecycle {
     this.assertUsable(lease.resource);
     if (lease.resource.lease !== lease.token) throw new CoreError("CONFLICT", "recall read snapshot lease is no longer active");
     return lease.resource.worker;
+  }
+
+  public snapshotHasBegun(): boolean {
+    const worker = this.pinnedWorker();
+    return worker !== undefined && this.resources.get(worker)?.snapshotBegun === true;
+  }
+
+  public async beforeSnapshotPreparation<T>(work: () => Promise<T>): Promise<T> {
+    const worker = this.pinnedWorker(), resource = worker === undefined ? undefined : this.resources.get(worker)!;
+    if (resource?.snapshotBegun || resource?.preparingQuery) {
+      throw new CoreError("CONFLICT", "query preparation requires an unbegun snapshot scope");
+    }
+    if (resource !== undefined) resource.preparingQuery = true;
+    try { return await work(); }
+    finally { if (resource !== undefined) resource.preparingQuery = false; }
+  }
+
+  public preparationDeadline(): RecallReadWorkerDeadline {
+    const deadline = this.deadlines.getStore();
+    if (deadline === undefined) throw new CoreError("OBLIGATION_VIOLATION", "query preparation requires a deadline scope");
+    deadline.check();
+    return deadline;
   }
 
   public async withinDeadline<T>(operation: string, work: () => Promise<T>): Promise<T> {
@@ -160,7 +184,14 @@ export class RecallReadWorkerLifecycle {
 
   private async snapshotOperation(operation: RecallReadWorkerOperation): Promise<void> {
     if (this.pinnedWorker() === undefined) throw new CoreError("OBLIGATION_VIOLATION", "recall read snapshot is not isolated onto a worker");
+    const resource = this.resources.get(this.pinnedWorker()!)!;
+    if (operation === "snapshot.beginDeferred") {
+      if (resource.preparingQuery) throw new CoreError("CONFLICT", "snapshot cannot begin during query preparation");
+      // Pending begin already excludes inference; do not wait for the worker acknowledgement to mark it.
+      resource.snapshotBegun = true;
+    }
     await this.request(operation, {});
+    if (operation !== "snapshot.beginDeferred") resource.snapshotBegun = false;
   }
 
   private assertOpen(): void {

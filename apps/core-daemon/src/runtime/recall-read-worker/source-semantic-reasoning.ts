@@ -1,10 +1,10 @@
 import {
   SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, SourceReferenceCapacityExceeded,
-  buildSourceReferenceCatalog, canonicalJson,
+  buildSourceReferenceCatalog, canonicalJson, sourceSemanticExecution,
   sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticQuery, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
-  fieldContractSha256, reasonSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
+  fieldContractSha256, executeSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
@@ -28,11 +28,15 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
     if (payload.request.kind === "prepare_source" || payload.request.kind === "validate_source") return prepareSource(runtime, payload, authorized, meter);
     if (payload.request.kind === "prepare_query") return prepareQuery(runtime, payload, authorized, meter);
     if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter);
-    const result = reasonSemantics(runtime, payload, authorized, meter);
+    return reasonSemantics(runtime, payload, authorized, meter);
+  };
+  return withSourceSemanticTransaction(runtime, payload, meter, () => {
+    // The byte limit applies to the complete native envelope, including actual phase evidence.
+    const result = SourceSemanticWorkerResultSchema.parse({ ...run(),
+      execution: sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition) });
     return result.kind === "reason" && payload.request.kind === "reason"
       ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;
-  };
-  return withSourceSemanticTransaction(runtime, payload, meter, run);
+  });
 }
 
 /** Bench-only source nomination; preserve the ordinary prepare-query lease and budget path. */
@@ -68,15 +72,19 @@ function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, paylo
       || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE")) {
       const request = payload.request;
       return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query",
+        execution: sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition),
         query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(request.query_semantics, request.original_query),
           request.query_semantics_unavailable),
         outcome: { status: "resource_exhausted" }, candidates: [], truncated: true,
         coverage: IDLE, work: workOf(meter) });
     }
     if (error instanceof SourceReferenceCapacityExceeded) throw new CoreError("VALIDATION", error.message,
-      { details: { admission: "unsupported_source", capacity: error.reason, work: workOf(meter) } });
-    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
-    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work: workOf(meter) } });
+      { details: { admission: "unsupported_source", capacity: error.reason, work: workOf(meter),
+        execution: sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition) } });
+    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter),
+      execution: sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition) } });
+    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work: workOf(meter),
+      execution: sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition) } });
     throw error;
   }
 }
@@ -268,11 +276,12 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
       work: workOf(meter)
     });
   }
-  const result = reasonSourceSemanticInterpretation({
-    request: {
+  const { result } = executeSourceSemanticInterpretation({
+    // Only the final envelope owner applies the caller's physical UTF-8 delivery cap.
+    computation: {
       contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: admission.interpretation_id, query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
-      original_query: original, budget: { ...request.budget, ...meter.remaining() }, output_byte_limit: request.output_byte_limit
+      original_query: original, budget: { ...request.budget, ...meter.remaining() }
     },
     source_interpretation: checked.bound, query_semantics: querySemantics, semantic_correspondence: correspondence, original_query: original, workspaceId: payload.workspace_id,
     scope: checked.stored.record.scope_class!, authorizedScopes: authorized,

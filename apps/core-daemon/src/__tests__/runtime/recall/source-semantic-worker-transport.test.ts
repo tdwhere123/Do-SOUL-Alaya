@@ -50,7 +50,7 @@ async function actualClient(workerCount = 1) {
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
   let client: RecallReadWorkerClient | null = null;
-  const guard = `--import=${new URL("../../support/provider-free-cli.mjs", import.meta.url).href}`;
+  const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
   process.execArgv.push(guard);
   const cleanup = async () => {
     await client?.close();
@@ -82,8 +82,8 @@ async function actualClient(workerCount = 1) {
 }
 async function captureClient() {
   const directory = mkdtempSync(join(tmpdir(), "alaya-source-capture-"));
-  const client = createRecallReadWorkerClient({ databaseFilename: join(directory, "fixture.db"), workerCount: 1,
-    requestTimeoutMs: 3000, workerUrl: new URL("./source-semantic-capture-worker-fixture.mjs", import.meta.url) });
+  const client = createRecallReadWorkerClient({ databaseFilename: join(directory, "fixture.capture"), workerCount: 1,
+    requestTimeoutMs: 3000, workerUrl: new URL("./source-semantic-query-worker-fixture.mjs", import.meta.url) });
   if (client === null) throw new Error("expected capture worker client");
   try {
     await client.ready();

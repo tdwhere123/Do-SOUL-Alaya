@@ -4,7 +4,7 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { expect, it, vi } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceReferenceResolver, sourceSemanticQueryIdentity,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceReferenceResolver, sourceSemanticQueryIdentity,
   SourceInterpretationInvalidatedPayloadSchema, type SourceReferenceCatalog, type SourceSemanticCorrespondence,
   type SourceInterpretationInvalidation, type SourceSemanticPublishedInterpretation
 } from "@do-soul/alaya-protocol";
@@ -61,7 +61,7 @@ async function output(session: Session, args: Record<string, unknown>) {
   expect(result.isError, JSON.stringify(result)).not.toBe(true);
   if (result.structuredContent === undefined || !("output" in result.structuredContent)) throw new Error("public result required");
   const parsed = SoulInterpretationResponseSchema.parse(result.structuredContent.output);
-  expect(parsed.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(parsed.execution).query_preparation.external_api_attempts).toBe(0);
   return parsed;
 }
 async function prepareSource(session: Session, sourceId = SOURCE_ID) {

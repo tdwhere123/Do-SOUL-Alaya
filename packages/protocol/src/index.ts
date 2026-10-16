@@ -252,7 +252,7 @@ export * from "./garden/identity-observation.js";
 export * from "./garden/source-interpretation.js";
 export * from "./garden/source-interpretation-packet.js";
 export * from "./recall/conditional-field/interpretation-coordinate.js";
-export { retargetInterpretationProduct, productEndpointId } from "./recall/conditional-field/product-identity.js";
+export { retargetInterpretationProduct, productEndpointId, sourceGoldRootIdentity } from "./recall/conditional-field/product-identity.js";
 export * from "./garden/locate-source-interpretation.js";
 export * from "./evidence/source-selection.js";
 export * from "./evidence/source-reference.js";
@@ -303,7 +303,7 @@ export {
   SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
   SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
   SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
-  SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
+  SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport,
   proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier, verifySourceSemanticLibraryDelivery
 } from "./garden/source-semantic-worker.js";
 export type {
@@ -313,6 +313,10 @@ export type {
   SourceSemanticLibraryDiscovery, SourceSemanticLibraryOrder, SourceSemanticLibrarySlotQualifier
 } from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-access.js";
+export {
+  SourceSemanticUndeliveredConclusionSchema, sourceSemanticUndeliveredConclusion, sourceSemanticReasonControl
+} from "./garden/source-semantic-reason-delivery.js";
+export type { SourceSemanticUndeliveredConclusion } from "./garden/source-semantic-reason-delivery.js";
 export * from "./garden/source-semantic-identity.js";
 export { validateSchemaGroundingForSignal, type SchemaGroundingValidationResult,
   type SchemaGroundingValidationStatus } from "./garden/schema-grounding.js";

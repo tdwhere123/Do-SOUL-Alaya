@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticFrame, type SourceSemanticInterpretation, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
@@ -200,7 +200,7 @@ it("uses one Q for a stated answer and two qualified measured inputs without cla
       original_query: QUESTION, query_semantics: semantics, semantic_correspondences: aligned,
       budget: ACCESS_BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES });
     if (recalled.operation !== "recall") throw new Error("comparison recall expected");
-    expect(recalled.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(recalled.execution).query_preparation.external_api_attempts).toBe(0);
     const measured = recalled.proofs?.find(row => row.source_interpretation_id === ids.get("measured-comparison-source")?.[0]);
     const stated = recalled.proofs?.find(row => row.source_interpretation_id === ids.get("stated-comparison-source")?.[0]);
     expect(measured?.binding_results?.filter(row => row.kind === "evidence").map(row => row.input).sort()).toEqual([0, 1]);

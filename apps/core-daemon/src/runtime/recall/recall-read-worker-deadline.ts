@@ -17,6 +17,11 @@ export class RecallReadWorkerDeadline {
     return this.controller.signal;
   }
 
+  public remainingMs(): number {
+    this.check();
+    return Math.max(0, this.expiresAt - performance.now());
+  }
+
   public check(): void {
     // Check the clock as well as the timer: a queued message can beat an overdue timer.
     if (!this.signal.aborted && performance.now() >= this.expiresAt) {

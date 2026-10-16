@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
+  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases,
   SoulInterpretationRecallDeliverySchema, SourceSemanticLibraryDiscoverySchema, SourceSemanticCoverageSchema, SourceSemanticQueryStatusSchema,
   canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus, type SourceEvidenceTarget
@@ -292,7 +293,7 @@ function admitLibraryMeasurement(
     & { readonly query_semantics_status?: SourceSemanticQueryStatus };
 } | Extract<SourceSemanticLibraryMeasurement, { status: "invalid" }> | null {
   if (!isRecord(input.recallResult)) return null;
-  const zeroCall = zeroCallReason(input.recallResult);
+  const zeroCall = zeroCallReason(input.recallResult, pageBudget !== HISTORICAL_SOURCE_ONLY_PAGE_BUDGET);
   if (zeroCall !== null) return invalid(zeroCall);
   if (recalled === null) return null;
   if (recalled === "invalid") return invalid("invalid_response");
@@ -422,7 +423,13 @@ function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold:
   return { ...metric, any_at_1: unavailable, any_at_5: unavailable, any_at_10: unavailable };
 }
 
-function zeroCallReason(raw: Record<string, unknown>): InvalidMeasurementReason | null {
+function zeroCallReason(raw: Record<string, unknown>, requireExecution: boolean): InvalidMeasurementReason | null {
+  if (requireExecution || Object.hasOwn(raw, "execution")) {
+    const execution = SourceSemanticExecutionSchema.safeParse(raw.execution);
+    if (!execution.success || sourceSemanticExecutionPhases(execution.data).query_preparation.external_api_attempts !== 0) {
+      return "missing_zero_call_evidence";
+    }
+  }
   if (Object.hasOwn(raw, "provider_calls") && raw.provider_calls !== 0) return "missing_zero_call_evidence";
   if (Object.hasOwn(raw, "provider_attempts") && raw.provider_attempts !== 0) return "missing_zero_call_evidence";
   if (Object.hasOwn(raw, "garden_enqueue") && raw.garden_enqueue !== 0) return "missing_zero_call_evidence";

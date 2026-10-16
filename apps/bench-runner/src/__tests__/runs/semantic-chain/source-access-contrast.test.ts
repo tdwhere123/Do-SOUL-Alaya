@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, expect, it, vi } from "vitest";
 import { SoulInterpretationRequestSchema, SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema,
+  sourceSemanticAcquisitionNotRun, sourceSemanticExecutionPhases, unavailableSourceQueryPreparation,
   type SoulInterpretationRequest, type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
 import { sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../../../core-daemon/src/mcp-memory/tool/interpretation-handler.js";
@@ -104,7 +105,7 @@ function checkRound(round: Round) {
   expect(round.original_query).toBe(ORIGINAL_QUERY);
   for (const response of [round.prepare, round.delivery]) {
     if (response === undefined) continue;
-    expect(response.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(response.execution).query_preparation.external_api_attempts).toBe(0);
     expect(response.work.logical_work ?? response.work.native_work).toBeLessThanOrEqual(REQUEST_BUDGET.work_units);
     expect(response.work.logical_memory_bytes).toBeLessThanOrEqual(REQUEST_BUDGET.memory_bytes);
   }
@@ -244,7 +245,14 @@ it.each(["duplicate", "exhausted"] as const)("refuses a %s reservation before in
 });
 
 function accessReceipt(sourceIds: readonly string[], observedCount = sourceIds.length, delivery = false) {
-  return SourceSemanticAccessReceiptSchema.parse({ contract: "source-semantic-access-v1", policy: "query-conditioned-v1",
+  return SourceSemanticAccessReceiptSchema.parse({ contract: "source-semantic-access-v2",
+    preparation: unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
+    acquisition: sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
+    phase_accounting: {
+      observation: null, completion: "included_in_worker_work_not_separately_measured",
+      native_cpu: "unknown", deadline: "soft_quarantine_until_exit"
+    },
+    policy: "query-conditioned-v1",
     input_id: `sha256:${"a".repeat(64)}`, pool_id: `sha256:${"b".repeat(64)}`,
     observed_source_count: observedCount, observed_interpretation_count: 0,
     source_candidates: sourceIds.map(source_id => ({ source_id,

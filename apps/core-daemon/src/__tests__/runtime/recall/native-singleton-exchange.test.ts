@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, expect, it, vi } from "vitest";
-import { indexEntryCacheKey, sourceSemanticQueryIdentity, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { sourceSemanticExecutionPhases, indexEntryCacheKey, sourceSemanticQueryIdentity, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceGoldRootIdentity } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPageWithEvidenceSetCoverage }
   from "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
@@ -107,7 +107,7 @@ function assertMeasurement(context: NativeSubsetContext, measurement: NativeMeas
     expect(page.proofs).toHaveLength(2); expect(page.proofs).toEqual(expect.arrayContaining(selected.flatMap(row => row.proofs)));
     expect(page.slot_qualifiers).toHaveLength(2);
     expect(page.request_identity).toBe(measurement.plan.public_request_identity);
-    expect(page.request_budget).toEqual(selectionExecutionBudget); expect(page.provider_attempts).toBe(0);
+    expect(page.request_budget).toEqual(selectionExecutionBudget); expect(sourceSemanticExecutionPhases(page.execution).query_preparation.external_api_attempts).toBe(0);
     expect(page.query_semantics_status).toEqual({ status: "admitted", query_semantics_id: queryId });
     expect(page.index).toMatchObject({ as_of: clock, snapshot_id: context.pool.access.pool_id,
       query_id: measurement.plan.query_id, representation: { page_budget: 5 }, continuation: {

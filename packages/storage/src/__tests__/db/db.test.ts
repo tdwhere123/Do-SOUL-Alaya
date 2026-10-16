@@ -10,6 +10,7 @@ import {
   getCurrentSchemaSummary,
   initDatabase
 } from "../../sqlite/db.js";
+import { registerUtcInstantComparison } from "../../sqlite/utc-instant-comparison.js";
 import { StorageError } from "../../shared/errors.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
@@ -296,6 +297,7 @@ describe("initDatabase migration runner", () => {
     const seed = new BetterSqlite3(context.filename);
     try {
       seed.pragma("foreign_keys = ON");
+      registerUtcInstantComparison(seed);
       seed.exec(`
         CREATE TABLE schema_version (
           version INTEGER PRIMARY KEY,

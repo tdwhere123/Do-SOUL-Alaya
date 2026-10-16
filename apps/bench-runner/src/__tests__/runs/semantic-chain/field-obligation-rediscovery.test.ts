@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, expect, it, vi } from "vitest";
-import { SoulInterpretationRequestSchema, SourceSemanticWorkerWorkSchema, sourceSemanticQueryIdentity,
-  type SoulInterpretationRequest, type SoulInterpretationResponse, type SourceSemanticCorrespondence,
-  type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
+import { SoulInterpretationRequestSchema, SourceSemanticWorkerWorkSchema, sourceSemanticExecutionPhases,
+  sourceSemanticQueryIdentity, type SoulInterpretationRequest, type SoulInterpretationResponse,
+  type SourceSemanticCorrespondence, type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../../../core-daemon/src/mcp-memory/tool/interpretation-handler.js";
 import { CLOCK, WS, withAccessLibrary, type AccessFixtureSetup } from
@@ -247,7 +247,9 @@ function checkReport(fixture: Fixture, report: Awaited<ReturnType<typeof runArm>
   }
   for (const round of [report.initial, report.second]) if (round !== null) {
     if (round.prepare?.query_semantics_id !== undefined) expect(round.prepare.query_semantics_id).toBe(sourceSemanticQueryIdentity(QUERY, fieldContractSha256));
-    for (const invocation of round.calls) if (invocation.response !== undefined) expect(invocation.response.provider_attempts).toBe(0);
+    for (const invocation of round.calls) if (invocation.response !== undefined) {
+      expect(sourceSemanticExecutionPhases(invocation.response.execution).query_preparation.external_api_attempts).toBe(0);
+    }
     if (round.delivery !== undefined) {
       expect(round.delivery.proofs ?? []).toEqual([]);
       expect(round.delivery.coverage.conditional_computation).toBe("unexercised");

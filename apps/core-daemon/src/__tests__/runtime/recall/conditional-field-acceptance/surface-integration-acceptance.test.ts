@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { inspect } from "node:util";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import(
+    "../../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js"
+  );
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
   MemoryDimension,
@@ -176,7 +185,11 @@ async function callRecall(
     },
     context
   });
-  if (!response.ok) throw new Error(response.error.message);
+  if (!response.ok) {
+    throw new Error(`${response.error.message}\n${inspect(response.error, {
+      depth: 8, maxArrayLength: 20, maxStringLength: 4096, breakLength: 120
+    })}`, { cause: response.error });
+  }
   return response.output as SoulMemorySearchResponse & { index: InformationIndex };
 }
 

@@ -1695,10 +1695,6 @@
     "max": 2,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/core-daemon/src/runtime/recall-read-worker/snapshot-session.ts": {
-    "max": 1,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/core-daemon/src/runtime/recall-read-worker/tier-window-client.ts": {
     "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"

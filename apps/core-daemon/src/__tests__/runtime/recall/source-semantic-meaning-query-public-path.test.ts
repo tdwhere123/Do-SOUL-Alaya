@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticDraft, type SourceSemanticPublishedInterpretation,
   SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
@@ -433,7 +433,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
         budget: BUDGET, authorized_scopes: SCOPES
       }, session.context);
       if (published.operation !== "propose" || published.published === undefined) {
-        throw new Error(`propose failed: ${JSON.stringify(published.outcome)}`);
+        throw new Error(`propose failed: ${JSON.stringify(published)}`);
       }
       sourceInterpretationId = published.published.interpretation_id;
       sourceInterpretation = published.published.interpretation;
@@ -453,7 +453,7 @@ it("recalls admitted query meaning through SQLite reopen, worker, and public int
         query_semantics: querySemanticsAfter, semantic_correspondences: [semantic_correspondence], budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES
       }, reopened.context);
       if (recalled.operation !== "recall") throw new Error(`recall expected: ${JSON.stringify(recalled)}`);
-      expect(recalled.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(recalled.execution).query_preparation.external_api_attempts).toBe(0);
       const proofSlot = recalled.slot_qualifiers?.find((row) => row.evidence_kind === "semantic_proof" && row.source_interpretation_id === sourceInterpretationId);
       expect(proofSlot).toBeDefined();
       expect(recalled.proofs?.some((row) => row.source_interpretation_id === sourceInterpretationId && (row.binding_results?.length ?? 0) > 0)).toBe(true);
@@ -565,7 +565,7 @@ it("requires the requested graduate's referent even when another graduate has th
       const result = await interpret(session.handler, { operation: "propose", source_handle: prepared.source_handle,
         draft: proposal.draft, producer_id: "test-author", producer_version: "p1",
         contract_version: "source-interpretation-v4", budget: BUDGET, authorized_scopes: SCOPES }, session.context);
-      if (result.operation !== "propose" || result.published === undefined) throw new Error(JSON.stringify(result.outcome));
+      if (result.operation !== "propose" || result.published === undefined) throw new Error(JSON.stringify(result));
       published = result.published;
     } finally { await closeSession(session, filename); }
 
@@ -623,7 +623,7 @@ it("requires the requested graduate's referent even when another graduate has th
           original_query, query_semantics: query, semantic_correspondences: [correspondence.semantic_correspondence],
           budget: BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES }, reopened.context);
         if (recall.operation !== "recall") throw new Error("recall required");
-        expect(recall.provider_attempts).toBe(0);
+        expect(sourceSemanticExecutionPhases(recall.execution).query_preparation.external_api_attempts).toBe(0);
         const bindings = recall.proofs?.flatMap(proof => proof.binding_results ?? []) ?? [];
         expect(bindings.map(row => row.returned.degree?.node_id).sort()).toEqual(expected);
         if (constrained) {

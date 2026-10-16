@@ -9,7 +9,7 @@ const isolation = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 afterAll(() => { isolation?.restore(); });
-import { indexEntryCacheKey, sourceSemanticQueryIdentity } from "@do-soul/alaya-protocol";
+import { sourceSemanticExecutionPhases, indexEntryCacheKey, sourceSemanticQueryIdentity } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceGoldRootIdentity, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPageWithEvidenceSetCoverage }
   from "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
@@ -124,7 +124,7 @@ function assertPage(page: PublicPage, wanted: readonly SourceSemanticLibraryPack
   expect(results).toHaveLength(wanted.length); expect(index.entries).toHaveLength(wanted.length);
   expect(proofs).toHaveLength(expectedProofs.length); expect(proofs).toEqual(expect.arrayContaining(expectedProofs));
   expect(page.request_identity).toBe(measurement.plan.public_request_identity);
-  expect(page.request_budget).toEqual(selectionExecutionBudget); expect(page.provider_attempts).toBe(0);
+  expect(page.request_budget).toEqual(selectionExecutionBudget); expect(sourceSemanticExecutionPhases(page.execution).query_preparation.external_api_attempts).toBe(0);
   expect(page.query_semantics_status).toEqual({ status: "admitted", query_semantics_id: queryId });
   expect(index.as_of).toBe(clock); expect(index.snapshot_id).toBe(context.pool.access.pool_id);
   expect(index.query_id).toBe(measurement.plan.query_id); expect(index.representation.page_budget).toBe(5);

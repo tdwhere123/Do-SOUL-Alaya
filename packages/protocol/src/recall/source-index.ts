@@ -1,9 +1,8 @@
 import { z } from "zod";
 import { AlayaError } from "../shared/alaya-error.js";
-import { SourceEvidenceTargetSchema, type SourceEvidenceTarget } from "./conditional-field/product-identity.js";
+import { SourceEvidenceTargetSchema, sourceGoldRootIdentity, type SourceEvidenceTarget } from "./conditional-field/product-identity.js";
 import { canonicalJson } from "./selection/capture/canonical-json.js";
 import { FieldContractDigestSchema, hashContentDigest, type FieldContractSha256 } from "./field-contract/canonical-identity.js";
-import { sourceGoldRootIdentity } from "../garden/source-semantic-worker.js";
 
 const Revision = z.string().min(1).max(256);
 export const SOURCE_INDEX_MAX_BODY_BYTES = 4 * 1024 * 1024;

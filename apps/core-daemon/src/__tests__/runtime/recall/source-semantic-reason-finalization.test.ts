@@ -1,5 +1,6 @@
 import { aliceUsesDraft } from "./source-semantic-library-binding-coverage.js";
-import { buildSourceReferenceCatalog, normalizeSourceSemantics, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
+import { buildSourceReferenceCatalog, normalizeSourceSemantics, sourceSemanticReasonControl,
+  type SourceSemanticWorkerResult, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { expect, it } from "vitest";
 import { finalizeSourceSemanticReason } from "../../../runtime/recall-read-worker/source-semantic-reason-finalization.js";
@@ -14,7 +15,7 @@ const coverage = { discovery: "complete", source_interpretation: "open", query_s
   semantic_correspondence: "open", conditional_computation: "complete", payload: "complete" } as const;
 const work = { native_work: 1, native_bytes: 1, logical_memory_bytes: 1, rss_bytes: 1 };
 
-it("truncates an oversized reason without demoting conditional proof use or world qualifiers", () => {
+it("prefers full evidence when it fits and otherwise preserves an undelivered control without demoting conditional proof use", () => {
   const source = "Alice uses Pixel, a tool.";
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(source), [{ assertion_id: 1, text: source }], fieldContractSha256);
   const draft = aliceUsesDraft(catalog, "Pixel");
@@ -25,7 +26,7 @@ it("truncates an oversized reason without demoting conditional proof use or worl
       attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION }, producer_id: "fixture", producer_version: "1", contract_version: "source-interpretation-v4"
   });
   if (normalized.status !== "normalized") throw new Error(`legal interpretation expected: ${JSON.stringify(normalized)}`);
-  const fitted = finalizeSourceSemanticReason({
+  const original: Extract<SourceSemanticWorkerResult, { kind: "reason" }> = {
     kind: "reason",
     source_disclosure: disclosure,
     interpretation: normalized.interpretation,
@@ -35,12 +36,20 @@ it("truncates an oversized reason without demoting conditional proof use or worl
       outcome: { status: "unexercised" }, consumed_leaves: []
     },
     coverage, work
-  }, 1024);
+  };
+  const full = finalizeSourceSemanticReason(original, 1_000_000);
+  expect(full).toBe(original);
+  expect(full.interpretation).toEqual(normalized.interpretation);
+  expect(full.result).toEqual(original.result);
+  expect(full.result).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
+    conclusion_scope: "conditional_on_interpretation", outcome: { status: "unexercised" }, consumed_leaves: [] });
+  const fitted = finalizeSourceSemanticReason(original, 1024);
   expect(fitted.source_disclosure.proof_use).toEqual({ kind: "conditional_support", qualification: "not_world_claim" });
-  expect(fitted.result.outcome).toEqual({ status: "truncated" });
-  expect(fitted.result.semantic_status).toBe("unreviewed");
-  expect(fitted.result.world_claim).toBe("unknown");
-  expect(fitted.result.conclusion_scope).toBe("conditional_on_interpretation");
+  expect(sourceSemanticReasonControl(fitted).outcome).toEqual({ status: "unexercised" });
+  expect(fitted.no_conclusion).toEqual([{ status: "unexercised" }, [null, null, null, null]]);
+  expect(fitted).not.toHaveProperty("result");
+  expect(sourceSemanticReasonControl(fitted)).not.toHaveProperty("attention");
+  expect(fitted.work).toEqual(work);
   expect(fitted.coverage.payload).toBe("truncated");
   expect(fitted).not.toHaveProperty("interpretation");
   expect(Buffer.byteLength(JSON.stringify(fitted), "utf8")).toBeLessThanOrEqual(1024);

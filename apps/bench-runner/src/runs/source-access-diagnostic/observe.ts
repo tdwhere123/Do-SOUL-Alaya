@@ -1,7 +1,7 @@
 import { lstatSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { AlayaError, ConditionalFieldSha256DigestSchema, SourceSemanticAccessReceiptSchema,
+import { AlayaError, ConditionalFieldSha256DigestSchema, SourceSemanticAccessReceiptSchema, sourceSemanticExecutionPhases,
   SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationRequestSchema, canonicalJson } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import { isContainedPath, samePhysicalLocation } from "../fs/opened-contained-path.js";
@@ -253,7 +253,8 @@ async function observeOne(config: SourceAccessDiagnosticConfig, root: string,
         const page: NativePage = { response, wall_ms: performance.now() - pageStarted };
         const resultPath = `${attemptBase}.result.json`;
         const resultRef = writeMeasuredArtifact(root, resultPath, { question_id: selected.question_id, policy,
-          page_number: pageNumber, work: response.work, provider_attempts: response.provider_attempts,
+          page_number: pageNumber, work: response.work, execution: response.execution,
+          provider_attempts: sourceSemanticExecutionPhases(response.execution).query_preparation.external_api_attempts,
           response_identity: chainIdentity(JSON.parse(JSON.stringify(response))), wall_ms: page.wall_ms },
         meter, config.limits.max_output_bytes);
         attemptEvidence[pageNumber]!.result = resultRef;

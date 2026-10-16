@@ -57,7 +57,8 @@ import { join } from "node:path";
 import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, UNKNOWN_UTTERANCE_ATTRIBUTION,
   SourceSemanticInterpretationSchema, SourceSemanticReasoningResultSchema,
-  sourceSemanticInterpretationIdentity, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity
+  sourceSemanticInterpretationIdentity, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity,
+  sourceSemanticReasonControl, sourceSemanticUndeliveredConclusion
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT, type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
@@ -249,4 +250,18 @@ it("fails closed when preparation attention cannot identify one of two C parents
   const workset = buildRecoveryCorrespondenceWorkset(query, selected, GENERATION, OPTIONS)!;
   expect(() => applyAffectedRecoveryCorrespondencePolicy({ ...policyInput(workset), reasonResults: [reason(selected)] }))
     .toThrow(/one exact retained parent/u);
+});
+
+it("does not treat a computed undelivered conclusion as correspondence attention", () => {
+  const { query, selected } = fixture();
+  const workset = buildRecoveryCorrespondenceWorkset(query, selected, GENERATION, OPTIONS)!;
+  const computed = reason(selected, `sha256:${"c".repeat(64)}`);
+  const receipt = sourceSemanticUndeliveredConclusion(computed.response.result);
+  const roundtrip = JSON.parse(JSON.stringify(receipt)) as typeof receipt;
+  const control = sourceSemanticReasonControl(roundtrip);
+  expect(control.conditional_computation_id).toBe(computed.response.result.conditional_computation_id);
+  expect(control.semantic_correspondence_id).toBe(`sha256:${"c".repeat(64)}`);
+  expect(control.attention).toBeUndefined();
+  expect(applyAffectedRecoveryCorrespondencePolicy({ ...policyInput(workset),
+    reasonResults: [{ ...computed, response: roundtrip as { result?: unknown } }] }).workset).toBe(workset);
 });

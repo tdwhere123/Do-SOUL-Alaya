@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, SoulInterpretationPrepareQueryResponseSchema, canonicalJson,
-  SourceSemanticWorkerWorkSchema, sourceRecallTarget } from "@do-soul/alaya-protocol";
+  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases, SourceSemanticWorkerWorkSchema, sourceRecallTarget } from "@do-soul/alaya-protocol";
 import { sourceSemanticAccessInputIdentity } from "@do-soul/alaya-core";
 import { isContainedPath, samePhysicalLocation } from "../fs/opened-contained-path.js";
 import { sourceGoldUnitFromPublishedRoot, sourceTargetJoinsGold } from "../measurement/source-gold-join.js";
@@ -22,7 +22,8 @@ const StartedSchema = z.object({ question_id: z.string(), policy: z.string(),
   prior_pool_id: z.string().nullable() }).strict();
 const ResultSchema = z.object({ question_id: z.string(), policy: z.string(),
   page_number: z.number().int().nonnegative(), work: SourceSemanticWorkerWorkSchema,
-  provider_attempts: z.number().int().nonnegative(), response_identity: z.string(),
+  execution: SourceSemanticExecutionSchema,
+  provider_attempts: z.number().int().nonnegative().nullable(), response_identity: z.string(),
   wall_ms: z.number().nonnegative() }).strict();
 const RunStartSchema = z.object({ contract: z.literal("source-access-diagnostic-start-v1"),
   config: SourceAccessDiagnosticObservationSchema.shape.config,
@@ -84,7 +85,7 @@ export async function evaluateSourceAccessDiagnostic(observationPath: string, ou
       rows.push(unknownRow(row, row.reason ?? "native access unavailable")); continue;
     }
     const expectedInputId = sourceSemanticAccessInputIdentity({ original_query: selected.question,
-      budget: frozen.config.budget, policy: row.policy });
+      budget: frozen.config.budget, policy: row.policy, contract: "source-semantic-access-v2" });
     rows.push(evaluatePreparedRow(observationPath, sourceRoot, frozen, selected,
       preparedRow.publication_path, preparedRow.publication_identity, preparedRow.chain_root,
       question.answer_session_ids, row, expectedInputId));
@@ -207,7 +208,9 @@ function readOrderedCandidates(observationPath: string, row: SourceAccessDiagnos
     if (result !== null) {
       attemptPaths.push(evidence.result!.path); settled++;
       if (result.question_id !== row.question_id || result.policy !== row.policy || result.page_number !== index
-        || result.provider_attempts !== 0) throw new AlayaError("CONFLICT", "diagnostic settled attempt changed");
+        || result.provider_attempts !== sourceSemanticExecutionPhases(result.execution).query_preparation.external_api_attempts) {
+        throw new AlayaError("CONFLICT", "diagnostic settled attempt changed");
+      }
       nativeWork += result.work.native_work; nativeBytes += result.work.native_bytes;
       if (result.work.logical_work === undefined) unresolved++;
       else {
@@ -223,7 +226,8 @@ function readOrderedCandidates(observationPath: string, row: SourceAccessDiagnos
     const access = page.response.access;
     if (chainIdentity(page.response) !== result.response_identity
       || chainIdentity(page.response.work) !== chainIdentity(result.work)
-      || page.response.provider_attempts !== result.provider_attempts || page.wall_ms !== result.wall_ms
+      || sourceSemanticExecutionPhases(page.response.execution).query_preparation.external_api_attempts !== result.provider_attempts
+      || canonicalJson(page.response.execution) !== canonicalJson(result.execution) || page.wall_ms !== result.wall_ms
       || page.response.work.logical_work === undefined || access === undefined
       || access.trace.kind !== "preparation_page" || access.policy !== row.policy
       || access.input_id !== expectedInputId

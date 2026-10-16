@@ -3,7 +3,7 @@ import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponse
   canonicalJson, SourceSemanticCorrespondencePreparationOptionsSchema,
   SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY, sourceSemanticCorrespondenceCacheMaterial,
   sourceSemanticCorrespondenceGenerationPolicies, sourceSemanticQueryIdentity,
-  SourceSemanticReasoningResultSchema, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+  sourceSemanticReasonControl, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -84,9 +84,10 @@ export function selectRecoveryNomination(window: readonly RecoveryWindowSource[]
   if (!Array.isArray(reason.results)) {
     throw new AlayaError("CONFLICT", "source nomination lacks the settled initial reasoning round");
   }
-  const candidates = reason.results.flatMap(row => {
-    if (row.status !== "reasoned" || row.response?.result === undefined) return [];
-    const result = SourceSemanticReasoningResultSchema.parse(row.response.result);
+  const controls = reason.results.flatMap(row => row.response === undefined ? []
+    : [{ row, control: sourceSemanticReasonControl(row.response) }]);
+  const candidates = controls.flatMap(({ row, control: result }) => {
+    if (row.status !== "reasoned") return [];
     const attention = result.attention;
     if (attention?.kind !== "computed" || attention.entries.length === 0 || attention.truncated ||
         attention.source_interpretation_id !== row.source_interpretation_id ||
@@ -109,7 +110,14 @@ export function selectRecoveryNomination(window: readonly RecoveryWindowSource[]
     record_id: chosen.source.record_id, content_digest: chosen.source.content_digest,
     initial_read_bytes: chosen.source.read_bytes, initial_body_bytes: chosen.source.body_bytes,
     attention: chosen.attention,
-    nomination: nominated === undefined ? "frozen_window_after_unbound_reason" : "initial_reason_attention" };
+    reason_controls: controls.map(({ row, control }) => ({
+      source_interpretation_id: control.source_interpretation_id ?? row.source_interpretation_id,
+      query_semantics_id: control.query_semantics_id, semantic_correspondence_id: control.semantic_correspondence_id,
+      conditional_computation_id: control.conditional_computation_id, outcome: control.outcome,
+      source_target: control.source_target, query_gaps: control.query_gaps })),
+    nomination: nominated !== undefined ? "initial_reason_attention"
+      : controls.some(({ control }) => control.conditional_computation_id !== undefined)
+        ? "frozen_window_after_computed_reason" : "frozen_window_after_unbound_reason" };
 }
 
 type RecoveryQualified = ReturnType<typeof admitInitialQualified>["settled"];

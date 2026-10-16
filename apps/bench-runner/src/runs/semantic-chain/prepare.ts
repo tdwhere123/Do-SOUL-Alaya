@@ -264,7 +264,7 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     }
     poolId = access.pool_id;
     queryHandle = response.query_handle;
-    trace.push({ coverage: response.coverage, work: response.work, access, query_semantics_status: response.query_semantics_status,
+    trace.push({ coverage: response.coverage, work: response.work, execution: response.execution, access, query_semantics_status: response.query_semantics_status,
       continuation_handle: response.continuation_handle ?? null,
       candidate_ids: response.candidates.map((candidate) => candidate.interpretation_id) });
     pages++;

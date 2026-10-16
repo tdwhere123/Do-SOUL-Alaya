@@ -1,5 +1,5 @@
 import type { Worker } from "node:worker_threads";
-import { indexEntryCacheKey, type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, unavailableSourceQueryPreparation, type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
   ConditionalFieldRecallPortResult,
@@ -15,7 +15,18 @@ import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.js";
-import { type WorkerOperationPayload, parseWorkerOperationPayload } from "../recall-read-worker/operation-schemas.js";
+import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema,
+  type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
+
+type PreparedQuery = NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>;
+export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string;
+  signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
+export type SourceSemanticsExecutionPort = Readonly<{
+  execute(input: SourceSemanticsPublicPayload): Promise<SourceSemanticWorkerResult>;
+  /** Capture/prepare before caller-owned beginDeferred, then execute within that caller's snapshot. */
+  withPreparedExecution<T>(input: SourceSemanticsPublicPayload,
+    work: (execute: () => Promise<SourceSemanticWorkerResult>) => Promise<T>): Promise<T>;
+}>;
 import {
   isPathAffinityOperation,
   normalizeRequestTimeoutMs,
@@ -40,7 +51,7 @@ export interface RecallReadWorkerClient {
   readonly readSnapshot: RecallReadSnapshotPort;
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
   readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
-  readonly sourceSemanticsPort?: Readonly<{ execute: (input: WorkerOperationPayload<"conditionalField.sourceSemantics">) => Promise<SourceSemanticWorkerResult> }>;
+  readonly sourceSemanticsPort?: SourceSemanticsExecutionPort;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -52,6 +63,7 @@ export function createRecallReadWorkerClient(input: {
   readonly workerCount?: number;
   readonly requestTimeoutMs?: number;
   readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
+  readonly prepareSourceQuery?: PrepareSourceQuery;
   readonly allowDirectSqliteRecallReads?: boolean;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): RecallReadWorkerClient | null {
@@ -87,6 +99,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly pathReadBind: RecallPathReadBind | undefined;
   private readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
   private readonly deliveryOwners = new Map<string, Worker>();
+  private readonly prepareSourceQuery?: PrepareSourceQuery;
   private readyPromise: Promise<void> | null = null;
   public readonly readSnapshot: RecallReadSnapshotPort;
 
@@ -222,6 +235,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     readonly workerCount?: number;
     readonly requestTimeoutMs?: number;
     readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
+    readonly prepareSourceQuery?: PrepareSourceQuery;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
     this.pathReadBind = input.pathReadBind;
@@ -229,6 +243,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       throw new Error("selected temporal recall worker requires parent projection preparation");
     }
     this.prepareTemporalProjection = input.prepareTemporalProjection;
+    this.prepareSourceQuery = input.prepareSourceQuery;
     this.lifecycle = new RecallReadWorkerLifecycle({
       ...input,
       workerCount: normalizeWorkerCount(input.workerCount),
@@ -242,8 +257,11 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     });
     this.readSnapshot = {
       ...this.lifecycle.readSnapshot,
-      isolate: async (work, affinity) => await this.lifecycle.isolate(work,
-        affinity === undefined ? undefined : this.deliveryOwner(affinity))
+      isolate: async (work, affinity) => {
+        const owner = affinity === undefined ? undefined : this.deliveryOwners.get(affinity);
+        return await this.lifecycle.isolate(work,
+          owner !== undefined && this.lifecycle.isAvailable(owner) ? owner : undefined);
+      }
     };
   }
 
@@ -255,13 +273,39 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
   };
 
-  public readonly sourceSemanticsPort = {
-    execute: async (input: WorkerOperationPayload<"conditionalField.sourceSemantics">): Promise<SourceSemanticWorkerResult> =>
-      await this.lifecycle.withinDeadline("conditionalField.sourceSemantics", async () => {
-        // Capture all schema-owned data before acquisition can wait. Parsing readonly
-        // schemas must never freeze caller data; the actual snapshot lease stays in ALS.
-        const captured = parseWorkerOperationPayload("conditionalField.sourceSemantics", structuredClone(input));
-        const request = captured.request;
+  public readonly sourceSemanticsPort: SourceSemanticsExecutionPort = {
+    execute: async input => await this.withPreparedSourceExecution(input, execute => execute()),
+    withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input, work)
+  };
+
+  private async withPreparedSourceExecution<T>(input: SourceSemanticsPublicPayload,
+    work: (execute: () => Promise<SourceSemanticWorkerResult>) => Promise<T>): Promise<T> {
+    return await this.lifecycle.withinDeadline("conditionalField.sourceSemantics", async () => {
+      // Synchronous whole-input capture precedes binding, worker acquisition and caller beginDeferred.
+      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
+      const request = captured.request;
+      const initial = request.kind === "prepare_query" ? request.source_handle === undefined &&
+        request.continuation_handle === undefined && request.source_preview_extents === undefined
+        : request.kind === "recall" && request.query_handle === undefined && request.continuation === undefined;
+      let prepared: PreparedQuery | undefined;
+      if (initial && (request.kind === "prepare_query" || request.kind === "recall") && request.access_policy !== "canonical-v1") {
+        const reason = this.lifecycle.snapshotHasBegun() ? "snapshot_already_begun" :
+          this.prepareSourceQuery === undefined ? "embedding_preparation_unwired" : undefined;
+        if (reason !== undefined) prepared = { receipt: unavailableSourceQueryPreparation(reason),
+          vector: { status: "unavailable", reason } };
+        else {
+          const deadline = this.lifecycle.preparationDeadline();
+          prepared = await this.lifecycle.beforeSnapshotPreparation(() => this.prepareSourceQuery!({ workspace_id: captured.workspace_id,
+            navigation: request.kind === "prepare_query" ? request.access_hint ?? request.original_query : request.original_query!,
+            signal: deadline.signal, remainingMs: () => deadline.remainingMs() }));
+          deadline.check();
+        }
+      }
+      let executed = false;
+      return await work(async () => {
+        if (executed) throw new Error("captured Source execution can only be dispatched once");
+        executed = true;
+        this.lifecycle.preparationDeadline().check();
         const handle = request.kind === "reason" ? request.query_handle
           : request.kind === "recall" ? request.continuation?.continuation_id ?? request.query_handle
           : request.kind === "prepare_query" ? request.continuation_handle ?? request.source_handle
@@ -270,7 +314,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         return await this.lifecycle.isolate(async () => {
           const worker = this.lifecycle.pinnedWorker()!;
           const parsed = await this.lifecycle.request<SourceSemanticWorkerResult>(
-            "conditionalField.sourceSemantics", captured);
+            "conditionalField.sourceSemantics", { ...captured,
+              ...(prepared === undefined ? {} : { prepared_query: prepared }) });
           const issued = parsed.kind === "prepare_source" ? parsed.source_handle
             : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
           if (issued !== undefined) this.deliveryOwners.set(issued, worker);
@@ -282,8 +327,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
           while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
           return parsed;
         }, owner);
-      })
-  };
+      });
+    });
+  }
 
   public async ready(): Promise<void> {
     if (this.readyPromise === null) {

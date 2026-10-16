@@ -8,13 +8,66 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 18.1.0, engine gateway 1.2.0
+## Unreleased — protocol 19.0.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
-heading (currently `## v0.3.11` below). Protocol 18.1.0 can move
-independently of the app semver.
+heading (currently `## v0.3.11` below). Protocol and engine gateway package
+versions can move independently of the app semver.
+
+Protocol 19.0.0 and engine gateway 2.0.0 declare the Source acquisition and
+phase-accounting **major** under handbook invariant §25. Current access receipts
+use `source-semantic-access-v2`; required `execution` distinguishes
+`query_preparation`, `acquisition` and conditional computation. Query embedding
+runs in `SourceIndexAcquisition.prepareQuery` before the caller-owned read
+snapshot (`beforeSnapshotPreparation`). A begun snapshot degrades as
+`snapshot_already_begun` with no inference, replacement or commit; an unwired
+binder is `embedding_preparation_unwired`. That model/index work is not covered
+by the later conditional computation's provider-free guarantee. Unknown costs
+remain unknown, not zero. Tool descriptions now express these phase boundaries
+rather than claiming the whole call is provider-free.
+
+Unscoped query-conditioned observation may run one snapshot-owned
+`source-index-interleaved-prefix.v1` join: bounded BM25 lexical rows and
+inspected vector windows (`ranking: exact_over_inspected_subset`, not
+full-library nearest neighbor) into at most 16 root `nominations`. Native `phase_accounting` keeps `observation` null when unmeasured,
+`completion` as `included_in_worker_work_not_separately_measured`,
+`native_cpu` as `unknown`, and `deadline` as `soft_quarantine_until_exit`. Soft worker deadlines bound caller
+latency only; `terminate` is a request, and a slot stays owned through
+quarantine until actual exit. Resource accounting stays truthful and request
+budgets are not increased. Holding a canonical-observation quote does not prove
+that every previous envelope still fits. Source index and backfill mechanisms
+exist; daemon scheduling, provisioning, default useful recall and natural-corpus
+effects are not established.
+
+Current-request `execution` may be the `native_reasoning_only` literal only for
+exact canonical not-requested/not-run phases (`operation_does_not_prepare` /
+`operation_does_not_acquire`, `semantic_generation_attempts: 0`). It does not
+imply zero native work. Any other reason, resource evidence or unknown
+measurement stays expanded `source-semantic-execution-v2`; frozen access
+provenance is unchanged. Public `provider_attempts` is removed: derive external
+attempts from execution, preserving unknown (`null`) measurements. Reason
+delivery first fits the complete v5 result and premises. Only an oversized
+envelope may instead carry `no_conclusion`: original `outcome`, available
+H/Q/C/computation identities and restrictions, disclosure including `proof_use`,
+coverage and measured work, without result, bindings or premises
+(`coverage.payload: truncated` when clipped). Its tuple holds
+`[outcome, [H, Q, C, computation], optional query gaps]`; `null` identity means
+unavailable, not uncomputed work. Recovery expands it through
+`sourceSemanticReasonControl` and must not treat omitted premises as never
+computed or invent attention. Mandatory evidence that cannot fit still fails
+closed.
+
+Cross-major migration: consumers must read the required execution/acquisition
+fields and current receipt versions together. Historical access v1 or missing
+execution evidence must not be relabeled as a current measured result. Archive
+bytes remain unchanged; rebuild current measurements through their native
+producer rather than patching old receipts. Query vectors stay in the private
+worker envelope, not public responses. Independent review and small-budget
+verification remain open. This migration does not establish default background
+indexing, ready vector coverage, or natural-corpus recall gains, and performs no
+release or provider execution.
 
 Protocol 18.1.0 includes source representation in unproved-delivery source
 identity. Verification uses the same source-record hash as receipts, so a

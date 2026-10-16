@@ -10,14 +10,19 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
-vi.hoisted(() => {
-  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
-  vi.stubGlobal("fetch", vi.fn(() => { throw new Error("network forbidden"); }));
+import {
+  createBenchDaemonConfigDirectoryLease, planBenchDaemonConfigDirectory
+} from "../../../../../bench-runner/src/harness/daemon/daemon-config-directory.js";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
 });
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import {
   SoulInterpretationResponseSchema,
@@ -26,7 +31,8 @@ import {
   type SourceReferenceCatalog, type SourceSemanticCorrespondence, type SourceSemanticQuery,
   type SourceSemanticWorkerRequest,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
-  UNKNOWN_UTTERANCE_ATTRIBUTION
+  UNKNOWN_UTTERANCE_ATTRIBUTION, unavailableSourceQueryPreparation,
+  sourceSemanticExecutionPhases, SourceSemanticExecutionSchema, sourceSemanticReasonControl
 } from "@do-soul/alaya-protocol";
 import { proposeCorrespondenceSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
 import {
@@ -39,7 +45,7 @@ import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, Sql
 import { parseWorkerOperationPayload } from "../../../runtime/recall-read-worker/operation-schemas.js";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
-import { createRecallReadWorkerClient, type RecallReadWorkerClient }
+import { createRecallReadWorkerClient, type RecallReadWorkerClient, type PrepareSourceQuery }
   from "../../../runtime/recall/recall-read-worker-client.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
@@ -162,6 +168,7 @@ async function withPublished(body: (input: {
 }) => Promise<void>, options: Readonly<{
   valid_from?: string; valid_to?: string; state?: "erased" | "superseded";
   scope?: "project" | "global_core"; count?: number; large?: boolean; workerCount?: number; legacyKeys?: boolean;
+  prepareSourceQuery?: PrepareSourceQuery;
 }> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-reasoning-"));
   const filename = join(directory, "alaya.db");
@@ -232,7 +239,10 @@ async function withPublished(body: (input: {
     eraser.apply(barrier); eraser.apply(barrier);
   }
   database.close(); closeCachedDatabase(filename);
-  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: options.workerCount ?? 1 })!;
+  const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+  process.execArgv.push(guard);
+  const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: options.workerCount ?? 1,
+    prepareSourceQuery: options.prepareSourceQuery })!;
   try {
     await client.ready();
     await body({
@@ -241,6 +251,8 @@ async function withPublished(body: (input: {
     });
   } finally {
     await client.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true });
+    const index = process.execArgv.lastIndexOf(guard);
+    if (index !== -1) process.execArgv.splice(index, 1);
   }
 }
 
@@ -269,9 +281,18 @@ it("fits preparation-required reasons at native and public UTF-8 boundaries with
       expect(Buffer.byteLength(JSON.stringify(native), "utf8")).toBeLessThanOrEqual(1024);
       expect(Buffer.byteLength(JSON.stringify(response), "utf8")).toBeLessThanOrEqual(1024);
       if (native.kind !== "reason" || response.operation !== "reason") throw new Error("expected reasons");
-      expect(native.result.outcome.status).toBe("preparation_required");
-      expect(response.result?.outcome.status).toBe("preparation_required");
-      expect(response.result?.world_claim).toBe("unknown");
+      const missing = "query_semantics" in extra ? "semantic_correspondence"
+        : "semantic_correspondence" in extra ? "query_semantics" : "query_semantics_and_correspondence";
+      expect(sourceSemanticReasonControl(native).outcome).toEqual({ status: "preparation_required", missing });
+      expect(sourceSemanticReasonControl(response).outcome).toEqual(sourceSemanticReasonControl(native).outcome);
+      expect(native.execution).toBe("native_reasoning_only");
+      expect(response.execution).toBe("native_reasoning_only");
+      expect(response).not.toHaveProperty("provider_attempts");
+      expect(response).not.toHaveProperty("result");
+      expect(response).not.toHaveProperty("interpretation");
+      expect(response.work.native_work).toBeGreaterThan(0);
+      console.info("preparation receipt bytes", { native: Buffer.byteLength(JSON.stringify(native), "utf8"),
+        public: Buffer.byteLength(JSON.stringify(response), "utf8") });
       expect(response.coverage.payload).toBe("truncated");
     }
   });
@@ -318,7 +339,13 @@ it("fits multibyte preparation output and measures the public envelope rather th
     expect(Buffer.byteLength(JSON.stringify(response), "utf8")).toBeLessThanOrEqual(nativeBytes);
     expect(response.coverage.payload).toBe("truncated");
     if (response.operation !== "reason") throw new Error("expected reason");
-    expect(response.result?.outcome.status).toBe("preparation_required");
+    expect(sourceSemanticReasonControl(response).outcome.status).toBe("preparation_required");
+    expect(full.result).toBeDefined();
+    expect(full.interpretation).toBeDefined();
+    expect(full.result?.world_claim).toBe("unknown");
+    expect(response).not.toHaveProperty("result");
+    console.info("multibyte receipt bytes", { nativeFull: nativeBytes,
+      public: Buffer.byteLength(JSON.stringify(response), "utf8") });
   }, { count: 2, large: true });
 });
 
@@ -386,7 +413,7 @@ it("reads current legacy-key H through the worker without mutation and rejects a
       source_interpretation_id: sourceInterpretationId, original_query: ORIGINAL, query_semantics: queryOf(),
       semantic_correspondence: correspondenceOf(sourceInterpretationId, queryOf()), budget: BUDGET, output_byte_limit: 1_000_000 };
     const result = await call(execute, reason);
-    if (result.kind !== "reason") throw new Error("reason expected");
+    if (result.kind !== "reason" || result.result === undefined) throw new Error("full reason expected");
     expect(result.result.outcome.status).toBe("interpreted");
     const discovery = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
     if (discovery.kind !== "prepare_query") throw new Error("query expected");
@@ -502,7 +529,7 @@ it("prepares, reasons, and reopens a durable source interpretation through a rea
       query_handle: preparedQuery.query_handle, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics),
       budget: BUDGET, output_byte_limit: 1000000
     });
-    if (reasoned.kind !== "reason") throw new Error("expected reason");
+    if (reasoned.kind !== "reason" || reasoned.result === undefined) throw new Error("expected full reason");
     expect(reasoned.result.outcome.status).toBe("interpreted");
     expect(reasoned.result.semantic_status).toBe("unreviewed");
     expect(reasoned.result.world_claim).toBe("unknown");
@@ -527,13 +554,22 @@ it("prepares, reasons, and reopens a durable source interpretation through a rea
       budget: BUDGET, output_byte_limit: 1600
     });
     if (clipped.kind !== "reason") throw new Error("expected clipped");
-    expect(clipped.result.outcome.status).toBe("truncated");
-    expect(clipped.result.consumed_leaves).toEqual([]);
-    expect(clipped.interpretation).toBeUndefined();
-    expect(clipped.semantic_correspondence).toBeUndefined();
-    expect(clipped.result.semantic_status).toBe("unreviewed");
-    expect(clipped.result.conclusion_scope).toBe("conditional_on_interpretation");
-    expect(clipped.result.world_claim).toBe("unknown");
+    const clippedControl = sourceSemanticReasonControl(clipped);
+    expect(clippedControl.outcome).toEqual(reasoned.result.outcome);
+    expect(clippedControl.conditional_computation_id).toBe(reasoned.result.conditional_computation_id);
+    expect(clippedControl.source_interpretation_id).toBe(reasoned.result.source_interpretation_id);
+    expect(clippedControl.query_semantics_id).toBe(reasoned.result.query_semantics_id);
+    expect(clippedControl.semantic_correspondence_id).toBe(reasoned.result.semantic_correspondence_id);
+    expect(clippedControl).not.toHaveProperty("attention");
+    expect(clipped).not.toHaveProperty("result");
+    expect(clipped).not.toHaveProperty("interpretation");
+    expect(clipped).not.toHaveProperty("semantic_correspondence");
+    expect(clipped).not.toHaveProperty("query");
+    expect(clipped).not.toHaveProperty("context");
+    expect(clipped.work.native_work).toBeGreaterThan(0);
+    expect(clipped.work.logical_work).toBeGreaterThan(clipped.work.native_work);
+    expect(clipped.work.native_bytes).toBeGreaterThan(0);
+    console.info("finished receipt bytes", Buffer.byteLength(JSON.stringify(clipped), "utf8"));
     expect(Buffer.byteLength(JSON.stringify(clipped))).toBeLessThanOrEqual(1600);
     await expect(call(execute, {
       kind: "reason", accepts_unreviewed_conditional_results: true,
@@ -578,7 +614,7 @@ it("invalidates expired handles and does not recover them after worker loss", as
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000
     });
-    if (oneshot.kind !== "reason") throw new Error("expected oneshot");
+    if (oneshot.kind !== "reason" || oneshot.result === undefined) throw new Error("expected full oneshot");
     expect(oneshot.result.outcome.status).toBe("interpreted");
     const live = await call(execute, { kind: "prepare_source", source_id: "artifact-1", budget: BUDGET });
     if (live.kind !== "prepare_source") throw new Error("expected live handle");
@@ -602,7 +638,7 @@ it("invalidates expired handles and does not recover them after worker loss", as
         source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
         budget: BUDGET, output_byte_limit: 1000000
       });
-      if (durable.kind !== "reason") throw new Error("expected a durable source interpretation");
+      if (durable.kind !== "reason" || durable.result === undefined) throw new Error("expected a full durable source interpretation");
       expect(durable.result.outcome.status).toBe("interpreted");
       expect(durable.result.source_interpretation_id).toBe(sourceInterpretationId);
     } finally { await reopened.close(); }
@@ -628,7 +664,7 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
       budget: BUDGET, output_byte_limit: 1000000
     });
-    if (first.kind !== "reason") throw new Error("expected first reason");
+    if (first.kind !== "reason" || first.result === undefined) throw new Error("expected first full reason");
     expect(first.result.outcome.status).toBe("interpreted");
     const { database } = await createRecallRealStorage(() => undefined, filename);
     const source = database.connection.prepare(
@@ -651,6 +687,10 @@ it("does not let a cache hit bypass erasure in the worker snapshot", async () =>
 }, 30000);
 
 it("paginates current interpretations including a large source interpretation and exposes the semantic body needed by semantic correspondence", async () => {
+  const prepare = vi.fn<PrepareSourceQuery>(async () => ({
+    receipt: unavailableSourceQueryPreparation("fixture_no_selected_profile"),
+    vector: { status: "unavailable", reason: "fixture_no_selected_profile" }
+  }));
   await withPublished(async ({ allIds, execute }) => {
     const querySemantics = queryOf(), seen = new Set<string>();
     const firstPage = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: BUDGET });
@@ -667,17 +707,26 @@ it("paginates current interpretations including a large source interpretation an
     const awaitingCorrespondence = await call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
       query_handle: firstPage.query_handle, source_interpretation_id: firstPage.candidates[0]!.interpretation_id,
       budget: BUDGET, output_byte_limit: 1_000_000 });
-    if (awaitingCorrespondence.kind !== "reason") throw new Error("expected preparation reason");
+    if (awaitingCorrespondence.kind !== "reason" || awaitingCorrespondence.result === undefined) throw new Error("expected full preparation reason");
     expect(awaitingCorrespondence.result.outcome).toEqual({ status: "preparation_required", missing: "semantic_correspondence" });
     expect(awaitingCorrespondence.coverage.discovery).toBe("truncated");
+    expect(prepare).toHaveBeenCalledTimes(1);
     const observationBudget = { ...BUDGET, work_units: 1_000_000 };
     let continuation: string | undefined;
+    let poolId: string | undefined;
     let count = 0;
     do {
       const page = await call(execute, { kind: "prepare_query", original_query: ORIGINAL, query_semantics: querySemantics, budget: observationBudget,
         ...(continuation === undefined ? {} : { continuation_handle: continuation }) });
       expect(page.kind).toBe("prepare_query");
       if (page.kind !== "prepare_query") throw new Error("expected query page");
+      expect(prepare).toHaveBeenCalledTimes(2);
+      expect(page.access).toBeDefined();
+      if (poolId !== undefined) {
+        expect(page.access?.pool_id).toBe(poolId);
+        expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(page.execution)).query_preparation.status).toBe("not_requested");
+      }
+      poolId = page.access?.pool_id;
       for (const descriptor of page.candidates) {
         expect(seen.has(descriptor.interpretation_id)).toBe(false);
         expect(descriptor.interpretation?.frames[0]?.bindings.length).toBe(2);
@@ -690,7 +739,7 @@ it("paginates current interpretations including a large source interpretation an
     } while (continuation !== undefined);
     expect([...seen].sort()).toEqual([...allIds].sort());
     expect(count).toBeGreaterThan(1);
-  }, { count: 20, large: true });
+  }, { count: 20, large: true, prepareSourceQuery: prepare });
 }, 30000);
 
 it("does not disclose unauthorized or obsolete descriptors", async () => {
@@ -721,7 +770,9 @@ it("binds query handles to query semantics, candidates and permissions and keeps
     const leased = await call(execute, request, { principal: "owner" });
     const direct = await call(execute, { kind: "reason", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: semanticCorrespondence, original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 }, { principal: "owner" });
-    if (leased.kind !== "reason" || direct.kind !== "reason") throw new Error("expected reason");
+    if (leased.kind !== "reason" || direct.kind !== "reason" || leased.result === undefined || direct.result === undefined) {
+      throw new Error("expected full leased and direct reasons");
+    }
     expect(leased.result.conditional_computation_id).toBe(direct.result.conditional_computation_id);
     expect(leased.coverage.discovery).toBe("complete");
     expect(direct.coverage.discovery).toBe("unexercised");
@@ -750,7 +801,7 @@ it("reports a failed semantic_correspondence as invalid instead of charging a de
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: forged, original_query: ORIGINAL,
       budget: { ...BUDGET, work_units: 4000, memory_bytes: 200000 }, output_byte_limit: 1000000
     });
-    if (result.kind !== "reason") throw new Error("expected reason");
+    if (result.kind !== "reason" || result.result === undefined) throw new Error("expected full reason");
     expect(result.result.outcome).toEqual({ status: "invalid", reason: "malformed_correspondence" });
     expect(result.coverage.conditional_computation).toBe("unexercised");
     const publicReason = createSourceSemanticInterpretationHandler({ now: () => CLOCK, sourceSemanticsPort: { execute } });
@@ -760,7 +811,9 @@ it("reports a failed semantic_correspondence as invalid instead of charging a de
       { workspaceId: WS, runId: RUN, agentTarget: "test", sessionId: "test" });
     expect(Buffer.byteLength(JSON.stringify(bounded), "utf8")).toBeLessThanOrEqual(1024);
     if (bounded.operation !== "reason") throw new Error("expected reason");
-    expect(bounded.result?.outcome.status).toBe("invalid");
+    expect(bounded.result).toMatchObject({ outcome: { status: "invalid", reason: "malformed_correspondence" },
+      semantic_status: "unreviewed", world_claim: "unknown", conclusion_scope: "conditional_on_interpretation" });
+    expect(bounded).not.toHaveProperty("no_conclusion");
   });
 });
 
@@ -788,7 +841,7 @@ it("reasons through the worker on receiver-produced query and semantic_correspon
       query_handle: prepared.query_handle, semantic_correspondence: receivedCorrespondence.semantic_correspondence,
       budget: BUDGET, output_byte_limit: 1000000
     });
-    if (result.kind !== "reason") throw new Error("expected reason");
+    if (result.kind !== "reason" || result.result === undefined) throw new Error("expected full reason");
     expect(result.result.outcome.status).toBe("interpreted");
     expect(result.result.binding_results?.[0]?.returned.tools?.node_id).toBe("rTools");
     expect(result.result.world_claim).toBe("unknown");
@@ -810,7 +863,7 @@ it("uses prepare, propose, query preparation and reasoning within the actual per
         producer_id: "test-author", producer_version: "p1", contract_version: "source-interpretation-v4",
         draft: usesDraft(source.catalog, assertion), budget: BUDGET });
       expect(proposed.exitCode).toBe(0);
-      expect(proposed.output).toMatchObject({ operation: "propose", outcome: { status: "interpreted" }, provider_attempts: 0 });
+      expect(proposed.output).toMatchObject({ operation: "propose", outcome: { status: "interpreted" }, execution: "native_reasoning_only" });
       const queryRow = await request({ operation: "prepare_query", original_query: ORIGINAL, query_semantics: queryOf(), budget: BUDGET });
       expect(queryRow.exitCode).toBe(0);
       const query = SoulInterpretationResponseSchema.parse(queryRow.output);
@@ -819,7 +872,7 @@ it("uses prepare, propose, query preparation and reasoning within the actual per
         query_handle: query.query_handle, semantic_correspondence: correspondenceOf(sourceInterpretationId, queryOf()),
         budget: BUDGET, output_byte_limit: 1_000_000 });
       expect(reason.exitCode).toBe(0);
-      expect(reason.output).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown" }, provider_attempts: 0 });
+      expect(reason.output).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown" }, execution: "native_reasoning_only" });
     });
     await withCliInterpretationSession(dirname(filename), WS, RUN, async request => {
       const restarted = await request({ operation: "propose", source_handle: oldSourceHandle,
@@ -895,15 +948,26 @@ it("delivers qualified answers through the actual CLI executable with no provide
       source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL, budget: BUDGET, output_byte_limit: 1000000 };
     const root = dirname(filename), binary = fileURLToPath(new URL("../../../../../../bin/alaya.mjs", import.meta.url));
     // Node loads --import as an ESM URL; a Windows drive path is parsed as a scheme.
-    const guard = new URL("../../support/provider-free-cli.mjs", import.meta.url).href;
-    const output = await promisify(execFile)(process.execPath, ["--import", guard, binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
-      "--workspace", WS, "--run", RUN, "--agent", "codex", "--json"], {
-      cwd: root, timeout: 30000, maxBuffer: 2_000_000,
-      env: { PATH: process.env.PATH, HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: root, DATA_DIR: root }
-    });
-    const parsed = JSON.parse(output.stdout);
-    expect(parsed).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown", semantic_status: "unreviewed" }, provider_attempts: 0 });
-    expect(parsed.result.binding_results[0].returned.tools.node_id).toBe("rTools");
-    expect(parsed.interpretation).toBeDefined(); expect(parsed.semantic_correspondence).toBeDefined();
+    const guard = new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+    const configDir = planBenchDaemonConfigDirectory();
+    const lease = createBenchDaemonConfigDirectoryLease(configDir);
+    await lease.prepare();
+    try {
+      expect(lease.path).toBe(configDir);
+      expect(await readdir(lease.path)).toEqual([]);
+      const output = await promisify(execFile)(process.execPath, ["--import", guard, binary, "tools", "call", "soul.interpretation", JSON.stringify(args),
+        "--workspace", WS, "--run", RUN, "--agent", "codex", "--json"], {
+        cwd: root, timeout: 30000, maxBuffer: 2_000_000,
+        env: { PATH: process.env.PATH, HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: root, DATA_DIR: root, ALAYA_CONFIG_DIR: lease.path }
+      });
+      expect(lease.path).toBe(configDir);
+      expect((await readdir(lease.path)).filter((name) => name === ".env" || name.startsWith(".env."))).toEqual([]);
+      const parsed = JSON.parse(output.stdout);
+      expect(parsed).toMatchObject({ result: { outcome: { status: "interpreted" }, world_claim: "unknown", semantic_status: "unreviewed" }, execution: "native_reasoning_only" });
+      expect(parsed.result.binding_results[0].returned.tools.node_id).toBe("rTools");
+      expect(parsed.interpretation).toBeDefined(); expect(parsed.semantic_correspondence).toBeDefined();
+    } finally {
+      await lease.cleanup();
+    }
   });
 }, 45000);

@@ -3,8 +3,8 @@ import { closeCachedDatabase, SqliteEventLogRepo, SqliteFieldSourceRecordRepo, S
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
-import { SOURCE_SEMANTIC_PUBLISHED_CONTRACT, type SourceSemanticCorrespondence,
-  type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
+import { sourceSemanticExecutionPhases, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticResourceExhausted,
+  type SourceSemanticCorrespondence, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
@@ -381,7 +381,18 @@ it("orders the complete observed pool for two queries before native descriptor p
     expect(recalled.slot_qualifiers.some((row) => row.evidence_kind === "source_evidence")).toBe(true);
     const direct = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
       original_query: orchid, query_semantics: accessQuery(orchid), semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
-    expect(direct.discovery.access).toEqual(recalled.discovery.access);
+    const directAccess = direct.discovery.access, frozenAccess = recalled.discovery.access;
+    if (directAccess === undefined || frozenAccess === undefined) throw new Error("both access receipts are required");
+    const { pool_id: directPool, acquisition: directAcquisition, ...directObservation } = directAccess;
+    const { pool_id: frozenPool, acquisition: frozenAcquisition, ...frozenObservation } = frozenAccess;
+    expect(directObservation).toEqual(frozenObservation);
+    const { budget: directAllowance, ...directAcquisitionEvidence } = directAcquisition;
+    const { budget: frozenAllowance, ...frozenAcquisitionEvidence } = frozenAcquisition;
+    expect(directAcquisitionEvidence).toEqual(frozenAcquisitionEvidence);
+    // Direct recall reserves its own finalization; frozen recall reuses the
+    // preparation's allowance evidence. Equal observations do not erase that history.
+    expect(directAllowance).not.toEqual(frozenAllowance);
+    expect(directPool).not.toBe(frozenPool);
     expect(first.work.native_bytes).toBeGreaterThan(0);
     expect(first.work.logical_work).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
     expect(first.work.logical_memory_bytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
@@ -440,7 +451,7 @@ it("preserves lexical role foils and query order under source ID and insertion o
       expect(scores[0]!.source_text_score).toBe(scores[1]!.source_text_score);
       expect(scores[1]!.source_text_score!).toBeGreaterThan(scores[2]!.source_text_score!);
       expect(scores[0]!.interpretation_reading_score).toBe(scores[1]!.interpretation_reading_score);
-      expect(result.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(result.execution).query_preparation.external_api_attempts).toBe(0);
       expect(result.coverage.conditional_computation).toBe("unexercised");
     });
   }
@@ -610,16 +621,19 @@ it("reads a raw-only body beyond the general observation half after proving no c
   });
 });
 
-it("reports census and header work when empty-population planning exhausts its protected allowance", async () => {
+it("fails generic source union preflight under 8000 work and 24000 bytes before census with no native observation", async () => {
   await withAccessLibrary([{ id: "raw", text: "Orchid irrigation." }], async ({ execute, filename }) => {
     const budget = { ...ACCESS_BUDGET, work_units: 8_000, memory_bytes: 24_000 };
     const { database } = await createRecallRealStorage(() => undefined, filename);
     const runtime = { database } as RecallReadWorkerRuntime;
     const meter = new SourceSemanticReadBudget(budget);
-    const planning = vi.fn();
+    const generic = vi.fn(), emptyCensus = vi.fn();
     const charge = SourceSemanticReadBudget.prototype.charge;
+    const headers = vi.spyOn(SqliteSourceHintReader.prototype, "pageBoundInterpretationHeaders");
+    const bodies = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
     const spy = vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
-      if (args[2] === "empty interpretation completion planning") planning();
+      if (args[2] === "source union preparation completion planning") generic();
+      if (args[2] === "empty interpretation completion planning") emptyCensus();
       return charge.apply(this, args);
     });
     try {
@@ -629,19 +643,73 @@ it("reports census and header work when empty-population planning exhausts its p
         ["project"], meter, orchid, undefined, "query-conditioned-v1", budget, undefined,
         { leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
           expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: orchid } }))()).toThrow();
-      const result = await accessCall(execute, { kind: "prepare_query", original_query: orchid, budget });
-      expect(planning).toHaveBeenCalledOnce();
-      expect(result.outcome).toEqual({ status: "resource_exhausted" });
-      expect(meter.nativeWork).toBeGreaterThan(0);
-      expect(meter.nativeBytes).toBeGreaterThan(0);
+      expect(generic).toHaveBeenCalled();
+      expect(emptyCensus).not.toHaveBeenCalled();
+      expect(headers).not.toHaveBeenCalled();
+      expect(bodies).not.toHaveBeenCalled();
+      expect(meter.nativeWork).toBe(0);
+      expect(meter.nativeBytes).toBe(0);
+      expect(meter.spentWork).toBeGreaterThan(0);
       expect(meter.spentWork).toBeLessThanOrEqual(budget.work_units);
       expect(meter.spentBytes).toBeLessThanOrEqual(budget.memory_bytes);
-      expect(result.work.native_work).toBeGreaterThan(0);
-      expect(result.work.native_bytes).toBeGreaterThan(0);
-      expect(result.work.logical_work).toBeGreaterThan(result.work.native_work);
+      const result = await accessCall(execute, { kind: "prepare_query", original_query: orchid, budget });
+      expect(result.outcome).toEqual({ status: "resource_exhausted" });
+      expect(result.work.native_work).toBe(0);
+      expect(result.work.native_bytes).toBe(0);
+      expect(result.work.logical_work).toBeGreaterThan(0);
       expect(result.work.logical_work).toBeLessThanOrEqual(budget.work_units);
       expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
-    } finally { spy.mockRestore(); database.close(); closeCachedDatabase(filename); }
+    } finally {
+      spy.mockRestore(); headers.mockRestore(); bodies.mockRestore();
+      database.close(); closeCachedDatabase(filename);
+    }
+  });
+});
+
+it("propagates injected empty-census planning refusal after a conclusive empty header without a false-empty pool", async () => {
+  await withAccessLibrary([{ id: "raw", text: "Orchid irrigation." }], async ({ filename }) => {
+    const { database } = await createRecallRealStorage(() => undefined, filename);
+    const runtime = { database } as RecallReadWorkerRuntime;
+    const meter = new SourceSemanticReadBudget(ACCESS_BUDGET);
+    const planning = vi.fn();
+    const charge = SourceSemanticReadBudget.prototype.charge;
+    const headers = vi.spyOn(SqliteSourceHintReader.prototype, "pageBoundInterpretationHeaders");
+    const bodies = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+    const spy = vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, ...args) {
+      if (args[2] === "empty interpretation completion planning") {
+        planning();
+        throw new SourceSemanticResourceExhausted("injected empty interpretation completion planning");
+      }
+      return charge.apply(this, args);
+    });
+    try {
+      let caught: unknown;
+      try {
+        database.connection.transaction(() => observeSourceSemanticAccess(runtime,
+          { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
+            request: { kind: "prepare_query", original_query: orchid, budget: ACCESS_BUDGET } },
+          ["project"], meter, orchid, undefined, "query-conditioned-v1", ACCESS_BUDGET, undefined,
+          { leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
+            expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: orchid } }))();
+      } catch (error) { caught = error; }
+      expect(planning).toHaveBeenCalledOnce();
+      expect(caught).toBeInstanceOf(SourceSemanticResourceExhausted);
+      expect((caught as SourceSemanticResourceExhausted).phase).toBe("empty interpretation completion");
+      expect(headers).toHaveBeenCalled();
+      const metadata = bodies.mock.calls.filter(([, , maxBytes, offset]) => maxBytes === 1 && (offset ?? 0) === 0);
+      const bodySpans = bodies.mock.calls.filter(([, , maxBytes, offset]) => !(maxBytes === 1 && (offset ?? 0) === 0));
+      expect(metadata).toHaveLength(1);
+      expect(bodySpans).toEqual([]);
+      expect(bodies.mock.invocationCallOrder[0]!).toBeLessThan(headers.mock.invocationCallOrder[0]!);
+      expect(meter.nativeWork).toBeGreaterThan(0);
+      expect(meter.nativeBytes).toBeGreaterThan(0);
+      expect(meter.spentWork).toBeGreaterThan(meter.nativeWork);
+      expect(meter.spentWork).toBeLessThanOrEqual(ACCESS_BUDGET.work_units);
+      expect(meter.spentBytes).toBeLessThanOrEqual(ACCESS_BUDGET.memory_bytes);
+    } finally {
+      spy.mockRestore(); headers.mockRestore(); bodies.mockRestore();
+      database.close(); closeCachedDatabase(filename);
+    }
   });
 });
 

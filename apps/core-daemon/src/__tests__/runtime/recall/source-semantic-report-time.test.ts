@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
 import {
@@ -172,7 +172,7 @@ it("keeps the reported inspection and telling dates attached through public work
           original_query: question, query_semantics: semantics, semantic_correspondences: [aligned],
           budget: ACCESS_BUDGET, output_byte_limit: 1_000_000, authorized_scopes: SCOPES });
         if (recalled.operation !== "recall") throw new Error("public recall expected");
-        expect(recalled.provider_attempts).toBe(0);
+        expect(sourceSemanticExecutionPhases(recalled.execution).query_preparation.external_api_attempts).toBe(0);
         const proof = recalled.proofs?.find(row => row.source_interpretation_id === sourceId);
         const answer = proof?.binding_results?.find(row => row.kind === "answer");
         expect(answer?.returned.answerDate?.node_id).toBeDefined();

@@ -20,7 +20,14 @@ export const previewNoveltyBytes = (raw: string | undefined, proof: string) => p
 function reserveRawRoots(input: Parameters<LibraryPageSelector>[0], novelOnly: boolean, deferNovel = false): readonly SourceSemanticLibraryPackage[] {
   let selected = rawOnly(input);
   if (deferNovel && selected.length === 0) return selectSourceSemanticLibraryPage(input);
-  const raws = new Map(input.candidates.filter(row => row.proofs.length === 0).map(row => [physicalRoot(row), row]));
+  // Authored prefix comparison uses the first zero-proof content_start===0 row per root, not a later located window.
+  const raws = new Map<string, SourceSemanticLibraryPackage>();
+  for (const row of input.candidates) {
+    if (row.proofs.length > 0 || row.entry.target.kind !== "source_evidence") continue;
+    if ((row.entry.target.span?.content_start ?? 0) !== 0) continue;
+    const root = physicalRoot(row);
+    if (!raws.has(root)) raws.set(root, row);
+  }
   const novelBytes = (row: SourceSemanticLibraryPackage) => previewNoveltyBytes(raws.get(physicalRoot(row))?.preview, row.preview);
   const meter = input.meter, heldWork = meter.work - Math.min(200_000, Math.floor(meter.work / 2));
   const heldBytes = meter.bytes - Math.min(16_000_000, Math.floor(meter.bytes / 2));

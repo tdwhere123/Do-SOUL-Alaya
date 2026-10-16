@@ -1,4 +1,6 @@
+import { performance } from "node:perf_hooks";
 import {
+  sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
   BoundedIdSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   canonicalJson, hashContentDigest, sourceGoldRootIdentity, sourceIndexProfileId,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
@@ -9,6 +11,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
+import { captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, validateSourceEmbeddingResults,
+  sourceEmbeddingInputDigest, sourceEmbeddingSha256, type SourceEmbeddingBindingResult,
+  type SourceEmbeddingBindingOptions } from "../embedding-recall/source-embedding-runtime.js";
 
 type QueryResourceRefusal = SourceIndexAcquisitionResult["resource_refusals"][number];
 type ScoredRoot = Readonly<{
@@ -18,11 +23,73 @@ type RetainedNomination = {
   source: SourceIndexTarget; lexical: SourceIndexLexicalRank[]; vector: SourceIndexRootNomination["vector"];
 };
 
-/** Production acquisition policy, intended for observeSourceSemanticAccess (prepare and library).
- * Call inside the caller-owned native read snapshot; this owner does not create a snapshot lease.
- * It does not run inference, read bodies, select delivery packages or publish public receipts.
+type SourceQueryPreparationInput = Readonly<{
+  navigation: string; selection: SourceIndexSelection | null;
+  bind: (options: SourceEmbeddingBindingOptions) => Promise<SourceEmbeddingBindingResult>;
+  signal: AbortSignal; remainingMs: () => number;
+}>;
+type PreparedSourceQuery = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
+
+/** Production acquisition policy shared by preparation and library access.
+ * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
+ * Nomination does not run inference, read bodies, select delivery packages or publish public receipts.
  */
 export class SourceIndexAcquisition {
+  /** Private inference before the native snapshot. Observe the selected configuration; never create one. */
+  public static async prepareQuery(input: SourceQueryPreparationInput): Promise<PreparedSourceQuery> {
+    const navigation = input.navigation, selection = structuredClone(input.selection), started = performance.now();
+    const bind = input.bind, signal = input.signal, remainingMs = input.remainingMs;
+    const digest = sourceEmbeddingInputDigest(navigation);
+    let receipt: SourceSemanticQueryPreparation = {
+      status: "unavailable", reason: "source_profile_unbound", navigation_digest: digest, selected: null,
+      method: "not_run", submitted_inputs: 0, token_count: null, external_api_attempts: 0,
+      binding_work: "not_run", execution_work: "not_run", elapsed_ms: 0
+    };
+    const unavailable = (reason: string, status: "unavailable" | "failed" = "unavailable"): PreparedSourceQuery => ({
+      vector: { status: "unavailable", reason: reason.length <= 256 ? reason : "query_preparation_failed" },
+      receipt: { ...receipt, status, reason: reason.length <= 256 ? reason : "query_preparation_failed", elapsed_ms: performance.now() - started }
+    });
+    if (selection === null) return unavailable("source_profile_unbound");
+    try {
+      const profile = captureSourceEmbeddingProfile(selection.configuration.profile, selection.profile_id);
+      if (sourceIndexConfigurationId(selection.configuration, sourceEmbeddingSha256) !== selection.config_id) {
+        return unavailable("selected_configuration_mismatch");
+      }
+      receipt = { ...receipt, selected: { selection_revision: selection.selection_revision,
+        config_id: selection.config_id, profile_id: selection.profile_id, profile } };
+      signal.throwIfAborted();
+      receipt = { ...receipt, binding_work: "unknown", external_api_attempts: null };
+      const binding = await bind({ window_bytes: profile.window_bytes, max_input_tokens: profile.max_input_tokens });
+      // Binding may not support cancellation. Discard anything arriving after the inherited deadline.
+      signal.throwIfAborted();
+      if (remainingMs() <= 0) return unavailable("preparation_deadline");
+      if (binding.status !== "ready") return unavailable(binding.reason);
+      const profileId = binding.profile_id;
+      const actual = captureSourceEmbeddingProfile(binding.profile, profileId);
+      const embed = binding.embedInputs.bind(binding);
+      if (profileId !== selection.profile_id || canonicalJson(actual) !== canonicalJson(profile) ||
+          sourceIndexProfileId(actual, sourceEmbeddingSha256) !== selection.profile_id) return unavailable("selected_profile_mismatch");
+      const method = actual.provider_kind === "local_onnx" ? "local_inference" : "external_api";
+      receipt = { ...receipt, method, submitted_inputs: 1, execution_work: "unknown",
+        external_api_attempts: method === "local_inference" ? 0 : null };
+      const inputs = captureSourceEmbeddingInputs([{ input_id: digest, text: navigation }]);
+      const observed = validateSourceEmbeddingResults(inputs, await embed(inputs, {
+        profile_id: profileId, signal, timeoutMs: Math.max(1, remainingMs())
+      }), actual)[0]!;
+      signal.throwIfAborted();
+      if (remainingMs() <= 0) return unavailable("preparation_deadline");
+      receipt = { ...receipt, token_count: observed.token_count };
+      if (observed.status !== "embedded") return unavailable(observed.reason, "failed");
+      if (!observed.vector.some(value => value !== 0)) return unavailable("zero_query_vector", "failed");
+      return { vector: { status: "available", profile: actual, profile_id: profileId,
+        input_digest: observed.input_digest, embedding: observed.vector },
+        receipt: { ...receipt, status: "ready", reason: null, elapsed_ms: performance.now() - started } };
+    } catch (error) {
+      return unavailable(signal.aborted ? "preparation_deadline" :
+        error instanceof Error ? "query_preparation_failed" : "query_preparation_unknown", "failed");
+    }
+  }
+
   public constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256) {}
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission): SourceIndexAcquisitionResult {
@@ -85,10 +152,12 @@ class AcquisitionQuery {
       this.stage = "vector"; this.scanVectors();
       this.stage = "nomination"; this.nominatePrefix();
     } catch (error) {
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      this.resourceRefusals.push({ stage: this.stage, phase: error.phase });
+      // Keep all completed debits even when a repository or admission callback fails.
+      // Work inside the failed operation remains unknown; it is not successful absence.
+      this.resourceRefusals.push({ stage: this.stage, phase: error instanceof SourceSemanticResourceExhausted
+        ? error.phase : "acquisition_failed_unknown_additional_cost" });
       if (this.stage === "input" && this.vector.completion === "not_run") {
-        this.vector = { ...this.vector, reason: "read_budget" };
+        this.vector = { ...this.vector, reason: error instanceof SourceSemanticResourceExhausted ? "read_budget" : "acquisition_failed" };
       }
       this.limited = true;
     }
@@ -263,8 +332,12 @@ class AcquisitionQuery {
         this.stage = "nomination";
         this.retainNomination(source, lexical?.lexical ?? null, vector?.vector ?? null);
       } catch (error) {
+        // A thrown admission leaves this attempt unsettled, not a native-unknown result.
+        if (this.counts.attempted > this.counts.admitted + this.counts.duplicate + this.counts.rejected) {
+          this.counts.rejected++;
+        }
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-        this.counts.rejected++; this.counts.resource_refused++;
+        this.counts.resource_refused++;
         this.resourceRefusals.push({ stage: this.stage, phase: error.phase });
         this.limited = true; break;
       }

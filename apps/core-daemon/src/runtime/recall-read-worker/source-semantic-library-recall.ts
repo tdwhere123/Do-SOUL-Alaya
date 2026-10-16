@@ -31,7 +31,7 @@ import { authorizedScopesFromAdmission } from "@do-soul/alaya-core";
 type LibraryDiscovery = Readonly<{ descriptors: readonly SourceSemanticHandleDescriptor[];
   interpretationPages: number; interpretationOpen: boolean; interpretationTruncated: boolean; pool: SourceSemanticAccessPool }>;
 
-/** Provider-free library recall: one query/scope, independent conditional computation, bounded evidence delivery. */
+/** Native library computation over one prepared query/scope and its bounded shared access pool. */
 export function runSourceSemanticLibraryRecall(
   runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget
@@ -83,6 +83,8 @@ export function runSourceSemanticLibraryRecall(
     work_units: Math.max(0, meter.work - Math.min(request.budget.finalization_reserve, Math.floor(meter.work / 4))),
     memory_bytes: meter.bytes - Math.min(Math.floor(meter.bytes / 4), request.output_byte_limit * 8 + 65536)
   });
+  let explorationAbsorbed = false;
+  try {
   const boundPool = lease?.access_pool;
   const policy = request.access_policy ?? boundPool?.access.policy ?? "query-conditioned-v1";
   const publicRequestIdentity = sourceSemanticLibraryRequestIdentity({
@@ -110,10 +112,11 @@ export function runSourceSemanticLibraryRecall(
       discovered.descriptors, request, admission.query, original)
     : { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
       executedCount: 0, computeOpen: false, interpretationTruncated: false };
-  meter.absorb(exploration);
+  explorationAbsorbed = true; meter.absorb(exploration);
   return deliverLibraryPage(runtime, payload, authorized, meter, request, boundStatus,
     admission.kind === "admitted" ? admission.query : undefined,
     sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
+  } finally { if (!explorationAbsorbed) meter.absorb(exploration); }
 }
 
 /** Bench-only fixed-window computation. Its derived pool stays internal and is not an MCP observation. */
@@ -223,10 +226,10 @@ function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: Sou
         });
         if (aligned.kind !== "admitted") { computeOpen = true; continue; }
         const executed = executeSourceSemanticInterpretation({
-          request: {
+          computation: {
             contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
             source_interpretation_id: aligned.interpretation_id, query_semantics_id: aligned.query_id, semantic_correspondence_id: aligned.semantic_correspondence_id,
-            original_query: original, budget: remaining, output_byte_limit: request.output_byte_limit
+            original_query: original, budget: remaining
           },
           source_interpretation: checked.bound, query_semantics: query, semantic_correspondence: semantic_correspondence, original_query: original,
           workspaceId: payload.workspace_id, scope: checked.stored.record.scope_class!,

@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { AlayaError, SourceSemanticReasoningResultSchema, canonicalJson,
+import { AlayaError, sourceSemanticReasonControl, canonicalJson,
   SourceSemanticCorrespondencePreparationOptionsSchema, sourceSemanticCorrespondenceGenerationPolicies,
   sourceSemanticCorrespondenceIdentity, type SourceSemanticCorrespondencePreparationOptions } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
@@ -67,8 +67,8 @@ export function applyAffectedRecoveryCorrespondencePolicy(input: Readonly<{
   const consumedId = input.nomination.attention?.semantic_correspondence_id;
   const reasons = input.reasonResults.flatMap(row => {
     if (row.source_interpretation_id !== current.descriptor.source_interpretation_id ||
-        row.response?.result === undefined) return [];
-    const result = SourceSemanticReasoningResultSchema.parse(row.response.result);
+        row.response === undefined) return [];
+    const result = sourceSemanticReasonControl(row.response);
     const attention = result.attention;
     if (result.source_interpretation_id !== current.descriptor.source_interpretation_id ||
         attention?.source_interpretation_id !== current.descriptor.source_interpretation_id ||

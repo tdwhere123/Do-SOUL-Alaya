@@ -1,13 +1,20 @@
-import { expect, it, vi } from "vitest";
-import { SoulInterpretationRequestSchema } from "@do-soul/alaya-protocol";
-import { closeCachedDatabase, SqliteSourceHintReader } from "@do-soul/alaya-storage";
-import { sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
+import { SoulInterpretationRequestSchema, SourceSemanticExecutionSchema, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
+import { closeCachedDatabase, SqliteSourceHintReader, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
+import { fieldContractSha256, SourceIndexLifecycle, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { ACCESS_BUDGET, CLOCK, WS, accessCall, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
+import { INDEX_BUDGET, SIMULATED_CONFIGURATION } from "./source-semantic-index-acquisition.test-support.js";
 
 const original = "Why delayed?";
 const query = accessQuery(original, "postpone");
@@ -62,7 +69,8 @@ it("uses one hinted indexed navigation to reach a source outside the bounded cen
     expect(signal).toMatchObject({ source_text_score: 0,
       reading: { query_alternative: 0, query_frame: "qStatement", source_frame: "fStatement" } });
     expect(signal!.interpretation_reading_score).toBeGreaterThan(0);
-    expect(hinted.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(hinted.execution).query_preparation.external_api_attempts).toBe(0);
+    expect(hinted).not.toHaveProperty("provider_attempts");
     const recalled = await handler({ operation: "recall", accepts_unreviewed_conditional_results: true,
       query_handle: hinted.query_handle!, semantic_correspondences: [], budget, output_byte_limit: 1_000_000,
       authorized_scopes }, context);
@@ -85,6 +93,43 @@ it("uses one hinted indexed navigation to reach a source outside the bounded cen
   });
 }, 60_000);
 
+it("admits one current source tuple shared by canonical, native index and repeated interpretation discovery", async () => {
+  await withAccessLibrary([{ id: "overlap", text: "Harbor opening was put off.", reading: "postpone", count: 2 }],
+    async ({ execute, filename, ids }) => {
+      const { database } = await createRecallRealStorage(() => undefined, filename);
+      let target;
+      try {
+        const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
+        const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
+        const generation = lifecycle.begin(lifecycle.select(WS, SIMULATED_CONFIGURATION));
+        expect(lifecycle.capture(WS, generation.generation_id, 16, INDEX_BUDGET).generation.enumeration_complete).toBe(true);
+        [target] = repository.listTargets(WS, generation.generation_id, null, 16);
+        if (target === undefined) throw new Error("native source index target expected");
+        const prepared = lifecycle.prepare(WS, generation.generation_id, target.root_key, INDEX_BUDGET);
+        if (prepared.status !== "ready") throw new Error("native source document expected");
+        // Independently authored vector control: no inference, provider or retained archive is used.
+        for (const window of prepared.document.windows) expect(lifecycle.acceptVector(WS, generation.generation_id, {
+          window_id: window.window_id, input_digest: window.content_digest,
+          embedding: new Float32Array([1, 0, 0]), token_count: 2, truncated: false
+        }, INDEX_BUDGET).status).toBe("accepted");
+        expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
+      } finally { database.close(); closeCachedDatabase(filename); }
+      const prepared = await accessCall(execute, { ...prepare, access_hint: "Harbor" });
+      expect(prepared.access?.acquisition.result?.nominations).toContainEqual(expect.objectContaining({ source: target,
+        lexical: [expect.objectContaining({ lane: "unicode61", rank: 1 })] }));
+      expect(prepared.access?.observed_source_count).toBe(1);
+      expect(prepared.access?.observed_interpretation_count).toBe(2);
+      expect(prepared.access?.source_candidates.map(row => row.record_id)).toEqual([target!.target.root_id]);
+      expect(new Set(prepared.candidates.map(row => row.interpretation_id))).toEqual(new Set(ids.get("overlap")));
+      const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle!, semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
+      expect(recalled.index.entries.filter(row => row.target.kind === "source_evidence"
+        && row.target.root_id === target!.target.root_id)).toHaveLength(1);
+      expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(recalled.execution)).acquisition.status).toBe("not_run");
+      expect(recalled.discovery.access?.acquisition).toEqual(prepared.access?.acquisition);
+    });
+}, 60_000);
+
 it("inherits a frozen hint across source-only continuation and rejects changes, scope drift and a stale revision", async () => {
   await withAccessLibrary(Array.from({ length: 17 }, (_, index) => ({ id: `raw-${index}`, text: "Harbor notes." })),
   async ({ execute, filename }) => {
@@ -98,6 +143,9 @@ it("inherits a frozen hint across source-only continuation and rejects changes, 
     expect(omitted.access?.trace).toMatchObject({ source_offset: 16 });
     expect(omitted.work.native_work).toBe(0);
     expect(omitted.work.native_bytes).toBe(0);
+    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(omitted.execution)).query_preparation).toMatchObject({ status: "not_requested", method: "not_run", submitted_inputs: 0 });
+    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(omitted.execution)).acquisition).toMatchObject({ status: "not_run", result: null });
+    expect(omitted.access?.acquisition).toEqual(first.access?.acquisition);
     await expect(accessCall(execute, { ...continued, access_hint: "elsewhere" })).rejects.toThrow(/policy|budget|hint/u);
     await expect(accessCall(execute, { ...continued, access_policy: "canonical-v1" })).rejects.toThrow(/hint|policy/u);
     await expect(accessCall(execute, continued, ["global_core"])).rejects.toThrow(/scope/u);

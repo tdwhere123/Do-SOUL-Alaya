@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
-import { SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "../garden/source-semantic-access.js";
+import { SourceSemanticExecutionSchema, SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "../garden/source-semantic-access.js";
 import { BoundedIdSchema, BoundedLabelSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema } from "../evidence/source-reference.js";
 import { RequestBudgetSchema } from "../recall/conditional-field/query.js";
@@ -8,14 +8,13 @@ import { AuthorizedScopesAdmissionSchema } from "../governance/active-constraint
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceSemanticQuerySchema } from "../recall/conditional-field/semantic-query.js";
 import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/semantic-correspondence.js";
-import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
+import { SourceSemanticReasonDeliverySchema, refineSourceSemanticReasonDelivery } from "../garden/source-semantic-reason-delivery.js";
 import { SourceSemanticDraftSchema } from "../garden/source-semantic-draft.js";
 import { SourceSemanticGenerationTaskSchema } from "../garden/source-semantic-generation-task.js";
 import {
-  SourceSemanticInterpretationSchema, SourceSemanticNoPropositionOutcomeSchema, SourceSemanticSourceBindingSchema,
+  SourceSemanticNoPropositionOutcomeSchema, SourceSemanticSourceBindingSchema,
   SourceSemanticOutcomeSchema,
-  SourceSemanticPublishedInterpretationSchema,
-  SourceSemanticReasoningResultSchema
+  SourceSemanticPublishedInterpretationSchema
 } from "../garden/source-semantic-interpretation.js";
 import { MemorySearchResultSchema } from "./mcp-memory-search-types.js";
 import { SourceDisclosureSchema } from "../recall/source-disclosure.js";
@@ -34,13 +33,13 @@ import {
   SourceSemanticWorkerWorkSchema
 } from "../garden/source-semantic-worker.js";
 
-/** Public MCP/CLI host operations. Provider-free. Current delivery follows invariant §25 major request binding. */
+/** Public MCP/CLI host operations. V2 phase accounting and pre-snapshot inference are an invariant §25 major. */
 export const SOUL_INTERPRETATION_TOOL_NAME = "soul.interpretation" as const;
 
 const CoverageWork = {
   coverage: SourceSemanticCoverageSchema,
   work: SourceSemanticWorkerWorkSchema,
-  provider_attempts: z.literal(0)
+  execution: SourceSemanticExecutionSchema
 };
 
 export const SoulInterpretationPrepareSourceRequestSchema = z.object({
@@ -176,19 +175,9 @@ export const SoulInterpretationPrepareQueryResponseSchema = z.object({
 
 export const SoulInterpretationReasonResponseSchema = z.object({
   operation: z.literal("reason"),
-  result: SourceSemanticReasoningResultSchema.optional(),
-  interpretation: SourceSemanticInterpretationSchema.optional(),
-  query: SourceSemanticQuerySchema.optional(),
-  semantic_correspondence: SourceSemanticCorrespondenceSchema.optional(),
-  context: SourceSemanticEvaluationContextSchema.optional(),
-  source_disclosure: SourceDisclosureSchema.optional(),
-  outcome: SourceSemanticOutcomeSchema.optional(),
+  ...SourceSemanticReasonDeliverySchema.shape,
   ...CoverageWork
-}).strict().superRefine((value, context) => {
-  if (value.result !== undefined && value.source_disclosure === undefined) {
-    context.addIssue({ code: "custom", path: ["source_disclosure"], message: "reasoning result requires disclosure" });
-  }
-}).readonly();
+}).strict().superRefine(refineSourceSemanticReasonDelivery).readonly();
 
 const SoulInterpretationRecallDeliveryBaseSchema = z.object({
   ...SourceSemanticLibraryDeliverySchema.shape,

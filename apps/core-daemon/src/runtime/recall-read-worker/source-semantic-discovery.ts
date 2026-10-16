@@ -69,7 +69,9 @@ export function loadVerified(runtime: SourceSemanticReadRuntime, workspace: stri
 }
 
 export function workOf(meter: SourceSemanticReadBudget) {
-  return { native_work: meter.nativeWork, logical_work: meter.spentWork, native_bytes: meter.nativeBytes,
+  return { native_work: meter.nativeWork, index_work: meter.indexWork,
+    native_accounting: meter.indexWork > 0 ? "partial" as const : "complete" as const,
+    logical_work: meter.spentWork, native_bytes: meter.nativeBytes,
     logical_memory_bytes: meter.spentBytes, rss_bytes: process.memoryUsage().rss };
 }
 export function admissionOf(error: CoreError): string | undefined {

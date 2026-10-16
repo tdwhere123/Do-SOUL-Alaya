@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissionSchema,
   SourceSemanticQuerySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticAccessPolicySchema,
-  SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
+  SourceSemanticExecutionSchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema, SourceSemanticCoverageSchema, SourceSemanticWorkerWorkSchema,
   SourceSemanticQueryStatusSchema, SourceSemanticQueryUnavailableReasonSchema,
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SourceSemanticCorrespondencePreparationOptionsSchema,
   SourceSemanticCorrespondenceGenerationPolicySchema } from "@do-soul/alaya-protocol";
@@ -54,6 +54,7 @@ const QueryBase = { query_key: Digest, original_query: z.string(), raw_digest: D
 const Discovery = {
   descriptors: z.array(SourceSemanticHandleDescriptorSchema),
   discovery_trace: z.array(z.object({ coverage: SourceSemanticCoverageSchema, work: SourceSemanticWorkerWorkSchema,
+    execution: SourceSemanticExecutionSchema,
     access: SourceSemanticAccessReceiptSchema, query_semantics_status: SourceSemanticQueryStatusSchema,
     continuation_handle: z.string().nullable(), candidate_ids: z.array(z.string()) }).strict()),
   discovery_pages: z.number().int().nonnegative(), discovery_open: z.boolean(),
@@ -76,7 +77,9 @@ export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
     }).strict()).optional(),
   }).strict()
 ]);
-export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v6" as const;
+// Retained v6/v1-access plans are deliberately unsupported, not upgraded. Remove this cutover boundary
+// only after all retained v6 chain, lazy-qualification and recovery artifacts have been retired.
+export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v7" as const;
 export const SemanticChainPlanSchema = z.object({
   contract: z.literal(SEMANTIC_CHAIN_PLAN_CONTRACT), input_identity: Digest,
   config: SemanticChainConfigSchema, queries: z.array(SemanticChainQuerySchema),

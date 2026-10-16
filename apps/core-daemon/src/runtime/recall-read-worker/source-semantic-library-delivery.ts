@@ -1,5 +1,5 @@
 import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  indexEntryCacheKey, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
+  indexEntryCacheKey, sourceSemanticExecution, type SourceSemanticExecution, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
   type SourceSemanticAccessReceipt,
   type SourceSemanticLibraryUnprovedComputation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
@@ -38,7 +38,8 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
   const reservePage = (page: readonly SourceSemanticLibraryPackage[], emittedOffset: number, more: boolean) => {
     const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
       page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
-    const result = pageResult(base, page, emittedOffset, more, request, meter, true, access);
+    const result = pageResult(base, page, emittedOffset, more, request, meter, true, access,
+      sourceSemanticExecution(base.pool.access.preparation, base.pool.access.acquisition));
     const encoded = encodeSourceSemanticLibraryResponse(result);
     meter.retain(encoded, "candidate delivery encoding");
     const bytes = Buffer.byteLength(JSON.stringify(encoded));
@@ -186,7 +187,7 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
   if (pageIndex < 0) throw new CoreError("VALIDATION", "library continuation offset is not a frozen page boundary");
   const page = plan.pages[pageIndex]!;
   const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
-    plan.page_access[pageIndex]!);
+    plan.page_access[pageIndex]!, sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition));
   if (result.index.continuation !== null) {
     const continuation = result.index.continuation;
     issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,
@@ -231,7 +232,8 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
 }
 
 function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean,
-  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticAccessReceipt): Recall {
+  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticAccessReceipt,
+  execution: SourceSemanticExecution): Recall {
   const assembled = assembleSourceSemanticLibraryIndex({ ...base, authorized_scopes: base.authorized,
     source_entries: page.map(row => row.entry), proof_groups: page.filter(row => row.proofs.length > 0),
     selected_entries: page.map(row => row.entry), root_order: page.map(root),
@@ -257,7 +259,7 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
   }));
   const discovery = { ...base.discovery, access };
   const work = reserveWork ? reservedWork(request) : workOf(meter);
-  const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget,
+  const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget, execution,
     request_identity: base.public_request_identity,
     query_semantics_status: base.query_semantics_status,
     delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
@@ -275,7 +277,8 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
   return result;
 }
 function reservedWork(request: Request) {
-  return { native_work: request.budget.work_units, logical_work: request.budget.work_units,
+  return { native_work: request.budget.work_units, index_work: request.budget.work_units,
+    native_accounting: "partial" as const, logical_work: request.budget.work_units,
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,
     rss_bytes: Number.MAX_SAFE_INTEGER };
 }
