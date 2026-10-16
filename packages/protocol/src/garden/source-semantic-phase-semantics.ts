@@ -4,7 +4,7 @@ import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
 
 const Completion = z.enum(["complete", "partial", "unavailable", "not_run"]);
-export const SourceSemanticPhaseResourcesSchema = z.object({ work: NonNegativeIntSchema, memory_bytes: NonNegativeIntSchema,
+const SourceSemanticPhaseResourcesSchema = z.object({ work: NonNegativeIntSchema, memory_bytes: NonNegativeIntSchema,
   native_bytes: NonNegativeIntSchema, sql_internal_work: z.literal("unknown") }).strict().readonly();
 export const SourceSemanticQueryPreparationSchema = z.object({
   status: z.enum(["ready", "unavailable", "failed", "not_requested"]), reason: z.string().nullable(),

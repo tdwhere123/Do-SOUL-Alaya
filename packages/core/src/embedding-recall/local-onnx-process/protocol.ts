@@ -1,7 +1,7 @@
 import type { SourceIndexProfile } from "@do-soul/alaya-protocol";
 import type { SourceEmbeddingBindingOptions, SourceEmbeddingInput, SourceEmbeddingResult } from "../source-embedding-runtime.js";
 
-export type LocalOnnxSourceBinding = Readonly<{ status: "unsupported"; reason: string }> | Readonly<{
+type LocalOnnxSourceBinding = Readonly<{ status: "unsupported"; reason: string }> | Readonly<{
   status: "ready"; profile: SourceIndexProfile; profile_id: string; binding_id: string;
 }>;
 export type LocalOnnxSourceResult = Omit<Extract<SourceEmbeddingResult, { status: "embedded" }>, "vector"> &

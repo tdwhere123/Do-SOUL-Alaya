@@ -11,7 +11,7 @@ export function sourceIndexEpoch(database: StorageDatabase, workspaceId: string)
   const raw = database.connection.prepare("SELECT epoch FROM source_index_epochs WHERE workspace_id = ?").get(workspaceId);
   return raw === undefined ? 0 : readIntegerField(readRecord(raw, "source epoch"), "epoch");
 }
-export function selectionFromRow(value: unknown): SourceIndexSelection {
+function selectionFromRow(value: unknown): SourceIndexSelection {
   const row = readRecord(value, "source index selection");
   return Object.freeze({ workspace_id: readNonEmptyStringField(row, "workspace_id"),
     selection_revision: readIntegerField(row, "selection_revision"), config_id: readNonEmptyStringField(row, "config_id"),
