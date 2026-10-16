@@ -1,11 +1,18 @@
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+
+import { spawnSync } from "node:child_process";
 import { startBenchPhaseDiagnostics } from "../../bench-phase-diagnostics.test-support.js";
 import { appendFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync,
   statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, type SourceSemanticCorrespondenceProposalInput } from "@do-soul/alaya-soul";
@@ -62,6 +69,40 @@ const WORLDS = [
 const roots: string[] = [];
 let queryFixtureRoot: string | undefined;
 const filledQueryWorksets = new Map<string, string>();
+const CHILD_GUARD = new globalThis.URL("../../support/provider-free-cli-bootstrap.mjs", import.meta.url).href;
+const RECOVERY_CLI = fileURLToPath(new globalThis.URL("../../../../dist/runs/semantic-chain/launch.js", import.meta.url));
+let childGuardVerified = false;
+
+function replayInitialReasonInChild(recoveryRoot: string) {
+  if (!childGuardVerified) {
+    const probe = spawnSync(process.execPath, ["--import", CHILD_GUARD, "--input-type=module", "--eval", `
+      import { readFileSync } from "node:fs";
+      if (process.env.ALAYA_GUARD_PROBE_TOKEN !== undefined) throw new Error("ambient credential survived");
+      try { await fetch("https://provider.invalid"); } catch (error) { console.error(String(error)); }
+      try { readFileSync("/unowned/.env"); } catch (error) { console.error(String(error)); }
+    `], { encoding: "utf8", env: { ...process.env, ALAYA_GUARD_PROBE_TOKEN: "synthetic-probe" }, timeout: 30_000 });
+    expect(probe.error).toBeUndefined();
+    expect(probe.status).toBe(1);
+    expect(probe.stderr).toContain("Provider-free test refused non-loopback fetch");
+    expect(probe.stderr).toContain("Provider-free test refused credential file");
+    childGuardVerified = true;
+  }
+  const reasonPath = join(recoveryRoot, "initial-reason.json"), nominationPath = join(recoveryRoot, "source-nomination.json");
+  const reason = readFileSync(reasonPath), nomination = readFileSync(nominationPath);
+  for (let replay = 0; replay < 2; replay++) {
+    const child = spawnSync(process.execPath, ["--import", CHILD_GUARD, RECOVERY_CLI,
+      "recover-reason-initial", "--root", recoveryRoot], { encoding: "utf8", env: process.env, timeout: 30_000 });
+    if (child.error !== undefined || child.status !== 0) process.stderr.write(
+      `RECOVERY_CHILD_REPLAY ${JSON.stringify({ status: child.status, error: child.error?.message,
+        stdout: child.stdout, stderr: child.stderr })}\n`);
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(0);
+    expect(JSON.parse(child.stdout)).toEqual(readChainArtifact(reasonPath));
+    expect(readFileSync(reasonPath)).toEqual(reason);
+    expect(readFileSync(nominationPath)).toEqual(nomination);
+    expect(readChainArtifact(nominationPath)).toBeDefined();
+  }
+}
 
 // Q and its original-only review do not depend on a native source world. Each
 // world still admits their real physical evidence through the recovery stages.
@@ -79,6 +120,8 @@ async function fillQueryFixture(worksetPath: string, cacheRoot: string, raw: () 
 afterAll(async () => {
   await settleActiveBenchDaemonTasks();
   if (queryFixtureRoot !== undefined) rmSync(queryFixtureRoot, { recursive: true, force: true });
+  try { expect(isolation.violations).toEqual([]); }
+  finally { isolation.restore(); }
 });
 
 afterEach(async () => {
@@ -318,6 +361,7 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   expect(staticInitialRecall).toBe(WORLDS.some(original => original.name === world.name)
     || world.name === "format C-only revision" ? "recall" : undefined);
   expect(await benchPhase("recover-reason-initial", () => runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot]))).toBe(0);
+  if (cOnly) replayInitialReasonInChild(recoveryRoot);
   expect(await benchPhase("recover-prepare-q-review", () => runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot]))).toBe(0);
   await benchPhase("fill.proposal", () => fillQueryFixture(join(recoveryRoot, "query-review-workset.json"), qReviewCache,
     () => queryRaw(world.date, true)));
@@ -603,6 +647,7 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
             outcome: { status: "abstained" } });
       }, H_PROFILE);
     expect(await runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot])).toBe(0);
+    replayInitialReasonInChild(recoveryRoot);
     expect(await runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot])).toBe(0);
     if (!childQFilled) {
       await fillProposal(join(recoveryRoot, "query-review-workset.json"), sharedQChild,

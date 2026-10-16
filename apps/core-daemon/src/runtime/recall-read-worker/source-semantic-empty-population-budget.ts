@@ -1,6 +1,7 @@
 import { sourceSemanticExecution, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   type RequestBudget, type SourceRecordIdentity, type SourceSemanticAccessPolicy, type SourceSemanticQuery,
-  type SourceSemanticResourceBudget, type SourceSemanticAccessReceipt, type SourceSemanticHandleDescriptor,
+  type SourceSemanticResourceBudget, type SourceSemanticAccessReceipt, type SourceSemanticCompactPreparation,
+  type SourceSemanticCompactAcquisition, type SourceSemanticHandleDescriptor,
   type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
@@ -19,7 +20,7 @@ type Completion = Readonly<{
   policy: SourceSemanticAccessPolicy; budget: RequestBudget; accessHint?: string;
   orderCost: (count: number) => SourceSemanticResourceBudget;
   leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery;
-  phases?: Pick<SourceSemanticAccessReceipt, "preparation" | "acquisition">;
+  phases?: Readonly<{ preparation: SourceSemanticCompactPreparation; acquisition: SourceSemanticCompactAcquisition }>;
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
   leaseCount?: 1 | 2;
 }>;
@@ -27,15 +28,6 @@ type Completion = Readonly<{
 function add(...costs: readonly SourceSemanticResourceBudget[]): SourceSemanticResourceBudget {
   return { work_units: costs.reduce((sum, cost) => sum + cost.work_units, 0),
     memory_bytes: costs.reduce((sum, cost) => sum + cost.memory_bytes, 0) };
-}
-
-/** The input is request-owned plain phase metadata; copy every occurrence, without identity-based sharing. */
-function captureMetadata(value: unknown): unknown {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return Object.freeze(value.map(captureMetadata));
-  const captured: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(value)) captured[key] = captureMetadata((value as Record<string, unknown>)[key]);
-  return Object.freeze(captured);
 }
 
 /** Build the bounded completion envelope with the actual receipt, retain, ordering and lease owners. */
@@ -47,13 +39,9 @@ function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
   const sourceRows = records.map((record) => ({ source_id: record.source_id, record_id: record.identity,
     read_bytes: WIDE_SCALAR, body_bytes: WIDE_SCALAR, complete: WIDE_SCALAR,
     signal: { source_text_score: WIDE_SCALAR, interpretation_reading_score: WIDE_SCALAR } }));
-  const receipt = sourceSemanticAccessReceiptValue(policy, DIGEST, sourceRows, [],
+  const receipt = sourceSemanticAccessReceiptValue(planning, policy, DIGEST, sourceRows, [],
     WIDE_SCALAR, WIDE_SCALAR, ALL_STOPS, input.sourcePreviewExtents, input.phases === undefined ? undefined : {
-      ...input.phases, phase_accounting: {
-        observation: { work: Number.MAX_SAFE_INTEGER, memory_bytes: Number.MAX_SAFE_INTEGER,
-          native_bytes: Number.MAX_SAFE_INTEGER, sql_internal_work: "unknown" },
-        completion: "included_in_worker_work_not_separately_measured", native_cpu: "unknown", deadline: "soft_quarantine_until_exit"
-      } });
+      ...input.phases, observation: [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER] });
   const access = { ...receipt, pool_id: DIGEST };
   const pool = { sources: records, descriptors: [], access, sourcePages: WIDE_SCALAR, interpretationPages: WIDE_SCALAR,
     ...(input.sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents: input.sourcePreviewExtents }),
@@ -67,17 +55,28 @@ function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
     truncated: WIDE_SCALAR, access_offset: WIDE_SCALAR, access_source_offset: WIDE_SCALAR
   });
   const queryLease = sizedLease("query"), pageLease = sizedLease("page");
-  const measure = (value: unknown) => SourceSemanticResourceLedger.measureRetain(value, planning.remaining(), planning);
+  const measure = (value: unknown) => SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning);
+  const overlay = (left: SourceSemanticResourceBudget, right: SourceSemanticResourceBudget) =>
+    SourceSemanticResourceLedger.overlayRetainObjects(left, right, planning);
+  // The owners above define the wire fields. Only numeric subtree prices survive this quote;
+  // no repeated lease/trace walk reconstructs or rereads their shared receipt and pool.
+  const emptyPrice = measure([]), receiptPrice = measure(receipt);
+  const accessPrice = overlay(receiptPrice, measure({ pool_id: DIGEST }));
+  const tracePrice = overlay(accessPrice, measure({ trace: wideTrace.trace }));
+  const poolPrice = measure({ ...pool, sources: measure(records), descriptors: emptyPrice, access: accessPrice });
+  const queryLeasePrice = measure({ ...queryLease, access_pool: poolPrice, candidates: emptyPrice });
   const leaseCount = input.leaseCount ?? (records.length > SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE ? 2 : 1);
-  const execution = sourceSemanticExecution(input.phases?.preparation, input.phases?.acquisition);
-  const initial = add(measure([]), input.orderCost(records.length), measure(receipt), measure(wideTrace), measure(execution),
-    measure(queryLease), ...(leaseCount === 2 ? [measure(pageLease)] : []),
+  const execution = sourceSemanticExecution(input.phases?.preparation, input.phases?.acquisition, planning);
+  const pageLeasePrice = leaseCount === 2 ? measure({ ...pageLease, access_pool: poolPrice, candidates: emptyPrice }) : undefined;
+  const executionPrice = measure(execution);
+  const initial = add(emptyPrice, input.orderCost(records.length), receiptPrice, tracePrice, executionPrice,
+    queryLeasePrice, ...(pageLeasePrice === undefined ? [] : [pageLeasePrice]),
     { work_units: semanticLeaseGroupAccountingCost(leaseCount), memory_bytes: 0 });
 
   // A full retained pool must still be pageable under a fresh request's unchanged budget.
   if (leaseCount === 2) {
-    const page = add(measure(input.suppliedQuerySemantics), measure(pool), measure(wideTrace), measure(sourceSemanticExecution()),
-      measure(queryLease), measure(pageLease),
+    const page = add(measure(input.suppliedQuerySemantics), poolPrice, tracePrice, measure(sourceSemanticExecution()),
+      queryLeasePrice, pageLeasePrice!,
       { work_units: semanticLeaseGroupAccountingCost(2), memory_bytes: 0 });
     if (page.work_units > budget.work_units || page.memory_bytes > budget.memory_bytes) {
       throw new SourceSemanticResourceExhausted("source-only continuation completion");
@@ -111,24 +110,11 @@ export class SourceSemanticUnionCompletion {
   }
 
   // Receipt, delivered trace, two query/page leases and current execution evidence.
-  metadata(value: Pick<SourceSemanticAccessReceipt, "preparation"> | SourceSemanticAccessReceipt["acquisition"]): void {
+  metadata(value: Readonly<{ preparation: SourceSemanticCompactPreparation }> | SourceSemanticCompactAcquisition): void {
     this.reserve(planning => {
-      const beforeWork = planning.spentWork, beforeBytes = planning.spentBytes;
-      // Bound the copy first. This guard is real traversal, distinct from capture and quotation.
-      planning.retain(value, "source union metadata capture bound");
-      const captureCost = { work_units: planning.spentWork - beforeWork, memory_bytes: planning.spentBytes - beforeBytes };
-      planning.charge(captureCost.work_units, captureCost.memory_bytes, "source union immutable metadata capture");
-      const captured = captureMetadata(value);
-      const measure = (row: unknown) => SourceSemanticResourceLedger.measureRetain(row, planning.remaining(), planning);
-      const payload = measure(captured);
-      const slots = [undefined, undefined, undefined, undefined, undefined];
-      const slot = measure(undefined), framedSlots = measure(slots);
-      // The ledger owns both payload and framing prices. Sharing the capture eliminates planner
-      // walks, not any of the five future retained/serialized occurrences reserved here.
-      const quote = { work_units: slots.length * payload.work_units + framedSlots.work_units - slots.length * slot.work_units,
-        memory_bytes: slots.length * payload.memory_bytes + framedSlots.memory_bytes - slots.length * slot.memory_bytes };
-      planning.retain([captureCost, payload, slot, framedSlots, quote], "source union metadata quote bookkeeping");
-      return quote;
+      const payload = SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning);
+      // Five future occurrences remain held; their already-owned immutable packed payload is not walked again.
+      return SourceSemanticResourceLedger.quoteRetain([payload, payload, payload, payload, payload], planning.remaining(), planning);
     });
   }
 
@@ -138,15 +124,24 @@ export class SourceSemanticUnionCompletion {
       read_bytes: WIDE_SCALAR, body_bytes: WIDE_SCALAR, complete: WIDE_SCALAR,
       signal: { source_text_score: WIDE_SCALAR, interpretation_reading_score: WIDE_SCALAR } };
     // Lookup, order input/output references, receipt plus two retained query/page pool copies.
-    this.hold([record, record, row, row, row, row], add(this.increment(this.sourceCount),
-      SourceSemanticReadBudget.tupleLookupCost("discovered", 1)));
+    this.reserve(planning => {
+      const recordPrice = SourceSemanticResourceLedger.quoteRetain(record, planning.remaining(), planning);
+      const rowPrice = SourceSemanticResourceLedger.quoteRetain(row, planning.remaining(), planning);
+      return add(SourceSemanticResourceLedger.quoteRetain([recordPrice, recordPrice, rowPrice, rowPrice, rowPrice, rowPrice],
+        planning.remaining(), planning), this.increment(this.sourceCount), SourceSemanticReadBudget.tupleLookupCost("discovered", 1));
+    });
     this.sourceCount++;
   }
 
   interpretation(descriptor: SourceSemanticHandleDescriptor, row: SourceSemanticAccessReceipt["interpretation_candidates"][number]): void {
     if (this.interpretationCount === SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE) this.reservePageLease();
-    this.hold([descriptor, descriptor, descriptor, row, row, row, row, row], add(this.increment(this.interpretationCount),
-      SourceSemanticReadBudget.signalReconciliationCost(1)));
+    this.reserve(planning => {
+      const descriptorPrice = SourceSemanticResourceLedger.quoteRetain(descriptor, planning.remaining(), planning);
+      const rowPrice = SourceSemanticResourceLedger.quoteRetain(row, planning.remaining(), planning);
+      return add(SourceSemanticResourceLedger.quoteRetain([descriptorPrice, descriptorPrice, descriptorPrice,
+        rowPrice, rowPrice, rowPrice, rowPrice, rowPrice], planning.remaining(), planning),
+        this.increment(this.interpretationCount), SourceSemanticReadBudget.signalReconciliationCost(1));
+    });
     this.interpretationCount++;
   }
 
@@ -166,10 +161,6 @@ export class SourceSemanticUnionCompletion {
   private increment(count: number): SourceSemanticResourceBudget {
     const before = this.orderCost(count), after = this.orderCost(count + 1);
     return { work_units: after.work_units - before.work_units, memory_bytes: after.memory_bytes - before.memory_bytes };
-  }
-
-  private hold(value: unknown, extra: SourceSemanticResourceBudget = { work_units: 0, memory_bytes: 0 }): void {
-    this.reserve(planning => add(SourceSemanticResourceLedger.measureRetain(value, planning.remaining(), planning), extra));
   }
 
   private reserve(quote: (planning: SourceSemanticReadBudget) => SourceSemanticResourceBudget): void {

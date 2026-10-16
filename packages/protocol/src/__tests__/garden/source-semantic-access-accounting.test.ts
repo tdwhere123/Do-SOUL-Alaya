@@ -3,7 +3,10 @@ import {
   SourceSemanticAccessReceiptSchema, SourceSemanticAcquisitionPhaseSchema, SourceSemanticAcquisitionSchema,
   SourceSemanticExecutionSchema, isNativeReasoningOnlyExecution, sourceSemanticAcquisitionNotRun,
   sourceSemanticExecution, sourceSemanticExecutionPhases, unavailableSourceQueryPreparation,
-  type SourceSemanticExecution
+  captureSourceSemanticQueryPreparation, captureSourceSemanticAcquisition,
+  packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,
+  sourceSemanticAccessPhases, sourceSemanticExecutionExternalAttempts,
+  type SourceSemanticAcquisitionPhase, type SourceSemanticExecution, type SourceSemanticQueryPreparation
 } from "../../garden/source-semantic-access.js";
 import { SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 
@@ -14,18 +17,24 @@ const coverage = {
   conditional_computation: "unexercised" as const, payload: "complete" as const
 };
 const work = { native_work: 0, native_bytes: 0, logical_memory_bytes: 0, rss_bytes: 0 };
-const phaseAccounting = {
-  observation: null,
-  completion: "included_in_worker_work_not_separately_measured" as const,
-  native_cpu: "unknown" as const, deadline: "soft_quarantine_until_exit" as const
-};
+
+function compactPhases(input: {
+  preparation?: SourceSemanticQueryPreparation;
+  acquisition?: SourceSemanticAcquisitionPhase;
+  observation?: readonly [number, number, number] | null;
+} = {}) {
+  return [1,
+    packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
+      input.preparation ?? unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"))),
+    packSourceSemanticAcquisition(captureSourceSemanticAcquisition(
+      input.acquisition ?? sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"))),
+    input.observation ?? null] as const;
+}
 
 function accessV2(overrides: Record<string, unknown> = {}) {
   return {
     contract: "source-semantic-access-v2" as const,
-    preparation: unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
-    acquisition: sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
-    phase_accounting: phaseAccounting,
+    phases: compactPhases(),
     policy: "canonical-v1" as const, input_id: digest, pool_id: digest,
     observed_source_count: 2, observed_interpretation_count: 0,
     source_candidates: [{ source_id: "source-2", record_id: digest, read_bytes: 1, body_bytes: 1,
@@ -38,7 +47,7 @@ function accessV2(overrides: Record<string, unknown> = {}) {
 }
 
 function historicV1() {
-  const { preparation: _preparation, acquisition: _acquisition, phase_accounting: _phases, ...rest } = accessV2();
+  const { phases: _phases, ...rest } = accessV2();
   return { ...rest, contract: "source-semantic-access-v1" as const };
 }
 
@@ -57,6 +66,16 @@ function parseRejected(schema: { safeParse(value: unknown): { success: boolean; 
   return parsed.success ? [] : parsed.error!.issues.map(issue => issue.message);
 }
 
+function compactNonNative(execution: SourceSemanticExecution) {
+  expect(execution).not.toBe("native_reasoning_only");
+  if (execution === "native_reasoning_only") throw new Error("expected compact execution");
+  return execution;
+}
+
+function receiptPhases(access: unknown = accessV2()) {
+  return sourceSemanticAccessPhases(SourceSemanticAccessReceiptSchema.parse(access));
+}
+
 it("rejects historic access v1 through the live receipt and public prepare consumers", () => {
   const historic = historicV1();
   const receiptMessages = parseRejected(SourceSemanticAccessReceiptSchema, historic);
@@ -71,13 +90,16 @@ it("rejects historic access v1 through the live receipt and public prepare consu
 
 it("rejects missing acquisition or execution instead of defaulting them to success or absence", () => {
   const access = accessV2();
-  const { acquisition: _acquisition, ...withoutAcquisition } = access;
-  const { preparation: _preparation, ...withoutPreparation } = access;
-  const { phase_accounting: _phases, ...withoutPhases } = access;
-  expect(SourceSemanticAccessReceiptSchema.safeParse(withoutAcquisition).success).toBe(false);
-  expect(SourceSemanticAccessReceiptSchema.safeParse(withoutPreparation).success).toBe(false);
+  const { phases: _phases, ...withoutPhases } = access;
   expect(SourceSemanticAccessReceiptSchema.safeParse(withoutPhases).success).toBe(false);
-  expect(SoulInterpretationPrepareQueryResponseSchema.safeParse(publicPrepare({ access: withoutAcquisition })).success)
+  expect(SourceSemanticAccessReceiptSchema.safeParse(accessV2({
+    phases: [1, compactPhases()[1]]
+  })).success).toBe(false);
+  expect(SourceSemanticAccessReceiptSchema.safeParse(accessV2({
+    phases: [1, unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
+      compactPhases()[2], null]
+  })).success).toBe(false);
+  expect(SoulInterpretationPrepareQueryResponseSchema.safeParse(publicPrepare({ access: withoutPhases })).success)
     .toBe(false);
   const { execution: _execution, ...withoutExecution } = publicPrepare({ access });
   expect(SoulInterpretationPrepareQueryResponseSchema.safeParse(withoutExecution).success).toBe(false);
@@ -89,20 +111,14 @@ it("rejects missing acquisition or execution instead of defaulting them to succe
   }).success).toBe(false);
 });
 
-function expandedExecution(execution: SourceSemanticExecution) {
-  expect(execution).not.toBe("native_reasoning_only");
-  if (execution === "native_reasoning_only") throw new Error("expected expanded execution");
-  return execution;
-}
-
 it("compacts only exact canonical not-run execution to native_reasoning_only", () => {
   expect(sourceSemanticExecution()).toBe("native_reasoning_only");
   expect(SourceSemanticExecutionSchema.parse("native_reasoning_only")).toBe("native_reasoning_only");
   expect(isNativeReasoningOnlyExecution(sourceSemanticExecution())).toBe(true);
   const phases = sourceSemanticExecutionPhases("native_reasoning_only");
-  expect(isNativeReasoningOnlyExecution(phases)).toBe(true);
   expect(sourceSemanticExecution(phases.query_preparation, phases.acquisition)).toBe("native_reasoning_only");
-  expect(SourceSemanticExecutionSchema.parse(phases)).toEqual(phases);
+  expect(isNativeReasoningOnlyExecution(sourceSemanticExecution(phases.query_preparation, phases.acquisition))).toBe(true);
+  expect(SourceSemanticExecutionSchema.safeParse(phases).success).toBe(false);
   expect(phases.semantic_generation_attempts).toBe(0);
   expect(phases.query_preparation).toEqual(unavailableSourceQueryPreparation("operation_does_not_prepare", "not_requested"));
   expect(phases.acquisition).toEqual(sourceSemanticAcquisitionNotRun("operation_does_not_acquire"));
@@ -112,43 +128,47 @@ it("compacts only exact canonical not-run execution to native_reasoning_only", (
 
 it("keeps reason-bearing not-run, failures, nonzero resources, and unknown attempts expanded", () => {
   const phases = sourceSemanticExecutionPhases("native_reasoning_only");
-  const reasonBearing = expandedExecution(sourceSemanticExecution(
+  const reasonBearing = compactNonNative(sourceSemanticExecution(
     unavailableSourceQueryPreparation("attestation_missing", "not_requested")));
   expect(isNativeReasoningOnlyExecution(reasonBearing)).toBe(false);
-  expect(reasonBearing.query_preparation.reason).toBe("attestation_missing");
-  expect(reasonBearing.query_preparation.external_api_attempts).toBe(0);
-  const failed = expandedExecution(sourceSemanticExecution(phases.query_preparation, {
+  expect(sourceSemanticExecutionPhases(reasonBearing).query_preparation.reason).toBe("attestation_missing");
+  expect(sourceSemanticExecutionPhases(reasonBearing).query_preparation.external_api_attempts).toBe(0);
+  const failed = compactNonNative(sourceSemanticExecution(phases.query_preparation, {
     ...sourceSemanticAcquisitionNotRun("operation_does_not_acquire"), status: "failed",
     reason: "index_unavailable", accounting: "partial"
   }));
-  expect(failed.acquisition.status).toBe("failed");
-  expect(failed.acquisition.accounting).toBe("partial");
-  expect(failed.acquisition.budget).toEqual({ work_units: 0, memory_bytes: 0 });
-  const nonzero = expandedExecution(sourceSemanticExecution(phases.query_preparation, {
+  expect(sourceSemanticExecutionPhases(failed).acquisition.status).toBe("failed");
+  expect(sourceSemanticExecutionPhases(failed).acquisition.accounting).toBe("partial");
+  expect(sourceSemanticExecutionPhases(failed).acquisition.budget).toEqual({ work_units: 0, memory_bytes: 0 });
+  const nonzero = compactNonNative(sourceSemanticExecution(phases.query_preparation, {
     ...sourceSemanticAcquisitionNotRun("operation_does_not_acquire"),
     budget: { work_units: 4, memory_bytes: 8 }
   }));
-  expect(nonzero.acquisition.status).toBe("not_run");
-  expect(nonzero.acquisition.budget).toEqual({ work_units: 4, memory_bytes: 8 });
+  expect(sourceSemanticExecutionPhases(nonzero).acquisition.status).toBe("not_run");
+  expect(sourceSemanticExecutionPhases(nonzero).acquisition.budget).toEqual({ work_units: 4, memory_bytes: 8 });
   expect(sourceSemanticExecutionPhases(nonzero).acquisition.budget.work_units).toBe(4);
-  const unknownAttempts = expandedExecution(sourceSemanticExecution({
+  const unknownAttempts = compactNonNative(sourceSemanticExecution({
     ...phases.query_preparation, external_api_attempts: null
   }));
-  expect(unknownAttempts.query_preparation.external_api_attempts).toBeNull();
   expect(sourceSemanticExecutionPhases(unknownAttempts).query_preparation.external_api_attempts).toBeNull();
-  expect(sourceSemanticExecution(unknownAttempts.query_preparation, unknownAttempts.acquisition))
-    .not.toBe("native_reasoning_only");
+  expect(sourceSemanticExecutionExternalAttempts(unknownAttempts)).toBeNull();
+  expect(sourceSemanticExecution(
+    sourceSemanticExecutionPhases(unknownAttempts).query_preparation,
+    sourceSemanticExecutionPhases(unknownAttempts).acquisition
+  )).not.toBe("native_reasoning_only");
 });
 
 it("derives canonical external attempts without rewriting unknown to zero", () => {
   expect(sourceSemanticExecutionPhases("native_reasoning_only").query_preparation.external_api_attempts).toBe(0);
-  const unknown = expandedExecution(SourceSemanticExecutionSchema.parse({
-    ...sourceSemanticExecutionPhases("native_reasoning_only"),
-    query_preparation: { ...sourceSemanticExecutionPhases("native_reasoning_only").query_preparation,
-      external_api_attempts: null }
+  expect(sourceSemanticExecutionExternalAttempts("native_reasoning_only")).toBe(0);
+  const unknown = compactNonNative(sourceSemanticExecution({
+    ...sourceSemanticExecutionPhases("native_reasoning_only").query_preparation,
+    external_api_attempts: null
   }));
-  expect(unknown.query_preparation.external_api_attempts).toBeNull();
-  expect(sourceSemanticExecution(unknown.query_preparation)).not.toBe("native_reasoning_only");
+  expect(sourceSemanticExecutionPhases(unknown).query_preparation.external_api_attempts).toBeNull();
+  expect(sourceSemanticExecutionExternalAttempts(unknown)).toBeNull();
+  expect(sourceSemanticExecution(sourceSemanticExecutionPhases(unknown).query_preparation))
+    .not.toBe("native_reasoning_only");
   expect("provider_attempts" in SoulInterpretationPrepareQueryResponseSchema.parse(publicPrepare())).toBe(false);
   expect(SoulInterpretationPrepareQueryResponseSchema.safeParse(publicPrepare({ provider_attempts: 0 })).success)
     .toBe(false);
@@ -171,32 +191,35 @@ it("preserves unknown versus zero and unavailable versus partial on local, exter
   expect(unknownAttempts.external_api_attempts).toBe(0);
   expect(unknownAttempts.token_count).toBeNull();
   expect(unknownAttempts.elapsed_ms).toBeNull();
-  expect(expandedExecution(SourceSemanticExecutionSchema.parse({
-    ...execution,
-    query_preparation: { ...execution.query_preparation, method: "local_inference", submitted_inputs: 1,
-      token_count: 8, external_api_attempts: 0, status: "ready", reason: null }
+  expect(sourceSemanticExecutionPhases(sourceSemanticExecution({
+    ...execution.query_preparation, method: "local_inference", submitted_inputs: 1,
+    token_count: 8, external_api_attempts: 0, status: "ready", reason: null
   })).query_preparation.external_api_attempts).toBe(0);
-  expect(expandedExecution(SourceSemanticExecutionSchema.parse({
-    ...execution,
-    query_preparation: { ...execution.query_preparation, method: "external_api", submitted_inputs: 1,
-      token_count: 8, external_api_attempts: 2, status: "ready", reason: null }
+  expect(sourceSemanticExecutionPhases(sourceSemanticExecution({
+    ...execution.query_preparation, method: "external_api", submitted_inputs: 1,
+    token_count: 8, external_api_attempts: 2, status: "ready", reason: null
   })).query_preparation.external_api_attempts).toBe(2);
-  expect(expandedExecution(SourceSemanticExecutionSchema.parse({
-    ...execution,
-    query_preparation: { ...execution.query_preparation, external_api_attempts: null }
+  expect(sourceSemanticExecutionPhases(sourceSemanticExecution({
+    ...execution.query_preparation, external_api_attempts: null
   })).query_preparation.external_api_attempts).toBeNull();
-  const measuredZero = {
-    ...accessV2().phase_accounting,
-    observation: { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown" as const }
-  };
-  expect(SourceSemanticAccessReceiptSchema.parse(accessV2({ phase_accounting: measuredZero }))
-    .phase_accounting.observation).toEqual(measuredZero.observation);
-  expect(SourceSemanticAccessReceiptSchema.parse(accessV2()).phase_accounting.observation).toBeNull();
+  expect(receiptPhases(accessV2({ phases: compactPhases({ observation: [0, 0, 0] }) }))
+    .phase_accounting.observation).toEqual({
+    work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown"
+  });
+  expect(receiptPhases().phase_accounting.observation).toBeNull();
+  expect(receiptPhases().phase_accounting.native_cpu).toBe("unknown");
   expect(SourceSemanticAccessReceiptSchema.safeParse(accessV2({
-    phase_accounting: { ...phaseAccounting, native_cpu: 0 }
+    phase_accounting: {
+      observation: null, completion: "included_in_worker_work_not_separately_measured",
+      native_cpu: 0, deadline: "soft_quarantine_until_exit"
+    }
   })).success).toBe(false);
   expect(SourceSemanticAccessReceiptSchema.safeParse(accessV2({
-    phase_accounting: { ...phaseAccounting, observation: { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: 0 } }
+    phase_accounting: {
+      observation: { work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: 0 },
+      completion: "included_in_worker_work_not_separately_measured",
+      native_cpu: "unknown", deadline: "soft_quarantine_until_exit"
+    }
   })).success).toBe(false);
   expect(SourceSemanticAcquisitionPhaseSchema.parse({
     ...sourceSemanticAcquisitionNotRun("index_unavailable"), status: "failed", reason: "index_unavailable",
@@ -251,10 +274,13 @@ it("keeps private vector bodies out of the public acquisition schema", () => {
     }
   }).success).toBe(false);
   const publicText = JSON.stringify(SourceSemanticAccessReceiptSchema.parse(accessV2({
-    acquisition: { ...phase, status: "executed", accounting: "complete", result }
+    phases: compactPhases({ acquisition: { ...phase, status: "executed", accounting: "complete", result } })
   })));
   expect(publicText).not.toMatch(/embedding/u);
   expect(publicText).not.toMatch(/Float32Array/u);
+  expect(JSON.stringify(receiptPhases(accessV2({
+    phases: compactPhases({ acquisition: { ...phase, status: "executed", accounting: "complete", result } })
+  })).acquisition)).not.toMatch(/embedding/u);
 });
 
 it("does not add an external dispatch while rejecting an old access artifact", () => {

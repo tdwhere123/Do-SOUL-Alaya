@@ -1,6 +1,7 @@
 import { indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  SourceSemanticWorkerResultSchema, sourceSemanticAcquisitionNotRun, sourceSemanticExecution,
-  unavailableSourceQueryPreparation, type IndexEntry, type InformationIndex, type SourceSemanticLibraryProof } from "@do-soul/alaya-protocol";
+  SourceSemanticWorkerResultSchema, packSourceSemanticAcquisition, packSourceSemanticQueryPreparation,
+  sourceSemanticAcquisitionNotRun, sourceSemanticExecution, unavailableSourceQueryPreparation,
+  type IndexEntry, type InformationIndex, type SourceSemanticLibraryProof } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, projectSourceDisclosure,
   sourceSemanticLibrarySourceEntry, sourceGoldRootIdentity, encodeSourceSemanticLibraryResponse, slotQualifiersFor } from "@do-soul/alaya-core";
 import { deliveredProofFixture, source, query, correspondenceFor } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
@@ -18,14 +19,11 @@ export const GOLD_TARGET = {
   root_id: "gold", source_version: "1", content_digest: DIGEST, evidence_object_id: null
 };
 export const GOLD = sourceGoldUnitFromPublishedRoot(GOLD_TARGET);
+const libraryPreparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
+const libraryAcquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
 export const libraryAccessPhases = {
-  preparation: unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
-  acquisition: sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
-  phase_accounting: {
-    observation: null,
-    completion: "included_in_worker_work_not_separately_measured" as const,
-    native_cpu: "unknown" as const, deadline: "soft_quarantine_until_exit" as const
-  }
+  phases: [1, packSourceSemanticQueryPreparation(libraryPreparation),
+    packSourceSemanticAcquisition(libraryAcquisition), null] as const
 };
 
 export function sourceOnly(root: string, workspaceId = "ws"): IndexEntry {
@@ -77,7 +75,7 @@ export function workerRecall(index: InformationIndex, proofs: readonly SourceSem
       conditional_computation: proved ? "complete" : "unexercised", payload: "complete"
     },
     work: { native_work: 0, native_bytes: 0, logical_memory_bytes: 0, rss_bytes: 0 },
-    execution: sourceSemanticExecution(libraryAccessPhases.preparation, libraryAccessPhases.acquisition)
+    execution: sourceSemanticExecution(libraryAccessPhases.phases[1], libraryAccessPhases.phases[2])
   });
   if (result.kind !== "recall") throw new Error("recall expected");
   return result;

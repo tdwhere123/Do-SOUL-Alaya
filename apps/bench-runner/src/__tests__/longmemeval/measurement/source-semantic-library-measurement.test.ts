@@ -5,7 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
 import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema, sourceSemanticExecution,
-  sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
+  sourceSemanticExecutionPhases, SourceSemanticExecutionSchema } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";
 import { DIGEST, REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeProofResponseFixture,
@@ -292,8 +292,14 @@ describe("source semantic library measurement", () => {
     const changed = structuredClone(response);
     Object.assign(changed.results![0]!, { output_binding: "different" });
     const phases = sourceSemanticExecutionPhases(response.execution);
-    const unknownAttempts = { ...phases, query_preparation: { ...phases.query_preparation, external_api_attempts: null } };
-    const nonzeroAttempts = { ...phases, query_preparation: { ...phases.query_preparation, external_api_attempts: 1 } };
+    const unknownAttempts = sourceSemanticExecution(
+      { ...phases.query_preparation, external_api_attempts: null }, phases.acquisition);
+    const nonzeroAttempts = sourceSemanticExecution(
+      { ...phases.query_preparation, external_api_attempts: 1 }, phases.acquisition);
+    expect(SourceSemanticExecutionSchema.safeParse(unknownAttempts).success).toBe(true);
+    expect(SourceSemanticExecutionSchema.safeParse(nonzeroAttempts).success).toBe(true);
+    expect(sourceSemanticExecutionPhases(unknownAttempts).query_preparation.external_api_attempts).toBeNull();
+    expect(sourceSemanticExecutionPhases(nonzeroAttempts).query_preparation.external_api_attempts).toBe(1);
     for (const rejected of [ { ...input, requestBudget: { ...REQUEST, work_units: 1 } },
       { ...input, recallResult: { ...response, execution: nonzeroAttempts } },
       { ...input, recallResult: { ...response, execution: unknownAttempts } },

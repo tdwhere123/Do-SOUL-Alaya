@@ -1,6 +1,6 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
-  SourceSemanticResourceExhausted, SourceSemanticLibraryUnprovedComputationSchema, canonicalJson,
+  SourceSemanticResourceExhausted, SourceSemanticLibraryUnprovedComputationSchema, canonicalJson, sourceSemanticExecution,
   type SourceSemanticCorrespondence, type SourceSemanticHandleDescriptor,
   type SourceSemanticLibraryProof, type SourceSemanticLibraryUnprovedComputation, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticQueryStatus,
   type SourceSemanticWorkerRequest
@@ -15,8 +15,8 @@ import {
 import { createRecallReadWorkerRuntime, type RecallReadWorkerRuntime, type SourceSemanticReadRuntime } from "./runtime.js";
 import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import { admissionOf, loadVerified, workOf } from "./source-semantic-discovery.js";
-import { accessInputIdentity, bindResearchFixedSourcePool, observeSourceSemanticAccess,
-  type ResearchSourceObservation, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
+import { accessInputIdentity, observeSourceSemanticAccess, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
+import { bindResearchFixedSourcePool, type ResearchSourceObservation } from "./source-semantic-research-pool.js";
 import {
   listEligibleSemanticSources, SourceSemanticReadBudget
 } from "../field/source-semantic-read-stores.js";
@@ -338,6 +338,9 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   const hydration = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) });
   const prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports);
   meter.absorb(hydration);
+  // Selection has no acquisition phase of its own; capture current execution
+  // from the parent after observation, not from the pool's frozen provenance.
+  const execution = sourceSemanticExecution(meter.preparation, meter.acquisition, meter);
   const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const base: Parameters<typeof prepareLibraryDelivery>[0] = {
     query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
@@ -366,11 +369,11 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
       open_residuals: openResiduals || prepared.incomplete, truncated: openResiduals || prepared.incomplete
     }
   };
-  const plan = prepareLibraryDelivery(base, prepared.packages, request, selection, "field", selectPage);
+  const plan = prepareLibraryDelivery(base, prepared.packages, request, selection, "field", selectPage, execution);
   const rawOrderSelection = researchRawOrder ? new SourceSemanticReadBudget({
     work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }) : null;
   const rawOrder = rawOrderSelection === null ? null : prepareLibraryDelivery(base,
-    prepared.packages, request, rawOrderSelection, "source_access");
+    prepared.packages, request, rawOrderSelection, "source_access", selectSourceSemanticLibraryPage, execution);
   meter.absorb(selection);
   return { ...plan, research_raw_order: rawOrder?.pages[0] ?? null,
     research_raw_order_work: rawOrderSelection === null ? null : workOf(rawOrderSelection) };

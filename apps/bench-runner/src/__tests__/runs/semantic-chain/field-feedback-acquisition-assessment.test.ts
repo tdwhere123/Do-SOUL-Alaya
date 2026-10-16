@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import {
   canonicalJson, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, SoulInterpretationResponseSchema,
-  sourceIndexEntry, indexEntryCacheKey, sourceSemanticQueryIdentity, sourceSemanticAcquisitionNotRun,
+  sourceIndexEntry, indexEntryCacheKey, sourceSemanticQueryIdentity, packSourceSemanticAcquisition,
+  packSourceSemanticQueryPreparation, sourceSemanticAcquisitionNotRun, sourceSemanticAccessPhases,
   sourceSemanticExecution, unavailableSourceQueryPreparation,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, type SourceSemanticWorkerWork
@@ -19,16 +20,13 @@ const frozen = frozenCell(CELLS[0]);
 const queryId = sourceSemanticQueryIdentity(QUERY, fieldContractSha256);
 const work: SourceSemanticWorkerWork = { native_work: 0, native_bytes: 0, logical_work: 1, logical_memory_bytes: 64, rss_bytes: 0 };
 const execution = sourceSemanticExecution();
+const accessPreparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
+const accessAcquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
 const accessPhases = {
-  preparation: unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
-  acquisition: sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
-  phase_accounting: {
-    observation: null,
-    completion: "included_in_worker_work_not_separately_measured" as const,
-    native_cpu: "unknown" as const, deadline: "soft_quarantine_until_exit" as const
-  }
+  phases: [1, packSourceSemanticQueryPreparation(accessPreparation),
+    packSourceSemanticAcquisition(accessAcquisition), null] as const
 };
-const accessExecution = sourceSemanticExecution(accessPhases.preparation, accessPhases.acquisition);
+const accessExecution = sourceSemanticExecution(accessPreparation, accessAcquisition);
 const coverage: Preparation["coverage"] = { discovery: "complete", source_interpretation: "unexercised",
   query_semantics: "complete", semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete" };
 
@@ -369,10 +367,12 @@ it("rejects a historic access v1 prepare receipt on the public interpretation co
   const report = withCommon(failedDelivery());
   const prepare = report.common.prepare!;
   const historic = { ...prepare.access!, contract: "source-semantic-access-v1" as const };
-  delete (historic as { preparation?: unknown }).preparation;
-  delete (historic as { acquisition?: unknown }).acquisition;
-  delete (historic as { phase_accounting?: unknown }).phase_accounting;
+  delete (historic as { phases?: unknown }).phases;
   expect(SoulInterpretationResponseSchema.safeParse({ ...prepare, access: historic as never }).success).toBe(false);
+  const { phases: _phases, ...withoutPhases } = prepare.access!;
+  expect(SoulInterpretationResponseSchema.safeParse({ ...prepare, access: {
+    ...withoutPhases, ...sourceSemanticAccessPhases(prepare.access!)
+  } as never }).success).toBe(false);
   const { execution: _execution, ...withoutExecution } = prepare;
   expect(SoulInterpretationResponseSchema.safeParse(withoutExecution).success).toBe(false);
   expect(SoulInterpretationResponseSchema.safeParse(prepare).success).toBe(true);

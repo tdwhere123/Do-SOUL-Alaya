@@ -5,7 +5,8 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
-import { SoulInterpretationRequestSchema, SourceSemanticExecutionSchema, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
+import { SoulInterpretationRequestSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
+  sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, SqliteSourceHintReader, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { fieldContractSha256, SourceIndexLifecycle, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
@@ -115,7 +116,7 @@ it("admits one current source tuple shared by canonical, native index and repeat
         expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
       } finally { database.close(); closeCachedDatabase(filename); }
       const prepared = await accessCall(execute, { ...prepare, access_hint: "Harbor" });
-      expect(prepared.access?.acquisition.result?.nominations).toContainEqual(expect.objectContaining({ source: target,
+      expect(sourceSemanticAccessPhases(prepared.access!).acquisition.result?.nominations).toContainEqual(expect.objectContaining({ source: target,
         lexical: [expect.objectContaining({ lane: "unicode61", rank: 1 })] }));
       expect(prepared.access?.observed_source_count).toBe(1);
       expect(prepared.access?.observed_interpretation_count).toBe(2);
@@ -126,7 +127,7 @@ it("admits one current source tuple shared by canonical, native index and repeat
       expect(recalled.index.entries.filter(row => row.target.kind === "source_evidence"
         && row.target.root_id === target!.target.root_id)).toHaveLength(1);
       expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(recalled.execution)).acquisition.status).toBe("not_run");
-      expect(recalled.discovery.access?.acquisition).toEqual(prepared.access?.acquisition);
+      expect(recalled.discovery.access?.phases[2]).toEqual(prepared.access?.phases[2]);
     });
 }, 60_000);
 
@@ -145,7 +146,7 @@ it("inherits a frozen hint across source-only continuation and rejects changes, 
     expect(omitted.work.native_bytes).toBe(0);
     expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(omitted.execution)).query_preparation).toMatchObject({ status: "not_requested", method: "not_run", submitted_inputs: 0 });
     expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(omitted.execution)).acquisition).toMatchObject({ status: "not_run", result: null });
-    expect(omitted.access?.acquisition).toEqual(first.access?.acquisition);
+    expect(omitted.access?.phases[2]).toEqual(first.access?.phases[2]);
     await expect(accessCall(execute, { ...continued, access_hint: "elsewhere" })).rejects.toThrow(/policy|budget|hint/u);
     await expect(accessCall(execute, { ...continued, access_policy: "canonical-v1" })).rejects.toThrow(/hint|policy/u);
     await expect(accessCall(execute, continued, ["global_core"])).rejects.toThrow(/scope/u);

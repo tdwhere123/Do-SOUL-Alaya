@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, SourceRecordIdentitySchema,
-  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases, SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema,
+  SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts, SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema,
   type SourceSemanticExecution } from "@do-soul/alaya-protocol";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
@@ -79,7 +79,7 @@ const ExposureSchema = ExposureReservationSchema.extend({ contract: z.literal("s
 function embeddingAttempts(executions: readonly SourceSemanticExecution[]): number | null {
   let total = 0;
   for (const execution of executions) {
-    const attempts = sourceSemanticExecutionPhases(execution).query_preparation.external_api_attempts;
+    const attempts = sourceSemanticExecutionExternalAttempts(execution);
     if (attempts === null) return null;
     total += attempts;
   }

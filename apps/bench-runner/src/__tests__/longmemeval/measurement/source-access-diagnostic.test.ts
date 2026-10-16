@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { SoulInterpretationPrepareQueryResponseSchema, SoulInterpretationRequestSchema,
-  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
+  SourceSemanticExecutionSchema, sourceSemanticAccessPhases, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
@@ -660,7 +660,7 @@ describe("source access diagnostic", () => {
     let fetchCalls = 0;
     globalThis.fetch = (async () => { fetchCalls++; throw new Error("provider network prohibited"); }) as typeof fetch;
     try {
-      for (const kind of ["historic-v1", "missing-execution"] as const) {
+      for (const kind of ["historic-v1", "expanded-v2", "missing-execution"] as const) {
         const alteredRoot = join(f.root, `rejected-${kind}`);
         await cp(join(f.root, "v2-observed"), alteredRoot, { recursive: true });
         const altered = readChainArtifact(join(alteredRoot, "observation.json")) as SourceAccessDiagnosticObservation;
@@ -668,13 +668,15 @@ describe("source access diagnostic", () => {
         const retained = readChainArtifact(join(alteredRoot, evidence.page!.path)) as { response: unknown };
         const response = structuredClone(retained.response) as {
           execution?: unknown; provider_attempts: number | null;
-          access: { contract: string; preparation?: unknown; acquisition?: unknown; phase_accounting?: unknown }
+          access: { contract: string; phases?: Parameters<typeof sourceSemanticAccessPhases>[0]["phases"] }
         };
         if (kind === "historic-v1") {
           response.access.contract = "source-semantic-access-v1";
-          delete response.access.preparation;
-          delete response.access.acquisition;
-          delete response.access.phase_accounting;
+          delete response.access.phases;
+        } else if (kind === "expanded-v2") {
+          if (response.access.phases === undefined) throw new Error("current compact access phases required");
+          Object.assign(response.access, sourceSemanticAccessPhases({ phases: response.access.phases }));
+          delete response.access.phases;
         } else {
           delete response.execution;
         }

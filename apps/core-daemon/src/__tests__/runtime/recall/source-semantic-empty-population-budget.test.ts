@@ -5,7 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
-import { SourceSemanticResourceExhausted, sourceSemanticExecution } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceExhausted, sourceSemanticAccessPhases, sourceSemanticExecution } from "@do-soul/alaya-protocol";
 import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -48,7 +48,8 @@ it.each([{ name: "omitted", accessHint: undefined }, { name: "maximum-length", a
       const byteReserve = ample.parent.bytes - ample.child.bytes;
       const actual = new SourceSemanticReadBudget(ampleBudget);
       const digest = `sha256:${"a".repeat(64)}`;
-      const receipt = sourceSemanticAccessReceiptValue("query-conditioned-v1", digest, [], [], false, false, []);
+      const receipt = sourceSemanticAccessReceiptValue(new SourceSemanticReadBudget(ampleBudget),
+        "query-conditioned-v1", digest, [], [], false, false, []);
       const pool = { sources: [], descriptors: [], access: { ...receipt, pool_id: digest }, sourcePages: 1, interpretationPages: 1,
         ...(accessHint === undefined ? {} : { accessHint }) };
       actual.retain([]);
@@ -90,8 +91,8 @@ it("reserves real v2 nomination metadata, execution evidence and both frozen lea
       request: { kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET }
     }, ["project"], new SourceSemanticReadBudget(QUERY_BUDGET), ORIGINAL, undefined, "query-conditioned-v1", QUERY_BUDGET))();
     expect(observed.sources).toHaveLength(17);
-    expect(observed.access.acquisition.result?.nominations).toHaveLength(16);
-    const phases = { preparation: observed.access.preparation, acquisition: observed.access.acquisition };
+    expect(sourceSemanticAccessPhases(observed.access).acquisition.result?.nominations).toHaveLength(16);
+    const phases = { preparation: observed.access.phases[1], acquisition: observed.access.phases[2] };
     const order = createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1", new SourceSemanticReadBudget(ACCESS_BUDGET));
     const context = { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
       expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: ORIGINAL };

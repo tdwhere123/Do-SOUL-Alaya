@@ -110,11 +110,18 @@ export function selectRecoveryNomination(window: readonly RecoveryWindowSource[]
     record_id: chosen.source.record_id, content_digest: chosen.source.content_digest,
     initial_read_bytes: chosen.source.read_bytes, initial_body_bytes: chosen.source.body_bytes,
     attention: chosen.attention,
-    reason_controls: controls.map(({ row, control }) => ({
-      source_interpretation_id: control.source_interpretation_id ?? row.source_interpretation_id,
-      query_semantics_id: control.query_semantics_id, semantic_correspondence_id: control.semantic_correspondence_id,
-      conditional_computation_id: control.conditional_computation_id, outcome: control.outcome,
-      source_target: control.source_target, query_gaps: control.query_gaps })),
+    // Omit absent optional controls before identity hashing; canonicalJson keeps explicit undefined that JSON.stringify drops.
+    reason_controls: controls.map(({ row, control }) => {
+      const source_interpretation_id = control.source_interpretation_id ?? row.source_interpretation_id;
+      return {
+        outcome: control.outcome,
+        ...(source_interpretation_id === undefined ? {} : { source_interpretation_id }),
+        ...(control.query_semantics_id === undefined ? {} : { query_semantics_id: control.query_semantics_id }),
+        ...(control.semantic_correspondence_id === undefined ? {} : { semantic_correspondence_id: control.semantic_correspondence_id }),
+        ...(control.conditional_computation_id === undefined ? {} : { conditional_computation_id: control.conditional_computation_id }),
+        ...(control.source_target === undefined ? {} : { source_target: control.source_target }),
+        ...(control.query_gaps === undefined ? {} : { query_gaps: control.query_gaps }) };
+    }),
     nomination: nominated !== undefined ? "initial_reason_attention"
       : controls.some(({ control }) => control.conditional_computation_id !== undefined)
         ? "frozen_window_after_computed_reason" : "frozen_window_after_unbound_reason" };

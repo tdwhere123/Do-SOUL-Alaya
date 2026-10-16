@@ -15,13 +15,26 @@ until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
 A GitHub release tag must match the latest published `## vX.Y.Z`
 heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
+`@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
 Protocol 19.0.0 and engine gateway 2.0.0 declare the Source acquisition and
-phase-accounting **major** under handbook invariant §25. Current access receipts
-use `source-semantic-access-v2`; required `execution` distinguishes
-`query_preparation`, `acquisition` and conditional computation. Query embedding
-runs in `SourceIndexAcquisition.prepareQuery` before the caller-owned read
-snapshot (`beforeSnapshotPreparation`). A begun snapshot degrades as
+phase-accounting **major** under handbook invariant §25. See the [current query
+contract](docs/handbook/recall.md#opt-in-open-source-semantics). Current access
+receipts use `source-semantic-access-v2` with required typed compact `phases`:
+version-1 tuple `[1, preparation, acquisition, observation|null]`. Public
+`execution` is the `native_reasoning_only` literal or version-1 tuple
+`[1, preparation, acquisition]`. Wire admission checks those compact slots
+directly and must not construct expanded objects. Expanded
+`source-semantic-execution-v2` meaning (`query_preparation`, `acquisition`,
+`semantic_generation_attempts: 0`) remains authoritative only through the
+Protocol helpers `sourceSemanticAccessPhases` and `sourceSemanticExecutionPhases`;
+`sourceSemanticExecution` emits the literal only on exact canonical equality.
+Capture (`captureSourceSemanticQueryPreparation` /
+`captureSourceSemanticAcquisition`) is the semantic ingress; packing never drops
+profile identity or unknown measurements. Conditional computation stays a
+separate post-snapshot coverage coordinate, not an execution field. Query
+embedding runs in `SourceIndexAcquisition.prepareQuery` before the caller-owned
+read snapshot (`beforeSnapshotPreparation`). A begun snapshot degrades as
 `snapshot_already_begun` with no inference, replacement or commit; an unwired
 binder is `embedding_preparation_unwired`. That model/index work is not covered
 by the later conditional computation's provider-free guarantee. Unknown costs
@@ -31,24 +44,39 @@ rather than claiming the whole call is provider-free.
 Unscoped query-conditioned observation may run one snapshot-owned
 `source-index-interleaved-prefix.v1` join: bounded BM25 lexical rows and
 inspected vector windows (`ranking: exact_over_inspected_subset`, not
-full-library nearest neighbor) into at most 16 root `nominations`. Native `phase_accounting` keeps `observation` null when unmeasured,
-`completion` as `included_in_worker_work_not_separately_measured`,
-`native_cpu` as `unknown`, and `deadline` as `soft_quarantine_until_exit`. Soft worker deadlines bound caller
-latency only; `terminate` is a request, and a slot stays owned through
-quarantine until actual exit. Resource accounting stays truthful and request
-budgets are not increased. Holding a canonical-observation quote does not prove
-that every previous envelope still fits. Source index and backfill mechanisms
-exist; daemon scheduling, provisioning, default useful recall and natural-corpus
-effects are not established.
+full-library nearest neighbor) into at most 16 root `nominations`. Compact
+`observation` is `null` when unmeasured, never zeros; a measured slot is
+`[work, memory_bytes, native_bytes]`. Expansion restores
+`sql_internal_work: unknown` and the fixed `phase_accounting` literals
+`completion: included_in_worker_work_not_separately_measured`,
+`native_cpu: unknown`, and `deadline: soft_quarantine_until_exit`. Those
+accounting fields are not retained on the receipt. Short preparation form
+elides only exact canonical not-run work; `null`, `unknown`, `not_run`, and
+vector `valid_empty` stay distinct from zero, absence, or `ready`. Soft worker
+deadlines bound caller latency only; `terminate` is a request, and a slot stays
+owned through quarantine until actual exit. Packing, expansion and pool-identity
+traversal charge the request ledger without refunds; `pool_id` hashes the
+expanded preimage while the receipt retains compact `phases`. Holding a
+canonical-observation quote does not prove that every previous envelope still
+fits. Source index and backfill mechanisms exist; daemon scheduling,
+provisioning, default useful recall and natural-corpus effects are not
+established.
 
 Current-request `execution` may be the `native_reasoning_only` literal only for
 exact canonical not-requested/not-run phases (`operation_does_not_prepare` /
 `operation_does_not_acquire`, `semantic_generation_attempts: 0`). It does not
-imply zero native work. Any other reason, resource evidence or unknown
-measurement stays expanded `source-semantic-execution-v2`; frozen access
-provenance is unchanged. Public `provider_attempts` is removed: derive external
-attempts from execution, preserving unknown (`null`) measurements. Reason
-delivery first fits the complete v5 result and premises. Only an oversized
+imply zero native work and is never inferred from generation-attempt count
+alone. Any other reason, resource evidence or unknown measurement stays a
+compact non-literal execution tuple. Frozen access `phases` are observation
+provenance, not this delivery's execution. Page-reservation encoding prices the
+first page with caller `initialExecution` (default native-only) and later reserved
+pages as native-only; public delivery of any frozen page attaches current-call
+`execution` from the worker meter without new source access, solver replay or
+re-selection. Public
+`provider_attempts` is removed: derive external attempts from execution,
+preserving unknown (`null`) measurements, including via
+`sourceSemanticExecutionExternalAttempts` without expanding complete phases.
+Reason delivery first fits the complete v5 result and premises. Only an oversized
 envelope may instead carry `no_conclusion`: original `outcome`, available
 H/Q/C/computation identities and restrictions, disclosure including `proof_use`,
 coverage and measured work, without result, bindings or premises
@@ -57,17 +85,20 @@ coverage and measured work, without result, bindings or premises
 unavailable, not uncomputed work. Recovery expands it through
 `sourceSemanticReasonControl` and must not treat omitted premises as never
 computed or invent attention. Mandatory evidence that cannot fit still fails
-closed.
+closed. Bounded final-proof deferral still uses the existing page selector; it
+prices a tentative later page against the actual current-execution envelope and
+does not add relevance, proof authority or recall gain.
 
-Cross-major migration: consumers must read the required execution/acquisition
-fields and current receipt versions together. Historical access v1 or missing
-execution evidence must not be relabeled as a current measured result. Archive
-bytes remain unchanged; rebuild current measurements through their native
-producer rather than patching old receipts. Query vectors stay in the private
-worker envelope, not public responses. Independent review and small-budget
-verification remain open. This migration does not establish default background
-indexing, ready vector coverage, or natural-corpus recall gains, and performs no
-release or provider execution.
+Cross-major migration: consumers must read compact `access.phases` / `execution`
+together with current receipt versions, expanding only through the Protocol
+helpers. Historical access v1, expanded live objects, or missing execution
+evidence must not be relabeled as a current measured result. Archive bytes
+remain unchanged; rebuild current measurements through their native producer
+rather than patching old receipts. Query vectors stay in the private worker
+envelope, not public responses. Independent review, runtime/codec tests and
+small-budget verification remain open. This migration does not establish default
+background indexing, ready vector coverage, or natural-corpus recall gains, and
+performs no release or provider execution.
 
 Protocol 18.1.0 includes source representation in unproved-delivery source
 identity. Verification uses the same source-record hash as receipts, so a
@@ -189,8 +220,6 @@ Native scoped C requests additionally bind a query-branch demand and explicit
 assessed/unassessed coverage, with separate H and total-C budgets. This producer
 metadata grants no proof authority. Full-catalog request identities stay stable;
 scoped results cannot satisfy another task or a full-catalog cache lookup.
-
-`@do-soul/alaya-engine-gateway` is `1.2.0`; app packages remain `0.3.11`.
 
 Engine gateway 1.1.0 exposes the existing resolved provider URL guard. Native chat
 Bench HTTP delegates use it before source and Q/C attempt reservation; local URL,

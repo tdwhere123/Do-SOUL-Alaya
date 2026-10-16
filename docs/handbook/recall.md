@@ -917,18 +917,29 @@ current source and Q/H/C/computation identities, logical completeness, and any
 keyed attention. It conveys no answer binding or source fact. Conditional
 computation coverage follows actual execution; missing dependencies remain
 unexercised, while resource-limited execution remains open. In the unreleased
-Protocol 19 major, current-request `execution` may be the `native_reasoning_only`
-literal only for exact canonical not-requested/not-run receipts
-(`query_preparation` reason `operation_does_not_prepare`, `acquisition` reason
-`operation_does_not_acquire`, `semantic_generation_attempts: 0`). That compact
-form excludes model/index acquisition attempts, not native reads or computation,
-and does not mean zero native work. Any other reason, resource evidence or
-unknown measurement stays expanded `source-semantic-execution-v2`.
-`sourceSemanticExecutionPhases` expands the literal to that same phase authority;
-`sourceSemanticExecution` emits the literal only on exact canonical equality.
+Protocol 19 major, public `execution` is the `native_reasoning_only` literal or
+the version-1 compact tuple `[1, preparation, acquisition]`; access receipts
+retain typed compact `phases` `[1, preparation, acquisition, observation|null]`.
+Wire admission checks those slots directly. Expanded
+`source-semantic-execution-v2` meaning remains authoritative only through
+`sourceSemanticAccessPhases` and `sourceSemanticExecutionPhases`.
+`sourceSemanticExecution` emits the literal only for exact canonical
+not-requested/not-run receipts (`query_preparation` reason
+`operation_does_not_prepare`, `acquisition` reason `operation_does_not_acquire`,
+`semantic_generation_attempts: 0`). That literal excludes model/index
+acquisition attempts, not native reads or computation, and does not mean zero
+native work; it is never inferred from generation-attempt count alone. Any other
+reason, resource evidence or unknown measurement stays a compact non-literal
+execution tuple. Packing captured semantics round-trips through the expansion
+helpers without dropping profile identity or unknown measurements: `null`,
+`unknown`, `not_run`, and vector `valid_empty` stay distinct from zero, absence,
+or `ready`.
 Public consumers derive external attempts from execution (preserving `null`),
-not a duplicate `provider_attempts` field or semantic-generation count. Frozen
-access receipts retain their original preparation/acquisition provenance.
+not a duplicate `provider_attempts` field or semantic-generation count, including
+via `sourceSemanticExecutionExternalAttempts` without expanding complete phases.
+Frozen access `phases` are observation provenance, not this delivery's execution;
+current-call `execution` is attached separately on first page and frozen
+continuation.
 
 Reason delivery tries the complete v5 result and all premises against the actual
 native/public UTF-8 envelope cap for every outcome. Full results and premises
@@ -1502,13 +1513,17 @@ full-library nearest neighbor). This Source-index pass nominates at most 16 root
 canonical observation is separate, so this is not a total candidate-union ceiling.
 Query embedding is `SourceIndexAcquisition.prepareQuery` under `beforeSnapshotPreparation`; a begun
 snapshot reports `snapshot_already_begun` without inference, and an unwired binder
-is `embedding_preparation_unwired`. Access `phase_accounting` uses nullable
-`observation`, `completion: included_in_worker_work_not_separately_measured`,
-`native_cpu: unknown`, and `deadline: soft_quarantine_until_exit`. Soft worker
-deadlines bound caller latency; a quarantined slot stays owned until actual exit.
-Native resource accounting stays truthful and request budgets are not increased;
-holding a canonical-observation quote does not prove that every previous envelope
-still fits. Source index and backfill mechanisms exist; daemon scheduling,
+is `embedding_preparation_unwired`. Compact `observation` is `null` when
+unmeasured, never zeros; a measured slot is `[work, memory_bytes, native_bytes]`.
+`sourceSemanticAccessPhases` restores `sql_internal_work: unknown` and the fixed
+`phase_accounting` literals `completion: included_in_worker_work_not_separately_measured`,
+`native_cpu: unknown`, and `deadline: soft_quarantine_until_exit`; those fields
+are not retained on the receipt. Soft worker deadlines bound caller latency; a
+quarantined slot stays owned until actual exit. Packing, expansion and pool-identity
+traversal charge the request ledger without refunds. Native resource accounting
+stays truthful and request budgets are not increased; holding a
+canonical-observation quote does not prove that every previous envelope still
+fits. Source index and backfill mechanisms exist; daemon scheduling,
 provisioning, default useful recall and natural-corpus effects are not established.
 
 Access progressively interleaves source-text observation, bounded header pages
@@ -1541,8 +1556,10 @@ decoding and verification use the existing ledger and phase reserves. Bounded
 membership may change with the implementation; the pool identity binds actual
 observations and prepared benchmark plans also pin the implementation revision.
 
-The access receipt retains identities, cached scores, source byte extents and
-open residuals, without duplicating interpretation bodies. It reports the total
+The access receipt retains identities, cached scores, source byte extents,
+compact `phases`, and open residuals, without duplicating interpretation bodies
+or expanded preparation/acquisition/`phase_accounting` fields. `pool_id` hashes
+the expanded preimage independently of that retained compact form. It reports the total
 observed source and interpretation counts separately from rows omitted from the
 current trace. Preparation continuation pages at most 16 source trace rows and
 16 interpretation descriptors; their offsets refer to the same frozen pool.
@@ -1580,8 +1597,11 @@ compatibility and distinctness unknown. Native delivery selects at most five sou
 It prefers a qualified direct answer, then uncovered original-query evidence inputs,
 then additional qualified local witnesses with unknown cross-source identity, and
 finally raw sources in the native access order. A bounded one-root exchange repairs
-overlapping greedy coverage when the complete replacement page fits. This is not a
-global optimum or a distinct-person count. These lexicographic preferences are a
+overlapping greedy coverage when the complete replacement page fits. Bounded
+final-proof deferral still uses that existing selector: it prices a tentative
+later page against the actual current-execution envelope after a real earlier
+page fits, never refunds failed work, and adds no relevance, proof authority or
+recall gain. This is not a global optimum or a distinct-person count. These lexicographic preferences are a
 ranking policy whose recall utility requires paired evidence. Candidate coverage
 is not joint answer sufficiency. Canonical order remains a diagnostic
 control and tie-break. Proof-bearing slots

@@ -6,8 +6,9 @@ const isolation = await vi.hoisted(async () => {
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
 import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
-import { SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted }
-  from "@do-soul/alaya-protocol";
+import { SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
+  sourceSemanticExecution, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted,
+  type SourceSemanticCompactAcquisition } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { acquireSourceSemanticIndex } from "../../../runtime/recall-read-worker/source-semantic-index-acquisition.js";
@@ -24,6 +25,9 @@ function runtime(fixture: IndexFixture) { return { database: fixture.database } 
 async function preparedVector(fixture: IndexFixture) {
   return fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal, remainingMs: () => 60_000 });
 }
+function expandedAcquisition(phase: SourceSemanticCompactAcquisition) {
+  return sourceSemanticExecutionPhases(sourceSemanticExecution(undefined, phase)).acquisition;
+}
 
 it("unions an unannotated vector-only root outside the same-budget canonical census through real SQLite", async () => {
   await withIndexedSources(obstructedSources, async fixture => {
@@ -37,12 +41,13 @@ it("unions an unannotated vector-only root outside the same-budget canonical cen
       workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES, request: preparation, prepared_query: prepared
     }, ["project"], meter, ORIGINAL, undefined, "query-conditioned-v1", QUERY_BUDGET))();
     const target = fixture.targets.find(row => row.source_id === "z-vector")!;
-    const nomination = pool.access.acquisition.result?.nominations.find(row => row.source.source_id === "z-vector");
+    const acquisition = sourceSemanticAccessPhases(pool.access).acquisition;
+    const nomination = acquisition.result?.nominations.find(row => row.source.source_id === "z-vector");
     expect(nomination).toMatchObject({ source: target, lexical: [], vector: { rank: 1, cosine: 1,
       window: { start_byte: 0, end_byte: Buffer.byteLength(RAW), content_digest: digest(RAW) } } });
-    expect(pool.access.acquisition).toMatchObject({ status: "executed", accounting: "complete" });
-    expect(pool.access.acquisition.result?.lexical).toMatchObject({ completion: "complete", index_coverage: "partial" });
-    expect(pool.access.acquisition.result?.nominations.every(row => row.lexical.length === 0)).toBe(true);
+    expect(acquisition).toMatchObject({ status: "executed", accounting: "complete" });
+    expect(acquisition.result?.lexical).toMatchObject({ completion: "complete", index_coverage: "partial" });
+    expect(acquisition.result?.nominations.every(row => row.lexical.length === 0)).toBe(true);
     expect(pool.descriptors).toEqual([]);
     expect(pool.sources.filter(row => row.identity === target.target.root_id)).toHaveLength(1);
     expect(pool.access.source_candidates.find(row => row.record_id === target.target.root_id)).toMatchObject({ complete: true,
@@ -54,8 +59,8 @@ it("unions an unannotated vector-only root outside the same-budget canonical cen
     }, ["project"], controlMeter, ORIGINAL, undefined, "canonical-v1", QUERY_BUDGET))();
     expect(control.sources.some(row => row.identity === target.target.root_id)).toBe(false);
     expect(control.access.unvisited_sources).toBe(true);
-    expect(control.access.acquisition).toMatchObject({ status: "not_run", reason: "controlled_or_scoped_access", result: null });
-    expect(meter.indexWork).toBe(pool.access.acquisition.result!.resources.work);
+    expect(sourceSemanticAccessPhases(control.access).acquisition).toMatchObject({ status: "not_run", reason: "controlled_or_scoped_access", result: null });
+    expect(meter.indexWork).toBe(sourceSemanticAccessPhases(pool.access).acquisition.result!.resources.work);
     expect(meter.spentWork).toBeLessThanOrEqual(QUERY_BUDGET.work_units);
     expect(meter.spentBytes).toBeLessThanOrEqual(QUERY_BUDGET.memory_bytes);
     expect(fixture.database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules").get()).toEqual({ n: 0 });
@@ -73,7 +78,7 @@ it("reaches the unannotated vector-only Source through public MCP preparation, f
     expect(prepared.access?.contract).toBe("source-semantic-access-v2");
     expect(SourceSemanticAccessReceiptSchema.safeParse(prepared.access).success).toBe(true);
     expect(SourceSemanticExecutionSchema.safeParse(prepared.execution).success).toBe(true);
-    expect(prepared.access?.acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
+    expect(sourceSemanticAccessPhases(prepared.access!).acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
       .toMatchObject({ source: target, lexical: [], vector: { rank: 1, cosine: 1 } });
     expect(prepared.access?.source_candidates.find(row => row.record_id === target.target.root_id)).toMatchObject({ complete: true });
     expect(prepared.candidates).toEqual([]);
@@ -84,7 +89,7 @@ it("reaches the unannotated vector-only Source through public MCP preparation, f
       output_byte_limit: 1_000_000, authorized_scopes: SCOPES });
     if (leased.operation !== "recall") throw new Error("MCP recall expected");
     expect(leased.discovery?.access?.pool_id).toBe(prepared.access?.pool_id);
-    expect(leased.discovery?.access?.acquisition).toEqual(prepared.access?.acquisition);
+    expect(leased.discovery?.access?.phases[2]).toEqual(prepared.access?.phases[2]);
     expect(sourceSemanticExecutionPhases(leased.execution).acquisition).toMatchObject({ status: "not_run" });
     // Payload hydration may read native source bytes; frozen reuse must not rerun acquisition or inference.
     expect(sourceSemanticExecutionPhases(leased.execution).query_preparation).toMatchObject({ status: "not_requested", submitted_inputs: 0 });
@@ -93,9 +98,9 @@ it("reaches the unannotated vector-only Source through public MCP preparation, f
       .toMatchObject({ content_preview: RAW, source_channels: ["source_record"] });
     const direct = await workerCall(client, recall);
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(2);
-    expect(direct.execution).toMatchObject({ contract: "source-semantic-execution-v2",
+    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(direct.execution))).toMatchObject({ contract: "source-semantic-execution-v2",
       query_preparation: { status: "ready", submitted_inputs: 1 }, acquisition: { status: "executed", accounting: "complete" } });
-    expect(direct.discovery.access?.acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
+    expect(sourceSemanticAccessPhases(direct.discovery.access!).acquisition.result?.nominations.find(row => row.source.source_id === "z-vector"))
       .toMatchObject({ source: target, lexical: [], vector: { rank: 1, cosine: 1 } });
     expect(direct.index.entries.filter(row => row.target.kind === "source_evidence" && row.target.root_id === target.target.root_id))
       .toHaveLength(1);
@@ -116,20 +121,20 @@ it("denies indexed scopes before union admission and retains one tuple shared by
     { id: "private", text: "Secret berth closure.", scope: "global_core", vector: [1, 0, 0] }], async fixture => {
     const client = await fixture.openClient();
     const result = await workerCall(client, preparation);
-    expect(result.access?.acquisition.result?.accounting).toMatchObject({ attempted: 2, admitted: 1,
+    expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.accounting).toMatchObject({ attempted: 2, admitted: 1,
       rejected: 1, scope_denied: 1, native_unknown: 0 });
     expect(result.access?.observed_source_count).toBe(1);
     expect(result.access?.source_candidates.map(row => row.source_id)).toEqual(["public"]);
-    expect(result.access?.acquisition.result?.nominations.map(row => row.source.source_id)).toEqual(["public"]);
+    expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.nominations.map(row => row.source.source_id)).toEqual(["public"]);
     const before = fixture.queryBinding.embedInputs.mock.calls.length;
     const canonical = await workerCall(client, { ...preparation, access_policy: "canonical-v1" });
-    expect(canonical.access?.acquisition).toMatchObject({ status: "not_run", result: null, reason: "controlled_or_scoped_access" });
+    expect(sourceSemanticAccessPhases(canonical.access!).acquisition).toMatchObject({ status: "not_run", result: null, reason: "controlled_or_scoped_access" });
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(before);
     const source = await workerCall(client, { kind: "prepare_source", source_id: "public", budget: QUERY_BUDGET });
     if (source.source_handle === undefined) throw new Error("source handle expected");
     const restricted = await workerCall(client, { ...preparation, source_handle: source.source_handle });
     expect(restricted.access?.source_candidates.map(row => row.source_id)).toEqual(["public"]);
-    expect(restricted.access?.acquisition).toMatchObject({ status: "not_run", result: null });
+    expect(sourceSemanticAccessPhases(restricted.access!).acquisition).toMatchObject({ status: "not_run", result: null });
     expect(fixture.queryBinding.embedInputs).toHaveBeenCalledTimes(before);
     await expect(workerCall(client, { kind: "prepare_source", source_id: "private", budget: QUERY_BUDGET })).rejects.toThrow();
   });
@@ -149,16 +154,16 @@ it.each(["source revision", "selected profile"] as const)("does not redirect a n
     const client = await fixture.openClient();
     const result = await workerCall(client, preparation);
     expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).query_preparation).toMatchObject({ status: "ready", selected: { profile_id: fixture.selection.profile_id } });
-    expect(result.access?.acquisition.status).toBe("executed");
-    expect(result.access?.acquisition.result?.nominations).toEqual([]);
+    expect(sourceSemanticAccessPhases(result.access!).acquisition.status).toBe("executed");
+    expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.nominations).toEqual([]);
     if (mutation === "selected profile") {
-      expect(result.access?.acquisition.result?.vector).toMatchObject({ completion: "unavailable", state: { status: "unbound" } });
+      expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.vector).toMatchObject({ completion: "unavailable", state: { status: "unbound" } });
       // A model switch cannot revoke the still-current, independently authorized Source.
       expect(result.access?.source_candidates).toContainEqual(expect.objectContaining({ record_id: target.target.root_id, complete: true }));
     } else {
       expect(result.access?.source_candidates.some(row => row.record_id === target.target.root_id)).toBe(false);
       expect(result.access?.source_candidates.find(row => row.source_id === "raw")?.record_id).not.toBe(target.target.root_id);
-      expect(result.access?.acquisition.result?.vector.state).toMatchObject({ status: "partial" });
+      expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.vector.state).toMatchObject({ status: "partial" });
     }
   });
 }, 60_000);
@@ -207,7 +212,8 @@ it("keeps useful source observation and real v2 phase evidence inside the origin
       observed_interpretation_count: 0, unvisited_sources: false, unvisited_interpretations: false });
     expect(result.access?.source_candidates).toContainEqual(expect.objectContaining({ source_id: "raw", complete: true,
       read_bytes: Buffer.byteLength(RAW), body_bytes: Buffer.byteLength(RAW) }));
-    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).acquisition).toEqual(result.access?.acquisition);
+    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).acquisition)
+      .toEqual(sourceSemanticAccessPhases(result.access!).acquisition);
     expect(result.work.logical_work).toBeLessThanOrEqual(budget.work_units);
     expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
   });
@@ -222,14 +228,15 @@ it("retains actual native acquisition unknowns rather than certifying successful
     const pool = fixture.database.connection.transaction(() => observeSourceSemanticAccess(runtime(fixture), {
       workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES, prepared_query: prepared, request: preparation
     }, ["project"], meter, ORIGINAL, undefined, "query-conditioned-v1", QUERY_BUDGET))();
-    expect(pool.access.acquisition.result).toMatchObject({ completion: "partial", nominations: [],
+    const unknown = sourceSemanticAccessPhases(pool.access);
+    expect(unknown.acquisition.result).toMatchObject({ completion: "partial", nominations: [],
       vector: { completion: "unavailable", reason: "native_query_failed" },
       resources: { sql_internal_work: "unknown" } });
-    expect(pool.access.phase_accounting).toMatchObject({ native_cpu: "unknown", observation: {
+    expect(unknown.phase_accounting).toMatchObject({ native_cpu: "unknown", observation: {
       sql_internal_work: "unknown", native_bytes: expect.any(Number) } });
-    expect(pool.access.acquisition.result?.resources.work).toBeGreaterThan(0);
+    expect(unknown.acquisition.result?.resources.work).toBeGreaterThan(0);
     expect(pool.access.source_candidates).toContainEqual(expect.objectContaining({ source_id: "raw", complete: true }));
-    expect(meter.acquisition).toEqual(pool.access.acquisition);
+    expect(meter.acquisition).toEqual(pool.access.phases[2]);
   });
 });
 
@@ -239,15 +246,17 @@ it("reports an actual bounded acquisition refusal with its native cost rather th
     const meter = new SourceSemanticReadBudget({ work_units: 512, memory_bytes: QUERY_BUDGET.memory_bytes });
     const policy = createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1",
       new SourceSemanticReadBudget(QUERY_BUDGET));
+    const metadataMeter = new SourceSemanticReadBudget(QUERY_BUDGET);
     const result = fixture.database.connection.transaction(() => acquireSourceSemanticIndex({ runtime: runtime(fixture),
-      workspace: WS, navigation: ORIGINAL, authorized: ["project"], meter, vector: prepared.vector,
+      workspace: WS, navigation: ORIGINAL, authorized: ["project"], meter, metadataMeter, vector: prepared.vector,
       canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost }))();
     try {
-      expect(result.phase).toMatchObject({ status: "executed", accounting: "complete", result: { completion: "partial" } });
-      expect(result.phase.result?.resource_refusals.length).toBeGreaterThan(0);
-      expect(result.phase.result?.vector.completion).not.toBe("complete");
-      expect(meter.indexWork).toBe(result.phase.result!.resources.work);
-      expect(meter.nativeBytes).toBe(result.phase.result!.resources.native_bytes);
+      const phase = expandedAcquisition(result.phase);
+      expect(phase).toMatchObject({ status: "executed", accounting: "complete", result: { completion: "partial" } });
+      expect(phase.result?.resource_refusals.length).toBeGreaterThan(0);
+      expect(phase.result?.vector.completion).not.toBe("complete");
+      expect(meter.indexWork).toBe(phase.result!.resources.work);
+      expect(meter.nativeBytes).toBe(phase.result!.resources.native_bytes);
       expect(meter.spentWork).toBeLessThanOrEqual(512);
       expect(meter.spentBytes).toBeLessThanOrEqual(QUERY_BUDGET.memory_bytes);
       const spent = [meter.spentWork, meter.spentBytes];

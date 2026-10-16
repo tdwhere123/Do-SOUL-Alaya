@@ -1,4 +1,4 @@
-import { SourceSemanticWorkerResultSchema, sourceSemanticExecution, sourceSemanticExecutionPhases,
+import { SourceSemanticWorkerResultSchema,
   sourceSemanticUndeliveredConclusion, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError } from "@do-soul/alaya-core";
 
@@ -7,9 +7,8 @@ type Reason = Extract<SourceSemanticWorkerResult, { kind: "reason" }>;
 /** Fit the actual consumer envelope; never retain conclusions without their complete premises. */
 export function finalizeSourceSemanticReason(result: Reason, limit: number,
   encode: (value: Reason) => string = JSON.stringify): Reason {
-  const phases = result.execution === undefined ? undefined : sourceSemanticExecutionPhases(result.execution);
-  const full: Reason = phases === undefined ? result : { ...result,
-    execution: sourceSemanticExecution(phases.query_preparation, phases.acquisition) };
+  // Producers already captured canonical compact execution. Fitting must not expand/repack it.
+  const full = result;
   if (Buffer.byteLength(encode(full), "utf8") <= limit) return full;
   if (full.result !== undefined) {
     const limited = SourceSemanticWorkerResultSchema.parse({ kind: "reason", execution: full.execution,

@@ -1,9 +1,19 @@
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { describe, expect, it, vi } from "vitest";
 import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
 import {
   buildSourceReferenceCatalog,
+  SoulInterpretationResponseSchema,
+  sourceSemanticExecution,
+  sourceSemanticExecutionPhases,
+  sourceSemanticReasonControl,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SoulInterpretationResponse,
   type SourceSemanticWorkerRequest,
@@ -50,6 +60,7 @@ const WORK = {
   logical_memory_bytes: 16,
   rss_bytes: 32
 } as const;
+const EXECUTION = sourceSemanticExecution();
 
 const SOURCE_DISCLOSURE = {
   material_kind: "original_body",
@@ -83,7 +94,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
     content_digest: `sha256:${fieldContractSha256(SOURCE)}`, source: SOURCE, catalog: CATALOG,
     source_disclosure: SOURCE_DISCLOSURE,
     attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
-    assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(SOURCE)] }], coverage: IDLE, work: WORK };
+    assertion_locations: [{ assertion_id: 1, source_utf8_span: [0, Buffer.byteLength(SOURCE)] }], coverage: IDLE, work: WORK, execution: EXECUTION };
   if (request.kind === "prepare_source") {
     return {
       kind: "prepare_source",
@@ -95,7 +106,8 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
       attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION,
       catalog: CATALOG,
       coverage: { ...IDLE, discovery: "complete" },
-      work: WORK
+      work: WORK,
+      execution: EXECUTION
     };
   }
   if (request.kind === "prepare_query") {
@@ -106,7 +118,8 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
       candidates: [],
       truncated: false,
       coverage: { ...IDLE, query_semantics: "open" },
-      work: WORK
+      work: WORK,
+      execution: EXECUTION
     };
   }
   return {
@@ -121,7 +134,8 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
       outcome: { status: "interpreted", gaps: [] }
     },
     coverage: { ...IDLE, conditional_computation: "complete" },
-    work: WORK
+    work: WORK,
+    execution: EXECUTION
   };
 }
 
@@ -149,6 +163,13 @@ async function callInterpretation(
     arguments: args,
     context
   });
+}
+
+function expectNoExternalOrGenerationAttempts(output: unknown) {
+  const admitted = SoulInterpretationResponseSchema.parse(output);
+  const phases = sourceSemanticExecutionPhases(admitted.execution);
+  expect(phases.query_preparation.external_api_attempts).toBe(0);
+  expect(phases.semantic_generation_attempts).toBe(0);
 }
 
 describe("soul.interpretation MCP/CLI surface", () => {
@@ -188,7 +209,7 @@ describe("soul.interpretation MCP/CLI surface", () => {
     });
   });
 
-  it("rejects an unwired worker and keeps provider_attempts at 0", async () => {
+  it("rejects an unwired worker and reports missing query semantics and correspondence without external or generation attempts", async () => {
     const missing = await callInterpretation(createHandler(), {
       operation: "prepare_source",
       source_id: "artifact-1",
@@ -215,15 +236,17 @@ describe("soul.interpretation MCP/CLI surface", () => {
     ]);
     expect(direct.ok).toBe(true);
     if (!direct.ok) throw new Error("reason missing semantic correspondence must succeed as a tool result");
-    expect(direct.output).toMatchObject({
-      operation: "reason",
-      outcome: { status: "preparation_required", missing: "query_semantics_and_correspondence" },
-      provider_attempts: 0
+    const output = SoulInterpretationResponseSchema.parse(direct.output);
+    expect(output.operation).toBe("reason");
+    expect(sourceSemanticReasonControl(output).outcome).toEqual({
+      status: "preparation_required",
+      missing: "query_semantics_and_correspondence"
     });
+    expectNoExternalOrGenerationAttempts(output);
     expect((mcp.structuredContent as { output: SoulInterpretationResponse }).output).toEqual(direct.output);
   });
 
-  it("routes prepare_source through the worker with provider_attempts 0", async () => {
+  it("routes prepare_source through the worker without external or generation attempts", async () => {
     const execute = vi.fn(async ({ request }: Parameters<SourceSemanticHostPort["execute"]>[0]) =>
       workerResult(request)
     );
@@ -239,9 +262,9 @@ describe("soul.interpretation MCP/CLI surface", () => {
       operation: "prepare_source",
       source_handle: "src-handle-1",
       source_id: "artifact-1",
-      provider_attempts: 0,
       work: WORK
     });
+    expectNoExternalOrGenerationAttempts(result.output);
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
@@ -280,9 +303,9 @@ describe("soul.interpretation MCP/CLI surface", () => {
     if (!proposed.ok) throw new Error("propose must return a tool result");
     expect(proposed.output).toMatchObject({
       operation: "propose",
-      outcome: { status: "invalid", reason: "malformed_interpretation" },
-      provider_attempts: 0
+      outcome: { status: "invalid", reason: "malformed_interpretation" }
     });
+    expectNoExternalOrGenerationAttempts(proposed.output);
   });
 
   it("does not publish when the worker lease has expired", async () => {
@@ -315,9 +338,9 @@ describe("soul.interpretation MCP/CLI surface", () => {
     if (!proposed.ok) throw new Error("expired propose must return a tool result");
     expect(proposed.output).toMatchObject({
       operation: "propose",
-      outcome: { status: "invalid", reason: "expired_handle" },
-      provider_attempts: 0
+      outcome: { status: "invalid", reason: "expired_handle" }
     });
+    expectNoExternalOrGenerationAttempts(proposed.output);
   });
 
   it("keeps ordinary Recall on the same handler with no provider calls", async () => {
@@ -363,12 +386,18 @@ it.each(["source_body", "source_identity"])("preserves unavailable %s separately
       details: { admission: "unavailable", unavailable: reason, work: WORK }
     });
   }) }), { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET });
-  expect(unavailable).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason },
-    coverage: { discovery: "open" }, work: WORK } });
+  expect(unavailable.ok).toBe(true);
+  if (!unavailable.ok) throw new Error("unavailable source must succeed as a tool result");
+  expect(unavailable.output).toMatchObject({ outcome: { status: "unavailable", reason },
+    coverage: { discovery: "open" }, work: WORK });
+  expectNoExternalOrGenerationAttempts(unavailable.output);
   const absent = await callInterpretation(createHandler({ sourceSemanticsPort: createPort(async () => {
     throw new CoreError("NOT_FOUND", "source is not currently admitted", { details: { admission: "no_eligible_source", work: WORK } });
   }) }), { operation: "prepare_source", source_id: "artifact-1", budget: BUDGET });
-  expect(absent).toMatchObject({ ok: true, output: { outcome: { status: "no_eligible_source", provider_attempts: 0 }, work: WORK } });
+  expect(absent.ok).toBe(true);
+  if (!absent.ok) throw new Error("no eligible source must succeed as a tool result");
+  expect(absent.output).toMatchObject({ outcome: { status: "no_eligible_source", provider_attempts: 0 }, work: WORK });
+  expectNoExternalOrGenerationAttempts(absent.output);
 });
 
 it("does not fold an unavailable body during propose into malformed interpretation", async () => {
@@ -381,7 +410,10 @@ it("does not fold an unavailable body during propose into malformed interpretati
     operation: "propose", source_handle: "source-handle", draft: DRAFT,
     producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET
   });
-  expect(result).toMatchObject({ ok: true, output: { outcome: { status: "unavailable", reason: "source_body" }, provider_attempts: 0 } });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error("unavailable propose must succeed as a tool result");
+  expect(result.output).toMatchObject({ outcome: { status: "unavailable", reason: "source_body" } });
+  expectNoExternalOrGenerationAttempts(result.output);
 });
 
 it("binds sibling generation_task after source validation and leaves task-absent drafts unchanged", async () => {
@@ -444,10 +476,13 @@ it.each(["original_body", "retained_excerpt", "canonical_projection"] as const)(
       context_support: [{ kind: "source_reference", assertion_id: row.assertion_id,
         source_ref: { first: row.segments[0]!.id, last: row.segments.at(-1)!.id } }] },
     producer_id: "test", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET });
-  expect(result).toMatchObject({ ok: true, output: { outcome: { status: "no_executable_proposition" },
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error("no-proposition disposition must succeed as a tool result");
+  expect(result.output).toMatchObject({ outcome: { status: "no_executable_proposition" },
     semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" },
     source_disclosure: { material_kind: "interpretation", source_representation,
-      source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }, provider_attempts: 0 } });
+      source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } } });
+  expectNoExternalOrGenerationAttempts(result.output);
   expect(publish).not.toHaveBeenCalled();
 });
 
@@ -458,7 +493,10 @@ it("preserves publication budget exhaustion and adds post-preparation failure co
   const handler = createHandler({ sourceSemanticsPort: createPort(), publication: { publish } });
   const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle", draft: DRAFT,
     producer_id: "test-author", producer_version: "1", contract_version: "source-interpretation-v4", budget: BUDGET });
-  expect(result).toMatchObject({ ok: true, output: { outcome: { status: "resource_exhausted" },
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error("publication budget exhaustion must succeed as a tool result");
+  expect(result.output).toMatchObject({ outcome: { status: "resource_exhausted" },
     work: { native_work: WORK.native_work + 4, logical_work: WORK.native_work + 12,
-      logical_memory_bytes: WORK.logical_memory_bytes + 400 }, provider_attempts: 0 } });
+      logical_memory_bytes: WORK.logical_memory_bytes + 400 } });
+  expectNoExternalOrGenerationAttempts(result.output);
 });

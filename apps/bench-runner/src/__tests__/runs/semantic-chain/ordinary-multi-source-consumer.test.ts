@@ -1,8 +1,14 @@
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+
 import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { nativeConsumerFixture, CONSUMER_CONFIG, HIDDEN_GOLD } from "./consumer.test-support.js";
 import { captureMultipleSources } from "./ordinary-multi-source.test-support.js";
@@ -45,6 +51,7 @@ beforeAll(async () => {
 }, 120000);
 afterAll(() => {
   for (const fixture of [base, largeBase, emptyBase]) if (fixture !== undefined) rmSync(fixture.root, { recursive: true, force: true });
+  isolation.restore(); expect(isolation.violations).toEqual([]);
 });
 
 it("admits actual multiple source roots and each contiguous targeted expansion from the same public query", () => {

@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
-  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases,
+  SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts,
   SoulInterpretationRecallDeliverySchema, SourceSemanticLibraryDiscoverySchema, SourceSemanticCoverageSchema, SourceSemanticQueryStatusSchema,
   canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus, type SourceEvidenceTarget
@@ -426,7 +426,7 @@ function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold:
 function zeroCallReason(raw: Record<string, unknown>, requireExecution: boolean): InvalidMeasurementReason | null {
   if (requireExecution || Object.hasOwn(raw, "execution")) {
     const execution = SourceSemanticExecutionSchema.safeParse(raw.execution);
-    if (!execution.success || sourceSemanticExecutionPhases(execution.data).query_preparation.external_api_attempts !== 0) {
+    if (!execution.success || sourceSemanticExecutionExternalAttempts(execution.data) !== 0) {
       return "missing_zero_call_evidence";
     }
   }

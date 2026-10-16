@@ -1,4 +1,3 @@
-import { SourceSemanticExecutionSchema, SourceSemanticResourceExhausted, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
@@ -6,6 +5,8 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
+import { SourceSemanticExecutionSchema, SourceSemanticResourceExhausted, sourceSemanticAccessPhases,
+  sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import type { SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -15,6 +16,8 @@ import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { ACCESS_BUDGET, CLOCK, WS, accessQuery, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import { ORIGINAL, QUERY_BUDGET, RAW, SCOPES, withIndexedSources } from "./source-semantic-index-acquisition.test-support.js";
+import { expectFirstExtentThenCensusRefusal, expectFundedExtentThenCensus, sourceObservationOrder }
+  from "./source-semantic-observation-order.test-support.js";
 
 const HINT = "x".repeat(1024);
 const HINT_NAVIGATION_WORK = 64 * (HINT.length + 1);
@@ -31,24 +34,7 @@ function navigationTrace() {
   return {
     headers, navigation, bodies, charge, reserve,
     snapshot() {
-      const reserveEvents = reserve.mock.calls.map((args, index) =>
-        ({ phase: args[2], order: reserve.mock.invocationCallOrder[index]! }));
-      const phaseBefore = (order: number) => {
-        let phase: unknown;
-        for (const event of reserveEvents) if (event.order < order) phase = event.phase;
-        return phase;
-      };
-      const metadataIndexes = bodies.mock.calls.flatMap(([, , maxBytes, offset], index) =>
-        maxBytes === 1 && (offset ?? 0) === 0 ? [index] : []);
-      const bodyIndexes = bodies.mock.calls.flatMap((_, index) =>
-        phaseBefore(bodies.mock.invocationCallOrder[index]!) === "access source extent" ? [index] : []);
-      const headerOrder = headers.mock.invocationCallOrder[0];
-      const firstMetadata = metadataIndexes[0] === undefined ? undefined : bodies.mock.invocationCallOrder[metadataIndexes[0]];
-      const firstBody = bodyIndexes[0] === undefined ? undefined : bodies.mock.invocationCallOrder[bodyIndexes[0]];
-      const bodySpans = bodyIndexes.map(index => {
-        const [, identity, maxBytes, offset] = bodies.mock.calls[index]!;
-        return `${identity}:${offset ?? 0}:${maxBytes}`;
-      });
+      const order = sourceObservationOrder({ bodies, headers, reserve, charge });
       return {
         headerReads: headers.mock.calls.length,
         navigationReads: navigation.mock.calls.length,
@@ -61,13 +47,9 @@ function navigationTrace() {
           work === HINT_NAVIGATION_WORK && bytes === HINT_NAVIGATION_BYTES && phase === "access query features").length,
         navigationPageReserves: reserve.mock.calls.filter(([, , phase]) => phase === "access navigation page").length,
         headerPageReserves: reserve.mock.calls.filter(([, , phase]) => phase === "interpretation access header page").length,
-        metadataReads: metadataIndexes.length,
-        bodySpans,
-        uniqueBodySpans: new Set(bodySpans).size === bodySpans.length,
-        metadataBeforeCensus: firstMetadata !== undefined && headerOrder !== undefined && firstMetadata < headerOrder,
-        censusBeforeBody: firstBody === undefined || headerOrder !== undefined && headerOrder < firstBody,
         emptyCensusPlanning: charge.mock.calls.filter(([, , phase]) =>
-          phase === "empty interpretation completion planning").length
+          phase === "empty interpretation completion planning").length,
+        ...order
       };
     },
     restore() { headers.mockRestore(); navigation.mockRestore(); bodies.mockRestore(); charge.mockRestore(); reserve.mockRestore(); }
@@ -109,9 +91,8 @@ it("skips navigation after one workspace-empty header page while observing the f
       expect(snap.firstSourceBeforeHeader).toBe(true);
       expect(snap.metadataReads).toBe(1);
       expect(snap.bodySpans).toHaveLength(1);
-      expect(snap.uniqueBodySpans).toBe(true);
-      expect(snap.metadataBeforeCensus).toBe(true);
-      expect(snap.censusBeforeBody).toBe(true);
+      expectFundedExtentThenCensus(snap);
+      expect(snap.furtherBodyAfterCensus).toBe(0);
       expect(snap.emptyCensusPlanning).toBe(1);
       expect(result.access).toMatchObject({ observed_source_count: 1, observed_interpretation_count: 0,
         unvisited_sources: false, unvisited_interpretations: false });
@@ -147,9 +128,8 @@ it.each([
       expect(snap.headerBeforeNavigation).toBe(true);
       expect(snap.metadataReads).toBe(1);
       expect(snap.bodySpans.length).toBeGreaterThan(0);
-      expect(snap.uniqueBodySpans).toBe(true);
-      expect(snap.metadataBeforeCensus).toBe(true);
-      expect(snap.censusBeforeBody).toBe(true);
+      expectFundedExtentThenCensus(snap);
+      if (interpretations === 0) expect(snap.furtherBodyAfterCensus).toBe(0);
       expect(snap.emptyCensusPlanning).toBe(0);
       expect(result.access?.observed_interpretation_count).toBe(interpretations);
       expect(result.candidates).toHaveLength(interpretations);
@@ -186,9 +166,8 @@ it.each([
         expect(() => run()).toThrow(/injected header read failure/u);
         const snap = trace.snapshot();
         expect(trace.headers).toHaveBeenCalled();
-        expect(snap.metadataReads).toBe(1);
-        expect(snap.metadataBeforeCensus).toBe(true);
-        expect(snap.bodySpans).toEqual([]);
+        expectFirstExtentThenCensusRefusal(snap);
+        expect(snap.bodySpans).toHaveLength(1);
         expect(snap.emptyCensusPlanning).toBe(0);
         return;
       }
@@ -197,9 +176,9 @@ it.each([
       expect(snap.navigationReads).toBe(1);
       expect(snap.hintNavigationFeatures).toBe(1);
       expect(snap.metadataReads).toBe(1);
-      expect(snap.uniqueBodySpans).toBe(true);
-      expect(snap.metadataBeforeCensus).toBe(true);
-      expect(snap.censusBeforeBody).toBe(true);
+      expect(snap.bodySpans.length).toBeGreaterThan(0);
+      expectFundedExtentThenCensus(snap);
+      expect(snap.furtherBodyAfterCensus).toBe(0);
       expect(snap.emptyCensusPlanning).toBe(0);
       expect(result.access?.observed_source_count).toBe(1);
       expect(result.access?.source_candidates).toEqual([expect.objectContaining({ source_id: "known" })]);
@@ -239,10 +218,10 @@ it.each(["reserve", "read"] as const)("rethrows the original injected first-cens
       expect((caught as SourceSemanticResourceExhausted).phase).toBe(`injected first census header ${failureAt}`);
       expect(returned).toBeUndefined(); // No returned body_bytes:null receipt is an error substitute.
       const snap = trace.snapshot();
-      expect(snap.metadataReads).toBe(1);
       expect(snap.headerReads).toBe(failureAt === "reserve" ? 0 : 1);
       expect(snap.headerPageReserves).toBe(1);
-      expect(snap.bodySpans).toEqual([]);
+      expectFirstExtentThenCensusRefusal(snap);
+      expect(snap.bodySpans).toHaveLength(1);
       expect(snap.navigationReads).toBe(0);
       expect(snap.navigationPageReserves).toBe(0);
       expect(snap.emptyCensusPlanning).toBe(0);
@@ -287,6 +266,8 @@ it("keeps an injected ordinary body-reservation exhaustion partial with its know
       expect(snap.metadataReads).toBe(1);
       expect(snap.headerReads).toBe(1);
       expect(snap.metadataBeforeCensus).toBe(true);
+      expect(snap.firstExtentBeforeCensus).toBe(0);
+      expect(snap.furtherBodyAfterCensus).toBe(0);
       expect(snap.bodySpans).toEqual([]);
       expect(snap.navigationReads).toBe(0);
       expect(snap.emptyCensusPlanning).toBe(1);
@@ -313,18 +294,18 @@ it("preserves source-index acquisition and public empty completion without 1024-
       expect(snap.firstSourceBeforeHeader).toBe(true);
       expect(snap.metadataReads).toBe(1);
       expect(snap.bodySpans.length).toBeGreaterThan(0);
-      expect(snap.uniqueBodySpans).toBe(true);
-      expect(snap.metadataBeforeCensus).toBe(true);
-      expect(snap.censusBeforeBody).toBe(true);
+      expectFundedExtentThenCensus(snap);
+      expect(snap.furtherBodyAfterCensus).toBe(0);
       expect(snap.emptyCensusPlanning).toBe(1);
       expect(result.access).toMatchObject({ observed_source_count: 1, observed_interpretation_count: 0,
         unvisited_sources: false, unvisited_interpretations: false });
       expect(result.coverage.discovery).toBe("complete");
       expect(result.access?.source_candidates).toContainEqual(expect.objectContaining({ source_id: "raw", complete: true,
         read_bytes: Buffer.byteLength(RAW), body_bytes: Buffer.byteLength(RAW) }));
-      expect(result.access?.acquisition).toMatchObject({ status: "executed", accounting: "complete" });
-      expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).acquisition).toEqual(result.access?.acquisition);
-      expect(result.access?.acquisition.result?.nominations.length).toBeGreaterThan(0);
+      expect(sourceSemanticAccessPhases(result.access!).acquisition).toMatchObject({ status: "executed", accounting: "complete" });
+      expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).acquisition)
+        .toEqual(sourceSemanticAccessPhases(result.access!).acquisition);
+      expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.nominations.length).toBeGreaterThan(0);
     } finally { trace.restore(); }
   });
 });

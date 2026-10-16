@@ -14,7 +14,7 @@ import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-
 import { SourceSemanticReadBudget, sourceSemanticReadStores } from "../../../runtime/field/source-semantic-read-stores.js";
 import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { bindResearchSourceAccessPool, bindVerifiedResearchSourceRecords }
-  from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
+  from "../../../runtime/recall-read-worker/source-semantic-research-pool.js";
 import { deliverFrozenLibraryPage, prepareLibraryDelivery, type LibraryPageSelector }
   from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";

@@ -6,7 +6,8 @@ import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attr
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
 import { SourceSemanticAccessReceiptSchema, sourceSemanticAcquisitionNotRun, sourceSemanticExecution,
-  unavailableSourceQueryPreparation } from "../../garden/source-semantic-access.js";
+  unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation, captureSourceSemanticAcquisition,
+  packSourceSemanticQueryPreparation, packSourceSemanticAcquisition } from "../../garden/source-semantic-access.js";
 import { InformationIndexSchema, IndexEntrySchema, sourceIndexEntry, indexEntryCacheKey,
   memoryIndexEntry } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
@@ -31,15 +32,12 @@ const coverage = {
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
 const execution = sourceSemanticExecution();
-const accessPhases = {
-  preparation: unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
-  acquisition: sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
-  phase_accounting: {
-    observation: null,
-    completion: "included_in_worker_work_not_separately_measured" as const,
-    native_cpu: "unknown" as const, deadline: "soft_quarantine_until_exit" as const
-  }
-};
+const accessPhases = [1,
+  packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
+    unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"))),
+  packSourceSemanticAcquisition(captureSourceSemanticAcquisition(
+    sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"))),
+  null] as const;
 const disclosure = { material_kind: "interpretation", source_binding: "unbound",
   evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "unbound" },
   temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } };
@@ -70,7 +68,7 @@ const validQuery = SourceSemanticQuerySchema.parse({
 });
 
 it("binds access trace counts and source completeness to the observed pool", () => {
-  const access = { contract: "source-semantic-access-v2", ...accessPhases, policy: "canonical-v1", input_id: digest, pool_id: digest,
+  const access = { contract: "source-semantic-access-v2", phases: accessPhases, policy: "canonical-v1", input_id: digest, pool_id: digest,
     observed_source_count: 2, observed_interpretation_count: 0,
     source_candidates: [{ source_id: "source-2", record_id: digest, read_bytes: 1, body_bytes: 1,
       complete: true, signal: { source_text_score: null, interpretation_reading_score: 0 } }],
@@ -78,10 +76,8 @@ it("binds access trace counts and source completeness to the observed pool", () 
     stopping_reasons: [], trace: { kind: "preparation_page", source_offset: 1, interpretation_offset: 0,
       omitted_source_count: 1, omitted_interpretation_count: 0 } };
   expect(SourceSemanticAccessReceiptSchema.safeParse(access).success).toBe(true);
-  const historic = { ...access, contract: "source-semantic-access-v1" };
-  delete (historic as { preparation?: unknown }).preparation;
-  delete (historic as { acquisition?: unknown }).acquisition;
-  delete (historic as { phase_accounting?: unknown }).phase_accounting;
+  const { phases: _phases, ...withoutPhases } = access;
+  const historic = { ...withoutPhases, contract: "source-semantic-access-v1" };
   expect(SourceSemanticAccessReceiptSchema.safeParse(historic).success).toBe(false);
   expect(SourceSemanticAccessReceiptSchema.safeParse({ ...historic, contract: "source-semantic-access-v2" }).success)
     .toBe(false);
@@ -158,6 +154,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
   });
   expect("continuation" in result).toBe(false);
   if (result.kind !== "reason") throw new Error("expected a reasoning result");
+  if (result.result === undefined) throw new Error("expected a delivered reasoning result");
   expect(result.result.semantic_status).toBe("unreviewed");
   expect(result.result.world_claim).toBe("unknown");
   expect(MemorySearchResultSchema.safeParse(result).success).toBe(false);

@@ -8,7 +8,7 @@ import { admitSourceSemanticQuery, authorizedScopesFromAdmission, authorizeSeman
   semanticInterpretationEvidenceId, sourceSemanticAccessInputIdentity, sourceSemanticLibraryQueryIdentity,
   sourceSemanticLibraryRequestIdentity, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
+import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceSemanticAccessPhases,
   sourceEvidenceRootTarget, sourceRecallTarget, type MemorySearchResult, type SourceEvidenceTarget,
   type SourceSemanticLibrarySlotQualifier,
   type SourceRecordIdentity } from "@do-soul/alaya-protocol";
@@ -230,9 +230,11 @@ export async function deliverPreparedSemanticChainQuery(input: Readonly<{
 function sameSealedSnapshotObservation(expected: Awaited<ReturnType<typeof discoverSemanticChainQuery>>["discovery"],
   actual: Awaited<ReturnType<typeof discoverSemanticChainQuery>>["discovery"]): boolean {
   const comparable = (value: typeof actual) => ({ descriptors: value.descriptors,
-    access: value.discovery_trace.map(({ access: { pool_id: _connectionPoolId, preparation, ...observation } }) => ({
-      ...observation, preparation: { ...preparation, elapsed_ms: undefined }
-    })) });
+    access: value.discovery_trace.map(({ access }) => {
+      const { pool_id: _connectionPoolId, phases: _phases, ...observation } = access;
+      const { preparation, ...otherPhases } = sourceSemanticAccessPhases(access);
+      return { ...observation, ...otherPhases, preparation: { ...preparation, elapsed_ms: undefined } };
+    }) });
   return canonicalJson(comparable(expected)) === canonicalJson(comparable(actual));
 }
 

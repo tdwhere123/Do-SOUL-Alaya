@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, SoulInterpretationPrepareQueryResponseSchema, canonicalJson,
-  SourceSemanticExecutionSchema, sourceSemanticExecutionPhases, SourceSemanticWorkerWorkSchema, sourceRecallTarget } from "@do-soul/alaya-protocol";
+  SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts, SourceSemanticWorkerWorkSchema, sourceRecallTarget } from "@do-soul/alaya-protocol";
 import { sourceSemanticAccessInputIdentity } from "@do-soul/alaya-core";
 import { isContainedPath, samePhysicalLocation } from "../fs/opened-contained-path.js";
 import { sourceGoldUnitFromPublishedRoot, sourceTargetJoinsGold } from "../measurement/source-gold-join.js";
@@ -208,7 +208,7 @@ function readOrderedCandidates(observationPath: string, row: SourceAccessDiagnos
     if (result !== null) {
       attemptPaths.push(evidence.result!.path); settled++;
       if (result.question_id !== row.question_id || result.policy !== row.policy || result.page_number !== index
-        || result.provider_attempts !== sourceSemanticExecutionPhases(result.execution).query_preparation.external_api_attempts) {
+        || result.provider_attempts !== sourceSemanticExecutionExternalAttempts(result.execution)) {
         throw new AlayaError("CONFLICT", "diagnostic settled attempt changed");
       }
       nativeWork += result.work.native_work; nativeBytes += result.work.native_bytes;
@@ -226,7 +226,7 @@ function readOrderedCandidates(observationPath: string, row: SourceAccessDiagnos
     const access = page.response.access;
     if (chainIdentity(page.response) !== result.response_identity
       || chainIdentity(page.response.work) !== chainIdentity(result.work)
-      || sourceSemanticExecutionPhases(page.response.execution).query_preparation.external_api_attempts !== result.provider_attempts
+      || sourceSemanticExecutionExternalAttempts(page.response.execution) !== result.provider_attempts
       || canonicalJson(page.response.execution) !== canonicalJson(result.execution) || page.wall_ms !== result.wall_ms
       || page.response.work.logical_work === undefined || access === undefined
       || access.trace.kind !== "preparation_page" || access.policy !== row.policy

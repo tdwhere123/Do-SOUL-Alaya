@@ -5,33 +5,25 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+  captureSourceSemanticQueryPreparation, packSourceSemanticQueryPreparation,
+  unavailableSourceQueryPreparation } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { SourceSemanticUnionCompletion } from "../../../runtime/recall-read-worker/source-semantic-empty-population-budget.js";
 
 const AMPLE = { work_units: 1_000_000, memory_bytes: 1_000_000 };
 
+function packedPreparation(meter?: SourceSemanticReadBudget) {
+  return packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
+    unavailableSourceQueryPreparation("orchid irrigation channel notes. ".repeat(40), "unavailable")), meter);
+}
+
 function phaseMetadata() {
-  return {
-    preparation: {
-      status: "unavailable",
-      reason: "preparation_scope_unavailable",
-      navigation_digest: null,
-      selected: null,
-      method: "not_run",
-      submitted_inputs: 0,
-      token_count: null,
-      external_api_attempts: 0,
-      binding_work: "not_run",
-      execution_work: "not_run",
-      elapsed_ms: null,
-      notes: "orchid irrigation channel notes. ".repeat(40),
-      windows: [null, { start: 0, end: 4096, digest: `sha256:${"a".repeat(64)}` }],
-      limitations: [null, "partial index coverage", ["nested", null, "x".repeat(256)], {
-        detail: "x".repeat(128), extra: null, terms: ["unicode61", null, "trigram"]
-      }]
-    }
-  };
+  return JSON.parse(JSON.stringify({ preparation: packedPreparation() })) as { preparation: ReturnType<typeof packedPreparation> };
+}
+
+function ownedPhaseMetadata() {
+  return { preparation: packedPreparation(new SourceSemanticReadBudget(AMPLE)) };
 }
 
 function quote(completion: SourceSemanticUnionCompletion, value: object) {
@@ -56,8 +48,8 @@ function fiveCopyHold(value: object) {
 function unfrozen(value: ReturnType<typeof phaseMetadata>) {
   expect(Object.isFrozen(value)).toBe(false);
   expect(Object.isFrozen(value.preparation)).toBe(false);
-  expect(Object.isFrozen(value.preparation.windows)).toBe(false);
-  expect(Object.isFrozen(value.preparation.limitations)).toBe(false);
+  expect(Object.isFrozen(value.preparation[1])).toBe(false);
+  expect(Object.isFrozen(value.preparation[2])).toBe(false);
 }
 
 function nativeIdle(parent: SourceSemanticReadBudget, child: SourceSemanticReadBudget) {
@@ -65,45 +57,36 @@ function nativeIdle(parent: SourceSemanticReadBudget, child: SourceSemanticReadB
     .toEqual([0, 0, 0, 0, 0, 0]);
 }
 
-function markerVisits(calls: readonly unknown[][], marker: readonly unknown[], phases: readonly string[]) {
-  return calls.filter(([work, bytes, phase]) => work === marker[0] && bytes === marker[1] && phases.includes(phase as string)).length;
-}
-
-it("holds a private five-copy quote from one capture while charging guard, copy and bookkeeping", () => {
+it("holds five future metadata occurrences from one quote without freezing mutable caller metadata", () => {
   const value = phaseMetadata();
   const snapshot = JSON.parse(JSON.stringify(value));
   const independentHold = fiveCopyHold(value);
-  const guard = SourceSemanticResourceLedger.measureRetain(value, AMPLE);
-  const charge = vi.spyOn(SourceSemanticReadBudget.prototype, "charge");
-  const fivePlanner = new SourceSemanticReadBudget(AMPLE);
-  const fiveStart = charge.mock.calls.length;
-  expect(SourceSemanticResourceLedger.measureRetain([value, value, value, value, value], fivePlanner.remaining(), fivePlanner))
-    .toEqual(independentHold);
-  const fiveCalls = charge.mock.calls.slice(fiveStart);
-  const onePlanner = new SourceSemanticReadBudget(AMPLE);
-  const oneStart = charge.mock.calls.length;
-  SourceSemanticResourceLedger.measureRetain(value, onePlanner.remaining(), onePlanner);
-  const oneWalk = charge.mock.calls.slice(oneStart);
-  const marker = oneWalk.reduce((best, call) => (call[1] as number) > (best[1] as number) ? call : best);
   const { parent, child, completion } = subject();
-  const quoteStart = charge.mock.calls.length;
   expect(quote(completion, value)).toBeUndefined();
-  const quoteCalls = charge.mock.calls.slice(quoteStart);
-  const phases = quoteCalls.map(call => call[2]);
   expect(held(parent)).toEqual(independentHold);
-  expect(phases).toContain("source union metadata capture bound");
-  expect(phases).toContain("source union immutable metadata capture");
-  expect(phases).toContain("source union metadata quote bookkeeping");
-  const capture = quoteCalls.find(call => call[2] === "source union immutable metadata capture")!;
-  expect(capture.slice(0, 2)).toEqual([guard.work_units, guard.memory_bytes]);
-  expect(markerVisits(fiveCalls, marker, ["retained value measurement work"])).toBe(5);
-  expect(markerVisits(quoteCalls, marker, ["source union metadata capture bound", "retained value measurement work"])).toBe(2);
+  expect(parent.spentWork).toBeGreaterThan(0);
+  expect(parent.spentBytes).toBeGreaterThan(0);
+  expect(parent.spentWork).toBeLessThan(independentHold.work_units);
+  expect(parent.spentBytes).toBeLessThan(independentHold.memory_bytes);
   expect(JSON.parse(JSON.stringify(value))).toEqual(snapshot);
   unfrozen(value);
-  value.preparation.reason = "mutated after quote";
-  value.preparation.limitations.push("post-quote");
+  (value.preparation[1] as string[]).push("mutated after quote");
+  (value.preparation[2] as unknown as unknown[]).push("post-quote");
   expect(held(parent)).toEqual(independentHold);
   nativeIdle(parent, child);
+
+  const owned = ownedPhaseMetadata();
+  expect(Object.isFrozen(owned)).toBe(false);
+  expect(Object.isFrozen(owned.preparation)).toBe(true);
+  const frozenHold = fiveCopyHold(owned);
+  const frozen = subject();
+  quote(frozen.completion, owned);
+  expect(held(frozen.parent)).toEqual(frozenHold);
+  expect(frozen.parent.spentWork).toBeGreaterThan(0);
+  expect(frozen.parent.spentWork).toBeLessThan(parent.spentWork);
+  expect(Object.isFrozen(owned)).toBe(false);
+  expect(Object.isFrozen(owned.preparation)).toBe(true);
+  nativeIdle(frozen.parent, frozen.child);
 });
 
 it("releases held completion allowance without refunding spent planning, and repeated release is harmless", () => {
@@ -134,15 +117,12 @@ it("releases held completion allowance without refunding spent planning, and rep
   nativeIdle(parent, child);
 });
 
-it("fails before capture when guarded allowance is insufficient and charges partial planning without a leaked hold", () => {
+it("keeps executed spend and leaks no hold when measurement or the final hold fails", () => {
   const value = phaseMetadata();
   const snapshot = JSON.parse(JSON.stringify(value));
   const guard = SourceSemanticResourceLedger.measureRetain(value, AMPLE);
-  const charge = vi.spyOn(SourceSemanticReadBudget.prototype, "charge");
   const short = subject({ work_units: guard.work_units - 1, memory_bytes: AMPLE.memory_bytes });
-  const beforeCapture = charge.mock.calls.length;
   expect(() => quote(short.completion, value)).toThrow(SourceSemanticResourceExhausted);
-  expect(charge.mock.calls.slice(beforeCapture).some(call => call[2] === "source union immutable metadata capture")).toBe(false);
   expect(JSON.parse(JSON.stringify(value))).toEqual(snapshot);
   unfrozen(value);
   expect(held(short.parent)).toEqual({ work_units: 0, memory_bytes: 0 });
@@ -153,13 +133,11 @@ it("fails before capture when guarded allowance is insufficient and charges part
   nativeIdle(short.parent, short.child);
 
   const mid = subject({ work_units: 2 * guard.work_units + 1, memory_bytes: AMPLE.memory_bytes });
-  const afterCapture = charge.mock.calls.length;
   expect(() => quote(mid.completion, value)).toThrow(SourceSemanticResourceExhausted);
-  expect(charge.mock.calls.slice(afterCapture).some(call => call[2] === "source union immutable metadata capture")).toBe(true);
   expect(JSON.parse(JSON.stringify(value))).toEqual(snapshot);
   unfrozen(value);
   expect(held(mid.parent)).toEqual({ work_units: 0, memory_bytes: 0 });
-  expect(mid.parent.spentWork).toBeGreaterThan(0);
+  expect(mid.parent.spentWork).toBeGreaterThan(guard.work_units);
   expect(mid.parent.spentWork + mid.parent.work).toBe(2 * guard.work_units + 1);
   nativeIdle(mid.parent, mid.child);
 });

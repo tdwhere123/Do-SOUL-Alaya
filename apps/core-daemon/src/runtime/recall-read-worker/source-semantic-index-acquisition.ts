@@ -1,4 +1,5 @@
-import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceSemanticAcquisitionPhase,
+import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
+  captureSourceSemanticAcquisition, packSourceSemanticAcquisition, type SourceSemanticCompactAcquisition,
   type SourceIndexQueryVector, type SourceIndexTarget, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
@@ -11,16 +12,18 @@ import type { SourceSemanticReadRuntime } from "./runtime.js";
  */
 export function acquireSourceSemanticIndex(input: Readonly<{
   runtime: SourceSemanticReadRuntime; workspace: string; navigation: string; authorized: readonly string[] | null;
-  meter: SourceSemanticReadBudget; vector: SourceIndexQueryVector;
+  meter: SourceSemanticReadBudget; metadataMeter: SourceSemanticReadBudget; vector: SourceIndexQueryVector;
   canonicalBytes: number; sourceCost: (length: number) => SourceSemanticResourceBudget;
-}>): { phase: SourceSemanticAcquisitionPhase; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
+}>): { phase: SourceSemanticCompactAcquisition; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
   const { meter } = input;
   const quote = quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes));
   let release: (() => void) | undefined, handedOff = false;
   let phase = sourceSemanticAcquisitionNotRun("canonical_observation_allowance");
   const finish = (nominations: readonly SourceIndexTarget[] = []) => {
+    // Codec overhead belongs to the parent's metadata phase, not index or source observation coordinates.
+    const compact = packSourceSemanticAcquisition(captureSourceSemanticAcquisition(phase, input.metadataMeter), input.metadataMeter);
     handedOff = true;
-    return { phase, nominations, releaseCanonical: () => release?.() };
+    return { phase: compact, nominations, releaseCanonical: () => release?.() };
   };
   try {
     release = meter.hold(quote);

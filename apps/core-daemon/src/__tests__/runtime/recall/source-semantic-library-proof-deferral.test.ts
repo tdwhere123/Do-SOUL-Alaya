@@ -10,11 +10,12 @@ const isolation = await vi.hoisted(async () => {
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
 import { canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
-  SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
-  type SourceSemanticCorrespondence, type SourceSemanticQuery, type SourceSemanticWorkerRequest,
+  SourceSemanticExecutionSchema, SourceSemanticResourceExhausted, SourceSemanticWorkerRequestSchema,
+  SourceSemanticWorkerResultSchema, sourceSemanticExecution, unavailableSourceQueryPreparation,
+  type SourceSemanticCorrespondence, type SourceSemanticExecution, type SourceSemanticQuery, type SourceSemanticWorkerRequest,
   type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { assembleSourceSemanticLibraryIndex, createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse,
-  fieldContractSha256, preparedDeliveryId, sealIssuedContinuation, sourceGoldRootIdentity,
+  fieldContractSha256, preparedDeliveryId, sealIssuedContinuation, selectSourceSemanticLibraryPage, sourceGoldRootIdentity,
   sourceSemanticLibrarySourceEntry, sourceSemanticLibraryQueryIdentity, SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID,
   type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo } from "@do-soul/alaya-storage";
@@ -67,9 +68,12 @@ function preparedPackages() {
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 
-function encodedBytes(result: Recall, request: Request): number {
-  return Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse({ ...result, work: {
-    native_work: request.budget.work_units, logical_work: request.budget.work_units,
+function encodedBytes(result: Recall, request: Request,
+  execution: SourceSemanticExecution = SourceSemanticExecutionSchema.parse(result.execution)): number {
+  // Derive the boundary from the complete public work envelope, including index accounting.
+  return Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse({ ...result, execution, work: {
+    native_work: request.budget.work_units, index_work: request.budget.work_units,
+    native_accounting: "partial", logical_work: request.budget.work_units,
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,
     rss_bytes: Number.MAX_SAFE_INTEGER
   } })));
@@ -125,7 +129,7 @@ it("freezes a fitting proof on a later page without occupying its root with raw 
     }
     const candidates = packages.flatMap(row => [row.proof, row.raw]);
     const pool = { sources: packages.map(row => row.fixture.record), descriptors: [], sourcePages: 1, interpretationPages: 0,
-      access: { ...sourceSemanticAccessReceiptValue("query-conditioned-v1", `sha256:${"ab".repeat(32)}`,
+      access: { ...sourceSemanticAccessReceiptValue(meter(), "query-conditioned-v1", `sha256:${"ab".repeat(32)}`,
         packages.map(row => ({ source_id: row.fixture.record.source_id, record_id: row.fixture.record.identity,
           read_bytes: 25, body_bytes: 25, complete: true,
           signal: { source_text_score: 0, interpretation_reading_score: 0 } })), [], false, false, []),
@@ -426,3 +430,203 @@ it("delivers B first and A's final-envelope-only proof over loopback through reo
     }
   });
 }, 60_000);
+
+async function withDeferralLibrary(run: (ctx: {
+  runtime: ReturnType<typeof createRecallReadWorkerRuntime>;
+  packages: ReturnType<typeof preparedPackages>;
+  request: Request;
+  base: Parameters<typeof prepareLibraryDelivery>[0];
+  payload: { workspace_id: string; as_of: string; authorized_scopes: { mode: "named"; scopes: ["project"] }; request: Request };
+}) => Promise<void> | void) {
+  const directory = await mkdtemp(join(tmpdir(), "library-proof-deferral-")), filename = join(directory, "alaya.db");
+  const { database } = await createRecallRealStorage(() => undefined, filename);
+  try {
+    const admission = createAuditedSourceAdmission({
+      stores: createSqliteFieldFormationStores({ database, repos: createDaemonFieldRepos({ database }) }),
+      eventLogRepo: new SqliteEventLogRepo(database), runtimeNotifier: { notifyEntry: async () => undefined },
+      sha256: fieldContractSha256
+    });
+    for (const id of ["first", "later"]) {
+      await admission.admit({ workspace_id: WS, source_id: id, source_version: "1",
+        content_bytes: "Alice uses X. Bob uses Y.", evidence_object_id: null, recorded_at: CLOCK,
+        event_time: null, valid_from: null, valid_to: null, speaker: "user", scope_class: "project", spans: [] }, { workspaceId: WS });
+    }
+    const runtime = createRecallReadWorkerRuntime(database), packages = preparedPackages();
+    const request: Request = { kind: "recall", accepts_unreviewed_conditional_results: true,
+      original_query: ORIGINAL, query_semantics: semantics, budget: BUDGET, output_byte_limit: 1_000_000 };
+    const base: Parameters<typeof prepareLibraryDelivery>[0] = { query_id: sourceSemanticLibraryQueryIdentity(ORIGINAL),
+      snapshot_id: `sha256:${"ef".repeat(32)}`, interpretation_id: "library", as_of: CLOCK,
+      expires_at: "2026-09-18T00:05:00.000Z", authorized: ["project"],
+      pool: { sources: packages.map(row => row.fixture.record), descriptors: [], sourcePages: 1, interpretationPages: 0,
+        access: { ...sourceSemanticAccessReceiptValue(meter(), "query-conditioned-v1", `sha256:${"ab".repeat(32)}`,
+          packages.map(row => ({ source_id: row.fixture.record.source_id, record_id: row.fixture.record.identity,
+            read_bytes: 25, body_bytes: 25, complete: true,
+            signal: { source_text_score: 0, interpretation_reading_score: 0 } })), [], false, false, []),
+          pool_id: `sha256:${"cd".repeat(32)}` } },
+      request_identity: fieldContractSha256(canonicalJson({ ...request, continuation: undefined })),
+      public_request_identity: `sha256:${"ff".repeat(32)}`,
+      query_semantics_status: { status: "admitted", query_semantics_id: sourceSemanticQueryIdentity(semantics, fieldContractSha256) },
+      unproved_computations: [], coverage: { discovery: "complete", source_interpretation: "open", query_semantics: "complete",
+        semantic_correspondence: "open", conditional_computation: "complete", payload: "complete" },
+      discovery: { eligible_source_count: 2, visited_source_pages: 1, visited_source_interpretation_pages: 0,
+        visited_source_interpretation_descriptors: 0, candidate_prefix: [], examined_source_interpretation_ids: [],
+        unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0, examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
+        open_residuals: false, truncated: false } };
+    await run({ runtime, packages, request, base, payload: { workspace_id: WS, as_of: CLOCK,
+      authorized_scopes: { mode: "named", scopes: ["project"] }, request } });
+  } finally { database.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true }); }
+}
+
+const NATIVE = sourceSemanticExecution();
+const ADMITTED = sourceSemanticExecution(unavailableSourceQueryPreparation("attestation_missing", "not_requested"));
+
+function extraRaw(id: string, preview: string, template: SourceSemanticLibraryPackage): SourceSemanticLibraryPackage {
+  const entry = sourceSemanticLibrarySourceEntry({ workspaceId: WS, root_id: id, source_version: "1",
+    content_digest: `sha256:${fieldContractSha256(preview)}`, evidence_object_id: null, hypothesis_id: "library" });
+  return { ...template, entry, entries: [entry], proofs: [], explanations: [], preview, payload_support: "envelope_budget",
+    source_disclosure: { ...template.source_disclosure, proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+}
+
+function discriminatingByteCap(fits: readonly number[], exceeds: readonly number[]): number {
+  const cap = Math.max(...fits);
+  if (!Number.isSafeInteger(cap) || exceeds.some(bytes => bytes <= cap)) {
+    throw new Error(`no independent discriminating cap: fits ${fits.join(",")} exceeds ${exceeds.join(",")}`);
+  }
+  return cap;
+}
+
+function prepareActive(base: Parameters<typeof prepareLibraryDelivery>[0],
+  candidates: readonly SourceSemanticLibraryPackage[], request: Request, readMeter = meter()) {
+  expect(ADMITTED).not.toBe(NATIVE);
+  return prepareLibraryDelivery(base, candidates, request, readMeter, "field", selectSourceSemanticLibraryPage, ADMITTED);
+}
+
+function reservedSingleton(result: Recall, row: SourceSemanticLibraryPackage,
+  execution: SourceSemanticExecution, moreRoots: boolean, emittedOffset: number): Recall {
+  const assembled = assembleSourceSemanticLibraryIndex({
+    query_id: result.index.query_id, snapshot_id: result.index.snapshot_id,
+    interpretation_id: result.index.interpretation_id!, as_of: CLOCK, expires_at: "2026-09-18T00:05:00.000Z",
+    authorized_scopes: ["project"], source_entries: [row.entry],
+    proof_groups: row.proofs.length > 0 ? [row] : [], selected_entries: [row.entry], root_order: [packageRoot(row)],
+    truncated: result.discovery.truncated, open_residuals: result.discovery.open_residuals,
+    more_roots: moreRoots, emitted_offset: emittedOffset });
+  const index = { ...assembled.index, result_version: result.index.result_version,
+    continuation: assembled.index.continuation === null ? null : sealIssuedContinuation(assembled.index.continuation) };
+  const continued = SourceSemanticWorkerResultSchema.parse({
+    ...result, execution, index, delivery_id: preparedDeliveryId(result.request_identity, index) });
+  if (continued.kind !== "recall") throw new Error("reserved singleton expected");
+  return continued;
+}
+
+function finalEnvelope(ctx: Parameters<Parameters<typeof withDeferralLibrary>[0]>[0]) {
+  const proofPages = ctx.packages.map(row => deliverFrozenLibraryPage(ctx.runtime, ctx.payload, meter(), ctx.request,
+    prepareLibraryDelivery(ctx.base, [row.proof], ctx.request, meter()), 0));
+  const rawPages = ctx.packages.map(row => deliverFrozenLibraryPage(ctx.runtime, ctx.payload, meter(), ctx.request,
+    prepareLibraryDelivery(ctx.base, [row.raw], ctx.request, meter()), 0));
+  const activeRawContinuing = ctx.packages.map((row, index) =>
+    encodedBytes(reservedSingleton(rawPages[index]!, row.raw, ADMITTED, true, 0), ctx.request));
+  const nativeProofFinal = ctx.packages.map((row, index) =>
+    encodedBytes(reservedSingleton(proofPages[index]!, row.proof, NATIVE, false, 1), ctx.request));
+  const activeProofComplete = proofPages.map(page => encodedBytes(page, ctx.request, ADMITTED));
+  const activeProofContinuing = ctx.packages.map((row, index) =>
+    encodedBytes(reservedSingleton(proofPages[index]!, row.proof, ADMITTED, true, 0), ctx.request));
+  const finalLimit = discriminatingByteCap([...activeRawContinuing, ...nativeProofFinal],
+    [...activeProofComplete, ...activeProofContinuing]);
+  const request = { ...ctx.request, output_byte_limit: finalLimit };
+  return { request, base: { ...ctx.base, request_identity: fieldContractSha256(canonicalJson({ ...request, continuation: undefined })) },
+    finalLimit };
+}
+
+it("keeps a fitting raw baseline when no current-execution prefix can hold a deferred final", async () => {
+  await withDeferralLibrary(ctx => {
+    const [a] = ctx.packages;
+    if (a === undefined) throw new Error("proof package expected");
+    const rawPage = deliverFrozenLibraryPage(ctx.runtime, ctx.payload, meter(), ctx.request,
+      prepareLibraryDelivery(ctx.base, [a.raw], ctx.request, meter()), 0);
+    const proofPage = deliverFrozenLibraryPage(ctx.runtime, ctx.payload, meter(), ctx.request,
+      prepareLibraryDelivery(ctx.base, [a.proof], ctx.request, meter()), 0);
+    const cap = discriminatingByteCap(
+      [encodedBytes(rawPage, ctx.request, ADMITTED),
+        encodedBytes(reservedSingleton(proofPage, a.proof, NATIVE, false, 1), ctx.request)],
+      [encodedBytes(proofPage, ctx.request, ADMITTED)]);
+    const request = { ...ctx.request, output_byte_limit: cap };
+    const base = { ...ctx.base, request_identity: fieldContractSha256(canonicalJson({ ...request, continuation: undefined })) };
+    const plan = prepareActive(base, [a.proof, a.raw], request);
+    expect(plan.pages).toHaveLength(1);
+    expect(plan.pages[0]!.map(row => row.proofs.length)).toEqual([0]);
+    expect(plan.pages[0]![0]!.entry).toEqual(a.raw.entry);
+    const delivered = deliverFrozenLibraryPage(ctx.runtime, { ...ctx.payload, request }, meter(), request, plan, 0);
+    expect(encodedBytes(delivered, request)).toBeLessThanOrEqual(cap);
+    expect(delivered.proofs ?? []).toEqual([]);
+    expect(delivered.index.continuation).toBeNull();
+  });
+});
+
+it("gives competing final-only proofs one raw prefix rather than a second last page", async () => {
+  await withDeferralLibrary(ctx => {
+    const { request, base, finalLimit } = finalEnvelope(ctx);
+    const candidates = ctx.packages.flatMap(row => [row.proof, row.raw]);
+    const plan = prepareActive(base, candidates, request);
+    expect(plan.pages.map(page => page.map(row => row.proofs.length))).toEqual([[0], [1]]);
+    expect(new Set(plan.pages.flat().map(packageRoot)).size).toBe(2);
+    const first = deliverFrozenLibraryPage(ctx.runtime, { ...ctx.payload, request }, meter(), request, plan, 0);
+    expect(first.proofs ?? []).toEqual([]);
+    expect(first.index.entries).toHaveLength(1);
+    const last = deliverFrozenLibraryPage(ctx.runtime, { ...ctx.payload, request }, meter(), request, plan, first.index.entries.length);
+    expect(last.proofs).toHaveLength(1);
+    expect(last.index.continuation).toBeNull();
+    expect(new Set([...first.index.entries, ...last.index.entries].map(row => {
+      if (row.target.kind !== "source_evidence") throw new Error("source root expected");
+      return sourceGoldRootIdentity(row.target);
+    })).size).toBe(2);
+    for (const page of [first, last]) expect(encodedBytes(page, request)).toBeLessThanOrEqual(finalLimit);
+  });
+});
+
+it("preserves an already reserved baseline and charged work when a deferred final proposal exhausts", async () => {
+  await withDeferralLibrary(ctx => {
+    const [a] = ctx.packages;
+    if (a === undefined) throw new Error("proof package expected");
+    const { request, base } = finalEnvelope(ctx);
+    const candidates = [a.proof, a.raw];
+    class FailDeferredProposal extends SourceSemanticReadBudget {
+      attempts = 0;
+      override charge(work: number, bytes: number, phase = "preparation"): void {
+        if (phase === "deferred final candidate references") {
+          this.attempts += 1;
+          throw new SourceSemanticResourceExhausted(phase);
+        }
+        super.charge(work, bytes, phase);
+      }
+    }
+    const failed = new FailDeferredProposal(BUDGET);
+    const plan = prepareActive(base, candidates, request, failed);
+    expect(failed.attempts).toBeGreaterThan(0);
+    expect(failed.spentWork).toBeGreaterThan(0);
+    expect(plan.pages).toHaveLength(1);
+    expect(plan.pages[0]!.length).toBeGreaterThan(0);
+    expect(plan.pages[0]!.every(row => row.proofs.length === 0)).toBe(true);
+    const delivered = deliverFrozenLibraryPage(ctx.runtime, { ...ctx.payload, request }, meter(), request, plan, 0);
+    expect(encodedBytes(delivered, request)).toBeLessThanOrEqual(request.output_byte_limit);
+    expect(delivered.proofs ?? []).toEqual([]);
+  });
+});
+
+it("does not replace a fitting baseline with a deferred candidate that drops roots or proofs", async () => {
+  await withDeferralLibrary(ctx => {
+    const [a, b] = ctx.packages;
+    if (a === undefined || b === undefined) throw new Error("two roots expected");
+    const { request, base } = finalEnvelope(ctx);
+    const third = extraRaw("third-root", "Carol stays quiet.", b.raw);
+    const rawPlan = prepareActive(base, [a.raw, b.raw, third], request);
+    const deferredPlan = prepareActive(base, [a.proof, a.raw, b.proof, b.raw, third], request);
+    expect(new Set(deferredPlan.pages.flat().map(packageRoot)).size)
+      .toBeGreaterThanOrEqual(new Set(rawPlan.pages.flat().map(packageRoot)).size);
+    expect(deferredPlan.pages.flat().filter(row => row.proofs.length > 0).length)
+      .toBeGreaterThanOrEqual(rawPlan.pages.flat().filter(row => row.proofs.length > 0).length);
+    expect(deferredPlan.pages.flat().length).toBeGreaterThan(0);
+    const first = deliverFrozenLibraryPage(ctx.runtime, { ...ctx.payload, request }, meter(), request, deferredPlan, 0);
+    expect(encodedBytes(first, request)).toBeLessThanOrEqual(request.output_byte_limit);
+    expect(first.index.entries.length).toBeGreaterThan(0);
+  });
+});

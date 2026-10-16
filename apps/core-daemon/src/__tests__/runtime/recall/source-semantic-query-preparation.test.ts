@@ -5,8 +5,10 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
+import { writeFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
-import { SourceSemanticWorkerRequestSchema, SoulInterpretationRequestSchema, SourceSemanticExecutionSchema, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
+import { SourceSemanticWorkerRequestSchema, SoulInterpretationRequestSchema, SourceSemanticExecutionSchema,
+  sourceSemanticAccessPhases, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { SourceSemanticsPublicPayloadSchema, parseWorkerOperationPayload, type SourceSemanticsPublicPayload } from
   "../../../runtime/recall-read-worker/operation-schemas.js";
 import type { RecallReadWorkerRequest } from "../../../runtime/recall-read-worker/protocol.js";
@@ -130,7 +132,7 @@ describe("Source query preparation before native snapshots", () => {
       expect(first.query_semantics_status.status).toBe("admitted");
       expect(second.query_semantics_id).toBe(first.query_semantics_id);
       expect(second.query_semantics_status).toEqual(first.query_semantics_status);
-      expect(second.access?.preparation.navigation_digest).toBe(digest("Alice tools navigation"));
+      expect(sourceSemanticAccessPhases(second.access!).preparation.navigation_digest).toBe(digest("Alice tools navigation"));
       expect(second.access?.input_id).not.toBe(first.access?.input_id);
       expect(second.access?.source_candidates).toEqual(first.access?.source_candidates);
     } finally { await h.cleanup(); }
@@ -153,7 +155,7 @@ describe("Source query preparation before native snapshots", () => {
       if (recalled.kind !== "recall") throw new Error("recall expected");
       expect(prepared.access).toBeDefined();
       expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
-      expect(recalled.discovery.access?.preparation).toEqual(prepared.access?.preparation);
+      expect(recalled.discovery.access?.phases[1]).toEqual(prepared.access?.phases[1]);
       expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(recalled.execution)).query_preparation).toMatchObject({ status: "not_requested", submitted_inputs: 0 });
       expect(h.prepare).toHaveBeenCalledTimes(1);
       expect(h.bind).toHaveBeenCalledTimes(1);
@@ -288,14 +290,17 @@ describe("captured Source execution and the single inherited deadline (synthetic
     try {
       const input = initialQuery();
       if (input.request.kind !== "prepare_query") throw new Error("query expected");
-      await expect(h.client.sourceSemanticsPort!.execute({ ...input, request: { ...input.request, access_hint: "fixture-delay:220" } }))
+      await expect(h.client.sourceSemanticsPort!.execute({ ...input, request: { ...input.request, access_hint: "fixture-hold" } }))
         .rejects.toThrow("timed out after 150ms");
       const owner = posts.calls()[0]!.worker;
       expect(terminate).toHaveBeenCalledTimes(1);
       let settled = false;
       const next = h.client.sourceSemanticsPort!.execute(initialQuery()).finally(() => { settled = true; });
       const result = expect(next).resolves.toMatchObject({ kind: "prepare_query" });
-      const late = await new Promise<{ result: { query_handle: string } }>(resolve => owner.once("message", resolve));
+      // Gate the late success so waiting for it does not spend the next request's replacement budget.
+      const late = new Promise<{ result: { query_handle: string } }>(resolve => owner.once("message", resolve));
+      writeFileSync(`${h.filename}.capture.release`, "");
+      const lateResult = await late;
       expect(settled).toBe(false);
       expect(posts.calls()).toHaveLength(1);
       expect(owner.threadId).toBeGreaterThan(0);
@@ -303,7 +308,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
       expect(owner.threadId).toBe(-1);
       expect(posts.calls()).toHaveLength(2);
       expect(posts.calls()[1]!.worker).not.toBe(owner);
-      const staleReason = payload({ kind: "reason", query_handle: late.result.query_handle,
+      const staleReason = payload({ kind: "reason", query_handle: lateResult.result.query_handle,
         source_interpretation_id: h.sourceInterpretationId,
         accepts_unreviewed_conditional_results: true, budget: BUDGET, output_byte_limit: 1_000_000 });
       expect(() => SourceSemanticsPublicPayloadSchema.parse(staleReason)).not.toThrow();

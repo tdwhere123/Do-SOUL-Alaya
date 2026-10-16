@@ -9,7 +9,13 @@ const database = new Database(workerData.databaseFilename, { readonly: true, tim
 const record = (event) => appendFileSync(`${workerData.databaseFilename}.events`,
   `${JSON.stringify({ threadId, ...event })}\n`, "utf8");
 record({ kind: "spawn" });
+const heldResponses = new Map();
 parentPort.on("message", async ({ id, operation, payload }) => {
+  if (operation === "fixture.releaseResponse") {
+    heldResponses.get(id)?.();
+    heldResponses.delete(id);
+    return;
+  }
   record({ kind: "dispatch", id, operation, payload });
   if (payload.workspaceId === "native-lock") {
     record({ kind: "sql-enter", id });
@@ -18,6 +24,12 @@ parentPort.on("message", async ({ id, operation, payload }) => {
   }
   if (payload.workspaceId?.startsWith("delay:")) {
     await new Promise(resolve => setTimeout(resolve, Number(payload.workspaceId.split(":")[1])));
+  }
+  if (payload.workspaceId === "held-response") {
+    await new Promise(resolve => {
+      heldResponses.set(id, resolve);
+      record({ kind: "response-held", id });
+    });
   }
   parentPort.postMessage({ id, ok: true, result: operation.startsWith("memory.") ? [] : null });
   record({ kind: "response", id });

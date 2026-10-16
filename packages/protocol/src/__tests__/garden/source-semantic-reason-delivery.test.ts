@@ -155,6 +155,7 @@ it("roundtrips a full reason result and premises without compacting them", () =>
     kind: "reason", result, query, source_disclosure: disclosure, coverage, work,
     execution: sourceSemanticExecution()
   });
+  if (native.kind !== "reason") throw new Error("expected a reasoning result");
   expect(native.result).toEqual(result);
   expect(native.query).toEqual(query);
   expect(native.no_conclusion).toBeUndefined();
@@ -171,6 +172,7 @@ it("roundtrips a full reason result and premises without compacting them", () =>
     kind: "reason", no_conclusion: sourceSemanticUndeliveredConclusion(result).no_conclusion,
     source_disclosure: disclosure, coverage, work
   });
+  if (compact.kind !== "reason") throw new Error("expected a reasoning result");
   expect(compact.result).toBeUndefined();
   expect(compact.query).toBeUndefined();
   expect(sourceSemanticReasonControl(compact)).not.toHaveProperty("attention");

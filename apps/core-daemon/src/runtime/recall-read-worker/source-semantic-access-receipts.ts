@@ -1,25 +1,30 @@
 import { SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
+  captureSourceSemanticQueryPreparation, captureSourceSemanticAcquisition, packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,
+  type SourceSemanticCompactPreparation, type SourceSemanticCompactAcquisition, type SourceSemanticResourceLedger,
   type SourceSemanticAccessPolicy, type SourceSemanticAccessReceipt, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 
 type Stops = SourceSemanticAccessReceipt["stopping_reasons"];
+export type AccessReceiptPhases = Readonly<{
+  preparation: SourceSemanticCompactPreparation; acquisition: SourceSemanticCompactAcquisition;
+  observation: readonly [number, number, number] | null;
+}>;
 type Pageable = Readonly<{
   observed_source_count: number; observed_interpretation_count: number;
   source_candidates: readonly unknown[]; interpretation_candidates: readonly unknown[];
 }>;
 
-/** The retained access receipt shape shared by observation and its conservative completion bound. */
-export function sourceSemanticAccessReceiptValue<Source, Interpretation, Unvisited>(policy: SourceSemanticAccessPolicy, inputId: string,
-  sources: readonly Source[], interpretations: readonly Interpretation[],
+/** Construct compact provenance before any pool, completion quote or lease retains it. */
+export function sourceSemanticAccessReceiptValue<Source, Interpretation, Unvisited>(meter: SourceSemanticResourceLedger,
+  policy: SourceSemanticAccessPolicy, inputId: string, sources: readonly Source[], interpretations: readonly Interpretation[],
   unvisitedSources: Unvisited, unvisitedInterpretations: Unvisited, stops: Stops,
-  sourcePreviewExtents?: SourceSemanticPreviewExtents,
-  phases?: Pick<SourceSemanticAccessReceipt, "preparation" | "acquisition" | "phase_accounting">) {
+  sourcePreviewExtents?: SourceSemanticPreviewExtents, phases?: AccessReceiptPhases) {
+  const preparation = phases?.preparation ?? packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
+    unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"), meter), meter);
+  const acquisition = phases?.acquisition ?? packSourceSemanticAcquisition(captureSourceSemanticAcquisition(
+    sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"), meter), meter);
+  meter.charge(1, 32, "source phase access tuple allocation");
   return { contract: "source-semantic-access-v2" as const,
-    preparation: phases?.preparation ?? unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"),
-    acquisition: phases?.acquisition ?? sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"),
-    phase_accounting: phases?.phase_accounting ?? {
-      observation: null,
-      completion: "included_in_worker_work_not_separately_measured" as const,
-      native_cpu: "unknown" as const, deadline: "soft_quarantine_until_exit" as const },
+    phases: [1, preparation, acquisition, phases?.observation ?? null] as const,
     policy, input_id: inputId,
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }),
     observed_source_count: sources.length, observed_interpretation_count: interpretations.length,

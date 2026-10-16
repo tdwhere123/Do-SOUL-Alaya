@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { deriveAddressableSpanViews, fieldContractSha256 } from "@do-soul/alaya-core";
-import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
+import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, UNKNOWN_UTTERANCE_ATTRIBUTION,
+  sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, sourceSemanticRequestCatalog } from "@do-soul/alaya-soul";
 import { closeCachedDatabase, initDatabase, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
 import { startBenchDaemon } from "../../../harness/daemon.js";
@@ -25,6 +26,11 @@ import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport } from
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, prepareSourceSemanticRequestLine,
   sourceSemanticArtifactPreparations } from "../../../runs/extraction/request-artifact.js";
 import { setExtractionCredentialFixture } from "../extraction-fill/fixture.js";
+
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
 
 const root = mkdtempSync(join(tmpdir(), "retained-native-source-"));
 const retainedPath = join(root, "retained.sqlite"), workspaceId = "retained-source", runId = "publication-run";
@@ -67,7 +73,10 @@ beforeAll(async () => {
   original = readFileSync(retainedPath); expectedSha256 = hashRegularFileNoFollow(retainedPath);
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+afterAll(() => {
+  try { expect(isolation.violations).toEqual([]); }
+  finally { isolation.restore(); rmSync(root, { recursive: true, force: true }); }
+});
 
 it("copies and reopens exact retained records without inventing clocks, roles or attribution", async () => {
   const snapshotPath = path("sealed.sqlite");
@@ -315,8 +324,10 @@ it("carries retained author and attribution through outgoing H, audited publicat
       SoulInterpretationRequestSchema.parse({ operation: "prepare_source", source_id: "assistant-source", budget,
         authorized_scopes: { mode: "named", scopes: ["project"] } })));
     expect(delivered).toMatchObject({ operation: "prepare_source", source_id: "assistant-source",
-      source_version: "original", attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, provider_attempts: 0 });
+      source_version: "original", attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION });
     if (delivered.operation !== "prepare_source") throw new Error("public source preparation required");
+    expect(sourceSemanticExecutionPhases(delivered.execution)).toMatchObject({
+      query_preparation: { external_api_attempts: 0 }, semantic_generation_attempts: 0 });
     expect(delivered.catalog?.assertions).toHaveLength(95);
     const quoted = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
       SoulInterpretationRequestSchema.parse({ operation: "prepare_source", source_id: "captured-source", budget,
@@ -327,8 +338,10 @@ it("carries retained author and attribution through outgoing H, audited publicat
     const prepared = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation",
       SoulInterpretationRequestSchema.parse({ operation: "prepare_query", original_query: generation.generation_task.original_query,
         source_handle: delivered.source_handle, budget, authorized_scopes: { mode: "named", scopes: ["project"] } })));
-    expect(prepared).toMatchObject({ operation: "prepare_query", provider_attempts: 0 });
+    expect(prepared).toMatchObject({ operation: "prepare_query" });
     if (prepared.operation !== "prepare_query") throw new Error("public query preparation required");
+    expect(sourceSemanticExecutionPhases(prepared.execution)).toMatchObject({
+      query_preparation: { external_api_attempts: 0 }, semantic_generation_attempts: 0 });
     expect(prepared.candidates.map(row => row.interpretation_id)).toContain(
       report.sources.find(row => row.source_id === "assistant-source")?.interpretation_id);
   } finally { await daemon.shutdown(); }

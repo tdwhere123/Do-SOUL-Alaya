@@ -5,6 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
+import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -148,27 +149,29 @@ describe("recall read worker deadline and native quarantine", () => {
     try {
       h.database.exec("BEGIN EXCLUSIVE");
       const originals = [...h.workers];
+      const originalExits = originals.map(worker => once(worker, "exit"));
       const failures = originals.map(worker => expect(read(h.lifecycle, "native-lock", worker)).rejects.toThrow(/timed out/));
       await expect.poll(() => h.events().filter(event => event.kind === "sql-enter").length).toBe(2);
       await Promise.all(failures);
       const queued = ["replacement-one", "replacement-two"].map(key => expect(read(h.lifecycle, key)).resolves.toEqual([]));
-      await pause(30);
       expect(h.exited.size).toBe(0);
       expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(2);
       expect(dispatched(h.events(), "replacement-one")).toHaveLength(0);
       expect(new Set(h.posts.mock.contexts)).toEqual(new Set(originals));
       h.database.exec("ROLLBACK");
-      await Promise.all(queued);
+      // One replacement may serve both queued reads before the other original
+      // exits. Stale notifications below must follow both actual exit events.
+      await Promise.all([...queued, ...originalExits]);
       expect(h.exited.size).toBe(2);
       expect(h.events().filter(event => event.kind === "spawn").length - h.exited.size).toBeLessThanOrEqual(2);
       await h.lifecycle.isolate(async () => {
         const replacement = h.track(h.lifecycle.pinnedWorker()!);
         expect(originals).not.toContain(replacement);
         let settled = false;
-        const request = read(h.lifecycle, "delay:100").finally(() => { settled = true; });
+        const request = read(h.lifecycle, "held-response").finally(() => { settled = true; });
         const requestResult = expect(request).resolves.toEqual([]);
-        await expect.poll(() => dispatched(h.events(), "delay:100").length).toBe(1);
-        const id = dispatched(h.events(), "delay:100")[0]!.id!;
+        await expect.poll(() => h.events().filter(event => event.kind === "response-held").length).toBe(1);
+        const id = dispatched(h.events(), "held-response")[0]!.id!;
         // Deliberately inject duplicate events after actual native exit: these are
         // fixture-only stale notifications, not claims that Worker emits two exits.
         for (const old of originals) {
@@ -180,6 +183,7 @@ describe("recall read worker deadline and native quarantine", () => {
         }
         expect(settled).toBe(false);
         expect(h.lifecycle.isAvailable(replacement)).toBe(true);
+        replacement.postMessage({ id, operation: "fixture.releaseResponse" });
         await requestResult;
       });
       await expect(read(h.lifecycle, "after-stale-events")).resolves.toEqual([]);

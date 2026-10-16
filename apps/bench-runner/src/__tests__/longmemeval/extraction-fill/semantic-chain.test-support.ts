@@ -441,6 +441,15 @@ async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string
   expect(mismatchMeasured.result.rows[0]).toMatchObject({ measurement: null,
     preparation_trace: expect.arrayContaining([expect.objectContaining({
       work: expect.objectContaining({ native_work: expect.any(Number) }) })]), preparation_elapsed_ms: expect.any(Number) });
+  const measuredZeroRoot = join(root, "measured-zero-observation");
+  writeChainArtifact(join(measuredZeroRoot, "prepare.json"), { ...plan, queries: plan.queries.map((entry) => entry.status !== "ready" ? entry
+    : { ...entry, discovery_trace: entry.discovery_trace.map((page) => {
+      const phases = page.access.phases;
+      return { ...page, access: { ...page.access, phases: [phases[0], phases[1], phases[2], [0, 0, 0]] as const } };
+    }) } ) });
+  expect((await replaySemanticChain(measuredZeroRoot)).result).toMatchObject({
+    rows: [{ status: "native_unavailable", reason: "prepared_access_pool_mismatch", first_exposure: null },
+      { status: "replayed" }] });
 }
 
 async function assertInterruptedExposure(root: string, output: string, queryKey: string): Promise<void> {

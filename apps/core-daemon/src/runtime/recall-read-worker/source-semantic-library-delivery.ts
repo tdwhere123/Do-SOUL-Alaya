@@ -28,18 +28,24 @@ export type LibraryDeliveryPlan = Readonly<{
 type PlanBase = Omit<LibraryDeliveryPlan, "pages" | "page_access"> & Readonly<{ pool: SourceSemanticAccessPool }>;
 export type LibraryPageSelector = typeof selectSourceSemanticLibraryPage;
 
-/** Freeze membership, witness packages and support reservations before exposing any page. */
+/**
+ * Freeze membership, witness packages and support reservations before exposing any page.
+ * Callers with current preparation/acquisition pass it; the default is native-only.
+ */
 export function prepareLibraryDelivery(base: PlanBase, candidates: readonly SourceSemanticLibraryPackage[],
   request: Request, meter: SourceSemanticReadBudget, order: "field" | "source_access" = "field",
-  selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage): LibraryDeliveryPlan {
+  selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage,
+  initialExecution: SourceSemanticExecution = sourceSemanticExecution()): LibraryDeliveryPlan {
+  const continuationExecution = sourceSemanticExecution();
   const pages: SourceSemanticLibraryPackage[][] = [];
   const pageAccess: SourceSemanticAccessReceipt[] = [];
   let remaining = [...candidates], offset = 0, incomplete = false;
   const reservePage = (page: readonly SourceSemanticLibraryPackage[], emittedOffset: number, more: boolean) => {
     const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
       page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
+    // Access phases are frozen provenance, not execution of this delivery.
     const result = pageResult(base, page, emittedOffset, more, request, meter, true, access,
-      sourceSemanticExecution(base.pool.access.preparation, base.pool.access.acquisition));
+      emittedOffset === 0 ? initialExecution : continuationExecution);
     const encoded = encodeSourceSemanticLibraryResponse(result);
     meter.retain(encoded, "candidate delivery encoding");
     const bytes = Buffer.byteLength(JSON.stringify(encoded));
@@ -66,13 +72,13 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
       const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
       meter.charge(remaining.length, remaining.length * 16, "library page root census");
       const remainingRootCount = new Set(remaining.map(root)).size;
-      const selected = selectPage({ candidates: remaining, meter, order,
+      let selected = selectPage({ candidates: remaining, meter, order,
         fitsStandalone: (candidate, precedingSlots) => {
           if (reservePage([candidate], offset + precedingSlots,
             finalPage.length > 0 || remainingRootCount > precedingSlots + 1).fits) return true;
           // Until the final membership is reserved, do not consume a raw twin
           // whose complete proof can use that smaller envelope after other roots.
-          return finalPage.length === 0 && reservePage([candidate], 0, false).fits;
+          return finalPage.length === 0 && reservePage([candidate], offset, false).fits;
         },
         fits: page => {
           const reserved = reservePage(page, offset, finalPage.length > 0 || remainingRootCount > page.length);
@@ -80,15 +86,26 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
           return reserved.fits;
         }
       });
+      // Keep the actual-envelope fallback reserved before optional future-fit work.
+      const fallbackFinal = selected.length === 0 && finalPage.length === 0
+        ? reserveFinalProofPage(remaining, meter, order, selectPage, reservePage, offset) : undefined;
+      // Only the initial preparation/acquisition envelope can shrink to native execution.
+      // Native-only pages retain their incumbent and the existing stalled final-page path.
+      if (offset === 0 && initialExecution !== continuationExecution && finalPage.length === 0
+        && (selected.length === 0 || selected.some(row => row.proofs.length === 0))) {
+        const deferred = reserveDeferredFinalProofPage(remaining, selected, meter, order, selectPage, reservePage, offset);
+        if (deferred !== undefined) {
+          selected = deferred.prefix;
+          accessByPage.set(pageKey(selected), deferred.prefixAccess);
+          finalPage = deferred.page; finalAccess = deferred.access; remaining = deferred.remaining;
+        }
+      }
       if (selected.length === 0) {
-        if (finalPage.length === 0) {
-          const final = reserveFinalProofPage(remaining, meter, order, selectPage, reservePage);
-          if (final.page.length > 0) {
-            finalPage = final.page; finalAccess = final.access;
-            const roots = new Set(finalPage.map(root));
-            remaining = remaining.filter(row => !roots.has(root(row)));
-            continue;
-          }
+        if (fallbackFinal !== undefined && fallbackFinal.page.length > 0) {
+          finalPage = fallbackFinal.page; finalAccess = fallbackFinal.access;
+          const roots = new Set(finalPage.map(root));
+          remaining = remaining.filter(row => !roots.has(root(row)));
+          continue;
         }
         incomplete = true; break;
       }
@@ -151,23 +168,69 @@ function improveReservedPackages(pages: SourceSemanticLibraryPackage[][], access
 type PageReservation = Readonly<{ access: SourceSemanticAccessReceipt; fits: boolean }>;
 
 /**
- * A stalled page has no fitting singleton in its continuing envelope. Reserve
- * one actual final membership, whose continuation-free encoding has no cursor
- * or offset overhead, then give other roots only earlier continuing pages.
- * Conflicting final-only roots may fall back to raw support or remain truncated.
- * Earlier pages never change; at most one metered final selection breaks the
- * stall, not a subset/permutation search or a replan of exposed membership.
+ * A future final envelope cannot justify consuming or excluding a root until a
+ * real earlier page fits. Preserve the baseline while trying one final proposal
+ * with the existing selector, then its actual current-execution prefix. With
+ * that final membership held, other final-only roots may use raw support rather
+ * than circularly reserving a second last page. Failed work is never refunded.
+ */
+function reserveDeferredFinalProofPage(candidates: readonly SourceSemanticLibraryPackage[],
+  baseline: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
+  order: "field" | "source_access", selectPage: LibraryPageSelector,
+  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => PageReservation,
+  emittedOffset: number
+): Readonly<{ page: readonly SourceSemanticLibraryPackage[]; access: SourceSemanticAccessReceipt;
+  prefix: readonly SourceSemanticLibraryPackage[]; prefixAccess: SourceSemanticAccessReceipt;
+  remaining: SourceSemanticLibraryPackage[] }> | undefined {
+  try {
+    meter.charge(candidates.length + baseline.length, (candidates.length + baseline.length) * 24,
+      "deferred final candidate references");
+    const rawRoots = new Set(baseline.filter(row => row.proofs.length === 0).map(root));
+    const finalCandidates = baseline.length === 0 ? candidates : candidates.filter(row => rawRoots.has(root(row)));
+    // This positive offset prices only a tentative future final, never a published first page.
+    const final = reserveFinalProofPage(finalCandidates, meter, order, selectPage, reserve, emittedOffset + 1);
+    if (final.page.length === 0) return undefined;
+    const finalRoots = new Set(final.page.map(root));
+    const remaining = candidates.filter(row => !finalRoots.has(root(row)));
+    const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
+    const prefix = selectPage({ candidates: remaining, meter, order,
+      fitsStandalone: (candidate, precedingSlots) => reserve([candidate], emittedOffset + precedingSlots, true).fits,
+      fits: page => {
+        const reserved = reserve(page, emittedOffset, true);
+        if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
+        return reserved.fits;
+      }
+    });
+    if (prefix.length === 0) return undefined;
+    const prefixAccess = accessByPage.get(pageKey(prefix));
+    if (prefixAccess === undefined) throw new CoreError("OBLIGATION_VIOLATION", "deferred final prefix has no reserved access receipt");
+    const confirmed = reserve(final.page, emittedOffset + prefix.length, false);
+    if (!confirmed.fits) return undefined;
+    return { page: final.page, access: confirmed.access, prefix, prefixAccess, remaining };
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    // Neither final roots nor prefix membership have changed the reserved baseline.
+    return undefined;
+  }
+}
+
+/**
+ * Reserve one final membership without cursor or offset overhead, using the
+ * caller's execution context. Earlier pages never change; each invocation uses
+ * one metered selection, not a subset/permutation search.
  */
 function reserveFinalProofPage(candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
   order: "field" | "source_access", selectPage: LibraryPageSelector,
-  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => PageReservation
+  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => PageReservation,
+  emittedOffset: number
 ): Readonly<{ page: readonly SourceSemanticLibraryPackage[]; access?: SourceSemanticAccessReceipt }> {
   meter.charge(candidates.length, candidates.length * 8, "final proof candidates");
   const proofs = candidates.filter(row => row.proofs.length > 0);
   if (proofs.length === 0) return { page: [] };
   const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
   const selected = selectPage({ candidates: proofs, meter, order, fits: page => {
-    const reserved = reserve(page, 0, false);
+    // A future context remains tentative until its caller proves a nonempty prefix.
+    const reserved = reserve(page, emittedOffset, false);
     if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
     return reserved.fits;
   } });
@@ -187,7 +250,7 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
   if (pageIndex < 0) throw new CoreError("VALIDATION", "library continuation offset is not a frozen page boundary");
   const page = plan.pages[pageIndex]!;
   const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
-    plan.page_access[pageIndex]!, sourceSemanticExecution(payload.prepared_query?.receipt, meter.acquisition));
+    plan.page_access[pageIndex]!, sourceSemanticExecution(meter.preparation, meter.acquisition, meter));
   if (result.index.continuation !== null) {
     const continuation = result.index.continuation;
     issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,

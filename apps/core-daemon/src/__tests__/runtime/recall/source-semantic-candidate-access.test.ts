@@ -1,9 +1,15 @@
-import { expect, it, vi } from "vitest";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
+afterAll(() => { isolation.restore(); });
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteFieldSourceRecordRepo, SqliteSourceHintReader,
   type StorageDatabase } from "@do-soul/alaya-storage";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
-import { sourceSemanticExecutionPhases, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticResourceExhausted,
+import { sourceSemanticAccessPhases, sourceSemanticExecutionPhases, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, SourceSemanticResourceExhausted,
   type SourceSemanticCorrespondence, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
 import { createSourceSemanticInterpretationHandler } from "../../../mcp-memory/tool/interpretation-handler.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -14,6 +20,8 @@ import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worke
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
+import { expectFirstExtentThenCensusRefusal, sourceObservationOrder }
+  from "./source-semantic-observation-order.test-support.js";
 
 const orchid = "orchid irrigation", jasmine = "jasmine pruning";
 const prepare = (original: string) => ({ kind: "prepare_query" as const, original_query: original,
@@ -383,9 +391,12 @@ it("orders the complete observed pool for two queries before native descriptor p
       original_query: orchid, query_semantics: accessQuery(orchid), semantic_correspondences: [], budget: ACCESS_BUDGET, output_byte_limit: 1_000_000 });
     const directAccess = direct.discovery.access, frozenAccess = recalled.discovery.access;
     if (directAccess === undefined || frozenAccess === undefined) throw new Error("both access receipts are required");
-    const { pool_id: directPool, acquisition: directAcquisition, ...directObservation } = directAccess;
-    const { pool_id: frozenPool, acquisition: frozenAcquisition, ...frozenObservation } = frozenAccess;
+    const { pool_id: directPool, phases: directPhases, ...directObservation } = directAccess;
+    const { pool_id: frozenPool, phases: frozenPhases, ...frozenObservation } = frozenAccess;
+    const { acquisition: directAcquisition, ...directPhaseObservation } = sourceSemanticAccessPhases({ phases: directPhases });
+    const { acquisition: frozenAcquisition, ...frozenPhaseObservation } = sourceSemanticAccessPhases({ phases: frozenPhases });
     expect(directObservation).toEqual(frozenObservation);
+    expect(directPhaseObservation).toEqual(frozenPhaseObservation);
     const { budget: directAllowance, ...directAcquisitionEvidence } = directAcquisition;
     const { budget: frozenAllowance, ...frozenAcquisitionEvidence } = frozenAcquisition;
     expect(directAcquisitionEvidence).toEqual(frozenAcquisitionEvidence);
@@ -696,10 +707,9 @@ it("propagates injected empty-census planning refusal after a conclusive empty h
       expect(caught).toBeInstanceOf(SourceSemanticResourceExhausted);
       expect((caught as SourceSemanticResourceExhausted).phase).toBe("empty interpretation completion");
       expect(headers).toHaveBeenCalled();
-      const metadata = bodies.mock.calls.filter(([, , maxBytes, offset]) => maxBytes === 1 && (offset ?? 0) === 0);
-      const bodySpans = bodies.mock.calls.filter(([, , maxBytes, offset]) => !(maxBytes === 1 && (offset ?? 0) === 0));
-      expect(metadata).toHaveLength(1);
-      expect(bodySpans).toEqual([]);
+      const order = sourceObservationOrder({ bodies, headers, charge: spy });
+      expectFirstExtentThenCensusRefusal(order);
+      expect(order.bodySpans).toHaveLength(1);
       expect(bodies.mock.invocationCallOrder[0]!).toBeLessThan(headers.mock.invocationCallOrder[0]!);
       expect(meter.nativeWork).toBeGreaterThan(0);
       expect(meter.nativeBytes).toBeGreaterThan(0);

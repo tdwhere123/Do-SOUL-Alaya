@@ -20,6 +20,7 @@ export const previewNoveltyBytes = (raw: string | undefined, proof: string) => p
 function reserveRawRoots(input: Parameters<LibraryPageSelector>[0], novelOnly: boolean, deferNovel = false): readonly SourceSemanticLibraryPackage[] {
   let selected = rawOnly(input);
   if (deferNovel && selected.length === 0) return selectSourceSemanticLibraryPage(input);
+  let needsNativeProgress = false;
   // Authored prefix comparison uses the first zero-proof content_start===0 row per root, not a later located window.
   const raws = new Map<string, SourceSemanticLibraryPackage>();
   for (const row of input.candidates) {
@@ -42,6 +43,8 @@ function reserveRawRoots(input: Parameters<LibraryPageSelector>[0], novelOnly: b
       return [row, novelBytes(row) / Math.max(1, Buffer.byteLength(JSON.stringify(row)))];
     }));
     if (novelOnly) proofs.sort((a, b) => ranks.get(b)! - ranks.get(a)!);
+    const blockedRoots = new Set<string>();
+    let deferredRoots = false;
     for (const proof of proofs) {
       if (novelOnly && ranks.get(proof) === 0) continue;
       const root = physicalRoot(proof);
@@ -53,14 +56,25 @@ function reserveRawRoots(input: Parameters<LibraryPageSelector>[0], novelOnly: b
         const standalone = selectSourceSemanticLibraryPage({ ...input, candidates: [proof],
           // A final-only envelope can replace baseline raw exposure; retain raw in that case.
           fits: page => input.fits(page) && input.fitsStandalone!(page[0]!, selected.length - 1) });
-        if (standalone.length === 0) continue;
+        if (standalone.length === 0) {
+          if (input.fitsStandalone(proof, selected.length - 1)) blockedRoots.add(root);
+          continue;
+        }
         const deferred = selected.filter(row => physicalRoot(row) !== root);
         // The last raw root can upgrade directly; never return an empty deferred page.
-        if (deferred.length > 0 && input.fits(deferred)) selected = deferred;
+        if (deferred.length > 0 && input.fits(deferred)) { selected = deferred; deferredRoots = true; }
       }
     }
+    needsNativeProgress = deferredRoots && selected.length > 0
+      && selected.every(row => row.proofs.length === 0 && blockedRoots.has(physicalRoot(row)));
   } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; }
   finally { meter.work += heldWork; meter.bytes += heldBytes; }
+  // A final-only raw twin is not an earlier proof prefix. Let the native owner
+  // establish real progress with its held allowance; optional work stays charged.
+  if (needsNativeProgress) {
+    const native = selectSourceSemanticLibraryPage(input);
+    if (native.length > 0) selected = native;
+  }
   return selected;
 }
 
