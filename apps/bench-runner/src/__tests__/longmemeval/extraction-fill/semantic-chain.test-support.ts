@@ -55,9 +55,11 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
     request_profile: "gemini-2.5-nonthinking-v1",
     items: [{ original_query: `What was completed?${" context".repeat(200)}` }, { original_query: "What was completed?" }] });
   const boundedRoot = join(cacheRoot, "bounded-query-discovery-chain");
+  // Current streamed identity accounting costs about 22.6k work for this 18-source short query.
+  // Keep one fixed cap that admits it while refusing the long query before discovery.
   const bounded = await prepareSemanticChain({ ...config, query_workset: boundedWorkset,
     snapshot_path: sourceOnlySnapshot.snapshot_path, snapshot_sha256: sourceOnlySnapshot.db_sha256,
-    budget: { ...config.budget, work_units: 20_000, finalization_reserve: 1_000 } }, boundedRoot);
+    budget: { ...config.budget, work_units: 25_000, finalization_reserve: 1_000 } }, boundedRoot);
   expect(bounded.queries).toMatchObject([{ status: "blocked",
     reason: "discovery_unavailable: native discovery resource exhausted" }, { status: "raw_ready", reason: "unattempted" }]);
   const boundedReplay = await replaySemanticChain(boundedRoot);

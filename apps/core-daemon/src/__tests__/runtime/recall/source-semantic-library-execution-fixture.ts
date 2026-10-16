@@ -27,7 +27,7 @@ export const RESERVED_WORK = { native_work: BUDGET.work_units, index_work: BUDGE
   native_accounting: "partial" as const, logical_work: BUDGET.work_units,
   native_bytes: BUDGET.memory_bytes, logical_memory_bytes: BUDGET.memory_bytes, rss_bytes: Number.MAX_SAFE_INTEGER };
 
-/** Real publication/SQLite/index lifecycle; only the fixed numerical embedding is simulated.
+/** Real publication/SQLite/index lifecycle; numerical embedding and preparation duration are fixed.
  * No provider, model, tokenizer download, recorded cache, or external corpus participates.
  */
 export async function executionLibrary(withRaw = false) {
@@ -54,9 +54,13 @@ export async function executionLibrary(withRaw = false) {
         speaker: "user", scope_class: "project", spans: [] }, { workspaceId: WS });
     }
     const embed = vi.fn(database.binding.embedInputs);
-    const prepare = vi.fn((input: { navigation: string; signal: AbortSignal; remainingMs: () => number }) =>
-      SourceIndexAcquisition.prepareQuery({ ...input, selection: database.selection,
-        bind: async () => ({ ...database.binding, embedInputs: embed }) }));
+    const prepare = vi.fn(async (input: { navigation: string; signal: AbortSignal; remainingMs: () => number }) => {
+      const result = await SourceIndexAcquisition.prepareQuery({ ...input, selection: database.selection,
+        bind: async () => ({ ...database.binding, embedInputs: embed }) });
+      // Exact byte-cap tests must not depend on the JSON length of wall-clock telemetry.
+      // Keep genuine preparation/binding results; author only this fixture's simulated duration.
+      return { ...result, receipt: { ...result.receipt, elapsed_ms: 1 } };
+    });
     const prepared = await prepare({ navigation: ORIGINAL, signal: new AbortController().signal, remainingMs: () => 60_000 });
     // The reused index fixture has an external-provider profile. Its simulated binding
     // supplies no HTTP-attempt measurement: preserve null rather than manufacture zero.
@@ -89,7 +93,7 @@ export function assembledSourcePage(full: RecallResult, rootIds: readonly string
   const access = full.discovery.access!;
   const records = new Set(rootIds);
   const interpretations = access.interpretation_candidates.filter(row =>
-    full.discovery.examined_source_interpretation_ids.includes(row.interpretation_id) && records.has(row.record_id));
+    full.discovery.examined_source_interpretation_ids.includes(row.interpretation_id));
   for (const row of interpretations) records.add(row.record_id);
   const source_candidates = access.source_candidates.filter(row => records.has(row.record_id));
   const assembled = assembleSourceSemanticLibraryIndex({
