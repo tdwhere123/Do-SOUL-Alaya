@@ -507,7 +507,11 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
   }
 }, process.platform === "win32" ? 120_000 : 60_000);
 
-it("reuses exact Q and H physical owners across isolated native source worlds", async () => {
+it("reuses exact Q and H physical owners across isolated native source worlds", async (testContext) => {
+  const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
+    testContext.task.timeout, testContext.signal, undefined, process.platform === "win32" ? 45_000 : undefined);
+  const benchPhase = phases.phase;
+  testContext.onTestFinished(() => phases.finish(testContext.task.result?.state === "fail"));
   const root = mkdtempSync(join(tmpdir(), "native-shared-physical-owner-")); roots.push(root);
   const sharedQ = join(root, "original-q-cache"), sharedQChild = join(root, "review-q-cache"),
     sharedH = join(root, "original-h-cache"), sharedHChild = join(root, "revised-h-cache");
@@ -525,11 +529,11 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
   for (const [index, world] of worlds.entries()) {
     const worldRoot = join(root, `world-${index}`), snapshotPath = join(worldRoot, "original.sqlite"),
       recoveryRoot = join(worldRoot, "recovery"), hCache = join(worldRoot, "new-h-cache");
-    await prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(worldRoot, "native-daemon"),
+    await benchPhase("snapshot.native", () => prepareNativeSourceRecordsSnapshot({ snapshotPath, dataDirRoot: join(worldRoot, "native-daemon"),
       workspaceId: `world-${index}`, runId: `world-${index}`, producerCommit: "0".repeat(40),
       sources: world.bodies.map((body, sourceIndex) => ({ source_id: `${sources[sourceIndex]}-${index}`,
         source_version: "1", title: world.titles[sourceIndex]!, content_bytes: body,
-        source_observed_at: OBSERVED, recorded_at: INGESTED[sourceIndex]! })) });
+        source_observed_at: OBSERVED, recorded_at: INGESTED[sourceIndex]! })) }));
     const native = readVerifiedNativeSourceSnapshot(snapshotPath);
     expect(native.records.map(row => row.content_bytes)).toEqual(world.bodies);
     physicalSnapshots.push(snapshotPath);
@@ -563,33 +567,33 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
         correspondence_pair_cap: 2, access_policy: "query-conditioned-v1", budget: BUDGET,
         authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 1_000_000 } };
     const freezePath = join(worldRoot, "freeze.json"); writeFileSync(freezePath, JSON.stringify(freeze));
-    expect(await runSemanticChainLauncher(["recover-declare-initial-q", "--config", freezePath,
-      "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-declare-initial-q", () => runSemanticChainLauncher(["recover-declare-initial-q", "--config", freezePath,
+      "--root", recoveryRoot]))).toBe(0);
     if (!originalQFilled) {
-      await fillProposal(qPath, sharedQ, () => queryRaw(false, false), Q_PROFILE,
-        () => { attempts.originalQ++; });
+      await benchPhase("fill.proposal", () => fillProposal(qPath, sharedQ, () => queryRaw(false, false), Q_PROFILE,
+        () => { attempts.originalQ++; }));
       originalQFilled = true;
     }
     if (index === 1) {
       const raw = providerRawAttemptPath(sharedH, physicalB!.key, 1), absent = `${raw}.temporarily-absent`;
       renameSync(raw, absent);
-      try { expect(await runSemanticChainLauncher(["recover-freeze", "--config", freezePath,
-        "--root", recoveryRoot])).toBe(2); }
+      try { expect(await benchPhase("recover-freeze", () => runSemanticChainLauncher(["recover-freeze", "--config", freezePath,
+        "--root", recoveryRoot]))).toBe(2); }
       finally { renameSync(absent, raw); }
     }
-    expect(await runSemanticChainLauncher(["recover-freeze", "--config", freezePath,
-      "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-freeze", () => runSemanticChainLauncher(["recover-freeze", "--config", freezePath,
+      "--root", recoveryRoot]))).toBe(0);
     const window = readChainArtifact(join(recoveryRoot, "recovery-window.json")) as {
       window: { source_id: string; initial_key: string }[]; selected_missing_keys: string[] };
     expect(window.window.find(row => row.source_id === `source-b-${index}`)?.initial_key).toBe(bKey);
-    const hPreflight = await fillSource(worldRoot, snapshotPath, hCache, EXTRACTION_OPEN_SEMANTICS_GENERATION,
+    const hPreflight = await benchPhase("fill.source", () => fillSource(worldRoot, snapshotPath, hCache, EXTRACTION_OPEN_SEMANTICS_GENERATION,
       window.selected_missing_keys.filter(key => key !== bKey), "initial-h", sourceRaw,
-      () => { attempts.newA++; });
+      () => { attempts.newA++; }));
     if (physicalB === undefined) {
       expect(window.selected_missing_keys).toContain(bKey);
-      physicalB = { key: bKey!, preflight: await fillSource(worldRoot, snapshotPath, sharedH,
+      physicalB = { key: bKey!, preflight: await benchPhase("fill.source", () => fillSource(worldRoot, snapshotPath, sharedH,
         EXTRACTION_OPEN_SEMANTICS_GENERATION, [bKey!], "shared-h", sourceRaw,
-        () => { attempts.sharedB++; }) };
+        () => { attempts.sharedB++; })) };
     } else expect(window.selected_missing_keys).not.toContain(bKey);
     const currentShared = index === 0 ? JSON.parse(readFileSync(physicalB.preflight, "utf8")) as
       Awaited<ReturnType<typeof preflightSourceSemanticInteractive>> : await preflightSourceSemanticInteractive({
@@ -607,19 +611,19 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
     if (index === 1) {
       writeFileSync(ownersPath, JSON.stringify([{ key: bKey, cache_root: sharedH,
         current_preflight_path: hPreflight, physical_preflight_path: physicalB!.preflight }]));
-      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+      expect(await benchPhase("recover-publish-initial", () => runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
         "--source-preflight", hPreflight, "--source-cache-root", hCache,
-        "--source-owners", ownersPath])).toBe(2);
+        "--source-owners", ownersPath]))).toBe(2);
       writeFileSync(ownersPath, JSON.stringify([{ key: bKey, cache_root: hCache,
         current_preflight_path: sharedCurrentPath, physical_preflight_path: physicalB!.preflight }]));
-      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+      expect(await benchPhase("recover-publish-initial", () => runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
         "--source-preflight", hPreflight, "--source-cache-root", hCache,
-        "--source-owners", ownersPath])).toBe(2);
+        "--source-owners", ownersPath]))).toBe(2);
       writeFileSync(ownersPath, JSON.stringify([{ key: bKey, cache_root: sharedH,
         current_preflight_path: physicalB!.preflight, physical_preflight_path: physicalB!.preflight }]));
-      expect(await runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
+      expect(await benchPhase("recover-publish-initial", () => runSemanticChainLauncher(["recover-publish-initial", "--root", recoveryRoot,
         "--source-preflight", hPreflight, "--source-cache-root", hCache,
-        "--source-owners", ownersPath])).toBe(2);
+        "--source-owners", ownersPath]))).toBe(2);
       writeFileSync(ownersPath, JSON.stringify([{ key: bKey, cache_root: sharedH,
         current_preflight_path: sharedCurrentPath, physical_preflight_path: physicalB!.preflight }]));
     }
@@ -628,7 +632,7 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
     const publishArgs = ["recover-publish-initial", "--root", recoveryRoot,
       "--source-preflight", hPreflight, "--source-cache-root", hCache,
       "--source-owners", ownersPath];
-    expect(await runSemanticChainLauncher(publishArgs)).toBe(0);
+    expect(await benchPhase("recover-publish-initial", () => runSemanticChainLauncher(publishArgs))).toBe(0);
     const qualified = readChainArtifact(join(recoveryRoot, "initial-qualified.json")) as {
       source_owners: { key: string; cache_root: string; physical_preflight_path?: string }[];
       descriptor_export: { source_id: string; descriptor: { source_interpretation_id: string } }[] };
@@ -637,28 +641,28 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
     expect(qualified.descriptor_export.some(row => row.source_id === `source-b-${index}`)).toBe(true);
     publishedB.push(qualified.descriptor_export.find(row => row.source_id === `source-b-${index}`)!
       .descriptor.source_interpretation_id);
-    expect(await runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot])).toBe(0);
-    await fillProposal(join(recoveryRoot, "initial-correspondence-workset.json"),
+    expect(await benchPhase("recover-prepare-initial-c", () => runSemanticChainLauncher(["recover-prepare-initial-c", "--root", recoveryRoot]))).toBe(0);
+    await benchPhase("fill.proposal", () => fillProposal(join(recoveryRoot, "initial-correspondence-workset.json"),
       join(worldRoot, "c-cache"), prompt => {
         const request = JSON.parse(prompt) as SourceSemanticCorrespondenceProposalInput;
         const predicate = request.source_interpretation_descriptors[0]!.interpretation.frames[0]?.predicate_support;
         return predicate?.kind === "explicit" && predicate.reading === "use" ? correspondenceRaw(prompt)
           : JSON.stringify({ contract: "source-semantic-correspondence-response-v4",
             outcome: { status: "abstained" } });
-      }, H_PROFILE);
-    expect(await runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot])).toBe(0);
+      }, H_PROFILE));
+    expect(await benchPhase("recover-reason-initial", () => runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot]))).toBe(0);
     replayInitialReasonInChild(recoveryRoot);
-    expect(await runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-prepare-q-review", () => runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot]))).toBe(0);
     if (!childQFilled) {
-      await fillProposal(join(recoveryRoot, "query-review-workset.json"), sharedQChild,
-        () => queryRaw(false, true), Q_PROFILE, () => { attempts.reviewQ++; });
+      await benchPhase("fill.proposal", () => fillProposal(join(recoveryRoot, "query-review-workset.json"), sharedQChild,
+        () => queryRaw(false, true), Q_PROFILE, () => { attempts.reviewQ++; }));
       childQFilled = true;
     }
     vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Q physical review was reposted"); }));
-    expect(await runSemanticChainLauncher(["recover-settle-q-review", "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-settle-q-review", () => runSemanticChainLauncher(["recover-settle-q-review", "--root", recoveryRoot]))).toBe(0);
     qChildKeys.push((readChainArtifact(join(recoveryRoot, "query-review.json")) as { child_key: string }).child_key);
-    expect(await runSemanticChainLauncher(["recover-prepare-source", "--root", recoveryRoot])).toBe(0);
-    expect(await runSemanticChainLauncher(["recover-prepare-h-revision", "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-prepare-source", () => runSemanticChainLauncher(["recover-prepare-source", "--root", recoveryRoot]))).toBe(0);
+    expect(await benchPhase("recover-prepare-h-revision", () => runSemanticChainLauncher(["recover-prepare-h-revision", "--root", recoveryRoot]))).toBe(0);
     const revision = readChainArtifact(join(recoveryRoot, "source-revision.json")) as {
       source_id: string; parent_key: string; parent_cache_root: string; parent_preflight_path: string;
       child_key: string; generation_path: string };
@@ -666,13 +670,14 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
       parent_cache_root: sharedH, parent_preflight_path: physicalB!.preflight });
     const childCache = sharedHChild;
     const childGeneration = JSON.parse(readFileSync(revision.generation_path, "utf8"));
-    const childPreflight = physicalChild === undefined ? await fillSource(worldRoot, snapshotPath,
+    const childPreflight = physicalChild === undefined ? await benchPhase("fill.source", () => fillSource(worldRoot, snapshotPath,
       childCache, childGeneration, [revision.child_key], "child-h", sourceRaw,
-      () => { attempts.revisedB++; }) : join(worldRoot, "current-child-h.json");
+      () => { attempts.revisedB++; })) : join(worldRoot, "current-child-h.json");
     if (physicalChild === undefined) {
       physicalChild = { key: revision.child_key, preflight: childPreflight };
     } else {
-      expect(revision.child_key).toBe(physicalChild.key);
+      const knownChild = physicalChild;
+      expect(revision.child_key).toBe(knownChild.key);
       const current = await preflightSourceSemanticInteractive({ variant: "native_source_snapshot",
         nativeSourcePopulation: { name: "originals", snapshotPath }, cacheRoot: childCache,
         sourcePacking: "complete-source", openSemantics: childGeneration,
@@ -682,20 +687,21 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
       writeFileSync(childPreflight, JSON.stringify(current));
       const raw = providerRawAttemptPath(childCache, revision.child_key, 1), absent = `${raw}.temporarily-absent`;
       renameSync(raw, absent);
-      try { expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
+      try { expect(await benchPhase("recover-publish-final", () => runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
         "--source-preflight", childPreflight, "--source-cache-root", childCache,
-        "--source-physical-preflight", physicalChild.preflight])).toBe(2); }
+        "--source-physical-preflight", knownChild.preflight]))).toBe(2); }
       finally { renameSync(absent, raw); }
     }
-    expect(await runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
+    const knownPhysicalChild = physicalChild ?? { key: revision.child_key, preflight: childPreflight };
+    expect(await benchPhase("recover-publish-final", () => runSemanticChainLauncher(["recover-publish-final", "--root", recoveryRoot,
       "--source-preflight", childPreflight, "--source-cache-root", childCache,
-      ...(index === 0 ? [] : ["--source-physical-preflight", physicalChild.preflight])])).toBe(0);
-    expect(await runSemanticChainLauncher(["recover-prepare-final-c", "--root", recoveryRoot])).toBe(0);
+      ...(index === 0 ? [] : ["--source-physical-preflight", knownPhysicalChild.preflight])]))).toBe(0);
+    expect(await benchPhase("recover-prepare-final-c", () => runSemanticChainLauncher(["recover-prepare-final-c", "--root", recoveryRoot]))).toBe(0);
     const newC = join(recoveryRoot, "final-correspondence-new-workset.json");
     if (existsSync(newC)) {
-      await fillProposal(newC, join(recoveryRoot, "final-correspondence-cache"), correspondenceRaw, H_PROFILE);
+      await benchPhase("fill.proposal", () => fillProposal(newC, join(recoveryRoot, "final-correspondence-cache"), correspondenceRaw, H_PROFILE));
     }
-    expect(await runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-final-deliver", () => runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot]))).toBe(0);
     const exposure = readChainArtifact(join(recoveryRoot, "first-exposure.json"));
     exposures.push(chainIdentity(exposure));
     vi.stubGlobal("fetch", vi.fn(() => { throw new Error("settled physical request was reposted"); }));
