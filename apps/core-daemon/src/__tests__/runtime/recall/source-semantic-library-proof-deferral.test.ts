@@ -9,7 +9,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
-import { canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
+import { encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosure, canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
   SourceSemanticExecutionSchema, SourceSemanticResourceExhausted, SourceSemanticWorkerRequestSchema,
   SourceSemanticWorkerResultSchema, sourceSemanticExecution, unavailableSourceQueryPreparation,
   type SourceSemanticCorrespondence, type SourceSemanticExecution, type SourceSemanticQuery, type SourceSemanticWorkerRequest,
@@ -50,17 +50,16 @@ function preparedPackages() {
       correspondence: correspondenceFor(interpretation, semantics), library: true, workspaceId: WS });
     const proof: SourceSemanticLibraryPackage = { entry: fixture.entry, entries: fixture.index.entries,
       explanations: fixture.index.explanations ?? [], proofs: [fixture.proof], preview: "Alice uses X. Bob uses Y.",
-      payload_support: "available", access_position: 0, source_disclosure: {
+      payload_support: "available", access_position: 0, source_disclosure: encodeSourceDisclosure({
         material_kind: "original_body", source_binding: "checked_record", evaluated_as_of: CLOCK,
         validity: { kind: "unknown", reason: "not_recorded" }, temporal_state: "unknown",
         proof_use: { kind: "conditional_support", qualification: "not_world_claim" }
-      } };
+      }) };
     const rawEntry = sourceSemanticLibrarySourceEntry({ workspaceId: WS, root_id: fixture.record.identity,
       source_version: fixture.record.source_version, content_digest: fixture.record.content_digest,
       evidence_object_id: null, hypothesis_id: "library" });
     const raw: SourceSemanticLibraryPackage = { ...proof, entry: rawEntry, entries: [rawEntry], proofs: [], explanations: [],
-      payload_support: "envelope_budget", source_disclosure: { ...proof.source_disclosure,
-        proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+      payload_support: "envelope_budget", source_disclosure: qualifySourceDisclosure(proof.source_disclosure, "source_only") };
     return { fixture, proof, raw };
   }).sort((a, b) => sourceGoldRootIdentity(a.fixture.target).localeCompare(sourceGoldRootIdentity(b.fixture.target)));
 }
@@ -361,7 +360,7 @@ it("delivers B first and A's final-envelope-only proof over loopback through reo
       if (aEntry.target.kind !== "source_evidence" || aProof === undefined || access === undefined || disclosed === undefined) {
         throw new Error("native A proof and source disclosure expected");
       }
-      const { source_time: _source_time, ...source_disclosure } = disclosed;
+      const source_disclosure = qualifySourceDisclosure(disclosed, sourceDisclosure(disclosed).proof_use.kind, false);
       const aPackage: SourceSemanticLibraryPackage = { entry: aEntry, entries: [aEntry],
         explanations: roomy.index.explanations ?? [], proofs: [aProof],
         preview: roomy.previews![indexEntryCacheKey(aEntry)]!, source_disclosure,
@@ -484,7 +483,7 @@ function extraRaw(id: string, preview: string, template: SourceSemanticLibraryPa
   const entry = sourceSemanticLibrarySourceEntry({ workspaceId: WS, root_id: id, source_version: "1",
     content_digest: `sha256:${fieldContractSha256(preview)}`, evidence_object_id: null, hypothesis_id: "library" });
   return { ...template, entry, entries: [entry], proofs: [], explanations: [], preview, payload_support: "envelope_budget",
-    source_disclosure: { ...template.source_disclosure, proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+    source_disclosure: qualifySourceDisclosure(template.source_disclosure, "source_only") };
 }
 
 function discriminatingByteCap(fits: readonly number[], exceeds: readonly number[]): number {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  MemorySearchResultSchema,
+  encodeSourceDisclosure, MemorySearchResultSchema,
   SoulMemorySearchResponseSchema,
   SourceLookupReasonsSchema,
   indexEntryCacheKey,
@@ -34,9 +34,9 @@ describe("conditional-field result encoding", () => {
     }));
     const index = { ...stubRecallIndex([]), as_of: "2026-09-25T00:00:00Z", entries: sources,
       representation: { ...stubRecallIndex([]).representation, page_budget: 2 } };
-    const disclosure = { material_kind: "original_body" as const, source_binding: "checked_record" as const,
-      evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown" as const, reason: "not_recorded" as const },
-      temporal_state: "unknown" as const, proof_use: { kind: "source_only" as const, qualification: "not_current_proof" as const } };
+    const disclosure = encodeSourceDisclosure({ material_kind: "original_body", source_binding: "checked_record",
+      evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "not_recorded" },
+      temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } });
     const previews = new Map(sources.map((source, offset) => [indexEntryCacheKey(source),
       `Exact ${offset === 0 ? "first" : "second"} original bytes.`]));
     const reason = (predicate_key: string) => SourceLookupReasonsSchema.parse([{
@@ -65,9 +65,9 @@ describe("conditional-field result encoding", () => {
     const entry = { ...root, target: { ...root.target,
       span: { content_start: 0, content_end: 8, content_complete: true, original_complete: true, retained_extent: "body" as const } } };
     const index = { ...stubRecallIndex([]), as_of: "2026-09-25T00:00:00Z", entries: [entry] };
-    const disclosure = { material_kind: "original_body" as const, source_binding: "checked_record" as const,
-      evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown" as const, reason: "not_recorded" as const },
-      temporal_state: "unknown" as const, proof_use: { kind: "source_only" as const, qualification: "not_current_proof" as const } };
+    const disclosure = encodeSourceDisclosure({ material_kind: "original_body", source_binding: "checked_record",
+      evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "not_recorded" },
+      temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } });
     const disclosureBytes = Buffer.byteLength(JSON.stringify({ source_disclosure: disclosure }));
     const results = encodeIndexResults(index, new Map([[indexEntryCacheKey(entry), "😀😀"]]), disclosureBytes + 4,
       { [indexEntryCacheKey(entry)]: { source_disclosure: disclosure } });

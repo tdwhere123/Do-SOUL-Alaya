@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPairExchange,
   type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
@@ -11,11 +11,11 @@ import { alternativeSelectionFixture, compatibleTaskSupport, coverageSelectionFi
 } from "./source-semantic-selection-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
-const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = {
+const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = encodeSourceDisclosure({
   material_kind: "original_body", source_binding: "unbound", evaluated_as_of: "2026-09-18T00:00:00.000Z",
   validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
   proof_use: { kind: "source_only", qualification: "not_current_proof" }
-};
+});
 const evidenceQuery: SourceSemanticQuery = { ...query(), requested_operation: { reading: "collect tools", support: { kind: "query_text", excerpt: "tools" } },
   alternatives: query().alternatives.map(row => ({ ...row, answer_frames: [], evidence_inputs: [{ frames: ["qUse"] }] })) };
 function witnessed(id: string, semantics = evidenceQuery): SourceSemanticLibraryPackage {

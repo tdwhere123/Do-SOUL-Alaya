@@ -1,6 +1,6 @@
 import { evaluateBooleanHypergraph } from "@do-soul/alaya-graph-algorithms";
 import { vi } from "vitest";
-import { buildSourceReferenceCatalog, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
+import { encodeSourceDisclosure, sourceDisclosure, buildSourceReferenceCatalog, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
   sourceReferenceResolver, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
   SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   type RequestBudget, type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery
@@ -120,9 +120,9 @@ function selectionFixture(original: string, alternatives: readonly (readonly num
       library: true, budget: executionBudget });
     const row: SourceSemanticLibraryPackage = { entry: actual.entry, entries: actual.index.entries,
       explanations: actual.index.explanations ?? [], proofs: [actual.proof], preview: body, access_position: 0,
-      payload_support: "available", source_disclosure: { material_kind: "original_body", source_binding: "unbound",
+      payload_support: "available", source_disclosure: encodeSourceDisclosure({ material_kind: "original_body", source_binding: "unbound",
         evaluated_as_of: CLOCK, validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
-        proof_use: { kind: "conditional_support", qualification: "not_world_claim" } } };
+        proof_use: { kind: "conditional_support", qualification: "not_world_claim" } }) };
     return { ...declaration, body, package: row, budget_rejections, dependencies: actual.source_dependencies };
   });
   return { original, semantics, alternatives, execution_budget: executionBudget, sources, pool: sources.map(row => row.package) };
@@ -268,5 +268,5 @@ export function rawSourceTwin(row: SourceSemanticLibraryPackage): SourceSemantic
     source_version: target.source_version, content_digest: target.content_digest,
     evidence_object_id: target.evidence_object_id, hypothesis_id: "library" });
   return { ...row, entry, entries: [entry], proofs: [], explanations: [], payload_support: "envelope_budget",
-    source_disclosure: { ...row.source_disclosure, proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+    source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(row.source_disclosure), proof_use: { kind: "source_only", qualification: "not_current_proof" } }) };
 }

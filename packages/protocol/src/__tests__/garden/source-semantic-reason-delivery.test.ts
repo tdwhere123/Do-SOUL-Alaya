@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { encodeSourceDisclosure } from "../../recall/source-disclosure.js";
 import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
 import { sourceSemanticExecution } from "../../garden/source-semantic-access.js";
@@ -17,9 +18,9 @@ const coverage = {
   conditional_computation: "complete" as const, payload: "truncated" as const
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
-const disclosure = { material_kind: "interpretation", source_binding: "unbound",
+const disclosure = encodeSourceDisclosure({ material_kind: "interpretation", source_binding: "unbound",
   evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "unbound" },
-  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } };
+  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } });
 const queryGaps = [{ kind: "disconnected_query" as const, affected_ids: ["actor"],
   support: [{ kind: "query_text" as const, excerpt: "Alice" }] }];
 const attention = {

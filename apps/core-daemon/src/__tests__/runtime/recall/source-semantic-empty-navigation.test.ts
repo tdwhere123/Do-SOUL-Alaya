@@ -121,8 +121,8 @@ it.each([
       const snap = trace.snapshot();
       expect(snap.headerReads).toBe(1);
       expect(snap.headerPageReserves).toBe(1);
-      expect(snap.navigationReads).toBe(1);
-      expect(snap.navigationPageReserves).toBe(1);
+      expect(snap.navigationReads).toBe(2);
+      expect(snap.navigationPageReserves).toBe(2);
       expect(snap.hintNavigationFeatures).toBe(1);
       expect(snap.firstSourceBeforeHeader).toBe(true);
       expect(snap.headerBeforeNavigation).toBe(true);
@@ -173,7 +173,7 @@ it.each([
       }
       const result = run(), snap = trace.snapshot();
       expect(snap.headerReads).toBe(1);
-      expect(snap.navigationReads).toBe(1);
+      expect(snap.navigationReads).toBe(2);
       expect(snap.hintNavigationFeatures).toBe(1);
       expect(snap.metadataReads).toBe(1);
       expect(snap.bodySpans.length).toBeGreaterThan(0);
@@ -278,7 +278,8 @@ it("keeps an injected ordinary body-reservation exhaustion partial with its know
 it("preserves source-index acquisition and public empty completion without 1024-hint navigation work", async () => {
   await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
     expect(fixture.database.connection.prepare("SELECT COUNT(*) AS n FROM evidence_capsules").get()).toEqual({ n: 0 });
-    const prepared = await fixture.prepareQuery({ navigation: HINT, signal: new AbortController().signal, remainingMs: () => 60_000 });
+    const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, supplemental_navigation: HINT,
+      signal: new AbortController().signal, remainingMs: () => 60_000 });
     const trace = navigationTrace();
     try {
       const result = asPrepared(runSourceSemanticWorker({ database: fixture.database } as RecallReadWorkerRuntime, {
@@ -302,10 +303,14 @@ it("preserves source-index acquisition and public empty completion without 1024-
       expect(result.coverage.discovery).toBe("complete");
       expect(result.access?.source_candidates).toContainEqual(expect.objectContaining({ source_id: "raw", complete: true,
         read_bytes: Buffer.byteLength(RAW), body_bytes: Buffer.byteLength(RAW) }));
-      expect(sourceSemanticAccessPhases(result.access!).acquisition).toMatchObject({ status: "executed", accounting: "complete" });
+      const acquisition = sourceSemanticAccessPhases(result.access!).acquisition;
+      expect(acquisition).toMatchObject({ status: "executed", accounting: "complete" });
       expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).acquisition)
-        .toEqual(sourceSemanticAccessPhases(result.access!).acquisition);
-      expect(sourceSemanticAccessPhases(result.access!).acquisition.result?.nominations.length).toBeGreaterThan(0);
+        .toEqual(acquisition);
+      expect(acquisition.result?.nominations.find(row => row.source.source_id === "raw"))
+        .toMatchObject({ lexical: [], vector: { rank: 1 } });
+      expect(acquisition.supplemental?.[0]?.result?.nominations.some(row => row.source.source_id === "raw")).toBe(true);
+      expect(result.access?.source_candidates.filter(row => row.source_id === "raw")).toHaveLength(1);
     } finally { trace.restore(); }
   });
 });

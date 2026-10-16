@@ -61,6 +61,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
+  sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void> }>;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
@@ -162,6 +163,7 @@ function createBackgroundServiceStarter(
 
     input.gardenBacklogTelemetryService.start();
     input.gardenRuntime.backgroundManager.start();
+    input.sourceIndexProducer?.start();
     state.backgroundStarted = true;
     const startupPass = input.gardenRuntime.runBackgroundPass().catch((error) => {
       input.warnLogger.warn("garden startup background pass failed", {
@@ -400,6 +402,16 @@ async function stopBackgroundServices(
       error: error instanceof Error ? error.message : String(error)
     });
     stopResult = "failed";
+  }
+  if (input.sourceIndexProducer !== undefined) {
+    try {
+      await input.sourceIndexProducer.stop();
+    } catch (error) {
+      input.warnLogger.warn("source index producer shutdown failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      stopResult = "failed";
+    }
   }
   await awaitStartupBackgroundPassInFlight(state);
   if (state.startupBackgroundPassFailure !== null) {

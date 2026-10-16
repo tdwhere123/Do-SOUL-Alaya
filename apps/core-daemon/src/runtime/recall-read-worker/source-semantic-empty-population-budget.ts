@@ -9,7 +9,8 @@ import { preflightSemanticLeaseGroup, queryPreparationLease, semanticLeaseGroupA
   type QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { preparationAccessReceiptValue, sourceSemanticAccessReceiptValue } from "./source-semantic-access-receipts.js";
 
-// The quoted encoding is wider than any finite binary64 JSON scalar; retain also charges it above a primitive.
+// This retained scalar exceeds a primitive by 88 bytes, also covering the size-only
+// scan's bounded numeric encoding when an actual completion replaces it with a number.
 const WIDE_SCALAR = "x".repeat(32);
 const DIGEST = `sha256:${"0".repeat(64)}`;
 const ALL_STOPS = ["budget", "source_limit", "interpretation_limit", "unavailable", "source_tail"] as const;
@@ -30,10 +31,10 @@ function add(...costs: readonly SourceSemanticResourceBudget[]): SourceSemanticR
     memory_bytes: costs.reduce((sum, cost) => sum + cost.memory_bytes, 0) };
 }
 
-/** Build the bounded completion envelope with the actual receipt, retain, ordering and lease owners. */
-function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
-  phase: "preparation_preflight" | "empty_census_completion"): SourceSemanticResourceBudget {
-  const { runtime, records, policy, budget, leaseContext } = input;
+/** Both initial quotes and a conclusive census use the same actual receipt/lease constructors. */
+function completionEnvelope(input: Completion, planning: SourceSemanticReadBudget,
+  phase: "preparation_preflight" | "empty_census_completion") {
+  const { records, policy, leaseContext } = input;
   planning.charge(1, 64, phase === "empty_census_completion"
     ? "empty interpretation completion planning" : "source union preparation completion planning");
   const sourceRows = records.map((record) => ({ source_id: record.source_id, record_id: record.identity,
@@ -54,8 +55,15 @@ function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
     ...queryPreparationLease(leaseContext, pool, 0, 0, false), kind,
     truncated: WIDE_SCALAR, access_offset: WIDE_SCALAR, access_source_offset: WIDE_SCALAR
   });
-  const queryLease = sizedLease("query"), pageLease = sizedLease("page");
-  const measure = (value: unknown) => SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning);
+  return { receipt, pool, wideTrace, queryLease: sizedLease("query"), pageLease: sizedLease("page") };
+}
+
+/** Build the bounded completion quote with the actual retention and ordering owners. */
+function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
+  phase: "preparation_preflight" | "empty_census_completion"): SourceSemanticResourceBudget {
+  const { runtime, records, budget } = input;
+  const { receipt, pool, wideTrace, queryLease, pageLease } = completionEnvelope(input, planning, phase);
+  const measure = (value: unknown) => SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning, "borrow");
   const overlay = (left: SourceSemanticResourceBudget, right: SourceSemanticResourceBudget) =>
     SourceSemanticResourceLedger.overlayRetainObjects(left, right, planning);
   // The owners above define the wire fields. Only numeric subtree prices survive this quote;
@@ -72,20 +80,25 @@ function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
   const executionPrice = { work_units: planning.spentWork - beforeExecution.work_units,
     memory_bytes: planning.spentBytes - beforeExecution.memory_bytes };
   const pageLeasePrice = leaseCount === 2 ? measure({ ...pageLease, access_pool: poolPrice, candidates: emptyPrice }) : undefined;
+  const beforeSizing = { work_units: planning.spentWork, memory_bytes: planning.spentBytes };
+  preflightSemanticLeaseGroup(runtime, leaseCount === 2 ? [queryLease, pageLease] : [queryLease], planning);
+  // Preflight executes the same size scan as publication. Its own spend stays spent;
+  // a second allowance protects the future scan, including already-owned phase contents.
+  const sizingPrice = { work_units: planning.spentWork - beforeSizing.work_units,
+    memory_bytes: planning.spentBytes - beforeSizing.memory_bytes };
   const initial = add(emptyPrice, input.orderCost(records.length), receiptPrice, tracePrice, executionPrice,
-    queryLeasePrice, ...(pageLeasePrice === undefined ? [] : [pageLeasePrice]),
+    queryLeasePrice, ...(pageLeasePrice === undefined ? [] : [pageLeasePrice]), sizingPrice,
     { work_units: semanticLeaseGroupAccountingCost(leaseCount), memory_bytes: 0 });
 
   // A full retained pool must still be pageable under a fresh request's unchanged budget.
   if (leaseCount === 2) {
     const page = add(measure(input.suppliedQuerySemantics), poolPrice, tracePrice, measure(sourceSemanticExecution()),
-      queryLeasePrice, pageLeasePrice!,
+      queryLeasePrice, pageLeasePrice!, sizingPrice,
       { work_units: semanticLeaseGroupAccountingCost(2), memory_bytes: 0 });
     if (page.work_units > budget.work_units || page.memory_bytes > budget.memory_bytes) {
       throw new SourceSemanticResourceExhausted("source-only continuation completion");
     }
   }
-  preflightSemanticLeaseGroup(runtime, leaseCount === 2 ? [queryLease, pageLease] : [queryLease]);
   return initial;
 }
 
@@ -115,9 +128,12 @@ export class SourceSemanticUnionCompletion {
   // Receipt, delivered trace, two query/page leases and current execution evidence.
   metadata(value: Readonly<{ preparation: SourceSemanticCompactPreparation }> | SourceSemanticCompactAcquisition): void {
     this.reserve(planning => {
-      const payload = SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning);
-      // Five future occurrences remain held; their already-owned immutable packed payload is not walked again.
-      return SourceSemanticResourceLedger.quoteRetain([payload, payload, payload, payload, payload], planning.remaining(), planning);
+      const payload = SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning, "borrow");
+      // Retention borrows five references, but each future lease still scans the actual
+      // phase for capacity. Immutable ownership does not exempt that separate operation.
+      const retention = SourceSemanticResourceLedger.quoteRetain([payload, payload, payload, payload, payload], planning.remaining(), planning);
+      const sizing = SourceSemanticResourceLedger.measureCanonicalJsonLength(value, planning.remaining(), planning);
+      return add(retention, sizing, sizing);
     });
   }
 
@@ -130,8 +146,10 @@ export class SourceSemanticUnionCompletion {
     this.reserve(planning => {
       const recordPrice = SourceSemanticResourceLedger.quoteRetain(record, planning.remaining(), planning);
       const rowPrice = SourceSemanticResourceLedger.quoteRetain(row, planning.remaining(), planning);
+      const sizing = SourceSemanticResourceLedger.measureCanonicalJsonLength([record, row], planning.remaining(), planning);
       return add(SourceSemanticResourceLedger.quoteRetain([recordPrice, recordPrice, rowPrice, rowPrice, rowPrice, rowPrice],
-        planning.remaining(), planning), this.increment(this.sourceCount), SourceSemanticReadBudget.tupleLookupCost("discovered", 1));
+        planning.remaining(), planning), sizing, sizing,
+        this.increment(this.sourceCount), SourceSemanticReadBudget.tupleLookupCost("discovered", 1));
     });
     this.sourceCount++;
   }
@@ -141,11 +159,37 @@ export class SourceSemanticUnionCompletion {
     this.reserve(planning => {
       const descriptorPrice = SourceSemanticResourceLedger.quoteRetain(descriptor, planning.remaining(), planning);
       const rowPrice = SourceSemanticResourceLedger.quoteRetain(row, planning.remaining(), planning);
+      const sizing = SourceSemanticResourceLedger.measureCanonicalJsonLength([descriptor, row, descriptor.interpretation_id], planning.remaining(), planning);
       return add(SourceSemanticResourceLedger.quoteRetain([descriptorPrice, descriptorPrice, descriptorPrice,
-        rowPrice, rowPrice, rowPrice, rowPrice, rowPrice], planning.remaining(), planning),
+        rowPrice, rowPrice, rowPrice, rowPrice, rowPrice], planning.remaining(), planning), sizing, sizing,
         this.increment(this.interpretationCount), SourceSemanticReadBudget.signalReconciliationCost(1));
     });
     this.interpretationCount++;
+  }
+
+  /** A one-page raw census adds no members. Reuse the receipt/trace/lease holds and
+   * recheck capacity, but preserve the original observation ceiling: those retention
+   * prices do not quote the subsequent expanded/canonical pool identity. Only an
+   * explicitly priced completion may replace that pre-existing half-budget bound.
+   */
+  emptyCompletion(input: Completion): void {
+    if (this.preparation === undefined || this.sourceCount !== input.records.length
+      || this.sourceCount > SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE || this.interpretationCount !== 0) {
+      this.release();
+      reserveEmptyInterpretationCompletion(input);
+      return;
+    }
+    const { parent, child } = input;
+    parent.reserve(child.spentWork, child.spentBytes, "empty interpretation prior observation");
+    const planning = new SourceSemanticReadBudget({ work_units: parent.work - child.spentWork,
+      memory_bytes: parent.bytes - child.spentBytes });
+    try {
+      const { queryLease } = completionEnvelope(input, planning, "empty_census_completion");
+      preflightSemanticLeaseGroup(input.runtime, [queryLease], planning);
+      child.work = Math.min(child.work, planning.work);
+      child.bytes = Math.min(child.bytes, planning.bytes);
+    } finally { parent.absorb(planning); }
+    this.release();
   }
 
   release(): void { for (const release of this.releases.splice(0)) release(); }
@@ -194,8 +238,10 @@ export function reserveEmptyInterpretationCompletion(input: Completion): void {
   try {
     const initial = planCompletion(input, planning, "empty_census_completion");
     planning.reserve(initial.work_units, initial.memory_bytes, "empty interpretation completion");
-    child.work = planning.work - initial.work_units;
-    child.bytes = planning.bytes - initial.memory_bytes;
+    // Retention prices alone do not include expanded/canonical identity work. Keep
+    // the original observation ceiling as well as the explicitly reserved completion.
+    child.work = Math.min(child.work, planning.work - initial.work_units);
+    child.bytes = Math.min(child.bytes, planning.bytes - initial.memory_bytes);
   } finally {
     // Planning is real work; charge it even if a bound or lease preflight fails.
     parent.absorb(planning);

@@ -7,7 +7,7 @@ afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
 import { dirname } from "node:path";
 import { REAL_SQLITE_TEST_RUN_ID as RUN } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
-import { SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema, sourceSemanticReasonControl,
+import { sourceDisclosure, SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema, sourceSemanticReasonControl,
   type SoulInterpretationResponse, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handler.js";
@@ -60,10 +60,10 @@ function requireUndelivered(compact: Reason, full: Reason, limit: number) {
   expect(compact.coverage).toEqual({ ...full.coverage, payload: "truncated" });
   if (compact.source_disclosure === undefined || full.source_disclosure === undefined) throw new Error("source disclosures required");
   // CLI calls pin their own real clocks; all other source qualifications must remain identical.
-  expect(compact.source_disclosure).toEqual({ ...full.source_disclosure,
-    evaluated_as_of: compact.source_disclosure.evaluated_as_of });
-  expect(Date.parse(compact.source_disclosure.evaluated_as_of)).toBeGreaterThanOrEqual(Date.parse(full.source_disclosure.evaluated_as_of));
-  expect(compact.source_disclosure?.proof_use).toEqual({ kind: "conditional_support", qualification: "not_world_claim" });
+  const compactDisclosure = sourceDisclosure(compact.source_disclosure), fullDisclosure = sourceDisclosure(full.source_disclosure);
+  expect(compactDisclosure).toEqual({ ...fullDisclosure, evaluated_as_of: compactDisclosure.evaluated_as_of });
+  expect(Date.parse(compactDisclosure.evaluated_as_of)).toBeGreaterThanOrEqual(Date.parse(fullDisclosure.evaluated_as_of));
+  expect(compactDisclosure.proof_use).toEqual({ kind: "conditional_support", qualification: "not_world_claim" });
   expect(compact.execution).toBe("native_reasoning_only");
   expect(compact.work.native_work).toBeGreaterThan(0);
   expect(compact.work.native_bytes).toBeGreaterThan(0);

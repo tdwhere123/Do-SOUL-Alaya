@@ -7,7 +7,7 @@ afterEach(() => { vi.restoreAllMocks(); expect(isolation.violations).toEqual([])
 afterAll(() => { isolation.restore(); });
 import * as core from "@do-soul/alaya-core";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
-import { SourceSemanticReasoningResultSchema, SourceSemanticWorkerResultSchema,
+import { sourceDisclosure, SourceSemanticReasoningResultSchema, SourceSemanticWorkerResultSchema,
   verifySourceSemanticLibraryDelivery, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
@@ -90,9 +90,10 @@ it("keeps an authored SQLite branch beyond the unchanged caller cap available to
     expect(SourceSemanticWorkerResultSchema.safeParse(native).success).toBe(true);
     expect(() => verifySourceSemanticLibraryDelivery(native, core.fieldContractSha256)).not.toThrow();
     expect(publicResult).toHaveProperty("results", [expect.objectContaining({
-      content_preview: "Alice uses Pixel.", source_disclosure: expect.objectContaining({
-        proof_use: expect.objectContaining({ kind: "source_only" }) })
+      content_preview: "Alice uses Pixel."
     })]);
+    if (publicResult.operation !== "recall") throw new Error("public recall required");
+    expect(sourceDisclosure(publicResult.results![0]!.source_disclosure!).proof_use).toMatchObject({ kind: "source_only" });
     console.info("authored library computation bytes", { computed: bytes(full.result), cap: request.output_byte_limit,
       local: bytes(local), native: bytes(native), public: bytes(publicResult) });
   });

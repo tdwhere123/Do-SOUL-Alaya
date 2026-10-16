@@ -5,7 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
-import { indexEntryCacheKey } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, indexEntryCacheKey } from "@do-soul/alaya-protocol";
 import type { SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { alternativeSelectionFixture, physicalRoot, rawSourceTwin, selectionExecutionBudget }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
@@ -31,7 +31,7 @@ function chain(context: NativeSubsetContext, measurement: NativeMeasurement,
   name: (row: SourceSemanticLibraryPackage) => string) {
   return deliverAllPages(context, measurement).flatMap((page, index) => measurement.plan.pages[index]!.map((row, slot) => ({
     page: index, root: name(row), preview: page.previews?.[indexEntryCacheKey(row.entry)],
-    payload_support: page.slot_qualifiers[slot]!.payload_support, proof_use: page.source_disclosures[indexEntryCacheKey(row.entry)]!.proof_use.kind,
+    payload_support: page.slot_qualifiers[slot]!.payload_support, proof_use: sourceDisclosure(page.source_disclosures[indexEntryCacheKey(row.entry)]!).proof_use.kind,
     proof_count: row.proofs.length
   })));
 }

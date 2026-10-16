@@ -440,6 +440,7 @@ function buildFinalizeOperationsRuntimeInput(
     temporalRuntimeLease: bootstrap.temporalRuntimeLease,
     recallReadWorkerClient: runtimeWiring.recallWiring.recallReadWorkerClient,
     closeEmbeddingProvider: runtimeWiring.recallWiring.closeEmbeddingProvider,
+    sourceIndexProducer: runtimeWiring.recallWiring.sourceIndexProducer,
     pathRelationEvictionTimer: runtimeWiring.recallWiring.pathRelationEvictionTimer,
     embeddingRecallService: runtimeWiring.recallWiring.embeddingRecallService,
     graphHealthService: foundation.graphHealthService,

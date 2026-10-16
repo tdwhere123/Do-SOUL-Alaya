@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import {
-  canonicalJson, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, SoulInterpretationResponseSchema,
+  encodeSourceDisclosure, sourceDisclosure, canonicalJson, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, SoulInterpretationResponseSchema,
   sourceIndexEntry, indexEntryCacheKey, sourceSemanticQueryIdentity, packSourceSemanticAcquisition,
   packSourceSemanticQueryPreparation, sourceSemanticAcquisitionNotRun, sourceSemanticAccessPhases,
   sourceSemanticExecution, unavailableSourceQueryPreparation,
@@ -23,7 +23,7 @@ const execution = sourceSemanticExecution();
 const accessPreparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
 const accessAcquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
 const accessPhases = {
-  phases: [1, packSourceSemanticQueryPreparation(accessPreparation),
+  phases: [2, packSourceSemanticQueryPreparation(accessPreparation),
     packSourceSemanticAcquisition(accessAcquisition), null] as const
 };
 const accessExecution = sourceSemanticExecution(accessPreparation, accessAcquisition);
@@ -72,9 +72,9 @@ function capturedDelivery(source: FrozenCell["sources"][number], budget: ReturnT
     source_version: source.source_version, content_digest: source.content_digest, evidence_object_id: null,
     association_milligrades: 0, hypothesis_id: "source-only", output_binding: "source-evidence", role: "requested",
     claim: "unknown", explanation_ids: [] });
-  const disclosure = { material_kind: "original_body", source_binding: "checked_record", evaluated_as_of: CLOCK,
+  const disclosure = encodeSourceDisclosure({ material_kind: "original_body", source_binding: "checked_record", evaluated_as_of: CLOCK,
     validity: { kind: "unknown", reason: "not_recorded" }, temporal_state: "unknown",
-    proof_use: { kind: "source_only", qualification: "not_current_proof" } };
+    proof_use: { kind: "source_only", qualification: "not_current_proof" } });
   const queryStatus = { status: "admitted" as const, query_semantics_id: queryId };
   const requestIdentity = sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES.scopes,
     original_query: ORIGINAL_QUERY, query_semantics: QUERY, query_semantics_status: queryStatus, source_id: sourceId,
@@ -294,8 +294,8 @@ const stableChanges: [string, (report: NativeReport) => void][] = [
     report.common.delivery = { ...value, index: { ...value.index!, query_id: sourceSemanticLibraryQueryIdentity("Another query") } }; }],
   ["disclosure", report => { const value = report.common.delivery!, at = new Date(Date.parse(CLOCK) + 1_000).toISOString();
     report.common.delivery = { ...value, source_disclosures: Object.fromEntries(Object.entries(value.source_disclosures!).map(([id, row]) =>
-      [id, { ...row, evaluated_as_of: at }])), results: value.results!.map(row => ({ ...row,
-        source_disclosure: { ...row.source_disclosure!, evaluated_as_of: at } })) }; }],
+      [id, encodeSourceDisclosure({ ...sourceDisclosure(row), evaluated_as_of: at })])), results: value.results!.map(row => ({ ...row,
+        source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(row.source_disclosure!), evaluated_as_of: at }) })) }; }],
   ["coverage", report => { report.common.delivery = { ...report.common.delivery!, coverage: { ...coverage, discovery: "open" } }; }],
   ["logical work", report => { report.common.delivery = { ...report.common.delivery!, work: { ...work, logical_work: 2 } }; }],
   ["logical memory", report => { report.common.delivery = { ...report.common.delivery!, work: { ...work, logical_memory_bytes: 65 } }; }],

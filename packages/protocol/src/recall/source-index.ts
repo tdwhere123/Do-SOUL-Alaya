@@ -35,6 +35,10 @@ export type SourceIndexSelection = Readonly<{
 }>;
 export const SourceIndexGenerationStatusSchema = z.enum(["building", "partial", "ready", "valid_empty", "failed", "retired"]);
 export type SourceIndexGenerationStatus = z.infer<typeof SourceIndexGenerationStatusSchema>;
+/** Generation eligibility only; callers must also verify the active pointer, selection and source guards. */
+export function sourceIndexGenerationCanServeQueries(status: string): status is "ready" | "partial" | "valid_empty" {
+  return status === "ready" || status === "partial" || status === "valid_empty";
+}
 export type SourceIndexGeneration = Readonly<{
   selection: SourceIndexSelection; generation_id: string; source_epoch: number;
   status: SourceIndexGenerationStatus; enumeration_complete: boolean; after_source_id: string | null;
@@ -108,6 +112,8 @@ export class SourceIndexOperationError extends AlayaError {
 export interface SourceIndexRepository {
   select(workspaceId: string, configuration: SourceIndexConfiguration): SourceIndexSelection;
   state(workspaceId: string): SourceIndexState;
+  /** Revoke configuration eligibility without declaring a build failure. Retains history and fences old work. */
+  unbind(workspaceId: string): void;
   begin(selection: SourceIndexSelection): SourceIndexGeneration;
   capturePage(workspaceId: string, generationId: string, limit: number, budget: SourceIndexBudget): SourceIndexCaptureResult;
   generation(workspaceId: string, generationId: string): SourceIndexGeneration | null;

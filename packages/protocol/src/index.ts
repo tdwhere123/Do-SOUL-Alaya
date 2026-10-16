@@ -26,8 +26,9 @@
 export type { EnvLookup } from "./config/env-lookup.js";
 export * from "./recall/source-index.js";
 export type * from "./recall/source-index-query.js";
-export { SourceDisclosureSchema, EvidenceTextDisclosuresSchema,
-  type SourceDisclosure, type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
+export { SOURCE_DISCLOSURE_CODEC_VERSION, SourceDisclosureSchema, SourceDisclosureSemanticSchema,
+  encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosureProofUse, sourceDisclosure, decodeHistoricalSourceDisclosure, EvidenceTextDisclosuresSchema,
+  type SourceDisclosure, type SourceDisclosureSemantic, type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
 export * from "./garden/source-semantic-resources.js";
 export { sourceSemanticStructuralEdges, sourceSemanticContextContains, sourceSemanticSlotNodeId } from "./garden/source-semantic-structure.js";
 export {

@@ -5,7 +5,7 @@ import { SourceSemanticReasonDeliverySchema, refineSourceSemanticReasonDelivery 
 import { SourceSemanticExecutionSchema, SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { assertFieldIdentity, hashSourceRecordId, type FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
-import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
+import { SourceDisclosureSchema, sourceDisclosure, type SourceDisclosure } from "../recall/source-disclosure.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
 import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema, SOURCE_REFERENCE_MAX_ASSERTIONS } from "../evidence/source-reference.js";
@@ -371,7 +371,7 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
       // Any independent proof at this explicit slot governs disclosure; array order is not occupancy.
       const expected = value.slot_qualifiers.some(row => row.index === position && row.evidence_kind === "semantic_proof")
         ? "conditional_support" : "source_only";
-      if (disclosure === undefined || disclosure.proof_use.kind !== expected) {
+      if (disclosure === undefined || sourceDisclosure(disclosure).proof_use.kind !== expected) {
         context.addIssue({ code: "custom", path: ["source_disclosures", indexEntryCacheKey(entry)],
           message: "each delivered source requires the matching proof qualification" });
       }

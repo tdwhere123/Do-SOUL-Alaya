@@ -1,5 +1,5 @@
 import { expect, vi } from "vitest";
-import { SourceDeliveredSpanSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
+import { sourceDisclosure, SourceDeliveredSpanSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   sourceRecallTarget, type SourceRecordIdentity, type SoulInterpretationResponse }
   from "@do-soul/alaya-protocol";
 import { authorizeSemanticScope, encodeSourceSemanticLibraryResponse, fieldContractSha256, hydrateUtf8Chunk,
@@ -224,14 +224,14 @@ function observeDelivery(context: NativeSubsetContext, measurement: NativeMeasur
       const entry = native.index.entries[coverIndex]!, result = encoded.results?.[coverIndex];
       expect(entry).toEqual(cover.entry); expect(entry.interpretation_node).toBeUndefined(); expect(entry.explanation_ids).toEqual([]);
       expect(result?.target).toEqual(cover.entry.target); expect(result?.content_preview).toBe(cover.preview);
-      expect(result?.source_disclosure?.proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
+      expect(sourceDisclosure(result!.source_disclosure!).proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
       const qualifiers = native.slot_qualifiers.filter(row => row.index === coverIndex);
       expect(qualifiers).toHaveLength(1); expect(qualifiers[0]?.evidence_kind).toBe("source_evidence");
       expect(qualifiers[0]?.witnesses).toBeUndefined(); expect(qualifiers[0]?.support).toBeUndefined();
       expect(qualifiers[0]?.conditional_computation_id).toBeUndefined();
       expect(qualifiers[0]?.source_interpretation_id).toBeUndefined();
       expect(qualifiers[0]?.query_semantics_id).toBeUndefined(); expect(qualifiers[0]?.semantic_correspondence_id).toBeUndefined();
-      expect(result?.source_disclosure?.source_binding).toBe("checked_record");
+      expect(sourceDisclosure(result!.source_disclosure!).source_binding).toBe("checked_record");
       expect(result?.budget_state.within_budget).toBe(true);
       const interval = exposure.position.intervals.find(row => row.root === physicalRoot(cover));
       expect(interval).toEqual({ root: physicalRoot(cover), start: 0, end: Buffer.byteLength(cover.preview) });

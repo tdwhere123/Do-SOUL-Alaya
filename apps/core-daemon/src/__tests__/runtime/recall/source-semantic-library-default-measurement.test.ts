@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { sourceDisclosure } from "@do-soul/alaya-protocol";
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -133,7 +134,7 @@ it("measures a real same-root improvement over three complementary independent p
     expect(hull.entry.target).toMatchObject({ workspace_id: admitted.target.workspace_id, root_id: admitted.target.root_id,
       source_version: admitted.target.source_version, content_digest: admitted.target.content_digest,
       evidence_object_id: admitted.target.evidence_object_id });
-    expect(hull.source_disclosure.proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
+    expect(sourceDisclosure(hull.source_disclosure).proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
     const [two] = [...prepareLibraryPackagePairs(candidates, [candidates.find(row => row.proofs.length === 1)!],
       new SourceSemanticReadBudget(selectionExecutionBudget))];
     expect(two).toBeDefined();

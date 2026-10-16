@@ -5,7 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { buildSourceReferenceCatalog, sourceReferenceResolver, sourceGoldRootIdentity, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
+import { sourceDisclosure, buildSourceReferenceCatalog, sourceReferenceResolver, sourceGoldRootIdentity, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
   SourceSemanticResourceExhausted, type SourceSemanticInterpretation } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticCorrespondence, createAuditedSourceAdmission, createSourceSemanticInterpretationPublication, EvidenceService,
   encodeSourceSemanticLibraryResponse, fieldContractSha256, sourceSemanticLibrarySourceEntry,
@@ -97,7 +97,7 @@ it("adds one exact non-prefix Unicode window for a single executed branch, witho
     expect(window.entry).toMatchObject({ hypothesis_id: "admitted-source-hypothesis", claim: "unknown", explanation_ids: [] });
     expect(window.entry).not.toHaveProperty("interpretation_node");
     expect(window.entry.target).not.toHaveProperty("interpretation_node");
-    expect(window.source_disclosure.proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
+    expect(sourceDisclosure(window.source_disclosure).proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
     const proof = result.packages.find(row => row.proofs.length === 1)!;
     expect(sourceGoldRootIdentity(window.entry.target as never)).toBe(sourceGoldRootIdentity(proof.entry.target as never));
     expect(result.packages.filter(row => row.proofs.length === 0 && !located([row]).length)).toHaveLength(2);

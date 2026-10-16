@@ -12,10 +12,11 @@ import {
   SourceSemanticCompactPreparationSchema, SourceSemanticExecutionSchema
 } from "../../garden/source-semantic-phase-wire.js";
 import * as codec from "../../garden/source-semantic-phase-codec.js";
+import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 
 it("classifies an out-of-bounds phase reference as a validation error", () => {
   const acquisition = codec.packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun("operation_does_not_acquire"));
-  const malformed = [1, [1, [], [0, 3, 0, null, 0]], acquisition] as const;
+  const malformed = [2, [1, [], [0, 3, 0, null, 0]], acquisition] as const;
   expect(SourceSemanticExecutionSchema.safeParse(malformed).success).toBe(false);
   expect(() => codec.sourceSemanticExecutionPhases(malformed))
     .toThrow(expect.objectContaining({ name: "AlayaError", code: "VALIDATION" }));
@@ -112,6 +113,62 @@ function notRunAcquisition(reason = "operation_does_not_acquire") {
   return sourceSemanticAcquisitionNotRun(reason);
 }
 
+it("captures both preparation routes once and never freezes or aliases caller-owned profiles", () => {
+  const original = structuredClone({ ...activePreparation(), supplemental: [activePreparation()] });
+  const snapshot = structuredClone(original), meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const parse = vi.spyOn(SourceSemanticQueryPreparationSchema, "parse");
+  try {
+    const captured = codec.captureSourceSemanticQueryPreparation(original, meter);
+    const packed = codec.packSourceSemanticQueryPreparation(captured, meter);
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(Object.isFrozen(captured)).toBe(true);
+    expect(Object.isFrozen(captured.supplemental?.[0]?.selected?.profile)).toBe(true);
+    expect(Object.isFrozen(original)).toBe(false);
+    expect(Object.isFrozen(original.selected.profile)).toBe(false);
+    original.selected.profile.model_id = "changed";
+    original.supplemental[0]!.selected.profile.model_id = "changed hint";
+    expect(codec.sourceSemanticExecutionPhases(codec.sourceSemanticExecution(packed)).query_preparation).toEqual(snapshot);
+  } finally { parse.mockRestore(); }
+});
+
+it("captures the whole mutable acquisition once before packing either route", () => {
+  const original = structuredClone({ ...activeAcquisition(), supplemental: [activeAcquisition()] });
+  const snapshot = structuredClone(original), meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const parse = vi.spyOn(SourceSemanticAcquisitionPhaseSchema, "parse");
+  try {
+    const packed = codec.packSourceSemanticAcquisition(original, meter);
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(Object.isFrozen(original)).toBe(false);
+    expect(Object.isFrozen(original.result.lexical.tokenization.terms)).toBe(false);
+    original.result.lexical.tokenization.terms.push("changed");
+    original.supplemental[0]!.result.accounting.admitted = 17;
+    expect(codec.sourceSemanticExecutionPhases(codec.sourceSemanticExecution(undefined, packed)).acquisition).toEqual(snapshot);
+    const captured = codec.captureSourceSemanticAcquisition(original, meter);
+    parse.mockClear();
+    codec.packSourceSemanticAcquisition(captured, meter);
+    expect(parse).not.toHaveBeenCalled();
+    for (const malformed of [{ ...original, allowance: { ...original.allowance, max_attempts: -1 } },
+      { ...original, result: { ...original.result, resources: { ...original.result.resources, work: -1 } } }]) {
+      expect(() => codec.packSourceSemanticAcquisition(malformed, meter)).toThrow();
+    }
+  } finally { parse.mockRestore(); }
+});
+
+it("owns validated native acquisition leaves without freezing or rereading caller evidence", () => {
+  const original = structuredClone({ ...activeAcquisition(), supplemental: [activeAcquisition()] });
+  const snapshot = structuredClone(original), meter = new SourceSemanticResourceLedger({ work_units: 100_000, memory_bytes: 1_000_000 });
+  const packed = codec.packSourceSemanticAcquisition(original, meter);
+  expect(Object.isFrozen(original.result.nominations[0]!.source.target)).toBe(false);
+  expect(Object.isFrozen(original.supplemental[0]!.result.vector.state.binding)).toBe(false);
+  original.result.nominations[0]!.source.target.root_id = "changed";
+  original.supplemental[0]!.result.nominations[0]!.vector.window.window_id = "changed";
+  original.result.vector.state.binding.generation_id = "changed";
+  expect(codec.sourceSemanticExecutionPhases(codec.sourceSemanticExecution(undefined, packed)).acquisition).toEqual(snapshot);
+  const invalid = structuredClone({ ...activeAcquisition(), supplemental: [activeAcquisition()] });
+  invalid.supplemental[0]!.result.vector.state.binding.generation_id = "invalid";
+  expect(() => codec.packSourceSemanticAcquisition(invalid, meter)).toThrow();
+});
+
 it("public admission rejects expanded objects, historic versions, and malformed tuples, refs, and enums", () => {
   const expandedPrep = unavailableSourceQueryPreparation("operation_does_not_prepare", "not_requested");
   const expandedAcq = notRunAcquisition();
@@ -175,7 +232,7 @@ it("parse then serialize stays compact and does not call packing or expansion", 
     const admittedAcq = SourceSemanticCompactAcquisitionSchema.parse(packedAcq);
     expect(admittedAcq[2][4]?.[3]).toEqual([...nineZeros]);
     sameCanonical(admittedAcq, packedAcq);
-    const execution = [1, packed, packedAcq] as const;
+    const execution = [2, packed, packedAcq] as const;
     const admittedExecution = SourceSemanticExecutionSchema.parse(execution);
     expect(admittedExecution).not.toBe("native_reasoning_only");
     sameCanonical(admittedExecution, execution);
@@ -259,14 +316,14 @@ it("capture, pack, public admit, and expand roundtrip inactive and full active f
   expect(packedAcq[1][(result[6][2][2] as readonly [number])[0]!]).toBe("");
   expect(result[8][0]).toBe(code(PHASE_CODES.limitation, "nominations_are_not_source_absence"));
   expect(packedAcq[1][(result[8][1] as readonly [number])[0]!]).toBe("1");
-  const phases = SourceSemanticAccessPhasesSchema.parse([1, packedPrep, packedAcq, null]);
-  sameCanonical(phases, [1, packedPrep, packedAcq, null]);
+  const phases = SourceSemanticAccessPhasesSchema.parse([2, packedPrep, packedAcq, null]);
+  sameCanonical(phases, [2, packedPrep, packedAcq, null]);
   const expanded = codec.sourceSemanticAccessPhases({ phases });
   sameCanonical(expanded.preparation, capturedPrep);
   sameCanonical(expanded.acquisition, capturedAcq);
   expect(expanded.phase_accounting.observation).toBeNull();
   const measured = codec.sourceSemanticAccessPhases({
-    phases: SourceSemanticAccessPhasesSchema.parse([1, packedPrep, packedAcq, [0, 0, 0]])
+    phases: SourceSemanticAccessPhasesSchema.parse([2, packedPrep, packedAcq, [0, 0, 0]])
   });
   expect(measured.phase_accounting.observation).toEqual({
     work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown"
@@ -275,7 +332,7 @@ it("capture, pack, public admit, and expand roundtrip inactive and full active f
     unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"));
   const inactiveAcq = codec.captureSourceSemanticAcquisition(notRunAcquisition("controlled_or_scoped_access"));
   const inactive = codec.sourceSemanticAccessPhases({
-    phases: SourceSemanticAccessPhasesSchema.parse([1,
+    phases: SourceSemanticAccessPhasesSchema.parse([2,
       codec.packSourceSemanticQueryPreparation(inactivePrep),
       codec.packSourceSemanticAcquisition(inactiveAcq), null])
   });
@@ -342,7 +399,7 @@ it("keeps selected profile, generation binding, nomination windows, and target i
   const captured = codec.captureSourceSemanticAcquisition(activeAcquisition());
   const packed = codec.packSourceSemanticAcquisition(captured);
   const expanded = codec.sourceSemanticAccessPhases({
-    phases: [1, codec.packSourceSemanticQueryPreparation(codec.captureSourceSemanticQueryPreparation(activePreparation())),
+    phases: [2, codec.packSourceSemanticQueryPreparation(codec.captureSourceSemanticQueryPreparation(activePreparation())),
       packed, null]
   }).acquisition;
   expect(expanded.result?.nominations[0]?.source).toEqual(target);
@@ -391,7 +448,7 @@ it("rejects invalid wire coordinates that would bypass leaf constraints and keep
   }).success).toBe(false);
   const publicText = JSON.stringify({
     packed: packedAcq,
-    expanded: codec.sourceSemanticAccessPhases({ phases: [1, packedPrep, packedAcq, null] }).acquisition
+    expanded: codec.sourceSemanticAccessPhases({ phases: [2, packedPrep, packedAcq, null] }).acquisition
   });
   expect(publicText).not.toMatch(/embedding/u);
   expect(publicText).not.toMatch(/Float32Array/u);
@@ -412,11 +469,57 @@ it("canonical native execution is exact slot equality, never inferred from gener
   })).not.toBe("native_reasoning_only");
   expect(SourceSemanticExecutionPhasesSchema.safeParse({ ...phases, semantic_generation_attempts: 1 }).success)
     .toBe(false);
-  const nativeTuple = SourceSemanticExecutionSchema.parse([1,
+  const nativeTuple = SourceSemanticExecutionSchema.parse([2,
     codec.packSourceSemanticQueryPreparation(codec.captureSourceSemanticQueryPreparation(phases.query_preparation)),
     codec.packSourceSemanticAcquisition(codec.captureSourceSemanticAcquisition(phases.acquisition))]);
   expect(nativeTuple).not.toBe("native_reasoning_only");
   if (nativeTuple === "native_reasoning_only") throw new Error("parse must not canonicalize");
   expect(codec.isNativeReasoningOnlyExecution(nativeTuple)).toBe(true);
   expect(codec.sourceSemanticExecution(nativeTuple[1], nativeTuple[2])).toBe("native_reasoning_only");
+});
+
+it.each(["primary", "supplemental"] as const)("preserves unknown %s acquisition costs instead of adding zero", route => {
+  const known = activeAcquisition(), notRun = notRunAcquisition();
+  const pack = (value: unknown) => codec.packSourceSemanticAcquisition(codec.captureSourceSemanticAcquisition(value));
+  const pair = (unknown: unknown) => pack(route === "primary"
+    ? { ...unknown as object, supplemental: [known] } : { ...known, supplemental: [unknown] });
+  expect(codec.sourceSemanticAcquisitionResources(pair(notRun))).toEqual([1, 8, 8]);
+  for (const unknown of [{ ...notRun, status: "failed", accounting: "partial" },
+    { ...notRun, status: "executed", accounting: "complete" },
+    { ...known, status: "failed", accounting: "partial" }]) {
+    expect(codec.sourceSemanticAcquisitionResources(pair(unknown))).toBeNull();
+  }
+  expect(codec.sourceSemanticAcquisitionResources(pack(notRun))).toEqual([0, 0, 0]);
+  expect(codec.sourceSemanticAcquisitionResources(pack({ ...notRun, status: "failed", accounting: "partial" }))).toBeNull();
+});
+
+it("preserves both route occurrences and windows while aggregating spending and unknown provider attempts", () => {
+  const original = activeAcquisition(), hint = activeAcquisition();
+  hint.result.navigation_digest = c;
+  hint.result.nominations[0]!.vector.window = { ...window, window_id: e, start_byte: 10, end_byte: 11 };
+  hint.result.resources = { work: 3, memory_bytes: 16, native_bytes: 4, sql_internal_work: "unknown" };
+  const phase = { ...original, supplemental: [hint] };
+  const preparation = { ...activePreparation(), supplemental: [{ ...activePreparation(), navigation_digest: c,
+    status: "failed" as const, external_api_attempts: null }] };
+  const packed = codec.packSourceSemanticAcquisition(codec.captureSourceSemanticAcquisition(phase));
+  const execution = SourceSemanticExecutionSchema.parse(codec.sourceSemanticExecution(preparation, packed));
+  expect(execution).not.toBe("native_reasoning_only");
+  const expanded = codec.sourceSemanticExecutionPhases(execution);
+  sameCanonical(expanded.acquisition, phase);
+  sameCanonical(expanded.query_preparation, preparation);
+  expect(expanded.acquisition.result?.nominations[0]?.source)
+    .toEqual(expanded.acquisition.supplemental?.[0]?.result?.nominations[0]?.source);
+  expect(expanded.acquisition.result?.nominations[0]?.vector?.window.window_id).toBe(a);
+  expect(expanded.acquisition.supplemental?.[0]?.result?.nominations[0]?.vector?.window.window_id).toBe(e);
+  expect(codec.sourceSemanticAcquisitionResources(packed)).toEqual([4, 24, 12]);
+  expect(codec.sourceSemanticExecutionExternalAttempts(execution)).toBeNull();
+  expect(codec.sourceSemanticExecutionExternalAttempts(codec.sourceSemanticExecution({ ...activePreparation(),
+    external_api_attempts: 2, supplemental: [{ ...activePreparation(), external_api_attempts: 3 }] }))).toBe(5);
+  expect(SourceSemanticExecutionSchema.safeParse([1,
+    codec.packSourceSemanticQueryPreparation(preparation), packed]).success).toBe(false);
+  expect(SourceSemanticAccessPhasesSchema.safeParse([1,
+    codec.packSourceSemanticQueryPreparation(preparation), packed, null]).success).toBe(false);
+  // A supplemental receipt cannot contain another route and evade the aggregate accounting owner.
+  expect(SourceSemanticQueryPreparationSchema.safeParse({ ...preparation,
+    supplemental: [preparation] }).success).toBe(false);
 });

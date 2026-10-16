@@ -65,6 +65,18 @@ export class SqliteSourceIndexRepository implements SourceIndexRepository, Sourc
     });
   }
 
+  public unbind(workspaceId: string): void {
+    BoundedIdSchema.parse(workspaceId);
+    this.atomic(() => {
+      // Advancing even an unbuilt selection fences callers that captured it before unbind.
+      // Generation snapshots preserve the previous revision/profile and accepted vectors.
+      this.database.connection.prepare(`UPDATE source_index_generations SET status='retired',reason='configuration_unbound'
+        WHERE workspace_id=? AND status != 'retired'`).run(workspaceId);
+      this.database.connection.prepare(`UPDATE source_index_selections
+        SET selection_revision=selection_revision+1,active_generation_id=NULL WHERE workspace_id=?`).run(workspaceId);
+    });
+  }
+
   public state(workspaceId: string): SourceIndexState {
     return this.atomic(() => {
       const selection = readSourceIndexSelection(this.database, workspaceId);

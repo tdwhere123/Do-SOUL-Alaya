@@ -10,6 +10,10 @@ import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   unavailableSourceQueryPreparation } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { SourceSemanticUnionCompletion } from "../../../runtime/recall-read-worker/source-semantic-empty-population-budget.js";
+import * as leases from "../../../runtime/recall-read-worker/source-semantic-leases.js";
+import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
+import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
+import { withIndexedSources, WS, CLOCK, ORIGINAL, RAW, SCOPES, QUERY_BUDGET } from "./source-semantic-index-acquisition.test-support.js";
 
 const AMPLE = { work_units: 1_000_000, memory_bytes: 1_000_000 };
 
@@ -42,7 +46,10 @@ function held(budget: SourceSemanticReadBudget) {
 }
 
 function fiveCopyHold(value: object) {
-  return SourceSemanticResourceLedger.measureRetain([value, value, value, value, value], AMPLE);
+  const retained = SourceSemanticResourceLedger.measureRetain([value, value, value, value, value], AMPLE);
+  // Each packed fixture scan costs 17 work units (wrapper/key, phase/table/body,
+  // scalar visits/scans). Its four safe integers need no encoding allocation.
+  return { work_units: retained.work_units + 2 * 17, memory_bytes: retained.memory_bytes };
 }
 
 function unfrozen(value: ReturnType<typeof phaseMetadata>) {
@@ -78,15 +85,67 @@ it("holds five future metadata occurrences from one quote without freezing mutab
   const owned = ownedPhaseMetadata();
   expect(Object.isFrozen(owned)).toBe(false);
   expect(Object.isFrozen(owned.preparation)).toBe(true);
-  const frozenHold = fiveCopyHold(owned);
+  // Five wrapper objects and reference slots still need future allowance; the already
+  // captured immutable phase graph does not need five new structural copies.
+  const frozenHold = { work_units: 1 + 5 * 2 + 2 * 17,
+    memory_bytes: 64 + 5 * 8 + 5 * (64 + 24 + 4 * "preparation".length + 8) };
   const frozen = subject();
   quote(frozen.completion, owned);
   expect(held(frozen.parent)).toEqual(frozenHold);
+  const actual = new SourceSemanticResourceLedger(AMPLE);
+  actual.retain([owned, owned, owned, owned, owned], "future metadata references", "borrow");
+  expect(frozenHold).toEqual({ work_units: actual.spentWork + 2 * 17, memory_bytes: actual.spentBytes });
   expect(frozen.parent.spentWork).toBeGreaterThan(0);
   expect(frozen.parent.spentWork).toBeLessThan(parent.spentWork);
   expect(Object.isFrozen(owned)).toBe(false);
   expect(Object.isFrozen(owned.preparation)).toBe(true);
   nativeIdle(frozen.parent, frozen.child);
+});
+
+it("reuses a complete one-page raw quote while rechecking the actual retained lease and preserving spend", async () => {
+  await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
+    const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, supplemental_navigation: "x".repeat(1024),
+      signal: new AbortController().signal, remainingMs: () => 60_000 });
+    const quote = vi.spyOn(SourceSemanticResourceLedger, "quoteRetain");
+    const preflight = vi.spyOn(leases, "preflightSemanticLeaseGroup");
+    const empty = SourceSemanticUnionCompletion.prototype.emptyCompletion;
+    let reused = 0;
+    vi.spyOn(SourceSemanticUnionCompletion.prototype, "emptyCompletion").mockImplementation(function (this: SourceSemanticUnionCompletion, input) {
+      quote.mockClear(); preflight.mockClear();
+      const before = held(input.parent), spent = input.parent.spentBytes;
+      expect(before.memory_bytes).toBeGreaterThan(0);
+      empty.call(this, input);
+      expect(quote).not.toHaveBeenCalled();
+      expect(preflight).toHaveBeenCalledTimes(1);
+      const [runtime, rows] = preflight.mock.calls[0]!;
+      expect(runtime).toBe(input.runtime);
+      expect(rows[0]).toMatchObject({ access_pool: { sources: input.records,
+        access: { observed_source_count: 1 } } });
+      expect(held(input.parent)).toEqual({ work_units: 0, memory_bytes: 0 });
+      expect(input.parent.spentBytes).toBeGreaterThan(spent);
+      expect(input.child.bytes + before.memory_bytes + input.child.spentBytes).toBeLessThanOrEqual(input.parent.bytes);
+      reused++;
+    });
+    const budget = { ...QUERY_BUDGET, memory_bytes: 300_000 };
+    const result = runSourceSemanticWorker({ database: fixture.database } as RecallReadWorkerRuntime, {
+      workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES, prepared_query: prepared,
+      request: { kind: "prepare_query", original_query: ORIGINAL, access_hint: "x".repeat(1024), budget } });
+    expect(reused).toBe(1);
+    expect(result.kind).toBe("prepare_query");
+    if (result.kind !== "prepare_query") throw new Error("query preparation expected");
+    expect(result.outcome).toEqual({ status: "preparation_required", missing: "query_semantics" });
+    expect(result.access?.source_candidates).toContainEqual(expect.objectContaining({ source_id: "raw", complete: true }));
+    expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
+    const client = await fixture.openClient();
+    const native = await client.sourceSemanticsPort!.execute({ workspace_id: WS, as_of: CLOCK, lifetime_now: CLOCK,
+      authorized_scopes: SCOPES, principal: "retention-check",
+      request: { kind: "prepare_query", original_query: ORIGINAL, access_hint: "x".repeat(1024), budget } });
+    if (native.kind !== "prepare_query") throw new Error("native query preparation expected");
+    expect(native.outcome).toEqual({ status: "preparation_required", missing: "query_semantics" });
+    expect(native.query_handle).toBeDefined();
+    expect(native.access?.source_candidates).toContainEqual(expect.objectContaining({ source_id: "raw", complete: true }));
+    expect(native.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
+  });
 });
 
 it("releases held completion allowance without refunding spent planning, and repeated release is harmless", () => {

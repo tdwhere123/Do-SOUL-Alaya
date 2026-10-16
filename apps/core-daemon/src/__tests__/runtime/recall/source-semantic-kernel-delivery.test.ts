@@ -8,7 +8,7 @@ afterAll(() => { isolation.restore(); });
 import * as core from "@do-soul/alaya-core";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { SourceSemanticReasoningResultSchema, SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
-  sourceSemanticReasonControl } from "@do-soul/alaya-protocol";
+  sourceDisclosure, sourceSemanticReasonControl } from "@do-soul/alaya-protocol";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
@@ -79,8 +79,9 @@ it("passes genuine over-megabyte computed evidence to native finalization and pr
       expect(sourceSemanticReasonControl(value)).not.toHaveProperty("binding_results");
       expect(sourceSemanticReasonControl(value)).not.toHaveProperty("attention");
       expect(value).toMatchObject({ coverage: { conditional_computation: "complete", payload: "truncated" },
-        source_disclosure: { proof_use: { kind: "conditional_support", qualification: "not_world_claim" } },
         execution: "native_reasoning_only" });
+      if (!("source_disclosure" in value)) throw new Error("reason disclosure required");
+      expect(sourceDisclosure(value.source_disclosure!)).toMatchObject({ proof_use: { kind: "conditional_support", qualification: "not_world_claim" } });
       expect(value.work.native_work).toBeGreaterThan(0);
       expect(value.work.native_bytes).toBeGreaterThan(0);
       expect(value.work.logical_memory_bytes).toBeGreaterThan(0);

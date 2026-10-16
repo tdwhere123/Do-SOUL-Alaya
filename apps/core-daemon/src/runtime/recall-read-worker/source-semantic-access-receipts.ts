@@ -24,7 +24,7 @@ export function sourceSemanticAccessReceiptValue<Source, Interpretation, Unvisit
     sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"), meter), meter);
   meter.charge(1, 32, "source phase access tuple allocation");
   return { contract: "source-semantic-access-v2" as const,
-    phases: [1, preparation, acquisition, phases?.observation ?? null] as const,
+    phases: [2, preparation, acquisition, phases?.observation ?? null] as const,
     policy, input_id: inputId,
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }),
     observed_source_count: sources.length, observed_interpretation_count: interpretations.length,

@@ -24,11 +24,12 @@ type RetainedNomination = {
 };
 
 type SourceQueryPreparationInput = Readonly<{
-  navigation: string; selection: SourceIndexSelection | null;
+  navigation: string; supplemental_navigation?: string; selection: SourceIndexSelection | null;
   bind: (options: SourceEmbeddingBindingOptions) => Promise<SourceEmbeddingBindingResult>;
   signal: AbortSignal; remainingMs: () => number;
 }>;
-type PreparedSourceQuery = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
+type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
+type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
 
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
@@ -37,7 +38,21 @@ type PreparedSourceQuery = Readonly<{ vector: SourceIndexQueryVector; receipt: S
 export class SourceIndexAcquisition {
   /** Private inference before the native snapshot. Observe the selected configuration; never create one. */
   public static async prepareQuery(input: SourceQueryPreparationInput): Promise<PreparedSourceQuery> {
-    const navigation = input.navigation, selection = structuredClone(input.selection), started = performance.now();
+    // Capture both texts and the selected configuration before the first asynchronous bind.
+    // The same binding/profile serves both distinct routes; a failed hint cannot replace original work.
+    const { navigation, supplemental_navigation, signal, remainingMs } = input;
+    const selection = structuredClone(input.selection), bind = input.bind;
+    let binding: Promise<SourceEmbeddingBindingResult> | undefined;
+    const captured = { navigation, selection, signal, remainingMs,
+      bind: (options: SourceEmbeddingBindingOptions) => binding ??= bind(options) };
+    const original = await SourceIndexAcquisition.prepareRoute(captured);
+    if (supplemental_navigation === undefined || supplemental_navigation === navigation) return original;
+    const supplemental = await SourceIndexAcquisition.prepareRoute({ ...captured, navigation: supplemental_navigation });
+    return { ...original, supplemental };
+  }
+
+  private static async prepareRoute(input: SourceQueryPreparationInput): Promise<PreparedRoute> {
+    const navigation = input.navigation, selection = input.selection, started = performance.now();
     const bind = input.bind, signal = input.signal, remainingMs = input.remainingMs;
     const digest = sourceEmbeddingInputDigest(navigation);
     let receipt: SourceSemanticQueryPreparation = {

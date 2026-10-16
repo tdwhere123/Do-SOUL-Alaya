@@ -13,6 +13,7 @@ import {
   prepareSourceIndexLexical,
   sourceIndexConfigurationId,
   sourceIndexGenerationId,
+  sourceIndexGenerationCanServeQueries,
   sourceIndexProfileId,
   sourceIndexTarget,
   type SourceIndexConfiguration,
@@ -21,6 +22,13 @@ import {
   type SourceIndexTarget
 } from "../../recall/source-index.js";
 import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
+
+it.each([
+  ["ready", true], ["partial", true], ["valid_empty", true],
+  ["unknown", false], ["unbound", false], ["building", false], ["failed", false], ["retired", false]
+] as const)("generation %s query eligibility is %s before active-binding guards", (status, eligible) => {
+  expect(sourceIndexGenerationCanServeQueries(status)).toBe(eligible);
+});
 
 function sha256(preimage: string): string {
   return createHash("sha256").update(preimage, "utf8").digest("hex");

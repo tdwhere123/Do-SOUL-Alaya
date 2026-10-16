@@ -29,7 +29,9 @@ it.each([{ name: "omitted", accessHint: undefined }, { name: "maximum-length", a
       expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: "orchid irrigation" };
     const attempt = (allowance: { work_units: number; memory_bytes: number }) => {
       const parent = new SourceSemanticReadBudget(allowance);
-      const child = new SourceSemanticReadBudget({ work_units: 1_000, memory_bytes: 1_000 });
+      // Isolate the explicit quote boundary; production's separate half-budget ceiling
+      // is checked through the real observation owner in completion-retention tests.
+      const child = new SourceSemanticReadBudget(allowance);
       child.charge(107, 229, "already observed header");
       let error: unknown;
       try {
@@ -53,10 +55,10 @@ it.each([{ name: "omitted", accessHint: undefined }, { name: "maximum-length", a
       const pool = { sources: [], descriptors: [], access: { ...receipt, pool_id: digest }, sourcePages: 1, interpretationPages: 1,
         ...(accessHint === undefined ? {} : { accessHint }) };
       actual.retain([]);
-      actual.retain(receipt);
-      actual.retain(preparationAccessReceiptValue(pool, 0, 0, 0));
+      actual.retain(receipt, "access receipt identity", "borrow");
+      actual.retain(preparationAccessReceiptValue(pool, 0, 0, 0), "access trace delivery", "borrow");
       actual.retain(sourceSemanticExecution());
-      actual.retain({ ...queryPreparationLease(leaseContext, pool, 0, 0, false), kind: "query" });
+      actual.retain({ ...queryPreparationLease(leaseContext, pool, 0, 0, false), kind: "query" }, "preparation lease", "borrow");
       actual.charge(semanticLeaseGroupAccountingCost(1), 0);
       expect(workReserve).toBeGreaterThanOrEqual(actual.spentWork);
       expect(byteReserve).toBeGreaterThanOrEqual(actual.spentBytes);
@@ -97,7 +99,7 @@ it("reserves real v2 nomination metadata, execution evidence and both frozen lea
     const context = { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
       expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: ORIGINAL };
     const attempt = (allowance: { work_units: number; memory_bytes: number }) => {
-      const parent = new SourceSemanticReadBudget(allowance), child = new SourceSemanticReadBudget({ work_units: 1000, memory_bytes: 1000 });
+      const parent = new SourceSemanticReadBudget(allowance), child = new SourceSemanticReadBudget(allowance);
       child.charge(107, 229);
       let error: unknown;
       try { reserveEmptyInterpretationCompletion({ runtime, parent, child, records: observed.sources,
@@ -115,11 +117,11 @@ it("reserves real v2 nomination metadata, execution evidence and both frozen lea
     actual.charge(orderCost.work_units, orderCost.memory_bytes);
     actual.retain([]);
     const { pool_id: _poolId, ...receipt } = observed.access;
-    actual.retain(receipt);
-    actual.retain(preparationAccessReceiptValue(observed, 0, 0, 0));
+    actual.retain(receipt, "access receipt identity", "borrow");
+    actual.retain(preparationAccessReceiptValue(observed, 0, 0, 0), "access trace delivery", "borrow");
     sourceSemanticExecution(phases.preparation, phases.acquisition, actual);
-    actual.retain({ ...queryPreparationLease(context, observed, 0, 0, false), kind: "query" });
-    actual.retain({ ...queryPreparationLease(context, observed, 0, 16, false), kind: "page" });
+    actual.retain({ ...queryPreparationLease(context, observed, 0, 0, false), kind: "query" }, "preparation lease", "borrow");
+    actual.retain({ ...queryPreparationLease(context, observed, 0, 16, false), kind: "page" }, "preparation lease", "borrow");
     actual.charge(semanticLeaseGroupAccountingCost(2), 0);
     expect(reservedWork).toBeGreaterThanOrEqual(actual.spentWork);
     expect(reservedBytes).toBeGreaterThanOrEqual(actual.spentBytes);

@@ -7,7 +7,7 @@ afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks()
 afterAll(() => { isolation.restore(); });
 import { canonicalJson, canonicalJsonChunks, captureSourceSemanticAcquisition, captureSourceSemanticQueryPreparation,
   packSourceSemanticAcquisition, packSourceSemanticQueryPreparation, SourceSemanticAccessReceiptSchema,
-  SourceSemanticResourceLedger, sourceSemanticAccessPhases, type SourceSemanticAccessReceipt }
+  sourceSemanticAccessPhases, type SourceSemanticAccessReceipt }
   from "@do-soul/alaya-protocol";
 import { fieldContractSha256, fieldContractSha256Chunks } from "@do-soul/alaya-core";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
@@ -24,7 +24,7 @@ const prepare = { kind: "prepare_query" as const, original_query: ORIGINAL, budg
 function runtime(fixture: IndexFixture) { return { database: fixture.database } as RecallReadWorkerRuntime; }
 
 function compactPhases(access: Readonly<{ phases: SourceSemanticAccessReceipt["phases"] }>) {
-  expect(access.phases[0]).toBe(1);
+  expect(access.phases[0]).toBe(2);
   expect(Array.isArray(access.phases[1])).toBe(true);
   expect(Array.isArray(access.phases[2])).toBe(true);
   expect(access).not.toHaveProperty("preparation");
@@ -32,7 +32,7 @@ function compactPhases(access: Readonly<{ phases: SourceSemanticAccessReceipt["p
   expect(access).not.toHaveProperty("phase_accounting");
 }
 
-function independentPoolId(access: Omit<SourceSemanticAccessReceipt, "trace">, worker: RecallReadWorkerRuntime,
+function independentPoolMaterial(access: Omit<SourceSemanticAccessReceipt, "trace">, worker: RecallReadWorkerRuntime,
   authorized: readonly string[] | null = ["project"]) {
   const expanded = sourceSemanticAccessPhases(access);
   const receipt = {
@@ -44,9 +44,17 @@ function independentPoolId(access: Omit<SourceSemanticAccessReceipt, "trace">, w
     unvisited_sources: access.unvisited_sources, unvisited_interpretations: access.unvisited_interpretations,
     stopping_reasons: access.stopping_reasons, ...expanded
   };
-  return `sha256:${fieldContractSha256(canonicalJson({
-    receipt, workspace: WS, authorized, revision: sourceSemanticRevision(worker)
-  }))}`;
+  return { receipt, workspace: WS, authorized, revision: sourceSemanticRevision(worker) };
+}
+function independentPoolId(access: Omit<SourceSemanticAccessReceipt, "trace">, worker: RecallReadWorkerRuntime) {
+  return `sha256:${fieldContractSha256(canonicalJson(independentPoolMaterial(access, worker)))}`;
+}
+
+function scalarEncodingBytes(value: unknown): number {
+  if (Array.isArray(value)) return value.reduce((sum, child) => sum + scalarEncodingBytes(child), 0);
+  if (value !== null && typeof value === "object") return Object.entries(value).reduce((sum, [key, child]) =>
+    sum + 24 + 2 * JSON.stringify(key).length + scalarEncodingBytes(child), 0);
+  return 24 + 2 * JSON.stringify(value).length;
 }
 
 function held(budget: SourceSemanticReadBudget) {
@@ -88,8 +96,8 @@ it("hashes the expanded preimage independently while retaining compact phases an
         charged.push({ phase, units, bytes });
       }
     });
-    vi.spyOn(SourceSemanticReadBudget.prototype, "retain").mockImplementation(function (this: SourceSemanticReadBudget, value, phase) {
-      retain.call(this, value, phase);
+    vi.spyOn(SourceSemanticReadBudget.prototype, "retain").mockImplementation(function (this: SourceSemanticReadBudget, value, phase, ownership) {
+      retain.call(this, value, phase, ownership);
       retained.push({ phase, value });
     });
     const pool = fixture.database.connection.transaction(() => observeSourceSemanticAccess(worker, {
@@ -115,11 +123,30 @@ it("hashes the expanded preimage independently while retaining compact phases an
     for (const phase of ["canonical identity traversal", "canonical identity scalar encoding", "canonical identity hash handoff"]) {
       expect(charged.some(row => row.phase === phase && row.units > 0 && row.bytes > 0)).toBe(true);
     }
+    const material = independentPoolMaterial(pool.access, worker);
+    expect(charged.filter(row => row.phase === "canonical identity hash handoff").reduce((sum, row) => sum + row.bytes, 0))
+      .toBe(Buffer.byteLength(canonicalJson(material), "utf8"));
+    expect(charged.filter(row => row.phase === "canonical identity scalar encoding").reduce((sum, row) => sum + row.bytes, 0))
+      .toBe(scalarEncodingBytes(material));
     expect(spent.length).toBeGreaterThan(0);
     for (let index = 1; index < spent.length; index++) expect(spent[index]!).toBeGreaterThanOrEqual(spent[index - 1]!);
     expect(meter.spentWork).toBe(spent.at(-1));
     const quoted = { preparation: pool.access.phases[1] };
-    const fiveHold = SourceSemanticResourceLedger.measureRetain([quoted, quoted, quoted, quoted, quoted], AMPLE);
+    // One array frame/slots plus five wrapper frames, preparation keys and owned references.
+    const pending: unknown[] = [quoted];
+    let sizeWork = 0, sizeBytes = 0;
+    while (pending.length > 0) {
+      const value = pending.pop(); sizeWork++;
+      if (value !== null && typeof value === "object") {
+        if (!Array.isArray(value)) sizeWork += Object.keys(value).length;
+        pending.push(...Object.values(value));
+      } else if (typeof value === "string" || typeof value === "number") {
+        sizeWork++;
+        if (typeof value === "number" && !Number.isSafeInteger(value)) sizeBytes += 88;
+      }
+    }
+    const fiveHold = { work_units: 1 + 5 * 2 + 2 * sizeWork,
+      memory_bytes: 64 + 5 * 8 + 5 * (64 + 24 + 4 * 11 + 8) + 2 * sizeBytes };
     const parent = new SourceSemanticReadBudget(AMPLE);
     const child = new SourceSemanticReadBudget(AMPLE);
     new SourceSemanticUnionCompletion(parent, child, () => ({ work_units: 0, memory_bytes: 0 })).metadata(quoted);

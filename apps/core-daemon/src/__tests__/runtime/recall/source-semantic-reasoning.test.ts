@@ -32,7 +32,7 @@ import {
   type SourceSemanticWorkerRequest,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT,
   UNKNOWN_UTTERANCE_ATTRIBUTION, unavailableSourceQueryPreparation,
-  sourceSemanticExecutionPhases, SourceSemanticExecutionSchema, sourceSemanticReasonControl
+  sourceSemanticExecutionPhases, SourceSemanticExecutionSchema, sourceSemanticReasonControl, sourceDisclosure
 } from "@do-soul/alaya-protocol";
 import { proposeCorrespondenceSemantics, proposeQuerySemantics } from "@do-soul/alaya-soul";
 import {
@@ -548,36 +548,63 @@ it("prepares, reasons, and reopens a durable source interpretation through a rea
     if (retry.kind !== "reason") throw new Error("expected retry");
     expect(retry.work.native_work).toBeGreaterThan(0);
     expect("continuation" in retry).toBe(false);
-    const clipped = await call(execute, {
-      kind: "reason", accepts_unreviewed_conditional_results: true,
-      source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics, semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
-      budget: BUDGET, output_byte_limit: 1600
-    });
-    if (clipped.kind !== "reason") throw new Error("expected clipped");
-    const clippedControl = sourceSemanticReasonControl(clipped);
-    expect(clippedControl.outcome).toEqual(reasoned.result.outcome);
-    expect(clippedControl.conditional_computation_id).toBe(reasoned.result.conditional_computation_id);
-    expect(clippedControl.source_interpretation_id).toBe(reasoned.result.source_interpretation_id);
-    expect(clippedControl.query_semantics_id).toBe(reasoned.result.query_semantics_id);
-    expect(clippedControl.semantic_correspondence_id).toBe(reasoned.result.semantic_correspondence_id);
-    expect(clippedControl).not.toHaveProperty("attention");
-    expect(clipped).not.toHaveProperty("result");
-    expect(clipped).not.toHaveProperty("interpretation");
-    expect(clipped).not.toHaveProperty("semantic_correspondence");
-    expect(clipped).not.toHaveProperty("query");
-    expect(clipped).not.toHaveProperty("context");
-    expect(clipped.work.native_work).toBeGreaterThan(0);
-    expect(clipped.work.logical_work).toBeGreaterThan(clipped.work.native_work);
-    expect(clipped.work.native_bytes).toBeGreaterThan(0);
-    console.info("finished receipt bytes", Buffer.byteLength(JSON.stringify(clipped), "utf8"));
-    expect(Buffer.byteLength(JSON.stringify(clipped))).toBeLessThanOrEqual(1600);
-    await expect(call(execute, {
-      kind: "reason", accepts_unreviewed_conditional_results: true,
-      source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics,
-      semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
-      budget: BUDGET, output_byte_limit: 1024
-    })).rejects.toThrow("output budget cannot retain interpretation qualifiers");
+    for (const limit of [1600, 1024]) {
+      const clipped = await call(execute, {
+        kind: "reason", accepts_unreviewed_conditional_results: true,
+        source_interpretation_id: sourceInterpretationId, query_semantics: querySemantics,
+        semantic_correspondence: correspondenceOf(sourceInterpretationId, querySemantics), original_query: ORIGINAL,
+        budget: BUDGET, output_byte_limit: limit
+      });
+      if (clipped.kind !== "reason") throw new Error("expected clipped");
+      const clippedControl = sourceSemanticReasonControl(clipped);
+      expect(clippedControl.outcome).toEqual(reasoned.result.outcome);
+      expect(clippedControl.conditional_computation_id).toBe(reasoned.result.conditional_computation_id);
+      expect(clippedControl.source_interpretation_id).toBe(reasoned.result.source_interpretation_id);
+      expect(clippedControl.query_semantics_id).toBe(reasoned.result.query_semantics_id);
+      expect(clippedControl.semantic_correspondence_id).toBe(reasoned.result.semantic_correspondence_id);
+      expect(clippedControl).not.toHaveProperty("attention");
+      expect(clipped.no_conclusion).toBeDefined();
+      expect(clipped.source_disclosure).toEqual(reasoned.source_disclosure);
+      expect(clipped.coverage).toEqual({ discovery: "unexercised", source_interpretation: "open",
+        query_semantics: "complete", semantic_correspondence: "open", conditional_computation: "complete", payload: "truncated" });
+      expect(clipped).not.toHaveProperty("result");
+      expect(clipped).not.toHaveProperty("interpretation");
+      expect(clipped).not.toHaveProperty("semantic_correspondence");
+      expect(clipped).not.toHaveProperty("query");
+      expect(clipped).not.toHaveProperty("context");
+      expect(clipped.work.native_work).toBeGreaterThan(0);
+      expect(clipped.work.logical_work).toBeGreaterThan(clipped.work.native_work);
+      expect(clipped.work.native_bytes).toBeGreaterThan(0);
+      expect(Buffer.byteLength(JSON.stringify(clipped))).toBeLessThanOrEqual(limit);
+    }
   });
+}, 30000);
+
+it("rejects a compact control receipt when the cap cannot retain bounded source validity", async () => {
+  const validFrom = "2026-09-01T00:00:00.000Z", validTo = "2026-10-01T00:00:00.000Z";
+  await withPublished(async ({ sourceInterpretationId, execute }) => {
+    const request = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
+      source_interpretation_id: sourceInterpretationId, query_semantics: queryOf(),
+      semantic_correspondence: correspondenceOf(sourceInterpretationId, queryOf()), original_query: ORIGINAL,
+      budget: BUDGET };
+    const full = await call(execute, { ...request, output_byte_limit: 1000000 });
+    if (full.kind !== "reason" || full.result === undefined || full.source_disclosure === undefined) {
+      throw new Error("expected full reason with source validity");
+    }
+    expect(sourceDisclosure(full.source_disclosure)).toMatchObject({ source_binding: "checked_record",
+      validity: { kind: "bounded", from: validFrom, to_exclusive: validTo }, temporal_state: "within_interval",
+      proof_use: { kind: "conditional_support", qualification: "not_world_claim" } });
+    const compact = await call(execute, { ...request, output_byte_limit: 1600 });
+    if (compact.kind !== "reason") throw new Error("expected compact reason");
+    expect(compact.no_conclusion).toBeDefined();
+    expect(compact.source_disclosure).toEqual(full.source_disclosure);
+    expect(sourceSemanticReasonControl(compact).outcome).toEqual(full.result.outcome);
+    expect(compact).not.toHaveProperty("result");
+    expect(Buffer.byteLength(JSON.stringify(compact))).toBeGreaterThan(1024);
+    expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThanOrEqual(1600);
+    await expect(call(execute, { ...request, output_byte_limit: 1024 }))
+      .rejects.toThrow("output budget cannot retain interpretation qualifiers");
+  }, { valid_from: validFrom, valid_to: validTo });
 }, 30000);
 
 it("rejects missing, empty, and null permission admissions", async () => {

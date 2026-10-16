@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, SourceDisclosureSchema, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import * as revisionOwner from "../../../runs/extraction/authority/inspection.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
 import { admitOrdinaryRecallObservation, inspectOrdinaryRecallObservation } from "../../../runs/semantic-chain/consumer/ordinary-recall.js";
@@ -89,14 +89,17 @@ function captureWithProtocolVersion(name: string, protocolVersion: string, mode:
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
-  if (["14.1.0", "15.0.0", "16.0.0", "17.0.0"].includes(protocolVersion)) {
-    // A prior producer qualified source-record bodies as original, before representation metadata existed.
+  if (protocolVersion !== "19.0.0") {
+    // Historical producers emitted named objects; pre-18 records also predate representation metadata.
     for (let ordinal = 1; ordinal <= captures[mode].observation.calls; ordinal += 1) {
       rewriteCapturedEnvelope(root, ordinal, envelope => {
         const block = envelope.content.find(value => value.type === "text")!;
         const payload = JSON.parse(String(block.text));
         if (payload.ok !== true) return envelope;
-        for (const row of payload.output.results) row.source_disclosure.material_kind = "original_body";
+        for (const row of payload.output.results) {
+          row.source_disclosure = sourceDisclosure(SourceDisclosureSchema.parse(row.source_disclosure));
+          if (["14.1.0", "15.0.0", "16.0.0", "17.0.0"].includes(protocolVersion)) row.source_disclosure.material_kind = "original_body";
+        }
         return { ...envelope, structuredContent: payload,
           content: envelope.content.map(value => value === block ? { ...block, text: JSON.stringify(payload) } : value) };
       });
@@ -180,7 +183,18 @@ it.each(["18.0.0", "18.1.0", "19.0.0"])("refuses legacy original-body qualificat
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
-  expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
+  if (protocolVersion !== "19.0.0") {
+    expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
+    return;
+  }
+  try {
+    admitOrdinaryRecallObservation(root);
+    expect.unreachable("current 19.0.0 wire admitted a named-object source_disclosure");
+  } catch (error) {
+    if (!(error instanceof z.ZodError)) throw error;
+    expect(error.issues).toEqual([{ expected: "tuple", code: "invalid_type",
+      path: ["results", 0, "source_disclosure"], message: "Invalid input: expected tuple, received object" }]);
+  }
 });
 
 it("recovers retained consumer bytes without another dispatch after interrupted result publication", async () => {

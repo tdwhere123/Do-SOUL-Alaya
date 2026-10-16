@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { indexEntryCacheKey, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, indexEntryCacheKey, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteEventLogRepo, SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -60,13 +60,13 @@ it("encodes retained excerpt and canonical projection disclosures with their exa
   for (const record of [ctx.raw, ctx.projection]) {
     const entry = result.index.entries.find(row => row.target.kind === "source_evidence" && row.target.root_id === record.identity);
     expect(entry).toBeDefined();
-    expect(result.source_disclosures[indexEntryCacheKey(entry!)]).toMatchObject({
+    expect(sourceDisclosure(result.source_disclosures[indexEntryCacheKey(entry!)]!)).toMatchObject({
       material_kind: record.source_representation!.kind, source_representation: record.source_representation });
   }
   const encoded = encodeSourceSemanticLibraryResponse(result);
   if (encoded.operation !== "recall") throw new Error("expected encoded library recall");
   expect(encoded.source_disclosures).toEqual(result.source_disclosures);
-  expect(encoded.results?.map(row => row.source_disclosure?.material_kind).sort()).toEqual(["canonical_projection", "retained_excerpt"]);
+  expect(encoded.results?.map(row => sourceDisclosure(row.source_disclosure!).material_kind).sort()).toEqual(["canonical_projection", "retained_excerpt"]);
 });
 
 it("reports an unfinished source observation and budget stop when dependency admission refuses its extent", async () => {

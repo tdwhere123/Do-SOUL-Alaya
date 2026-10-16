@@ -1,3 +1,5 @@
+import { canonicalJsonLength } from "../recall/selection/capture/canonical-json.js";
+
 export type SourceSemanticResourceBudget = Readonly<{ work_units: number; memory_bytes: number }>;
 
 export class SourceSemanticResourceExhausted extends Error {
@@ -27,6 +29,28 @@ function issuePrice(cost: SourceSemanticResourceBudget, kind: RetainedKind,
   return snapshot;
 }
 
+type Meter = Pick<SourceSemanticResourceLedger, "charge" | "retain">;
+function freezeOwned(row: object, charge: (work: number, bytes: number) => void, phase: string): number {
+  let work = 1;
+  charge(1, 0);
+  const array = Array.isArray(row), prototype = Object.getPrototypeOf(row);
+  if (prototype !== (array ? Array.prototype : Object.prototype) && prototype !== null) {
+    throw new SourceSemanticResourceExhausted(`${phase} immutable data prototype`);
+  }
+  if (array && Object.keys(row).length !== row.length) {
+    throw new SourceSemanticResourceExhausted(`${phase} immutable dense array`);
+  }
+  for (const key of Reflect.ownKeys(row)) {
+    charge(1, 0); work++;
+    if (typeof key !== "string" || !("value" in Object.getOwnPropertyDescriptor(row, key)!)
+      || array && key !== "length" && (String(Number(key)) !== key || Number(key) < 0 || Number(key) >= row.length)) {
+      throw new SourceSemanticResourceExhausted(`${phase} immutable data property`);
+    }
+  }
+  Object.freeze(row);
+  return work;
+}
+
 /** Conservative logical allocations/work; not a wall-clock guarantee or an RSS bound. */
 export class SourceSemanticResourceLedger {
   public work: number;
@@ -42,10 +66,27 @@ export class SourceSemanticResourceLedger {
     this.reserve(work, bytes, phase);
     this.work -= work; this.bytes -= bytes; this.spentWork += work; this.spentBytes += bytes;
   }
+  /** Capture through the validator once, then freeze only its newly owned plain data. */
+  static capture<T extends object>(value: unknown, parse: (value: unknown) => T, phase: string, meter?: Meter,
+    allocation: "retained" | "packing_intermediate" = "retained"): T {
+    if (allocation === "retained") meter?.retain(value, phase);
+    else captureFrames(value, meter, phase);
+    const owned = parse(value), pending: unknown[] = [owned];
+    meter?.charge(0, 8, phase);
+    while (pending.length > 0) {
+      const row = pending.pop();
+      if (row === null || typeof row !== "object") continue;
+      freezeOwned(row, (work, bytes) => meter?.charge(work, bytes, phase), phase);
+      const values = Object.values(row);
+      meter?.charge(0, values.length * 8, phase);
+      pending.push(...values);
+    }
+    return owned;
+  }
   /** Bound traversal and copies before schema validation or canonicalization. */
-  retain(value: unknown, phase = "preparation", ownership?: "immutable"): void {
+  retain(value: unknown, phase = "preparation", ownership?: "immutable" | "borrow"): void {
     const work = this.spentWork, bytes = this.spentBytes;
-    const freezeWork = traverseRetained(value, this, phase, undefined, false, ownership === "immutable");
+    const freezeWork = traverseRetained(value, this, phase, undefined, false, ownership === "immutable", ownership === "borrow");
     if (ownership === "immutable" && value !== null && typeof value === "object") {
       const cost = issuePrice({ work_units: this.spentWork - work - freezeWork, memory_bytes: this.spentBytes - bytes }, kindOf(value), this, phase);
       this.charge(1, 16, phase);
@@ -55,10 +96,11 @@ export class SourceSemanticResourceLedger {
   /** Quote expressions may contain earlier issued numeric prices. Actual retain never interprets them.
    * Owned immutable payloads reuse the exact price captured by their executed retention traversal. */
   static quoteRetain(value: unknown, allowance: SourceSemanticResourceBudget,
-    planner?: SourceSemanticResourceLedger): SourceSemanticResourceBudget {
+    planner?: SourceSemanticResourceLedger, ownership?: "borrow"): SourceSemanticResourceBudget {
     const measured = new SourceSemanticResourceLedger(allowance);
-    traverseRetained(value, measured, "retained value quote", planner, true);
-    return retainedPrice(value) ?? issuePrice({ work_units: measured.spentWork, memory_bytes: measured.spentBytes }, kindOf(value), planner);
+    traverseRetained(value, measured, "retained value quote", planner, true, false, ownership === "borrow");
+    return (ownership === "borrow" ? undefined : retainedPrice(value))
+      ?? issuePrice({ work_units: measured.spentWork, memory_bytes: measured.spentBytes }, kindOf(value), planner);
   }
   /** Overlay object frames using only validated numeric snapshots. Duplicate fields overquote, never underquote. */
   static overlayRetainObjects(left: SourceSemanticResourceBudget, right: SourceSemanticResourceBudget,
@@ -76,11 +118,47 @@ export class SourceSemanticResourceLedger {
     traverseRetained(value, measured, "retained value measurement", planner);
     return { work_units: measured.spentWork, memory_bytes: measured.spentBytes };
   }
+  /** Run a capacity-only canonical scan on this ledger, or mirror it into a planner.
+   * Unlike retain/borrow, sizing must visit the contents of owned immutable payloads. */
+  canonicalJsonLength(value: unknown, planner?: SourceSemanticResourceLedger): number {
+    if (planner === undefined) return canonicalJsonLength(value, this);
+    return canonicalJsonLength(value, { charge: (work, bytes, phase) => {
+      planner.charge(work, bytes, phase);
+      this.charge(work, bytes, phase);
+    } });
+  }
+  /** Quote the same executed size scan, including its small numeric encodings. */
+  static measureCanonicalJsonLength(value: unknown, allowance: SourceSemanticResourceBudget,
+    planner?: SourceSemanticResourceLedger): SourceSemanticResourceBudget {
+    const measured = new SourceSemanticResourceLedger(allowance);
+    measured.canonicalJsonLength(value, planner);
+    return { work_units: measured.spentWork, memory_bytes: measured.spentBytes };
+  }
   remaining(): SourceSemanticResourceBudget { return { work_units: this.work, memory_bytes: this.bytes }; }
 }
 
+/** Schema capture copies containers, not immutable strings. This mode is only for an
+ * intermediate immediately consumed by a fully charged packed retention; it must not
+ * substitute for the retained capture returned by a public semantic ingress. */
+function captureFrames(value: unknown, meter: Meter | undefined, phase: string): void {
+  if (meter === undefined) return;
+  const pending = [value];
+  meter?.charge(0, 8, phase);
+  while (pending.length) {
+    const row = pending.pop();
+    meter?.charge(1, 0, phase);
+    if (row === null || typeof row !== "object") continue;
+    const array = Array.isArray(row), keys = array ? undefined : Object.keys(row);
+    const count = array ? row.length : keys!.length;
+    // Owned container slots plus the key-reference array used by this bounded scan.
+    meter?.charge(0, 64 + count * (array ? 8 : 16), phase);
+    if (array) for (const child of row) pending.push(child);
+    else for (const key of keys!) pending.push((row as Record<string, unknown>)[key]);
+  }
+}
+
 function traverseRetained(value: unknown, meter: SourceSemanticResourceLedger, phase: string,
-  planner?: SourceSemanticResourceLedger, quote = false, immutable = false): number {
+  planner?: SourceSemanticResourceLedger, quote = false, immutable = false, borrow = false): number {
   const charge = (work: number, bytes: number) => {
     planner?.charge(work, bytes, "retained value measurement work");
     meter.charge(work, bytes, phase);
@@ -93,6 +171,12 @@ function traverseRetained(value: unknown, meter: SourceSemanticResourceLedger, p
   const pending: unknown[] = [value];
   while (pending.length > 0) {
     const row = pending.pop();
+    // Only a completed owner retention certifies a borrow. Frozen caller objects and
+    // numeric quotes cannot assert ownership; an actual copy still pays its full price.
+    if (borrow && row !== null && typeof row === "object" && IMMUTABLE_PRICES.has(row)) {
+      charge(1, 8);
+      continue;
+    }
     const price = quote ? retainedPrice(row) : undefined;
     if (price !== undefined) {
       planner?.charge(1, 0, "retained numeric price reference");
@@ -104,25 +188,7 @@ function traverseRetained(value: unknown, meter: SourceSemanticResourceLedger, p
     const array = Array.isArray(row), keys = array ? undefined : Object.keys(row);
     charge(0, array ? row.length * 8 : keys!.reduce((size, key) => size + 24 + 4 * key.length, 0));
     reserve(array ? row.length : keys!.length, 0);
-    if (immutable) {
-      // Freeze only owned plain data. Accessors, custom prototypes and symbols cannot certify a stable price.
-      charge(1, 0); freezeWork++;
-      const prototype = Object.getPrototypeOf(row);
-      if (prototype !== (Array.isArray(row) ? Array.prototype : Object.prototype) && prototype !== null) {
-        throw new SourceSemanticResourceExhausted(`${phase} immutable data prototype`);
-      }
-      if (Array.isArray(row) && Object.keys(row).length !== row.length) {
-        throw new SourceSemanticResourceExhausted(`${phase} immutable dense array`);
-      }
-      for (const key of Reflect.ownKeys(row)) {
-        charge(1, 0); freezeWork++;
-        if (typeof key !== "string" || !("value" in Object.getOwnPropertyDescriptor(row, key)!)
-          || Array.isArray(row) && key !== "length" && (String(Number(key)) !== key || Number(key) < 0 || Number(key) >= row.length)) {
-          throw new SourceSemanticResourceExhausted(`${phase} immutable data property`);
-        }
-      }
-      Object.freeze(row);
-    }
+    if (immutable) freezeWork += freezeOwned(row, charge, phase);
     if (array) for (const item of row) pending.push(item);
     else for (const key of keys!) pending.push((row as Record<string, unknown>)[key]);
   }

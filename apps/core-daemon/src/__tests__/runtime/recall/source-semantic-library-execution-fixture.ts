@@ -3,7 +3,7 @@ import { SourceIndexAcquisition, assembleSourceSemanticLibraryIndex, createAudit
   encodeSourceSemanticLibraryResponse, fieldContractSha256, preparedDeliveryId, sealIssuedContinuation,
   sourceGoldRootIdentity } from "@do-soul/alaya-core";
 import { SqliteEventLogRepo } from "@do-soul/alaya-storage";
-import { indexEntryCacheKey, SourceSemanticWorkerResultSchema, type SourceSemanticExecution,
+import { qualifySourceDisclosure, sourceDisclosure, indexEntryCacheKey, SourceSemanticWorkerResultSchema, type SourceSemanticExecution,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { queryDatabase, BUDGET, CLOCK, ORIGINAL, WS, query } from "./source-semantic-query-preparation-fixture.js";
 import { correspondenceFor, deliveredProofFixture }
@@ -126,8 +126,7 @@ export function assembledSourcePage(full: RecallResult, rootIds: readonly string
 /** Complete public encoder bytes, including reserved work and excluding optional source time. */
 export function publicReservationBytes(result: RecallResult, execution: SourceSemanticExecution): number {
   const source_disclosures = Object.fromEntries(Object.entries(result.source_disclosures).map(([key, value]) => {
-    const { source_time: _optional, ...mandatory } = value;
-    return [key, mandatory];
+    return [key, qualifySourceDisclosure(value, sourceDisclosure(value).proof_use.kind, false)];
   }));
   return Buffer.byteLength(JSON.stringify(encodeSourceSemanticLibraryResponse({
     ...result, execution, source_disclosures, work: RESERVED_WORK })));

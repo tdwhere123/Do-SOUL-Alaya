@@ -9,7 +9,7 @@ import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, sourceDisclosure, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { nativeConsumerFixture, CONSUMER_CONFIG, HIDDEN_GOLD } from "./consumer.test-support.js";
 import { captureMultipleSources } from "./ordinary-multi-source.test-support.js";
 import { admitOrdinaryRecallObservation } from "../../../runs/semantic-chain/consumer/ordinary-recall.js";
@@ -173,7 +173,7 @@ it.each(["workspace", "digest", "disclosure", "source_state"] as const)("rejects
   const observation = OrdinaryRecallMultiSourceObservationSchema.parse(structuredClone(capture.observation));
   const first = calls[0]!, row = first.output!.results[0]!;
   if (field === "source_state") observation.source_states[0]!.contiguous_delivered_bytes -= 1;
-  else if (field === "disclosure") (row.source_disclosure as { material_kind: string }).material_kind = "original_body";
+  else if (field === "disclosure") Object.assign(row, { source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(row.source_disclosure!), material_kind: "original_body" }) });
   else {
     const target = first.output!.index!.entries[0]!.target;
     if (target.kind !== "source_evidence") throw new Error("source fixture required");

@@ -13,7 +13,7 @@ import {
 import { MemoryDimensionSchema } from "../memory/memory-entry.js";
 import { ScopeClassSchema } from "../memory/object-kind.js";
 import { ClaimLifecycleStateSchema } from "../memory/claim-form.js";
-import { SourceDisclosureSchema } from "../recall/source-disclosure.js";
+import { SourceDisclosureSchema, sourceDisclosure } from "../recall/source-disclosure.js";
 import { PathGovernanceClassSchema } from "../relations/path-relation.js";
 import {
   RecallBudgetStateSchema,
@@ -106,7 +106,7 @@ export const MemorySearchResultSchema = z
     }
     if (value.source_disclosure === undefined) {
       context.addIssue({ code: "custom", path: ["source_disclosure"], message: "source result requires disclosure" });
-    } else if (value.source_disclosure.proof_use.kind !== (value.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND ? "conditional_support" : "source_only")) {
+    } else if (sourceDisclosure(value.source_disclosure).proof_use.kind !== (value.object_kind === SOURCE_SEMANTIC_PROOF_OBJECT_KIND ? "conditional_support" : "source_only")) {
       context.addIssue({ code: "custom", path: ["source_disclosure", "proof_use"], message: "disclosure must match delivered proof kind" });
     }
     if (value.object_id !== undefined) {

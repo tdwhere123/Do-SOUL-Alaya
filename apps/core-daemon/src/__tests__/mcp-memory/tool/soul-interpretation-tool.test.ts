@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CoreError, fieldContractSha256 } from "@do-soul/alaya-core";
 import {
-  buildSourceReferenceCatalog,
+  encodeSourceDisclosure, sourceDisclosure, buildSourceReferenceCatalog,
   SoulInterpretationResponseSchema,
   sourceSemanticExecution,
   sourceSemanticExecutionPhases,
@@ -62,7 +62,7 @@ const WORK = {
 } as const;
 const EXECUTION = sourceSemanticExecution();
 
-const SOURCE_DISCLOSURE = {
+const SOURCE_DISCLOSURE = encodeSourceDisclosure({
   material_kind: "original_body",
   source_binding: "checked_record",
   evaluated_as_of: "2026-09-18T00:00:00.000Z",
@@ -70,7 +70,7 @@ const SOURCE_DISCLOSURE = {
   validity: { kind: "unknown", reason: "not_recorded" },
   temporal_state: "unknown",
   proof_use: { kind: "source_only", qualification: "not_current_proof" }
-} as const;
+});
 
 const DRAFT = {
   contract: "source-interpretation-v4" as const,
@@ -124,7 +124,7 @@ function workerResult(request: SourceSemanticWorkerRequest): SourceSemanticWorke
   }
   return {
     kind: "reason",
-    source_disclosure: { ...SOURCE_DISCLOSURE, material_kind: "interpretation" },
+    source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(SOURCE_DISCLOSURE), material_kind: "interpretation" }),
     result: {
       contract: "source-interpretation-reasoning-v5",
       semantic_status: "unreviewed",
@@ -468,7 +468,7 @@ it.each(["original_body", "retained_excerpt", "canonical_projection"] as const)(
   const handler = createHandler({ sourceSemanticsPort: createPort(async ({ request }) => {
     const result = workerResult(request);
     return result.kind !== "validate_source" ? result : { ...result,
-      source_disclosure: { ...result.source_disclosure, material_kind: kind, source_representation } };
+      source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(result.source_disclosure), material_kind: kind, source_representation }) };
   }), publication: { publish } });
   const row = CATALOG.assertions[0]!;
   const result = await callInterpretation(handler, { operation: "propose", source_handle: "source-handle",
@@ -479,9 +479,11 @@ it.each(["original_body", "retained_excerpt", "canonical_projection"] as const)(
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error("no-proposition disposition must succeed as a tool result");
   expect(result.output).toMatchObject({ outcome: { status: "no_executable_proposition" },
-    semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" },
-    source_disclosure: { material_kind: "interpretation", source_representation,
-      source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } } });
+    semantic_status: "unreviewed", source_binding: { source_id: "artifact-1" } });
+  const output = SoulInterpretationResponseSchema.parse(result.output);
+  if (output.operation !== "propose") throw new Error("propose response expected");
+  expect(sourceDisclosure(output.source_disclosure!)).toMatchObject({ material_kind: "interpretation", source_representation,
+    source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } });
   expectNoExternalOrGenerationAttempts(result.output);
   expect(publish).not.toHaveBeenCalled();
 });

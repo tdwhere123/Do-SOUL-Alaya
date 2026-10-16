@@ -1,28 +1,32 @@
 import {
   SourceSemanticQueryPreparationSchema, SourceSemanticAcquisitionPhaseSchema,
-  sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation, SourceSemanticVectorBindingSchema, SourceSemanticQueryWindowSchema,
+  sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
   type SourceSemanticQueryPreparation, type SourceSemanticAcquisitionPhase,
   type SourceSemanticAcquisition, type SourceSemanticPhaseAccounting, type SourceSemanticExecutionPhases as ExecutionPhases
 } from "./source-semantic-phase-semantics.js";
 import { PHASE_CODES as C, type SourceSemanticCompactPreparation, type SourceSemanticCompactAcquisition,
   type SourceSemanticAccessPhases, type SourceSemanticExecution, type CompactAcquisitionResult,
   type CompactLimitation } from "./source-semantic-phase-wire.js";
-import type { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
+import { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 import { AlayaError } from "../shared/alaya-error.js";
-import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
-import { SourceIndexTargetSchema } from "../recall/source-index.js";
 
 type Meter = Pick<SourceSemanticResourceLedger, "charge" | "retain">;
 const POLICY = "source-index-interleaved-prefix.v1" as const;
+const CAPTURED = new WeakSet<object>();
+function captured<T extends object>(value: T, meter?: Meter): T {
+  meter?.charge(1, 16, "source phase capture ownership");
+  CAPTURED.add(value);
+  return value;
+}
 
 /** Semantic ingress is explicit and separate from packing and public wire admission. */
 export function captureSourceSemanticQueryPreparation(value: unknown, meter?: Meter): SourceSemanticQueryPreparation {
-  meter?.retain(value, "source phase semantic preparation capture");
-  return SourceSemanticQueryPreparationSchema.parse(value);
+  return captured(SourceSemanticResourceLedger.capture(value, value => SourceSemanticQueryPreparationSchema.parse(value),
+    "source phase semantic preparation capture", meter), meter);
 }
 export function captureSourceSemanticAcquisition(value: unknown, meter?: Meter): SourceSemanticAcquisitionPhase {
-  meter?.retain(value, "source phase semantic acquisition capture");
-  return SourceSemanticAcquisitionPhaseSchema.parse(value);
+  return captured(SourceSemanticResourceLedger.capture(value, value => SourceSemanticAcquisitionPhaseSchema.parse(value),
+    "source phase semantic acquisition capture", meter), meter);
 }
 
 /** Traversal work and its pending references, without pretending to retain another expanded copy. */
@@ -53,7 +57,8 @@ class LocalStrings {
     this.meter?.charge(1 + value.length, 0, "source phase local index lookup");
     const prior = this.indices.get(value);
     if (prior !== undefined) return prior;
-    this.meter?.charge(1, 32 + 4 * value.length, "source phase local index entry");
+    // Map and table retain two references to the same immutable string, not another body.
+    this.meter?.charge(1, 32 + 2 * 8, "source phase local index entry");
     const index = this.table.length; this.indices.set(value, index); this.table.push(value); return index;
   }
   nullable(value: string | null): number | null { return value === null ? null : this.ref(value); }
@@ -66,9 +71,15 @@ class LocalStrings {
   }
 }
 
-/** Pack only captured semantics. Version 1 never drops profile identity or unknown measurements. */
+/** Pack captured route semantics for the v2 phase envelope without flattening hint costs or unknowns. */
 export function packSourceSemanticQueryPreparation(value: SourceSemanticQueryPreparation, meter?: Meter): SourceSemanticCompactPreparation {
-  traverse(value, meter, "source phase preparation packing traversal");
+  const owned = CAPTURED.has(value) ? value : captureSourceSemanticQueryPreparation(value, meter);
+  traverse(owned, meter, "source phase preparation packing traversal");
+  const packed = packPreparation(owned, meter);
+  meter?.retain(packed, "source phase packed preparation allocation", "immutable");
+  return packed;
+}
+function packPreparation(value: SourceSemanticQueryPreparation, meter?: Meter): SourceSemanticCompactPreparation {
   const strings = new LocalStrings(meter), status = strings.code(C.preparation, value.status) as 0 | 1 | 2 | 3;
   const reason = strings.nullable(value.reason), navigation = strings.nullable(value.navigation_digest);
   const short = value.selected === null && value.method === "not_run" && value.submitted_inputs === 0
@@ -79,22 +90,27 @@ export function packSourceSemanticQueryPreparation(value: SourceSemanticQueryPre
       strings.ref(value.selected.config_id), strings.ref(value.selected.profile_id), value.selected.profile],
     strings.code(C.method, value.method) as 0 | 1 | 2, value.submitted_inputs, value.token_count, value.external_api_attempts,
     strings.code(C.work, value.binding_work) as 0 | 1, strings.code(C.work, value.execution_work) as 0 | 1, value.elapsed_ms];
-  const packed: SourceSemanticCompactPreparation = [1, strings.table, body];
-  meter?.retain(packed, "source phase packed preparation allocation", "immutable");
-  return packed;
+  const primary = [1, strings.table, body] as const;
+  const route = value.supplemental?.[0];
+  const hint = route === undefined ? undefined : packPreparation(route, meter);
+  return hint === undefined ? primary : [...primary, [hint as NonNullable<SourceSemanticCompactPreparation[3]>[0]]];
 }
 
 function packResult(value: SourceSemanticAcquisition, strings: LocalStrings): CompactAcquisitionResult {
+  const input = value.vector.input;
   const counts = value.accounting;
   const tuple = [counts.attempted, counts.admitted, counts.duplicate, counts.rejected, counts.scope_denied,
     counts.native_unknown, counts.resource_refused, counts.stale, counts.nomination_limit] as const;
-  const tokenization = value.lexical.tokenization, state = value.vector.state, input = value.vector.input;
+  const tokenization = value.lexical.tokenization, state = value.vector.state;
   const vectorState: CompactAcquisitionResult[7][1] = state === null ? null : "binding" in state
-    ? [strings.code(C.vector, state.status) as 0 | 1 | 2, state.binding]
+    ? [strings.code(C.vector, state.status) as 0 | 1 | 2,
+      state.binding]
     : [strings.code(C.vector, state.status) as 3 | 4 | 5, strings.ref(state.reason)];
   return [strings.nullable(value.navigation_digest), strings.code(C.completion, value.completion) as 0 | 1 | 2 | 3,
-    value.nominations.map(row => [row.source, row.lexical.map(rank => [rank.rank, strings.code(C.lane, rank.lane) as 0 | 1,
-      rank.lane_rank, rank.bm25]), row.vector === null ? null : [row.vector.rank, row.vector.cosine, row.vector.window]]),
+    value.nominations.map(row => [row.source,
+      row.lexical.map(rank => [rank.rank, strings.code(C.lane, rank.lane) as 0 | 1, rank.lane_rank, rank.bm25]),
+      row.vector === null ? null : [row.vector.rank, row.vector.cosine,
+        row.vector.window]]),
     tuple.every(count => count === 0) ? 0 : tuple,
     [value.resources.work, value.resources.memory_bytes, value.resources.native_bytes],
     value.resource_refusals.map(row => [strings.code(C.stage, row.stage) as 0 | 1 | 2 | 3 | 4, strings.ref(row.phase)]),
@@ -108,40 +124,25 @@ function packResult(value: SourceSemanticAcquisition, strings: LocalStrings): Co
     strings.limitations(value.limitations)];
 }
 export function packSourceSemanticAcquisition(value: SourceSemanticAcquisitionPhase, meter?: Meter): SourceSemanticCompactAcquisition {
-  validateAcquisitionReferences(value, meter);
-  traverse(value, meter, "source phase acquisition packing traversal");
-  const strings = new LocalStrings(meter);
-  const packed: SourceSemanticCompactAcquisition = [1, strings.table,
-    [strings.code(C.acquisition, value.status) as 0 | 1 | 2, strings.nullable(value.reason),
-      [value.allowance.max_attempts, value.allowance.max_roots, value.allowance.max_vector_windows],
-      [value.budget.work_units, value.budget.memory_bytes], value.result === null ? null : packResult(value.result, strings),
-      strings.code(C.accounting, value.accounting) as 0 | 1 | 2]];
+  // The expanded copy is transient: validation owns its containers, and the packed
+  // retention below owns every string/leaf that survives. No semantic copy escapes.
+  const owned = CAPTURED.has(value) ? value : SourceSemanticResourceLedger.capture(value,
+    value => SourceSemanticAcquisitionPhaseSchema.parse(value), "source phase acquisition packing capture", meter, "packing_intermediate");
+  traverse(owned, meter, "source phase acquisition packing traversal");
+  const packed = packAcquisition(owned, meter);
   meter?.retain(packed, "source phase packed acquisition allocation", "immutable");
   return packed;
 }
-
-/** Native receipts forward repository/binder leaves; validate those before any lease can be issued. */
-function validateAcquisitionReferences(value: SourceSemanticAcquisitionPhase, meter?: Meter): void {
-  const result = value.result;
-  if (result === null) return;
-  const input = result.vector.input;
-  if (input.status === "available") {
-    meter?.charge(2, 0, "source phase vector digest admission");
-    Sha256DigestSchema.parse(input.profile_id); Sha256DigestSchema.parse(input.input_digest);
-  }
-  const state = result.vector.state;
-  if (state !== null && "binding" in state) {
-    meter?.retain(state.binding, "source phase vector binding admission");
-    SourceSemanticVectorBindingSchema.parse(state.binding);
-  }
-  for (const nomination of result.nominations) {
-    meter?.retain(nomination.source, "source phase nomination target admission");
-    SourceIndexTargetSchema.parse(nomination.source);
-    if (nomination.vector !== null) {
-      meter?.retain(nomination.vector.window, "source phase vector window admission");
-      SourceSemanticQueryWindowSchema.parse(nomination.vector.window);
-    }
-  }
+function packAcquisition(value: SourceSemanticAcquisitionPhase, meter?: Meter): SourceSemanticCompactAcquisition {
+  const strings = new LocalStrings(meter);
+  const primary = [1, strings.table,
+    [strings.code(C.acquisition, value.status) as 0 | 1 | 2, strings.nullable(value.reason),
+      [value.allowance.max_attempts, value.allowance.max_roots, value.allowance.max_vector_windows],
+      [value.budget.work_units, value.budget.memory_bytes], value.result === null ? null : packResult(value.result, strings),
+      strings.code(C.accounting, value.accounting) as 0 | 1 | 2]] as const;
+  const route = value.supplemental?.[0];
+  const hint = route === undefined ? undefined : packAcquisition(route, meter);
+  return hint === undefined ? primary : [...primary, [hint as NonNullable<SourceSemanticCompactAcquisition[3]>[0]]];
 }
 
 class LocalReader {
@@ -167,7 +168,8 @@ function expandPreparation(value: SourceSemanticCompactPreparation, meter?: Mete
     method: body[0] === 0 ? "not_run" : C.method[body[5]], submitted_inputs: body[0] === 0 ? 0 : body[6],
     token_count: body[0] === 0 ? null : body[7], external_api_attempts: body[0] === 0 ? 0 : body[8],
     binding_work: body[0] === 0 ? "not_run" : C.work[body[9]], execution_work: body[0] === 0 ? "not_run" : C.work[body[10]],
-    elapsed_ms: body[0] === 0 ? body[4] : body[11]
+    elapsed_ms: body[0] === 0 ? body[4] : body[11],
+    ...(value[3] === undefined ? {} : { supplemental: [expandPreparation(value[3][0], meter)] })
   };
   meter?.retain(preparation, "source phase expanded preparation allocation");
   return preparation;
@@ -200,28 +202,30 @@ function expandAcquisition(value: SourceSemanticCompactAcquisition, meter?: Mete
   const phase: SourceSemanticAcquisitionPhase = { policy: POLICY, status: C.acquisition[body[0]], reason: strings.nullable(body[1]),
     allowance: { max_attempts: body[2][0], max_roots: body[2][1], max_vector_windows: body[2][2] },
     budget: { work_units: body[3][0], memory_bytes: body[3][1] }, result: body[4] === null ? null : expandResult(body[4], strings),
-    accounting: C.accounting[body[5]] };
+    accounting: C.accounting[body[5]],
+    ...(value[3] === undefined ? {} : { supplemental: [expandAcquisition(value[3][0], meter)] }) };
   meter?.retain(phase, "source phase expanded acquisition allocation");
   return phase;
 }
 
 function nativePhases(): ExecutionPhases {
-  return { contract: "source-semantic-execution-v2", semantic_generation_attempts: 0,
+  return { contract: "source-semantic-execution-v3", semantic_generation_attempts: 0,
     query_preparation: unavailableSourceQueryPreparation("operation_does_not_prepare", "not_requested"),
     acquisition: sourceSemanticAcquisitionNotRun("operation_does_not_acquire") };
 }
 function compactPreparation(value: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation, meter?: Meter): SourceSemanticCompactPreparation {
   return Array.isArray(value) ? value as SourceSemanticCompactPreparation
-    : packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(value, meter), meter);
+    : packSourceSemanticQueryPreparation(value as SourceSemanticQueryPreparation, meter);
 }
 function compactAcquisition(value: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticCompactAcquisition {
   return Array.isArray(value) ? value as SourceSemanticCompactAcquisition
-    : packSourceSemanticAcquisition(captureSourceSemanticAcquisition(value, meter), meter);
+    : packSourceSemanticAcquisition(value as SourceSemanticAcquisitionPhase, meter);
 }
 
 /** Exact checked-slot equality: native-only is never inferred from generation-attempt count alone. */
 export function isNativeReasoningOnlyExecution(value: SourceSemanticExecution, meter?: Meter): boolean {
   if (value === "native_reasoning_only") return true;
+  if (value[1][3] !== undefined || value[2][3] !== undefined) return false;
   const p = value[1][2], a = value[2][2];
   meter?.charge(32, 0, "source phase canonical native equality");
   const preparation = p[1] === 3 && p[2] !== null && value[1][1][p[2]] === "operation_does_not_prepare" && p[3] === null
@@ -234,7 +238,7 @@ export function sourceSemanticExecution(preparation?: SourceSemanticQueryPrepara
   acquisition?: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticExecution {
   if (preparation === undefined && acquisition === undefined) return "native_reasoning_only";
   // Defaults are authored by the semantic constructors, not untrusted ingress.
-  const value = [1, preparation === undefined
+  const value = [2, preparation === undefined
     ? packSourceSemanticQueryPreparation(unavailableSourceQueryPreparation("operation_does_not_prepare", "not_requested"), meter)
     : compactPreparation(preparation, meter), acquisition === undefined
     ? packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun("operation_does_not_acquire"), meter)
@@ -248,7 +252,7 @@ export function sourceSemanticExecutionPhases(value: SourceSemanticExecution, me
     const phases = nativePhases(); meter?.retain(phases, "source phase native execution expansion"); return phases;
   }
   meter?.charge(5, 64 + 4 * 8 + 4 * 24 + 4 * (8 + 28 + 17 + 11), "source phase expanded execution framing");
-  return { contract: "source-semantic-execution-v2", semantic_generation_attempts: 0,
+  return { contract: "source-semantic-execution-v3", semantic_generation_attempts: 0,
     query_preparation: expandPreparation(value[1], meter), acquisition: expandAcquisition(value[2], meter) };
 }
 export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter): Readonly<{
@@ -263,13 +267,24 @@ export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSema
 }
 /** Narrow readers preserve null without allocating or expanding complete phases. */
 export function sourceSemanticExecutionExternalAttempts(value: SourceSemanticExecution): number | null {
-  return value === "native_reasoning_only" || value[1][2][0] === 0 ? 0 : value[1][2][8];
+  if (value === "native_reasoning_only") return 0;
+  const preparation = value[1], primary = preparation[2][0] === 0 ? 0 : preparation[2][8];
+  const hint = preparation[3]?.[0][2], supplemental = hint === undefined || hint[0] === 0 ? 0 : hint[8];
+  return primary === null || supplemental === null ? null : primary + supplemental;
 }
 export function sourceSemanticPreparationReason(value: SourceSemanticCompactPreparation, meter?: Meter): string | null {
   meter?.charge(2, 0, "source phase preparation reason reference");
   return value[2][2] === null ? null : value[1][value[2][2]]!;
 }
+const ZERO_RESOURCES = [0, 0, 0] as const;
 export function sourceSemanticAcquisitionResources(value: SourceSemanticCompactAcquisition, meter?: Meter): readonly [number, number, number] | null {
   meter?.charge(5, 0, "source phase acquisition resource slots");
-  return value[2][4] === null ? null : value[2][4][4];
+  const resources = (route: SourceSemanticCompactAcquisition): readonly [number, number, number] | null =>
+    route[2][5] === 1 ? null : route[2][4]?.[4] ?? (route[2][0] === 1 && route[2][5] === 2 ? ZERO_RESOURCES : null);
+  const primary = resources(value), hint = value[3]?.[0];
+  if (hint === undefined) return primary;
+  const supplemental = resources(hint);
+  if (primary === null || supplemental === null) return null;
+  meter?.charge(3, 24, "source phase aggregate resource tuple");
+  return [primary[0] + supplemental[0], primary[1] + supplemental[1], primary[2] + supplemental[2]];
 }

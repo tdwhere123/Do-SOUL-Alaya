@@ -289,10 +289,14 @@ daemon HTTP routes only and has its own contract surface (httpOnly session cooki
   + JSON over HTTP, no SSE / WebSocket).
 
 Source-bearing views across these surfaces use the Protocol `SourceDisclosure`
-contract and Core's read-time projection. The qualification is outside stored
-original or retained reduction text. Evidence HTTP and pointer reads preserve
-the existing workspace authorization and report unknown original validity when
-no checked source record is available.
+contract and Core's read-time projection. Live public and worker bytes are the
+version-1 lossless compact tuple; Inspector and other named readers expand it
+with `sourceDisclosure`. Historical Protocol 14–18 named objects are archive-only
+(`decodeHistoricalSourceDisclosure`) and are rejected as current ingress. The
+qualification is outside stored original or retained reduction text. Evidence
+HTTP and pointer reads preserve the existing workspace authorization and report
+unknown original validity when no checked source record is available. Detail:
+[`recall.md` Source disclosure](recall.md#source-disclosure).
 
 Persistent daemon HTTP authentication has an explicit operator-owned
 lifecycle: `ALAYA_REQUEST_TOKEN` remains stable across restarts, and changing
@@ -417,6 +421,31 @@ daemon parent process prepares the current or exact as-of projection before
 dispatch; worker SQLite connections are query-only and never append EventLog
 entries or materialize projections. This preserves the daemon's single-writer
 boundary while the main database connection remains open.
+
+Query-conditioned source embedding for `soul.interpretation` prepare/recall runs
+in the parent under `beforeSnapshotPreparation` and is attached privately as
+`prepared_query` on `conditionalField.sourceSemantics`. Public MCP/CLI payloads
+cannot supply vectors or selected profiles.
+
+A private Source-index producer is constructed with recall materialization
+wiring. It starts with other background services and stops during shutdown after
+the Garden background manager. It is not an MCP, CLI, or Inspector surface and is
+separate from Garden `EMBEDDING_BACKFILL`. Binding uses the daemon's local-only
+source-index entry (`local_onnx`); missing or API providers stay unbound for this
+producer. The producer drives Source-index lifecycle select/begin/capture,
+backfill steps, and activation CAS on a private local configuration revision.
+`root_complete` is not generation readiness. `SourceIndexLifecycle.unbind` atomically
+retires generations, clears active eligibility and advances the selection revision;
+retained configuration is historical, not a ready binding. Old captured selections,
+writes and activation cannot restore eligibility. Recovery starts a fresh generation,
+without encoding configuration absence as build failure.
+
+Passes are concurrency 1 with bounded rotating workspace/root visits and shared
+capture/backfill allowances. Stop and deadlines end local waiting without cancelling
+shared inference; native occupancy stays quarantined until settlement or provider
+close. Query preparation requires an eligible active generation. Local model artifacts
+must already be provisioned; this wiring does not download them. Mechanism-level
+cached-model checks do not establish default useful recall or natural-corpus effects.
 
 Each step records an audit row `daemon.startup.<step>.completed`. Tool
 calls that arrive before step 6 receive a fail-closed response.

@@ -91,14 +91,16 @@ export const SourceSemanticsPublicPayloadSchema = z.object({
   expires_at: z.string().datetime().optional(), request: SourceSemanticWorkerRequestSchema
 }).strict();
 export type SourceSemanticsPublicPayload = z.infer<typeof SourceSemanticsPublicPayloadSchema>;
-const PreparedQuerySchema = z.object({
-  receipt: SourceSemanticQueryPreparationSchema,
+const PreparedRouteSchema = z.object({
+  receipt: SourceSemanticQueryPreparationSchema.refine(value => value.supplemental === undefined,
+    "private route preparation cannot nest supplemental routes"),
   vector: z.union([
     z.object({ status: z.literal("unavailable"), reason: z.string().min(1).max(256) }).strict(),
     z.object({ status: z.literal("available"), profile: SourceIndexProfileSchema, profile_id: z.string(),
       input_digest: z.string(), embedding: z.custom<Float32Array>(value => value instanceof Float32Array) }).strict()
   ])
 }).strict();
+const PreparedQuerySchema = PreparedRouteSchema.extend({ supplemental: PreparedRouteSchema.optional() }).strict();
 
 const PAYLOAD_SCHEMAS = {
   ready: EmptyObjectSchema,

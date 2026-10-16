@@ -11,7 +11,7 @@ import { z } from "zod";
 import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceSemanticAccessPhases,
   sourceEvidenceRootTarget, sourceRecallTarget, type MemorySearchResult, type SourceEvidenceTarget,
   type SourceSemanticLibrarySlotQualifier,
-  type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+  type SourceRecordIdentity, type SoulInterpretationResponse } from "@do-soul/alaya-protocol";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
@@ -284,12 +284,14 @@ export function measureSemanticChain(root: string, replayPath: string, goldValue
   return { path, result };
 }
 
+// Keep declaration inference at the public value boundary, not the nested Zod graph.
+const ReplayResponseSchema: z.ZodType<SoulInterpretationResponse> = SoulInterpretationResponseSchema;
 export const ReplaySchema = z.object({ contract: z.literal("source-semantic-chain-replay-v3"),
   plan_identity: z.string(), identity: z.string(), arm: z.enum(["retained", "without_semantic_correspondences"]), provider_calls: z.literal(0),
   rows: z.array(z.object({ query_key: z.string(), status: z.enum(["blocked", "replayed", "native_unavailable"]),
     reason: z.string().optional(), native_elapsed_ms: z.number().nonnegative().optional(),
     preparation_elapsed_ms: z.number().nonnegative().optional(),
-    response: SoulInterpretationResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional(),
+    response: ReplayResponseSchema.optional(), first_exposure: FirstExposurePageSchema.nullable().optional(),
     correspondence_outcomes: z.array(z.object({ key: z.string().nullable(), raw_digest: z.string().nullable() }).passthrough()).optional(),
     preparation_trace: SemanticChainQuerySchema.options[1].shape.discovery_trace.nullable().optional()
   }).passthrough()) }).passthrough();

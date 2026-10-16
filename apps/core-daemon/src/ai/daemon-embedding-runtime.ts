@@ -81,6 +81,9 @@ export function createDaemonEmbeddingRuntime(input: {
       providerState.embeddingProvider?.bindSourceEmbedding?.(structuredClone(options)) ??
         Promise.resolve({ status: "unsupported" as const, reason: providerState.embeddingProvider === null
           ? "embedding_provider_unavailable" : "provider_source_evidence_pending" }),
+    // Source-index producer binds only a cached local runtime. Missing/API providers stay unbound.
+    bindLocalSourceIndex: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
+      bindLocalSourceIndex(providerState.embeddingProvider, options),
     getProviderDimensions: () => providerState.readiness.dimensions,
     getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status),
     closeProvider: () => closeEmbeddingProvider(providerState.embeddingProvider)
@@ -370,4 +373,21 @@ function resolveEmbeddingProvider(input: {
 async function closeEmbeddingProvider(provider: EmbeddingProviderPort | null): Promise<void> {
   if (provider?.close === undefined) return;
   await provider.close();
+}
+
+function bindLocalSourceIndex(
+  provider: EmbeddingProviderPort | null,
+  options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]
+) {
+  const captured = structuredClone(options);
+  if (provider === null || !provider.isAvailable) {
+    return Promise.resolve({ status: "unsupported" as const, reason: "embedding_provider_unavailable" });
+  }
+  if (provider.providerKind !== "local_onnx") {
+    return Promise.resolve({ status: "unsupported" as const, reason: "source_index_local_runtime_required" });
+  }
+  if (typeof provider.bindSourceEmbedding !== "function") {
+    return Promise.resolve({ status: "unsupported" as const, reason: "provider_source_evidence_pending" });
+  }
+  return provider.bindSourceEmbedding(captured);
 }

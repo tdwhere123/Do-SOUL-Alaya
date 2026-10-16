@@ -23,6 +23,14 @@ import { callAlayaMcpMemoryTool } from "../../../mcp/server/mcp-server.js";
 import { createDeps } from "../../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { assertBuiltWorker, builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
 
+export const PROVIDER_FREE_WORKER_IMPORT = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+{
+  const current = process.env.NODE_OPTIONS ?? "";
+  if (!current.includes(PROVIDER_FREE_WORKER_IMPORT)) {
+    process.env.NODE_OPTIONS = `${current} ${PROVIDER_FREE_WORKER_IMPORT}`.trim();
+  }
+}
+
 export { WS };
 export const CLOCK = "2026-09-18T00:00:00.000Z";
 export const ORIGINAL = "Why delayed?";
@@ -100,15 +108,15 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
     // Later real admissions make coverage partial without fabricating or changing the active generation.
     for (const source of sources.filter(source => source.indexed === false)) await admit(source);
     const queryBinding = simulatedBinding(selection, () => [1, 0, 0], outsideTransaction);
-    const prepareQuery = vi.fn(async (input: { navigation: string; signal: AbortSignal; remainingMs: () => number }) => {
+    const prepareQuery = vi.fn(async (input: { navigation: string; supplemental_navigation?: string; signal: AbortSignal; remainingMs: () => number }) => {
       const state = repository.state(WS);
       return SourceIndexAcquisition.prepareQuery({ ...input, selection: "selection" in state ? state.selection : null,
         bind: async () => queryBinding });
     });
     const openClient = async () => {
       assertBuiltWorker();
-      // NODE_OPTIONS is inherited too, but explicit execArgv protects direct Vitest invocations.
-      const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+      // NODE_OPTIONS is inherited too; execArgv still protects direct Vitest invocations.
+      const guard = PROVIDER_FREE_WORKER_IMPORT;
       process.execArgv.push(guard);
       let client;
       try { client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl,
@@ -137,7 +145,7 @@ export type IndexFixture = {
   admit(source: IndexedSource, version?: string): Promise<Awaited<ReturnType<ReturnType<typeof createAuditedSourceAdmission>["admit"]>>["record"]>;
   backfillBinding: ReturnType<typeof simulatedBinding>;
   queryBinding: ReturnType<typeof simulatedBinding>;
-  prepareQuery: ReturnType<typeof vi.fn<(input: { navigation: string; signal: AbortSignal; remainingMs: () => number }) =>
+  prepareQuery: ReturnType<typeof vi.fn<(input: { navigation: string; supplemental_navigation?: string; signal: AbortSignal; remainingMs: () => number }) =>
     ReturnType<typeof SourceIndexAcquisition.prepareQuery>>>;
   openClient(): Promise<RecallReadWorkerClient>;
 };

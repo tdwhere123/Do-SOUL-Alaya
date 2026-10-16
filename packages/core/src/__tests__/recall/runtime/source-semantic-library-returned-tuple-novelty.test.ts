@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
 import {
   selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithReturnedTupleNovelty,
@@ -10,11 +10,11 @@ import { deliveredProofFixture, source, query, correspondenceFor, event, ORIGINA
 
 const TOOL_NAMES = ["Pixel", "ThinkPad", "earbuds", "charger", "Kindle"] as const;
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
-const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = {
+const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = encodeSourceDisclosure({
   material_kind: "original_body", source_binding: "unbound", evaluated_as_of: "2026-09-18T00:00:00.000Z",
   validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
   proof_use: { kind: "source_only", qualification: "not_current_proof" }
-};
+});
 
 function packaged(
   interpretation: ReturnType<typeof source>, semantics: SourceSemanticQuery, preview: string, position = 0,

@@ -1,5 +1,5 @@
 import { aliceUsesDraft } from "./source-semantic-library-binding-coverage.js";
-import { buildSourceReferenceCatalog, normalizeSourceSemantics, sourceSemanticReasonControl,
+import { sourceDisclosure, buildSourceReferenceCatalog, normalizeSourceSemantics, sourceSemanticReasonControl,
   type SourceSemanticWorkerResult, UNKNOWN_UTTERANCE_ATTRIBUTION } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { expect, it } from "vitest";
@@ -44,7 +44,7 @@ it("prefers full evidence when it fits and otherwise preserves an undelivered co
   expect(full.result).toMatchObject({ semantic_status: "unreviewed", world_claim: "unknown",
     conclusion_scope: "conditional_on_interpretation", outcome: { status: "unexercised" }, consumed_leaves: [] });
   const fitted = finalizeSourceSemanticReason(original, 1024);
-  expect(fitted.source_disclosure.proof_use).toEqual({ kind: "conditional_support", qualification: "not_world_claim" });
+  expect(sourceDisclosure(fitted.source_disclosure).proof_use).toEqual({ kind: "conditional_support", qualification: "not_world_claim" });
   expect(sourceSemanticReasonControl(fitted).outcome).toEqual({ status: "unexercised" });
   expect(fitted.no_conclusion).toEqual([{ status: "unexercised" }, [null, null, null, null]]);
   expect(fitted).not.toHaveProperty("result");

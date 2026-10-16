@@ -17,29 +17,46 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
-Protocol 19.0.0 and engine gateway 2.0.0 declare the Source acquisition and
-phase-accounting **major** under handbook invariant §25. See the [current query
-contract](docs/handbook/recall.md#opt-in-open-source-semantics). Current access
-receipts use `source-semantic-access-v2` with required typed compact `phases`:
-version-1 tuple `[1, preparation, acquisition, observation|null]`. Public
-`execution` is the `native_reasoning_only` literal or version-1 tuple
-`[1, preparation, acquisition]`. Wire admission checks those compact slots
-directly and must not construct expanded objects. Expanded
-`source-semantic-execution-v2` meaning (`query_preparation`, `acquisition`,
-`semantic_generation_attempts: 0`) remains authoritative only through the
-Protocol helpers `sourceSemanticAccessPhases` and `sourceSemanticExecutionPhases`;
-`sourceSemanticExecution` emits the literal only on exact canonical equality.
-Capture (`captureSourceSemanticQueryPreparation` /
-`captureSourceSemanticAcquisition`) is the semantic ingress; packing never drops
-profile identity or unknown measurements. Conditional computation stays a
+Protocol 19.0.0 and engine gateway 2.0.0 declare the Source acquisition,
+phase-accounting, and SourceDisclosure compact-wire **major** under handbook
+invariant §25. Package versions stay `19.0.0` / `2.0.0`; this is not a release.
+See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
+and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
+These uncommitted changes are unreviewed. A 300000-unit preparation regression is
+currently failing. Do not treat this section as acceptance or readiness.
+
+Current access receipts use `source-semantic-access-v2` with required typed compact
+`phases`: version-2 tuple `[2, preparation, acquisition, observation|null]`.
+Public `execution` is the `native_reasoning_only` literal or version-2 tuple
+`[2, preparation, acquisition]`. Inner preparation and acquisition remain
+version-1 compact tuples; each may carry one optional supplemental route at
+slot `[3]` (original-first primary, distinct `access_hint`). Wire admission
+checks those compact slots directly and must not construct expanded objects.
+Expanded `source-semantic-execution-v3` meaning (`query_preparation`,
+`acquisition`, `semantic_generation_attempts: 0`) remains authoritative only
+through the Protocol helpers `sourceSemanticAccessPhases` and
+`sourceSemanticExecutionPhases`; `sourceSemanticExecution` emits the literal only
+on exact canonical equality with no supplemental route. Capture
+(`captureSourceSemanticQueryPreparation` / `captureSourceSemanticAcquisition`)
+is the semantic ingress; packing never drops profile identity, unknown
+measurements, or supplemental route costs. Conditional computation stays a
 separate post-snapshot coverage coordinate, not an execution field. Query
 embedding runs in `SourceIndexAcquisition.prepareQuery` before the caller-owned
-read snapshot (`beforeSnapshotPreparation`). A begun snapshot degrades as
-`snapshot_already_begun` with no inference, replacement or commit; an unwired
-binder is `embedding_preparation_unwired`. That model/index work is not covered
-by the later conditional computation's provider-free guarantee. Unknown costs
-remain unknown, not zero. Tool descriptions now express these phase boundaries
-rather than claiming the whole call is provider-free.
+read snapshot (`beforeSnapshotPreparation`): original navigation first, then a
+distinct hint as a shared-bind supplemental route. A failed hint cannot replace
+original work. A begun snapshot degrades as `snapshot_already_begun` with no
+inference, replacement or commit; an unwired binder is
+`embedding_preparation_unwired`. That model/index work is not covered by the
+later conditional computation's provider-free guarantee. Unknown costs remain
+unknown, not zero. Prepared vectors stay on the private worker `prepared_query`
+envelope, not public MCP/CLI payloads. Tool descriptions express these phase
+boundaries rather than claiming the whole call is provider-free.
+
+Live `source_disclosure` is codec version 1: a lossless positional tuple derived
+from the named semantic (`encodeSourceDisclosure` / `sourceDisclosure`). Named
+Protocol 14–18 objects are rejected as current ingress; `decodeHistoricalSourceDisclosure`
+is an offline archive reader only. Protocol 13.x named-object history remains
+historical, not the live wire.
 
 Unscoped query-conditioned observation may run one snapshot-owned
 `source-index-interleaved-prefix.v1` join: bounded BM25 lexical rows and
@@ -58,16 +75,21 @@ owned through quarantine until actual exit. Packing, expansion and pool-identity
 traversal charge the request ledger without refunds; `pool_id` hashes the
 expanded preimage while the receipt retains compact `phases`. Holding a
 canonical-observation quote does not prove that every previous envelope still
-fits. Source index and backfill mechanisms exist; daemon scheduling,
-provisioning, default useful recall and natural-corpus effects are not
-established.
+fits. A private daemon Source-index producer is wired into background start/stop
+and is separate from Garden `EMBEDDING_BACKFILL`. Local model artifacts must already
+be provisioned; the producer does not download them. Mechanism-level cached-model
+checks do not establish default useful recall or natural-corpus effects. The existing Source-index lifecycle now has explicit unbind/recovery:
+configuration absence atomically revokes active eligibility and fences old selection
+revisions without marking a build failed. Shared generation-status eligibility
+serves storage and query preparation. Producer waits do not cancel shared inference;
+native occupancy remains quarantined until settlement or provider close.
 
 Current-request `execution` may be the `native_reasoning_only` literal only for
 exact canonical not-requested/not-run phases (`operation_does_not_prepare` /
-`operation_does_not_acquire`, `semantic_generation_attempts: 0`). It does not
-imply zero native work and is never inferred from generation-attempt count
-alone. Any other reason, resource evidence or unknown measurement stays a
-compact non-literal execution tuple. Frozen access `phases` are observation
+`operation_does_not_acquire`, `semantic_generation_attempts: 0`, no supplemental
+route). It does not imply zero native work and is never inferred from
+generation-attempt count alone. Any other reason, resource evidence, supplemental
+route or unknown measurement stays a compact non-literal execution tuple. Frozen access `phases` are observation
 provenance, not this delivery's execution. Page-reservation encoding prices the
 first page with caller `initialExecution` (default native-only) and later reserved
 pages as native-only; public delivery of any frozen page attaches current-call
@@ -90,10 +112,12 @@ prices a tentative later page against the actual current-execution envelope and
 does not add relevance, proof authority or recall gain.
 
 Cross-major migration: consumers must read compact `access.phases` / `execution`
-together with current receipt versions, expanding only through the Protocol
-helpers. Historical access v1, expanded live objects, or missing execution
-evidence must not be relabeled as a current measured result. Archive bytes
-remain unchanged; rebuild current measurements through their native producer
+and compact `source_disclosure` together with current receipt versions, expanding
+only through the Protocol helpers. Historical access v1, version-1 phase
+envelopes, expanded live objects, named Protocol 14–18 disclosures, earlier 13.x
+named objects, or missing execution evidence must not be relabeled as a current
+measured result. Archive
+bytes remain unchanged; rebuild current measurements through their native producer
 rather than patching old receipts. Query vectors stay in the private worker
 envelope, not public responses. Independent review, runtime/codec tests and
 small-budget verification remain open. This migration does not establish default

@@ -144,13 +144,45 @@ describe("Source query preparation before native snapshots", () => {
       const second = await h.client.sourceSemanticsPort!.execute({ ...changed,
         request: { ...changed.request, access_hint: "Alice tools navigation" } });
       if (first.kind !== "prepare_query" || second.kind !== "prepare_query") throw new Error("query expected");
-      expect(h.prepare.mock.calls.map(([input]) => input.navigation)).toEqual([ORIGINAL, "Alice tools navigation"]);
+      expect(h.prepare.mock.calls.map(([input]) => [input.navigation, input.supplemental_navigation]))
+        .toEqual([[ORIGINAL, undefined], [ORIGINAL, "Alice tools navigation"]]);
       expect(first.query_semantics_status.status).toBe("admitted");
       expect(second.query_semantics_id).toBe(first.query_semantics_id);
       expect(second.query_semantics_status).toEqual(first.query_semantics_status);
-      expect(sourceSemanticAccessPhases(second.access!).preparation.navigation_digest).toBe(digest("Alice tools navigation"));
+      expect(sourceSemanticAccessPhases(second.access!).preparation.navigation_digest).toBe(digest(ORIGINAL));
+      expect(sourceSemanticAccessPhases(second.access!).preparation.supplemental?.[0]?.navigation_digest)
+        .toBe(digest("Alice tools navigation"));
       expect(second.access?.input_id).not.toBe(first.access?.input_id);
       expect(second.access?.source_candidates).toEqual(first.access?.source_candidates);
+    } finally { await h.cleanup(); }
+  });
+
+  it("charges both transferred backing buffers rather than only their vector views through the real worker", async () => {
+    const h = await queryClient();
+    const prepare = h.prepare.getMockImplementation()!;
+    let padded = false;
+    h.prepare.mockImplementation(async input => {
+      const prepared = await prepare(input);
+      const route = (value: typeof prepared, bytes: number) => {
+        if (value.vector.status !== "available") throw new Error("available fixture vector expected");
+        const embedding = padded ? new Float32Array(new ArrayBuffer(bytes), 16, value.vector.embedding.length)
+          : new Float32Array(value.vector.embedding.length);
+        embedding.set(value.vector.embedding);
+        return { receipt: { ...value.receipt, elapsed_ms: 0 }, vector: { ...value.vector, embedding } };
+      };
+      return { ...route(prepared, 4096), supplemental: route(prepared.supplemental!, 8192) };
+    });
+    try {
+      const initial = initialQuery();
+      if (initial.request.kind !== "prepare_query") throw new Error("query expected");
+      const input = { ...initial, request: { ...initial.request, access_hint: "Unrelated irrigation" } };
+      const small = await h.client.sourceSemanticsPort!.execute(input);
+      padded = true;
+      const large = await h.client.sourceSemanticsPort!.execute(input);
+      expect(large.work.logical_memory_bytes - small.work.logical_memory_bytes).toBe(4096 + 8192 - 2 * 3 * 4);
+      expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(large.execution)).query_preparation)
+        .toMatchObject({ status: "ready", submitted_inputs: 1, supplemental: [{ status: "ready", submitted_inputs: 1 }] });
+      expect(h.bind).toHaveBeenCalledTimes(2);
     } finally { await h.cleanup(); }
   });
 
@@ -294,8 +326,8 @@ describe("captured Source execution and the single inherited deadline (synthetic
       const pending = h.client.sourceSemanticsPort!.execute({ ...input,
         request: { ...input.request, access_hint: "fixture-hold" } });
       const rejected = expect(pending).rejects.toThrow("timed out after 400ms");
-      await tick(); await clock.advance(80); await clock.advance(80);
-      await posts.firstPost; await clock.advance(240);
+      await tick(); await clock.advance(80); await clock.advance(80); await clock.advance(80);
+      await posts.firstPost; await clock.advance(160);
       writeFileSync(`${h.filename}.capture.release`, "");
       await rejected;
       expect(modelTimeout).toBeGreaterThan(0);

@@ -18,6 +18,14 @@ export class SourceIndexLifecycle {
     return this.repository.select(captured.workspaceId, SourceIndexConfigurationSchema.parse(captured.configuration));
   }
 
+  /** Configuration absence revokes the selection revision, not the success/failure of a build.
+   * The retained profile is historical configuration, never evidence of runtime readiness.
+   */
+  public unbind(workspaceId: string): void {
+    BoundedIdSchema.parse(workspaceId);
+    this.repository.unbind(workspaceId);
+  }
+
   /** Reuses the persisted build for the selected configuration and native source epoch. */
   public begin(selection: SourceIndexSelection) {
     return this.repository.begin(structuredClone(selection));

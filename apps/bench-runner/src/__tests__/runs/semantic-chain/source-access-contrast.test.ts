@@ -249,7 +249,7 @@ function accessReceipt(sourceIds: readonly string[], observedCount = sourceIds.l
   const preparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
   const acquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
   return SourceSemanticAccessReceiptSchema.parse({ contract: "source-semantic-access-v2",
-    phases: [1, packSourceSemanticQueryPreparation(preparation), packSourceSemanticAcquisition(acquisition), null],
+    phases: [2, packSourceSemanticQueryPreparation(preparation), packSourceSemanticAcquisition(acquisition), null],
     policy: "query-conditioned-v1",
     input_id: `sha256:${"a".repeat(64)}`, pool_id: `sha256:${"b".repeat(64)}`,
     observed_source_count: observedCount, observed_interpretation_count: 0,

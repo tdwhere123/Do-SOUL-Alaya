@@ -6,7 +6,7 @@ import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/sou
 const Completion = z.enum(["complete", "partial", "unavailable", "not_run"]);
 const SourceSemanticPhaseResourcesSchema = z.object({ work: NonNegativeIntSchema, memory_bytes: NonNegativeIntSchema,
   native_bytes: NonNegativeIntSchema, sql_internal_work: z.literal("unknown") }).strict().readonly();
-export const SourceSemanticQueryPreparationSchema = z.object({
+const SourceSemanticRoutePreparationSchema = z.object({
   status: z.enum(["ready", "unavailable", "failed", "not_requested"]), reason: z.string().nullable(),
   navigation_digest: Sha256DigestSchema.nullable(),
   selected: z.object({ selection_revision: NonNegativeIntSchema, config_id: Sha256DigestSchema,
@@ -14,6 +14,10 @@ export const SourceSemanticQueryPreparationSchema = z.object({
   method: z.enum(["not_run", "local_inference", "external_api"]), submitted_inputs: NonNegativeIntSchema,
   token_count: NonNegativeIntSchema.nullable(), external_api_attempts: NonNegativeIntSchema.nullable(),
   binding_work: z.enum(["not_run", "unknown"]), execution_work: z.enum(["not_run", "unknown"]), elapsed_ms: z.number().nonnegative().nullable()
+}).strict().readonly();
+/** Primary slots always describe original navigation; supplemental slots describe a distinct hint. */
+export const SourceSemanticQueryPreparationSchema = SourceSemanticRoutePreparationSchema.unwrap().extend({
+  supplemental: z.array(SourceSemanticRoutePreparationSchema).min(1).max(1).readonly().optional()
 }).strict().readonly();
 export type SourceSemanticQueryPreparation = z.infer<typeof SourceSemanticQueryPreparationSchema>;
 export const SourceSemanticVectorBindingSchema = z.object({ workspace_id: BoundedIdSchema, selection_revision: NonNegativeIntSchema,
@@ -53,7 +57,7 @@ export const SourceSemanticAcquisitionSchema = z.object({
     ]) }).strict().readonly(),
   limitations: z.array(z.string()).readonly()
 }).strict().readonly();
-export const SourceSemanticAcquisitionPhaseSchema = z.object({
+const SourceSemanticRouteAcquisitionSchema = z.object({
   policy: z.literal("source-index-interleaved-prefix.v1"),
   status: z.enum(["executed", "not_run", "failed"]), reason: z.string().nullable(),
   allowance: z.object({ max_attempts: NonNegativeIntSchema, max_roots: NonNegativeIntSchema,
@@ -61,6 +65,9 @@ export const SourceSemanticAcquisitionPhaseSchema = z.object({
   budget: z.object({ work_units: NonNegativeIntSchema, memory_bytes: NonNegativeIntSchema }).strict().readonly(),
   result: SourceSemanticAcquisitionSchema.nullable(),
   accounting: z.enum(["complete", "partial", "not_run"])
+}).strict().readonly();
+export const SourceSemanticAcquisitionPhaseSchema = SourceSemanticRouteAcquisitionSchema.unwrap().extend({
+  supplemental: z.array(SourceSemanticRouteAcquisitionSchema).min(1).max(1).readonly().optional()
 }).strict().readonly();
 export type SourceSemanticAcquisitionPhase = z.infer<typeof SourceSemanticAcquisitionPhaseSchema>;
 export function sourceSemanticAcquisitionNotRun(reason: string): SourceSemanticAcquisitionPhase {
@@ -84,7 +91,7 @@ export const SourceSemanticPhaseAccountingSchema = z.object({
 export type SourceSemanticPhaseAccounting = z.infer<typeof SourceSemanticPhaseAccountingSchema>;
 /** Expanded meaning remains authoritative; public wire admission is a separate, non-transforming schema. */
 export const SourceSemanticExecutionPhasesSchema = z.object({
-  contract: z.literal("source-semantic-execution-v2"), query_preparation: SourceSemanticQueryPreparationSchema,
+  contract: z.literal("source-semantic-execution-v3"), query_preparation: SourceSemanticQueryPreparationSchema,
   acquisition: SourceSemanticAcquisitionPhaseSchema, semantic_generation_attempts: z.literal(0)
 }).strict().readonly();
 export type SourceSemanticExecutionPhases = z.infer<typeof SourceSemanticExecutionPhasesSchema>;

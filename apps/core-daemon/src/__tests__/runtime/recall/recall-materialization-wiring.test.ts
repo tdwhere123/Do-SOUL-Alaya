@@ -25,11 +25,12 @@ import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-rea
 import { createRecallServiceRuntime } from "../../../runtime/recall-materialization/recall-materialization-recall-runtime.js";
 import { createRecallMaterializationWiring, recallMaterializationWiringTestInternals } from "../../../runtime/recall-materialization/recall-materialization-wiring.js";
 import type { CreateRecallMaterializationWiringInput } from "../../../runtime/recall-materialization/recall-materialization-wiring-types.js";
+import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { ORIGINAL, WS, digest, embedded, queryDatabase } from "./source-semantic-query-preparation-fixture.js";
 
 const { closeRecallReadWorkerAfterStartupFailure } = recallMaterializationWiringTestInternals;
 
-it("injects one shared embedding runtime into ordinary recall and the worker's private Source preparation callback", async () => {
+it("prepares only eligible active generations and preserves original/hint failures without extra inference", async () => {
   const h = await queryDatabase();
   // Wiring-only doubles: no daemon provider, model loading or inference is constructed.
   const embedInputs = vi.fn(async (inputs: Parameters<typeof embedded>[0]) => embedded(inputs));
@@ -66,6 +67,33 @@ it("injects one shared embedding runtime into ordinary recall and the worker's p
       vector: { status: "available", input_digest: digest(ORIGINAL) } });
     expect(createDaemonEmbeddingRuntime).toHaveBeenCalledTimes(1);
     expect(h.database.connection.inTransaction).toBe(false);
+    h.database.connection.prepare("DELETE FROM source_index_vectors WHERE workspace_id=?").run(WS);
+    expect(h.index.state(WS).status).toBe("partial");
+    await prepare!({ workspace_id: WS, navigation: ORIGINAL, signal: new AbortController().signal, remainingMs: () => 1000 });
+    expect(bindSourceEmbedding).toHaveBeenCalledTimes(2);
+    expect(h.index.state(WS).status).toBe("partial"); // query inference never invents generation readiness
+    const state = h.index.state(WS);
+    if (state.status === "unknown" || state.active_generation_id === null) throw new Error("active partial required");
+    h.index.fail(WS, state.active_generation_id, "build_failed");
+    const preparation = { workspace_id: WS, navigation: ORIGINAL, supplemental_navigation: "distinct hint",
+      signal: new AbortController().signal, remainingMs: () => 1000 };
+    const failed = await prepare!(preparation);
+    expect(failed).toMatchObject({ vector: { status: "unavailable", reason: "source_index_failed" },
+      receipt: { navigation_digest: digest(ORIGINAL), submitted_inputs: 0 },
+      supplemental: { vector: { status: "unavailable", reason: "source_index_failed" },
+        receipt: { navigation_digest: digest("distinct hint"), submitted_inputs: 0 } } });
+    h.index.unbind(WS);
+    expect((await prepare!(preparation)).receipt.reason).toBe("source_index_unbound");
+    expect(bindSourceEmbedding).toHaveBeenCalledTimes(2);
+    const unavailable = vi.spyOn(SqliteSourceIndexRepository.prototype, "state").mockImplementation(() => { throw new Error("read failed"); });
+    try {
+      expect(await prepare!(preparation)).toMatchObject({
+        receipt: { reason: "source_selection_unavailable", navigation_digest: digest(ORIGINAL) },
+        supplemental: { vector: { status: "unavailable", reason: "source_selection_unavailable" },
+          receipt: { reason: "source_selection_unavailable", navigation_digest: digest("distinct hint") } }
+      });
+      expect(bindSourceEmbedding).toHaveBeenCalledTimes(2);
+    } finally { unavailable.mockRestore(); }
   } finally { h.cleanup(); }
 });
 

@@ -9,7 +9,7 @@ const isolation = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 afterAll(() => { isolation?.restore(); });
-import { sourceSemanticExecutionPhases, indexEntryCacheKey, sourceSemanticQueryIdentity } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, sourceSemanticExecutionPhases, indexEntryCacheKey, sourceSemanticQueryIdentity } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceGoldRootIdentity, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPageWithEvidenceSetCoverage }
   from "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
@@ -153,8 +153,8 @@ function assertPage(page: PublicPage, wanted: readonly SourceSemanticLibraryPack
     const disclosure = { material_kind: "original_body", source_binding: "unbound", evaluated_as_of: clock,
       validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
       proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
-    expect(result.source_disclosure).toEqual(disclosure);
-    expect(page.source_disclosures?.[indexEntryCacheKey(row.entry)]).toEqual(disclosure);
+    expect(sourceDisclosure(result.source_disclosure!)).toEqual(disclosure);
+    expect(sourceDisclosure(page.source_disclosures![indexEntryCacheKey(row.entry)]!)).toEqual(disclosure);
     expect(qualifiers[position]).toMatchObject({ evidence_kind: "semantic_proof", payload_support: "available",
       support: { answer: "unrepresented", operation: "not_executed", compatibility: "unknown", distinctness: "unknown" } });
     return physicalRoot(row);

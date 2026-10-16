@@ -22,7 +22,7 @@ export const GOLD = sourceGoldUnitFromPublishedRoot(GOLD_TARGET);
 const libraryPreparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
 const libraryAcquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
 export const libraryAccessPhases = {
-  phases: [1, packSourceSemanticQueryPreparation(libraryPreparation),
+  phases: [2, packSourceSemanticQueryPreparation(libraryPreparation),
     packSourceSemanticAcquisition(libraryAcquisition), null] as const
 };
 

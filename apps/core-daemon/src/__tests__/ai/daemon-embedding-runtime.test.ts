@@ -575,3 +575,41 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
   });
 
 });
+
+describe("createDaemonEmbeddingRuntime Source-index local bind", () => {
+  it("leaves Source-index unbound for a non-local provider without calling it", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    const bindSourceEmbedding = vi.fn(async () => ({ status: "unsupported" as const, reason: "should_not_run" }));
+    try {
+      const runtime = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv: new Map([
+          ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]),
+        eventLogRepo: fixture.eventLogRepo,
+        runtimeNotifier: { notifyEntry: () => undefined },
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: {
+          providerKind: "openai",
+          modelId: "text-embedding-3-small",
+          schemaVersion: 1,
+          isAvailable: true,
+          embedTexts: async () => [new Float32Array([1])],
+          bindSourceEmbedding
+        }
+      });
+      await expect(runtime.bindLocalSourceIndex({ window_bytes: 24 })).resolves.toEqual({
+        status: "unsupported", reason: "source_index_local_runtime_required"
+      });
+      expect(bindSourceEmbedding).not.toHaveBeenCalled();
+      await runtime.closeProvider();
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
+});

@@ -160,6 +160,38 @@ it("reuses an owned frozen subtree without repeating traversal while keeping fut
   expect(planner.spentBytes).toBeLessThan(fiveCost.memory_bytes);
 });
 
+it("quotes borrowed owned references exactly without making actual copies free", () => {
+  const owned = fragment();
+  actualRetain(owned, "immutable");
+  const value = { first: owned, second: owned };
+  const borrowed = new SourceSemanticResourceLedger(ample);
+  borrowed.retain(value, "borrowed immutable payload", "borrow");
+  // Object frame, both property keys, and two retained references; no second payload graph.
+  const expected = { work_units: 3, memory_bytes: 64 + (24 + 4 * 5) + (24 + 4 * 6) + 2 * 8 };
+  expect({ work_units: borrowed.spentWork, memory_bytes: borrowed.spentBytes }).toEqual(expected);
+  const quote = quoteRetain(value, ample, undefined, "borrow");
+  expect({ work_units: quote.work_units, memory_bytes: quote.memory_bytes }).toEqual(expected);
+  expect(actualSpent(value).memory_bytes).toBeGreaterThan(expected.memory_bytes);
+  const exact = new SourceSemanticResourceLedger(expected);
+  exact.retain(value, "borrowed immutable payload", "borrow");
+  expect(exact.remaining()).toEqual({ work_units: 0, memory_bytes: 0 });
+  for (const short of [{ ...expected, work_units: expected.work_units - 1 },
+    { ...expected, memory_bytes: expected.memory_bytes - 1 }]) {
+    expect(() => new SourceSemanticResourceLedger(short).retain(value, "borrowed immutable payload", "borrow"))
+      .toThrow(SourceSemanticResourceExhausted);
+  }
+});
+
+it("does not accept caller freezing or numeric prices as borrowed ownership", () => {
+  const caller = Object.freeze({ snow: "雪" });
+  const price = quoteRetain(fragment(), ample);
+  for (const value of [caller, price, JSON.parse(JSON.stringify(price))]) {
+    const actual = new SourceSemanticResourceLedger(ample);
+    actual.retain(value, "uncertified borrow", "borrow");
+    expect({ work_units: actual.spentWork, memory_bytes: actual.spentBytes }).toEqual(actualSpent(value));
+  }
+});
+
 it("rejects getters, prototypes, and symbols when retaining owned immutable data", () => {
   let accessed = false;
   const getter = { get snow() { accessed = true; return "雪"; } };

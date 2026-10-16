@@ -24,7 +24,7 @@ export function sourceSemanticAccessInputIdentity(input: Readonly<{
     query_semantics: input.query_semantics, source_id: input.source_id, budget: input.budget, policy: input.policy,
     ...(input.access_hint === undefined ? {} : { access_hint: input.access_hint }),
     ...(input.source_preview_extents === undefined ? {} : { source_preview_extents: input.source_preview_extents }),
-    resource_contract: input.contract === "source-semantic-access-v2" ? "shared-union-completion-reserve-v2" :
+    resource_contract: input.contract === "source-semantic-access-v2" ? "original-first-navigation-v3" :
       SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT }))}`;
 }
 
@@ -79,9 +79,10 @@ export function createSourceSemanticAccessPolicy(original: string, query: Source
   const sourceHints = new Map<string, SourceSemanticAccessSignal>();
   return {
     orderCost: sourceSemanticAccessOrderCost,
-    navigationQuery: (ledger: SourceSemanticResourceLedger): string | null => {
+    navigationQuery: (ledger: SourceSemanticResourceLedger, route: "original" | "hint" = "original"): string | null => {
       if (policy === "canonical-v1") return null;
-      const navigation = accessHint ?? original;
+      const navigation = route === "original" ? original : accessHint;
+      if (navigation === undefined || route === "hint" && navigation === original) return null;
       chargeQueryFeatures(navigation, ledger);
       return navigation;
     },

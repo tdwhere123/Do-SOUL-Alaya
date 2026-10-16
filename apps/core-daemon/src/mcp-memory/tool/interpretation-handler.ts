@@ -1,4 +1,4 @@
-import { sourceSemanticExecution, SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
+import { sourceDisclosure, sourceSemanticExecution, SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticInterpretation, type SoulInterpretationRequest,
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
   type AuthorizedScopesAdmission, type SourceRecordIdentity, type SourceInterpretationInvalidation,
@@ -147,7 +147,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       const outcome = verifySourceSemanticDisposition(request.disposition, prepared.catalog, fieldContractSha256);
       return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "propose", outcome, semantic_status: "unreviewed",
         source_disclosure: projectSourceDisclosure({ material_kind: "interpretation",
-          evaluated_as_of: prepared.source_disclosure.evaluated_as_of,
+          evaluated_as_of: sourceDisclosure(prepared.source_disclosure).evaluated_as_of,
           source: checkedSourceFromDisclosure(prepared.source_disclosure) }),
         source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest,
           attribution_context: prepared.attribution_context },
@@ -202,8 +202,9 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
   }
 }
 
-function checkedSourceFromDisclosure(disclosure: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
+function checkedSourceFromDisclosure(wire: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
   Parameters<typeof projectSourceDisclosure>[0]["source"] {
+  const disclosure = sourceDisclosure(wire);
   if (disclosure.source_binding === "unbound") return undefined;
   const sourceTime = disclosure.source_time;
   const event_time = sourceTime?.kind === "known" ? { event_time: sourceTime.at }

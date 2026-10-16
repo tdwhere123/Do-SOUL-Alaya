@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
-import { canonicalJson, canonicalJsonChunks } from "../../recall/selection/capture/canonical-json.js";
+import { describe, expect, it, vi } from "vitest";
+import { canonicalJson, canonicalJsonChunks, canonicalJsonLength } from "../../recall/selection/capture/canonical-json.js";
 import { sourceTextDigest } from "../../relations/relation-assertion.js";
 
 const MIXED_KEYS = { a: 1, B: 2, "": 0 } as const;
@@ -25,6 +25,28 @@ describe("canonicalJson", () => {
     expect(hash.digest("hex")).toBe(sha256(canonicalJson(value)));
     expect(() => [...canonicalJsonChunks(value, { charge() { throw new Error("budget exhausted"); } })])
       .toThrow("budget exhausted");
+  });
+
+  it("sizes canonical text exactly without serializing string bodies", () => {
+    const text = Array.from({ length: 65_536 }, (_, code) => String.fromCharCode(code)).join("");
+    const values = [text, "\ud800", "\udfff", "\ud800x\udfff", "\ud800\udfff", "\udfff\ud800",
+      ...[0, -0, 9, 10, -99, 999_999_999_999_999, 1_000_000_000_000_000, Number.MAX_SAFE_INTEGER,
+        -Number.MAX_SAFE_INTEGER, Number.MAX_VALUE, Number.MIN_VALUE, NaN],
+      { z: [undefined, , Symbol("omitted"), () => undefined, "原文🙂\n", null, -0, Infinity, 1e-7, 1e21],
+        a: { absent: undefined, quoted: '"\\', omitted: () => undefined } }];
+    for (const value of values) {
+      const expected = canonicalJson(value).length;
+      const stringify = vi.spyOn(JSON, "stringify");
+      const charges: number[] = [];
+      const length = canonicalJsonLength(value, { charge(_work, bytes) { charges.push(bytes); } });
+      const serialized = stringify.mock.calls.map(([value]) => value);
+      stringify.mockRestore();
+      expect(length).toBe(expected);
+      expect(serialized.every(value => typeof value === "number")).toBe(true);
+      expect(charges.reduce((sum, bytes) => sum + bytes, 0)).toBe(serialized.length * 88);
+    }
+    expect(() => canonicalJsonLength(undefined)).toThrow(/no root string/u);
+    expect(() => canonicalJsonLength(1, { charge() { throw new Error("size exhausted"); } })).toThrow("size exhausted");
   });
 
   it("is independent of process locale", () => {

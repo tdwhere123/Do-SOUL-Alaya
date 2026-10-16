@@ -1,5 +1,5 @@
 import {
-  SourceIndexConfigurationSchema, SourceIndexGenerationStatusSchema, type SourceIndexSelection, type SourceIndexGeneration,
+  SourceIndexConfigurationSchema, SourceIndexGenerationStatusSchema, sourceIndexGenerationCanServeQueries, type SourceIndexSelection, type SourceIndexGeneration,
   type SourceIndexBudget, type SourceIndexResources, type SourceIndexVectorQueryState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -97,7 +97,7 @@ export function readSourceIndexQueryState(database: StorageDatabase, workspaceId
     const config = readNonEmptyStringField(row, "config_id"), profile = readNonEmptyStringField(row, "profile_id");
     if (revision !== readIntegerField(row, "generation_revision") || config !== readNonEmptyStringField(row, "generation_config") ||
         profile !== readNonEmptyStringField(row, "generation_profile")) return unavailable("superseded");
-    if (status !== "ready" && status !== "partial" && status !== "valid_empty") return unavailable(status);
+    if (!sourceIndexGenerationCanServeQueries(status)) return unavailable(status);
     const epoch = readIntegerField(row, "source_epoch"), currentEpoch = readIntegerField(row, "current_epoch");
     const dimensions = readIntegerField(row, "dimensions");
     if (epoch > currentEpoch || dimensions < 1 || dimensions > 65536) return unavailable("invalid_active_generation");

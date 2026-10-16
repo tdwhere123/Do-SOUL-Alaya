@@ -23,7 +23,7 @@ function compactPhases(input: {
   acquisition?: SourceSemanticAcquisitionPhase;
   observation?: readonly [number, number, number] | null;
 } = {}) {
-  return [1,
+  return [2,
     packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
       input.preparation ?? unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"))),
     packSourceSemanticAcquisition(captureSourceSemanticAcquisition(
@@ -105,7 +105,7 @@ it("rejects missing acquisition or execution instead of defaulting them to succe
   expect(SoulInterpretationPrepareQueryResponseSchema.safeParse(withoutExecution).success).toBe(false);
   expect(SoulInterpretationResponseSchema.safeParse(withoutExecution).success).toBe(false);
   expect(SourceSemanticExecutionSchema.safeParse({
-    contract: "source-semantic-execution-v2",
+    contract: "source-semantic-execution-v3",
     acquisition: sourceSemanticAcquisitionNotRun("operation_does_not_acquire"),
     semantic_generation_attempts: 0
   }).success).toBe(false);

@@ -5,50 +5,22 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
-import { indexEntryCacheKey, SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
-import { assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse, preparedDeliveryId, slotQualifiersFor }
-  from "@do-soul/alaya-core";
+import { encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPairExchange }
   from "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
 import { alternativeSelectionFixture, coverageSelectionFixture, physicalRoot, rawSourceTwin, selectionExecutionBudget }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
-import { deliverAllPages, measureNativeSubset, measurementSummary, nativeSubsetContext, persistArtifact,
-  type NativeMeasurement, type NativeSubsetContext } from "./source-semantic-library-subset-packing.test-support.js";
+import { combinedMembershipEnvelope, twoPageFinalProofByteCap }
+  from "./source-semantic-library-anytime-selection.test-support.js";
+import { deliverAllPages, measureNativeSubset, measurementSummary, nativeSubsetContext, persistArtifact }
+  from "./source-semantic-library-subset-packing.test-support.js";
 import { exhaustiveReference, measureSelectionGap, selectionGapLimits } from "./source-semantic-library-selection-gap.test-support.js";
 import { freezeTextGold, measureTextRecall, textRecallPolicies } from "./source-semantic-library-text-recall.test-support.js";
 
-/** Independent single-page sizing oracle over the complete frozen membership,
- * not a delivery, selector replay, or a copied production reservation byte count. */
-function combinedMembershipEnvelope(context: NativeSubsetContext, measurement: NativeMeasurement) {
-  const { plan, native, request } = measurement, membership = plan.pages.flat();
-  const proofs = membership.flatMap(row => row.proofs);
-  const { index } = assembleSourceSemanticLibraryIndex({ query_id: plan.query_id, snapshot_id: plan.snapshot_id,
-    interpretation_id: plan.interpretation_id, as_of: plan.as_of, expires_at: plan.expires_at,
-    authorized_scopes: plan.authorized, source_entries: membership.map(row => row.entry),
-    selected_entries: membership.map(row => row.entry), proof_groups: membership.filter(row => row.proofs.length > 0),
-    root_order: membership.map(physicalRoot), truncated: plan.discovery.truncated,
-    open_residuals: plan.discovery.open_residuals, more_roots: false, emitted_offset: 0 });
-  const material = SourceSemanticWorkerResultSchema.parse({ ...native, index, total_count: membership.length,
-    delivery_id: preparedDeliveryId(native.request_identity, index), proofs,
-    previews: Object.fromEntries(membership.map(row => [indexEntryCacheKey(row.entry), row.preview])),
-    source_disclosures: Object.fromEntries(membership.map(row => [indexEntryCacheKey(row.entry), row.source_disclosure])),
-    slot_qualifiers: slotQualifiersFor(index, proofs).map(row => ({ ...row,
-      payload_support: membership[row.index]!.payload_support, selection_basis: membership[row.index]!.selection_basis })),
-    discovery: { ...native.discovery, access: { ...context.pool.access,
-      trace: { kind: "library_selection", omitted_source_count: 0, omitted_interpretation_count: 0 } } },
-    work: { native_work: request.budget.work_units, index_work: request.budget.work_units,
-      native_accounting: "partial", logical_work: request.budget.work_units,
-      native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,
-      rss_bytes: Number.MAX_SAFE_INTEGER } });
-  if (material.kind !== "recall") throw new Error("complete public membership expected");
-  const encoded = encodeSourceSemanticLibraryResponse(material);
-  if (encoded.operation !== "recall" || encoded.results === undefined) throw new Error("complete public membership expected");
-  return { ...encoded, results: encoded.results };
-}
-
-it("delivers all thirteen text statements in two bounded pages despite optional pair-work refusal at 238405 bytes", async () => {
-  const limit = 238405, context = await nativeSubsetContext(coverageSelectionFixture(selectionExecutionBudget));
+it("delivers all thirteen text statements in two bounded pages despite optional pair-work refusal", async () => {
+  const context = await nativeSubsetContext(coverageSelectionFixture(selectionExecutionBudget));
   try {
+    const limit = twoPageFinalProofByteCap(context);
     const candidates = context.fixture.pool.flatMap(row => [rawSourceTwin(row), row]), gold = freezeTextGold(context.fixture);
     const baseline = measureTextRecall(context, candidates, limit, textRecallPolicies.original_default, gold);
     const trial = measureTextRecall(context, candidates, limit, textRecallPolicies.anytime_pairs, gold);
@@ -97,8 +69,9 @@ it.each([238982, 277716])("keeps complete default delivery where private pair wo
 }, 120_000);
 
 it("keeps an over-cap complete membership partially observed until the actual continuation supplies the missing text", async () => {
-  const limit = 238405, context = await nativeSubsetContext(coverageSelectionFixture(selectionExecutionBudget));
+  const context = await nativeSubsetContext(coverageSelectionFixture(selectionExecutionBudget));
   try {
+    const limit = twoPageFinalProofByteCap(context);
     const candidates = context.fixture.pool.flatMap(row => [rawSourceTwin(row), row]), gold = freezeTextGold(context.fixture);
     const measurement = measureNativeSubset(context, limit, undefined, candidates, textRecallPolicies.anytime_pairs);
     const combined = combinedMembershipEnvelope(context, measurement);

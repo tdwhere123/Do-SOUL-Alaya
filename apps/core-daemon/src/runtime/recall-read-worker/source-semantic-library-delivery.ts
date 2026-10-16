@@ -1,4 +1,4 @@
-import { SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+import { encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosure, SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
   indexEntryCacheKey, sourceSemanticExecution, type SourceSemanticExecution, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
   type SourceSemanticAccessReceipt,
   type SourceSemanticLibraryUnprovedComputation,
@@ -271,7 +271,7 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
   // Charge each bounded formatting attempt before measuring it, even when it
   // cannot fit. Previously reserved roots, previews and proofs remain intact.
   for (const row of page) {
-    const source_time = row.source_disclosure.source_time;
+    const source_time = sourceDisclosure(row.source_disclosure).source_time;
     if (source_time === undefined) continue;
     // ISO times are bounded to 64 ASCII characters by the disclosure schema;
     // this covers escaped JSON, both public copies and transient formatting.
@@ -281,14 +281,26 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       break;
     }
-    const addedBytes = 2 * Buffer.byteLength(`,"source_time":${JSON.stringify(source_time)}`);
-    if (reservedBytes + addedBytes > request.output_byte_limit) continue;
     const key = indexEntryCacheKey(row.entry);
     const disclosure = final.source_disclosures[key];
     if (disclosure === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selected library source lacks disclosure");
-    final = { ...final, source_disclosures: {
-      ...final.source_disclosures, [key]: { ...disclosure, source_time }
-    } };
+    let withTime: typeof disclosure, addedBytes: number;
+    try {
+      // Size the actual codec values, including null absence slots, not a second
+      // named-field format. Both public copies use this exact representation.
+      const semantic = { ...sourceDisclosure(disclosure), source_time };
+      meter.retain(semantic, "optional source time semantic capture");
+      withTime = encodeSourceDisclosure(semantic);
+      meter.retain(withTime, "optional source time codec allocation");
+      const before = JSON.stringify(disclosure), after = JSON.stringify(withTime);
+      meter.charge(1, (before.length + after.length) * 2, "optional source time codec encoding");
+      addedBytes = 2 * (Buffer.byteLength(after) - Buffer.byteLength(before));
+    } catch (error) {
+      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+      break;
+    }
+    if (reservedBytes + addedBytes > request.output_byte_limit) continue;
+    final = { ...final, source_disclosures: { ...final.source_disclosures, [key]: withTime } };
     reservedBytes += addedBytes;
   }
   return { ...final, work: workOf(meter) };
@@ -312,13 +324,10 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
     `${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`));
   const previews = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), row.preview]));
   const source_disclosures = Object.fromEntries(page.map(row => {
-    const { source_time: _source_time, ...disclosure } = row.source_disclosure;
-    return [indexEntryCacheKey(row.entry), {
-      ...disclosure,
-      proof_use: row.proofs.length > 0
-        ? { kind: "conditional_support" as const, qualification: "not_world_claim" as const }
-        : { kind: "source_only" as const, qualification: "not_current_proof" as const }
-    }];
+    const wire = qualifySourceDisclosure(row.source_disclosure,
+      row.proofs.length > 0 ? "conditional_support" : "source_only", false);
+    meter.retain(wire, "library disclosure codec allocation");
+    return [indexEntryCacheKey(row.entry), wire];
   }));
   const discovery = { ...base.discovery, access };
   const work = reserveWork ? reservedWork(request) : workOf(meter);

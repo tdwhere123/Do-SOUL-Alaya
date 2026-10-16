@@ -29,6 +29,9 @@ import { CLOCK, ORIGINAL, QUERY_BUDGET, RAW, SCOPES, WS, withIndexedSources, typ
 const PREFLIGHT = { schema_version: 1 as const, work_units: 8_000, memory_bytes: 24_000,
   page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 };
 const VECTOR_BACKING = 65_536;
+const VECTOR_ARRAY_OVERHEAD = 32;
+const VECTOR_BUFFER_REFERENCES = 80;
+const RECEIVED_VECTOR_BYTES = VECTOR_ARRAY_OVERHEAD + VECTOR_BACKING;
 const CORE_VECTOR_PHASE = "source query vector capture, validation and norm";
 const PACK_PREP = "source phase preparation packing traversal";
 const EXEC_TUPLE = "source phase execution tuple allocation";
@@ -73,16 +76,26 @@ async function withAdmittedSource(body: (runtime: RecallReadWorkerRuntime) => Pr
     await body(createRecallReadWorkerRuntime(database));
   } finally { database.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true }); }
 }
-async function viewedPrepared(fixture: IndexFixture) {
-  const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal,
-    remainingMs: () => 60_000 });
-  if (prepared.vector.status !== "available") throw new Error("available query vector expected");
-  const embedding = new Float32Array(new ArrayBuffer(VECTOR_BACKING), 0, prepared.vector.embedding.length);
-  embedding.set(prepared.vector.embedding);
+function viewedEmbedding(values: ArrayLike<number>) {
+  const embedding = new Float32Array(new ArrayBuffer(VECTOR_BACKING), 0, values.length);
+  embedding.set(values);
   expect(embedding.buffer.byteLength).toBe(VECTOR_BACKING);
   expect(embedding.byteLength).toBeLessThan(VECTOR_BACKING);
-  return { prepared: { ...prepared, vector: { ...prepared.vector, embedding } } as PreparedQuery, backing: VECTOR_BACKING,
-    dimensions: prepared.vector.profile.dimensions };
+  return embedding;
+}
+async function viewedPrepared(fixture: IndexFixture) {
+  const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, supplemental_navigation: "Harbor",
+    signal: new AbortController().signal, remainingMs: () => 60_000 });
+  if (prepared.vector.status !== "available") throw new Error("available query vector expected");
+  if (prepared.supplemental?.vector.status !== "available") throw new Error("available supplemental query vector expected");
+  const original = viewedEmbedding(prepared.vector.embedding);
+  const hint = viewedEmbedding(prepared.supplemental.vector.embedding);
+  expect(original.buffer).not.toBe(hint.buffer);
+  return {
+    prepared: { ...prepared, vector: { ...prepared.vector, embedding: original },
+      supplemental: { ...prepared.supplemental, vector: { ...prepared.supplemental.vector, embedding: hint } } } as PreparedQuery,
+    backing: VECTOR_BACKING, receivedBytes: RECEIVED_VECTOR_BYTES, dimensions: prepared.vector.profile.dimensions
+  };
 }
 function collectCharges<T>(run: () => T) {
   const charge = SourceSemanticResourceLedger.prototype.charge;
@@ -138,30 +151,34 @@ it("rejects malformed input at dispatch and malformed results at the real operat
   });
 });
 
-it("charges the received vector backing buffer once before skipped and executed index routes and a separate Core copy only when executed", async () => {
+it("charges each distinct received vector backing plus array overhead before skipped and executed index routes and a separate Core copy only when executed", async () => {
   await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
-    const { prepared, backing, dimensions } = await viewedPrepared(fixture);
+    const { prepared, backing, receivedBytes, dimensions } = await viewedPrepared(fixture);
     const worker = { database: fixture.database } as RecallReadWorkerRuntime;
+    const receivedCharge = expect.objectContaining({ work: 1, bytes: receivedBytes });
     const skipped = collectCharges(() => runSourceSemanticWorker(worker, payload({ kind: "prepare_query",
       original_query: ORIGINAL, access_policy: "canonical-v1", budget: QUERY_BUDGET }, prepared)));
     const receivedSkipped = vectorCharges(skipped.calls);
-    expect(receivedSkipped).toEqual([expect.objectContaining({ work: 0, bytes: backing })]);
-    expect(skipped.calls.findIndex(row => row.phase === PACK_PREP)).toBeGreaterThan(skipped.calls.indexOf(receivedSkipped[0]!));
+    expect(skipped.calls.filter(row => row.kind === "charge" && row.phase === "worker query vector buffer references"))
+      .toEqual([expect.objectContaining({ work: 1, bytes: VECTOR_BUFFER_REFERENCES })]);
+    expect(receivedSkipped).toEqual([receivedCharge, receivedCharge]);
+    expect(skipped.calls.findIndex(row => row.phase === PACK_PREP)).toBeLessThan(skipped.calls.indexOf(receivedSkipped[0]!));
     expect(skipped.calls.some(row => row.phase === "source acquisition envelope and input capture")).toBe(false);
     expect(skipped.calls.some(row => row.phase === CORE_VECTOR_PHASE)).toBe(false);
     expect(skipped.value.kind).toBe("prepare_query");
     expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(skipped.value.execution)).acquisition.status).toBe("not_run");
     const executed = collectCharges(() => runSourceSemanticWorker(worker, payload({ kind: "prepare_query",
-      original_query: ORIGINAL, budget: QUERY_BUDGET }, prepared)));
+      original_query: ORIGINAL, access_hint: "Harbor", budget: QUERY_BUDGET }, prepared)));
     const receivedExecuted = vectorCharges(executed.calls);
-    expect(receivedExecuted).toEqual([expect.objectContaining({ work: 0, bytes: backing })]);
-    expect(executed.calls.findIndex(row => row.phase === PACK_PREP)).toBeGreaterThan(executed.calls.indexOf(receivedExecuted[0]!));
+    expect(receivedExecuted).toEqual([receivedCharge, receivedCharge]);
+    expect(executed.calls.findIndex(row => row.phase === PACK_PREP)).toBeLessThan(executed.calls.indexOf(receivedExecuted[0]!));
     const envelope = executed.calls.findIndex(row => row.phase === "source acquisition envelope and input capture");
-    expect(envelope).toBeGreaterThan(executed.calls.indexOf(receivedExecuted[0]!));
+    expect(envelope).toBeGreaterThan(executed.calls.indexOf(receivedExecuted[1]!));
     expect(executed.calls.some(row => row.phase === CORE_VECTOR_PHASE)).toBe(true);
     const core = executed.calls.find(row => row.phase === CORE_VECTOR_PHASE);
     expect(core).toMatchObject({ work: 3 * dimensions, bytes: 4 * dimensions });
     expect(core?.bytes).not.toBe(backing);
+    expect(core?.bytes).not.toBe(receivedBytes);
     if (executed.value.kind !== "prepare_query" || executed.value.access === undefined) {
       throw new Error("executed preparation access expected");
     }
@@ -174,31 +191,41 @@ it("charges the received vector backing buffer once before skipped and executed 
   });
 }, 60_000);
 
-it("stops one byte short of the received vector backing and charges that exact remaining byte extent", async () => {
+it("refuses one-byte-short backing and charges both complete backings before refusing further work", async () => {
   await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
-    const { prepared, backing } = await viewedPrepared(fixture);
+    const { prepared, receivedBytes } = await viewedPrepared(fixture);
     const worker = { database: fixture.database } as RecallReadWorkerRuntime;
     const request = { kind: "prepare_query" as const, original_query: ORIGINAL, access_policy: "canonical-v1" as const,
       budget: QUERY_BUDGET };
     const ample = collectCharges(() => runSourceSemanticWorker(worker, payload(request, prepared)));
     const received = vectorCharges(ample.calls)[0];
     if (received === undefined) throw new Error("received vector charge expected");
+    expect(received).toMatchObject({ work: 1, bytes: receivedBytes });
     const spentBefore = QUERY_BUDGET.memory_bytes - received.remainingBytes;
+    const bothBackings = received.bytes * 2;
     const adjacent = collectCharges(() => caught(() => runSourceSemanticWorker(worker, payload({ ...request,
-      budget: { ...QUERY_BUDGET, memory_bytes: spentBefore + backing - 1 } }, prepared))));
-    expectClosed(adjacent.value, { native_work: 0, native_bytes: 0, logical_memory_bytes: spentBefore });
-    expect((adjacent.value as CoreError).message).toContain("worker received query vector");
+      budget: { ...QUERY_BUDGET, memory_bytes: spentBefore + received.bytes - 1 } }, prepared))));
     expect(vectorCharges(adjacent.calls, true)).toEqual([]);
     expect(vectorCharges(adjacent.calls, false)).toEqual([expect.objectContaining({
-      work: 0, bytes: backing, remainingBytes: backing - 1, ok: false })]);
+      work: 1, bytes: received.bytes, remainingBytes: received.bytes - 1, ok: false })]);
+    // executionOf runs before buffer charges, so vector exhaustion keeps inference evidence.
+    expect(adjacent.value).toMatchObject({ kind: "prepare_query", outcome: { status: "resource_exhausted" },
+      candidates: [], truncated: true });
+    expect((adjacent.value as { work: { native_work: number; native_bytes: number; logical_memory_bytes: number } }).work)
+      .toMatchObject({ native_work: 0, native_bytes: 0, logical_memory_bytes: spentBefore });
     const exact = collectCharges(() => caught(() => runSourceSemanticWorker(worker, payload({ ...request,
-      budget: { ...QUERY_BUDGET, memory_bytes: spentBefore + backing } }, prepared))));
-    const exactVector = vectorCharges(exact.calls)[0];
-    expect(exactVector).toMatchObject({ work: 0, bytes: backing, remainingBytes: backing, ok: true });
-    const closed = expectClosed(exact.value, {
-      logical_memory_bytes: spentBefore + backing, native_work: 0, native_bytes: 0 });
-    expect(closed.message).not.toContain("worker received query vector");
-    expect(closed.message).toContain("source phase");
+      budget: { ...QUERY_BUDGET, memory_bytes: spentBefore + bothBackings } }, prepared))));
+    const exactVectors = vectorCharges(exact.calls, true);
+    expect(exactVectors).toEqual([
+      expect.objectContaining({ work: 1, bytes: received.bytes, remainingBytes: bothBackings, ok: true }),
+      expect.objectContaining({ work: 1, bytes: received.bytes, remainingBytes: received.bytes, ok: true })]);
+    const exhausted = SourceSemanticWorkerResultSchema.parse(exact.value);
+    expect(exhausted).toMatchObject({ kind: "prepare_query", outcome: { status: "resource_exhausted" },
+      candidates: [], truncated: true, work: {
+        logical_memory_bytes: spentBefore + bothBackings, native_work: 0, native_bytes: 0 } });
+    expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(exhausted.execution)).query_preparation)
+      .toMatchObject({ status: "ready", supplemental: [{ status: "ready" }] });
+    expect(exact.calls.some(row => row.phase === CORE_VECTOR_PHASE)).toBe(false);
   });
 }, 60_000);
 
@@ -255,7 +282,7 @@ it("rebuilds metered execution when acquisition replaces the initial evidence an
 
 it("fails closed when source-phase capture exhausts after an available vector without admitting execution", async () => {
   await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
-    const { prepared, backing } = await viewedPrepared(fixture);
+    const { prepared } = await viewedPrepared(fixture);
     const retain = SourceSemanticReadBudget.prototype.retain;
     vi.spyOn(SourceSemanticReadBudget.prototype, "retain").mockImplementation(function (this: SourceSemanticReadBudget, value, phase, ownership) {
       if (phase === "source phase semantic preparation capture") {
@@ -267,8 +294,7 @@ it("fails closed when source-phase capture exhausts after an available vector wi
       payload({ kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET }, prepared))), {
       native_work: 0, native_bytes: 0, logical_memory_bytes: expect.any(Number) });
     expect(closed.message).toContain("source phase semantic preparation capture");
-    const spent = (closed.details as { work: { logical_memory_bytes: number } }).work.logical_memory_bytes;
-    expect(spent).toBeGreaterThanOrEqual(backing);
+    expect(closed.details).not.toHaveProperty("execution");
   });
 }, 60_000);
 

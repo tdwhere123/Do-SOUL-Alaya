@@ -795,41 +795,70 @@ Their scores and approval records are historical evidence, not current
 implementation guidance or target KPI certification.
 
 
-## Historical source disclosure
+## Source disclosure
 
 Permitted reads of retained originals carry a required `source_disclosure`
-view. It identifies original body versus retained excerpt, gist or interpretation,
-the exact read evaluation clock, the admitted source interval when checked, and
-the interval's relation to that clock. A bounded end is exclusive; a future
-start is `before_start`, not expired. A null or unavailable interval remains
-explicitly unknown. The comparison uses the full UTC precision of stored
-timestamps. Ordinary Recall uses its pinned interpretation clock; frozen library
-pages keep the first request's clock while their separate lifetime lease expires.
+qualification. It identifies original body versus retained excerpt, gist or
+interpretation, the exact read evaluation clock, the admitted source interval
+when checked, and the interval's relation to that clock. A bounded end is
+exclusive; a future start is `before_start`, not expired. A null or unavailable
+interval remains explicitly unknown. The comparison uses the full UTC precision
+of stored timestamps. Ordinary Recall uses its pinned interpretation clock;
+frozen library pages keep the first request's clock while their separate lifetime
+lease expires.
 
 `source_only` says `not_current_proof`; an actually delivered conditional proof
 says `conditional_support` and remains an unreviewed interpretation with an
-unknown world claim. The view does not change source eligibility, proof admission,
-ranking, erasure, current-source selection or source identity. Retained capsule
-gist and excerpt are independent reductions: completeness of the reduction does
-not make it an original body. Their original validity stays unknown without a
-checked source binding. Evidence pointer and HTTP reads disclose each text field;
-Inspector shows the qualification outside the stored text.
+unknown world claim. The qualification does not change source eligibility, proof
+admission, ranking, erasure, current-source selection or source identity.
+Retained capsule gist and excerpt are independent reductions: completeness of
+the reduction does not make it an original body. Their original validity stays
+unknown without a checked source binding. Evidence pointer and HTTP reads
+disclose each text field; Inspector shows the qualification outside the stored
+text.
 
-The required public fields are a Protocol 13.0.0 major cutover under invariant
-§25. The semantic library delivery identity is v6 with worker/public protocol 7;
-old response bytes and continuations are not relabeled. Source-record and
-interpretation identity algorithms remain unchanged.
+**Current wire (unreleased Protocol 19.0.0 / engine gateway 2.0.0, invariant
+§25 major; not a release).** Live MCP, worker, library, recall-candidate,
+evidence-text, and Inspector payloads admit only codec version 1: the lossless
+positional tuple `[1, material_kind, source_binding, source_representation|null,
+evaluated_as_of, source_time|null, validity, temporal_state, proof_use]`.
+Nested values keep their named fields. Null optional slots mean undisclosed, not
+unknown. `encodeSourceDisclosure` captures and validates the named semantic once
+before emitting the tuple. `sourceDisclosure` is the named helper for an admitted
+current tuple. `qualifySourceDisclosure` changes only `proof_use` and optional
+time omission without recapturing source metadata. Core `projectSourceDisclosure`
+emits this tuple. Codec version is independent of library/result versions. Named
+Protocol 14–18 objects are not live ingress; `decodeHistoricalSourceDisclosure`
+is an offline ordinary-recall archive reader for those majors and must not be used
+for current MCP or worker admission. Unsupported codec versions fail closed.
+This compact helper/decoder pair is still being finalized. It does not establish
+review, release, or default useful recall.
 
-Protocol 13.4.0 adds optional `source_time` to this view. Current projections
-disclose the checked source record's `event_time` as source observation/event
-metadata, independently of its validity interval and the read clock. Known,
-not-recorded, metadata-unavailable and unbound remain distinct; this metadata
-does not establish when a described event occurred. Historical disclosures
-without the field remain parseable, and existing library identities stay v6/7.
-In native library delivery, the complete source facts and text reserve the
-first-page envelope before optional source time is included. An absent
-`source_time` means time was not disclosed, including when the byte or work
-budget omits it; it does not mean the original record lacked source time.
+Consumers of the live tuple include `soul.recall` results, `soul.interpretation`
+prepare/reason/library deliveries, Core recall encoding, evidence-pointer HTTP
+reads, and Memory Inspector (`sourceDisclosure` before display). Public callers
+cannot supply query vectors or selected profiles on this surface.
+
+## Historical source disclosure
+
+The named-object public fields were a Protocol 13.0.0 major cutover under
+invariant §25. That object is historical public bytes, not the live wire; live
+Protocol 19 admission is the compact tuple above. Semantic field meanings in this
+section still apply through `sourceDisclosure`. The semantic library delivery
+identity at that cutover was v6 with worker/public protocol 7; old response bytes
+and continuations were not relabeled. Source-record and interpretation identity
+algorithms remain unchanged.
+
+Protocol 13.4.0 added optional named `source_time` to that historical object.
+Live projections still disclose the checked source record's `event_time` as source
+observation/event metadata, independently of its validity interval and the read
+clock. Known, not-recorded, metadata-unavailable and unbound remain distinct; this
+metadata does not establish when a described event occurred. Named 13.x objects without the field remained parseable as that historical object
+and are not live ingress; existing library identities stayed v6/7 at that minor. In native
+library delivery, the complete source facts and text reserve the first-page
+envelope before optional source time is included. An absent `source_time` means
+time was not disclosed, including when the byte or work budget omits it; it does
+not mean the original record lacked source time.
 
 Source records may explicitly qualify their `source_representation` as
 `original_body`, `retained_excerpt`, or `canonical_projection`. Missing historical
@@ -918,25 +947,28 @@ keyed attention. It conveys no answer binding or source fact. Conditional
 computation coverage follows actual execution; missing dependencies remain
 unexercised, while resource-limited execution remains open. In the unreleased
 Protocol 19 major, public `execution` is the `native_reasoning_only` literal or
-the version-1 compact tuple `[1, preparation, acquisition]`; access receipts
-retain typed compact `phases` `[1, preparation, acquisition, observation|null]`.
-Wire admission checks those slots directly. Expanded
-`source-semantic-execution-v2` meaning remains authoritative only through
+the version-2 compact tuple `[2, preparation, acquisition]`; access receipts
+retain typed compact `phases` `[2, preparation, acquisition, observation|null]`.
+Inner preparation and acquisition remain version-1 compact tuples; each may carry
+one optional supplemental route at slot `[3]` (original-first primary, distinct
+hint). Wire admission checks those compact slots directly. Expanded
+`source-semantic-execution-v3` meaning remains authoritative only through
 `sourceSemanticAccessPhases` and `sourceSemanticExecutionPhases`.
 `sourceSemanticExecution` emits the literal only for exact canonical
 not-requested/not-run receipts (`query_preparation` reason
 `operation_does_not_prepare`, `acquisition` reason `operation_does_not_acquire`,
-`semantic_generation_attempts: 0`). That literal excludes model/index
-acquisition attempts, not native reads or computation, and does not mean zero
-native work; it is never inferred from generation-attempt count alone. Any other
-reason, resource evidence or unknown measurement stays a compact non-literal
-execution tuple. Packing captured semantics round-trips through the expansion
-helpers without dropping profile identity or unknown measurements: `null`,
-`unknown`, `not_run`, and vector `valid_empty` stay distinct from zero, absence,
-or `ready`.
+`semantic_generation_attempts: 0`, no supplemental route). That literal excludes
+model/index acquisition attempts, not native reads or computation, and does not
+mean zero native work; it is never inferred from generation-attempt count alone.
+Any other reason, resource evidence, supplemental route or unknown measurement
+stays a compact non-literal execution tuple. Packing captured semantics
+round-trips through the expansion helpers without dropping profile identity,
+unknown measurements, or supplemental route costs: `null`, `unknown`, `not_run`,
+and vector `valid_empty` stay distinct from zero, absence, or `ready`.
 Public consumers derive external attempts from execution (preserving `null`),
-not a duplicate `provider_attempts` field or semantic-generation count, including
-via `sourceSemanticExecutionExternalAttempts` without expanding complete phases.
+summing original and supplemental routes, not a duplicate `provider_attempts`
+field or semantic-generation count, including via
+`sourceSemanticExecutionExternalAttempts` without expanding complete phases.
 Frozen access `phases` are observation provenance, not this delivery's execution;
 current-call `execution` is attached separately on first page and frozen
 continuation.
@@ -1461,17 +1493,21 @@ reprepare after changes. One-shot reasoning is supported without claiming that
 library discovery ran. There is no cross-run semantic result/coverage cache.
 
 Initial `prepare_query` may carry an optional `access_hint` of 1–1024 nonblank
-characters. It replaces only the existing single FTS navigation text; original
-query, admitted Q and final source/interpretation scoring remain unchanged.
-It is incompatible with a source handle or canonical access. Access pool and
-resolved library request identities bind the exact hint. A continuation can
-omit it to inherit the frozen value, but cannot change or introduce it and never
-resumes observation. Query-handle recall reuses that pool. The hint provides no
-semantic correspondence, fact, or durable memory. Existing FTS covers published
+characters. Original-query navigation is always prepared first. A distinct hint
+adds one supplemental navigation route that shares the same embedding bind and
+selected profile; a failed hint cannot replace original work, and an identical
+hint is not a second route. Original query, admitted Q and final
+source/interpretation scoring remain unchanged. The hint is incompatible with a
+source handle or canonical access. Access pool identity for `source-semantic-access-v2`
+binds `original-first-navigation-v3` together with the exact hint. A continuation
+can omit it to inherit the frozen value, but cannot change or introduce it and
+never resumes observation. Query-handle recall reuses that pool. The hint provides
+no semantic correspondence, fact, or durable memory. Existing FTS covers published
 interpretation capsules; raw-only sources still depend on source observation.
-Each preparation meters its own work. A task performing another preparation
-must reserve and account for both calls and delivery in its outer total budget;
-this parameter does not establish a cross-request allowance or generate clues.
+Each route meters its own work against the shared request ledger. A task performing
+another preparation must reserve and account for both calls and delivery in its
+outer total budget; this parameter does not establish a cross-request allowance or
+generate clues.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. After snapshot,
@@ -1496,8 +1532,9 @@ and modality foils may tie or outrank a relevant interpretation without acquirin
 assertion authority. A source without an interpretation remains a raw candidate.
 Before interpretation verification, the query-conditioned policy nominates up
 to 16 inspected capsule candidates across the existing Porter/trigram FTS lanes.
-Quoted navigation tokens (the hint when supplied, otherwise the original query)
-use resumable ascending native rowid seeks and
+Quoted navigation tokens use the original query for that original-first pass; a
+distinct hint does not replace those original tokens. Seeks are resumable
+ascending native rowid seeks and
 bounded capsule metadata point reads, without BM25, body reads or a SQL sorter.
 The exact signed-64-bit cursors bind workspace and query. Empty seeks and all
 metadata/filter attempts count against the same observation ledger, including
@@ -1511,20 +1548,36 @@ one snapshot-owned `source-index-interleaved-prefix.v1` join: bounded BM25 lexic
 rows and inspected vector windows (`ranking: exact_over_inspected_subset`, not
 full-library nearest neighbor). This Source-index pass nominates at most 16 roots;
 canonical observation is separate, so this is not a total candidate-union ceiling.
-Query embedding is `SourceIndexAcquisition.prepareQuery` under `beforeSnapshotPreparation`; a begun
-snapshot reports `snapshot_already_begun` without inference, and an unwired binder
-is `embedding_preparation_unwired`. Compact `observation` is `null` when
-unmeasured, never zeros; a measured slot is `[work, memory_bytes, native_bytes]`.
-`sourceSemanticAccessPhases` restores `sql_internal_work: unknown` and the fixed
-`phase_accounting` literals `completion: included_in_worker_work_not_separately_measured`,
+Query embedding is `SourceIndexAcquisition.prepareQuery` under
+`beforeSnapshotPreparation`, before the caller-owned read snapshot. The parent
+prepares original navigation first, then a distinct `access_hint` as
+`supplemental_navigation`, capturing both texts and the selected configuration
+before the first bind; both routes share one bind promise. A begun snapshot
+reports `snapshot_already_begun` without inference, replacement or commit; an
+unwired binder is `embedding_preparation_unwired`. Those unavailable receipts may
+still occupy both original and supplemental slots. Prepared vectors and selected
+profiles stay on the private worker `prepared_query` envelope
+(`conditionalField.sourceSemantics`); public MCP/CLI payloads cannot supply them,
+and a private route receipt cannot nest another supplemental. Compact
+`observation` is `null` when unmeasured, never zeros; a measured slot is
+`[work, memory_bytes, native_bytes]`. `sourceSemanticAccessPhases` restores
+`sql_internal_work: unknown` and the fixed `phase_accounting` literals
+`completion: included_in_worker_work_not_separately_measured`,
 `native_cpu: unknown`, and `deadline: soft_quarantine_until_exit`; those fields
 are not retained on the receipt. Soft worker deadlines bound caller latency; a
 quarantined slot stays owned until actual exit. Packing, expansion and pool-identity
 traversal charge the request ledger without refunds. Native resource accounting
 stays truthful and request budgets are not increased; holding a
 canonical-observation quote does not prove that every previous envelope still
-fits. Source index and backfill mechanisms exist; daemon scheduling,
-provisioning, default useful recall and natural-corpus effects are not established.
+fits. Source-index query and backfill mechanisms exist. A private daemon
+Source-index producer is wired into background start/stop and is separate from
+Garden `EMBEDDING_BACKFILL`; it is not an MCP surface. Local model artifacts must
+already be provisioned; this wiring does not download them. Mechanism-level
+cached-model checks do not establish default useful recall or natural-corpus effects. Configuration absence uses `SourceIndexLifecycle.unbind`, not
+build failure: it retires generations, clears active eligibility and advances the
+selection revision to fence old work. Query preparation requires an eligible active
+generation. Producer stop/deadlines end local waiting without cancelling shared
+inference; native occupancy remains owned until settlement or provider close.
 
 Access progressively interleaves source-text observation, bounded header pages
 through the existing capsule cursor index, and whole interpretation verification
@@ -1631,7 +1684,7 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. Protocol owns the complete delivery identity: protocol 7, library v6,
+owner. Protocol owns the complete delivery identity: protocol 8, library v6,
 membership purpose and the five-slot page budget. Worker and public readers derive
 from it; a public outcome-only response contains no partial delivery fields and
 is unavailable for measurement. Unknown/obsolete delivery versions are invalid.

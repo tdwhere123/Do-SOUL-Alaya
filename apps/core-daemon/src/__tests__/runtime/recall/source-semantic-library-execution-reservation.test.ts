@@ -5,7 +5,7 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { canonicalJson, indexEntryCacheKey, sourceSemanticAccessPhases, sourceSemanticExecution,
+import { qualifySourceDisclosure, sourceDisclosure, canonicalJson, indexEntryCacheKey, sourceSemanticAccessPhases, sourceSemanticExecution,
   SourceSemanticExecutionSchema, SourceSemanticWorkerResultSchema, type SourceSemanticAccessReceipt,
   type SourceSemanticExecution, type SourceSemanticWorkerResult, type SoulInterpretationResponse
 } from "@do-soul/alaya-protocol";
@@ -49,8 +49,7 @@ function activeExecution(fixture: ExecutionLibrary, result: Recall,
  */
 function expectedReservation(result: Recall, execution: SourceSemanticExecution): PublicRecall {
   const source_disclosures = Object.fromEntries(Object.entries(result.source_disclosures).map(([key, value]) => {
-    const { source_time: _optional, ...mandatory } = value;
-    return [key, mandatory];
+    return [key, qualifySourceDisclosure(value, sourceDisclosure(value).proof_use.kind, false)];
   }));
   return publicRecall({ ...result, execution, source_disclosures, work: RESERVED_WORK });
 }

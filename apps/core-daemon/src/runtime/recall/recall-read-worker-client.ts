@@ -19,7 +19,7 @@ import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema,
   type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
 
 type PreparedQuery = NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>;
-export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string;
+export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string; supplemental_navigation?: string;
   signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
 export type SourceSemanticsExecutionPort = Readonly<{
   execute(input: SourceSemanticsPublicPayload): Promise<SourceSemanticWorkerResult>;
@@ -291,12 +291,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       if (initial && (request.kind === "prepare_query" || request.kind === "recall") && request.access_policy !== "canonical-v1") {
         const reason = this.lifecycle.snapshotHasBegun() ? "snapshot_already_begun" :
           this.prepareSourceQuery === undefined ? "embedding_preparation_unwired" : undefined;
-        if (reason !== undefined) prepared = { receipt: unavailableSourceQueryPreparation(reason),
-          vector: { status: "unavailable", reason } };
-        else {
+        const navigation = request.original_query!;
+        const hint = request.kind === "prepare_query" && request.access_hint !== navigation ? request.access_hint : undefined;
+        if (reason !== undefined) {
+          // No preparation ran: preserve unknown digest/profile rather than synthesizing a ready binding.
+          const unavailable = { receipt: unavailableSourceQueryPreparation(reason), vector: { status: "unavailable" as const, reason } };
+          prepared = { ...unavailable, ...(hint === undefined ? {} : { supplemental: unavailable }) };
+        } else {
           const deadline = this.lifecycle.preparationDeadline();
           prepared = await this.lifecycle.beforeSnapshotPreparation(() => this.prepareSourceQuery!({ workspace_id: captured.workspace_id,
-            navigation: request.kind === "prepare_query" ? request.access_hint ?? request.original_query : request.original_query!,
+            navigation, ...(hint === undefined ? {} : { supplemental_navigation: hint }),
             signal: deadline.signal, remainingMs: () => deadline.remainingMs() }));
           deadline.check();
         }

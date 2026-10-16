@@ -1,8 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
-import { indexEntryCacheKey } from "@do-soul/alaya-protocol";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterEach(() => { expect(isolation.violations).toEqual([]); });
+afterAll(() => { isolation.restore(); });
+import { sourceDisclosure, indexEntryCacheKey } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256 } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -14,10 +20,7 @@ import { createRecallRealStorage, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
 
 const CLOCK = "2026-09-18T00:00:00.000Z";
 const SOURCE_TIME = "2024-02-03T04:05:06.0000007Z";
-// Protocol v2 includes the actual preparation/acquisition receipt in each delivery.
-const OUTPUT_BYTES = 20_300;
-
-it("reserves all five source facts before adding optional time to a bounded native page", async () => {
+it.each([19_392, 20_300])("reserves all five source facts before optional time at %i native output bytes", async (OUTPUT_BYTES) => {
   const directory = await mkdtemp(join(tmpdir(), "source-time-packing-"));
   const filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
@@ -58,11 +61,22 @@ it("reserves all five source facts before adding optional time to a bounded nati
     expect(delivered.index.continuation).toBeNull();
     expect(delivered.results.every(row => row.budget_state.within_budget)).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(delivered))).toBeLessThanOrEqual(OUTPUT_BYTES);
-    expect(delivered.results.filter(row => row.source_disclosure?.source_time?.kind === "known")).toHaveLength(4);
-    const undisclosed = delivered.results[4]!;
-    expect(undisclosed.source_disclosure?.source_time).toBeUndefined();
-    expect(delivered.source_disclosures[indexEntryCacheKey(delivered.index.entries[4]!)]?.source_time).toBeUndefined();
-    expect(delivered.results[0]?.source_disclosure?.source_time).toEqual({ kind: "known", at: SOURCE_TIME });
+    expect(delivered.results.filter(row => sourceDisclosure(row.source_disclosure!).source_time?.kind === "known"),
+      `complete envelope bytes=${Buffer.byteLength(JSON.stringify(delivered))}`)
+      .toHaveLength(OUTPUT_BYTES === 19_392 ? 4 : 5);
+    if (OUTPUT_BYTES === 19_392) {
+      const undisclosed = delivered.results[4]!;
+      expect(sourceDisclosure(undisclosed.source_disclosure!).source_time).toBeUndefined();
+      expect(sourceDisclosure(delivered.source_disclosures[indexEntryCacheKey(delivered.index.entries[4]!)]!).source_time).toBeUndefined();
+    }
+    for (const row of delivered.results.slice(0, OUTPUT_BYTES === 19_392 ? 4 : 5)) {
+      expect(sourceDisclosure(row.source_disclosure!).source_time).toEqual({ kind: "known", at: SOURCE_TIME });
+    }
+    const wire = JSON.parse(JSON.stringify(delivered));
+    for (const [position, row] of wire.results.entries()) {
+      expect(row.source_disclosure[0]).toBe(1);
+      expect(wire.source_disclosures[indexEntryCacheKey(delivered.index.entries[position]!)]).toEqual(row.source_disclosure);
+    }
 
     const roomy = await client.sourceSemanticsPort!.execute({ ...request,
       request: { ...request.request, output_byte_limit: 1_000_000 } });
@@ -73,7 +87,7 @@ it("reserves all five source facts before adding optional time to a bounded nati
     }
     expect(roomyDelivery.results.map(row => row.content_preview)).toEqual(delivered.results.map(row => row.content_preview));
     expect(roomyDelivery.index.continuation).toBeNull();
-    expect(roomyDelivery.results.every(row => row.source_disclosure?.source_time?.kind === "known")).toBe(true);
+    expect(roomyDelivery.results.every(row => sourceDisclosure(row.source_disclosure!).source_time?.kind === "known")).toBe(true);
     expect(worker.work.logical_work).toBe(roomy.work.logical_work);
     expect(worker.work.logical_memory_bytes).toBe(roomy.work.logical_memory_bytes);
     const constrained = await client.sourceSemanticsPort!.execute({ ...request, request: { ...request.request,

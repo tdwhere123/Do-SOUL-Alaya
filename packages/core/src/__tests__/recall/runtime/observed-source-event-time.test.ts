@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  CONDITIONAL_FIELD_SCHEMA_VERSION,
+  sourceDisclosure, CONDITIONAL_FIELD_SCHEMA_VERSION,
   indexEntryCacheKey,
   sourceIndexEntry,
   sourceRecallTarget,
@@ -146,7 +146,8 @@ function pageSourceTime(
     manifestationFor: () => "excerpt"
   });
   payload.finalize([bound.entry], 20);
-  return payload.sourceMetadata[indexEntryCacheKey(bound.entry)]?.source_disclosure?.source_time;
+  const disclosure = payload.sourceMetadata[indexEntryCacheKey(bound.entry)]?.source_disclosure;
+  return disclosure === undefined ? undefined : sourceDisclosure(disclosure).source_time;
 }
 
 function observationFor(row: SourceRootObserverRow): TypedObservation {

@@ -18,7 +18,7 @@ import { sourceSemanticRevision } from "./source-semantic-leases.js";
 import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { beginCanonicalSourceText, readSourceText } from "./source-semantic-source-observation.js";
 import { acquireSourceSemanticIndex } from "./source-semantic-index-acquisition.js";
-import { SourceSemanticUnionCompletion, reserveEmptyInterpretationCompletion } from "./source-semantic-empty-population-budget.js";
+import { SourceSemanticUnionCompletion } from "./source-semantic-empty-population-budget.js";
 import { sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
 
 type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number];
@@ -53,7 +53,7 @@ export function bindAccessPoolIdentity<Receipt extends Omit<SourceSemanticAccess
   runtime: SourceSemanticReadRuntime, workspace: string, authorized: readonly string[] | null, receipt: Receipt,
   meter: SourceSemanticReadBudget
 ): Receipt & { pool_id: string } {
-  // Preserve the exact expanded v2 preimage, before adding pool_id or a trace.
+  // Bind expanded original/supplemental phase meaning, before adding pool_id or a trace.
   const { phases: _phases, ...fields } = receipt;
   // Expansion borrows every scalar string from immutable tuples or fixed literals.
   // Charge its new object/array frames, then stream canonical scalars to the hash.
@@ -133,8 +133,10 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
       ...(sourcePreviewExtents !== undefined || preferredSourceIds !== undefined || policyName === "canonical-v1" ? {} : {
         acquire: (next: SourceRecordIdentity | null, bodyBytes: number) => {
           const observed = acquireSourceSemanticIndex({ runtime, workspace: payload.workspace_id,
-            navigation: accessHint ?? original, authorized, meter: observation, metadataMeter: meter,
+            navigation: original, authorized, meter: observation, metadataMeter: meter,
             vector: payload.prepared_query?.vector ?? { status: "unavailable", reason: sourceSemanticPreparationReason(prepare, meter) ?? "preparation_unavailable" },
+            ...(accessHint === undefined || accessHint === original ? {} : { supplemental: { navigation: accessHint,
+              vector: payload.prepared_query?.supplemental?.vector ?? { status: "unavailable", reason: "hint_preparation_unavailable" } } }),
             canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost });
           releaseCanonical = observed.releaseCanonical;
           acquisition = observed.phase; observation.acquisition = acquisition;
@@ -175,8 +177,8 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   try {
     interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, byId, sourceRows, stops,
       sourceId, completion === undefined ? undefined : () => {
-        unionCompletion.release(); releaseCanonical();
-        reserveEmptyInterpretationCompletion({
+        releaseCanonical();
+        unionCompletion.emptyCompletion({
         runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
         policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
         suppliedQuerySemantics: completion.suppliedQuerySemantics, accessHint, sourcePreviewExtents,
@@ -206,10 +208,10 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   meter.charge(1, 24, "source phase observation tuple allocation");
   const receipt = sourceSemanticAccessReceiptValue(meter, policyName, inputId, orderedSources, orderedInterpretations,
     sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops],
-    sourcePreviewExtents, { preparation: prepare, acquisition, observation: [
-      observation.spentWork - (indexResources?.[0] ?? 0), observation.spentBytes - (indexResources?.[1] ?? 0),
-      observation.nativeBytes - (indexResources?.[2] ?? 0)] });
-  meter.retain(receipt, "access receipt identity");
+    sourcePreviewExtents, { preparation: prepare, acquisition, observation: indexResources === null ? null : [
+      observation.spentWork - indexResources[0], observation.spentBytes - indexResources[1],
+      observation.nativeBytes - indexResources[2]] });
+  meter.retain(receipt, "access receipt identity", "borrow");
   const access = bindAccessPoolIdentity(runtime, payload.workspace_id, authorized, receipt, meter);
   return { sources: orderedSources.map((row) => byId.get(row.record_id)!),
     descriptors: orderedInterpretations.map((row) => interpretations.descriptors.get(row.interpretation_id)!),
@@ -409,22 +411,33 @@ function appendInterpretationHeaders(pending: InterpretationHeader[], rows: read
 
 function readInterpretationNavigation(runtime: SourceSemanticReadRuntime, workspace: string,
   meter: SourceSemanticReadBudget, policy: Policy) {
-  const query = policy.navigationQuery(meter);
-  if (query === null) return { rows: [], unavailable: false, resourceLimited: false };
-  const nativeLimit = Math.min(meter.work, 2 * SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE + 2);
-  const nativeByteLimit = Math.min(Math.floor(meter.bytes / 8), 1_000_000);
-  meter.reserve(nativeLimit, nativeByteLimit, "access navigation page");
-  const page = new SqliteSourceHintReader(runtime.database.connection).pageInterpretationTextHints({
-    workspaceId: workspace, query, limit: SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-    nativeLimit, nativeByteLimit, afterCursor: null
-  });
-  meter.read(page.nativeVisits, page.bytesRead);
   const rows: InterpretationHeader[] = [];
-  for (const row of page.rows) {
-    const header = { ...row, identity: row.object_id, query_hint: true as const };
-    meter.retain(header, "access lexical header retention"); rows.push(header);
+  let nativeRemaining = 2 * SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE + 2;
+  let unavailable = false, resourceLimited = false;
+  try {
+    for (const route of ["original", "hint"] as const) {
+      if (nativeRemaining === 0 || rows.length === SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE) break;
+      const query = policy.navigationQuery(meter, route);
+      if (query === null) continue;
+      const nativeLimit = Math.min(meter.work, nativeRemaining);
+      const nativeByteLimit = Math.min(Math.floor(meter.bytes / 8), 1_000_000);
+      meter.reserve(nativeLimit, nativeByteLimit, "access navigation page");
+      const page = new SqliteSourceHintReader(runtime.database.connection).pageInterpretationTextHints({
+        workspaceId: workspace, query, limit: SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE - rows.length,
+        nativeLimit, nativeByteLimit, afterCursor: null
+      });
+      meter.read(page.nativeVisits, page.bytesRead); nativeRemaining -= page.nativeVisits;
+      unavailable ||= page.unavailable; resourceLimited ||= page.resourceLimited;
+      for (const row of page.rows) {
+        const header = { ...row, identity: row.object_id, query_hint: true as const };
+        meter.retain(header, "access lexical header retention"); rows.push(header);
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+    resourceLimited = true;
   }
-  return { rows, unavailable: page.unavailable, resourceLimited: page.resourceLimited };
+  return { rows, unavailable, resourceLimited };
 }
 
 function readInterpretationHeaderPage(runtime: SourceSemanticReadRuntime, workspace: string,
@@ -471,7 +484,7 @@ export function accessDescriptorPage(runtime: SourceSemanticReadRuntime, workspa
 export function preparationAccessReceipt(pool: SourceSemanticAccessPool, sourceOffset: number,
   interpretationOffset: number, interpretationCount: number, meter: SourceSemanticReadBudget): SourceSemanticAccessReceipt {
   const receipt = preparationAccessReceiptValue(pool, sourceOffset, interpretationOffset, interpretationCount);
-  meter.retain(receipt, "access trace delivery");
+  meter.retain(receipt, "access trace delivery", "borrow");
   return receipt;
 }
 
@@ -485,6 +498,6 @@ export function libraryAccessReceipt(pool: SourceSemanticAccessPool, examined: r
   const receipt: SourceSemanticAccessReceipt = { ...pool.access, source_candidates: sourceRows, interpretation_candidates: interpretationRows,
     trace: { kind: "library_selection", omitted_source_count: pool.access.observed_source_count - sourceRows.length,
       omitted_interpretation_count: pool.access.observed_interpretation_count - interpretationRows.length } };
-  meter.retain(receipt, "access trace delivery");
+  meter.retain(receipt, "access trace delivery", "borrow");
   return receipt;
 }

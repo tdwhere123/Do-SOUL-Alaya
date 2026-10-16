@@ -12,7 +12,7 @@ import { InformationIndexSchema, IndexEntrySchema, sourceIndexEntry, indexEntryC
   memoryIndexEntry } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
-import { SourceDisclosureSchema } from "../../recall/source-disclosure.js";
+import { encodeSourceDisclosure, sourceDisclosure, SourceDisclosureSemanticSchema } from "../../recall/source-disclosure.js";
 import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema, SourceSemanticLibraryProofSchema,
@@ -32,27 +32,28 @@ const coverage = {
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
 const execution = sourceSemanticExecution();
-const accessPhases = [1,
+const accessPhases = [2,
   packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
     unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"))),
   packSourceSemanticAcquisition(captureSourceSemanticAcquisition(
     sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"))),
   null] as const;
-const disclosure = { material_kind: "interpretation", source_binding: "unbound",
+const disclosure = encodeSourceDisclosure({ material_kind: "interpretation", source_binding: "unbound",
   evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "unbound" },
-  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } };
+  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } });
 
-it("accepts historical disclosure bytes while binding disclosed source time to a checked record", () => {
-  expect(SourceDisclosureSchema.safeParse(disclosure).success).toBe(true);
-  expect(SourceDisclosureSchema.safeParse({ ...disclosure,
+it("binds disclosed source time to a checked record without conflating omitted time", () => {
+  const semantic = sourceDisclosure(disclosure);
+  expect(SourceDisclosureSemanticSchema.safeParse(semantic).success).toBe(true);
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...semantic,
     source_time: { kind: "unknown", reason: "unbound" } }).success).toBe(true);
-  expect(SourceDisclosureSchema.safeParse({ ...disclosure,
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...semantic,
     source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }).success).toBe(false);
-  const checked = { ...disclosure, source_binding: "checked_record",
+  const checked = { ...semantic, source_binding: "checked_record",
     validity: { kind: "unknown", reason: "not_recorded" } };
-  expect(SourceDisclosureSchema.safeParse({ ...checked,
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...checked,
     source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }).success).toBe(true);
-  expect(SourceDisclosureSchema.safeParse({ ...checked,
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...checked,
     source_time: { kind: "unknown", reason: "unbound" } }).success).toBe(false);
 });
 const validQuery = SourceSemanticQuerySchema.parse({
@@ -360,7 +361,7 @@ it("requires a disclosure for each delivered source and rejects metadata for an 
   const delivery = { ...baseDelivery, total_count: 1,
     index: { ...baseDelivery.index, entries: [entry] },
     slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
-    source_disclosures: { [key]: { ...disclosure, material_kind: "original_body" } } };
+    source_disclosures: { [key]: encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" }) } };
   const accepted = SourceSemanticLibraryDeliverySchema.safeParse(delivery);
   expect(accepted.success, accepted.success ? "" : JSON.stringify(accepted.error.issues)).toBe(true);
   expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...delivery, source_disclosures: {} }).success).toBe(false);
@@ -388,9 +389,9 @@ it("requires each semantic proof qualifier to occupy a delivered source slot", (
     coverage: { ...coverage, query_semantics: "complete" },
     index: { ...delivery.index, entries: [entry] }
   };
-  const sourceOnlyDisclosure = { ...disclosure, material_kind: "original_body" };
-  const proofDisclosure = { ...sourceOnlyDisclosure,
-    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
+  const sourceOnlyDisclosure = encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" });
+  const proofDisclosure = encodeSourceDisclosure({ ...sourceDisclosure(sourceOnlyDisclosure),
+    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } });
   const memory = memoryIndexEntry({ workspace_id: "workspace", object_id: "memory", source_revision: "v1",
     association_milligrades: 0 });
   expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest },
@@ -432,8 +433,8 @@ it("requires proof qualifiers to bind delivered proof premises on a proof-bearin
     coverage: { ...coverage, query_semantics: "complete" },
     index: { ...delivery.index, entries: [entry] }
   };
-  const proofDisclosure = { ...disclosure, material_kind: "original_body",
-    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
+  const proofDisclosure = encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body",
+    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } });
   const bound = { ...occupied, proofs: [proof], source_disclosures: { [key]: proofDisclosure } };
   const qualifier = sourceSemanticProofQualifier(proof, 0);
   expect(accepts({ ...bound, slot_qualifiers: [qualifier] })).toEqual([true, true]);
@@ -453,7 +454,7 @@ it("requires proof qualifiers to bind delivered proof premises on a proof-bearin
     sourceSemanticProofQualifier(libraryProof({ rootId: "other" }), 0)
   ], source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
   expect(accepts({ ...occupied, proofs: [proof], slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
-    source_disclosures: { [key]: { ...disclosure, material_kind: "original_body" } } })).toEqual([true, true]);
+    source_disclosures: { [key]: encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" }) } })).toEqual([true, true]);
 });
 
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {

@@ -47,7 +47,7 @@ function readyBind(selected: SourceIndexSelection, embed: SourceEmbeddingBinding
   return { status: "ready", profile: selected.configuration.profile, profile_id: selected.profile_id, embedInputs: embed, ...changes };
 }
 async function prepare(input: {
-  navigation?: string; selection?: SourceIndexSelection | null; bind?: (options: {
+  navigation?: string; supplemental_navigation?: string; selection?: SourceIndexSelection | null; bind?: (options: {
     window_bytes: number; max_input_tokens?: number;
   }) => Promise<SourceEmbeddingBindingResult>; signal?: AbortSignal; remainingMs?: () => number;
 }) {
@@ -57,7 +57,7 @@ async function prepare(input: {
     return embedded(rows);
   }));
   return SourceIndexAcquisition.prepareQuery({
-    navigation: input.navigation ?? NAVIGATION, selection: selected, bind, signal: input.signal ?? new AbortController().signal,
+    navigation: input.navigation ?? NAVIGATION, supplemental_navigation: input.supplemental_navigation, selection: selected, bind, signal: input.signal ?? new AbortController().signal,
     remainingMs: input.remainingMs ?? (() => 5_000)
   });
 }
@@ -70,6 +70,30 @@ function expectReceipt(receipt: SourceSemanticQueryPreparation, expected: Record
 }
 
 describe("simulated query-preparation adapters, no native inference", () => {
+  it("captures one selection and binding for distinct original/hint vectors and retains failed hint submissions", async () => {
+    const selected = selectionFor(profile()), originalSelection = structuredClone(selected);
+    const embed = vi.fn(async (inputs: readonly SourceEmbeddingInput[]) => {
+      if (inputs[0]?.text !== NAVIGATION) throw new Error("hint inference failed");
+      // Mutation after the first await cannot retarget the hint's selected profile/configuration.
+      Object.assign(selected, { profile_id: ZERO, config_id: ZERO });
+      return embedded(inputs);
+    });
+    const bind = vi.fn(async () => readyBind(originalSelection, embed));
+    const result = await prepare({ selection: selected, supplemental_navigation: "different navigation", bind });
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(embed.mock.calls.map(([inputs]) => inputs[0]?.text)).toEqual([NAVIGATION, "different navigation"]);
+    expect(result.receipt).toMatchObject({ status: "ready", submitted_inputs: 1,
+      selected: { profile_id: originalSelection.profile_id, config_id: originalSelection.config_id } });
+    expect(result.supplemental?.receipt).toMatchObject({ status: "failed", submitted_inputs: 1,
+      token_count: null, execution_work: "unknown", external_api_attempts: 0,
+      navigation_digest: sourceEmbeddingInputDigest("different navigation"),
+      selected: { profile_id: originalSelection.profile_id, config_id: originalSelection.config_id } });
+    expect(result.vector.status).toBe("available");
+    expect(result.supplemental?.vector.status).toBe("unavailable");
+    const duplicate = await prepare({ supplemental_navigation: NAVIGATION });
+    expect(duplicate.supplemental).toBeUndefined();
+  });
+
   it("reports null/unbound selection without binding, submitting, or treating abort/deadline as the cause", async () => {
     const bind = vi.fn();
     const signal = AbortSignal.abort();

@@ -21,7 +21,7 @@ const original = "Why delayed?";
 const query = accessQuery(original, "postpone");
 const prepare = { kind: "prepare_query" as const, original_query: original, query_semantics: query, budget: ACCESS_BUDGET };
 
-it("uses one hinted indexed navigation to reach a source outside the bounded census through public worker preparation", async () => {
+it("uses original navigation then supplemental hint to reach a source outside the bounded census through public worker preparation", async () => {
   await withAccessLibrary([
     { id: "a", text: "Granite walls." },
     { id: "middle", text: "Granite ".repeat(1000), reading: "surround", count: 40 },
@@ -41,8 +41,7 @@ it("uses one hinted indexed navigation to reach a source outside the bounded cen
         { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] }, request: { ...request, access_hint: "Harbor" } },
         ["project"], meter, original, query, "query-conditioned-v1", budget,
         undefined, undefined, undefined, undefined, "Harbor"))();
-      expect(navigation).toHaveBeenCalledOnce();
-      expect(navigation.mock.calls[0]?.[0].query).toBe("Harbor");
+      expect(navigation.mock.calls.map(([input]) => input.query)).toEqual([original, "Harbor"]);
       expect(pool.sources.map(row => row.source_id)).toContain("z");
       expect(pool.sources.map(row => row.source_id)).not.toContain("private");
       expect(meter.nativeWork).toBeGreaterThan(0);
@@ -116,7 +115,7 @@ it("admits one current source tuple shared by canonical, native index and repeat
         expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
       } finally { database.close(); closeCachedDatabase(filename); }
       const prepared = await accessCall(execute, { ...prepare, access_hint: "Harbor" });
-      expect(sourceSemanticAccessPhases(prepared.access!).acquisition.result?.nominations).toContainEqual(expect.objectContaining({ source: target,
+      expect(sourceSemanticAccessPhases(prepared.access!).acquisition.supplemental?.[0]?.result?.nominations).toContainEqual(expect.objectContaining({ source: target,
         lexical: [expect.objectContaining({ lane: "unicode61", rank: 1 })] }));
       expect(prepared.access?.observed_source_count).toBe(1);
       expect(prepared.access?.observed_interpretation_count).toBe(2);

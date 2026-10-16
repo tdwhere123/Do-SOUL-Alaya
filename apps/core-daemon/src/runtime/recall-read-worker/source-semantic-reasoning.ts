@@ -24,12 +24,21 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
   const meter = new SourceSemanticReadBudget(payload.request.budget);
   const run = (executionOf: () => SourceSemanticExecution) => {
     if (payload.prepared_query !== undefined) {
-      if (payload.prepared_query.vector.status === "available") {
-        // postMessage clones the backing buffer, even for a view. Core's later capture owns a separate copy.
-        meter.charge(0, payload.prepared_query.vector.embedding.buffer.byteLength, "worker received query vector");
+      meter.preparation = packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation({
+        ...payload.prepared_query.receipt, ...(payload.prepared_query.supplemental === undefined ? {} : {
+          supplemental: [payload.prepared_query.supplemental.receipt] }) }, meter), meter);
+      // Keep inference evidence even if charging the received buffers refuses observation.
+      executionOf();
+      // postMessage clones each distinct backing buffer, even for views; acquisition later
+      // captures each measured vector separately. Neither failed nor supplemental work is free.
+      meter.charge(1, 80, "worker query vector buffer references");
+      const buffers = new Set<ArrayBufferLike>();
+      for (const route of [payload.prepared_query, payload.prepared_query.supplemental]) {
+        if (route?.vector.status === "available" && !buffers.has(route.vector.embedding.buffer)) {
+          meter.charge(1, 32 + route.vector.embedding.buffer.byteLength, "worker received query vector");
+          buffers.add(route.vector.embedding.buffer);
+        }
       }
-      meter.preparation = packSourceSemanticQueryPreparation(
-        captureSourceSemanticQueryPreparation(payload.prepared_query.receipt, meter), meter);
     }
     // Capture failure evidence before exploration can exhaust its allowance. Reuse requires unchanged phase owners.
     executionOf();

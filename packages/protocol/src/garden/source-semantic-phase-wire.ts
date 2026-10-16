@@ -4,7 +4,7 @@ import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexProfileSchema, SourceIndexTargetSchema } from "../recall/source-index.js";
 import { SourceSemanticQueryWindowSchema, SourceSemanticVectorBindingSchema } from "./source-semantic-phase-semantics.js";
 
-// Version 1 fixes these codes independently of schema/property iteration order.
+// Codes are stable across phase envelope versions; v2 binds original-first routes.
 export const PHASE_CODES = {
   preparation: ["ready", "unavailable", "failed", "not_requested"],
   method: ["not_run", "local_inference", "external_api"],
@@ -73,20 +73,32 @@ function limitations(owner: References, values: readonly z.infer<typeof Limitati
 }
 
 /** Admission checks compact slots directly. It must not construct an expanded semantic phase. */
-const CompactPreparationShape = z.tuple([z.literal(1), Strings, PreparationBody]).readonly()
-  .superRefine(([, table, body], ctx) => {
+const SinglePreparation = z.tuple([z.literal(1), Strings, PreparationBody]).readonly();
+const CompactPreparationShape = z.tuple([z.literal(1), Strings, PreparationBody,
+  z.tuple([SinglePreparation]).readonly().optional()]).readonly()
+  .superRefine(([version, table, body, supplemental], ctx) => {
+    checkPreparationReferences([version, table, body], ctx);
+    for (const route of supplemental ?? []) checkPreparationReferences(route, ctx);
+  });
+function checkPreparationReferences([, table, body]: z.infer<typeof SinglePreparation>, ctx: z.RefinementCtx): void {
     const owner = { table, ctx };
     reference(owner, body[2]); reference(owner, body[3], true);
     if (body[0] === 1 && body[4] !== null) {
       reference(owner, body[4][1], true); reference(owner, body[4][2], true);
     }
-  });
+}
 export type SourceSemanticCompactPreparation = z.output<typeof CompactPreparationShape>;
 export type SourceSemanticCompactPreparationInput = z.input<typeof CompactPreparationShape>;
 export const SourceSemanticCompactPreparationSchema:
   z.ZodType<SourceSemanticCompactPreparation, SourceSemanticCompactPreparationInput> = CompactPreparationShape;
-const CompactAcquisitionShape = z.tuple([z.literal(1), Strings, AcquisitionBody]).readonly()
-  .superRefine(([, table, body], ctx) => {
+const SingleAcquisition = z.tuple([z.literal(1), Strings, AcquisitionBody]).readonly();
+const CompactAcquisitionShape = z.tuple([z.literal(1), Strings, AcquisitionBody,
+  z.tuple([SingleAcquisition]).readonly().optional()]).readonly()
+  .superRefine(([version, table, body, supplemental], ctx) => {
+    checkAcquisitionReferences([version, table, body], ctx);
+    for (const route of supplemental ?? []) checkAcquisitionReferences(route, ctx);
+  });
+function checkAcquisitionReferences([, table, body]: z.infer<typeof SingleAcquisition>, ctx: z.RefinementCtx): void {
     const owner = { table, ctx };
     reference(owner, body[1]);
     const result = body[4];
@@ -106,19 +118,19 @@ const CompactAcquisitionShape = z.tuple([z.literal(1), Strings, AcquisitionBody]
       reference(owner, vector[6][1], true); reference(owner, vector[6][2], true);
     } else reference(owner, vector[6][1]);
     limitations(owner, result[8]);
-  });
+}
 export type SourceSemanticCompactAcquisition = z.output<typeof CompactAcquisitionShape>;
 export type SourceSemanticCompactAcquisitionInput = z.input<typeof CompactAcquisitionShape>;
 export const SourceSemanticCompactAcquisitionSchema:
   z.ZodType<SourceSemanticCompactAcquisition, SourceSemanticCompactAcquisitionInput> = CompactAcquisitionShape;
-const AccessPhasesShape = z.tuple([z.literal(1), SourceSemanticCompactPreparationSchema,
+const AccessPhasesShape = z.tuple([z.literal(2), SourceSemanticCompactPreparationSchema,
   SourceSemanticCompactAcquisitionSchema, Resources.nullable()]).readonly();
 export type SourceSemanticAccessPhases = z.output<typeof AccessPhasesShape>;
 export type SourceSemanticAccessPhasesInput = z.input<typeof AccessPhasesShape>;
 export const SourceSemanticAccessPhasesSchema:
   z.ZodType<SourceSemanticAccessPhases, SourceSemanticAccessPhasesInput> = AccessPhasesShape;
 const ExecutionShape = z.union([z.literal("native_reasoning_only"),
-  z.tuple([z.literal(1), SourceSemanticCompactPreparationSchema, SourceSemanticCompactAcquisitionSchema]).readonly()]);
+  z.tuple([z.literal(2), SourceSemanticCompactPreparationSchema, SourceSemanticCompactAcquisitionSchema]).readonly()]);
 export type SourceSemanticExecution = z.output<typeof ExecutionShape>;
 export type SourceSemanticExecutionInput = z.input<typeof ExecutionShape>;
 export const SourceSemanticExecutionSchema: z.ZodType<SourceSemanticExecution, SourceSemanticExecutionInput> = ExecutionShape;
