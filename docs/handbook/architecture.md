@@ -331,6 +331,39 @@ Field formation, projection-generation, and causal-usage writes use
 the verified persist-then-audit order: persist the receipt, then append
 EventLog from a separate audit helper. Audit still precedes broadcast.
 
+Predecessor-bound source replacement uses that same audited writer as
+ordinary retained-source admission (`createAuditedSourceReplacement`,
+wired as daemon `sourceRecordReplacement`). Possession of the Node
+capability is authority; it is not an MCP, CLI, or Inspector write
+surface and does not authorize a new public product API. The writer
+captures the request once, then compare-and-replaces only inside a
+top-level field transaction that still holds the expected current record
+(`workspace_id`, `source_id`, `identity`, `source_version`,
+`content_digest`). The replacement must keep that workspace and logical
+source, use a new `source_version`, and carry a strictly later
+`recorded_at`. Nested savepoints cannot attest a durable transition.
+Precommit refusal (`rejected`) leaves no replacement row, audit, or
+notification. Unknown commit evidence must not be rewritten as rollback
+or as a fabricated transition. After a durable commit, postcommit
+projection failure (`committed_projection_unready`) keeps the stored
+transition and does not append audit. `explicit_checkpoint` deferral is
+not a projection failure: the writer still appends the replacement
+admission audit and notifies after the receipt. It returns
+`committed_projection_deferred` when rebuilding is deferred to a later
+field projection checkpoint; that returned outcome does not change when
+the checkpoint runs. A completed immediate projection, acknowledged audit
+and successful notification return `ready`. An incomplete audit remains
+`committed_audit_incomplete` with `not_appended` or `unknown` append evidence;
+an acknowledged audit followed by notification failure remains
+`committed_notification_failed`. Neither rolls back the committed source
+transition. The observed pair is this writer's historical
+predecessor → replacement, not durable correction lineage, content
+truth, or later currentness; supersession during audit does not erase
+that pair. Predecessor bytes and event time remain stored. Independent
+contradictory source reports remain separate evidence, not replacements.
+This contract does not close a full feedback loop or cross-source
+chronology.
+
 Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.
 
@@ -468,7 +501,8 @@ Both produce candidates that flow through the Promotion Gate before
 becoming durable.
 
 Ordinary official-API extraction uses `source-interpretation-v1`. Protocol owns
-phrase location and Core owns source admission and observation publication;
+phrase location and Core owns source admission, predecessor-bound
+replacement, and observation publication;
 model predicate/role proposals do not certify their meaning. Interactive turns,
 post-turn tasks, and bench compile seeds retain the exact canonical extraction
 corpus before calling the provider or replaying its cache. Interactive artifact

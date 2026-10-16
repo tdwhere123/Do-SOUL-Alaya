@@ -40,7 +40,7 @@ function wrapExplicitCheckpointLifecycle(
     rebuild: (workspaceId, recordedAt) => raw.rebuild(workspaceId, recordedAt),
     requestRebuild: (workspaceId, requestedAt) =>
       raw.requestRebuild(workspaceId, requestedAt),
-    drainPending() {},
+    drainPending() { return "deferred" as const; },
     checkpoint() {
       raw.drainPending();
     }

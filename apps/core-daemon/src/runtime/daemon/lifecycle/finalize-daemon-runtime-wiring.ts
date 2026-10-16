@@ -8,6 +8,7 @@ import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   createSourceAdmissionPort,
   createAuditedSourceAdmission,
+  createAuditedSourceReplacement,
   fieldContractSha256,
   HqAnswerOverlapPairSource
 } from "@do-soul/alaya-core";
@@ -255,6 +256,12 @@ function createMemoryHqExports(input: FinalizeDaemonRuntimeWiringInput) {
 function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
   return {
     sourceRecordAdmission: createAuditedSourceAdmission({
+      sha256: fieldContractSha256,
+      stores: input.fieldComposition.stores,
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
+    }),
+    sourceRecordReplacement: createAuditedSourceReplacement({
       sha256: fieldContractSha256,
       stores: input.fieldComposition.stores,
       eventLogRepo: input.eventLogRepo,

@@ -26,6 +26,16 @@ afterEach(() => {
 });
 
 describe("field composition admission", () => {
+  it.each(["immediate", "explicit_checkpoint"] as const)("reports the committed transaction projection under %s admission", mode => {
+    const { database, stores } = openComposition(mode);
+    const record = sourceRecord("Ada wrote notes.");
+    const outcome = stores.runAtomicWithOutcome!(() => stores.putRecord(record, "Ada wrote notes."));
+    expect(outcome).toMatchObject({ status: "committed", result: record,
+      projection: mode === "immediate" ? "ready" : "deferred" });
+    expect(rebuildStartedCount(database)).toBe(mode === "immediate" ? 1 : 0);
+    expect(pendingRebuildCount(database)).toBe(mode === "immediate" ? 0 : 1);
+  });
+
   it("rebuilds on each source write when admission is immediate", () => {
     const { database, stores } = openComposition();
     stores.putRecord(sourceRecord("Ada wrote notes."), "Ada wrote notes.");
@@ -40,7 +50,7 @@ describe("field composition admission", () => {
     stores.putRecord(sourceRecord("Ada wrote notes."), "Ada wrote notes.");
     stores.putRecord(sourceRecord("Ada revised notes."), "Ada revised notes.");
     projectionLifecycle.requestRebuild(WORKSPACE, "2026-08-16T00:03:00.000Z");
-    projectionLifecycle.drainPending();
+    expect(projectionLifecycle.drainPending()).toBe("deferred");
 
     expect(rebuildStartedCount(database)).toBe(0);
     expect(pendingRebuildCount(database)).toBe(1);

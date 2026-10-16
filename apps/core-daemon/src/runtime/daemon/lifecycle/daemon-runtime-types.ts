@@ -11,6 +11,7 @@ import type { TrustStateRecorder } from "../../../trust/state.js";
 import type {
   AnswerCoRelevancePairSourcePort,
   AuditedSourceAdmission,
+  AuditedSourceReplacement,
   EmbeddingRecallService,
   PathRelationProposalService,
   RecallService,
@@ -142,6 +143,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly relationProjectionCheckpoint: RelationProjectionCheckpointPort;
   readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
   readonly sourceRecordAdmission: AuditedSourceAdmission;
+  readonly sourceRecordReplacement: AuditedSourceReplacement;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

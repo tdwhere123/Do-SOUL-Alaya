@@ -74,6 +74,15 @@ export {
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
+export {
+  createAuditedSourceReplacement,
+  type AuditedSourceReplacement,
+  type SourceReplacementRequest,
+  type SourceReplacementPredecessor,
+  type SourceReplacementTransition,
+  type SourceReplacementOutcome
+} from "./memory/evidence-create/audited-source-replacement.js";
+export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
 export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
 export { authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
 export {

@@ -41,7 +41,8 @@ export type SqliteFieldProjectionLifecycle = Readonly<{
     recordedAt: string
   ): FieldProjectionGeneration;
   requestRebuild(workspaceId: string, requestedAt: string): void;
-  drainPending(): void;
+  /** Void attests a completed drain; deferred leaves work for the explicit checkpoint. */
+  drainPending(): void | "deferred";
   checkpoint(): void;
 }>;
 
