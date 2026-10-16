@@ -10,7 +10,11 @@ import type { SourceEmbeddingBinding, SourceEmbeddingInput } from "../../embeddi
 
 const stubChildPath = fileURLToPath(new URL("./local-onnx-embedding-ipc-stub-child.mjs", import.meta.url));
 const clients: LocalOnnxEmbeddingClient[] = [];
-afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.close())); });
+const releaseTerminations: Array<() => void> = [];
+afterEach(async () => {
+  for (const release of releaseTerminations.splice(0)) release();
+  await Promise.all(clients.splice(0).map(client => client.close()));
+});
 
 // Real fork/IPC and deterministic fixture evidence; no tokenizer, model, or provider execution.
 describe("Source embedding (real fork transport, fixture capability)", () => {
@@ -176,7 +180,7 @@ describe("Source embedding (real fork transport, fixture capability)", () => {
   it.each(["timeout", "abort"])("refuses Source %s and waits for the actual child exit before replacement", async (cancellation) => {
     let sent!: () => void;
     const started = new Promise<void>(resolve => { sent = resolve; });
-    const tracking = forkFixture({ running: sent });
+    const tracking = forkFixture({ running: sent, holdTermination: true });
     const client = openClient(tracking.host);
     const binding = await bind(client);
     const controller = new AbortController();
@@ -189,8 +193,13 @@ describe("Source embedding (real fork transport, fixture capability)", () => {
     await refusal;
     expect(tracking.live).toBe(1);
     const replacement = bind(client);
-    await new Promise(resolve => setTimeout(resolve, 40));
-    expect(tracking.spawns).toBe(1);
+    void replacement.catch(() => undefined); // Cleanup may reject it if an assertion fails.
+    // Windows terminates immediately on SIGTERM, so hold the request at the host boundary.
+    // The real exit event, rather than a sleep or a synthetic exit, releases the replacement.
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      expect(tracking.spawns).toBe(1);
+    } finally { tracking.releaseTermination(); }
     const fresh = await replacement;
     await expect(fresh.embedInputs([{ input_id: "recovered", text: "raw" }], { profile_id: fresh.profile_id, timeoutMs: 5_000 }))
       .resolves.toMatchObject([{ status: "embedded", input_id: "recovered" }]);
@@ -281,16 +290,26 @@ function forkFixture(hooks: {
   response?(response: MutableResponse, request: LocalOnnxEmbeddingIpcRequest): void;
   send?(request: LocalOnnxEmbeddingIpcRequest, childIndex: number): void;
   running?(): void;
+  holdTermination?: boolean;
 } = {}) {
   const inner = createForkLocalOnnxEmbeddingHost(stubChildPath);
-  const tracking = { spawns: 0, live: 0, maxLive: 0, requests: [] as LocalOnnxEmbeddingIpcRequest[],
+  let held = hooks.holdTermination ?? false;
+  let terminate: (() => void) | undefined;
+  const tracking = { releaseTermination() { held = false; terminate?.(); terminate = undefined; },
+    spawns: 0, live: 0, maxLive: 0, requests: [] as LocalOnnxEmbeddingIpcRequest[],
     replies: [] as LocalOnnxEmbeddingIpcSuccess[], deliver: [] as Array<(message: unknown) => void>, host: null! as LocalOnnxEmbeddingIpcHost };
+  if (held) releaseTerminations.push(tracking.releaseTermination);
   tracking.host = { spawn() {
     const childIndex = tracking.spawns++;
     tracking.maxLive = Math.max(tracking.maxLive, ++tracking.live);
     const child = inner.spawn();
     child.on("exit", () => { tracking.live -= 1; });
     return new Proxy(child, { get(target, property, receiver) {
+      if (property === "kill") return (signal?: Parameters<typeof child.kill>[0]) => {
+        if (!held) return target.kill(signal);
+        terminate = () => { target.kill(signal); };
+        return true;
+      };
       if (property === "send") return (message: LocalOnnxEmbeddingIpcRequest, callback?: (error: Error | null) => void) => {
         tracking.requests.push(structuredClone(message));
         hooks.send?.(message, childIndex);

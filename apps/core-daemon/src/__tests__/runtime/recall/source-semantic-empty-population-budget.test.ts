@@ -117,7 +117,7 @@ it("reserves real v2 nomination metadata, execution evidence and both frozen lea
     const { pool_id: _poolId, ...receipt } = observed.access;
     actual.retain(receipt);
     actual.retain(preparationAccessReceiptValue(observed, 0, 0, 0));
-    actual.retain(sourceSemanticExecution(phases.preparation, phases.acquisition));
+    sourceSemanticExecution(phases.preparation, phases.acquisition, actual);
     actual.retain({ ...queryPreparationLease(context, observed, 0, 0, false), kind: "query" });
     actual.retain({ ...queryPreparationLease(context, observed, 0, 16, false), kind: "page" });
     actual.charge(semanticLeaseGroupAccountingCost(2), 0);

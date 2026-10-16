@@ -169,8 +169,8 @@ async function withOriginalLibrary(
 
 it("rejects a partially hydrated frozen pool even when the proposal is empty", async () => {
   await withOriginalLibrary(twelveSources(), async ({ database, records }) => {
-    // This quota can hydrate and deliver the first source, but not the complete twelve-source pool.
-    const budget = { ...ACCESS_BUDGET, work_units: 2000 };
+    // Include streamed hash handoffs: hydrate/deliver one source, but not the complete twelve-source pool.
+    const budget = { ...ACCESS_BUDGET, work_units: 3000 };
     const first = records[0]!.record_id;
     const small = compareResearchOriginalSourceEvidence(database, {
       ...evidenceInput(records.slice(0, 1), { proposed_root_ids: [first] }), budget

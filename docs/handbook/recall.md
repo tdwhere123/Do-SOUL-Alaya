@@ -1559,7 +1559,15 @@ observations and prepared benchmark plans also pin the implementation revision.
 The access receipt retains identities, cached scores, source byte extents,
 compact `phases`, and open residuals, without duplicating interpretation bodies
 or expanded preparation/acquisition/`phase_accounting` fields. `pool_id` hashes
-the expanded preimage independently of that retained compact form. It reports the total
+the expanded preimage independently of that retained compact form. Identity hashing
+streams canonical scalars through the shared hash owner; it does not retain an
+additional expanded tree or enclosing JSON string. Phase expansion charges new
+container/reference frames while borrowing immutable scalar strings. Encoding
+charges traversal, ordering, scalar JSON and UTF-8 handoff allocations. Native
+acquisition wrappers pack owner-produced data directly, validating forwarded
+repository/binder leaves before issuing leases; wire ingress still captures the
+complete semantic schema. Execution reserves price its actual tuple construction,
+not another deep copy of already-owned phases. It reports the total
 observed source and interpretation counts separately from rows omitted from the
 current trace. Preparation continuation pages at most 16 source trace rows and
 16 interpretation descriptors; their offsets refer to the same frozen pool.

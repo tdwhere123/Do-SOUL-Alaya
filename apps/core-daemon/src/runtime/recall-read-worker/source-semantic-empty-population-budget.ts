@@ -66,9 +66,12 @@ function planCompletion(input: Completion, planning: SourceSemanticReadBudget,
   const poolPrice = measure({ ...pool, sources: measure(records), descriptors: emptyPrice, access: accessPrice });
   const queryLeasePrice = measure({ ...queryLease, access_pool: poolPrice, candidates: emptyPrice });
   const leaseCount = input.leaseCount ?? (records.length > SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE ? 2 : 1);
-  const execution = sourceSemanticExecution(input.phases?.preparation, input.phases?.acquisition, planning);
+  const beforeExecution = { work_units: planning.spentWork, memory_bytes: planning.spentBytes };
+  sourceSemanticExecution(input.phases?.preparation, input.phases?.acquisition, planning);
+  // Execution reuses owned compact phases; quote its actual framing/equality work, not a deep copy.
+  const executionPrice = { work_units: planning.spentWork - beforeExecution.work_units,
+    memory_bytes: planning.spentBytes - beforeExecution.memory_bytes };
   const pageLeasePrice = leaseCount === 2 ? measure({ ...pageLease, access_pool: poolPrice, candidates: emptyPrice }) : undefined;
-  const executionPrice = measure(execution);
   const initial = add(emptyPrice, input.orderCost(records.length), receiptPrice, tracePrice, executionPrice,
     queryLeasePrice, ...(pageLeasePrice === undefined ? [] : [pageLeasePrice]),
     { work_units: semanticLeaseGroupAccountingCost(leaseCount), memory_bytes: 0 });

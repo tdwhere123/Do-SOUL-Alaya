@@ -3,10 +3,14 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../../../../bench-runner/src/__tests__/support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
+afterEach(() => {
+  try { expect(isolation.violations).toEqual([]); }
+  finally { vi.useRealTimers(); vi.restoreAllMocks(); }
+});
 afterAll(() => { isolation.restore(); });
 import { writeFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
+import { performance } from "node:perf_hooks";
 import { SourceSemanticWorkerRequestSchema, SoulInterpretationRequestSchema, SourceSemanticExecutionSchema,
   sourceSemanticAccessPhases, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { SourceSemanticsPublicPayloadSchema, parseWorkerOperationPayload, type SourceSemanticsPublicPayload } from
@@ -17,11 +21,23 @@ import { BUDGET, CLOCK, ORIGINAL, WS, deferred, digest, embedded, initialQuery, 
 
 type Mutable<T> = { -readonly [K in keyof T]: Mutable<T[K]> };
 const observePosts = () => {
-  const spy = vi.spyOn(Worker.prototype, "postMessage");
-  return { spy, calls: () => spy.mock.calls.map((args, index) => ({ request: args[0] as RecallReadWorkerRequest,
+  const nativePost = Worker.prototype.postMessage, firstPost = deferred();
+  const spy = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (this: Worker, ...args) {
+    nativePost.apply(this, args); firstPost.resolve();
+  });
+  return { spy, firstPost: firstPost.promise, calls: () => spy.mock.calls.map((args, index) => ({ request: args[0] as RecallReadWorkerRequest,
     worker: spy.mock.contexts[index] as Worker })) };
 };
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+
+// Deadlines measure explicit operation progress, not host-dependent worker import time.
+// Worker messages, native exits and setImmediate remain real.
+function controlDeadlineClock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  let now = performance.now();
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  return { advance: async (ms: number) => { now += ms; await vi.advanceTimersByTimeAsync(ms); } };
+}
 
 // These expectations are new behavior, independent of the existing response-fixture migrations.
 describe("Source query preparation before native snapshots", () => {
@@ -205,6 +221,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
 
   it.each([["bind", "resolved"], ["model", "resolved"], ["model", "rejected"]] as const)(
     "discards late %s %s outcomes without dispatching, unhandled rejection or a replacement deadline", async (phase, outcome) => {
+    const clock = controlDeadlineClock();
     const opened = deferred(), release = deferred();
     let calls = 0;
     const h = await queryClient({ capture: true, requestTimeoutMs: 120,
@@ -225,6 +242,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
       const rejected = expect(pending).rejects.toThrow("timed out after 120ms");
       await opened.promise;
       latePreparation = h.prepare.mock.results[0]!.value;
+      await clock.advance(120);
       await rejected;
       expect(h.prepare.mock.calls[0]![0].signal.aborted).toBe(true);
       expect(posts.calls()).toEqual([]);
@@ -242,6 +260,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
   });
 
   it("includes model time and worker queue time in one deadline and never dispatches an expired queued call", async () => {
+    const clock = controlDeadlineClock();
     const opened = deferred(), release = deferred(), model = deferred();
     const h = await queryClient({ capture: true, requestTimeoutMs: 250, embed: async inputs => { await model.promise; return embedded(inputs); } });
     const posts = observePosts();
@@ -249,9 +268,10 @@ describe("captured Source execution and the single inherited deadline (synthetic
     try {
       const request = h.client.sourceSemanticsPort!.execute(initialQuery());
       const rejected = expect(request).rejects.toThrow("timed out after 250ms");
-      await new Promise(resolve => setTimeout(resolve, 90));
+      await clock.advance(90);
       holder = h.client.readSnapshot.isolate!(async () => { opened.resolve(); await release.promise; });
       await opened.promise; model.resolve();
+      await tick(); await clock.advance(160);
       await rejected; release.resolve(); await holder; await tick();
       expect(h.prepare).toHaveBeenCalledTimes(1);
       expect(posts.calls()).toEqual([]);
@@ -259,6 +279,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
   });
 
   it("does not reset the bind/model deadline when dispatch finally starts", async () => {
+    const clock = controlDeadlineClock();
     const wait = () => new Promise<void>(resolve => setTimeout(resolve, 80));
     let modelTimeout: number | undefined;
     const h = await queryClient({ capture: true, requestTimeoutMs: 400,
@@ -269,9 +290,14 @@ describe("captured Source execution and the single inherited deadline (synthetic
     try {
       const input = initialQuery();
       if (input.request.kind !== "prepare_query") throw new Error("query expected");
-      // A fresh dispatch deadline would admit this 300ms reply after the earlier preparation time.
-      await expect(h.client.sourceSemanticsPort!.execute({ ...input,
-        request: { ...input.request, access_hint: "fixture-delay:300" } })).rejects.toThrow("timed out after 400ms");
+      // Release a real reply at the original deadline; a fresh dispatch deadline would admit it.
+      const pending = h.client.sourceSemanticsPort!.execute({ ...input,
+        request: { ...input.request, access_hint: "fixture-hold" } });
+      const rejected = expect(pending).rejects.toThrow("timed out after 400ms");
+      await tick(); await clock.advance(80); await clock.advance(80);
+      await posts.firstPost; await clock.advance(240);
+      writeFileSync(`${h.filename}.capture.release`, "");
+      await rejected;
       expect(modelTimeout).toBeGreaterThan(0);
       expect(modelTimeout).toBeLessThan(400);
       expect(posts.calls()).toHaveLength(1);
@@ -280,6 +306,7 @@ describe("captured Source execution and the single inherited deadline (synthetic
   });
 
   it("quarantines a dispatched timeout until actual worker exit, ignoring late success", async () => {
+    const clock = controlDeadlineClock();
     const h = await queryClient({ capture: true, publishInterpretation: true, requestTimeoutMs: 150 });
     const posts = observePosts();
     const nativeTerminate = Worker.prototype.terminate;
@@ -290,8 +317,9 @@ describe("captured Source execution and the single inherited deadline (synthetic
     try {
       const input = initialQuery();
       if (input.request.kind !== "prepare_query") throw new Error("query expected");
-      await expect(h.client.sourceSemanticsPort!.execute({ ...input, request: { ...input.request, access_hint: "fixture-hold" } }))
-        .rejects.toThrow("timed out after 150ms");
+      const pending = h.client.sourceSemanticsPort!.execute({ ...input, request: { ...input.request, access_hint: "fixture-hold" } });
+      const rejected = expect(pending).rejects.toThrow("timed out after 150ms");
+      await posts.firstPost; await clock.advance(150); await rejected;
       const owner = posts.calls()[0]!.worker;
       expect(terminate).toHaveBeenCalledTimes(1);
       let settled = false;

@@ -1,14 +1,14 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-  SourceSemanticResourceExhausted, canonicalJson, type SourceRecordIdentity,
+  SourceSemanticResourceExhausted, canonicalJson, canonicalJsonChunks, type SourceRecordIdentity,
   sourceSemanticGenerationTaskSummary, sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
-  captureSourceSemanticQueryPreparation, captureSourceSemanticAcquisition,
+  captureSourceSemanticQueryPreparation,
   packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,
   sourceSemanticAcquisitionResources, sourceSemanticPreparationReason, sourceSemanticAccessPhases,
   type SourceSemanticAccessReceipt, type SourceSemanticAccessSignal, type SourceSemanticAccessPolicy,
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents
 } from "@do-soul/alaya-protocol";
-import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
+import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256, fieldContractSha256Chunks,
   projectSourceDisclosure } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget, semanticSourceTupleIdentity } from "../field/source-semantic-read-stores.js";
@@ -55,12 +55,29 @@ export function bindAccessPoolIdentity<Receipt extends Omit<SourceSemanticAccess
 ): Receipt & { pool_id: string } {
   // Preserve the exact expanded v2 preimage, before adding pool_id or a trace.
   const { phases: _phases, ...fields } = receipt;
-  const expanded = { ...fields, ...sourceSemanticAccessPhases(receipt, meter) };
+  // Expansion borrows every scalar string from immutable tuples or fixed literals.
+  // Charge its new object/array frames, then stream canonical scalars to the hash.
+  const expanded = { ...fields, ...sourceSemanticAccessPhases(receipt, {
+    charge: (work, bytes, phase) => meter.charge(work, bytes, phase),
+    retain: (value, phase) => retainPhaseFrames(value, meter, phase)
+  }) };
+  meter.charge(4, 512 + Object.keys(expanded).length * 24 + 32, "source access identity frames");
   const material = { receipt: expanded, workspace, authorized, revision: sourceSemanticRevision(runtime) };
-  meter.retain(material, "source access expanded canonical identity traversal");
-  const encoded = canonicalJson(material);
-  meter.retain(encoded, "source access canonical identity encoding");
-  return { ...receipt, pool_id: `sha256:${fieldContractSha256(encoded)}` };
+  return { ...receipt, pool_id: `sha256:${fieldContractSha256Chunks(canonicalJsonChunks(material, meter), meter)}` };
+}
+
+/** Decoder strings are borrowed; only container frames and reference slots are allocated. */
+function retainPhaseFrames(value: unknown, meter: SourceSemanticReadBudget, phase?: string): void {
+  const pending = [value];
+  meter.charge(0, 8, phase);
+  while (pending.length) {
+    const row = pending.pop();
+    meter.charge(1, 0, phase);
+    if (row === null || typeof row !== "object") continue;
+    const values = Array.isArray(row) ? row : Object.values(row);
+    meter.charge(1, Array.isArray(row) ? 64 + values.length * 16 : 128 + values.length * 24, phase);
+    for (const child of values) pending.push(child);
+  }
 }
 
 export function previewExtent(record: SourceRecordIdentity,
@@ -98,8 +115,8 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     payload.prepared_query?.receipt ?? unavailableSourceQueryPreparation(
       controlled ? "controlled_or_scoped_access" : "preparation_scope_unavailable", controlled ? "not_requested" : "unavailable"), meter), meter);
   if (payload.prepared_query !== undefined) meter.preparation = prepare;
-  let acquisition = packSourceSemanticAcquisition(captureSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun(
-    controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter), meter), absorbed = false;
+  let acquisition = packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun(
+    controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter), absorbed = false;
   let releaseCanonical: () => void = () => undefined;
   let canonicalRecord: SourceRecordIdentity | undefined;
   let canonicalRead: ReturnType<typeof beginCanonicalSourceText> | undefined;

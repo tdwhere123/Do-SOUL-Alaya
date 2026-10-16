@@ -5,11 +5,12 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
-import { SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
+import { createSourceSemanticAccessPolicy, fieldContractSha256 } from "@do-soul/alaya-core";
+import { canonicalJson, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
   sourceSemanticExecution, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted,
   type SourceSemanticCompactAcquisition } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
+import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { acquireSourceSemanticIndex } from "../../../runtime/recall-read-worker/source-semantic-index-acquisition.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
@@ -214,6 +215,10 @@ it("keeps useful source observation and real v2 phase evidence inside the origin
       read_bytes: Buffer.byteLength(RAW), body_bytes: Buffer.byteLength(RAW) }));
     expect(sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(result.execution)).acquisition)
       .toEqual(sourceSemanticAccessPhases(result.access!).acquisition);
+    const { pool_id, trace: _trace, phases: _phases, ...fields } = result.access!;
+    const expanded = { ...fields, ...sourceSemanticAccessPhases(result.access!) };
+    expect(pool_id).toBe(`sha256:${fieldContractSha256(canonicalJson({ receipt: expanded,
+      workspace: WS, authorized: ["project"], revision: sourceSemanticRevision(runtime(fixture)) }))}`);
     expect(result.work.logical_work).toBeLessThanOrEqual(budget.work_units);
     expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
   });

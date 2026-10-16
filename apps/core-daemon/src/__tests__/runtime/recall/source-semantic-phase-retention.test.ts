@@ -5,11 +5,11 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { canonicalJson, captureSourceSemanticAcquisition, captureSourceSemanticQueryPreparation,
+import { canonicalJson, canonicalJsonChunks, captureSourceSemanticAcquisition, captureSourceSemanticQueryPreparation,
   packSourceSemanticAcquisition, packSourceSemanticQueryPreparation, SourceSemanticAccessReceiptSchema,
   SourceSemanticResourceLedger, sourceSemanticAccessPhases, type SourceSemanticAccessReceipt }
   from "@do-soul/alaya-protocol";
-import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { fieldContractSha256, fieldContractSha256Chunks } from "@do-soul/alaya-core";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
 import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
@@ -54,6 +54,22 @@ function held(budget: SourceSemanticReadBudget) {
   return { work_units: outstanding.work_units - budget.spentWork, memory_bytes: outstanding.memory_bytes - budget.spentBytes };
 }
 
+it("charges exact UTF-8 hash handoffs without changing Unicode preimages", () => {
+  for (const text of ["ascii", "原文", "🙂", "\ud800"]) {
+    const value = { text }, preimage = canonicalJson(value);
+    let handoffBytes = 0;
+    const digest = fieldContractSha256Chunks(canonicalJsonChunks(value), {
+      charge(work, bytes, phase) {
+        expect(work).toBe(1);
+        expect(phase).toBe("canonical identity hash handoff");
+        handoffBytes += bytes;
+      }
+    });
+    expect(digest).toBe(fieldContractSha256(preimage));
+    expect(handoffBytes).toBe(Buffer.byteLength(preimage, "utf8"));
+  }
+});
+
 it("hashes the expanded preimage independently while retaining compact phases and charging packing without refunds", async () => {
   await withIndexedSources([{ id: "raw", text: RAW, vector: [1, 0, 0] }], async fixture => {
     const prepared = await fixture.prepareQuery({ navigation: ORIGINAL,
@@ -62,11 +78,15 @@ it("hashes the expanded preimage independently while retaining compact phases an
     const charge = SourceSemanticReadBudget.prototype.charge;
     const retain = SourceSemanticReadBudget.prototype.retain;
     const spent: number[] = [];
+    const charged: { phase: string | undefined; units: number; bytes: number }[] = [];
     const retained: { phase: string | undefined; value: unknown }[] = [];
     const meter = new SourceSemanticReadBudget(QUERY_BUDGET);
     vi.spyOn(SourceSemanticReadBudget.prototype, "charge").mockImplementation(function (this: SourceSemanticReadBudget, units, bytes, phase) {
       charge.call(this, units, bytes, phase);
-      if (this === meter) spent.push(this.spentWork);
+      if (this === meter) {
+        spent.push(this.spentWork);
+        charged.push({ phase, units, bytes });
+      }
     });
     vi.spyOn(SourceSemanticReadBudget.prototype, "retain").mockImplementation(function (this: SourceSemanticReadBudget, value, phase) {
       retain.call(this, value, phase);
@@ -89,8 +109,12 @@ it("hashes the expanded preimage independently while retaining compact phases an
     expect(receipt).not.toHaveProperty("preparation");
     expect(retained.some(row => row.phase === "source phase packed preparation allocation")).toBe(true);
     expect(retained.some(row => row.phase === "source phase packed acquisition allocation")).toBe(true);
-    expect(retained.some(row => row.phase === "source access expanded canonical identity traversal")).toBe(true);
-    expect(retained.some(row => row.phase === "source access canonical identity encoding")).toBe(true);
+    // Borrowed phase strings are streamed rather than retained as a second full preimage.
+    expect(retained.some(row => row.phase === "source access expanded canonical identity traversal")).toBe(false);
+    expect(retained.some(row => row.phase === "source access canonical identity encoding")).toBe(false);
+    for (const phase of ["canonical identity traversal", "canonical identity scalar encoding", "canonical identity hash handoff"]) {
+      expect(charged.some(row => row.phase === phase && row.units > 0 && row.bytes > 0)).toBe(true);
+    }
     expect(spent.length).toBeGreaterThan(0);
     for (let index = 1; index < spent.length; index++) expect(spent[index]!).toBeGreaterThanOrEqual(spent[index - 1]!);
     expect(meter.spentWork).toBe(spent.at(-1));

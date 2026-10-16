@@ -96,6 +96,18 @@ function activeAcquisition() {
   };
 }
 
+it.each(["input profile", "input digest", "binding", "target", "window"])(
+  "rejects a malformed native %s before packing acquisition evidence", (fault) => {
+    const phase = structuredClone(activeAcquisition());
+    if (fault === "input profile") phase.result.vector.input.profile_id = "invalid";
+    if (fault === "input digest") phase.result.vector.input.input_digest = "invalid";
+    if (fault === "binding") phase.result.vector.state.binding.generation_id = "invalid";
+    if (fault === "target") phase.result.nominations[0]!.source.target.content_digest = "invalid";
+    if (fault === "window") phase.result.nominations[0]!.vector.window.window_id = "invalid";
+    expect(() => codec.packSourceSemanticAcquisition(phase)).toThrow();
+  }
+);
+
 function notRunAcquisition(reason = "operation_does_not_acquire") {
   return sourceSemanticAcquisitionNotRun(reason);
 }

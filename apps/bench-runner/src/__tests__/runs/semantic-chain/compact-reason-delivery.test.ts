@@ -93,7 +93,8 @@ it("keeps an explicit no_conclusion without computation identity unbound rather 
   expect(nominated.nomination).toBe("frozen_window_after_unbound_reason");
   expect(nominated.attention).toBeNull();
   expect(nominated.reason_controls[0]).toMatchObject({
-    outcome: result.outcome, conditional_computation_id: undefined
+    outcome: result.outcome
   });
+  expect(nominated.reason_controls[0]).not.toHaveProperty("conditional_computation_id");
   expect(sourceSemanticReasonControl(roundtrip).conditional_computation_id).toBeUndefined();
 });

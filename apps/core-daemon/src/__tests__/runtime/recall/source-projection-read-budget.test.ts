@@ -70,17 +70,19 @@ it("encodes retained excerpt and canonical projection disclosures with their exa
 });
 
 it("reports an unfinished source observation and budget stop when dependency admission refuses its extent", async () => {
-  const ctx = await fixture(), reads = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+  const ctx = await fixture(), find = SqliteFieldSourceRecordRepo.prototype.findByIdBounded;
+  const reads = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
   const observe = (budget: typeof ACCESS_BUDGET) => {
     const ledger = new SourceSemanticReadBudget(budget);
     const pool = ctx.database.connection.transaction(() => observeSourceSemanticAccess(ctx.runtime, ctx.payload,
       ["project"], ledger, original, accessQuery(original), "query-conditioned-v1", budget, ctx.projection.source_id))();
     return { pool, ledger };
   };
-  observe(ACCESS_BUDGET);
-  const firstAllowance = reads.mock.calls[0]![4]!.workLimit!;
-  reads.mockClear();
-  const budget = { ...ACCESS_BUDGET, work_units: ACCESS_BUDGET.work_units - 2 * (firstAllowance - 6), finalization_reserve: 0 };
+  // Constrain the native dependency read itself; metadata packing has its own allowance.
+  reads.mockImplementationOnce(function (this: SqliteFieldSourceRecordRepo, workspace, id, length, offset, limits) {
+    return find.call(this, workspace, id, length, offset, { ...limits, workLimit: 6 });
+  });
+  const budget = ACCESS_BUDGET;
   const limited = observe(budget);
   expect(reads.mock.results[0]!.value).toMatchObject({ resourceLimited: true, dependencyWork: 0, nativeBytes: 0 });
   expect(limited.pool.access.source_candidates).toMatchObject([{ complete: false, read_bytes: 0,

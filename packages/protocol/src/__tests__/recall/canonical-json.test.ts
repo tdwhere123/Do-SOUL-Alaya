@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { canonicalJson } from "../../recall/selection/capture/canonical-json.js";
+import { canonicalJson, canonicalJsonChunks } from "../../recall/selection/capture/canonical-json.js";
 import { sourceTextDigest } from "../../relations/relation-assertion.js";
 
 const MIXED_KEYS = { a: 1, B: 2, "": 0 } as const;
@@ -13,6 +13,18 @@ describe("canonicalJson", () => {
   it("sorts object keys by UTF-16 code units and quotes keys", () => {
     expect(canonicalJson(MIXED_KEYS)).toBe(MIXED_KEYS_CANONICAL);
     expect(canonicalJson({ B: 2, a: 1, "": 0 })).toBe(MIXED_KEYS_CANONICAL);
+  });
+
+  it("streams the identical preimage, including escaped text and undefined slots", () => {
+    const value = { z: [undefined, "原文🙂\n", null, -0], a: { absent: undefined, quoted: '"\\' } };
+    const chunks = [...canonicalJsonChunks(value)];
+    expect(chunks.join("")).toBe(canonicalJson(value));
+    expect(() => [...canonicalJsonChunks(undefined)]).toThrow(/no root string/u);
+    const hash = createHash("sha256");
+    for (const chunk of chunks) hash.update(chunk, "utf8");
+    expect(hash.digest("hex")).toBe(sha256(canonicalJson(value)));
+    expect(() => [...canonicalJsonChunks(value, { charge() { throw new Error("budget exhausted"); } })])
+      .toThrow("budget exhausted");
   });
 
   it("is independent of process locale", () => {

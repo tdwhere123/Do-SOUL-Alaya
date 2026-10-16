@@ -175,7 +175,7 @@ export * from "./events/surface.js";
 export * from "./events/recall-context.js";
 export * from "./recall/selection/capture/capture-execution.js";
 export * from "./recall/selection/capture/capture-receipt-structures.js";
-export { canonicalJson } from "./recall/selection/capture/canonical-json.js";
+export { canonicalJson, canonicalJsonChunks } from "./recall/selection/capture/canonical-json.js";
 export * from "./recall/selection/capture/canonical-selection-receipt.js";
 export * from "./events/green-governance.js";
 export * from "./events/budget.js";

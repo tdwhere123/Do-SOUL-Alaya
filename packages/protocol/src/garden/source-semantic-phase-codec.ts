@@ -1,6 +1,6 @@
 import {
   SourceSemanticQueryPreparationSchema, SourceSemanticAcquisitionPhaseSchema,
-  sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
+  sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation, SourceSemanticVectorBindingSchema, SourceSemanticQueryWindowSchema,
   type SourceSemanticQueryPreparation, type SourceSemanticAcquisitionPhase,
   type SourceSemanticAcquisition, type SourceSemanticPhaseAccounting, type SourceSemanticExecutionPhases as ExecutionPhases
 } from "./source-semantic-phase-semantics.js";
@@ -9,6 +9,8 @@ import { PHASE_CODES as C, type SourceSemanticCompactPreparation, type SourceSem
   type CompactLimitation } from "./source-semantic-phase-wire.js";
 import type { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 import { AlayaError } from "../shared/alaya-error.js";
+import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
+import { SourceIndexTargetSchema } from "../recall/source-index.js";
 
 type Meter = Pick<SourceSemanticResourceLedger, "charge" | "retain">;
 const POLICY = "source-index-interleaved-prefix.v1" as const;
@@ -106,6 +108,7 @@ function packResult(value: SourceSemanticAcquisition, strings: LocalStrings): Co
     strings.limitations(value.limitations)];
 }
 export function packSourceSemanticAcquisition(value: SourceSemanticAcquisitionPhase, meter?: Meter): SourceSemanticCompactAcquisition {
+  validateAcquisitionReferences(value, meter);
   traverse(value, meter, "source phase acquisition packing traversal");
   const strings = new LocalStrings(meter);
   const packed: SourceSemanticCompactAcquisition = [1, strings.table,
@@ -115,6 +118,30 @@ export function packSourceSemanticAcquisition(value: SourceSemanticAcquisitionPh
       strings.code(C.accounting, value.accounting) as 0 | 1 | 2]];
   meter?.retain(packed, "source phase packed acquisition allocation", "immutable");
   return packed;
+}
+
+/** Native receipts forward repository/binder leaves; validate those before any lease can be issued. */
+function validateAcquisitionReferences(value: SourceSemanticAcquisitionPhase, meter?: Meter): void {
+  const result = value.result;
+  if (result === null) return;
+  const input = result.vector.input;
+  if (input.status === "available") {
+    meter?.charge(2, 0, "source phase vector digest admission");
+    Sha256DigestSchema.parse(input.profile_id); Sha256DigestSchema.parse(input.input_digest);
+  }
+  const state = result.vector.state;
+  if (state !== null && "binding" in state) {
+    meter?.retain(state.binding, "source phase vector binding admission");
+    SourceSemanticVectorBindingSchema.parse(state.binding);
+  }
+  for (const nomination of result.nominations) {
+    meter?.retain(nomination.source, "source phase nomination target admission");
+    SourceIndexTargetSchema.parse(nomination.source);
+    if (nomination.vector !== null) {
+      meter?.retain(nomination.vector.window, "source phase vector window admission");
+      SourceSemanticQueryWindowSchema.parse(nomination.vector.window);
+    }
+  }
 }
 
 class LocalReader {
@@ -206,8 +233,12 @@ export function isNativeReasoningOnlyExecution(value: SourceSemanticExecution, m
 export function sourceSemanticExecution(preparation?: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation,
   acquisition?: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticExecution {
   if (preparation === undefined && acquisition === undefined) return "native_reasoning_only";
-  const value = [1, compactPreparation(preparation ?? unavailableSourceQueryPreparation("operation_does_not_prepare", "not_requested"), meter),
-    compactAcquisition(acquisition ?? sourceSemanticAcquisitionNotRun("operation_does_not_acquire"), meter)] as const;
+  // Defaults are authored by the semantic constructors, not untrusted ingress.
+  const value = [1, preparation === undefined
+    ? packSourceSemanticQueryPreparation(unavailableSourceQueryPreparation("operation_does_not_prepare", "not_requested"), meter)
+    : compactPreparation(preparation, meter), acquisition === undefined
+    ? packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun("operation_does_not_acquire"), meter)
+    : compactAcquisition(acquisition, meter)] as const;
   meter?.charge(1, 24, "source phase execution tuple allocation");
   return isNativeReasoningOnlyExecution(value, meter) ? "native_reasoning_only" : value;
 }

@@ -1,5 +1,5 @@
 import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
-  captureSourceSemanticAcquisition, packSourceSemanticAcquisition, type SourceSemanticCompactAcquisition,
+  packSourceSemanticAcquisition, type SourceSemanticCompactAcquisition,
   type SourceIndexQueryVector, type SourceIndexTarget, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
@@ -21,7 +21,9 @@ export function acquireSourceSemanticIndex(input: Readonly<{
   let phase = sourceSemanticAcquisitionNotRun("canonical_observation_allowance");
   const finish = (nominations: readonly SourceIndexTarget[] = []) => {
     // Codec overhead belongs to the parent's metadata phase, not index or source observation coordinates.
-    const compact = packSourceSemanticAcquisition(captureSourceSemanticAcquisition(phase, input.metadataMeter), input.metadataMeter);
+    // This wrapper is authored here from the acquisition owner's checked observations.
+    // Wire ingress still captures/validates; re-parsing this owned graph would clone it again.
+    const compact = packSourceSemanticAcquisition(phase, input.metadataMeter);
     handedOff = true;
     return { phase: compact, nominations, releaseCanonical: () => release?.() };
   };

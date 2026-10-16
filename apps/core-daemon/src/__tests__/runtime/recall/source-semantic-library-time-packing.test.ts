@@ -14,7 +14,8 @@ import { createRecallRealStorage, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
 
 const CLOCK = "2026-09-18T00:00:00.000Z";
 const SOURCE_TIME = "2024-02-03T04:05:06.0000007Z";
-const OUTPUT_BYTES = 19_392;
+// Protocol v2 includes the actual preparation/acquisition receipt in each delivery.
+const OUTPUT_BYTES = 20_300;
 
 it("reserves all five source facts before adding optional time to a bounded native page", async () => {
   const directory = await mkdtemp(join(tmpdir(), "source-time-packing-"));
