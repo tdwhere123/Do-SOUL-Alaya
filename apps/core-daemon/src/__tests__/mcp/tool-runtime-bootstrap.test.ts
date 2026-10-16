@@ -1,6 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
 
 import path from "node:path";
 
@@ -8,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDeferred,
+  createToolRuntimeIsolatedConfigDir,
   getToolRuntimeWiringFixture,
   resetToolRuntimeWiringState,
   resolveBootGardenProvider
@@ -82,7 +81,7 @@ async function waitUntil(condition: () => boolean): Promise<void> {
 describe("daemon tool runtime bootstrap", () => {
 
   beforeEach(async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-isolated-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     process.env.ALAYA_CONFIG_DIR = configDir;
   });
@@ -246,6 +245,8 @@ describe("daemon tool runtime bootstrap", () => {
     "wires the official_api garden provider through bootstrap and routing without an ad-hoc model env surface",
     async () => {
     delete process.env.OPENAI_API_KEY;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
     process.env.ALAYA_OPENAI_SECRET_REF = "env:ALAYA_TEST_OPENAI_KEY";
     process.env.ALAYA_TEST_OPENAI_KEY = "sk-official";
     process.env.OFFICIAL_GARDEN_MODEL = "ignored-override";
@@ -278,6 +279,7 @@ describe("daemon tool runtime bootstrap", () => {
   );
 
   it("prefers the dedicated Garden secret-ref over the deprecated embedding fallback", async () => {
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
     process.env.ALAYA_GARDEN_OPENAI_SECRET_REF = "env:ALAYA_GARDEN_TEST_OPENAI_KEY";
     process.env.ALAYA_GARDEN_TEST_OPENAI_KEY = "sk-dedicated-garden";
     process.env.ALAYA_OPENAI_SECRET_REF = "env:ALAYA_TEST_OPENAI_KEY";
@@ -295,7 +297,7 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("loads embedding secret-ref config from the Alaya config-dir .env during daemon bootstrap", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-env-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     await writeFile(
       path.join(configDir, ".env"),
@@ -310,6 +312,8 @@ describe("daemon tool runtime bootstrap", () => {
     );
     process.env.ALAYA_CONFIG_DIR = configDir;
     process.env.ALAYA_TEST_OPENAI_KEY = "sk-config-file";
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
     delete process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
     delete process.env.ALAYA_OPENAI_SECRET_REF;
     delete process.env.OPENAI_API_KEY;
@@ -336,7 +340,7 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("falls back to local heuristics when the embedding fallback secret-ref is unresolvable", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-provider-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     await writeFile(
       path.join(configDir, ".env"),
@@ -349,6 +353,8 @@ describe("daemon tool runtime bootstrap", () => {
     );
     process.env.ALAYA_CONFIG_DIR = configDir;
     delete process.env.ALAYA_MISSING_OPENAI_KEY;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
     delete process.env.ALAYA_OPENAI_SECRET_REF;
 
     await bootDaemonRuntime();
@@ -365,6 +371,8 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("hot-applies Garden compute PATCH by refreshing routing candidates without restart", async () => {
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
     delete process.env.ALAYA_OPENAI_SECRET_REF;
     delete process.env.OPENAI_API_KEY;
 

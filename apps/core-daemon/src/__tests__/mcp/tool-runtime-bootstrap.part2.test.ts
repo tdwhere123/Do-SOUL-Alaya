@@ -1,6 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
 
 import path from "node:path";
 
@@ -10,6 +8,7 @@ import type { LocalOnnxTransformersProbeResult } from "@do-soul/alaya-core";
 
 import {
   createDeferred,
+  createToolRuntimeIsolatedConfigDir,
   getToolRuntimeWiringFixture,
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
@@ -83,7 +82,7 @@ async function waitUntil(condition: () => boolean): Promise<void> {
 describe("daemon tool runtime bootstrap", () => {
 
   beforeEach(async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-isolated-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     process.env.ALAYA_CONFIG_DIR = configDir;
   });
@@ -104,7 +103,7 @@ describe("daemon tool runtime bootstrap", () => {
   });
 
   it("does not report embedding enabled when the local extra is missing even if the supplement flag is on", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-missing-embedding-status-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     await writeFile(
       path.join(configDir, ".env"),
@@ -156,18 +155,20 @@ describe("daemon tool runtime bootstrap", () => {
   }, BOOTSTRAP_TEST_TIMEOUT_MS);
 
   it("rejects malformed embedding secret refs during daemon bootstrap", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-malformed-embedding-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     await writeFile(
       path.join(configDir, ".env"),
       [
         "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true",
+        "ALAYA_EMBEDDING_PROVIDER=openai",
         "ALAYA_OPENAI_SECRET_REF=this-has-no-prefix",
         ""
       ].join("\n"),
       "utf8"
     );
     process.env.ALAYA_CONFIG_DIR = configDir;
+    delete process.env.ALAYA_EMBEDDING_PROVIDER;
     delete process.env.ALAYA_OPENAI_SECRET_REF;
 
     await expect(bootDaemonRuntime()).rejects.toThrow("ALAYA_OPENAI_SECRET_REF");
@@ -175,6 +176,8 @@ describe("daemon tool runtime bootstrap", () => {
 
   it("ignores a raw OPENAI_API_KEY when the Alaya secret-ref env is absent", async () => {
     delete process.env.ALAYA_OPENAI_SECRET_REF;
+    delete process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
+    delete process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
     process.env.OPENAI_API_KEY = "sk-legacy-global";
 
     await bootDaemonRuntime();
