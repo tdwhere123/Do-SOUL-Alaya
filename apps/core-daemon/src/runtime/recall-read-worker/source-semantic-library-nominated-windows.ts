@@ -12,8 +12,13 @@ export type LibrarySourceNomination = NonNullable<SourceSemanticAcquisitionPhase
 /** Private navigation hydration, never a semantic support or multi-span package producer. */
 export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, sources: readonly IndexEntry[],
-  nominations: readonly LibrarySourceNomination[]): SourceSemanticLibraryPackage[] {
+  nominations: readonly LibrarySourceNomination[], sourcePositions?: ReadonlyMap<string, number>): SourceSemanticLibraryPackage[] {
   const packages: SourceSemanticLibraryPackage[] = [];
+  meter.charge(nominations.length, 0, "library nominated location enumeration");
+  if (nominations.every(row => row.vector?.window === undefined)) return packages;
+  // Navigation only: this invocation's baseline may supply first-position tuple identities.
+  // The index never proves currentness, logical source identity, byte retention or scope.
+  const positions = sourcePositions ?? indexSourcePositions(sources, meter);
   for (const nomination of nominations) {
     const window = nomination.vector?.window;
     // A lexical rank has no byte location. Never manufacture a prefix location for it.
@@ -23,10 +28,14 @@ export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntim
     if (target.workspace_id !== payload.workspace_id || nomination.source.root_key !== sourceGoldRootIdentity(target)) {
       throw new CoreError("CONFLICT", "nominated window has a different source binding");
     }
-    meter.charge(sources.length, 0, "library nominated source lookup");
-    const position = sources.findIndex(entry => entry.target.kind === "source_evidence"
-      && sourceGoldRootIdentity(entry.target) === nomination.source.root_key);
-    if (position < 0) throw new CoreError("CONFLICT", "nominated window is outside the captured source pool");
+    meter.charge(1, 0, "library nominated source lookup");
+    const position = positions.get(nomination.source.root_key);
+    if (position === undefined) throw new CoreError("CONFLICT", "nominated window is outside the captured source pool");
+    const source = sources[position];
+    meter.retain(source?.target, "library nominated pool binding");
+    if (source?.target.kind !== "source_evidence" || sourceGoldRootIdentity(source.target) !== nomination.source.root_key) {
+      throw new CoreError("CONFLICT", "nominated window is outside the captured source pool");
+    }
     const current = sourceSemanticReadStores(runtime.database, payload.workspace_id, nomination.source.source_id,
       meter, authorized).getCurrentRecord(payload.workspace_id, nomination.source.source_id);
     if (current === null || current.identity !== target.root_id || current.source_version !== target.source_version
@@ -47,8 +56,6 @@ export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntim
     }
     const preview = sourceSemanticLibraryRawPreview(text, sources.length);
     const end = window.start_byte + Buffer.byteLength(preview);
-    const source = sources[position]!;
-    if (source.target.kind !== "source_evidence") throw new CoreError("OBLIGATION_VIOLATION", "nominated source target changed");
     const entry = { ...source, target: { ...source.target, span: { content_start: window.start_byte, content_end: end,
       retained_extent: "body" as const, content_complete: window.start_byte === 0 && end === nomination.source.body_bytes,
       original_complete: false } } };
@@ -58,6 +65,22 @@ export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntim
         evaluated_as_of: payload.as_of, source: current }) });
   }
   return packages;
+}
+
+/** Preserve findIndex's first-position semantics for standalone hydration callers. */
+function indexSourcePositions(sources: readonly IndexEntry[], meter: SourceSemanticReadBudget): ReadonlyMap<string, number> {
+  meter.charge(1, 64, "library nominated source index");
+  const positions = new Map<string, number>();
+  for (const [position, entry] of sources.entries()) {
+    meter.charge(1, 0, "library nominated source enumeration");
+    if (entry.target.kind !== "source_evidence") continue;
+    meter.retain(entry.target, "library nominated source identity");
+    const root = sourceGoldRootIdentity(entry.target);
+    if (positions.has(root)) continue;
+    meter.charge(1, 64 + root.length * 2, "library nominated source index");
+    positions.set(root, position);
+  }
+  return positions;
 }
 
 /** Native chunks may end before the requested interval; each next read is bounded and charged. */

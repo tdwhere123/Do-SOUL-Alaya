@@ -13,6 +13,7 @@ import { encodeSourceSemanticLibraryResponse, sourceGoldRootIdentity, sourceSema
   type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { SqliteFieldEraseBarrierRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
+import { prepareLibraryPackages } from "../../../runtime/recall-read-worker/source-semantic-library-packages.js";
 import { prepareNominatedLibraryWindows, type LibrarySourceNomination }
   from "../../../runtime/recall-read-worker/source-semantic-library-nominated-windows.js";
 import { projectResearchNativeProposals, researchNativeProposalSelector, compareResearchNominatedSourceLibrary,
@@ -26,7 +27,7 @@ import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/sou
 import { complementaryProofSelectionFixture, rawSourceTwin }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
 import { query as incompatibleQuery } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
-import { nominatedLibraryContext, compareInGuardedWorker, BODY, CONDITION, ANSWER, ORIGINAL, digest, ACCESS_BUDGET, CLOCK, WS,
+import { nominatedLibraryContext, censusNominatedLibraryContext, compareInGuardedWorker, BODY, CONDITION, ANSWER, ORIGINAL, digest, ACCESS_BUDGET, CLOCK, WS,
   type NominatedLibraryContext } from "./source-semantic-nominated-library.test-support.js";
 
 function captured(context: NominatedLibraryContext) {
@@ -46,6 +47,67 @@ function relocated(nomination: LibrarySourceNomination, start: number, end: numb
   return { ...nomination, vector: { ...nomination.vector!, window: { ...nomination.vector!.window,
     start_byte: start, end_byte: end, content_digest: digest(Buffer.from(BODY).subarray(start, end).toString("utf8")) } } };
 }
+
+it("hydrates every located census window within the original hydration allowance without changing baseline prefixes", async () => {
+  const context = await censusNominatedLibraryContext();
+  // Frozen first-request hydration allowance, not a larger quota or a new divisor.
+  const allowance = { work_units: 1_533_996, memory_bytes: 8_740_785 };
+  try {
+    expect(context.sources).toHaveLength(475);
+    expect(context.bodies.reduce((sum, body) => sum + body.length, 0)).toBe(498_652);
+    expect(context.nominations.reduce((sum, row) => sum + row.vector!.window.end_byte - row.vector!.window.start_byte, 0)).toBe(5_344);
+    context.database.connection.transaction(() => {
+      const prefixMeter = new SourceSemanticReadBudget(allowance), nominatedMeter = new SourceSemanticReadBudget(allowance);
+      const prefix = prepareLibraryPackages(context.runtime, context.payload, ["project"], prefixMeter, context.sources, []);
+      const nominated = prepareLibraryPackages(context.runtime, context.payload, ["project"], nominatedMeter,
+        context.sources, [], context.nominations);
+      expect(prefix.incomplete).toBe(false);
+      expect(prefix.packages).toHaveLength(475);
+      expect(prefixMeter.spentWork).toBeGreaterThan(1_490_000);
+      expect(nominated.incomplete).toBe(false);
+      expect(nominated.packages).toHaveLength(491);
+      const variants = nominated.packages.filter(row => row.entry.target.kind === "source_evidence"
+        && row.entry.target.span!.content_start > 0);
+      expect(variants).toHaveLength(16); // Null/partial preparation is not success.
+      expect(nominated.packages.filter(row => !variants.includes(row))).toEqual(prefix.packages);
+      for (const [position, row] of variants.entries()) {
+        const span = row.entry.target.kind === "source_evidence" ? row.entry.target.span! : undefined;
+        expect(span).toBeDefined();
+        expect(span!.content_start).toBe(context.nominations[position]!.vector!.window.start_byte);
+        expect(row.preview).toBe(Buffer.from(context.bodies[position]!).subarray(span!.content_start, span!.content_end).toString("utf8"));
+        expect(row.proofs).toEqual([]);
+        expect(row.access_position).toBe(position);
+      }
+      expect(nominatedMeter.spentWork).toBeLessThanOrEqual(allowance.work_units);
+      expect(nominatedMeter.spentWork - prefixMeter.spentWork).toBeLessThanOrEqual(35_092);
+      expect(nominatedMeter.spentBytes).toBeLessThanOrEqual(allowance.memory_bytes);
+      expect(() => prepareLibraryPackages(context.runtime, context.payload, ["project"],
+        new SourceSemanticReadBudget({ ...allowance, work_units: prefixMeter.spentWork + 1_000 }),
+        context.sources, [], context.nominations)).toThrow(SourceSemanticResourceExhausted);
+    })();
+  } finally { await context.close(); }
+}, 60_000);
+
+it("keeps nomination order and duplicate windows before the first raw alias of a source tuple", async () => {
+  const context = await nominatedLibraryContext();
+  try {
+    const { nomination, entries } = captured(context);
+    const source = entries.find(entry => entry.target.kind === "source_evidence"
+      && sourceGoldRootIdentity(entry.target) === nomination.source.root_key)!;
+    const sources = [source, { ...source, hypothesis_id: "source-alias" }, ...entries.filter(entry => entry !== source)];
+    const first = relocated(nomination, 8192, 8220), second = relocated(nomination, 8200, 8230);
+    const result = context.database.connection.transaction(() => prepareLibraryPackages(context.runtime, context.payload,
+      ["project"], new SourceSemanticReadBudget(ACCESS_BUDGET), sources, [], [second, first, second]))();
+    expect(result.incomplete).toBe(false);
+    const position = result.packages.filter(row => row.access_position === 0);
+    expect(position.map(row => row.entry.target.kind === "source_evidence" && row.entry.target.span!.content_start))
+      .toEqual([8200, 8192, 8200, 0]);
+    expect(position[0]).not.toBe(position[2]); // Same nomination object still produces two legal variants.
+    expect(position.every(row => row.entry.hypothesis_id === source.hypothesis_id)).toBe(true);
+    expect(result.packages.filter(row => row.access_position === 1)).toHaveLength(1);
+    expect(result.packages.find(row => row.access_position === 1)!.entry.hypothesis_id).toBe("source-alias");
+  } finally { await context.close(); }
+});
 
 it.each(["absent", "invalid"] as const)("exposes actual non-prefix bytes with Q %s in a guarded SQLite worker, without changing public O1", async mode => {
   const context = await nominatedLibraryContext(mode === "invalid" ? incompatibleQuery("a different original question") : undefined);
