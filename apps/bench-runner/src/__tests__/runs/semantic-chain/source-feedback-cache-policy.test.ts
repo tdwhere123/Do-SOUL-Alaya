@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
@@ -60,7 +61,7 @@ it("reuses exactly the scoped seed request policy, producer, physical root and o
   const expected = { ...producer, contract: "source-semantic-proposal-workset-v3" as const, kind: "semantic_correspondence" as const,
     items: [{ original_query: original, admitted_query_semantics: query, generation_policy,
       source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation }] }] };
-  expect(reader).toHaveBeenCalledWith(expected, input.cache_root, 4096, expect.anything());
+  expect(reader).toHaveBeenCalledExactlyOnceWith(expected, resolve(input.cache_root), 4096, expect.anything());
   expect(result).toMatchObject({ status: "unavailable", reason: "unattempted", new_dispatches: 0,
     cache_key: materializeSemanticProposalLines(expected, 4096)[0]!.key, historical_production: { status: "unknown" } });
   for (const changed of [{ max_output_tokens: 2048 }, { cache_root: "/different/physical-cache" }, { correspondence_cap: 2 },
@@ -92,7 +93,7 @@ it("captures caller-owned cache policy before later mutation without searching a
     .map(line => ({ line, status: "unattempted" as const })));
   const result = await host.prepare(action(host.policy_id));
   expect(reader).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ model: producer.model }),
-    "/owned/exact-cache", 4096, expect.anything());
+    resolve("/owned/exact-cache"), 4096, expect.anything());
   expect(result).toMatchObject({ status: "unavailable", new_dispatches: 0, historical_production: { status: "unknown" } });
 });
 

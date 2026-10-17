@@ -3,12 +3,13 @@ const fixture = vi.hoisted(() => ({ artifacts: new Map<string, unknown>(), reser
   { identity: string; work_units: number; memory_bytes: number } | undefined,
   admission: vi.fn(), reserve: vi.fn(), daemon: vi.fn() }));
 vi.mock("node:fs", async importOriginal => ({ ...await importOriginal<typeof import("node:fs")>(), existsSync: () => true }));
-vi.mock("../../../runs/semantic-chain/contract.js", () => ({
-  chainIdentity: (value: unknown) => JSON.stringify(value),
-  readChainArtifact: (path: string) => fixture.artifacts.get(path.split("/").at(-1)!),
-  writeChainArtifact: vi.fn(), SemanticChainConfigSchema: { parse: fixture.admission },
-  assertChainSnapshot: fixture.admission, withSemanticChainDaemon: fixture.daemon
-}));
+vi.mock("../../../runs/semantic-chain/contract.js", async () => {
+  const { basename } = await import("node:path");
+  return { chainIdentity: (value: unknown) => JSON.stringify(value),
+    readChainArtifact: (path: string) => fixture.artifacts.get(basename(path)),
+    writeChainArtifact: vi.fn(), SemanticChainConfigSchema: { parse: fixture.admission },
+    assertChainSnapshot: fixture.admission, withSemanticChainDaemon: fixture.daemon };
+});
 vi.mock("../../../runs/semantic-chain/recovery-allowance.js", () => ({ readRecoveryAction: () => fixture.reservation,
   reserveRecoveryAction: fixture.reserve, reserveRecoveryRead: fixture.admission, recoveryAllowanceIdentity: fixture.admission }));
 vi.mock("../../../runs/semantic-proposal/fill.js", () => ({ readSemanticProposalResults: fixture.admission }));

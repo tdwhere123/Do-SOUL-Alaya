@@ -197,6 +197,8 @@ it("runs the compiled existing entry through real Core/daemon/cache and repairs 
   const { recovery, cache } = await fixture();
   const cacheBefore = cacheDigest(cache);
   const failed = await child(recovery, "projection"); expect(failed.code, `${failed.stderr}\n${failed.stdout.slice(-8192)}`).toBe(2);
+  expect(failed.stderr).toContain("fixture refuses legacy projection");
+  expect(existsSync(join(recovery, "initial-reason.json"))).toBe(false);
   const retained = readSourceExperiment(recovery); expect(retained.status).toBe("result_ready");
   if (retained.execution === undefined || !("trace" in retained.execution) || retained.input?.contract !== "source-feedback-experiment-v1") {
     throw new Error("expected retained feedback seed and trace");

@@ -54,13 +54,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Typecheck also consumes the daemon's compiled Node entries from bench-runner.
+      - name: Build
+        run: pnpm build
+
       # The command checks the whole workspace; repeat it once per OS, not per shard.
       - name: Typecheck
         if: ${{ matrix.group == 'libraries' }}
         run: pnpm run --if-present typecheck
-
-      - name: Build
-        run: pnpm build
 
       - name: Test
         id: vitest

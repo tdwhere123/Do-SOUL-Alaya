@@ -2,7 +2,7 @@
 import "../../support/strict-provider-free-cli-bootstrap.mjs";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { basename, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
 import { Worker } from "node:worker_threads";
@@ -92,7 +92,7 @@ fs.mkdtempSync = function (prefix, ...rest) {
 };
 const link = fs.linkSync;
 fs.linkSync = function (source, destination) {
-  if (fault === "projection" && String(destination).endsWith("/initial-reason.json")) {
+  if (fault === "projection" && basename(String(destination)) === "initial-reason.json") {
     throw Object.assign(new Error("fixture refuses legacy projection"), { code: "FIXTURE_PROJECTION_REFUSAL" });
   }
   return link.call(this, source, destination);

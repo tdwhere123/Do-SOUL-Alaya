@@ -1,11 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-const guard = fileURLToPath(new URL("../../support/source-import-boundary.mjs", import.meta.url));
+const guard = new URL("../../support/source-import-boundary.mjs", import.meta.url).href;
 const prepare = new URL("../../../../dist/runs/snapshot/source-records/prepare.js", import.meta.url).href;
 const artifact = new URL("../../../../dist/runs/snapshot/source-records/contract.js", import.meta.url).href;
 const storage = new URL("../../../../../../packages/storage/dist/index.js", import.meta.url).href;
@@ -172,9 +171,9 @@ function run(program: string, args: string[] = []) {
 }
 
 it("imports authored source records and cleans the explicit lease on successful sealing and partial failure without model execution", () => {
-  const root = mkdtempSync(join(tmpdir(), "source-import-lifecycle-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "source-import-lifecycle-")));
   try {
-    const result = run(importProgram, [root, prepare, artifact, new URL(`file://${guard}`).href, storage]);
+    const result = run(importProgram, [root, prepare, artifact, guard, storage]);
     expect(result.error, result.stderr).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
     const line = result.stdout.split("\n").find(row => row.startsWith("IMPORT_RECEIPT "));
@@ -187,7 +186,8 @@ it("imports authored source records and cleans the explicit lease on successful 
 it.each([
   ["real model import", `const { createRequire } = await import("node:module");
     const require = createRequire(${JSON.stringify(prepare)});
-    await import(require.resolve("@huggingface/transformers"))`, "model-provider.module.load"],
+    const { pathToFileURL } = await import("node:url");
+    await import(pathToFileURL(require.resolve("@huggingface/transformers")).href)`, "model-provider.module.load"],
   ["model worker", `const { Worker } = await import("node:worker_threads"); new Worker(new URL("file:///forbidden-model-worker.js"))`, "worker.create"],
   ["SQLite write queue worker", `const { Worker } = await import("node:worker_threads");
     new Worker(new URL(${JSON.stringify(new URL("../../../../../../packages/storage/dist/sqlite/write-queue/worker.js", import.meta.url).href)}))`, "worker.create"],
@@ -205,7 +205,7 @@ it("executes only the pinned read-only Git telemetry query with a credential-fre
   const result = run(`import assert from "node:assert/strict";
     import { createHash } from "node:crypto";
     import { execFile } from "node:child_process";
-    const { receipt } = await import(${JSON.stringify(new URL(`file://${guard}`).href)});
+    const { receipt } = await import(${JSON.stringify(guard)});
     const stdout = await new Promise((resolve, reject) => execFile("git", ["worktree", "list", "--porcelain"], {
       encoding: "utf8", timeout: 5000, env: { PATH: process.env.PATH } },
       (error, stdout) => error ? reject(error) : resolve(stdout)));

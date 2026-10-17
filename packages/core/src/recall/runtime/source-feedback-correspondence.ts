@@ -40,7 +40,7 @@ export type SourceFeedbackCorrespondenceHost = Readonly<{
   prepare(action: SourceFeedbackCorrespondenceAction): Promise<SourceFeedbackCorrespondenceResult>;
 }>;
 
-export function feedbackDescriptorIsBound(descriptor: SourceSemanticHandleDescriptor): boolean {
+function feedbackDescriptorIsBound(descriptor: SourceSemanticHandleDescriptor): boolean {
   const h = descriptor.interpretation;
   return h !== undefined && sourceSemanticInterpretationIdentity(h, fieldContractSha256) === descriptor.interpretation_id
     && h.source.source_id === descriptor.source_id && h.source.source_version === descriptor.source_version

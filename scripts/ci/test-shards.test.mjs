@@ -124,6 +124,15 @@ function workflowJob(name) {
   return workflow.slice(start + 1).split(/\n(?=  [a-z][a-z-]*:)/u)[0];
 }
 
+test("CI builds compiled daemon dependencies before whole-workspace typechecking on every OS", () => {
+  const job = workflowJob("test-shard-ubuntu");
+  const build = job.indexOf("      - name: Build\n        run: pnpm build");
+  const typecheck = job.indexOf("      - name: Typecheck\n");
+  assert.ok(build >= 0 && typecheck > build, "daemon dist must exist before bench-runner typecheck");
+  assert.match(job.slice(typecheck), /if: \$\{\{ matrix.group == 'libraries' \}\}\n        run: pnpm run --if-present typecheck/u);
+  for (const os of ["macos", "windows"]) assert.match(workflowJob(`test-shard-${os}`), /steps: \*shard-steps/u);
+});
+
 test("CI enables compile caching only outside coverage even with an inherited disable sentinel", () => {
   const root = mkdtempSync(path.join(tmpdir(), "ci-compile-cache-"));
   temporary.push(root);

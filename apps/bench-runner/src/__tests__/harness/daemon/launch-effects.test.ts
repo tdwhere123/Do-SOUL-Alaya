@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -22,7 +22,7 @@ it("leaves ambient queue and Garden defaults intact unless launch effects are se
 });
 
 it("plans an owned lease under an existing explicit root without consulting ambient temp placement", async () => {
-  const root = await mkdtemp(join(tmpdir(), "source-import-launch-")); roots.push(root);
+  const root = await realpath(await mkdtemp(join(tmpdir(), "source-import-launch-"))); roots.push(root);
   const launch = createBenchDaemonLaunchConfig({ ...defaults, configDirectoryRoot: root,
     sqliteWriteQueue: "disabled", embeddingStartupProbe: "omit", gardenCompute: "disabled",
     ambientEnv: { TMPDIR: "/not-the-config-root", ALAYA_SQLITE_WRITE_QUEUE: "1",
@@ -43,6 +43,20 @@ it("plans an owned lease under an existing explicit root without consulting ambi
   expect(await readdir(root)).toEqual([launch.configDir.slice(root.length + 1)]);
   await lease.cleanup(); await lease.cleanup();
   expect(await readdir(root)).toEqual([]);
+});
+
+it("pins the physical config directory when its parent is reached through an alias", async () => {
+  const root = await mkdtemp(join(tmpdir(), "source-import-aliased-root-")); roots.push(root);
+  const physical = join(root, "physical"), alias = join(root, "alias");
+  await mkdir(join(physical, "config"), { recursive: true });
+  await symlink(physical, alias, "junction");
+  const launch = createBenchDaemonLaunchConfig({ ...defaults, configDirectoryRoot: join(alias, "config"), ambientEnv: {} });
+  expect(dirname(launch.configDir)).toBe(await realpath(join(physical, "config")));
+  const lease = createBenchDaemonConfigDirectoryLease(launch.configDir);
+  await lease.prepare();
+  expect(await readdir(join(alias, "config"))).toEqual([launch.configDir.slice(dirname(launch.configDir).length + 1)]);
+  await lease.cleanup();
+  expect(await readdir(join(physical, "config"))).toEqual([]);
 });
 
 it("does not create an absent explicit root or remove an unowned conflicting lease", async () => {

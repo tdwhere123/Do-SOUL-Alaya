@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -52,7 +52,7 @@ it("pins a relative config root before asynchronous dataset loading can change c
     release({ sha256: "b".repeat(64), questions: [{ question_id: "captured-root-question" }] });
     await rejection;
     expect(boundary.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      configDirectoryRoot: join(before, "config"), dataDirRoot: join(root, "live") }));
+      configDirectoryRoot: await realpath(join(before, "config")), dataDirRoot: join(root, "live") }));
     expect(await readdir(join(before, "config"))).toEqual([]);
     expect(await readdir(join(after, "config"))).toEqual([]);
   } finally { process.chdir(originalCwd); }
