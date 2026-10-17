@@ -3,8 +3,10 @@ import type { SourceIndexConfiguration } from "@do-soul/alaya-protocol";
 import type { SourceEmbeddingBinding, SourceEmbeddingResult } from "../../embedding-recall/source-embedding-runtime.js";
 
 type GuardReport = {
-  phase: string; pid: number; installed_before_entry: boolean; shared_credential_guard: boolean;
-  credential_environment_count: number; transport_guards: string[]; violations: string[]; responses: number;
+  phase: string; pid: number; preload_specifier: string; exec_argv?: string[];
+  configured_child_exec_argv?: string[]; credential_environment_count: number;
+  transport_guards: string[]; violations: string[]; local_responses: number;
+  observed_application_replies?: number;
 };
 type OfflineIsolation = {
   children: { pid: number; script: string; preload: string; exited: boolean; code: number | null; signal: string | null }[];
@@ -43,16 +45,19 @@ afterAll(() => offline.isolation?.restore());
 
 function assertGuards(isolation: OfflineIsolation): void {
   const parent = isolation.snapshot();
-  expect(parent.shared_credential_guard).toBe(true);
+  expect(parent.preload_specifier).toBe(isolation.children[0]!.preload);
+  expect(parent.configured_child_exec_argv).toEqual(["--import", isolation.children[0]!.preload]);
   expect(parent.credential_environment_count).toBe(0);
   expect(parent.violations).toEqual([]);
   expect(isolation.children).toHaveLength(1);
   expect(isolation.children[0]!.exited).toBe(true);
   expect(isolation.childReports[0]?.phase, "actual child must acknowledge preload before entry imports").toBe("installed");
   for (const report of isolation.childReports) {
+    const argv = report.exec_argv ?? [];
     expect(report.pid).toBe(isolation.children[0]!.pid);
-    expect(report.installed_before_entry).toBe(true);
-    expect(report.shared_credential_guard).toBe(true);
+    expect(report.preload_specifier).toBe(isolation.children[0]!.preload);
+    expect(argv.includes("--import")).toBe(true);
+    expect(argv[argv.indexOf("--import") + 1]).toBe(report.preload_specifier);
     expect(report.credential_environment_count).toBe(0);
     expect(report.transport_guards).toEqual(parent.transport_guards);
     expect(report.violations).toEqual([]);
