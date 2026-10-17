@@ -8,7 +8,8 @@ import type { SourceSemanticReadBudget } from "../field/source-semantic-read-sto
 import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { admissionOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 
-const DISPLAY_BYTES = 4096;
+import { LIBRARY_SOURCE_DISPLAY_BYTES as DISPLAY_BYTES, prepareNominatedLibraryWindows,
+  type LibrarySourceNomination } from "./source-semantic-library-nominated-windows.js";
 export type LibraryExecutedSupport = Readonly<{
   proof: SourceSemanticLibraryProof;
   group: Pick<SourceSemanticLibraryPackage, "entries" | "explanations">;
@@ -18,7 +19,8 @@ export type LibraryExecutedSupport = Readonly<{
 /** Hydration consumes actual execution origins and current authorized source bytes. */
 export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
-  sources: readonly IndexEntry[], executed: readonly LibraryExecutedSupport[]) {
+  sources: readonly IndexEntry[], executed: readonly LibraryExecutedSupport[],
+  researchNominations?: readonly LibrarySourceNomination[]) {
   const prepared: ReturnType<typeof supportPackages>[] = [];
   let incomplete = false;
   for (const [position, entry] of sources.entries()) {
@@ -52,6 +54,21 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
   catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     incomplete = true;
+  }
+  if (researchNominations !== undefined) {
+    // Optional private hydration follows all baseline reservations. Preserve every legal
+    // window/qualification variant; root deduplication is the selector's separate job.
+    const nominated = prepareNominatedLibraryWindows(runtime, payload, authorized, meter, sources, researchNominations);
+    const expanded: SourceSemanticLibraryPackage[] = [];
+    for (const candidate of packages) {
+      if (candidate.proofs.length === 0) {
+        for (const window of nominated) if (window.access_position === candidate.access_position
+          && !expanded.includes(window)) expanded.push(window);
+      }
+      expanded.push(candidate);
+    }
+    meter.charge(packages.length * (nominated.length + 1), expanded.length * 8, "library nominated variant references");
+    return { packages: expanded, incomplete };
   }
   return { packages, incomplete };
 }

@@ -195,7 +195,7 @@ function prepareResearchFixedSourceLibrary(runtime: SourceSemanticReadRuntime, p
   return { request, meter, plan, branches };
 }
 
-function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
+export function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   descriptors: readonly SourceSemanticHandleDescriptor[],
   request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, query: SourceSemanticQuery, original: string) {
@@ -308,6 +308,27 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
   publicRequestIdentity: string, researchRawOrder = false,
   selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage) {
+  const prepared = prepareSourceSemanticLibraryInputs(runtime, payload, authorized, meter, request, queryStatus,
+    query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
+  const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
+  const plan = prepareLibraryDelivery(prepared.base, prepared.packages, request, selection, "field", selectPage, prepared.execution);
+  const rawOrderSelection = researchRawOrder ? new SourceSemanticReadBudget({
+    work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }) : null;
+  const rawOrder = rawOrderSelection === null ? null : prepareLibraryDelivery(prepared.base,
+    prepared.packages, request, rawOrderSelection, "source_access", selectSourceSemanticLibraryPage, prepared.execution);
+  meter.absorb(selection);
+  return { ...plan, research_raw_order: rawOrder?.pages[0] ?? null,
+    research_raw_order_work: rawOrderSelection === null ? null : workOf(rawOrderSelection) };
+}
+
+/** Shared package/base owner. Private comparisons capture these inputs, not another recall engine. */
+export function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
+  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryStatus: SourceSemanticQueryStatus,
+  query: SourceSemanticQuery | undefined,
+  sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
+  branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
+  publicRequestIdentity: string, researchNominations?: Parameters<typeof prepareLibraryPackages>[6]) {
   const { descriptors, interpretationPages, interpretationOpen } = discovered;
   const { proofGroups, examined, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
@@ -336,12 +357,12 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   }
   const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen;
   const hydration = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) });
-  const prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports);
-  meter.absorb(hydration);
+  let prepared: ReturnType<typeof prepareLibraryPackages>;
+  try { prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports, researchNominations); }
+  finally { meter.absorb(hydration); }
   // Selection has no acquisition phase of its own; capture current execution
   // from the parent after observation, not from the pool's frozen provenance.
   const execution = sourceSemanticExecution(meter.preparation, meter.acquisition, meter);
-  const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   const base: Parameters<typeof prepareLibraryDelivery>[0] = {
     query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
     as_of: payload.as_of, authorized, request_identity: requestIdentity, public_request_identity: publicRequestIdentity, pool: discovered.pool,
@@ -369,14 +390,7 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
       open_residuals: openResiduals || prepared.incomplete, truncated: openResiduals || prepared.incomplete
     }
   };
-  const plan = prepareLibraryDelivery(base, prepared.packages, request, selection, "field", selectPage, execution);
-  const rawOrderSelection = researchRawOrder ? new SourceSemanticReadBudget({
-    work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }) : null;
-  const rawOrder = rawOrderSelection === null ? null : prepareLibraryDelivery(base,
-    prepared.packages, request, rawOrderSelection, "source_access", selectSourceSemanticLibraryPage, execution);
-  meter.absorb(selection);
-  return { ...plan, research_raw_order: rawOrder?.pages[0] ?? null,
-    research_raw_order_work: rawOrderSelection === null ? null : workOf(rawOrderSelection) };
+  return { base, packages: prepared.packages, incomplete: prepared.incomplete, execution };
 }
 
 function semanticCorrespondencesByInterpretation(rows: readonly SourceSemanticCorrespondence[]): Map<string, SourceSemanticCorrespondence[]> {

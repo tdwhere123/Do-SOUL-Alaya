@@ -1,0 +1,86 @@
+import { type IndexEntry, type SourceSemanticAcquisitionPhase, SourceSemanticResourceExhausted } from "@do-soul/alaya-protocol";
+import { CoreError, authorizeSemanticScope, fieldContractSha256, hydrateUtf8Chunk, projectSourceDisclosure,
+  sourceGoldRootIdentity, sourceSemanticLibraryRawPreview, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
+import { SqliteFieldSourceRecordRepo, RETAINED_SOURCE_READ_RESERVATION } from "@do-soul/alaya-storage";
+import { sourceSemanticReadStores, type SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import type { SourceSemanticReadRuntime } from "./runtime.js";
+import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
+
+export const LIBRARY_SOURCE_DISPLAY_BYTES = 4096;
+export type LibrarySourceNomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
+
+/** Private navigation hydration, never a semantic support or multi-span package producer. */
+export function prepareNominatedLibraryWindows(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, sources: readonly IndexEntry[],
+  nominations: readonly LibrarySourceNomination[]): SourceSemanticLibraryPackage[] {
+  const packages: SourceSemanticLibraryPackage[] = [];
+  for (const nomination of nominations) {
+    const window = nomination.vector?.window;
+    // A lexical rank has no byte location. Never manufacture a prefix location for it.
+    if (window === undefined) continue;
+    const target = nomination.source.target;
+    meter.retain(nomination.source, "library nominated source binding");
+    if (target.workspace_id !== payload.workspace_id || nomination.source.root_key !== sourceGoldRootIdentity(target)) {
+      throw new CoreError("CONFLICT", "nominated window has a different source binding");
+    }
+    meter.charge(sources.length, 0, "library nominated source lookup");
+    const position = sources.findIndex(entry => entry.target.kind === "source_evidence"
+      && sourceGoldRootIdentity(entry.target) === nomination.source.root_key);
+    if (position < 0) throw new CoreError("CONFLICT", "nominated window is outside the captured source pool");
+    const current = sourceSemanticReadStores(runtime.database, payload.workspace_id, nomination.source.source_id,
+      meter, authorized).getCurrentRecord(payload.workspace_id, nomination.source.source_id);
+    if (current === null || current.identity !== target.root_id || current.source_version !== target.source_version
+      || current.content_digest !== target.content_digest) {
+      throw new CoreError("CONFLICT", "nominated window is not the current source record");
+    }
+    authorizeSemanticScope(current.scope_class, authorized);
+    const size = window.end_byte - window.start_byte;
+    if (!Number.isSafeInteger(window.start_byte) || window.start_byte < 0 || !Number.isSafeInteger(window.end_byte)
+      || size < 1 || size > LIBRARY_SOURCE_DISPLAY_BYTES || window.end_byte > nomination.source.body_bytes) {
+      throw new CoreError("VALIDATION", "nominated window exceeds the contiguous display bounds");
+    }
+    const text = readWindow(runtime, payload.workspace_id, target.root_id, nomination.source.body_bytes,
+      window.start_byte, window.end_byte, meter);
+    meter.charge(text.length * 3, Buffer.byteLength(text) * 3, "library nominated window verification");
+    if (`sha256:${fieldContractSha256(text)}` !== window.content_digest) {
+      throw new CoreError("CONFLICT", "nominated window digest does not match retained bytes");
+    }
+    const preview = sourceSemanticLibraryRawPreview(text, sources.length);
+    const end = window.start_byte + Buffer.byteLength(preview);
+    const source = sources[position]!;
+    if (source.target.kind !== "source_evidence") throw new CoreError("OBLIGATION_VIOLATION", "nominated source target changed");
+    const entry = { ...source, target: { ...source.target, span: { content_start: window.start_byte, content_end: end,
+      retained_extent: "body" as const, content_complete: window.start_byte === 0 && end === nomination.source.body_bytes,
+      original_complete: false } } };
+    meter.charge(1, 1024, "library nominated raw package");
+    packages.push({ entry, entries: [entry], explanations: [], proofs: [], preview, access_position: position,
+      payload_support: "not_applicable", source_disclosure: projectSourceDisclosure({ material_kind: "original_body",
+        evaluated_as_of: payload.as_of, source: current }) });
+  }
+  return packages;
+}
+
+/** Native chunks may end before the requested interval; each next read is bounded and charged. */
+function readWindow(runtime: SourceSemanticReadRuntime, workspace: string, recordId: string, bodyBytes: number,
+  start: number, end: number, meter: SourceSemanticReadBudget): string {
+  const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256), chunks: string[] = [];
+  for (let offset = start; offset < end;) {
+    meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "library nominated raw read");
+    const read = repo.findByIdBounded(workspace, recordId, end - offset, offset,
+      { workLimit: meter.work, nativeByteLimit: meter.bytes });
+    meter.read(5 + (read?.dependencyWork ?? 0), read === null ? 0 : read.nativeBytes + read.metadataBytes);
+    if (read?.resourceLimited) throw new SourceSemanticResourceExhausted("library nominated source dependencies");
+    if (read?.record?.source_body == null || read.invalidOffset || read.bodyBytes !== bodyBytes) {
+      throw new CoreError("CONFLICT", "nominated source bytes are unavailable or misbound");
+    }
+    const text = read.record.source_body;
+    meter.charge(text.length * 3, Buffer.byteLength(text) * 3 + 32, "library nominated UTF-8 chunk");
+    const chunk = hydrateUtf8Chunk(text, { byteLimit: end - offset });
+    if (chunk.status !== "chunk" || chunk.end_offset === 0) {
+      throw new CoreError("VALIDATION", "nominated window does not end on a UTF-8 boundary");
+    }
+    chunks.push(chunk.text); offset += chunk.end_offset;
+  }
+  meter.charge(chunks.length, (end - start) * 2, "library nominated contiguous assembly");
+  return chunks.join("");
+}
