@@ -12,6 +12,7 @@ import { createRequire, registerHooks, syncBuiltinESMExports } from "node:module
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
 import { createReadOnlyGitExecutionPolicy } from "./read-only-git-boundary.mjs";
+import { createAuthorityRevisionGitPolicy } from "./authority-revision-git-boundary.mjs";
 
 // Install before application imports, in both the fixture process and its pinned
 // SQLite read worker. This is a JS effect guard, not an OS sandbox or filesystem jail.
@@ -21,6 +22,11 @@ const restores = [];
 const require = createRequire(import.meta.url);
 const readOnlyGitPolicy = workers.isMainThread ? createReadOnlyGitExecutionPolicy() : null;
 const nativeExecFile = cp.execFile;
+const nativeExecFileSync = cp.execFileSync;
+// Only an explicit preload URL binding admits the production revision reader.
+const authorityCheckout = new URL(import.meta.url).searchParams.get("authority_checkout");
+const authorityGitPolicy = workers.isMainThread && authorityCheckout !== null
+  ? createAuthorityRevisionGitPolicy(authorityCheckout) : null;
 const readWorker = new URL("../../../../core-daemon/dist/runtime/recall/recall-read-worker.js", import.meta.url).href;
 const platform = process.platform === "linux" && !process.report.getReport().header.glibcVersionRuntime
   ? "linuxmusl" : process.platform;
@@ -79,6 +85,19 @@ replace(cp, "execFile", function(command, args, options, ...rest) {
   catch { return deny("process.execFile.context"); }
   record("process.execFile.read-only-git.allowed", { ...invocation.receipt, args: [...args] });
   return Reflect.apply(nativeExecFile, this, [invocation.executable, args, invocation.options, ...rest]);
+});
+replace(cp, "execFileSync", function(command, args, options) {
+  if (!authorityGitPolicy) return deny("process.execFileSync");
+  let operation, invocation;
+  try {
+    operation = authorityGitPolicy.prepare(command, args, options);
+    invocation = readOnlyGitPolicy.prepare(command, options);
+  } catch { return deny("process.execFileSync.authority-context"); }
+  record("process.execFileSync.authority-git.allowed", { ...invocation.receipt, args: [...args] });
+  const result = Reflect.apply(nativeExecFileSync, this, [invocation.executable, args, invocation.options]);
+  try { authorityGitPolicy.observe(operation, result); }
+  catch { return deny("process.execFileSync.authority-path"); }
+  return result;
 });
 for (const key of ["WebSocket", "EventSource"]) if (typeof globalThis[key] === "function") block(globalThis, key, key);
 const nativeDlopen = process.dlopen;
