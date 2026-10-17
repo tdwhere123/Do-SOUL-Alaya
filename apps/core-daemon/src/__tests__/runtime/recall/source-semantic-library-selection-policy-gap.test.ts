@@ -9,11 +9,13 @@ import { SourceSemanticResourceExhausted } from "@do-soul/alaya-protocol";
 import { selectSourceSemanticLibraryPage } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPageWithEvidenceSetCoverage, selectSourceSemanticLibraryPageWithReturnedTupleNovelty }
   from "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
-import { alternativeSelectionFixture, coverageSelectionFixture, rawSourceTwin, selectionExecutionBudget,
+import { alternativeSelectionFixture, coverageSelectionFixture, physicalRoot, rawSourceTwin, selectionExecutionBudget,
   type SelectionTaskFixture } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
 import { measureNativeSubset, nativeSubsetContext, roomyDeliveryBytes, type NativeSubsetContext }
   from "./source-semantic-library-subset-packing.test-support.js";
-import { exhaustiveReference, measureSelectionGap, type ObjectiveVector } from "./source-semantic-library-selection-gap.test-support.js";
+import { exhaustiveReference, measureSelectionGap, publicEvidenceSetPage, type ObjectiveVector }
+  from "./source-semantic-library-selection-gap.test-support.js";
+import { prepareOriginalCandidates } from "./source-semantic-library-covering-window.test-support.js";
 
 const MARGIN = 200;
 const selectors = { default: selectSourceSemanticLibraryPage, evidenceSet: selectSourceSemanticLibraryPageWithEvidenceSetCoverage,
@@ -84,6 +86,106 @@ for (const row of cases) {
     });
   }, 120_000);
 }
+
+function preparedPublicPair(context: NativeSubsetContext) {
+  const prepared = prepareOriginalCandidates(context), candidates = prepared.candidates;
+  const proofPair = ["checks-left", "checks-right"].map(id => {
+    const source = context.fixture.sources.find(source => source.id === id)!;
+    return candidates.find(row => physicalRoot(row) === physicalRoot(source.package) && row.proofs.length > 0)!;
+  });
+  // Same hydrated pool and allowance for both policies; keep the existing fit-derived margin.
+  const limit = measureNativeSubset(context, roomyDeliveryBytes, proofPair, candidates).reserved_bytes! + MARGIN;
+  return { prepared, candidates, limit,
+    control: measureNativeSubset(context, limit, undefined, candidates, selectors.default),
+    candidate: measureNativeSubset(context, limit, undefined, candidates, selectors.evidenceSet) };
+}
+
+it("delivers the complete alternative on the encoded public page while default stays incomplete", async () => {
+  await withContext(alternativeSelectionFixture(selectionExecutionBudget), context => {
+    const pair = preparedPublicPair(context);
+    const control = publicEvidenceSetPage(context.fixture, pair.control.encoded);
+    const candidate = publicEvidenceSetPage(context.fixture, pair.candidate.encoded);
+    expect(pair.prepared.work.native_work).toBeGreaterThan(0);
+    expect(pair.prepared.work.native_bytes).toBeGreaterThan(0);
+    for (const run of [pair.control, pair.candidate]) {
+      expect(run.encoded_bytes).toBeLessThanOrEqual(pair.limit);
+      expect(run.preparation_phases["candidate delivery encoding"]?.logical_work).toBeGreaterThan(0);
+      expect(run.exposure.position).toMatchObject({ status: "complete", issues: [] });
+      expect(run.exposure.proof_qualification).toMatchObject({ status: "complete", increment: 2, issues: [] });
+    }
+    const expectedCoordinates: Readonly<Record<string, readonly { alternative: number; input: number }[]>> = {
+      "checks-left": [{ alternative: 1, input: 0 }, { alternative: 1, input: 1 }],
+      "checks-right": [{ alternative: 1, input: 2 }, { alternative: 1, input: 3 }],
+      "permission": [{ alternative: 0, input: 0 }], "backup-compatible": [{ alternative: 0, input: 1 }]
+    };
+    expect(control.query_semantics_status).toMatchObject({ status: "admitted" });
+    expect(candidate.query_semantics_status).toMatchObject({ status: "admitted" });
+    expect(control.source_ids).toEqual(["checks-left", "checks-right"]);
+    expect(candidate.source_ids).toEqual(["backup-compatible", "permission"]);
+    expect(control.present_inputs).toEqual([3, 4, 5, 6]);
+    expect(candidate.present_inputs).toEqual([1, 2]);
+    expect(control.complete_alternatives).toEqual([]);
+    expect(candidate.complete_alternatives).toEqual([[1, 2]]);
+    expect(control.qualified_complete_alternatives).toEqual([]);
+    expect(candidate.qualified_complete_alternatives).toEqual([[1, 2]]);
+    expect(candidate.source_ids).not.toEqual(control.source_ids);
+    for (const slot of [...control.slots, ...candidate.slots]) {
+      const authored = context.fixture.sources.find(source => source.id === slot.source_id);
+      expect(authored).toBeDefined();
+      expect(slot.preview).toBe(authored!.body);
+      expect(slot.within_budget).toBe(true);
+      expect(slot.proof_use).toMatchObject({ kind: "conditional_support" });
+      expect(slot.supported_coordinates).toEqual(expectedCoordinates[authored!.id]);
+      const proof = authored!.package.proofs[0]!;
+      expect(slot.proof_identity).toEqual({ source_interpretation_id: proof.source_interpretation_id,
+        query_semantics_id: proof.query_semantics_id, semantic_correspondence_id: proof.semantic_correspondence_id,
+        conditional_computation_id: proof.conditional_computation_id });
+      expect(slot.qualifier_support).toEqual(slot.proof_support);
+      expect(slot.proof_support).toMatchObject({
+        answer: "unrepresented", operation: "not_executed", compatibility: "unknown", distinctness: "unknown"
+      });
+      expect(slot.qualifier_support).toMatchObject({
+        answer: "unrepresented", operation: "not_executed", compatibility: "unknown", distinctness: "unknown"
+      });
+      expect(slot.world_claim).toBe("unknown");
+      expect(slot.semantic_status).toBe("unreviewed");
+      expect(slot.selection_reason).toMatch(/unknown/i);
+    }
+    // Public original-body delivery requires an addressed span, not preview text alone.
+    for (const slot of [...control.slots, ...candidate.slots]) {
+      const authored = context.fixture.sources.find(source => source.id === slot.source_id)!;
+      expect(slot.span).toMatchObject({
+        content_start: 0, content_end: Buffer.byteLength(authored.body), retained_extent: "body", content_complete: true
+      });
+      expect(slot.index_span).toEqual(slot.span);
+    }
+  });
+}, 120_000);
+
+it("does not count expected text with missing, unqualified or wrong-input proof as qualified coverage", async () => {
+  await withContext(alternativeSelectionFixture(selectionExecutionBudget), context => {
+    const pair = preparedPublicPair(context), fixture = context.fixture;
+    expect(() => publicEvidenceSetPage(fixture, { ...pair.candidate.encoded, proofs: [] })).toThrow(/bind.*proof/u);
+    // Valid public proofs for inputs 3–6 cannot qualify the expected text for inputs 1–2.
+    const wrongInputs = publicEvidenceSetPage(fixture, { ...pair.control.encoded,
+      results: pair.control.encoded.results!.map((row, index) => ({ ...row,
+        content_preview: fixture.sources.find(source => source.id === (index === 0 ? "permission" : "backup-compatible"))!.body })) });
+    expect(wrongInputs.present_inputs).toEqual([1, 2]);
+    expect(wrongInputs.complete_alternatives).toEqual([[1, 2]]);
+    expect(wrongInputs.slots.every(slot => slot.proof_support !== undefined)).toBe(true);
+    expect(wrongInputs.qualified_complete_alternatives).toEqual([]);
+    const rawPair = ["permission", "backup-compatible"].map(id => {
+      const source = fixture.sources.find(source => source.id === id)!;
+      return pair.candidates.find(row => physicalRoot(row) === physicalRoot(source.package) && row.proofs.length === 0)!;
+    });
+    const unqualified = publicEvidenceSetPage(fixture,
+      measureNativeSubset(context, pair.limit, rawPair, pair.candidates).encoded);
+    expect(unqualified.present_inputs).toEqual([1, 2]);
+    expect(unqualified.complete_alternatives).toEqual([[1, 2]]);
+    expect(unqualified.slots.every(slot => slot.proof_support === undefined)).toBe(true);
+    expect(unqualified.qualified_complete_alternatives).toEqual([]);
+  });
+}, 120_000);
 
 /** Limits at the encoded size of every proof-only subset: each cluster of near-equal sizes, minus and plus a clear margin. */
 function scanLimits(context: NativeSubsetContext): readonly number[] {

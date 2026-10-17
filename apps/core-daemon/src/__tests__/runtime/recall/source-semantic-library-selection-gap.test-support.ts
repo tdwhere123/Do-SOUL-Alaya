@@ -1,6 +1,8 @@
+import { proofForLibraryEntry, proofForLibraryQualifier, projectSourceSemanticQuerySupport, SoulInterpretationResponseSchema, sourceDisclosure,
+  sourceGoldRootIdentity, type SoulInterpretationResponse } from "@do-soul/alaya-protocol";
 import type { SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import { selectSourceSemanticLibraryPage } from "@do-soul/alaya-core";
-import { physicalRoot, rawSourceTwin, type SelectionTaskFixture }
+import { deploymentStatement, physicalRoot, rawSourceTwin, type SelectionTaskFixture }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
 import type { LibraryPageSelector } from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
 import { measureNativeSubset, roomyDeliveryBytes, type NativeSubsetContext } from "./source-semantic-library-subset-packing.test-support.js";
@@ -131,4 +133,55 @@ export function measureSelectionGap(context: NativeSubsetContext, limit: number,
     best_text_inputs: Math.max(0, ...facts.map(row => row.text_inputs)),
     complete_pages: facts.filter(row => row.complete).map(row => row.label).sort(), selected_fits_in_pool_order: probeFits,
     selector_work: run.selector_work, preparation_work: { logical_work: run.preparation_work.logical_work, logical_bytes: run.preparation_work.logical_bytes } };
+}
+
+/** Serialized public membership, not selected plan packages. */
+export function decodePublicLibraryPage(encoded: SoulInterpretationResponse) {
+  const decoded = SoulInterpretationResponseSchema.parse(JSON.parse(JSON.stringify(encoded)));
+  if (decoded.operation !== "recall" || decoded.results === undefined || decoded.index === undefined
+    || decoded.slot_qualifiers === undefined) {
+    throw new Error("public membership page expected");
+  }
+  return { ...decoded, results: decoded.results, index: decoded.index, slot_qualifiers: decoded.slot_qualifiers };
+}
+
+/** Authored statements and public proofs; package labels are not this surface. */
+export function publicEvidenceSetPage(fixture: SelectionTaskFixture, encoded: SoulInterpretationResponse) {
+  const page = decodePublicLibraryPage(encoded);
+  const slots = page.results.map((row, index) => {
+    const target = row.target;
+    if (target?.kind !== "source_evidence") throw new Error("source evidence target expected");
+    const entry = page.index.entries[index]!;
+    const proofs = page.proofs ?? [], proof = proofForLibraryEntry(entry, proofs);
+    const qualifier = proof === undefined ? undefined : page.slot_qualifiers.find(slot => slot.index === index
+      && proofForLibraryQualifier(entry, slot, proofs) === proof);
+    const authored = fixture.sources.find(source => physicalRoot(source.package) === sourceGoldRootIdentity(target));
+    const support = proof === undefined || qualifier === undefined ? undefined
+      : projectSourceSemanticQuerySupport(proof.query, proof.binding_results ?? []);
+    return {
+      source_id: authored?.id ?? null, preview: row.content_preview, span: target.span,
+      index_span: entry.target.kind === "source_evidence" ? entry.target.span : undefined,
+      within_budget: row.budget_state.within_budget, selection_reason: row.selection_reason,
+      proof_use: row.source_disclosure === undefined ? undefined : sourceDisclosure(row.source_disclosure).proof_use,
+      qualifier_support: qualifier?.support, proof_support: support,
+      supported_coordinates: support?.evidence_inputs.filter(input => input.status === "supported")
+        .map(({ alternative, input }) => ({ alternative, input })) ?? [],
+      proof_identity: proof === undefined ? undefined : { source_interpretation_id: proof.source_interpretation_id,
+        query_semantics_id: proof.query_semantics_id, semantic_correspondence_id: proof.semantic_correspondence_id,
+        conditional_computation_id: proof.conditional_computation_id },
+      world_claim: proof?.world_claim, semantic_status: proof?.semantic_status
+    };
+  });
+  const present_inputs = [...new Set(fixture.alternatives.flat())]
+    .filter(input => slots.some(slot => slot.preview.includes(deploymentStatement(input))))
+    .sort((left, right) => left - right);
+  const covered = (inputs: readonly number[], alternative: number, qualified: boolean) => inputs.every((input, coordinate) => slots.some(slot =>
+    (!qualified || slot.supported_coordinates.some(row => row.alternative === alternative && row.input === coordinate))
+    && slot.preview.includes(deploymentStatement(input))));
+  return {
+    query_semantics_status: page.query_semantics_status, slots, present_inputs,
+    source_ids: slots.flatMap(slot => slot.source_id === null ? [] : [slot.source_id]).sort(),
+    complete_alternatives: fixture.alternatives.filter((inputs, alternative) => covered(inputs, alternative, false)),
+    qualified_complete_alternatives: fixture.alternatives.filter((inputs, alternative) => covered(inputs, alternative, true))
+  };
 }
