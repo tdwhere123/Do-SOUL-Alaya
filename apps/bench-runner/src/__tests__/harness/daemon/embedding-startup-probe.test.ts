@@ -19,7 +19,8 @@ vi.mock("@modelcontextprotocol/sdk/inMemory.js", () => ({ InMemoryTransport: {
 } }));
 vi.mock("../../../shared/version.js", () => ({ resolveBenchRunnerVersion: () => "fixture-version" }));
 vi.mock("../../../harness/daemon/daemon-environment.js", () => ({
-  BENCH_DAEMON_MANAGED_ENV_KEYS: [], resolveBenchDaemonManagedEnvKeys: () => []
+  BENCH_DAEMON_MANAGED_ENV_KEYS: [], resolveBenchDaemonManagedEnvKeys: () => [],
+  assertBenchDaemonLaunchEffects: vi.fn()
 }));
 vi.mock("../../../harness/daemon/daemon-config-directory.js", () => ({
   createBenchDaemonConfigDirectoryLease: () => ({ prepare: async () => undefined, cleanup: doubles.cleanupConfig })
@@ -73,6 +74,26 @@ it("leaves disabled bench startup's probe policy unspecified", async () => {
   try {
     expect(doubles.construct).toHaveBeenCalledWith(expect.objectContaining({ embeddingStartupProbe: undefined }));
   } finally { await daemon.shutdown(); }
+});
+
+it("inherits a prepared startup probe when the caller leaves it unspecified", async () => {
+  const daemon = await startBenchDaemon({ dataDirRoot: "/fixture-data" }, {
+    dataDir: "/fixture-data", configDir: "/fixture-config", embeddingMode: "disabled",
+    embeddingProviderKind: "local_onnx", embeddingStartupProbe: "omit", environment: {},
+    reviewerCredentials: { identity: "fixture", token: "fixture" }
+  });
+  try {
+    expect(doubles.construct).toHaveBeenCalledWith(expect.objectContaining({ embeddingStartupProbe: "omit" }));
+  } finally { await daemon.shutdown(); }
+});
+
+it("rejects conflicting prepared startup probes before runtime construction", async () => {
+  await expect(startBenchDaemon({ dataDirRoot: "/fixture-data", embeddingStartupProbe: "eager" }, {
+    dataDir: "/fixture-data", configDir: "/fixture-config", embeddingMode: "disabled",
+    embeddingProviderKind: "local_onnx", embeddingStartupProbe: "omit", environment: {},
+    reviewerCredentials: { identity: "fixture", token: "fixture" }
+  })).rejects.toThrow("does not match requested effects");
+  expect(doubles.construct).not.toHaveBeenCalled();
 });
 
 it("closes an omitted-probe runtime after startup fails and releases the bench slot", async () => {

@@ -3,7 +3,7 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -167,6 +167,31 @@ function cacheDigest(root: string): string {
   }
   visit(root); return hash.digest("hex");
 }
+
+it("keeps newly managed garden and conflict credentials absent while unrelated secret reads still fail", () => {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key)));
+  const host = "host-must-not-be-read";
+  env.ALAYA_OFFICIAL_GARDEN_SECRET_REF = host;
+  env.ALAYA_GARDEN_OPENAI_SECRET_REF = host;
+  env.ALAYA_CONFLICT_LLM_API_KEY = host;
+  env.ALAYA_CONFLICT_LLM_SECRET_REF = host;
+  const probe = spawnSync(process.execPath, ["--import", BOOTSTRAP, "-e",
+    `const keys = ["ALAYA_OFFICIAL_GARDEN_SECRET_REF", "ALAYA_GARDEN_OPENAI_SECRET_REF", "ALAYA_CONFLICT_LLM_API_KEY", "ALAYA_CONFLICT_LLM_SECRET_REF"];
+     const absent = Object.fromEntries(keys.map(key => [key, process.env[key] ?? null]));
+     let unrelated = "missing-throw";
+     try { void process.env.ALAYA_UNRELATED_HOST_SECRET; unrelated = "leaked"; }
+     catch (error) { unrelated = error instanceof Error ? error.message : String(error); }
+     process.stdout.write(JSON.stringify({ absent, unrelated }));`],
+    { env, encoding: "utf8", timeout: 10_000 });
+  expect(probe.error, probe.stderr).toBeUndefined();
+  const payload = JSON.parse(probe.stdout);
+  expect(payload.absent).toEqual({
+    ALAYA_OFFICIAL_GARDEN_SECRET_REF: null, ALAYA_GARDEN_OPENAI_SECRET_REF: null,
+    ALAYA_CONFLICT_LLM_API_KEY: null, ALAYA_CONFLICT_LLM_SECRET_REF: null
+  });
+  expect(payload.unrelated).toBe("Credential environment access forbidden");
+  expect(probe.status).toBe(1);
+});
 
 it("runs the compiled existing entry through real Core/daemon/cache and repairs missing projection without a worker", async () => {
   const { recovery, cache } = await fixture();

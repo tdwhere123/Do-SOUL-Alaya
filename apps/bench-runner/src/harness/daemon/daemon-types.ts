@@ -60,6 +60,11 @@ export type { BenchTokenMetrics } from "../token/token-metrics.js";
 export interface BenchDaemonOptions {
   readonly sourceSemanticInterpretationClock?: string;
   readonly dataDirRoot?: string;
+  /** Execution placement only; the root must already exist. The owned child lease is removed on shutdown. */
+  readonly configDirectoryRoot?: string;
+  /** Opt out of the optional storage worker, retaining ordinary audited main-connection writes. */
+  readonly sqliteWriteQueue?: "disabled";
+  readonly gardenCompute?: "disabled";
   readonly workspaceId?: string;
   readonly runId?: string;
   readonly embeddingMode?: BenchEmbeddingMode;

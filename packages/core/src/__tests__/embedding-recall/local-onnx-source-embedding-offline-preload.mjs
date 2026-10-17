@@ -11,6 +11,7 @@ import tls from "node:tls";
 import { syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
 import { installProviderFreeBoundary } from "../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.ts";
+import { createReadOnlyGitExecutionPolicy } from "../../../../../apps/bench-runner/src/__tests__/support/read-only-git-boundary.mjs";
 
 const preloadSpecifier = import.meta.url;
 const sourceAllocation = parseSourceAllocation(new URL(preloadSpecifier));
@@ -42,6 +43,7 @@ let explicitRunInputs = 0;
 let reservedBytes = 0;
 const readOnlyGitCalls = [];
 const allowReadOnlyGit = !childMode && process.env.ALAYA_SOURCE_EMBEDDING_OFFLINE_ALLOW_GIT === "1";
+const readOnlyGitPolicy = allowReadOnlyGit ? createReadOnlyGitExecutionPolicy() : null;
 const ALLOWED_CHILD_OPS = new Set(["warmup", "bind_source", "embed_source", "close"]);
 let responses = 0;
 let restored = false;
@@ -123,13 +125,11 @@ for (const key of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFi
         query?.slice(0, 3).join(" ") === "hash-object --no-filters --" && query.length > 3 &&
           query.slice(3).every(path => !/(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(path)));
       if (command !== "git" || !permitted || options?.shell) return deny(`unexpected ${key}`);
-      const offered = options?.env ?? {};
-      const env = Object.fromEntries(Object.entries(offered).filter(([name]) =>
-        !/(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|NODE_OPTIONS)/iu.test(name)));
-      Object.assign(env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
-        GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" });
-      readOnlyGitCalls.push({ command, args, credential_environment_count: credentialCount(env) });
-      return Reflect.apply(native, this, [command, args, { ...options, env }, ...rest]);
+      let invocation;
+      try { invocation = readOnlyGitPolicy.prepare(command, options); }
+      catch { return deny(`unexpected ${key} execution context`); }
+      readOnlyGitCalls.push({ ...invocation.receipt, args });
+      return Reflect.apply(native, this, [invocation.executable, args, invocation.options, ...rest]);
     });
     transportGuards.push(`subprocess.${key}.read-only-git-only`);
   } else block(childProcess, key, `subprocess.${key}`);

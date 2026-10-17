@@ -43,10 +43,12 @@ for (const owner of [fs, fsp]) {
 }
 process.on("exit", () => { if (refusals.length > 0) process.exitCode = 1; });
 
-// The existing bench harness snapshots these absent embedding credentials/control
-// references and creates a synthetic reviewer token. Never consult ambient secrets.
+// The existing bench harness snapshots these absent embedding, Garden, conflict,
+// and control credentials and creates a synthetic reviewer token. Never consult ambient secrets.
 const fixtureControls = new Map([
   ["OPENAI_API_KEY", undefined], ["ALAYA_OPENAI_SECRET_REF", undefined],
+  ["ALAYA_OFFICIAL_GARDEN_SECRET_REF", undefined], ["ALAYA_GARDEN_OPENAI_SECRET_REF", undefined],
+  ["ALAYA_CONFLICT_LLM_API_KEY", undefined], ["ALAYA_CONFLICT_LLM_SECRET_REF", undefined],
   ["ALAYA_REQUEST_TOKEN", undefined], ["ALAYA_REQUEST_TOKEN_WORKSPACES", undefined],
   ["ALAYA_REVIEWER_TOKEN", undefined], ["ALAYA_MCP_TOOL_CONFIRMATION_TOKEN", undefined],
   ["ALAYA_E2E_EVENT_TRIGGER_TOKEN", undefined]
