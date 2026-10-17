@@ -177,9 +177,12 @@ export function hasProviderRawContinuationAttempts(root: string, key: string): b
   });
 }
 
-export function providerRawAttemptInputPaths(root: string, key: string): readonly string[] {
+export function providerRawAttemptInputPaths(root: string, key: string, noFollowDirectories = false): readonly string[] {
   const directory = join(root, "provider-raw", key.slice(0, 2));
-  return [directory, ...matchingRawAttemptNames(directory, key).map(name => join(directory, name))];
+  // Qualified read admission refuses escapes; the retained-protection inventory must still record aliases.
+  const names = !noFollowDirectories ? matchingRawAttemptNames(directory, key) : !boundedArtifactEntryExists(directory) ? []
+    : withRootBoundDirectory({ root: directory, label: "provider raw input inventory" }, bound => matchingRawAttemptNames(bound, key));
+  return [directory, ...names.map(name => join(directory, name))];
 }
 
 function matchingRawAttemptNames(directory: string, key: string): readonly string[] {

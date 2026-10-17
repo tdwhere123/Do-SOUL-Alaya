@@ -1,11 +1,12 @@
-import { type SourceRecordIdentity, type SourceSemanticAccessReceipt, type SourceSemanticHandleDescriptor,
+import { canonicalJson, hashContentDigest, verifySourceRecordIdentity, sourceSemanticGenerationTaskSummary, SourceSemanticResourceExhausted, type SourceRecordIdentity, type SourceSemanticAccessReceipt, type SourceSemanticHandleDescriptor,
   type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents } from "@do-soul/alaya-protocol";
-import { CoreError, authorizeSemanticScope } from "@do-soul/alaya-core";
+import { CoreError, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { sourceSemanticReadStores, type SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { loadVerified } from "./source-semantic-discovery.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { accessInputIdentity, bindAccessPoolIdentity, previewExtent, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import { sourceSemanticAccessReceiptValue } from "./source-semantic-access-receipts.js";
+import type { QualifiedSourceSelection, QualifiedSourceSelectionReply } from "./source-semantic-qualified-selection-boundary.js";
 
 type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number];
 export type ResearchSourceObservation = SourceObservation & Pick<SourceRecordIdentity, "source_version" | "content_digest">;
@@ -22,14 +23,7 @@ export function bindResearchFixedSourcePool(runtime: SourceSemanticReadRuntime, 
   const records = bindVerifiedResearchSourceRecords(runtime, workspace, authorized, meter, rows);
   const positions = new Map(records.map((record, index) => [record.source_id, index]));
   const verified = descriptors.map(descriptor => {
-    const checked = loadVerified(runtime, workspace, descriptor.interpretation_id, authorized, meter);
-    const record = checked.stored.record;
-    const position = positions.get(record.source_id);
-    if (position === undefined || record.identity !== rows[position]!.record_id ||
-        record.source_version !== descriptor.source_version || record.content_digest !== descriptor.content_digest ||
-        record.source_id !== descriptor.source_id || checked.bound.interpretation_id !== descriptor.interpretation_id) {
-      throw new CoreError("CONFLICT", "research interpretation escapes its frozen source tuple");
-    }
+    const { record, position } = verifyResearchDescriptor(runtime, workspace, authorized, meter, rows, positions, descriptor);
     return { descriptor, position, record_id: record.identity };
   }).sort((a, b) => a.position - b.position || a.descriptor.interpretation_id.localeCompare(b.descriptor.interpretation_id));
   if (new Set(verified.map(row => row.descriptor.interpretation_id)).size !== verified.length) {
@@ -40,6 +34,62 @@ export function bindResearchFixedSourcePool(runtime: SourceSemanticReadRuntime, 
       interpretation_id: row.descriptor.interpretation_id, record_id: row.record_id,
       signal: { source_text_score: null, interpretation_reading_score: 0 }
     })));
+}
+
+function verifyResearchDescriptor(runtime: SourceSemanticReadRuntime, workspace: string,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, rows: readonly ResearchSourceObservation[],
+  positions: ReadonlyMap<string, number>, descriptor: SourceSemanticHandleDescriptor) {
+  const checked = loadVerified(runtime, workspace, descriptor.interpretation_id, authorized, meter);
+  const record = checked.stored.record, position = positions.get(record.source_id), h = checked.bound.interpretation;
+  if (position === undefined || record.identity !== rows[position]!.record_id ||
+      record.source_version !== descriptor.source_version || record.content_digest !== descriptor.content_digest ||
+      record.source_id !== descriptor.source_id || checked.bound.interpretation_id !== descriptor.interpretation_id ||
+      descriptor.producer_id !== h.producer_id || descriptor.producer_version !== h.producer_version ||
+      descriptor.contract_version !== h.contract_version || canonicalJson(descriptor.generation_task ?? null) !==
+      canonicalJson(h.generation_task === undefined ? null : sourceSemanticGenerationTaskSummary(h.generation_task)) || descriptor.interpretation !== undefined &&
+      canonicalJson(descriptor.interpretation) !== canonicalJson(h)) {
+    throw new CoreError("CONFLICT", "research interpretation escapes its frozen source tuple");
+  }
+  return { record, position };
+}
+
+/** Provider-free bounded consumer. Every tuple is current and its complete body is actually read;
+ * rejected/missing H remains a raw member, never a smaller replacement population. */
+export function bindResearchQualifiedSourcePool(runtime: SourceSemanticReadRuntime, workspace: string,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
+  query: SourceSemanticQuery, budget: RequestBudget, input: QualifiedSourceSelection) {
+  const rows: ResearchSourceObservation[] = input.nominees.map(source => ({ ...source.current,
+    read_bytes: source.body_bytes, body_bytes: source.body_bytes, complete: true,
+    signal: { source_text_score: null, interpretation_reading_score: 0 } }));
+  const records = bindVerifiedResearchSourceRecords(runtime, workspace, authorized, meter, rows);
+  for (const [index, record] of records.entries()) {
+    verifySourceRecordIdentity(record, fieldContractSha256);
+    const stored = sourceSemanticReadStores(runtime.database, workspace, record.source_id, meter, authorized).getStoredRecord(workspace, record.identity);
+    meter.charge(stored?.content_bytes.length ?? 0, 0, "research fixed body verification");
+    if (stored === null || hashContentDigest(stored.content_bytes, fieldContractSha256) !== record.content_digest ||
+        Buffer.byteLength(stored.content_bytes) !== rows[index]!.body_bytes) {
+      throw new CoreError("CONFLICT", "research source body differs from its frozen identity or extent");
+    }
+  }
+  const positions = new Map(records.map((record, index) => [record.source_id, index]));
+  const descriptors: SourceSemanticHandleDescriptor[] = [], interpretationRows: InterpretationObservation[] = [];
+  const eligibility: QualifiedSourceSelectionReply["eligibility"] = input.nominees.map(source => {
+    if (source.interpretation === undefined) return { source, h: "missing", c: source.correspondence_status, reason: "interpretation_not_supplied" };
+    try {
+      const { record } = verifyResearchDescriptor(runtime, workspace, authorized, meter, rows, positions, source.interpretation);
+      if (record.identity !== source.current.record_id) throw new CoreError("CONFLICT", "interpretation belongs to another nominee");
+      descriptors.push(source.interpretation);
+      interpretationRows.push({ interpretation_id: source.interpretation.interpretation_id, record_id: record.identity,
+        signal: { source_text_score: null, interpretation_reading_score: 0 } });
+      return { source, h: "ready", c: source.correspondence_status, reason: null };
+    } catch (error) {
+      if (error instanceof SourceSemanticResourceExhausted) throw error;
+      if (!(error instanceof CoreError)) throw error;
+      return { source, h: "rejected", c: source.correspondence_status, reason: error.message.slice(0, 512) };
+    }
+  });
+  return { eligibility, pool: bindResearchSourceAccessPool(runtime, workspace, authorized, meter,
+    original, query, budget, records, rows, descriptors, interpretationRows) };
 }
 
 /** Access identity over already verified current records; currentness stays on the binder. */

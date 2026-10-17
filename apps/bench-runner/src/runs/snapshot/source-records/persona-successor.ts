@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
-import { AlayaError } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { readVerifiedRetainedSourceRecordsArtifact } from "./native.js";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-path.js";
 import { inspectSourceRecordsArtifact, type SourceRecordsDataset, type SourceRecordsMessage } from "./contract.js";
@@ -51,7 +52,34 @@ export function preparePersonaSuccessor(input: PersonaSuccessorInput, options: {
 }
 export type PreparedPersonaSuccessor = ReturnType<typeof preparePersonaSuccessor>;
 
-export function personaPredecessor(successor: PreparedPersonaSuccessor, coordinates: {
+/** Private qualified readmission: the native origin pins the successor DB; its version pins
+ * this exact parent manifest. Both sidecars must also describe actual current DB records. */
+export function readVerifiedPersonaSuccessorMembership(snapshotPath: string, parentSnapshotPath: string, workspaceId: string) {
+  const successor = readVerifiedRetainedSourceRecordsArtifact(snapshotPath, workspaceId);
+  const parent = readVerifiedRetainedSourceRecordsArtifact(parentSnapshotPath, workspaceId);
+  const binding = successor.manifest.persona_successor;
+  if (binding === undefined || resolve(binding.parent_snapshot) !== resolve(parentSnapshotPath) ||
+      binding.parent_manifest_sha256 !== parent.manifest.manifest_sha256 ||
+      !isDeepStrictEqual(successor.manifest.dataset, parent.manifest.dataset) ||
+      !isDeepStrictEqual(successor.sidecar.questions, parent.sidecar.questions) ||
+      successor.messages.length !== parent.messages.length ||
+      Date.parse(successor.manifest.recorded_at) <= Date.parse(parent.manifest.recorded_at)) {
+    throw new AlayaError("CONFLICT", "qualified persona successor differs from its verified parent artifact");
+  }
+  const predecessors = new Map(parent.messages.map(row => [row.message_id, row]));
+  if (predecessors.size !== parent.messages.length) throw new AlayaError("CONFLICT", "persona parent repeats a logical source identity");
+  for (const row of successor.messages) {
+    const old = personaPredecessor({ predecessors }, { questionId: row.question_id, sessionId: row.session_id,
+      sessionIndex: row.session_index, roundIndex: row.round_index, messageId: row.message_id,
+      messageIndex: row.message_index, role: row.role });
+    if (canonicalJson(row.predecessor) !== canonicalJson(old)) {
+      throw new AlayaError("CONFLICT", "qualified persona predecessor differs from actual parent membership");
+    }
+  }
+  return successor;
+}
+
+export function personaPredecessor(successor: Pick<PreparedPersonaSuccessor, "predecessors">, coordinates: {
   questionId: string; sessionId: string; sessionIndex: number; roundIndex: number;
   messageId: string; messageIndex: number; role: string;
 }): SourceRecordsMessage["record"] {

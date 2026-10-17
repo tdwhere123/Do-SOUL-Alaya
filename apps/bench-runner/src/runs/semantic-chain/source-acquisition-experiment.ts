@@ -12,12 +12,16 @@ import { captureSourceExperimentValue, publishSourceExperimentLifetime, publishS
   readSourceExperiment, SOURCE_EXPERIMENT_ACTION } from "./source-experiment.js";
 import { currentBenchScope } from "../../harness/daemon-task.js";
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
-import type { compareResearchSourceAcquisitionControls } from "../../../../core-daemon/src/runtime/recall/source-semantic-research-acquisition-controls.js";
+import type { compareResearchSourceAcquisitionControls, compareResearchSourceQualifiedSelection } from "../../../../core-daemon/src/runtime/recall/source-semantic-research-acquisition-controls.js";
+import { SourceQualifiedSelectionInputSchema, admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "./source-qualified-selection-input.js";
+export type SourceQualifiedAcquisitionComparison = { producer: ReturnType<typeof admitSourceQualifiedSelection>;
+  comparison?: Awaited<ReturnType<typeof compareResearchSourceQualifiedSelection>> };
 
 export type SourceAcquisitionComparison = Awaited<ReturnType<typeof compareResearchSourceAcquisitionControls>>;
 const Amount = z.number().int().nonnegative().safe();
 export const SourceAcquisitionExperimentInputSchema = z.object({
   contract: z.literal("source-acquisition-experiment-v1"), root: z.string().min(1),
+  qualified_selection: SourceQualifiedSelectionInputSchema.optional(),
   config: SemanticChainConfigSchema, original_query: z.string().min(1),
   host_admission: RecoveryAllowanceSchema,
   guard_allocation: z.object({ source_inputs: Amount, utf8_bytes: Amount }).strict(),
@@ -41,8 +45,10 @@ export async function captureSourceAcquisitionLaunchBinding() { return (await la
 
 function assertRoot(input: SourceAcquisitionExperimentInput, root: string): void {
   if (input.root !== root || canonicalPath(root) !== root) throw new AlayaError("CONFLICT", "acquisition requires its canonical frozen root");
-  for (const path of [input.config.snapshot_path, input.config.source_index!.cache_root,
-    input.config.source_index!.preparation_path, input.config.query_cache_root, input.config.correspondence_cache_root]) {
+  for (const path of [input.config.snapshot_path,
+    ...(input.config.source_index === undefined ? [] : [input.config.source_index.cache_root, input.config.source_index.preparation_path]),
+    input.config.query_cache_root, input.config.correspondence_cache_root,
+    ...(input.qualified_selection === undefined ? [] : qualifiedSelectionInputPaths(input.config, input.qualified_selection))]) {
     if (canonicalPathsOverlap(canonicalPath(root), canonicalPath(path))) {
       throw new AlayaError("CONFLICT", "acquisition output overlaps a frozen input or cache");
     }
@@ -50,10 +56,13 @@ function assertRoot(input: SourceAcquisitionExperimentInput, root: string): void
   if (existsSync(join(root, "recovery-window.json"))) throw new AlayaError("CONFLICT", "acquisition cannot consume a recovery window");
 }
 function assertPolicy(input: SourceAcquisitionExperimentInput): void {
-  if (input.config.source_index === undefined || input.config.access_policy !== "query-conditioned-v1") {
-    throw new AlayaError("VALIDATION", "acquisition requires a prepared query-conditioned Source index");
+  if (input.config.access_policy !== "query-conditioned-v1" || (input.qualified_selection === undefined
+    ? input.config.source_index === undefined
+    : input.config.source_index !== undefined || input.guard_allocation.source_inputs !== 0 || input.guard_allocation.utf8_bytes !== 0 ||
+      input.config.source_preview_extents !== undefined)) {
+    throw new AlayaError("VALIDATION", "acquisition requires its prepared index or an explicit zero-inference qualified population");
   }
-  // The question is frozen independently; neither Q/H/C nor answers/gold enter execution.
+  // The original question stays frozen independently of its producer interpretation.
   const question = z.object({ original_query: z.string() }).safeParse(input.config.query_workset.items[0]);
   if (input.config.query_workset.items.length !== 1 || !question.success || question.data.original_query !== input.original_query) {
     throw new AlayaError("CONFLICT", "acquisition question differs from frozen configuration");
@@ -86,7 +95,8 @@ export async function compareSemanticChainSourceAcquisition(inputValue: SourceAc
     }
     assertPolicy(input); assertRoot(input, root);
     freezeRecoveryAllowance(root, identity, input.host_admission, input.config.snapshot_path);
-    reserveRecoveryRead(root, "admit guarded acquisition", [input.config.source_index!.preparation_path]);
+    reserveRecoveryRead(root, "admit guarded acquisition", input.config.source_index === undefined
+      ? qualifiedSelectionInputPaths(input.config, input.qualified_selection!) : [input.config.source_index.preparation_path]);
     assertChainSnapshot(input.config);
     owner = await launchOwner(); owner.assertAcquisitionLaunchBinding(input.launch);
     const timing = await import("../../../../core-daemon/dist/runtime/recall-read-worker/client-config.js");
@@ -173,6 +183,12 @@ export async function executeGuardedSourceAcquisition(root: string, identity: st
   try {
     const comparisonOwner = await import("../../../../core-daemon/dist/runtime/recall/source-semantic-research-acquisition-controls.js");
     const payloadOwner = await import("../../../../core-daemon/dist/mcp-memory/tool/interpretation-handler.js");
+    const producer = input.qualified_selection === undefined ? undefined : admitSourceQualifiedSelection(input.config, input.qualified_selection);
+    if (producer?.status === "unavailable") {
+      publishSourceExperimentResult(root, identity, { qualified_comparison: { producer } });
+      writeChainArtifact(join(root, "source-experiment-child.json"), { identity, pid: process.pid, status: "closed", phase: "comparison", active, physical_total: "unknown" });
+      return;
+    }
     await withSemanticChainDaemon(input.config, root, async daemon => {
       phase = "comparison";
       const signal = AbortSignal.any([invocation.signal, currentBenchScope()!.signal]);
@@ -181,18 +197,29 @@ export async function executeGuardedSourceAcquisition(root: string, identity: st
         runId: input.config.run_id, sessionId: identity, agentTarget: "bench" }, {
         kind: "recall", accepts_unreviewed_conditional_results: true, original_query: input.original_query, access_policy: input.config.access_policy,
         budget: input.config.budget, output_byte_limit: input.config.output_byte_limit,
+        ...(producer?.status !== "ready" ? {} : { query_semantics: producer.query_semantics,
+          semantic_correspondences: producer.semantic_correspondences }),
         ...(input.config.source_preview_extents === undefined ? {} : { source_preview_extents: input.config.source_preview_extents })
       }, input.config.authorized_scopes);
       const remaining = Math.floor(invocation.deadline - Date.now());
       if (remaining <= 0) throw new AlayaError("DEADLINE", "acquisition lifetime exhausted during startup");
-      const comparison = await comparisonOwner.compareResearchSourceAcquisitionControls(
-        comparisonOwner.researchSourceAcquisitionClient(daemon.runtime), payload, { signal, timeoutMs: remaining });
-      publishSourceExperimentResult(root, identity, { comparison }); // Before shutdown, guard reconciliation or diagnostic failures.
+      const client = comparisonOwner.researchSourceAcquisitionClient(daemon.runtime);
+      if (producer?.status === "ready") {
+        const comparison = await comparisonOwner.compareResearchSourceQualifiedSelection(client, payload, producer.population, { signal, timeoutMs: remaining });
+        publishSourceExperimentResult(root, identity, { qualified_comparison: { producer, comparison } });
+      } else {
+        const comparison = await comparisonOwner.compareResearchSourceAcquisitionControls(client, payload, { signal, timeoutMs: remaining });
+        publishSourceExperimentResult(root, identity, { comparison });
+      } // Before shutdown, guard reconciliation or diagnostic failures.
       phase = "cleanup";
     }, { signal: invocation.signal, embeddingStartupProbe: "omit" });
     writeChainArtifact(join(root, "source-experiment-child.json"), { identity, pid: process.pid, status: "closed", phase,
       active, physical_total: "unknown" });
   } catch (error) {
+    if (input.qualified_selection !== undefined && readSourceExperiment(root).execution === undefined) {
+      publishSourceExperimentResult(root, identity, { qualified_failure: { phase, diagnostic: captureSourceExperimentValue(error, true),
+        population: input.qualified_selection } });
+    }
     writeChainArtifact(join(root, "source-experiment-child.json"), { identity, pid: process.pid, status: "failed", phase,
       active, diagnostic: captureSourceExperimentValue(error, true), physical_total: "unknown" });
   }

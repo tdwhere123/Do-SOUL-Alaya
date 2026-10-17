@@ -1,10 +1,12 @@
-import { mkdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { lstatSync, mkdirSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { SourceSemanticWorkerWorkSchema } from "@do-soul/alaya-protocol";
 import { chainIdentity } from "./contract.js";
+import { boundedArtifactEntryExists, withBoundedStableRegularFile, withRootBoundDirectory }
+  from "../extraction/cache-audit/bounded-artifact-reader.js";
 
 const Amount = z.number().int().nonnegative().safe();
 export const RecoveryAllowanceSchema = z.object({
@@ -80,8 +82,16 @@ export function reserveRecoveryRead(root: string, label: string, additionalPaths
     const allowance = RecoveryAllowanceSchema.parse(JSON.parse(cycle.allowance_json));
     let bytes = 0;
     for (const path of new Set([cycle.snapshot_path, ...additionalPaths].map(path => resolve(path)))) {
-      try { bytes += statSync(path).size; }
-      catch { /* Missing inputs are still charged the fixed admission floor and rejected by their reader. */ }
+      // Callers supply the bounded reader inventory, not a recursive cache/archive scan.
+      // Resolve-path duplicates count once; distinct hard-linked names remain distinct inputs.
+      if (!boundedArtifactEntryExists(path)) continue;
+      if (lstatSync(path).isDirectory()) {
+        withRootBoundDirectory({ root: path, label: "recovery input directory" }, () => undefined);
+        continue;
+      }
+      bytes += withRootBoundDirectory({ root: dirname(path), label: "recovery input parent" }, directory =>
+        withBoundedStableRegularFile({ path: join(directory, basename(path)),
+          maxBytes: allowance.max_input_bytes_per_read, label: "recovery input" }, (_descriptor, opened) => Number(opened.size)));
     }
     if (cycle.read_count >= allowance.max_read_admissions || bytes > allowance.max_input_bytes_per_read) {
       throw new AlayaError("UNAVAILABLE", `recovery read allowance cannot admit ${label}`);

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { opendirSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { boundedArtifactEntryExists, withRootBoundDirectory } from "../../extraction/cache-audit/bounded-artifact-reader.js";
 import { LongMemEvalPersonaSuccessorSchema, longMemEvalPersonaSourceVersion } from
   "../../../datasets/longmemeval/ingestion/task-persona.js";
 import { isDeepStrictEqual } from "node:util";
@@ -55,6 +58,27 @@ export type SourceRecordsDataset = z.infer<typeof SourceRecordsDatasetSchema>;
 export const sourceRecordsManifestPath = (path: string): string => `${path}.manifest.json`;
 export const sourceRecordsSidecarPath = (path: string): string => `${path}.sources.json`;
 export const sourceRecordsShardPath = (path: string, digest: string): string => `${path}.sources.${Digest.parse(digest)}.json`;
+
+/** Metadata-only inventory for the retained reader; never walk unrelated archives or read shard bodies. */
+export function sourceRecordsArtifactInputPaths(snapshotPathInput: string): readonly string[] {
+  const snapshotPath = resolve(snapshotPathInput), directory = dirname(snapshotPath), name = basename(snapshotPath);
+  const paths = [snapshotPath, sourceRecordsManifestPath(snapshotPath), sourceRecordsSidecarPath(snapshotPath),
+    ...["-wal", "-shm", "-journal"].map(suffix => snapshotPath + suffix)];
+  if (!boundedArtifactEntryExists(directory)) return paths;
+  return withRootBoundDirectory({ root: directory, label: "source_records input inventory" }, bound => {
+    const handle = opendirSync(bound);
+    let visited = 0;
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (++visited > 32_768) throw new AlayaError("UNAVAILABLE", "source_records input inventory exceeds its bound");
+        if (entry.name.startsWith(`${name}.sources.`) && /^[a-f0-9]{64}\.json$/u.test(entry.name.slice(name.length + 9))) {
+          paths.push(join(directory, entry.name));
+        }
+      }
+    } finally { handle.closeSync(); }
+    return paths;
+  });
+}
 
 export function sealSourceRecordsManifest(body: z.infer<typeof ManifestBody>): SourceRecordsManifest {
   const parsed = ManifestBody.parse(body);

@@ -30,7 +30,7 @@ export function semanticProposalLookup(
 
 /** Physical inputs of the proposal reader, retained independently of their semantic admission. */
 export function semanticProposalCacheInputPaths(
-  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number
+  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number, noFollowDirectories = false
 ): readonly string[] {
   const paths = [cacheRoot];
   for (const item of workset.items) {
@@ -41,14 +41,14 @@ export function semanticProposalCacheInputPaths(
     const shard = semanticProposalShardPath(cacheRoot, line.key);
     paths.push(dirname(shard), shard, ledgerPath(cacheRoot,
       semanticProposalLookup(workset, line, maxOutputTokens).attempt_lineage_digest!),
-      ...providerRawAttemptInputPaths(cacheRoot, line.key));
+      ...providerRawAttemptInputPaths(cacheRoot, line.key, noFollowDirectories));
     if (line.request.revision !== undefined && workset.revision_parent_cache_root !== undefined) {
       const parent = resolveSemanticProposalRevisionParent(workset, item, maxOutputTokens);
       const parentRoot = workset.revision_parent_cache_root;
       const parentShard = semanticProposalShardPath(parentRoot, parent.key);
       paths.push(parentRoot, dirname(parentShard), parentShard,
         ledgerPath(parentRoot, semanticProposalLookup(workset, parent, maxOutputTokens).attempt_lineage_digest!),
-        ...providerRawAttemptInputPaths(parentRoot, parent.key));
+        ...providerRawAttemptInputPaths(parentRoot, parent.key, noFollowDirectories));
     }
   }
   return paths;
