@@ -169,19 +169,17 @@ type ConflictDetectionLlmConfig = Readonly<{
 
 function readConflictDetectionLlmConfig(): ConflictDetectionLlmConfig | null {
   const baseUrl = processEnvLookup().ALAYA_CONFLICT_LLM_PROVIDER_URL?.trim();
-  const apiKey = readConflictDetectionLlmApiKey();
-  if (
-    baseUrl === undefined ||
-    baseUrl.length === 0 ||
-    apiKey === undefined ||
-    apiKey.length === 0
-  ) {
+  if (baseUrl === undefined || baseUrl.length === 0) {
     return null;
   }
   // Conflict LLM is optional. Missing model is the same skip as missing
-  // URL/key — do not invent a vendor default.
+  // URL/key — do not invent a vendor default or read unused credentials.
   const model = processEnvLookup().ALAYA_CONFLICT_LLM_MODEL?.trim();
   if (model === undefined || model.length === 0) {
+    return null;
+  }
+  const apiKey = readConflictDetectionLlmApiKey();
+  if (apiKey === undefined || apiKey.length === 0) {
     return null;
   }
   const parsedTimeout = Number.parseInt(processEnvLookup().ALAYA_CONFLICT_LLM_TIMEOUT_MS ?? "", 10);

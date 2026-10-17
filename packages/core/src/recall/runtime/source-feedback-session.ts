@@ -1,5 +1,5 @@
 import {
-  canonicalJson, sameRecallTarget, SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema, SourceSemanticWorkerWorkSchema,
+  canonicalJson, sameRecallTarget, sourceSemanticQueryIdentity, SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema, SourceSemanticWorkerWorkSchema,
   type RequestBudget, type SourceEvidenceTarget, type SourceSemanticWorkerRequest,
   type SourceSemanticWorkerResult, type SourceSemanticWorkerWork
 } from "@do-soul/alaya-protocol";
@@ -7,6 +7,9 @@ import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { bindSourceSemanticLocations } from "../../memory/evidence-create/source-semantic-location.js";
 import { admitSourceSemanticCorrespondence } from "../conditional-field/query/source-semantic-correspondence-admission.js";
+import { admitFeedbackCorrespondence, selectFeedbackHintDescriptor, feedbackQualificationMatches,
+  type SourceFeedbackCorrespondenceAction, type SourceFeedbackCorrespondenceRequest,
+  type SourceFeedbackCorrespondenceResult } from "./source-feedback-correspondence.js";
 
 type ReasonRequest = Extract<SourceSemanticWorkerRequest, { kind: "reason" }>;
 type ReasonResult = Extract<SourceSemanticWorkerResult, { kind: "reason" }>;
@@ -18,10 +21,12 @@ export type SourceFeedbackSessionInput = Readonly<{
   /** Selected H/Q/C, not an authoritative demand. Only native acceptance can produce navigation. */
   seed: ReasonRequest;
   budget: RequestBudget; action_budget: RequestBudget;
+  /** Named cache-only host policy; absence preserves navigation-only execution. */
+  correspondence_policy_id?: string;
 }>;
 export type SourceFeedbackAction = Readonly<{
   action_id: string; demand_id: string; parent_entitlement_id: string;
-  request: SourceSemanticWorkerRequest;
+  request: SourceSemanticWorkerRequest | SourceFeedbackCorrespondenceRequest;
 }>;
 export type SourceFeedbackTerminalCause = Readonly<{
   kind: "caller_abort" | "execution_error";
@@ -29,13 +34,15 @@ export type SourceFeedbackTerminalCause = Readonly<{
   diagnostic?: Readonly<{ status: "unavailable" | "partial" }>;
 }>;
 export type SourceFeedbackSettlement =
+  | Readonly<{ status: "prepared"; result: SourceFeedbackCorrespondenceResult }>
   | Readonly<{ status: "observed"; result: SourceSemanticWorkerResult }>
   | Readonly<{ status: "failed"; work?: SourceSemanticWorkerWork; terminal_cause?: SourceFeedbackTerminalCause }>
   | Readonly<{ status: "unknown"; phase: "waiting" | "preparing" | "dispatched" | "unknown"; terminal_cause?: SourceFeedbackTerminalCause }>
   | Readonly<{ status: "cancelled"; terminal_cause?: SourceFeedbackTerminalCause }>;
-type Demand = { id: string; request: SourceSemanticWorkerRequest };
+type Demand = { id: string; request: SourceSemanticWorkerRequest | SourceFeedbackCorrespondenceRequest };
 
 /** Request-local single writer. Discovery is navigation, never a joined conditional proof.
+ * Nested transitions share one captured authority and reservation ledger; all I/O stays in the adapter.
  * No continuation, persistent graph, source writer, or arbitrary blocked binding recovery lives here. */
 export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
   const captured = structuredClone(input);
@@ -57,8 +64,21 @@ export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
   let stopped: "complete" | "failed" | "unknown" | "cancelled" | "budget_exhausted" | "non_actionable" | undefined;
   let terminalCause: SourceFeedbackTerminalCause | undefined;
   let work = 0, bytes = 0, reservedWork = 0, reservedBytes = 0, serial = 0;
+  const preparations: SourceFeedbackCorrespondenceResult[] = [];
+  let qualification: { status: "pending" | "unavailable" | "unknown" | "local";
+    reason?: string; origin_exposure_id?: string; reason_exposure_id?: string;
+    terminal_cause?: SourceFeedbackTerminalCause } | undefined;
+  let qualificationAction: SourceFeedbackCorrespondenceAction | undefined;
+  let qualifiedCorrespondence: ReasonRequest["semantic_correspondence"];
 
-  function enqueue(material: unknown, request: SourceSemanticWorkerRequest): void {
+  function terminate(status: NonNullable<typeof stopped>, reason: string = status): void {
+    stopped = status;
+    if (qualification?.status !== "pending") return;
+    qualification = { ...qualification, status: status === "unknown" || status === "cancelled" ? "unknown" : "unavailable",
+      reason, ...(terminalCause === undefined ? {} : { terminal_cause: terminalCause }) };
+  }
+
+  function enqueue(material: unknown, request: Demand["request"]): void {
     // Attempts, exposure identities and recursively growing parent paths are deliberately absent.
     const id = canonicalJson([root, material]);
     const workKey = canonicalJson(request);
@@ -71,11 +91,11 @@ export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
     if (active !== undefined) return { status: "in_flight" };
     if (stopped !== undefined) return { status: "stopped" };
     const demand = queue.shift();
-    if (demand === undefined) { stopped = "complete"; return { status: "stopped" }; }
+    if (demand === undefined) { terminate("complete", "qualification_incomplete"); return { status: "stopped" }; }
     const allocation = captured.action_budget;
     if (work + reservedWork + allocation.work_units > captured.budget.work_units
       || bytes + reservedBytes + allocation.memory_bytes > captured.budget.memory_bytes) {
-      stopped = "budget_exhausted"; return { status: "stopped" };
+      terminate("budget_exhausted", "insufficient_budget"); return { status: "stopped" };
     }
     reservedWork += allocation.work_units; reservedBytes += allocation.memory_bytes;
     active = Object.freeze({ action_id: `${captured.request_id}:${++serial}`, demand_id: demand.id,
@@ -91,48 +111,112 @@ export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
     const action = active;
     const owned = structuredClone(settlement);
     settlements.set(actionId, owned); active = undefined;
-    if (owned.status !== "observed" && owned.terminal_cause !== undefined) terminalCause = owned.terminal_cause;
+    if (owned.status !== "observed" && owned.status !== "prepared" && owned.terminal_cause !== undefined) terminalCause = owned.terminal_cause;
     if (owned.status === "unknown" || owned.status === "cancelled") {
-      stopped = owned.status; return true; // Unknown/uncancelled native work is never refunded.
+      terminate(owned.status); return true; // Unknown/cancelled occupancy is never refunded.
     }
+    if (action.request.kind === "prepare_correspondence") {
+      acceptPreparation(action as SourceFeedbackCorrespondenceAction, owned);
+      return true;
+    }
+    if (owned.status === "prepared") { terminate("unknown", "unexpected_preparation"); return true; }
     const parsed = owned.status === "observed" ? SourceSemanticWorkerResultSchema.safeParse(owned.result) : undefined;
     if (parsed !== undefined && (!parsed.success || parsed.data.kind !== action.request.kind)) {
-      stopped = "unknown"; return true;
+      terminate("unknown", "invalid_native_result"); return true;
     }
     const result = parsed?.success ? parsed.data : undefined;
     const usage = result?.work ?? (owned.status === "failed" ? owned.work : undefined);
     if (!SourceSemanticWorkerWorkSchema.safeParse(usage).success || usage?.logical_work === undefined
       || usage.logical_work > action.request.budget.work_units || usage.logical_memory_bytes > action.request.budget.memory_bytes) {
-      stopped = "unknown"; return true; // Rejected measurement is not evidence with which to settle the reservation.
+      terminate("unknown", "native_cost_unknown"); return true; // Rejected measurement cannot settle the reservation.
     }
     // These are already inclusive child totals. Native/index/access/inner resource_usage are NOT added.
     work += usage.logical_work; bytes += usage.logical_memory_bytes;
     reservedWork -= action.request.budget.work_units; reservedBytes -= action.request.budget.memory_bytes;
-    if (owned.status === "failed") { stopped = "failed"; return true; }
-    if (result === undefined) { stopped = "unknown"; return true; }
-    exposures.push({ exposure_id: `${captured.request_id}:exposure:${exposures.length + 1}`, action_id: actionId, result });
-    try { advance(result); }
-    catch (error) { stopped = "unknown"; terminalCause = captureSourceFeedbackTerminalCause(error, "execution_error"); }
+    if (owned.status === "failed") {
+      terminate("failed", action.request.kind === "reason" ? "reason_failed" : "native_action_failed"); return true;
+    }
+    if (result === undefined) { terminate("unknown", "native_result_unknown"); return true; }
+    const exposure = { exposure_id: `${captured.request_id}:exposure:${exposures.length + 1}`, action_id: actionId, result };
+    exposures.push(exposure);
+    try { advance(result, action, exposure.exposure_id); }
+    catch (error) {
+      terminalCause = captureSourceFeedbackTerminalCause(error, "execution_error"); terminate("unknown", "transition_failed");
+    }
     return true;
   }
 
-  function advance(result: SourceSemanticWorkerResult): void {
+  function acceptPreparation(action: SourceFeedbackCorrespondenceAction, owned: SourceFeedbackSettlement): void {
+    if (owned.status !== "prepared" || canonicalJson(owned.result.action) !== canonicalJson(action)
+      || owned.result.new_dispatches !== 0) {
+      terminate("unknown", "preparation_unbound"); return; // Unbound host work cannot release its parent hold.
+    }
+    const result = owned.result, usage = result.work;
+    preparations.push(result);
+    if (result.status === "unknown" || !SourceSemanticWorkerWorkSchema.safeParse(usage).success || usage?.logical_work === undefined
+      || usage.logical_work > action.request.budget.work_units || usage.logical_memory_bytes > action.request.budget.memory_bytes) {
+      qualification = { ...qualification!, status: "unknown", reason: result.status === "unknown" ? result.reason : "host_cost_unknown" };
+      terminate("unknown"); return;
+    }
+    work += usage.logical_work; bytes += usage.logical_memory_bytes;
+    reservedWork -= action.request.budget.work_units; reservedBytes -= action.request.budget.memory_bytes;
+    if (result.status === "unavailable") {
+      qualification = { ...qualification!, status: "unavailable", reason: result.reason }; return;
+    }
+    const admission = admitFeedbackCorrespondence(action, result);
+    if (admission === undefined) {
+      qualification = { ...qualification!, status: "unavailable", reason: "correspondence_rejected" }; return;
+    }
+    qualificationAction = action; qualifiedCorrespondence = admission.semantic_correspondence;
+    enqueue(["qualify", action.request.policy_id, action.request.descriptor.interpretation_id, action.demand_id], {
+      kind: "reason", accepts_unreviewed_conditional_results: true,
+      query_handle: action.request.query_handle, source_interpretation_id: action.request.descriptor.interpretation_id,
+      original_query: captured.original_query, query_semantics: action.request.query_semantics,
+      semantic_correspondence: admission.semantic_correspondence, budget: captured.action_budget,
+      output_byte_limit: seed.output_byte_limit
+    });
+  }
+
+  function advance(result: SourceSemanticWorkerResult, action: SourceFeedbackAction, exposureId: string): void {
     if (result.kind === "prepare_source") {
-      if (!sameSource(result)) { stopped = "non_actionable"; return; }
+      if (!sameSource(result)) { terminate("non_actionable"); return; }
       enqueue(["validate", captured.source_target], { kind: "validate_source", source_handle: result.source_handle, budget: captured.action_budget });
     } else if (result.kind === "validate_source") {
-      if (!sameSource(result)) { stopped = "non_actionable"; return; }
+      if (!sameSource(result)) { terminate("non_actionable"); return; }
       validated = result;
       enqueue(["reason", seed.source_interpretation_id], seed);
+    } else if (result.kind === "reason" && qualificationAction !== undefined) {
+      const matches = feedbackQualificationMatches(qualificationAction, qualifiedCorrespondence!, result, captured.workspace_id);
+      qualification = { ...qualification!, reason_exposure_id: exposureId,
+        status: matches ? "local" : "unavailable", ...(matches ? {} : { reason: "qualification_rejected" }) };
+      // Terminal local computation: no acceptingNavigation, binding transfer or recursion across H.
     } else if (result.kind === "reason") {
       const demands = validated === undefined ? [] : acceptingNavigation(result, captured, validated);
-      if (demands.length === 0) { stopped = "non_actionable"; return; }
+      if (demands.length === 0) { terminate("non_actionable"); return; }
       for (const demand of demands) enqueue(demand.identity, {
         kind: "prepare_query", original_query: captured.original_query, access_hint: demand.text,
         query_semantics: result.query!, budget: captured.action_budget
       });
+    } else if (result.kind === "prepare_query" && captured.correspondence_policy_id !== undefined && qualification === undefined) {
+      qualification = { status: "pending", origin_exposure_id: exposureId };
+      const hint = action.request.kind === "prepare_query" ? action.request.access_hint : undefined;
+      const selected = selectFeedbackHintDescriptor(result.candidates, seed.source_interpretation_id!, hint);
+      const queryId = seed.query_semantics === undefined ? undefined : sourceSemanticQueryIdentity(seed.query_semantics, fieldContractSha256);
+      const unavailable = result.query_handle === undefined ? "missing_lease"
+        : result.query_semantics_status.status !== "admitted" || result.query_semantics_status.query_semantics_id !== queryId
+          || result.query_semantics_id !== queryId ? "query_mismatch"
+        : selected.status === "unavailable" ? selected.reason : undefined;
+      if (unavailable !== undefined || selected.status !== "matched") {
+        qualification = { ...qualification, status: "unavailable", reason: unavailable }; return;
+      }
+      enqueue(["correspondence", seed.query_semantics, hint, selected.descriptor, captured.correspondence_policy_id], {
+        kind: "prepare_correspondence", policy_id: captured.correspondence_policy_id,
+        origin_action_id: action.action_id, origin_exposure_id: exposureId, access_hint: hint!,
+        descriptor: selected.descriptor, query_handle: result.query_handle!,
+        original_query: captured.original_query, query_semantics: seed.query_semantics!, budget: captured.action_budget
+      });
     }
-    // prepare_query yields new observations only. It neither settles chronology nor starts a frozen continuation.
+    // The original discovery exposure retains its actual completeness; local reason has a separate snapshot.
   }
 
   function sameSource(source: Pick<ValidatedSource, "source_id" | "source_version" | "content_digest">): boolean {
@@ -148,6 +232,7 @@ export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
         reserved_work: reservedWork, reserved_memory_bytes: reservedBytes,
         measurement: "logical_not_native_cpu" as const },
       exposures, settlements: [...settlements.entries()],
+      ...(captured.correspondence_policy_id === undefined ? {} : { preparations, qualification: qualification ?? { status: "not_scheduled" as const } }),
       joint_assessment: { status: "not_lowered" as const, reason: "source_qualified_join_and_temporal_comparison_not_admitted" as const } });
   }
   function stop(status: "cancelled" | "unknown", cause?: SourceFeedbackTerminalCause): void {
@@ -155,7 +240,7 @@ export function createSourceFeedbackSession(input: SourceFeedbackSessionInput) {
     if (active !== undefined) accept(active.action_id, status === "cancelled" ? { status, terminal_cause: cause }
       : { status, phase: "unknown", terminal_cause: cause });
     else if (cause !== undefined) terminalCause = structuredClone(cause);
-    stopped ??= status;
+    if (stopped === undefined) terminate(status);
   }
   return { next, accept, finish, stop };
 }

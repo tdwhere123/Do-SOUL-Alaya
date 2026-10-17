@@ -4,45 +4,8 @@ const isolation = await vi.hoisted(async () => {
   // Reuse the CLI test's preimport provider guard before loading native execution.
   const guard = "../../../../../core-daemon/src/__tests__/support/provider-free-cli.mjs";
   await import(guard);
-  const [{ default: http }, { default: https }, { default: net }, { default: tls },
-    { default: http2 }, { default: dgram }, { default: fs }, { default: fsp }, { syncBuiltinESMExports }] =
-    await Promise.all([import("node:http"), import("node:https"), import("node:net"), import("node:tls"),
-      import("node:http2"), import("node:dgram"), import("node:fs"), import("node:fs/promises"), import("node:module")]);
-  const restores: (() => void)[] = [], forbidden: string[] = [];
-  function block(owner: object, key: string) {
-    const descriptor = Object.getOwnPropertyDescriptor(owner, key)!;
-    Object.defineProperty(owner, key, { ...descriptor, value: () => {
-      forbidden.push(key); throw new Error(`Provider-free recovery test forbids ${key}`);
-    } });
-    restores.push(() => Object.defineProperty(owner, key, descriptor));
-  }
-  for (const owner of [http, https]) for (const key of ["request", "get"]) block(owner, key);
-  for (const key of ["connect", "createConnection"]) block(net, key);
-  block(net.Socket.prototype, "connect"); block(tls, "connect"); block(http2, "connect");
-  block(dgram, "createSocket"); block(globalThis, "fetch");
-  const environment = process.env;
-  process.env = new Proxy(environment, { get(target, key) {
-    if (typeof key === "string" && /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key)) {
-      forbidden.push("credential environment"); throw new Error("Credential environment access forbidden");
-    }
-    return Reflect.get(target, key);
-  } });
-  restores.push(() => { process.env = environment; });
-  for (const owner of [fs, fsp]) for (const key of ["readFile", "readFileSync", "open", "openSync", "createReadStream"]) {
-    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-    if (descriptor?.value === undefined) continue;
-    Object.defineProperty(owner, key, { ...descriptor, value: new Proxy(descriptor.value, {
-      apply(target, receiver, args) {
-        if (/(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(String(args[0]))) {
-          forbidden.push("credential file"); throw new Error("Credential file access forbidden");
-        }
-        return Reflect.apply(target, receiver, args);
-      }
-    }) });
-    restores.push(() => Object.defineProperty(owner, key, descriptor));
-  }
-  syncBuiltinESMExports();
-  return { forbidden, restore: () => { for (const restore of restores.reverse()) restore(); syncBuiltinESMExports(); } };
+  const { installStrictProviderFreeBoundary } = await import("../../support/strict-provider-free-boundary.js");
+  return installStrictProviderFreeBoundary();
 });
 
 // Publication wiring is outside this helper contract; retain real request/cache/revision execution.

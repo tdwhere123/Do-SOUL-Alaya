@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import {
   closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync,
   type BigIntStats
@@ -15,6 +17,28 @@ import {
   boundDirectoryChildNoFollow,
   boundDirectoryChildPath
 } from "../fill/manifest/root-directory-binding.js";
+
+type ArtifactReadMeter = { meter: SourceSemanticResourceLedger; failure?: unknown };
+const readMeter = new AsyncLocalStorage<ArtifactReadMeter>();
+/** Named consumer: cache-only source-feedback preparation. Every nested physical read
+ * pays on the opened file size, not a racy pre-read stat or an inventory estimate. */
+export function withBoundedArtifactReadMeter<T>(meter: SourceSemanticResourceLedger, read: () => T): T {
+  const scope: ArtifactReadMeter = { meter };
+  return readMeter.run(scope, () => {
+    try {
+      const value = read();
+      if (scope.failure !== undefined) throw scope.failure;
+      return value;
+    } catch (error) { throw scope.failure ?? error; }
+  });
+}
+
+function debitArtifactRead(debit: (meter: SourceSemanticResourceLedger) => void): void {
+  const scope = readMeter.getStore();
+  if (scope === undefined) return;
+  try { debit(scope.meter); }
+  catch (error) { scope.failure ??= error; throw error; }
+}
 
 export interface BoundedStableRegularFile {
   readonly bytes: Buffer;
@@ -50,6 +74,7 @@ export function readBoundedStableRegularFile(input: {
   readonly label: string;
 }): BoundedStableRegularFile {
   return withBoundedStableRegularFile(input, (descriptor, opened) => {
+    debitArtifactRead(meter => meter.charge(1, Number(opened.size), `${input.label} physical read buffer`));
     const bytes = Buffer.allocUnsafe(Number(opened.size));
     let offset = 0;
     while (offset < bytes.length) {
@@ -93,6 +118,7 @@ export function decodeCanonicalUtf8Artifact(bytes: Uint8Array, label: string): s
   if (!Buffer.from(decoded, "utf8").equals(bytes)) {
     throw new Error(`${label} UTF-8 bytes are not canonical`);
   }
+  debitArtifactRead(meter => meter.retain(decoded, `${label} UTF-8 decoding`));
   return decoded;
 }
 

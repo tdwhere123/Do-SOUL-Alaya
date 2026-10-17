@@ -1516,12 +1516,34 @@ on newly bound entity coordinates, not query literals, derived nodes, attention,
 or an opaque `binding_id`. The yield is fresh `prepare_query` navigation that
 keeps the captured original query, authorized scope identity and `as_of`, with the
 seed source id/version/digest retained as root provenance. It is not a joined proof,
-chronology settlement, source write,
-or frozen continuation, and observing those queries does not start another
-`reason`. Seed H/Q/C is selected input, not an authoritative demand; only native
+chronology settlement, source write, or frozen continuation. Navigation-only
+sessions stop at that exposure. With an explicit private cache-only host policy,
+Core can reserve one correspondence preparation for an exposed non-seed H whose
+mention text matches that originating reserved action's hint through the existing
+`sourceLiteralOccurs` NFC literal owner. The worker's order chooses among bound
+matches; scores alone, metadata substrings, or unread/off-page H do not qualify.
+This is navigation, not source identity or cross-H binding transfer. No exposed
+match remains explicitly unavailable without extra pagination or quota. One existing
+leased `reason` then uses that H, the unchanged original text and Q, and newly
+admitted local C. Preparation binds its originating action/exposure and hint,
+exact descriptor, policy and parent entitlement. An ID-only/mismatched descriptor,
+missing lease, unusable cache or insufficient allowance is not ready-empty.
+The daemon and bench collaborator reuse SOUL request construction and the existing
+semantic-proposal key, read, decode and Core admission owners; no provider request,
+fill fallback, cache write or new worker operation is introduced. Each subsequent
+native reason obtains its own local snapshot and current-lease checks, not a joint
+snapshot. The actual discovery exposure retains its completeness. The result is
+independent local qualification only; seed assignments never transfer across H,
+and the follow-forward result does not navigate recursively. Existing Q evidence
+branches may qualify independently; C cannot split a purely conjunctive Q.
+Seed H/Q/C is selected input, not an authoritative demand; only native
 acceptance produces navigation. Each reserved action copies the same parent
 entitlement and child `action_budget`; unknown or cancelled occupancy holds that
-reservation and is never booked as zero. Recorded exposures are append-only.
+reservation and is never booked as zero. Host construction, physical cache reads,
+decoding and native reason debit the same parent allowance through existing logical
+resource owners. Unknown host cost retains its reservation; historical producer
+usage (possibly unknown) is separate from zero new dispatches. Recorded native
+exposures and host preparation outcomes are append-only.
 Finish always reports `joint_assessment.status: not_lowered`
 (`source_qualified_join_and_temporal_comparison_not_admitted`). The daemon adapter
 (`apps/core-daemon/src/runtime/recall/source-feedback-execution.ts`) is trusted
@@ -1529,7 +1551,14 @@ Node wiring through `withExecutionScope`: a caller-linked abort and timeout
 lifetime, not a read snapshot, MCP delivery, or ordinary `soul.recall` loop.
 Execution certainty and terminal cause remain separate: worker loss, deadline
 expiry, and an in-flight caller abort can all leave unknown occupancy with its
-reservation held; the recorded cause distinguishes them.
+reservation held; the recorded cause distinguishes them. A measured qualifying
+reason failure terminalizes qualification as unavailable with its cause; unknown
+or cancelled occupancy stays unknown and held, never stopped-but-pending.
+The private `executeSourceFeedbackForRuntime` Node entry uses the existing port
+registered by `createAlayaDaemonRuntime`, with no client getter or runtime field.
+Constructor and entry must use matching compiled module identity. Missing binding
+fails closed and a closed client retains its existing execution-scope refusal.
+This entry does not construct a seed or make ordinary Recall a feedback loop.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. After snapshot,

@@ -38,6 +38,7 @@ import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
 import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
 import { bindResearchSourceAcquisitionClient } from "./runtime/recall/source-semantic-research-acquisition-controls.js";
+import { bindSourceFeedbackExecutionPort } from "./runtime/recall/source-feedback-execution.js";
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
@@ -108,7 +109,13 @@ export async function createAlayaDaemonRuntime(
     installUnhandledRejectionHandler(bootstrap.warnLogger, process, {
       shutdown: runtime.shutdown
     });
-    if (recallReadWorkerClient !== null) bindResearchSourceAcquisitionClient(runtime, recallReadWorkerClient);
+    const runtimeRecallReadWorkerClient = recallAndCore.recallWiring.recallReadWorkerClient;
+    if (runtimeRecallReadWorkerClient !== null) {
+      bindResearchSourceAcquisitionClient(runtime, runtimeRecallReadWorkerClient);
+      if (runtimeRecallReadWorkerClient.sourceSemanticsPort !== undefined) {
+        bindSourceFeedbackExecutionPort(runtime, runtimeRecallReadWorkerClient.sourceSemanticsPort);
+      }
+    }
     return runtime;
   } catch (error) {
     return await closeDaemonStartupResourcesAfterFailure({

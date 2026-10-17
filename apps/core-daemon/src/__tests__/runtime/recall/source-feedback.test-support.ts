@@ -10,7 +10,7 @@ import { createRecallRealStorage } from "../../../../../../packages/core/src/__t
 import { digestOriginalQuery } from "../../../../../../packages/core/src/recall/conditional-field/query/compile-query-identity.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { builtWorkerUrl } from "./recall-read-worker-client-fixture.js";
-import { ACCESS_BUDGET, CLOCK, WS, withAccessLibrary } from "./source-semantic-access.test-support.js";
+import { ACCESS_BUDGET, CLOCK, WS, withAccessLibrary, type AccessFixtureSource } from "./source-semantic-access.test-support.js";
 
 export const ORIGINAL = "Which ticket does M7 use?";
 export const CHILD = { ...ACCESS_BUDGET, work_units: 200_000, memory_bytes: 4_000_000 };
@@ -44,9 +44,9 @@ export function query(): SourceSemanticQuery {
         { id: "theme", role_reading: "theme", target_variable: "ticket", support: { kind: "query_text", excerpt: "ticket" } }] }],
       context_obligations: [{ frame: "qUse", kind: "asserted_at_source" }] }], return_variables: ["ticket"], gaps: [] };
 }
-function correspondence(id: string): SourceSemanticCorrespondence {
+function correspondence(id: string, q = query()): SourceSemanticCorrespondence {
   return { contract: "source-semantic-correspondence-v3", source_interpretation_id: id,
-    query_semantics_id: sourceSemanticQueryIdentity(query(), fieldContractSha256),
+    query_semantics_id: sourceSemanticQueryIdentity(q, fieldContractSha256),
     producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_CORE_PRODUCER_ID, producer_version: "1", contract_version: "source-semantic-correspondence-v3",
     correspondences: [
       { relation: "contextual_equivalence", query_endpoint: { kind: "referent", variable: "actor" },
@@ -64,15 +64,18 @@ function correspondence(id: string): SourceSemanticCorrespondence {
 }
 
 export async function withFeedbackSource(ticket: string, body: (input: {
-  client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>; session: SourceFeedbackSessionInput; native: Reason;
-}) => Promise<void>) {
-  const guard = `--import=${new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url).href}`;
+  client: NonNullable<ReturnType<typeof createRecallReadWorkerClient>>; session: SourceFeedbackSessionInput; native: Reason; filename: string;
+  ids: ReadonlyMap<string, readonly string[]>;
+}) => Promise<void>, options?: { original_query: string; query: SourceSemanticQuery; provider_guard?: URL;
+  additional_sources?: readonly AccessFixtureSource[]; approval_ticket?: string; interpretation_census?: "complete" }) {
+  const guard = `--import=${(options?.provider_guard ?? new URL("../../../../../bench-runner/src/__tests__/support/provider-free-cli-bootstrap.mjs", import.meta.url)).href}`;
   process.execArgv.push(guard);
   try {
     await withAccessLibrary([
       { id: "a", text: `M7 uses ${ticket}.`, verbatim: true, authoredDraft: catalog => draft(catalog, ticket) },
+      ...(options?.additional_sources ?? []),
       { id: "middle", text: "Granite ".repeat(1000), reading: "surround", count: 40 },
-      { id: "z", text: `${ticket} approval by Rina.`, reading: "approval" }
+      { id: "z", text: `${options?.approval_ticket ?? ticket} approval by Rina.`, reading: "approval" }
     ], async ({ filename, ids }) => {
       const { database } = await createRecallRealStorage(() => undefined, filename);
       // Census walks logical source_id, not the persisted record root. Oversized metadata on
@@ -84,20 +87,22 @@ export async function withFeedbackSource(ticket: string, body: (input: {
       // leaves z reachable according to digest-derived capsule verification order. An oversized
       // middle timestamp sorts after a and before z, stopping that census without changing the
       // FTS route through which the accepted ticket binding must discover z.
-      database.connection.prepare("UPDATE evidence_capsules SET created_at=? WHERE source_hash IN (SELECT content_digest FROM source_records WHERE source_id='middle')")
-        .run(`${CLOCK}${"x".repeat(65)}`);
+      if (options?.interpretation_census !== "complete") {
+        database.connection.prepare("UPDATE evidence_capsules SET created_at=? WHERE source_hash IN (SELECT content_digest FROM source_records WHERE source_id='middle')")
+          .run(`${CLOCK}${"x".repeat(65)}`);
+      }
       database.close(); closeCachedDatabase(filename);
       const client = createRecallReadWorkerClient({ databaseFilename: filename, workerUrl: builtWorkerUrl, workerCount: 1 })!;
       try {
         await client.ready();
         const seed = { kind: "reason" as const, accepts_unreviewed_conditional_results: true as const,
-          original_query: ORIGINAL, source_interpretation_id: ids.get("a")![0]!, query_semantics: query(),
-          semantic_correspondence: correspondence(ids.get("a")![0]!), budget: CHILD, output_byte_limit: 1_000_000 };
+          original_query: options?.original_query ?? ORIGINAL, source_interpretation_id: ids.get("a")![0]!, query_semantics: options?.query ?? query(),
+          semantic_correspondence: correspondence(ids.get("a")![0]!, options?.query), budget: CHILD, output_byte_limit: 1_000_000 };
         const native = await client.sourceSemanticsPort!.execute({ ...CONTEXT, request: seed });
         if (native.kind !== "reason" || native.result?.source_target === undefined) throw new Error("native bound result required");
-        await body({ client, native, session: { request_id: "root-request", parent_entitlement_id: "root-allowance",
+        await body({ client, native, filename, ids, session: { request_id: "root-request", parent_entitlement_id: "root-allowance",
           workspace_id: WS, source_id: "a", source_target: native.result.source_target,
-          scope_identity: canonicalJson([CONTEXT.principal, CONTEXT.authorized_scopes]), as_of: CLOCK, original_query: ORIGINAL,
+          scope_identity: canonicalJson([CONTEXT.principal, CONTEXT.authorized_scopes]), as_of: CLOCK, original_query: options?.original_query ?? ORIGINAL,
           seed, budget: { ...CHILD, work_units: 1_000_000, memory_bytes: 20_000_000 }, action_budget: CHILD } });
       } finally { await client.close(); }
     });

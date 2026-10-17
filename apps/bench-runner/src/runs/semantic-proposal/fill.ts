@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import {
   admitSourceSemanticCorrespondence, admitSourceSemanticQuery, refuseRecallCampaignLiveExtraction
 } from "@do-soul/alaya-core";
-import { isChatSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
+import { isChatSemanticRequestProfile, AlayaError, canonicalJson, type SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { withBoundedArtifactReadMeter } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import {
   prepareSourceSemanticProposalRevision, proposeCorrespondenceSemantics, proposeQuerySemantics, sourceSemanticQueryPresentation,
   type SourceSemanticProposalRevision,
@@ -200,15 +201,25 @@ function assertAuthorizedProposalRequest(
 }
 
 /** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
-export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number) {
-  const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
+export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number,
+  meter?: SourceSemanticResourceLedger) {
+  if (meter !== undefined) return withBoundedArtifactReadMeter(meter,
+    () => readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, meter));
+  return readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens);
+}
+
+function readMeteredSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number,
+  meter?: SourceSemanticResourceLedger) {
+  const lines = materializeSemanticProposalLines(workset, maxOutputTokens, meter);
   assertRetainedProposalRevisionParents(workset, cacheRoot, maxOutputTokens, lines);
   return lines.map((line) => {
     const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
+    meter?.retain(state, "semantic proposal cache/ledger decode");
     const shard = state.shard;
     if (state.status !== "settled") return { line, shard, status: state.status };
     if (shard === undefined) return { line, status: "unattempted" as const };
-    const replay = replayCachedProposalShard(line, shard);
+    const replay = replayCachedProposalShard(line, shard, meter);
+    meter?.retain(replay, "semantic proposal receiver and Core admission");
     if (!hasAdmittedProposalOutcome(shard)) {
       const outcome = proposalOutcomeStatus(shard);
       // Witnessed non-complete finish is incomplete only when the reserved raw is a
@@ -361,7 +372,7 @@ type CachedProposalReplay =
   | Readonly<{ state: "parsed"; classified: ProposalAttemptClass; received: ReturnType<typeof receiveLine> }>;
 
 function replayCachedProposalShard(
-  line: SemanticProposalLine, shard: SemanticProposalShard
+  line: SemanticProposalLine, shard: SemanticProposalShard, meter?: SourceSemanticResourceLedger
 ): CachedProposalReplay {
   // Raw/reservation inspection has already verified this accounting rejection;
   // semantic parsing must not reinterpret it into admitted output or abstention.
@@ -384,7 +395,7 @@ function replayCachedProposalShard(
     }
     return { state: "unparsed", classified: "empty" };
   }
-  const received = receiveLine(line, shard.raw_json), receivedOutcome = received.outcome;
+  const received = receiveLine(line, shard.raw_json, meter), receivedOutcome = received.outcome;
   const recordedStatus = proposalOutcomeStatus(shard);
   if ((recordedStatus === "resource_exhausted" || receivedOutcome.status === "resource_exhausted") &&
       recordedStatus !== receivedOutcome.status) {
@@ -411,7 +422,7 @@ function replayCachedProposalShard(
   return { state: "parsed", classified, received };
 }
 
-function receiveLine(line: SemanticProposalLine, rawJson: string) {
+function receiveLine(line: SemanticProposalLine, rawJson: string, meter?: SourceSemanticResourceLedger) {
   if (line.kind === "query") {
     const request = line.request as SourceSemanticQueryRequest;
     const received = proposeQuerySemantics({
@@ -438,7 +449,7 @@ function receiveLine(line: SemanticProposalLine, rawJson: string) {
     resource_limits: request.resource_limits,
     ...(request.generation_policy === undefined ? {} : { generation_policy: request.generation_policy }),
     ...(request.revision === undefined ? {} : { revision: request.revision })
-  }, { rawJson });
+  }, { rawJson }, meter);
   if (canonicalJson(received.request) !== canonicalJson(request)) {
     throw new AlayaError("INTERNAL", "semantic proposal receive lost the retained request envelope");
   }
