@@ -55,9 +55,9 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllMocks(); });
 
 it.each([undefined, "eager", "omit"] as const)(
-  "threads startup probe %s through bench state and startup without inferring it from cached-local execution", async mode => {
+  "threads startup probe %s through bench state and startup without inferring it from local provider selection", async mode => {
     const daemon = await startBenchDaemon({ dataDirRoot: "/fixture-data", embeddingMode: "env",
-      embeddingProviderKind: "local_onnx", cachedLocalEmbedding: { cache_root: "/fixture-cache", model_id: "fixture-model" },
+      embeddingProviderKind: "local_onnx",
       ...(mode === undefined ? {} : { embeddingStartupProbe: mode }) });
     try {
       expect(doubles.construct).toHaveBeenCalledExactlyOnceWith({ embeddingStartupProbe: mode,
