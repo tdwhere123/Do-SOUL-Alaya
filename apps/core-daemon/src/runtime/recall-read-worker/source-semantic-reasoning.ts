@@ -41,7 +41,7 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
   const meter = new SourceSemanticReadBudget(payload.request.budget);
   const run = (executionOf: SourceSemanticRequestExecution,
     finalizeNativeRecall: (result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => {
-    if (payload.qualified_control !== undefined) return compareResearchQualifiedSourceSelection(runtime, payload, meter);
+    if (payload.qualified_control !== undefined) return compareResearchQualifiedSourceSelection(runtime, payload, meter, finalizeNativeRecall);
     if (payload.prepared_query !== undefined) {
       meter.preparation = capturePackSourceSemanticPreparationForRequest({
         ...payload.prepared_query.receipt, ...(payload.prepared_query.supplemental === undefined ? {} : {

@@ -14,6 +14,7 @@ import { currentBenchScope } from "../../harness/daemon-task.js";
 import { canonicalPath, canonicalPathsOverlap } from "../fs/opened-contained-path.js";
 import type { compareResearchSourceAcquisitionControls, compareResearchSourceQualifiedSelection } from "../../../../core-daemon/src/runtime/recall/source-semantic-research-acquisition-controls.js";
 import { SourceQualifiedSelectionInputSchema, admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "./source-qualified-selection-input.js";
+import { SourceSemanticJointSelectionSchema } from "../../../../core-daemon/dist/runtime/recall-read-worker/source-semantic-joint-boundary.js";
 export type SourceQualifiedAcquisitionComparison = { producer: ReturnType<typeof admitSourceQualifiedSelection>;
   comparison?: Awaited<ReturnType<typeof compareResearchSourceQualifiedSelection>> };
 
@@ -22,6 +23,7 @@ const Amount = z.number().int().nonnegative().safe();
 export const SourceAcquisitionExperimentInputSchema = z.object({
   contract: z.literal("source-acquisition-experiment-v1"), root: z.string().min(1),
   qualified_selection: SourceQualifiedSelectionInputSchema.optional(),
+  joint_selection: SourceSemanticJointSelectionSchema.optional(),
   config: SemanticChainConfigSchema, original_query: z.string().min(1),
   host_admission: RecoveryAllowanceSchema,
   guard_allocation: z.object({ source_inputs: Amount, utf8_bytes: Amount }).strict(),
@@ -56,6 +58,9 @@ function assertRoot(input: SourceAcquisitionExperimentInput, root: string): void
   if (existsSync(join(root, "recovery-window.json"))) throw new AlayaError("CONFLICT", "acquisition cannot consume a recovery window");
 }
 function assertPolicy(input: SourceAcquisitionExperimentInput): void {
+  if (input.joint_selection !== undefined && input.qualified_selection === undefined) {
+    throw new AlayaError("VALIDATION", "joint consumption requires its fixed qualified population");
+  }
   if (input.config.access_policy !== "query-conditioned-v1" || (input.qualified_selection === undefined
     ? input.config.source_index === undefined
     : input.config.source_index !== undefined || input.guard_allocation.source_inputs !== 0 || input.guard_allocation.utf8_bytes !== 0 ||
@@ -205,7 +210,8 @@ export async function executeGuardedSourceAcquisition(root: string, identity: st
       if (remaining <= 0) throw new AlayaError("DEADLINE", "acquisition lifetime exhausted during startup");
       const client = comparisonOwner.researchSourceAcquisitionClient(daemon.runtime);
       if (producer?.status === "ready") {
-        const comparison = await comparisonOwner.compareResearchSourceQualifiedSelection(client, payload, producer.population, { signal, timeoutMs: remaining });
+        const comparison = await comparisonOwner.compareResearchSourceQualifiedSelection(client, payload, producer.population,
+          { signal, timeoutMs: remaining }, input.joint_selection);
         publishSourceExperimentResult(root, identity, { qualified_comparison: { producer, comparison } });
       } else {
         const comparison = await comparisonOwner.compareResearchSourceAcquisitionControls(client, payload, { signal, timeoutMs: remaining });

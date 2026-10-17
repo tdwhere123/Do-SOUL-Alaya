@@ -6,6 +6,8 @@ import type { ResearchSourceAcquisitionReply } from "../recall-read-worker/sourc
 
 import { QualifiedSourceSelectionSchema, type QualifiedSourceSelection, type QualifiedSourceSelectionReply }
   from "../recall-read-worker/source-semantic-qualified-selection-boundary.js";
+import { SourceSemanticJointSelectionSchema } from "../recall-read-worker/source-semantic-joint-boundary.js";
+import type { SourceSemanticJointSelection } from "@do-soul/alaya-core/dist/recall/conditional-field/query/source-semantic-joint-witness.js";
 
 type QualifiedComparisonFailure = { phase: "begin" | "selection" | "cleanup"; cause: unknown; earlier?: QualifiedComparisonFailure };
 type PreparedQuery = NonNullable<Parameters<NonNullable<RecallReadWorkerClient["researchAcquisition"]>["dispatch"]>[1]>;
@@ -94,9 +96,10 @@ export async function compareResearchSourceAcquisitionControls(
  * Retain a completed worker result before rollback or execution-scope cleanup can fail. */
 export async function compareResearchSourceQualifiedSelection(client: ResearchSourceAcquisitionPort,
   input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection,
-  options: Readonly<{ signal?: AbortSignal; timeoutMs: number }>) {
+  options: Readonly<{ signal?: AbortSignal; timeoutMs: number }>, jointSelection?: SourceSemanticJointSelection) {
   const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
   const fixed = QualifiedSourceSelectionSchema.parse(structuredClone(population));
+  const joint = jointSelection === undefined ? undefined : SourceSemanticJointSelectionSchema.parse(structuredClone(jointSelection));
   const host = client.researchLibrary, scope = client.researchAcquisition, snapshot = client.readSnapshot;
   if (host === undefined || scope === undefined || snapshot.isolate === undefined) {
     throw new CoreError("CONFLICT", "qualified comparison requires the native library worker");
@@ -107,7 +110,7 @@ export async function compareResearchSourceQualifiedSelection(client: ResearchSo
     await scope.withExecutionScope(options, () => snapshot.isolate!(async () => {
       try {
         await snapshot.beginDeferred(); phase = "selection";
-        selection = await host.compareQualified(captured, fixed);
+        selection = await host.compareQualified(captured, fixed, joint);
       } catch (cause) { failure = { phase, cause }; }
       phase = "cleanup";
       try { await snapshot.rollback(); }

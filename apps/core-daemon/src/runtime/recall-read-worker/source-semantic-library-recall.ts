@@ -150,7 +150,7 @@ export function runSourceSemanticLibraryRecall(
   // orchestration owner supplies the same finalizer used by the default route.
   if (payload.joint_control !== undefined) {
     const native = finalizeNativeRecall!(result);
-    return captureResearchJointDelivery(native, runtime, payload, authorized,
+    return captureResearchJointDelivery(native, runtime, undefined, payload, authorized,
       meter, request, boundStatus, admission.kind === "admitted" ? admission.query : undefined,
       sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
   }

@@ -15,21 +15,25 @@ import { prepareLibraryDelivery, fitFrozenLibraryPage, reservedLibraryWork, type
 import { forkCapturedRequestBudget } from "./source-semantic-research-nominated-library.js";
 import { chargeResearchTransport, reserveResearchFailureTransport } from "./source-semantic-research-serialization.js";
 import type { QualifiedSourceSelectionReply, QualifiedSourceSelectionArm } from "./source-semantic-qualified-selection-boundary.js";
+import { captureResearchJointDelivery } from "./source-semantic-research-joint-delivery.js";
+
+type NativeRecall = Parameters<typeof captureResearchJointDelivery>[0];
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Query = Extract<ReturnType<typeof admitSourceSemanticQuery>, { kind: "admitted" }>;
 type Prepared = ReturnType<typeof prepareSourceSemanticLibraryInputs>;
 const reservedWork = (request: Request) => ({ ...reservedLibraryWork(request), native_accounting: "complete" as const });
 
-/** One native snapshot, one paid preparation, equal counterfactual starts. No observation,
- * query preparation, continuation issuance, provider fallback or joint computation. */
+/** One native snapshot and paid preparation. Either equal counterfactual starts or exclusive
+ * joint consumption; no observation, query preparation, continuation issuance or provider fallback. */
 export function compareResearchQualifiedSourceSelection(runtime: RecallReadWorkerRuntime,
-  payload: SourceSemanticWorkerPayload, meter: SourceSemanticReadBudget): QualifiedSourceSelectionReply {
+  payload: SourceSemanticWorkerPayload, meter: SourceSemanticReadBudget,
+  finalizeNative: (result: NativeRecall) => NativeRecall): QualifiedSourceSelectionReply {
   const request = payload.request, population = payload.qualified_control;
   if (population === undefined || request.kind !== "recall" || request.original_query === undefined ||
       request.query_handle !== undefined || request.continuation !== undefined ||
       request.access_policy !== "query-conditioned-v1" || payload.prepared_query !== undefined ||
-      payload.acquisition_control !== undefined || payload.joint_control !== undefined) {
+      payload.acquisition_control !== undefined) {
     throw new CoreError("VALIDATION", "qualified selection requires one provider-free direct fixed-population recall");
   }
   const scopes = authorizedScopesFromAdmission(payload.authorized_scopes).authorized_scopes;
@@ -38,32 +42,45 @@ export function compareResearchQualifiedSourceSelection(runtime: RecallReadWorke
   if (admission.kind !== "admitted") throw new CoreError("VALIDATION", "qualified selection requires admitted Q");
   // The transaction owns this ledger, including admission/quote failures and an unfundable failure wire.
   meter.retain([request, population], "qualified fixed-population admission");
+  if (payload.joint_control !== undefined) meter.retain(payload.joint_control, "qualified joint premise admission");
   const reply: QualifiedSourceSelectionReply = { kind: "research_qualified_selection", status: "unavailable", reason: "preparation_not_completed",
     population, eligibility: population.nominees.map(source => ({ source, h: "missing", c: source.correspondence_status, reason: "not_checked" })),
     query_semantics_status: sourceSemanticQueryStatus(admission), common_work: workOf(meter), fork_start: meter.remaining(),
     arms: { default: null, evidence_set_coverage: null }, fork_work: { default: null, evidence_set_coverage: null },
     failure: null, work: workOf(meter), physical_total: "unknown" };
-  const wire = () => ({ ...reply, work: reservedWork(request) });
+  const wire = () => ({ ...reply, work: reservedWork(request), ...(reply.joint === undefined ? {} : {
+    joint: { ...reply.joint, work: reservedWork(request) } }) });
   const releaseFailure = reserveResearchFailureTransport({ ...wire(), common_work: reservedWork(request), reason: "\u0000".repeat(1024),
     failure: { phase: "\u0000".repeat(64), name: "\u0000".repeat(256), message: "\u0000".repeat(1024), stack: "\u0000".repeat(8192), code: "\u0000".repeat(256) },
     fork_work: { default: reservedWork(request), evidence_set_coverage: reservedWork(request) },
     eligibility: reply.eligibility.map(row => ({ ...row, h: "rejected", c: "\u0000".repeat(256), reason: "\u0000".repeat(512) })) }, meter);
   let phase = "preparation";
   try {
-    const prepared = prepareQualifiedPackages(runtime, payload, request, admission, scopes, meter, reply);
+    const { prepared, jointArgs } = prepareQualifiedPackages(runtime, payload, request, admission, scopes, meter, reply);
     reply.common_work = workOf(meter); reply.fork_start = meter.remaining();
-    for (const [policy, selector] of [["default", selectSourceSemanticLibraryPage],
-      ["evidence_set_coverage", selectSourceSemanticLibraryPageWithEvidenceSetCoverage]] as const) {
-      phase = policy;
-      const fork = forkCapturedRequestBudget(request, meter);
-      // A held recovery wire is not spent work, but both forks must inherit the same unavailable capacity.
-      fork.hold({ work_units: fork.work - meter.work, memory_bytes: fork.bytes - meter.bytes });
-      try { reply.arms[policy] = deliverQualifiedPage(request, prepared, policy, selector, fork); }
-      finally { reply.fork_work[policy] = workOf(fork); }
+    if (payload.joint_control !== undefined) {
+      phase = "default";
+      const delivered = deliverQualifiedPage(request, prepared, "default", selectSourceSemanticLibraryPage, meter);
+      reply.arms.default = delivered.arm; reply.fork_work.default = workOf(meter);
+      const native = finalizeNative(delivered.native);
+      phase = "joint";
+      reply.joint = captureResearchJointDelivery(native, runtime, { meter, envelope: reply }, ...jointArgs).private_joint;
+      reply.status = reply.joint.status; reply.reason = reply.joint.reason;
+    } else {
+      for (const [policy, selector] of [["default", selectSourceSemanticLibraryPage],
+        ["evidence_set_coverage", selectSourceSemanticLibraryPageWithEvidenceSetCoverage]] as const) {
+        phase = policy;
+        const fork = forkCapturedRequestBudget(request, meter);
+        // A held recovery wire is not spent work, but both forks inherit the same unavailable capacity.
+        fork.hold({ work_units: fork.work - meter.work, memory_bytes: fork.bytes - meter.bytes });
+        try { reply.arms[policy] = deliverQualifiedPage(request, prepared, policy, selector, fork).arm; }
+        finally { reply.fork_work[policy] = workOf(fork); }
+      }
+      reply.status = "complete"; reply.reason = null;
     }
-    reply.status = "complete"; reply.reason = null; phase = "transport";
-    // Outer transport is real work too, not a sum of the two cumulative fork quotes.
-    chargeResearchTransport(wire(), meter);
+    // The joint adapter meters this exact outer envelope on the shared ledger.
+    // Ordinary comparison retains its own transport, not a sum of cumulative fork quotes.
+    if (payload.joint_control === undefined) { phase = "transport"; chargeResearchTransport(wire(), meter); }
   } catch (error) {
     if (phase === "preparation") reply.common_work = workOf(meter);
     reply.status = "failed";
@@ -72,6 +89,7 @@ export function compareResearchQualifiedSourceSelection(runtime: RecallReadWorke
       stack: error instanceof Error ? error.stack?.slice(0, 8192) ?? null : null, code: error instanceof CoreError ? error.code : null };
     // Never expose an unpriced partial. Retain measured fork work and the funded failure instead.
     reply.arms = { default: null, evidence_set_coverage: null };
+    delete reply.joint;
     releaseFailure();
     chargeResearchTransport(wire(), meter);
   } finally { releaseFailure(); reply.work = workOf(meter); }
@@ -81,7 +99,7 @@ export function compareResearchQualifiedSourceSelection(runtime: RecallReadWorke
 /** Common source verification, local admission, execution and hydration precede either policy. */
 function prepareQualifiedPackages(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   request: Request, admission: Query, scopes: readonly string[] | null, meter: SourceSemanticReadBudget,
-  reply: QualifiedSourceSelectionReply): Prepared {
+  reply: QualifiedSourceSelectionReply) {
   const original = request.original_query!;
   const { pool, eligibility } = bindResearchQualifiedSourcePool(runtime, payload.workspace_id, scopes, meter,
     original, admission.query, request.budget, reply.population);
@@ -106,18 +124,20 @@ function prepareQualifiedPackages(runtime: RecallReadWorkerRuntime, payload: Sou
     authorized_scopes: scopes, original_query: original, query_semantics: admission.query,
     query_semantics_status: reply.query_semantics_status, semantic_correspondences: correspondences, budget: request.budget,
     output_byte_limit: request.output_byte_limit, access_policy: request.access_policy! });
-  const prepared = prepareSourceSemanticLibraryInputs(runtime, payload, scopes, meter, executable, reply.query_semantics_status, admission.query,
+  const jointArgs: Parameters<typeof prepareSourceSemanticLibraryInputs> extends [unknown, ...infer Rest] ? Rest : never =
+    [payload, scopes, meter, executable, reply.query_semantics_status, admission.query,
     { sources: [...pool.sources], pages: pool.sourcePages, open: false, truncated: false },
     { descriptors: pool.descriptors, interpretationPages: pool.interpretationPages,
-      interpretationOpen: false, interpretationTruncated: false, pool }, branches, original, requestIdentity, publicIdentity);
+      interpretationOpen: false, interpretationTruncated: false, pool }, branches, original, requestIdentity, publicIdentity];
+  const prepared = prepareSourceSemanticLibraryInputs(runtime, ...jointArgs);
   if (prepared.incomplete) throw new SourceSemanticResourceExhausted("qualified package preparation");
-  return prepared;
+  return { prepared, jointArgs };
 }
 
 /** The existing full-envelope owners fit and encode the actual public spans/proofs; only non-issued
  * routing identities are removed from the private retained page. No lease owner is called. */
 function deliverQualifiedPage(request: Request, prepared: Prepared, policy: QualifiedSourceSelectionArm["policy"],
-  selector: LibraryPageSelector, meter: SourceSemanticReadBudget): QualifiedSourceSelectionArm {
+  selector: LibraryPageSelector, meter: SourceSemanticReadBudget): { arm: QualifiedSourceSelectionArm; native: NativeRecall } {
   const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
   let plan: ReturnType<typeof prepareLibraryDelivery>;
   try { plan = prepareLibraryDelivery(prepared.base, prepared.packages, request, selection, "field", selector, prepared.execution); }
@@ -139,5 +159,5 @@ function deliverQualifiedPage(request: Request, prepared: Prepared, policy: Qual
   const arm = { policy, artifact, serialized, full_envelope_bytes: fullBytes,
     output_byte_limit: request.output_byte_limit, work: reservedWork(request) };
   chargeResearchTransport(arm, meter);
-  return { ...arm, work: workOf(meter) };
+  return { arm: { ...arm, work: workOf(meter) }, native: result };
 }

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { canonicalJson, SourceRecordIdentitySchema, SourceSemanticHandleDescriptorSchema, SourceSemanticWorkerWorkSchema,
   SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
 import { PrivateArtifactSchema } from "./source-semantic-research-nominated-library.js";
+import { ResearchJointDiagnosticsSchema } from "./source-semantic-joint-boundary.js";
 
 const record = SourceRecordIdentitySchema.unwrap().shape;
 export const QualifiedSourceTupleSchema = z.object({ source_id: record.source_id, record_id: record.identity,
@@ -44,6 +45,7 @@ export const QualifiedSourceSelectionReplySchema = z.object({ kind: z.literal("r
   common_work: SourceSemanticWorkerWorkSchema, fork_start: z.object({ work_units: z.number().int().nonnegative(),
     memory_bytes: z.number().int().nonnegative() }).strict(),
   arms: z.object({ default: Arm.nullable(), evidence_set_coverage: Arm.nullable() }).strict(),
+  joint: ResearchJointDiagnosticsSchema.optional(),
   fork_work: z.object({ default: SourceSemanticWorkerWorkSchema.nullable(), evidence_set_coverage: SourceSemanticWorkerWorkSchema.nullable() }).strict(),
   failure: z.object({ phase: z.string(), name: z.string(), message: z.string(), stack: z.string().nullable(), code: z.string().nullable() }).strict().nullable(),
   work: SourceSemanticWorkerWorkSchema, physical_total: z.literal("unknown")
@@ -52,8 +54,12 @@ export const QualifiedSourceSelectionReplySchema = z.object({ kind: z.literal("r
     canonicalJson(row.source) !== canonicalJson(value.population.nominees[i]))) {
     context.addIssue({ code: "custom", message: "qualification must preserve every original nominee" });
   }
-  if (value.status === "complete" && (value.reason !== null || value.arms.default === null || value.arms.evidence_set_coverage === null)) {
-    context.addIssue({ code: "custom", message: "complete selection requires both funded deliveries" });
+  if (value.status === "complete" && (value.reason !== null || value.arms.default === null ||
+      (value.joint === undefined ? value.arms.evidence_set_coverage === null : value.joint.status !== "complete"))) {
+    context.addIssue({ code: "custom", message: "complete selection requires its funded deliveries" });
+  }
+  if (value.joint !== undefined && (value.arms.evidence_set_coverage !== null || value.fork_work.evidence_set_coverage !== null)) {
+    context.addIssue({ code: "custom", message: "joint consumption is exclusive of the coverage comparison" });
   }
 });
 export type QualifiedSourceSelectionReply = z.infer<typeof QualifiedSourceSelectionReplySchema>;

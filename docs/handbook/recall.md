@@ -1580,8 +1580,14 @@ separate known native and diagnostic work. Native continuation identity and work
 affinity remain ordinary; private fitting issues no hidden continuation leases.
 Only delivered, non-routable private pages and bounded dependencies escape; no
 joint cache or persistent graph is introduced. Ordinary MCP/default recall does
-not enable this adapter. Its guarded non-test benchmark caller is not yet wired;
-authored native-worker controls do not establish natural semantic fidelity.
+not enable this adapter. The guarded acquisition experiment can instead consume
+an admitted fixed population through `researchLibrary.compareQualified` with explicit
+joint selection. This exclusive branch reuses current H verification, Q/C admission
+and actually executed locals without discovery or query preparation. Its default
+page, joint delivery, withdrawal and actual final outer transport share one ledger
+and snapshot; every nominee remains explicit and private fitting issues no leases.
+Ordinary qualified comparison retains its two counterfactual policies. Authored
+external-entry controls establish this wiring, not natural semantic fidelity.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. After snapshot,

@@ -78,7 +78,8 @@ export interface RecallReadWorkerClient {
   /** Private guarded source experiment consumer; ordinary recall retains its preparation path. */
   readonly researchLibrary?: Readonly<{ recall(input: SourceSemanticsPublicPayload,
     selection?: SourceSemanticJointSelection): Promise<LibraryReply>;
-    compareQualified(input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection): Promise<QualifiedSourceSelectionReply>;
+    compareQualified(input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection,
+      selection?: SourceSemanticJointSelection): Promise<QualifiedSourceSelectionReply>;
   }>;
   ready(): Promise<void>;
   close(): Promise<void>;
@@ -361,10 +362,12 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly researchLibrary = {
-    compareQualified: async (input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection): Promise<QualifiedSourceSelectionReply> => {
+    compareQualified: async (input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection,
+      selection?: SourceSemanticJointSelection): Promise<QualifiedSourceSelectionReply> => {
       // Admission precedes every worker effect; this path intentionally never calls withPreparedSourceExecution.
       const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
       const qualified = QualifiedSourceSelectionSchema.parse(structuredClone(population));
+      const joint = selection === undefined ? undefined : SourceSemanticJointSelectionSchema.parse(structuredClone(selection));
       if (captured.request.kind !== "recall" || captured.request.original_query === undefined ||
           captured.request.query_semantics === undefined || captured.request.query_handle !== undefined ||
           captured.request.continuation !== undefined || captured.request.access_policy !== "query-conditioned-v1") {
@@ -375,7 +378,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       }
       this.lifecycle.preparationDeadline().check();
       const reply = await this.lifecycle.request<SourceSemanticsReply>("conditionalField.sourceSemantics", {
-        ...captured, qualified_control: qualified
+        ...captured, qualified_control: qualified, ...(joint === undefined ? {} : { joint_control: joint })
       });
       if (reply.kind !== "research_qualified_selection") throw new CoreError("CONFLICT", "qualified comparison reply mismatch");
       return reply;

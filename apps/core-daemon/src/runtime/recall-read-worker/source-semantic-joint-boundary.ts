@@ -46,7 +46,7 @@ const Delivery = z.object({ artifact: PrivateArtifact, serialized: z.string(), f
     ctx.addIssue({ code: "custom", message: "private delivery must retain the actual fitting encoded artifact" });
   }
 });
-const DiagnosticsOwner = z.object({ contract: z.literal("private-joint-delivery-v1"),
+export const ResearchJointDiagnosticsSchema = z.object({ contract: z.literal("private-joint-delivery-v1"),
   status: z.enum(["complete", "unavailable", "failed"]), reason: Id.nullable(), request_identity: Digest,
   assessment: Assessment.nullable(), witness_delivered: z.boolean(), candidate: Delivery.nullable(),
   withdrawal: z.object({ leaf_id: Id, leaf: SourceSemanticConsumedLeafSchema, assessment: Assessment,
@@ -58,8 +58,8 @@ const DiagnosticsOwner = z.object({ contract: z.literal("private-joint-delivery-
     ctx.addIssue({ code: "custom", message: "complete private joint delivery requires actual delivery and causal withdrawal" });
   }
 });
-export type ResearchJointDiagnostics = z.output<typeof DiagnosticsOwner>;
+export type ResearchJointDiagnostics = z.output<typeof ResearchJointDiagnosticsSchema>;
 export const ResearchJointReplySchema = z.object({ kind: z.literal("research_joint"), result: Recall,
-  private_joint: DiagnosticsOwner }).strict();
+  private_joint: ResearchJointDiagnosticsSchema }).strict();
 export type ResearchJointReply = z.output<typeof ResearchJointReplySchema>;
 export type ResearchJointDelivery = z.output<typeof Delivery>;

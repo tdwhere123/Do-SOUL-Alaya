@@ -5,38 +5,47 @@ import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256,
 import { assessSourceSemanticJointWitness, type SourceSemanticJointAssessment }
   from "@do-soul/alaya-core/dist/recall/conditional-field/query/source-semantic-joint-witness.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
+import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { workOf } from "./source-semantic-discovery.js";
 import { executeLibraryBranches, prepareSourceSemanticLibraryInputs } from "./source-semantic-library-recall.js";
 import { prepareLibraryDelivery, fitFrozenLibraryPage, reservedLibraryWork, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
 import { chargeResearchTransport, reserveResearchFailureTransport } from "./source-semantic-research-serialization.js";
 import { forkCapturedRequestBudget } from "./source-semantic-research-nominated-library.js";
 import type { ResearchJointDiagnostics, ResearchJointDelivery, ResearchJointReply } from "./source-semantic-joint-boundary.js";
+import type { QualifiedSourceSelectionReply } from "./source-semantic-qualified-selection-boundary.js";
 
 type Args = Parameters<typeof prepareSourceSemanticLibraryInputs> extends [unknown, ...infer Rest] ? Rest : never;
 type Branches = ReturnType<typeof executeLibraryBranches>;
 
-/** Private native adapter for the planned guarded compareSemanticChainSourceAcquisition Q-present mode.
- * The bench caller is a separate integration slice. Remove if that consumer is abandoned.
+/** Private native adapter for guarded compareSemanticChainSourceAcquisition Q-present consumption.
+ * Remove if that consumer is abandoned.
  * No new observation pipeline,
  * generic ranker, retained joint state or public proof meaning. Optional failure preserves native sibling.
  */
 export function captureResearchJointDelivery(native: ResearchJointReply["result"], runtime: RecallReadWorkerRuntime,
-  ...args: Args): ResearchJointReply {
+  owned: { meter: SourceSemanticReadBudget; envelope: QualifiedSourceSelectionReply } | undefined, ...args: Args): ResearchJointReply {
   const [payload, authorized, capturedCosts, request, status, query, sources, discovered, branches,
     original, requestIdentity, publicIdentity] = args;
-  const meter = forkCapturedRequestBudget(request, capturedCosts);
+  // Fixed-population consumption owns one sequential ledger, including failed private work.
+  // Ordinary research recall retains its existing diagnostic fork/native sibling contract.
+  const meter = owned?.meter ?? forkCapturedRequestBudget(request, capturedCosts);
   const progress: ResearchJointDiagnostics = { contract: "private-joint-delivery-v1", status: "unavailable",
     reason: "selected_semantics_unavailable", request_identity: `sha256:${requestIdentity}`,
     assessment: null, witness_delivered: false, candidate: null, withdrawal: null, work: workOf(meter) };
   const reply: ResearchJointReply = { kind: "research_joint", result: native, private_joint: progress };
   // Reuse the native fit owner's bounded receipt, including the longer accounting tag.
   // The serialized work receipt is replaced only after its own serialization has been paid.
-  const wire = () => ({ ...reply, private_joint: { ...progress,
-    work: { ...reservedLibraryWork(request), native_accounting: "complete" as const } } });
+  const reservedWork = () => ({ ...reservedLibraryWork(request), native_accounting: "complete" as const });
+  // Charge the actual outer consumer envelope once, not a discarded native sibling wrapper
+  // followed by another full transport. Both routes retain the same serialization tariff.
+  const wire = () => owned === undefined ? { ...reply, private_joint: { ...progress, work: reservedWork() } }
+    : { ...owned.envelope, status: progress.status, reason: progress.reason,
+      joint: { ...progress, work: reservedWork() }, work: reservedWork() };
   let releaseFailure: () => void;
   try {
-    releaseFailure = reserveResearchFailureTransport({ ...wire(), private_joint: { ...wire().private_joint,
-      status: "failed", reason: "\u0000".repeat(1024) } }, meter);
+    const failure = { ...progress, status: "failed", reason: "\u0000".repeat(1024), work: reservedWork() };
+    releaseFailure = reserveResearchFailureTransport(owned === undefined ? { ...wire(), private_joint: failure }
+      : { ...wire(), status: "failed", reason: failure.reason, joint: failure }, meter);
   } catch (error) {
     // Even a failed private envelope needs funding. Use the existing error boundary rather
     // than return an unpaid payload; retain the fork's planning cost separately from native work.
