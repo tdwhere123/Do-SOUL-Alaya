@@ -298,6 +298,7 @@ function buildRecallMaterializationWiringResult(
 function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializationWiringInput) {
   const embeddingRuntime = createDaemonEmbeddingRuntime({
     database: input.database,
+    embeddingStartupProbe: input.embeddingStartupProbe,
     configEnv: input.configEnv,
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,

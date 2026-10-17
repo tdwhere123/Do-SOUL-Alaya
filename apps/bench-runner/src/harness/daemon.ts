@@ -94,6 +94,7 @@ interface BenchDaemonState {
   readonly activeContext: { workspaceId: string; runId: string };
   readonly embeddingMode: NonNullable<BenchDaemonOptions["embeddingMode"]>;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
+  readonly embeddingStartupProbe: BenchDaemonOptions["embeddingStartupProbe"];
   readonly expectedReconciliationBasis: BenchDaemonOptions["expectedReconciliationBasis"];
   readonly recallWeightOverrides: BenchDaemonOptions["recallWeightOverrides"];
   readonly relationProjectionAdmissionMode: BenchDaemonOptions["relationProjectionAdmissionMode"];
@@ -141,6 +142,7 @@ async function createBenchDaemonState(
     activeContext,
     embeddingMode,
     embeddingProviderKind,
+    embeddingStartupProbe: opts.embeddingStartupProbe,
     expectedReconciliationBasis,
     recallWeightOverrides,
     relationProjectionAdmissionMode,
@@ -178,6 +180,7 @@ async function bootBenchDaemon(
     defaultRunId: state.defaultRunId,
     activeContext: state.activeContext,
     launch: state.launch,
+    embeddingStartupProbe: state.embeddingStartupProbe,
     expectedReconciliationBasis: state.expectedReconciliationBasis,
     relationProjectionAdmissionMode: state.relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode: state.fieldProjectionAdmissionMode,

@@ -8,6 +8,7 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type {
   AlayaDaemonRuntime,
+  AlayaDaemonRuntimeOptions,
   EffectiveReconciliationBasis,
   FieldProjectionAdmissionMode,
   RelationProjectionAdmissionMode
@@ -62,6 +63,7 @@ export interface BenchDaemonOptions {
   readonly workspaceId?: string;
   readonly runId?: string;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly embeddingStartupProbe?: AlayaDaemonRuntimeOptions["embeddingStartupProbe"];
   // Selects which provider the bench daemon points the embedding subsystem at
   // when embeddingMode === "env". OpenAI is explicit opt-in; the local ONNX
   // provider is the product default. Ignored when embeddingMode is "disabled".

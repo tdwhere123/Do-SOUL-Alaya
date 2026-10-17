@@ -48,8 +48,11 @@ import {
 } from "./daemon-embedding-provider-readiness.js";
 import { resolveEmbeddingWarmupHoldReason } from "./embedding-warmup-hold.js";
 
+export type EmbeddingStartupProbe = "eager" | "omit";
+
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
+  readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly configEnv: ReadonlyMap<string, string>;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
   readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
@@ -140,7 +143,8 @@ function createEmbeddingRuntimeServices(
   const providerWarmup = createProviderWarmup(
     providerState.embeddingProvider,
     input.warn,
-    providerState.readiness
+    providerState.readiness,
+    input.embeddingStartupProbe
   );
   const embeddingStatusService = createEmbeddingStatusService({
     embeddingEnabled: config.embeddingSupplementEnabled,
@@ -285,9 +289,11 @@ function applyEmbeddingPolicyDecorator(
 function createProviderWarmup(
   embeddingProvider: EmbeddingProviderPort | null,
   warn: (message: string, meta: Record<string, unknown>) => void,
-  readiness: EmbeddingProviderReadiness
+  readiness: EmbeddingProviderReadiness,
+  startupProbe: EmbeddingStartupProbe = "eager"
 ): Promise<"not_requested" | "ready" | "failed"> {
-  if (embeddingProvider === null) {
+  // Omission skips only this effect; validated provider use still owns readiness.
+  if (embeddingProvider === null || startupProbe === "omit") {
     return Promise.resolve("not_requested");
   }
   return embeddingProvider

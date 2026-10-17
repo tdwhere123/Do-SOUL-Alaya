@@ -40,6 +40,7 @@ import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
+import type { EmbeddingStartupProbe } from "./ai/daemon-embedding-runtime.js";
 import type { FieldProjectionAdmissionMode } from "./runtime/field/admission-mode.js";
 import type { RelationProjectionAdmissionMode } from "./runtime/recall-materialization/relation-projection/mode.js";
 
@@ -71,6 +72,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..", "..");
 
 export interface AlayaDaemonRuntimeOptions {
+  /** Defaults to eager; "omit" skips the probe without establishing readiness. */
+  readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly sourceSemanticInterpretationClock?: string;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
@@ -91,7 +94,8 @@ export async function createAlayaDaemonRuntime(
       registerRecallReadWorker: (client) => {
         recallReadWorkerClient = client;
       },
-      relationProjectionAdmissionMode: options.relationProjectionAdmissionMode
+      relationProjectionAdmissionMode: options.relationProjectionAdmissionMode,
+      embeddingStartupProbe: options.embeddingStartupProbe
     });
     const runtime = await createGardenAndFinalRuntime(
       bootstrap,

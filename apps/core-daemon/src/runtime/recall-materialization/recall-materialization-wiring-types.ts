@@ -41,9 +41,11 @@ import type { AppConfigService } from "../../services/config/config-service.js";
 import type { AlayaRuntimeNotifier } from "../daemon/support/runtime-notifier.js";
 import type { RelationProjectionAdmissionMode } from "./relation-projection/mode.js";
 import type { RecallPathReadBind } from "../recall/recall-path-read-bind.js";
+import type { EmbeddingStartupProbe } from "../../ai/daemon-embedding-runtime.js";
 
 export type CreateRecallMaterializationWiringInput = {
   readonly database: StorageDatabase;
+  readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly pathReadBind?: RecallPathReadBind;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly configEnv: ReadonlyMap<string, string>;
