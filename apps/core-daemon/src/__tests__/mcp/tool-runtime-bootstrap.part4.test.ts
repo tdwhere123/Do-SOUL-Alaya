@@ -1,13 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-
-import { tmpdir } from "node:os";
-
-import path from "node:path";
+import { rm } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDeferred,
+  createToolRuntimeIsolatedConfigDir,
   getToolRuntimeWiringFixture,
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
@@ -100,7 +97,7 @@ async function waitUntil(condition: () => boolean): Promise<void> {
 describe("daemon tool runtime bootstrap", () => {
 
   beforeEach(async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-daemon-config-isolated-"));
+    const configDir = await createToolRuntimeIsolatedConfigDir();
     isolatedConfigDirs.push(configDir);
     process.env.ALAYA_CONFIG_DIR = configDir;
   });

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,9 +88,20 @@ export interface VerifiedLongMemEvalDatasetAuthority {
   readonly [verifiedDatasetAuthorityBrand]: true;
 }
 
+type ObservedDatasetInput = Pick<LongMemEvalQuestion, "question_id" | "question" | "question_date" |
+  "haystack_session_ids" | "haystack_dates" | "haystack_sessions">;
 interface VerifiedDatasetAuthorityRecord {
+  readonly variant: LongMemEvalVariant;
   readonly datasetSha256: string;
   readonly assignments: readonly LongMemEvalSelectionAssignment[];
+  readonly inputDigests: ReadonlyMap<string, string>;
+}
+
+// Input provenance excludes scoring metadata. It is not speaker identity.
+function datasetInputDigest(question: ObservedDatasetInput): string {
+  return createHash("sha256").update(JSON.stringify([question.question_id, question.question, question.question_date,
+    question.haystack_session_ids, question.haystack_dates,
+    question.haystack_sessions.map(session => session.map(({ role, content }) => [role, content]))]), "utf8").digest("hex");
 }
 
 export type LongMemEvalAuthoritySelection =
@@ -208,6 +220,7 @@ export async function loadDatasetWindowWithIdentity(
   const pinned = await readPinnedDatasetIdentity(variant, pinnedPath);
   const questions: LongMemEvalQuestion[] = [];
   const assignments: LongMemEvalSelectionAssignment[] = [];
+  const inputDigests = new Map<string, string>();
   const identity = await streamLongMemEvalDataset(localPath, {
     datasetLabel: variant,
     expectedBytes: pinned.sizeBytes,
@@ -216,6 +229,7 @@ export async function loadDatasetWindowWithIdentity(
     assignments.push(datasetAssignment(question));
     if (index >= options.offset &&
         (options.limit === undefined || index < options.offset + options.limit)) {
+      inputDigests.set(question.question_id, datasetInputDigest(question));
       questions.push(question);
     }
   });
@@ -233,7 +247,7 @@ export async function loadDatasetWindowWithIdentity(
     checksumSource: pinnedPath,
     sourcePath: localPath,
     promotionAuthority: pinnedMetaRoot === PINNED_META_ROOT
-      ? mintVerifiedDatasetAuthority(identity.sha256, assignments)
+      ? mintVerifiedDatasetAuthority(identity.sha256, assignments, variant, inputDigests)
       : null
   };
 }
@@ -359,21 +373,40 @@ export function mintLongMemEvalDatasetAuthorityFromTestToken(
   input: {
     readonly datasetSha256: string;
     readonly assignments: readonly LongMemEvalSelectionAssignment[];
+    readonly questionInputs?: readonly ObservedDatasetInput[];
   }
 ): VerifiedLongMemEvalDatasetAuthority {
   if (!boundTestAuthorityTokens.has(token)) {
     throw new Error("test-only LongMemEval authority seam is unavailable");
   }
-  return mintVerifiedDatasetAuthority(input.datasetSha256, input.assignments);
+  return mintVerifiedDatasetAuthority(input.datasetSha256, input.assignments, "longmemeval_s",
+    new Map(input.questionInputs?.map(question => [question.question_id, datasetInputDigest(question)])));
+}
+
+/** A Bench input policy may consume the existing official-pin capability, not a
+ * checksum copied into a second policy registry. Custom metadata has no authority. */
+export function assertVerifiedLongMemEvalDatasetMembership(
+  authority: VerifiedLongMemEvalDatasetAuthority | null,
+  input: { variant: LongMemEvalVariant; sha256: string; questions: readonly ObservedDatasetInput[] }
+): void {
+  const verified = authority === null ? undefined : verifiedDatasetAuthorities.get(authority);
+  if (verified === undefined || verified.variant !== input.variant || verified.datasetSha256 !== input.sha256 ||
+      input.questions.length === 0) throw new AlayaError("VALIDATION", "persona policy requires the supported official dataset pin");
+  selectDatasetOrderSubset(verified.assignments, input.questions.map(question => question.question_id));
+  if (input.questions.some(question => verified.inputDigests.get(question.question_id) !== datasetInputDigest(question))) {
+    throw new AlayaError("CONFLICT", "persona input differs from the verified original dataset question");
+  }
 }
 
 function mintVerifiedDatasetAuthority(
   datasetSha256: string,
-  assignments: readonly LongMemEvalSelectionAssignment[]
+  assignments: readonly LongMemEvalSelectionAssignment[],
+  variant: LongMemEvalVariant = "longmemeval_s",
+  inputDigests: ReadonlyMap<string, string> = new Map()
 ): VerifiedLongMemEvalDatasetAuthority {
   const authority = Object.freeze({}) as VerifiedLongMemEvalDatasetAuthority;
   verifiedDatasetAuthorities.set(authority, {
-    datasetSha256,
+    variant, datasetSha256, inputDigests: new Map(inputDigests),
     assignments: Object.freeze(assignments.map((row) => Object.freeze({ ...row })))
   });
   return authority;

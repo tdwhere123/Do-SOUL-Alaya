@@ -3,6 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   createAlayaDaemonRuntime,
   type AlayaDaemonRuntime,
+  type AlayaDaemonRuntimeOptions,
   type EffectiveReconciliationBasis,
   type FieldProjectionAdmissionMode,
   type RelationProjectionAdmissionMode
@@ -23,6 +24,7 @@ import type { BenchDaemonConfigDirectoryLease } from "./daemon-config-directory.
 type ActiveBenchContext = { workspaceId: string; runId: string };
 
 export interface BenchDaemonStartupInput {
+  readonly embeddingStartupProbe?: AlayaDaemonRuntimeOptions["embeddingStartupProbe"];
   readonly sourceSemanticInterpretationClock?: string;
   readonly dataDir: string;
   readonly defaultWorkspaceId: string;
@@ -56,7 +58,8 @@ export async function initializeBenchDaemon(
     input.expectedReconciliationBasis,
     input.relationProjectionAdmissionMode,
     input.fieldProjectionAdmissionMode,
-    input.sourceSemanticInterpretationClock
+    input.sourceSemanticInterpretationClock,
+    input.embeddingStartupProbe
   );
   try {
     await installBenchProfile(
@@ -80,9 +83,11 @@ async function createBenchRuntimeResources(
   expectedReconciliationBasis: EffectiveReconciliationBasis | undefined,
   relationProjectionAdmissionMode: RelationProjectionAdmissionMode | undefined,
   fieldProjectionAdmissionMode: FieldProjectionAdmissionMode | undefined,
-  sourceSemanticInterpretationClock: string | undefined
+  sourceSemanticInterpretationClock: string | undefined,
+  embeddingStartupProbe: AlayaDaemonRuntimeOptions["embeddingStartupProbe"]
 ): Promise<BenchDaemonStartupResources> {
   const runtime = await createAlayaDaemonRuntime({
+    embeddingStartupProbe,
     ...(sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock }),
     relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode

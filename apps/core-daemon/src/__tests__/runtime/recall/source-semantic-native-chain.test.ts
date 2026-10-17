@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, hashLabeledIdentity,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, hashLabeledIdentity,
   type SourceReferenceCatalog, type SourceSemanticInterpretation, type SourceSemanticQuery,
   SOURCE_SEMANTIC_QUERY_CONTRACT, SOURCE_SEMANTIC_CORRESPONDENCE_CONTRACT
 } from "@do-soul/alaya-protocol";
@@ -287,7 +287,7 @@ async function prepareSource(handler: Handler, context: Context, sourceId: strin
     || output.source_id === undefined) {
     throw new Error("prepare_source must return a handle and catalog");
   }
-  expect(output.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(output.execution).query_preparation.external_api_attempts).toBe(0);
   return { ...output, source_handle: output.source_handle, catalog: output.catalog };
 }
 
@@ -298,9 +298,9 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
     budget: BUDGET, authorized_scopes: SCOPES
   }, context);
   if (output.operation !== "propose" || output.published === undefined) {
-    throw new Error(`propose failed: ${JSON.stringify(output.outcome)}`);
+    throw new Error(`propose failed: ${JSON.stringify(output)}`);
   }
-  expect(output.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(output.execution).query_preparation.external_api_attempts).toBe(0);
   return output.published;
 }
 
@@ -340,7 +340,7 @@ it("preserves positive finite-domain and measured-comparison proofs through publ
         { correspondences: correspondence.correspondences, domains: correspondence.domains }, FINITE_QUERY);
       const forall = await queryHandleRecall(reopened.handler, reopened.context, FINITE_QUERY, semantics, [receivedFiniteCorrespondence.semantic_correspondence], budget);
       if (forall.operation !== "recall") throw new Error("native forall recall required");
-      expect(forall.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(forall.execution).query_preparation.external_api_attempts).toBe(0);
       expect(forall.proofs).toHaveLength(1);
       expect(forall.proofs![0]!.evaluation).toMatchObject({ status: "supported", vacuous: false });
       expect(forall.proofs![0]!.consumed_leaves.map((row) => row.leaf_kind)).toEqual(expect.arrayContaining([
@@ -406,7 +406,7 @@ it("preserves table source interpretation and receiver query semantics and seman
           operation: "prepare_query", original_query: ORIGINAL, query_semantics: receivedQuery.query, budget: BUDGET, authorized_scopes: SCOPES
         }, reopened.context);
         if (preparedQuery.operation !== "prepare_query") throw new Error("prepare_query expected");
-        expect(preparedQuery.provider_attempts).toBe(0);
+        expect(sourceSemanticExecutionPhases(preparedQuery.execution).query_preparation.external_api_attempts).toBe(0);
         expect(preparedQuery.candidates.some((row) => row.interpretation_id === interpretationId)).toBe(true);
         const receivedCorrespondence = receiveCorrespondence(receivedQuery.query, published.interpretation, interpretationId);
         expect(receivedCorrespondence.semantic_correspondence.source_interpretation_id).toBe(interpretationId);
@@ -424,7 +424,7 @@ it("preserves table source interpretation and receiver query semantics and seman
           })
         );
         if (recalled.operation !== "recall") throw new Error("library recall expected");
-        expect(recalled.provider_attempts).toBe(0);
+        expect(sourceSemanticExecutionPhases(recalled.execution).query_preparation.external_api_attempts).toBe(0);
         expect((mcp.structuredContent as { output: { operation: string } }).output.operation).toBe("recall");
         expect(recalled.discovery?.eligible_source_count).toBeGreaterThanOrEqual(2);
         expect(recalled.order?.enumeration_policy).toBe("evidence_support");
@@ -499,7 +499,7 @@ it("preserves table source interpretation and receiver query semantics and seman
         expect(comparison.query.evaluation).toMatchObject({ kind: "comparison", unit: "ms", operation: "gt" });
         const compared = await queryHandleRecall(reopened.handler, reopened.context, COMPARISON, comparison.query, []);
         if (compared.operation !== "recall") throw new Error("comparison recall expected");
-        expect(compared.provider_attempts).toBe(0);
+        expect(sourceSemanticExecutionPhases(compared.execution).query_preparation.external_api_attempts).toBe(0);
         expect(compared.slot_qualifiers?.some((row) => row.evidence_kind === "semantic_proof")).toBe(false);
         expect(compared.coverage?.conditional_computation).toBe("unexercised");
         expect(compared.coverage?.semantic_correspondence).toBe("unexercised");
@@ -743,7 +743,7 @@ it("keeps failed sources available and reserves or paginates complete packages u
         expect(workerLimited.slot_qualifiers.filter(row => row.evidence_kind === "semantic_proof")
           .every(row => row.payload_support === "available")).toBe(true);
         expect(soulSearchFromLibraryRecall(workerLimited).results.some((row) => row.object_kind === "memory_entry")).toBe(false);
-        expect(full.provider_attempts).toBe(0);
+        expect(sourceSemanticExecutionPhases(full.execution).query_preparation.external_api_attempts).toBe(0);
       } finally {
         await closeSession(reopened, filename);
       }
@@ -876,7 +876,7 @@ it("publishes repeated source assertions through the public handle and delivers 
       );
       const response = SoulInterpretationResponseSchema.parse((mcp.structuredContent as { output: unknown }).output);
       if (response.operation !== "recall") throw new Error("public recall required");
-      expect(response.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(response.execution).query_preparation.external_api_attempts).toBe(0);
       const search = soulSearchFromLibraryRecall(response);
       expect(search.results.some((row) => row.target.kind === "source_evidence"
         && row.target.root_id === identities[sourceId])).toBe(true);

@@ -30,6 +30,7 @@ import { authorizedScopesMismatch } from "../conditional-field/query/compile-que
 import { stableStringify } from "../../shared/stable-stringify.js";
 import { collectRelations } from "../conditional-field/query/compile-query.js";
 import { ObservedSourceFacts } from "./observed-source-facts.js";
+import { indexedIdentityWork } from "../conditional-field/engine/state-endpoint-index.js";
 import {
   openResiduals,
   type SourceDomainCoverage
@@ -114,7 +115,7 @@ function observeWithinMemory(
     input.cost?.add("observe", { joins: compilation.work_units });
   }
   const seedUnitCost = 4 + seedProgramStates(interpretation.program, state.compiled_automaton).length
-    * Math.max(1, interpretation.hypotheses.length);
+    * Math.max(1, interpretation.hypotheses.length) * indexedIdentityWork(state);
   let expectedRevision = input.expected_source_revision;
   if (expectedRevision === undefined && input.readers.snapshotPin !== undefined) {
     if (state.remaining_exploration < SNAPSHOT_PIN_NATIVE_WORK) return interruptObservedField(state);

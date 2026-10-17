@@ -1,8 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  canonicalJson, SoulInterpretationRequestSchema, SourceSemanticWorkerWorkSchema, sourceSemanticQueryIdentity,
-  type SoulInterpretationRequest, type SoulInterpretationResponse, type SourceSemanticWorkerWork
+  canonicalJson, SoulInterpretationRequestSchema, SourceSemanticWorkerWorkSchema, sourceSemanticExecutionPhases,
+  sourceSemanticQueryIdentity, type SoulInterpretationRequest, type SoulInterpretationResponse, type SourceSemanticWorkerWork
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../../../core-daemon/src/mcp-memory/tool/interpretation-handler.js";
@@ -67,7 +67,8 @@ async function callNative(root: string, name: string, requestValue: unknown, han
   try {
     call.response = await handler(request, { workspaceId: WS, runId: "field-feedback-acquisition", agentTarget: "codex", sessionId: root });
     call.encoded_response_bytes = Buffer.byteLength(JSON.stringify(call.response));
-    if (call.response.provider_attempts !== 0) throw new AcquisitionProtocolContradiction("provider attempt in native-only study");
+    const attempts = sourceSemanticExecutionPhases(call.response.execution).query_preparation.external_api_attempts;
+    if (attempts !== 0 && attempts !== null) throw new AcquisitionProtocolContradiction("provider attempt in native-only study");
     if (call.encoded_response_bytes > 1_000_000) throw new AcquisitionProtocolContradiction("native response exceeds frozen capture envelope");
   } catch (error) {
     const details = error !== null && typeof error === "object" && "details" in error ? error.details as { work?: unknown } : undefined;

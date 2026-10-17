@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { encodeSourceDisclosure } from "@do-soul/alaya-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SAMPLE_ROWS,
@@ -141,7 +142,7 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
 
   it("labels retained evidence text and unknown original validity before displaying it", async () => {
     const evaluatedAt = "2026-09-18T12:00:00.000Z";
-    const disclosure = (material_kind: "retained_gist" | "retained_excerpt") => ({
+    const disclosure = (material_kind: "retained_gist" | "retained_excerpt") => encodeSourceDisclosure({
       material_kind, source_binding: "unbound", evaluated_as_of: evaluatedAt,
       validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
       proof_use: { kind: "source_only", qualification: "not_current_proof" }

@@ -1,6 +1,7 @@
 import {
   isChatSemanticRequestProfile, AlayaError, ApprovedSemanticContextSchema, UtteranceAttributionSchema,
-  UNKNOWN_UTTERANCE_ATTRIBUTION, SourceSemanticCorrespondenceGenerationPolicySchema, SourceSemanticQueryPresentationSchema
+  UNKNOWN_UTTERANCE_ATTRIBUTION, SourceSemanticCorrespondenceGenerationPolicySchema, SourceSemanticQueryPresentationSchema,
+  type SourceSemanticResourceLedger
 } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import {
@@ -98,8 +99,10 @@ export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWo
 }
 
 export function materializeSemanticProposalLines(
-  workset: SemanticProposalWorkset, maxOutputTokens: number
+  workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger
 ): readonly SemanticProposalLine[] {
+  meter?.retain(workset, "semantic proposal request construction input");
+  meter?.canonicalJsonLength(workset);
   if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal workset contract/profile mismatch");
   }
@@ -134,8 +137,11 @@ export function materializeSemanticProposalLines(
       ...(parsed.generation_policy === undefined ? {} : { generation_policy: parsed.generation_policy }),
       ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
     });
-    return bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request), request,
+    const line = bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request), request,
       sourceSemanticCorrespondenceResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
+    meter?.retain(line, "semantic proposal request and encoded cache identity");
+    meter?.canonicalJsonLength(line);
+    return line;
   });
 }
 

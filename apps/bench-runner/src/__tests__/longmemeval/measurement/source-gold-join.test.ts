@@ -1,5 +1,5 @@
 import { FirstExposureSession, initialScoringSlots } from "../../../runs/measurement/first-exposure-session.js";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import { compileConditionalFieldQuery, interpretationIdentity, projectSourceDisclosure } from "@do-soul/alaya-core";
 import {
@@ -90,7 +90,7 @@ function fixture(targets: readonly RecallTargetRef[]) {
 describe("source gold join and mixed-kind first-exposure", () => {
   it("joins record-only source gold and does not treat an extracted memory twin as the source key", () => {
     const sourcePage = fixture([sourceTarget()]);
-    expect(sourcePage.recallResult.results[0]?.source_disclosure).toMatchObject({
+    expect(sourceDisclosure(sourcePage.recallResult.results[0]!.source_disclosure!)).toMatchObject({
       source_binding: "unbound", source_time: { kind: "unknown", reason: "unbound" },
       validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
       proof_use: { kind: "source_only" }

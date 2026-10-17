@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { encodeSourceDisclosure } from "@do-soul/alaya-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { retainLoadedMemoryRowWindow } from "../../pages/memory-browser";
 import {
@@ -24,11 +25,11 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
     setWorkspaceId(null);
   });
 
-  const gistDisclosure = {
+  const gistDisclosure = encodeSourceDisclosure({
     material_kind: "retained_gist", source_binding: "unbound", evaluated_as_of: "2026-09-18T12:00:00.000Z",
     validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
     proof_use: { kind: "source_only", qualification: "not_current_proof" }
-  };
+  });
 
   it("keeps an uncomputed contradiction count distinct from computed zero", async () => {
     fetchMock.mockImplementation(async (input: FetchInput) => urlOf(input).includes("/memory-entries/ws1")

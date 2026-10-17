@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import {   SourceSemanticResourceExhausted, indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, SourceSemanticResourceExhausted, indexEntryCacheKey, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET } from "@do-soul/alaya-protocol";
 import { CoreError, createAuditedSourceAdmission, fieldContractSha256, sourceGoldRootIdentity } from "@do-soul/alaya-core";
 import { closeCachedDatabase, SqliteEventLogRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
@@ -118,7 +118,7 @@ function assertUnavailableOriginalArm(
   expect(arm.encoded.operation).toBe("recall");
   const encoded = encodedOriginals(arm);
   expect(encoded.results?.map((row) => row.content_preview)).toEqual(stored.map(previewOf));
-  expect(encoded.results?.map((row) => row.source_disclosure?.proof_use)).toEqual(
+  expect(encoded.results?.map((row) => sourceDisclosure(row.source_disclosure!).proof_use)).toEqual(
     stored.map(() => ({ kind: "source_only", qualification: "not_current_proof" }))
   );
   expect(encoded.index?.entries.map(entryRoot)).toEqual([...expectedRootIds]);
@@ -169,8 +169,8 @@ async function withOriginalLibrary(
 
 it("rejects a partially hydrated frozen pool even when the proposal is empty", async () => {
   await withOriginalLibrary(twelveSources(), async ({ database, records }) => {
-    // This quota can hydrate and deliver the first source, but not the complete twelve-source pool.
-    const budget = { ...ACCESS_BUDGET, work_units: 2000 };
+    // Include streamed hash handoffs: hydrate/deliver one source, but not the complete twelve-source pool.
+    const budget = { ...ACCESS_BUDGET, work_units: 3000 };
     const first = records[0]!.record_id;
     const small = compareResearchOriginalSourceEvidence(database, {
       ...evidenceInput(records.slice(0, 1), { proposed_root_ids: [first] }), budget

@@ -1,16 +1,52 @@
-import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceRecordIdentity, type SourceIndexTarget, type SourceIndexQueryResources, type SourceSemanticResourceBudget, type SourceSemanticCompactPreparation, type SourceSemanticCompactAcquisition } from "@do-soul/alaya-protocol";
 import { CoreError, authorizeSemanticScope, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRecordFromRow, type StorageDatabase } from "@do-soul/alaya-storage";
 
 export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
+  public preparation?: SourceSemanticCompactPreparation;
+  public acquisition?: SourceSemanticCompactAcquisition;
+  public indexWork = 0;
+  private heldWork = 0;
+  private heldBytes = 0;
   public nativeWork = 0;
   public nativeBytes = 0;
+  static tupleLookupCost(kind: "catalog" | "discovered", count: number): SourceSemanticResourceBudget {
+    return { work_units: count, memory_bytes: count * (kind === "catalog" ? 16 : 24) };
+  }
+  static signalReconciliationCost(count: number): SourceSemanticResourceBudget {
+    return { work_units: count, memory_bytes: 0 };
+  }
   read(work: number, bytes: number, reason = "native source read"): void {
     this.charge(work, bytes, reason); this.nativeWork += work; this.nativeBytes += bytes;
   }
+  /** A held allowance is not execution. Release it before the quoted completion runs. */
+  hold(cost: SourceSemanticResourceBudget): () => void {
+    this.reserve(cost.work_units, cost.memory_bytes, "source completion allowance");
+    this.work -= cost.work_units; this.bytes -= cost.memory_bytes;
+    this.heldWork += cost.work_units; this.heldBytes += cost.memory_bytes;
+    let held = true;
+    return () => {
+      if (!held) return;
+      this.work += cost.work_units; this.bytes += cost.memory_bytes;
+      this.heldWork -= cost.work_units; this.heldBytes -= cost.memory_bytes; held = false;
+    };
+  }
+  outstandingAllowance(): Readonly<{ work_units: number; memory_bytes: number }> {
+    return { work_units: this.spentWork + this.heldWork, memory_bytes: this.spentBytes + this.heldBytes };
+  }
+  constrainToParent(parent: SourceSemanticReadBudget): void {
+    this.work = Math.min(this.work, Math.max(0, parent.work - this.spentWork - this.heldWork));
+    this.bytes = Math.min(this.bytes, Math.max(0, parent.bytes - this.spentBytes - this.heldBytes));
+  }
+  absorbIndex(resources: SourceIndexQueryResources): void {
+    // Native bytes are already included in memory_bytes, not a second debit.
+    this.charge(resources.work, resources.memory_bytes, "source index acquisition");
+    this.indexWork += resources.work; this.nativeBytes += resources.native_bytes;
+  }
   absorb(child: SourceSemanticReadBudget): void {
     this.charge(child.spentWork, child.spentBytes, "bounded read phase");
-    this.nativeWork += child.nativeWork; this.nativeBytes += child.nativeBytes;
+    this.nativeWork += child.nativeWork; this.nativeBytes += child.nativeBytes; this.indexWork += child.indexWork;
+    if (child.acquisition !== undefined) this.acquisition = child.acquisition;
   }
 }
 
@@ -60,7 +96,9 @@ export function sourceSemanticReadStores(database: StorageDatabase, workspace: s
 /** Current authorized source identities. Query text is not a membership predicate. */
 export function listEligibleSemanticSources(
   database: StorageDatabase, workspace: string, meter: SourceSemanticReadBudget,
-  authorized: readonly string[] | null, preferredSourceIds: readonly string[] = []
+  authorized: readonly string[] | null, preferredSourceIds: readonly string[] = [],
+  union?: Readonly<{ nominations: readonly SourceIndexTarget[]; beforeRetain: (record: SourceRecordIdentity, tuple: string) => void;
+    acquire?: (next: SourceRecordIdentity | null, bodyBytes: number) => readonly SourceIndexTarget[] }>
 ): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number;
   stopping_reasons: readonly ("budget" | "source_limit" | "unavailable")[] } {
   if (preferredSourceIds.length > 16 || new Set(preferredSourceIds).size !== preferredSourceIds.length ||
@@ -72,7 +110,7 @@ export function listEligibleSemanticSources(
   const accepted = new Set<string>();
   const stoppingReasons = new Set<"budget" | "source_limit" | "unavailable">();
   let afterSourceId: string | null = null, pages = 0, truncated = true, open = false;
-  const append = (page: NonNullable<ReturnType<typeof repo.findCurrentBounded>>) => {
+  const append = (page: NonNullable<ReturnType<typeof repo.findCurrentBounded>>, expected?: SourceIndexTarget) => {
     if (page.resourceLimited) { open = true; stoppingReasons.add("budget"); return "budget" as const; }
     if (page.record === null) { open = true; stoppingReasons.add("unavailable"); return "unavailable" as const; }
     const record = sourceRecordFromRow(page.record);
@@ -81,16 +119,36 @@ export function listEligibleSemanticSources(
       return "skipped" as const;
     }
     try { authorizeSemanticScope(record.scope_class, authorized); } catch { return "skipped" as const; }
-    if (accepted.has(record.source_id)) return "skipped" as const;
-    try { meter.retain(record, "current source catalog"); }
-    catch (error) {
+    if (expected !== undefined && (expected.source_id !== record.source_id || expected.target.root_id !== record.identity ||
+        expected.target.workspace_id !== record.workspace_id || expected.target.source_version !== record.source_version ||
+        expected.target.content_digest !== record.content_digest)) return "skipped" as const;
+    try {
+      const tuple = semanticSourceTupleIdentity(record, meter);
+      if (accepted.has(tuple)) return "skipped" as const;
+      union?.beforeRetain(record, tuple); meter.retain(record, "current source catalog");
+      accepted.add(tuple); sources.push(record);
+      return "accepted" as const;
+    } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       open = true; stoppingReasons.add("budget"); return "budget" as const;
     }
-    accepted.add(record.source_id); sources.push(record);
-    return "accepted" as const;
   };
   let exhausted = false;
+  const admitNominations = (nominations: readonly SourceIndexTarget[]) => {
+    for (const nomination of nominations) {
+      try {
+        meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION);
+        const page = repo.findCurrentBounded(workspace, nomination.source_id, 1, 0,
+          { workLimit: meter.work, nativeByteLimit: meter.bytes });
+        meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+        if (page !== null && append(page, nomination) === "budget") { exhausted = true; break; }
+      } catch (error) {
+        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        open = true; stoppingReasons.add("budget"); exhausted = true; break;
+      }
+    }
+  };
+  admitNominations(union?.nominations ?? []);
   for (const sourceId of preferredSourceIds) {
     try { meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION); }
     catch (error) {
@@ -112,10 +170,14 @@ export function listEligibleSemanticSources(
     const page = repo.findNextCurrentBounded(workspace, afterSourceId, 1, { workLimit: meter.work, nativeByteLimit: meter.bytes });
     meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
     pages += 1;
-    if (page === null) { truncated = false; break; }
+    if (page === null) {
+      if (pages === 1) admitNominations(union?.acquire?.(null, 0) ?? []);
+      truncated = false; break;
+    }
     if (page.record === null) { open = true; stoppingReasons.add("unavailable"); break; }
     afterSourceId = page.record.source_id;
     if (append(page) === "budget") break;
+    if (pages === 1) admitNominations(union?.acquire?.(sources[0] ?? null, page.bodyBytes) ?? []);
   }
   if (truncated) open = true;
   if (truncated && pages >= 512) stoppingReasons.add("source_limit");
@@ -123,6 +185,12 @@ export function listEligibleSemanticSources(
     sources,
     truncated, open, pages, stopping_reasons: [...stoppingReasons]
   };
+}
+
+export function semanticSourceTupleIdentity(record: SourceRecordIdentity, meter: SourceSemanticReadBudget): string {
+  const tuple = `${record.workspace_id}\0${record.identity}\0${record.source_version}\0${record.content_digest}`;
+  meter.retain(tuple, "source union tuple identity");
+  return tuple;
 }
 
 export function currentSemanticSource(stores: Pick<FieldFormationStores, "getCurrentRecord" | "getStoredRecord">,

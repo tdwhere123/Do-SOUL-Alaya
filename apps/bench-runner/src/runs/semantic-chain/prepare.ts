@@ -7,6 +7,7 @@ import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "@do-soul/al
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
+import { assertSemanticChainSourceObservation, SemanticChainSourceObservationError } from "./source-index-observation.js";
 import { readSemanticChainProposalResults, semanticChainPreparationIdentity, semanticChainQueryAvailability,
   verifySemanticChainQueries } from "./inputs.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract,
@@ -64,7 +65,8 @@ export async function prepareSemanticChain(value: unknown, root: string,
           catch (error) {
             refuseBenchWorkAfterCancel();
             if (!(error instanceof AlayaError && error.code === "UNAVAILABLE")) throw error;
-            queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}` });
+            queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}`,
+              ...(error instanceof SemanticChainSourceObservationError ? { discovery_failure: error.failure } : {}) });
             continue;
           }
           if (querySemantics === undefined) {
@@ -252,6 +254,7 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     if (JSON.stringify(response.query_semantics_status) !== JSON.stringify(expectedStatus)) {
       throw new AlayaError("CONFLICT", "native discovery changed query semantic availability");
     }
+    assertSemanticChainSourceObservation(config, response);
     const access = response.access;
     if (access === undefined && response.outcome?.status === "resource_exhausted") {
       throw new AlayaError("UNAVAILABLE", "native discovery resource exhausted");
@@ -264,7 +267,7 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     }
     poolId = access.pool_id;
     queryHandle = response.query_handle;
-    trace.push({ coverage: response.coverage, work: response.work, access, query_semantics_status: response.query_semantics_status,
+    trace.push({ coverage: response.coverage, work: response.work, execution: response.execution, access, query_semantics_status: response.query_semantics_status,
       continuation_handle: response.continuation_handle ?? null,
       candidate_ids: response.candidates.map((candidate) => candidate.interpretation_id) });
     pages++;

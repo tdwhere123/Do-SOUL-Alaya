@@ -106,6 +106,18 @@ export function sourceRootEligible(
   return !namedScopesExclude(principal, row.scope_class);
 }
 
+/** One hypothesis packet admits only its own interpretation rows. */
+export function interpretationRowEligible(
+  row: RelationObserverRow,
+  hypothesisId: string | undefined
+): boolean {
+  return row.validity?.kind === "interpretation"
+    && hypothesisId !== undefined
+    && hypothesisId === row.validity.hypothesis_id
+    && row.interpretation_source?.packet_id === row.validity.packet_id
+    && row.interpretation_target?.packet_id === row.validity.packet_id;
+}
+
 export function relationRowEligible(
   input: ObserveConditionalFieldInput,
   row: RelationObserverRow
@@ -119,9 +131,8 @@ export function relationRowEligible(
   // Query-local derived transitions are never admitted as source relation rows.
   if (row.validity.kind === "query_snapshot") return false;
   if (row.validity.kind === "interpretation") {
-    return input.query.hypotheses.length === 1 && input.query.hypotheses[0]?.hypothesis_id === row.validity.hypothesis_id
-      && row.interpretation_source?.packet_id === row.validity.packet_id
-      && row.interpretation_target?.packet_id === row.validity.packet_id;
+    const hypothesisId = input.query.hypotheses.length === 1 ? input.query.hypotheses[0]?.hypothesis_id : undefined;
+    return interpretationRowEligible(row, hypothesisId);
   }
   if (asOf === undefined) return true;
   return isRelationValidityActiveAt(row.validity, asOf,

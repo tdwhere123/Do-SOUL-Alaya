@@ -1,8 +1,15 @@
+import {
+  createBenchDaemonConfigDirectoryLease,
+  planBenchDaemonConfigDirectory
+} from "../../../../bench-runner/src/harness/daemon/daemon-config-directory.js";
+
 export const ORIGINAL_ALAYA_MCP_TOOL_CATALOG_JSON = process.env.ALAYA_MCP_TOOL_CATALOG_JSON;
 export const ORIGINAL_ALAYA_ALLOWED_MCP_SERVERS = process.env.ALAYA_ALLOWED_MCP_SERVERS;
 export const ORIGINAL_ALAYA_MCP_SERVER_CONFIG_JSON = process.env.ALAYA_MCP_SERVER_CONFIG_JSON;
 export const ORIGINAL_ALAYA_CONFIG_DIR = process.env.ALAYA_CONFIG_DIR;
 export const ORIGINAL_ALAYA_ENABLE_EMBEDDING_SUPPLEMENT = process.env.ALAYA_ENABLE_EMBEDDING_SUPPLEMENT;
+export const ORIGINAL_ALAYA_EMBEDDING_PROVIDER = process.env.ALAYA_EMBEDDING_PROVIDER;
+export const ORIGINAL_ALAYA_OFFICIAL_GARDEN_SECRET_REF = process.env.ALAYA_OFFICIAL_GARDEN_SECRET_REF;
 export const ORIGINAL_ALAYA_GARDEN_OPENAI_SECRET_REF = process.env.ALAYA_GARDEN_OPENAI_SECRET_REF;
 export const ORIGINAL_ALAYA_GARDEN_TEST_OPENAI_KEY = process.env.ALAYA_GARDEN_TEST_OPENAI_KEY;
 export const ORIGINAL_ALAYA_OPENAI_SECRET_REF = process.env.ALAYA_OPENAI_SECRET_REF;
@@ -11,6 +18,13 @@ export const ORIGINAL_OPENAI_EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODE
 export const ORIGINAL_OPENAI_EMBEDDING_PROVIDER_URL = process.env.OPENAI_EMBEDDING_PROVIDER_URL;
 export const ORIGINAL_OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 export const ORIGINAL_OFFICIAL_GARDEN_MODEL = process.env.OFFICIAL_GARDEN_MODEL;
+
+/** Isolated ALAYA_CONFIG_DIR whose .env is the native fixture namespace the provider-free guard permits. Machine-home credential paths remain denied. */
+export async function createToolRuntimeIsolatedConfigDir(): Promise<string> {
+  const configDir = planBenchDaemonConfigDirectory();
+  await createBenchDaemonConfigDirectoryLease(configDir).prepare();
+  return configDir;
+}
 
 export async function readMockConfigEnv(): Promise<ReadonlyMap<string, string>> {
   const configDir = process.env.ALAYA_CONFIG_DIR;

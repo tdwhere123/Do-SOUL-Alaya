@@ -59,10 +59,11 @@ it("attributes bounded observation cost while retaining its source-supported inp
     }
   });
   try {
+    // A quarter of the default allowance stops before the last statement with indexed row deltas.
     const actual = deliveredProofFixture({ interpretation: proof.interpretation, semantics: proof.query,
       correspondence: proof.semantic_correspondence, original: proof.original_query,
       library: true, budget: { ...SOURCE_SEMANTIC_REASONING_BUDGET,
-        work_units: SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 2 } });
+        work_units: Math.floor(SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 4) } });
     expect(groups.length).toBeGreaterThan(0);
     expect(projections.length).toBeGreaterThan(0);
     const charges = [...ledgers].map(([ledger, value]) => {

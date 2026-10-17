@@ -1,17 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-vi.hoisted(() => {
-  for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
-  const nativeFetch = globalThis.fetch;
-  vi.stubGlobal("fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (new URL(String(input)).hostname !== "127.0.0.1" || init?.redirect !== "error") throw new Error("only no-redirect loopback transport allowed");
-    return nativeFetch(input, init);
-  });
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
 });
-import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema } from "@do-soul/alaya-protocol";
+afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
+import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema, sourceSemanticExecution,
+  sourceSemanticExecutionPhases, SourceSemanticExecutionSchema } from "@do-soul/alaya-protocol";
 import { encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";
-import { REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeProofResponseFixture,
-  nativeSourceHitWithUnverifiedProofFixture } from "./source-semantic-library-measurement-fixture.js";
+import { DIGEST, REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeProofResponseFixture,
+  nativeSourceHitWithUnverifiedProofFixture, libraryAccessPhases } from "./source-semantic-library-measurement-fixture.js";
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import {
@@ -30,7 +28,7 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
     goldSourceUnits: [GOLD]
   });
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("source semantic library measurement", () => {
   it("admits a new reader exposure without spending a proof verification allowance", () => {
@@ -49,7 +47,7 @@ describe("source semantic library measurement", () => {
   it.each(["source", "interpretation", "computation"] as const)("keeps an unvisited or unfinished %s negative unavailable in worker and public measurement", kind => {
     const result = workerRecall(assemble([sourceOnly("other")], []));
     const discovery = { ...result.discovery, ...(kind === "computation" ? { open_residuals: true } : { access: {
-      contract: "source-semantic-access-v1" as const, policy: "canonical-v1" as const,
+      contract: "source-semantic-access-v2" as const, ...libraryAccessPhases, policy: "canonical-v1" as const,
       input_id: GOLD.content_digest, pool_id: GOLD.content_digest,
       observed_source_count: 1, observed_interpretation_count: 0, source_candidates: [], interpretation_candidates: [],
       trace: { kind: "library_selection" as const, omitted_source_count: 1, omitted_interpretation_count: 0 },
@@ -76,6 +74,27 @@ describe("source semantic library measurement", () => {
       Object.assign(changedStatus.native_observation, { query_semantics_status: { status: "unavailable", reason: "absent" } });
       expect(readmitSourceSemanticLibraryMeasurement(changedStatus, input).measurement?.status).toBe("invalid");
     }
+  });
+
+  it("rejects a historic access v1 receipt instead of scoring it as a current observation", () => {
+    const result = workerRecall(assemble([sourceOnly("other")], []));
+    const count = result.index.entries.length;
+    const historicAccess = {
+      contract: "source-semantic-access-v1", policy: "canonical-v1",
+      input_id: DIGEST, pool_id: DIGEST, observed_source_count: count, observed_interpretation_count: 0,
+      source_candidates: [], interpretation_candidates: [],
+      trace: { kind: "library_selection", omitted_source_count: count, omitted_interpretation_count: 0 },
+      unvisited_sources: true, unvisited_interpretations: false, stopping_reasons: ["budget"]
+    };
+    const worker = { ...result, discovery: { ...result.discovery, access: historicAccess as never } };
+    const fetch = vi.fn(() => { throw new Error("provider transport forbidden"); });
+    vi.stubGlobal("fetch", fetch);
+    expect(SourceSemanticWorkerResultSchema.safeParse(worker).success).toBe(false);
+    expect(measureSourceSemanticLibraryResponse({
+      recallResult: worker, firstExposurePage: recordSourceSemanticLibraryFirstExposure(result),
+      requestBudget: REQUEST, goldSourceUnits: [GOLD]
+    })).toMatchObject({ measurement: { status: "invalid", reason: "invalid_response" }, sourceBearingUnion: null });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("preserves observed source and validated proof hits while unrelated native access remains open", () => {
@@ -156,7 +175,7 @@ describe("source semantic library measurement", () => {
     const response = encodeSourceSemanticLibraryResponse(workerRecall(assemble([sourceOnly("gold")], [])));
     if (response.operation !== "recall") throw new Error("native delivery expected");
     const outcome = { operation: "recall", outcome: { status: "preparation_required", missing: "query_semantics" },
-      coverage: response.coverage, work: response.work, provider_attempts: 0 };
+      coverage: response.coverage, work: response.work, execution: sourceSemanticExecution() };
     const input = { recallResult: outcome, firstExposurePage: recordSourceSemanticLibraryFirstExposure(response),
       requestBudget: REQUEST, goldSourceUnits: [GOLD] };
     expect(measureSourceSemanticLibraryResponse(input)).toMatchObject({ measurement: null, sourceBearingUnion: null });
@@ -272,11 +291,24 @@ describe("source semantic library measurement", () => {
     const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
     const changed = structuredClone(response);
     Object.assign(changed.results![0]!, { output_binding: "different" });
+    const phases = sourceSemanticExecutionPhases(response.execution);
+    const unknownAttempts = sourceSemanticExecution(
+      { ...phases.query_preparation, external_api_attempts: null }, phases.acquisition);
+    const nonzeroAttempts = sourceSemanticExecution(
+      { ...phases.query_preparation, external_api_attempts: 1 }, phases.acquisition);
+    expect(SourceSemanticExecutionSchema.safeParse(unknownAttempts).success).toBe(true);
+    expect(SourceSemanticExecutionSchema.safeParse(nonzeroAttempts).success).toBe(true);
+    expect(sourceSemanticExecutionPhases(unknownAttempts).query_preparation.external_api_attempts).toBeNull();
+    expect(sourceSemanticExecutionPhases(nonzeroAttempts).query_preparation.external_api_attempts).toBe(1);
     for (const rejected of [ { ...input, requestBudget: { ...REQUEST, work_units: 1 } },
-      { ...input, recallResult: { ...response, provider_attempts: 1 } }, { ...input, sourceRecords: [] },
+      { ...input, recallResult: { ...response, execution: nonzeroAttempts } },
+      { ...input, recallResult: { ...response, execution: unknownAttempts } },
+      { ...input, sourceRecords: [] },
       { ...input, recallResult: changed, firstExposurePage: recordSourceSemanticLibraryFirstExposure(changed) } ]) {
       expect(readmitSourceSemanticLibraryMeasurement(original.measurement, rejected).measurement?.status).toBe("invalid");
     }
+    expect(measureSourceSemanticLibraryResponse({ ...input, recallResult: { ...response, execution: unknownAttempts } }))
+      .toMatchObject({ measurement: { status: "invalid", reason: "missing_zero_call_evidence" } });
     expect(verify).not.toHaveBeenCalled();
     expect(readmitSourceSemanticLibraryMeasurement(original.measurement, input).sourceBearingUnion?.any_at_5.status).toBe("hit");
     expect(verify).toHaveBeenCalledTimes(1);

@@ -11,6 +11,7 @@ import type { TrustStateRecorder } from "../../../trust/state.js";
 import type {
   AnswerCoRelevancePairSourcePort,
   AuditedSourceAdmission,
+  AuditedSourceReplacement,
   EmbeddingRecallService,
   PathRelationProposalService,
   RecallService,
@@ -50,6 +51,8 @@ export interface AlayaDaemonRuntime {
   readonly startupSteps: readonly DaemonStartupStepRecord[];
   readonly services: AlayaDaemonRuntimeServices;
   startBackgroundServices(): void;
+  /** One bounded normal Source producer pass, without scheduling Garden or future mutation. */
+  runSourceIndexPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   // invariant: targeted BULK_ENRICH drain for bench edge-plane readiness.
   // Runs only the requested workspace's BULK_ENRICH worker loop, leaving the
@@ -142,6 +145,7 @@ export interface AlayaDaemonRuntimeServices {
   readonly relationProjectionCheckpoint: RelationProjectionCheckpointPort;
   readonly fieldProjectionCheckpoint: FieldProjectionCheckpointPort;
   readonly sourceRecordAdmission: AuditedSourceAdmission;
+  readonly sourceRecordReplacement: AuditedSourceReplacement;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly runService: Pick<RunService, "getById" | "ensureAttachedMcpSessionRun">;
   readonly trustStateRecorder: TrustStateRecorder;

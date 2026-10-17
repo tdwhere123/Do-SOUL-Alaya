@@ -1,10 +1,16 @@
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, SourceDisclosureSchema, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import * as revisionOwner from "../../../runs/extraction/authority/inspection.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
 import { admitOrdinaryRecallObservation, inspectOrdinaryRecallObservation } from "../../../runs/semantic-chain/consumer/ordinary-recall.js";
@@ -55,6 +61,7 @@ afterAll(async () => {
   globalThis.fetch = nativeFetch; vi.unstubAllEnvs(); vi.restoreAllMocks();
   server.closeAllConnections(); if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
   if (base !== undefined) rmSync(base.root, { recursive: true, force: true });
+  isolation.restore(); expect(isolation.violations).toEqual([]);
 });
 
 function prepareInput(observationRoot: string, name: string,
@@ -82,14 +89,17 @@ function captureWithProtocolVersion(name: string, protocolVersion: string, mode:
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
-  if (["14.1.0", "15.0.0", "16.0.0", "17.0.0"].includes(protocolVersion)) {
-    // A prior producer qualified source-record bodies as original, before representation metadata existed.
+  if (protocolVersion !== "19.0.0") {
+    // Historical producers emitted named objects; pre-18 records also predate representation metadata.
     for (let ordinal = 1; ordinal <= captures[mode].observation.calls; ordinal += 1) {
       rewriteCapturedEnvelope(root, ordinal, envelope => {
         const block = envelope.content.find(value => value.type === "text")!;
         const payload = JSON.parse(String(block.text));
         if (payload.ok !== true) return envelope;
-        for (const row of payload.output.results) row.source_disclosure.material_kind = "original_body";
+        for (const row of payload.output.results) {
+          row.source_disclosure = sourceDisclosure(SourceDisclosureSchema.parse(row.source_disclosure));
+          if (["14.1.0", "15.0.0", "16.0.0", "17.0.0"].includes(protocolVersion)) row.source_disclosure.material_kind = "original_body";
+        }
         return { ...envelope, structuredContent: payload,
           content: envelope.content.map(value => value === block ? { ...block, text: JSON.stringify(payload) } : value) };
       });
@@ -134,7 +144,7 @@ it.each(["complete", "prefix", "prefix_error"] as const)("passes the exact order
 
 it("keeps producer provenance while binding preparation and execution to the current verifier", async () => {
   const capture = captures.prefix, producer = capture.config.implementation_revision;
-  expect(capture.config.protocol_package_version).toBe("18.1.0");
+  expect(capture.config.protocol_package_version).toBe("19.0.0");
   const verifier = "b".repeat(40), next = "c".repeat(40);
   const revision = vi.spyOn(revisionOwner, "readCurrentExtractionAuthorityRevision").mockReturnValue(verifier);
   try {
@@ -150,11 +160,12 @@ it("keeps producer provenance while binding preparation and execution to the cur
   } finally { revision.mockRestore(); }
 });
 
-it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
+it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0"])("admits a %s archive with the current reader without rewriting producer provenance", protocolVersion => {
   const { root, config } = captureWithProtocolVersion(`historical-${protocolVersion}`, protocolVersion);
   const original = readFileSync(join(root, "config.json"), "utf8");
+  const originalEnvelope = readFileSync(join(root, "execution", "01-public-envelope.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "18.1.0",
+  const binding = { protocol_package_version: protocolVersion, reader_protocol_package_version: "19.0.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision };
   expect(observation.binding).toMatchObject(binding);
   expect(observation.state).toBe("partial");
@@ -162,16 +173,28 @@ it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0"])("admits a %s archive
   expect(run.preparation.observation_binding).toMatchObject(binding);
   expect(admitConsumerPreparation(run.preparation.output_root).preparation).toEqual(run.preparation);
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
+  expect(readFileSync(join(root, "execution", "01-public-envelope.json"), "utf8")).toBe(originalEnvelope);
 });
 
-it.each(["18.0.0", "18.1.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
+it.each(["18.0.0", "18.1.0", "19.0.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
   const { root, config } = captureWithProtocolVersion(`original-overclaim-${protocolVersion}`, "17.0.0");
   config.protocol_package_version = protocolVersion;
   writeJson(join(root, "config.json"), config);
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
-  expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
+  if (protocolVersion !== "19.0.0") {
+    expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
+    return;
+  }
+  try {
+    admitOrdinaryRecallObservation(root);
+    expect.unreachable("current 19.0.0 wire admitted a named-object source_disclosure");
+  } catch (error) {
+    if (!(error instanceof z.ZodError)) throw error;
+    expect(error.issues).toEqual([{ expected: "tuple", code: "invalid_type",
+      path: ["results", 0, "source_disclosure"], message: "Invalid input: expected tuple, received object" }]);
+  }
 });
 
 it("recovers retained consumer bytes without another dispatch after interrupted result publication", async () => {
@@ -315,7 +338,7 @@ it.each([
   expect(hits).toBe(before);
 });
 
-it.each(["15.0.1", "18.2.0", "19.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
+it.each(["15.0.1", "18.2.0", "20.0.0"])("refuses unsupported producer version %s even with a recomputed configuration binding", protocolVersion => {
   const { root } = captureWithProtocolVersion(`unsupported-producer-${protocolVersion}`, protocolVersion);
   expect(() => prepare(root, `unsupported-consumer-${protocolVersion}`)).toThrow();
 });
@@ -390,7 +413,7 @@ it("removes only verified mirrors from a complete Protocol 15 archive while pres
   expect(derived.consumer_config).toMatchObject({ evidence_view: "verified_mirror_removal" });
   expect(derived.observation_binding).toEqual(original.observation_binding);
   expect(derived.observation_binding).toMatchObject({ observation_identity: observation.binding.observation_identity,
-    protocol_package_version: "15.0.0", reader_protocol_package_version: "18.1.0", producer_candidate: config.candidate });
+    protocol_package_version: "15.0.0", reader_protocol_package_version: "19.0.0", producer_candidate: config.candidate });
   expect(line.userPrompt).toBe(JSON.stringify({ original_query: QUESTION, query_as_of: config.first_request.source_observed_at,
     evidence: { ...observation.evidence, calls: observation.evidence.calls.map((call, index) =>
       ({ ...call, envelope: expectedEnvelopes[index] })) } }));

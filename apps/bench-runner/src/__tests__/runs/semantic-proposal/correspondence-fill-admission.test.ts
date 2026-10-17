@@ -634,8 +634,12 @@ it("admits an semantic_correspondence shard only after Core admission", async ()
   expect(hasAdmittedProposalOutcome(shard!)).toBe(true);
   const observer = vi.spyOn(semanticProposals, "proposeCorrespondenceSemantics");
   const cached = readSemanticProposalResults(prepared, cacheRoot, 128)[0]!;
-  expect(observer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ original_query: ORIGINAL }),
-    { rawJson: shard!.raw_json });
+  const request = materializeSemanticProposalLines(prepared, 128)[0]!.request as SourceSemanticCorrespondenceRequest;
+  expect(observer).toHaveBeenCalledExactlyOnceWith({ original_query: ORIGINAL,
+    admitted_query_semantics: request.admitted_query_semantics,
+    source_interpretation_descriptors: request.source_interpretation_descriptors,
+    producer_id: request.producer_capability.producer_id, producer_version: request.producer_capability.producer_version,
+    resource_limits: request.resource_limits }, { rawJson: shard!.raw_json }, undefined);
   expect(cached.status).toBe("interpreted");
   expect(cached.received).toBe(observer.mock.results[0]!.value);
   expect(cached.received).toEqual(received);

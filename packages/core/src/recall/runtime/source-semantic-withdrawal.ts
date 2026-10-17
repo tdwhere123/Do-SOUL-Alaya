@@ -1,4 +1,4 @@
-import type { Derivation, SourceSemanticConsumedLeaf, SourceSemanticReasoningResult } from "@do-soul/alaya-protocol";
+import type { Derivation, SourceSemanticConsumedLeaf, SourceSemanticReasoningResult, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { withdrawDerivationLeaves, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { localLeafIds, traceDerivationForest } from "../conditional-field/engine/derivation-provenance.js";
 
@@ -16,11 +16,15 @@ export type SourceSemanticWithdrawalTrace = Readonly<{
 export function traceSourceSemanticWithdrawals(input: Readonly<{
   state: FieldEngineState; origins: ReadonlyMap<string, SourceSemanticConsumedLeaf>;
   baseline: SourceSemanticReasoningResult; limit: number;
+  select?: (leaf: SourceSemanticConsumedLeaf) => boolean;
+  meter?: SourceSemanticResourceLedger;
   prefix_resource_usage: Readonly<{ work_units: number; memory_bytes: number }>;
   project: (state: FieldEngineState, leaf_id?: string) => SourceSemanticReasoningResult;
 }>): SourceSemanticWithdrawalTrace {
+  input.meter?.retain(input.baseline, "shared withdrawal baseline and dependency indexes");
+  input.meter?.charge(input.origins.size, input.origins.size * 64, "shared withdrawal origins");
   const consumed = new Set(input.baseline.evidence_leaves?.map((row) => row.observation_id) ?? []);
-  const candidates = [...input.origins].filter(([id, leaf]) => consumed.has(id)
+  const candidates = [...input.origins].filter(([id, leaf]) => consumed.has(id) && (input.select?.(leaf) ?? true)
     && (leaf.leaf_kind.startsWith("source_interpretation_") || leaf.leaf_kind.startsWith("semantic_correspondence_")));
   const interpretationLeaves = candidates.filter(([, leaf]) => leaf.leaf_kind.startsWith("source_interpretation_"));
   const correspondenceLeaves = candidates.filter(([, leaf]) => leaf.leaf_kind.startsWith("semantic_correspondence_"));
@@ -29,12 +33,13 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
     .flat().filter((row): row is NonNullable<typeof row> => row !== undefined).slice(0, input.limit);
   const roots = new Map((input.baseline.derivations ?? []).map((row) => [row.derivation_id, row]));
   const dependencies = (input.baseline.binding_results ?? []).map((answer) => {
-    const traced = traceDerivationForest({ forest: roots, roots: answer.explanation_ids });
+    const traced = traceDerivationForest({ forest: roots, roots: answer.explanation_ids, maxVisits: input.meter?.work });
+    input.meter?.charge(traced.work, traced.work * 128, "shared withdrawal dependency closure");
     return { answer, complete: traced.complete,
       leaves: localLeafIds(traced.traversal) };
   });
   const arms = selected.map(([leaf_id, leaf]) => {
-    const result = input.project(withdrawDerivationLeaves(input.state, leaf_id), leaf_id);
+    const result = input.project(withdrawSourceSemanticState(input.state, leaf_id, input.meter), leaf_id);
     const independent = dependencies.filter((row) => row.complete && row.answer.explanation_ids.length > 0
       && !row.leaves.has(leaf_id)).map((row) => row.answer);
     return { leaf_id, leaf, result, independent_answer_bindings: independent.map((row) => row.binding_id),
@@ -42,8 +47,21 @@ export function traceSourceSemanticWithdrawals(input: Readonly<{
         : independent.every((answer) => result.binding_results?.some((row) => row.binding_id === answer.binding_id
           && JSON.stringify(row.explanation_ids) === JSON.stringify(answer.explanation_ids))) };
   });
+  input.meter?.retain(arms, "shared withdrawal projected arms");
   return { contract: "source-semantic-withdrawal-trace-v1",
     prefix_resource_usage: input.prefix_resource_usage,
     origins: [...input.origins].map(([leaf_id, leaf]) => ({ leaf_id, leaf })),
     derivations: [...input.state.derivations], attempted: arms.length, unattempted: candidates.length - arms.length, arms };
+}
+
+/** Conservative logical quote for the finite SCC/revision transformation, not measured CPU.
+ * Charge before the lower-level state fork; offline counterfactual traces keep their historical quotes. */
+export function withdrawSourceSemanticState(state: FieldEngineState, leaf: string, meter?: SourceSemanticResourceLedger): FieldEngineState {
+  if (meter !== undefined) {
+    const rows = [state.seeds, state.transitions, state.derivations, state.support, state.facets];
+    const size = rows.reduce((n, row) => n + row.length, 0);
+    meter.charge(size * size + 1, size * 512, "shared withdrawal SCC and derivation revision");
+    meter.retain(rows, "shared withdrawal state fork");
+  }
+  return withdrawDerivationLeaves(state, leaf);
 }

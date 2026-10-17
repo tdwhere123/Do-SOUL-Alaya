@@ -3,9 +3,9 @@ import {
   type SourceSemanticResourceLedger, type SourceSemanticDomain
 } from "@do-soul/alaya-protocol";
 import { sourceSemanticRelationKey as key, type SourceSemanticPremisePopulation } from "../../runtime/source-semantic-premises.js";
-import type { SourceSemanticBranchPlan } from "../../runtime/source-semantic-branch-plan.js";
+import { type SourceSemanticBranchPlan } from "../../runtime/source-semantic-branch-plan.js";
 import { compileSourceSemanticAlternative, compileSourceSemanticGroupProgram,
-  type SourceSemanticLoweredObligation } from "./compile-source-semantic-query.js";
+  type SourceSemanticCompilation, type SourceSemanticLoweredObligation } from "./compile-source-semantic-query.js";
 import { semanticRelation as rel, semanticSequence as sequence, semanticAlternatives as alternatives,
   semanticOwnerProof, emptySemanticProgram } from "./source-semantic-proof-program.js";
 
@@ -25,24 +25,36 @@ type Input = Readonly<{ source_interpretation: SourceSemanticInterpretation; que
   population: SourceSemanticPremisePopulation; meter: SourceSemanticResourceLedger; branches: readonly SourceSemanticBranchPlan[] }>;
 const DOMAIN = "@finite:domain";
 
+/** Group-phase lowering. An empty instance population may omit `finite`; forall and membership stay on the finite object. */
+export function lowerSourceSemanticPhases(
+  query: SourceSemanticQuery,
+  branches: readonly SourceSemanticBranchPlan[],
+  meter: SourceSemanticResourceLedger,
+  finite?: SourceSemanticCompilation
+): SourceSemanticExecutionPlan {
+  const groupPhases = branches.map(plan => {
+    const obligations: SourceSemanticLoweredObligation[] = [];
+    const program = compileSourceSemanticGroupProgram(query, plan.view, plan.alternative, meter, finite,
+      plan.groupFrame, plan.acceptIndex, plan.groupQueryFrame, obligations);
+    return { program, alternative: plan.alternative, acceptIndex: plan.acceptIndex, groupFrame: plan.groupFrame,
+      plan, obligations };
+  });
+  return {
+    program: groupPhases[0]?.program ?? emptySemanticProgram,
+    branches: groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative,
+      plan: phase.plan, obligations: phase.obligations })),
+    missingOperands: false,
+    groupPhases
+  };
+}
+
 /** Expand finite obligations only. Every outcome is still decided by the conditional-field engine. */
 export function compileSourceSemanticExecution(input: Input): SourceSemanticExecutionPlan {
   const { query_semantics: querySemantics, source_interpretation: sourceInterpretation, semantic_correspondence: semanticCorrespondence, meter, population } = input;
   if (querySemantics.evaluation === undefined) {
-    const finite = { source_interpretation: sourceInterpretation, population, semantic_correspondence: semanticCorrespondence };
-    const groupPhases = input.branches.map(plan => {
-      const obligations: SourceSemanticLoweredObligation[] = [];
-      const program = compileSourceSemanticGroupProgram(querySemantics, plan.view, plan.alternative, meter, finite,
-        plan.groupFrame, plan.acceptIndex, plan.groupQueryFrame, obligations);
-      return { program, alternative: plan.alternative, acceptIndex: plan.acceptIndex, groupFrame: plan.groupFrame,
-        plan, obligations };
+    return lowerSourceSemanticPhases(querySemantics, input.branches, meter, {
+      source_interpretation: sourceInterpretation, population, semantic_correspondence: semanticCorrespondence
     });
-    const branches = groupPhases.map((phase) => ({ purpose: "support" as const, alternative: phase.alternative,
-      plan: phase.plan, obligations: phase.obligations }));
-    return {
-      program: groupPhases[0]?.program ?? emptySemanticProgram,
-      branches, missingOperands: false, groupPhases
-    };
   }
   const mapping = semanticCorrespondence.domains?.find((row) => row.query_domain === querySemantics.evaluation!.domain);
   const domain = sourceInterpretation.domains?.find((row) => row.id === mapping?.source_domain);

@@ -22,7 +22,8 @@ import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { inspectSemanticChainReplayTarget, replaySemanticChain } from "../../../runs/semantic-chain/replay.js";
 import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema } from "@do-soul/alaya-protocol";
+  SoulInterpretationResponseSchema, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema,
+  sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { parseSourceSemanticRequest, SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
@@ -57,8 +58,8 @@ it("delivers a raw source outside the frozen qualification window after final na
     "A short unrelated note.",
     "Another short unrelated note."
   ];
-  // Long sources stay just above the 1600-byte preview boundary. The fixed byte cap
-  // keeps the real native page budget-limited to two long previews and a short outsider.
+  // Long sources stay just above the 1600-byte preview boundary. Protect the
+  // original two long previews plus outsider against receipt-overhead regressions.
   const fixture = await phases.phase("source-fixture", () => sourceFixture(contents, 17700));
   const config = await phases.phase("initial-native-bind", () => fixture.bind());
   const root = join(cacheRoot, "raw-outside-stage");
@@ -187,6 +188,10 @@ it("freezes ten distinct native raw records and reopens a full sealed final libr
   const root = join(cacheRoot, "lazy-stage");
   const window = await prepareLazyQualificationWindow(config, root);
   expect(window.provider_calls).toBe(0);
+  expect(window.query_executions.length).toBeGreaterThan(0);
+  expect(window.query_executions.every(execution => SourceSemanticExecutionSchema.safeParse(execution).success
+    && sourceSemanticExecutionPhases(execution).query_preparation.external_api_attempts === 0)).toBe(true);
+  expect(JSON.parse(JSON.stringify(window)).query_executions).toEqual(window.query_executions);
   expect(window.window).toHaveLength(10);
   expect(new Set(window.window.map(row => row.record_id)).size).toBe(10);
   expect(window.window.map(row => row.record_id)).toEqual(window.starting_access.source_candidates.slice(0, 10).map(row => row.record_id));

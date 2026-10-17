@@ -25,6 +25,7 @@ import {
   type FieldEngineState,
   type FieldObservationEffect
 } from "../conditional-field/engine/field-engine.js";
+import { facetIdentityIndexOf } from "../conditional-field/engine/field-retention-index.js";
 import { programRelationKinds } from "../conditional-field/engine/path-composition-adjacency.js";
 import { seedActivationsForObservation } from "../conditional-field/engine/path-composition-seed.js";
 import { overlayIsRoutingOnly, pairKey } from "../conditional-field/engine/path-routing.js";
@@ -179,7 +180,7 @@ function refreshPathFrontier(session: ObservationSession): boolean {
     liveStateOffset: frontier === undefined || frontier.facets !== state.facets
       || frontier.sourceFacts !== state.source_facts
       || (state.observation_gaps?.guards === true && state.seen_identities.length > frontier.identities) ? 0 : frontier.identities,
-    overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, discoveries: state.discoveries,
+    overlay: RELATION_ROUTING, sourceFacts: sourceFacts.snapshot, facets: state.facets, facetIndex: facetIdentityIndexOf(state), discoveries: state.discoveries,
     bindingContexts: state.binding_contexts, physicalKinds: session.predicates,
     compiledAutomaton: state.compiled_automaton } },
     offset: 0, retained_bytes: 0, page: { schema_version: 1, query_id: interpretation.query_id,
@@ -305,7 +306,8 @@ function consumeAdjacencyPage(session: ObservationSession, action: ObservationAc
   session.state = { ...session.state, remaining_exploration: Math.max(0, session.state.remaining_exploration - observed.work.work_units),
     pending_path_effects: { input: { rows: session.relationRows, options: {
       interpretation, asOf: input.as_of, liveStates: session.state.seen_identities, overlay: RELATION_ROUTING,
-      sourceFacts: sourceFacts.snapshot, facets: session.state.facets, discoveries: session.state.discoveries,
+      sourceFacts: sourceFacts.snapshot, facets: session.state.facets, facetIndex: facetIdentityIndexOf(session.state),
+      discoveries: session.state.discoveries,
       physicalKinds: session.predicates, compiledAutomaton: session.state.compiled_automaton,
       bindingContexts: session.state.binding_contexts,
       ...(joinRows === undefined ? {} : { joinRows }) } },

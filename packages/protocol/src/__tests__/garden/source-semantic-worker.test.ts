@@ -5,12 +5,14 @@ import type { SourceRepresentation } from "../../recall/field-contract/source-sp
 import { UNKNOWN_UTTERANCE_ATTRIBUTION } from "../../conversation/utterance-attribution.js";
 import { MemorySearchResultSchema } from "../../surfaces/mcp-memory-search-types.js";
 import { SourceInterpretationReasoningResultSchema } from "../../garden/source-interpretation-packet.js";
-import { SourceSemanticAccessReceiptSchema } from "../../garden/source-semantic-access.js";
+import { SourceSemanticAccessReceiptSchema, sourceSemanticAcquisitionNotRun, sourceSemanticExecution,
+  unavailableSourceQueryPreparation, captureSourceSemanticQueryPreparation, captureSourceSemanticAcquisition,
+  packSourceSemanticQueryPreparation, packSourceSemanticAcquisition } from "../../garden/source-semantic-access.js";
 import { InformationIndexSchema, IndexEntrySchema, sourceIndexEntry, indexEntryCacheKey,
   memoryIndexEntry } from "../../recall/conditional-field/index-view.js";
 import { SoulInterpretationRequestSchema, SoulInterpretationResponseSchema } from "../../surfaces/mcp-interpretation-types.js";
 import { SourceSemanticQuerySchema } from "../../recall/conditional-field/semantic-query.js";
-import { SourceDisclosureSchema } from "../../recall/source-disclosure.js";
+import { encodeSourceDisclosure, sourceDisclosure, SourceDisclosureSemanticSchema } from "../../recall/source-disclosure.js";
 import {
   SourceSemanticWorkerRequestSchema, SourceSemanticWorkerResultSchema,
   SourceSemanticLibraryContinuationSchema, SourceSemanticLibraryDeliverySchema, SourceSemanticLibraryProofSchema,
@@ -29,21 +31,29 @@ const coverage = {
   conditional_computation: "unexercised" as const, payload: "complete" as const
 };
 const work = { native_work: 1, native_bytes: 2, logical_memory_bytes: 3, rss_bytes: 4 };
-const disclosure = { material_kind: "interpretation", source_binding: "unbound",
+const execution = sourceSemanticExecution();
+const accessPhases = [2,
+  packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
+    unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested"))),
+  packSourceSemanticAcquisition(captureSourceSemanticAcquisition(
+    sourceSemanticAcquisitionNotRun("controlled_or_scoped_access"))),
+  null] as const;
+const disclosure = encodeSourceDisclosure({ material_kind: "interpretation", source_binding: "unbound",
   evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "unbound" },
-  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } };
+  temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } });
 
-it("accepts historical disclosure bytes while binding disclosed source time to a checked record", () => {
-  expect(SourceDisclosureSchema.safeParse(disclosure).success).toBe(true);
-  expect(SourceDisclosureSchema.safeParse({ ...disclosure,
+it("binds disclosed source time to a checked record without conflating omitted time", () => {
+  const semantic = sourceDisclosure(disclosure);
+  expect(SourceDisclosureSemanticSchema.safeParse(semantic).success).toBe(true);
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...semantic,
     source_time: { kind: "unknown", reason: "unbound" } }).success).toBe(true);
-  expect(SourceDisclosureSchema.safeParse({ ...disclosure,
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...semantic,
     source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }).success).toBe(false);
-  const checked = { ...disclosure, source_binding: "checked_record",
+  const checked = { ...semantic, source_binding: "checked_record",
     validity: { kind: "unknown", reason: "not_recorded" } };
-  expect(SourceDisclosureSchema.safeParse({ ...checked,
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...checked,
     source_time: { kind: "known", at: "2024-02-03T04:05:06Z" } }).success).toBe(true);
-  expect(SourceDisclosureSchema.safeParse({ ...checked,
+  expect(SourceDisclosureSemanticSchema.safeParse({ ...checked,
     source_time: { kind: "unknown", reason: "unbound" } }).success).toBe(false);
 });
 const validQuery = SourceSemanticQuerySchema.parse({
@@ -59,7 +69,7 @@ const validQuery = SourceSemanticQuerySchema.parse({
 });
 
 it("binds access trace counts and source completeness to the observed pool", () => {
-  const access = { contract: "source-semantic-access-v1", policy: "canonical-v1", input_id: digest, pool_id: digest,
+  const access = { contract: "source-semantic-access-v2", phases: accessPhases, policy: "canonical-v1", input_id: digest, pool_id: digest,
     observed_source_count: 2, observed_interpretation_count: 0,
     source_candidates: [{ source_id: "source-2", record_id: digest, read_bytes: 1, body_bytes: 1,
       complete: true, signal: { source_text_score: null, interpretation_reading_score: 0 } }],
@@ -67,6 +77,11 @@ it("binds access trace counts and source completeness to the observed pool", () 
     stopping_reasons: [], trace: { kind: "preparation_page", source_offset: 1, interpretation_offset: 0,
       omitted_source_count: 1, omitted_interpretation_count: 0 } };
   expect(SourceSemanticAccessReceiptSchema.safeParse(access).success).toBe(true);
+  const { phases: _phases, ...withoutPhases } = access;
+  const historic = { ...withoutPhases, contract: "source-semantic-access-v1" };
+  expect(SourceSemanticAccessReceiptSchema.safeParse(historic).success).toBe(false);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...historic, contract: "source-semantic-access-v2" }).success)
+    .toBe(false);
   expect(SourceSemanticAccessReceiptSchema.safeParse({ ...access,
     trace: { ...access.trace, omitted_source_count: 0 } }).success).toBe(false);
   expect(SourceSemanticAccessReceiptSchema.safeParse({ ...access,
@@ -140,6 +155,7 @@ it("admits prepare and one-shot reason without a continuation token", () => {
   });
   expect("continuation" in result).toBe(false);
   if (result.kind !== "reason") throw new Error("expected a reasoning result");
+  if (result.result === undefined) throw new Error("expected a delivered reasoning result");
   expect(result.result.semantic_status).toBe("unreviewed");
   expect(result.result.world_claim).toBe("unknown");
   expect(MemorySearchResultSchema.safeParse(result).success).toBe(false);
@@ -175,7 +191,7 @@ function libraryDelivery() {
       visited_source_interpretation_descriptors: 0, candidate_prefix: [], examined_source_interpretation_ids: [],
       unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0, examination_cap: 32, open_residuals: false, truncated: false },
     order: { enumeration_policy: "evidence_support", tie_policy: "canonical_identity", occupancy: "source_gold_root_identity", occupancy_prefix: 5, page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET },
-    slot_qualifiers: [], source_disclosures: {}, coverage, work };
+    slot_qualifiers: [], source_disclosures: {}, coverage, work, execution };
 }
 
 const otherDigest = `sha256:${"b".repeat(64)}`;
@@ -191,7 +207,7 @@ it.each<{ label: string; representation?: SourceRepresentation }>([
   const entry = sourceIndexEntry({ ...source, root_kind: "source_record", root_id: identity, evidence_object_id: null,
     hypothesis_id: digest, output_binding: "binding", role: "requested", association_milligrades: 0,
     claim: "unknown", explanation_ids: [] });
-  const { coverage: _coverage, work: _work, ...base } = libraryDelivery();
+  const { coverage: _coverage, work: _work, execution: _execution, ...base } = libraryDelivery();
   const raw = { ...base, total_count: 1,
     query_semantics_status: { status: "admitted", query_semantics_id: digest },
     index: { ...base.index, entries: [entry] },
@@ -289,11 +305,13 @@ function libraryProof(input: { correspondenceId?: string; rootId?: string } = {}
 
 it("shares current delivery version, membership and page budget admission between worker and public surfaces", () => {
   const delivery = libraryDelivery();
+  expect(SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION).toBe(8);
   const accepts = (value: unknown) => [
     SourceSemanticWorkerResultSchema.safeParse(Object.assign({ kind: "recall" }, value)).success,
-    SoulInterpretationResponseSchema.safeParse(Object.assign({ operation: "recall", results: [], provider_attempts: 0 }, value)).success
+    SoulInterpretationResponseSchema.safeParse(Object.assign({ operation: "recall", results: [] }, value)).success
   ];
   expect(accepts(delivery)).toEqual([true, true]);
+  expect(SourceSemanticWorkerResultSchema.parse({ kind: "recall", ...delivery }).execution).toBe("native_reasoning_only");
   expect(accepts({ ...delivery, query_semantics_status: { status: "unavailable", reason: "producer_failure" } })).toEqual([true, true]);
   expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest } })).toEqual([true, true]);
   for (const version of ["source-semantic-library-v1", "source-semantic-library-v3", "not-a-native-library-result"]) {
@@ -301,7 +319,11 @@ it("shares current delivery version, membership and page budget admission betwee
     expect(InformationIndexSchema.safeParse(index).success).toBe(true);
     expect(accepts({ ...delivery, index })).toEqual([false, false]);
   }
-  for (const changed of [ { ...delivery, protocol_version: 4 }, { ...delivery, request_identity: "unbound" }, { ...delivery, page_purpose: "update" },
+  const { execution: _execution, ...withoutExecution } = delivery;
+  expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...withoutExecution }).success).toBe(true);
+  expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [],
+    ...withoutExecution }).success).toBe(false);
+  for (const changed of [ { ...delivery, protocol_version: 4 }, { ...delivery, protocol_version: 7 }, { ...delivery, request_identity: "unbound" }, { ...delivery, page_purpose: "update" },
     { ...delivery, order: { ...delivery.order, page_budget: 9 } },
     { ...delivery, index: { ...delivery.index, representation: { ...delivery.index.representation, page_budget: 9 } } },
     { ...delivery, index: { ...delivery.index, page_purpose: "update" } } ]) expect(accepts(changed)).toEqual([false, false]);
@@ -311,7 +333,7 @@ it("binds availability, semantic coverage and qualified slots on both delivery s
   const delivery = libraryDelivery();
   const accepts = (value: Record<string, unknown>) => [
     SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
-    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], ...value }).success
   ];
   const proofSlot = { index: 0, evidence_kind: "semantic_proof", source_interpretation_id: digest,
     query_semantics_id: digest, semantic_correspondence_id: digest, conditional_computation_id: digest,
@@ -320,7 +342,7 @@ it("binds availability, semantic coverage and qualified slots on both delivery s
   expect(accepts(delivery)).toEqual([true, true]);
   expect(accepts({ ...delivery, coverage: { ...coverage, query_semantics: "complete" } })).toEqual([false, false]);
   expect(accepts({ ...delivery, slot_qualifiers: [proofSlot] })).toEqual([false, false]);
-  const { coverage: _coverage, work: _work, ...baseDelivery } = delivery;
+  const { coverage: _coverage, work: _work, execution: _execution, ...baseDelivery } = delivery;
   expect(SourceSemanticLibraryDeliverySchema.safeParse(baseDelivery).success).toBe(true);
   expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...baseDelivery, slot_qualifiers: [proofSlot] }).success).toBe(false);
   expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest },
@@ -335,11 +357,11 @@ it("requires a disclosure for each delivered source and rejects metadata for an 
     hypothesis_id: "h0", output_binding: "source-evidence", role: "requested", association_milligrades: 0,
     claim: "unknown", explanation_ids: [] });
   const key = indexEntryCacheKey(entry);
-  const { coverage: _coverage, work: _work, ...baseDelivery } = libraryDelivery();
+  const { coverage: _coverage, work: _work, execution: _execution, ...baseDelivery } = libraryDelivery();
   const delivery = { ...baseDelivery, total_count: 1,
     index: { ...baseDelivery.index, entries: [entry] },
     slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
-    source_disclosures: { [key]: { ...disclosure, material_kind: "original_body" } } };
+    source_disclosures: { [key]: encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" }) } };
   const accepted = SourceSemanticLibraryDeliverySchema.safeParse(delivery);
   expect(accepted.success, accepted.success ? "" : JSON.stringify(accepted.error.issues)).toBe(true);
   expect(SourceSemanticLibraryDeliverySchema.safeParse({ ...delivery, source_disclosures: {} }).success).toBe(false);
@@ -351,7 +373,7 @@ it("requires each semantic proof qualifier to occupy a delivered source slot", (
   const delivery = libraryDelivery();
   const accepts = (value: Record<string, unknown>) => [
     SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
-    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], ...value }).success
   ];
   const proofSlot = (index: number, correspondenceId = digest) => ({
     index, evidence_kind: "semantic_proof", source_interpretation_id: digest,
@@ -367,9 +389,9 @@ it("requires each semantic proof qualifier to occupy a delivered source slot", (
     coverage: { ...coverage, query_semantics: "complete" },
     index: { ...delivery.index, entries: [entry] }
   };
-  const sourceOnlyDisclosure = { ...disclosure, material_kind: "original_body" };
-  const proofDisclosure = { ...sourceOnlyDisclosure,
-    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
+  const sourceOnlyDisclosure = encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" });
+  const proofDisclosure = encodeSourceDisclosure({ ...sourceDisclosure(sourceOnlyDisclosure),
+    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } });
   const memory = memoryIndexEntry({ workspace_id: "workspace", object_id: "memory", source_revision: "v1",
     association_milligrades: 0 });
   expect(accepts({ ...delivery, query_semantics_status: { status: "admitted", query_semantics_id: digest },
@@ -399,7 +421,7 @@ it("requires proof qualifiers to bind delivered proof premises on a proof-bearin
   const delivery = libraryDelivery();
   const accepts = (value: Record<string, unknown>) => [
     SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...value }).success,
-    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0, ...value }).success
+    SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], ...value }).success
   ];
   const entry = proofBearingEntry();
   const key = indexEntryCacheKey(entry);
@@ -411,8 +433,8 @@ it("requires proof qualifiers to bind delivered proof premises on a proof-bearin
     coverage: { ...coverage, query_semantics: "complete" },
     index: { ...delivery.index, entries: [entry] }
   };
-  const proofDisclosure = { ...disclosure, material_kind: "original_body",
-    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } };
+  const proofDisclosure = encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body",
+    proof_use: { kind: "conditional_support", qualification: "not_world_claim" } });
   const bound = { ...occupied, proofs: [proof], source_disclosures: { [key]: proofDisclosure } };
   const qualifier = sourceSemanticProofQualifier(proof, 0);
   expect(accepts({ ...bound, slot_qualifiers: [qualifier] })).toEqual([true, true]);
@@ -432,7 +454,7 @@ it("requires proof qualifiers to bind delivered proof premises on a proof-bearin
     sourceSemanticProofQualifier(libraryProof({ rootId: "other" }), 0)
   ], source_disclosures: { [key]: proofDisclosure } })).toEqual([false, false]);
   expect(accepts({ ...occupied, proofs: [proof], slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
-    source_disclosures: { [key]: { ...disclosure, material_kind: "original_body" } } })).toEqual([true, true]);
+    source_disclosures: { [key]: encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" }) } })).toEqual([true, true]);
 });
 
 it("rejects every missing mandatory delivery field and partial deliveries disguised as outcomes", () => {
@@ -441,11 +463,11 @@ it("rejects every missing mandatory delivery field and partial deliveries disgui
     const partial = { ...delivery };
     Reflect.deleteProperty(partial, key);
     expect(SourceSemanticWorkerResultSchema.safeParse({ kind: "recall", ...partial }).success, key).toBe(false);
-    expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [], provider_attempts: 0,
+    expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", results: [],
       outcome: { status: "preparation_required", missing: "query_semantics" }, ...partial }).success, key).toBe(false);
   }
-  expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", ...delivery, provider_attempts: 0 }).success).toBe(false);
-  const outcome = { operation: "recall", outcome: { status: "preparation_required", missing: "query_semantics" }, coverage, work, provider_attempts: 0 };
+  expect(SoulInterpretationResponseSchema.safeParse({ operation: "recall", ...delivery }).success).toBe(false);
+  const outcome = { operation: "recall", outcome: { status: "preparation_required", missing: "query_semantics" }, coverage, work, execution };
   expect(SoulInterpretationResponseSchema.safeParse(outcome).success).toBe(true);
   for (const partial of [{ protocol_version: 3 }, { request_identity: digest }, { results: [] }, { request_budget: budget }, { proofs: [] }]) {
     expect(SoulInterpretationResponseSchema.safeParse({ ...outcome, ...partial }).success).toBe(false);

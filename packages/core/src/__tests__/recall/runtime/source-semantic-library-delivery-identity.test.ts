@@ -24,19 +24,23 @@ it("checks unproved source identity before encoding the public library response"
       visited_source_interpretation_descriptors: 0, candidate_prefix: [], examined_source_interpretation_ids: [],
       unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0, examination_cap: 32, open_residuals: false, truncated: false },
     order: SOURCE_SEMANTIC_LIBRARY_ORDER, slot_qualifiers: [{ index: 0, evidence_kind: "source_evidence" }],
-    source_disclosures: { [indexEntryCacheKey(entry)]: { material_kind: "original_body", source_binding: "checked_record",
-      evaluated_as_of: "2026-10-13T00:00:00Z", validity: { kind: "unknown", reason: "not_recorded" },
-      temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } } },
+    source_disclosures: { [indexEntryCacheKey(entry)]: [1, "original_body", "checked_record", null, "2026-10-13T00:00:00Z", null,
+      { kind: "unknown", reason: "not_recorded" }, "unknown", { kind: "source_only", qualification: "not_current_proof" }] },
     unproved_computations: [{ kind: "complete_zero_binding", conclusion_scope: "conditional_on_interpretation", world_claim: "unknown",
       source_record: { ...source, identity }, source_interpretation_id: digest, query_semantics_id: digest,
       semantic_correspondence_id: digest, conditional_computation_id: digest, completeness }],
     previews: { [indexEntryCacheKey(entry)]: "Source bytes" },
     coverage: { discovery: "complete", source_interpretation: "complete", query_semantics: "complete",
       semantic_correspondence: "complete", conditional_computation: "complete", payload: "complete" },
-    work: { native_work: 1, native_bytes: 12, logical_memory_bytes: 12, rss_bytes: 0 }
+    work: { native_work: 1, native_bytes: 12, logical_memory_bytes: 12, rss_bytes: 0 },
+    execution: "native_reasoning_only"
   });
   if (result.kind !== "recall") throw new Error("expected library result");
-  expect(encodeSourceSemanticLibraryResponse(result)).toMatchObject({ operation: "recall", total_count: 1 });
+  expect(encodeSourceSemanticLibraryResponse(result)).toMatchObject({
+    operation: "recall", total_count: 1, execution: "native_reasoning_only"
+  });
+  expect(() => encodeSourceSemanticLibraryResponse({ ...result, execution: undefined }))
+    .toThrow(/requires actual execution accounting/u);
   const computation = result.unproved_computations![0]!;
   expect(() => encodeSourceSemanticLibraryResponse({ ...result, unproved_computations: [{ ...computation,
     source_record: { ...computation.source_record, source_id: "substituted-source" }

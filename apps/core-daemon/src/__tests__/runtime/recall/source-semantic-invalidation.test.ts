@@ -4,7 +4,7 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { expect, it, vi } from "vitest";
 import {
-  SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceReferenceResolver, sourceSemanticQueryIdentity,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema, sourceReferenceResolver, sourceSemanticQueryIdentity,
   SourceInterpretationInvalidatedPayloadSchema, type SourceReferenceCatalog, type SourceSemanticCorrespondence,
   type SourceInterpretationInvalidation, type SourceSemanticPublishedInterpretation
 } from "@do-soul/alaya-protocol";
@@ -61,7 +61,7 @@ async function output(session: Session, args: Record<string, unknown>) {
   expect(result.isError, JSON.stringify(result)).not.toBe(true);
   if (result.structuredContent === undefined || !("output" in result.structuredContent)) throw new Error("public result required");
   const parsed = SoulInterpretationResponseSchema.parse(result.structuredContent.output);
-  expect(parsed.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(parsed.execution).query_preparation.external_api_attempts).toBe(0);
   return parsed;
 }
 async function prepareSource(session: Session, sourceId = SOURCE_ID) {
@@ -132,6 +132,7 @@ it("persists independent H invalidation through the public route and reopen whil
     await admit(session);
     const bad = await publish(session, "sealed");
     const before = await recall(session, [bad]);
+    const historicalEnvelope = JSON.stringify(before);
     expect(before.proofs?.map(row => row.source_interpretation_id)).toEqual([bad.interpretation_id]);
     await failSupplement(session);
     expect((await recall(session, [bad])).proofs?.map(row => row.source_interpretation_id)).toEqual([bad.interpretation_id]);
@@ -169,7 +170,26 @@ it("persists independent H invalidation through the public route and reopen whil
     const rediscovered = await output(session, { operation: "prepare_query", original_query: ORIGINAL, query_semantics: QUERY });
     if (rediscovered.operation !== "prepare_query") throw new Error("query required");
     expect(rediscovered.candidates.map(row => row.interpretation_id)).toEqual([good.interpretation_id]);
-    expect((await recall(session, [bad, good])).proofs?.map(row => row.source_interpretation_id)).toEqual([good.interpretation_id]);
+    expect(await call(session, { ...reasonRequest, query_handle: rediscovered.query_handle })).toMatchObject({ isError: true,
+      structuredContent: { ok: false, error: { code: "VALIDATION" } } });
+    const current = await recall(session, [bad, good]);
+    expect(current.proofs?.map(row => row.source_interpretation_id)).toEqual([good.interpretation_id]);
+    const currentQualifier = current.slot_qualifiers!.find(row => row.evidence_kind === "semantic_proof")!;
+    const currentRecord = session.stores.getCurrentRecord(WS, SOURCE_ID)!;
+    const currentProof = deliveredSourceSemanticLibraryProof(current.index!, current.index!.entries[currentQualifier.index]!,
+      currentQualifier, current.proofs!, currentRecord);
+    expect(currentProof.verified_proofs.map(row => row.source_interpretation_id)).toEqual([good.interpretation_id]);
+    const exhausted = deliveredSourceSemanticLibraryProof(current.index!, current.index!.entries[currentQualifier.index]!,
+      currentQualifier, current.proofs!, currentRecord, { ...BUDGET, work_units: 100, finalization_reserve: 10 });
+    expect(exhausted.proof).toBeUndefined();
+    expect(exhausted.verified_proofs).toEqual([]);
+    expect(exhausted.resource_usage.work_units).toBeGreaterThan(0);
+    expect(exhausted.resource_usage.work_units).toBeLessThanOrEqual(100);
+    expect(exhausted.resource_usage.memory_bytes).toBeGreaterThan(0);
+    // Reopen changes neither the old evidence nor its historical replay meaning.
+    expect(JSON.stringify(before)).toBe(historicalEnvelope);
+    expect(deliveredSourceSemanticLibraryProof(before.index!, before.index!.entries[qualifier.index]!, qualifier,
+      before.proofs!, currentRecord).verified_proofs.map(row => row.source_interpretation_id)).toEqual([bad.interpretation_id]);
     const fresh = await prepareSource(session);
     expect(await output(session, { ...request, source_handle: fresh.source_handle })).toMatchObject({ invalidation: { status: "already_invalidated" } });
     expect(auditRows(session)).toHaveLength(1);

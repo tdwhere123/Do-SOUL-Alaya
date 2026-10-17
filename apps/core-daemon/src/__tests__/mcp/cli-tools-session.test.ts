@@ -4,6 +4,8 @@ vi.hoisted(() => {
   for (const key of Object.keys(process.env)) if (/API_KEY|TOKEN|SECRET/u.test(key)) delete process.env[key];
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("provider transport forbidden"); }));
 });
+import { projectSourceDisclosure } from "@do-soul/alaya-core";
+import { sourceSemanticExecution } from "@do-soul/alaya-protocol";
 import { createToolsCommand } from "../../cli/tools.js";
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
@@ -19,10 +21,13 @@ function session(stdin: Readable, handler: McpMemoryToolHandler) {
 const line = `${JSON.stringify({ tool: "soul.interpretation", arguments: {} })}\n`;
 const success: Awaited<ReturnType<McpMemoryToolHandler["call"]>> = {
   ok: true, tool_name: "soul.interpretation", output: { operation: "reason",
-    outcome: { status: "preparation_required", missing: "query_semantics_and_correspondence" },
+    no_conclusion: [{ status: "preparation_required", missing: "query_semantics_and_correspondence" }, [null, null, null, null]],
+    source_disclosure: projectSourceDisclosure({ material_kind: "interpretation",
+      evaluated_as_of: "2026-09-18T00:00:00.000Z", proof_use: "source_only" }),
     coverage: { discovery: "unexercised", source_interpretation: "unexercised", query_semantics: "unexercised",
       semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete" },
-    work: { native_work: 0, native_bytes: 0, logical_memory_bytes: 0, rss_bytes: 0 }, provider_attempts: 0 }
+    work: { native_work: 0, native_bytes: 0, logical_memory_bytes: 0, rss_bytes: 0 },
+    execution: sourceSemanticExecution() }
 };
 
 it("retains a principal per explicit CLI session while assigning independent sessions distinct principals", async () => {

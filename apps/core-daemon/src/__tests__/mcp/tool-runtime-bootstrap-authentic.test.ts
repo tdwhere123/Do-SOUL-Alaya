@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
+import { createToolRuntimeIsolatedConfigDir } from "./tool-runtime-wiring-fixture-env.js";
 
 const TEST_TIMEOUT_MS = 45_000;
 const tempDirs: string[] = [];
@@ -35,12 +36,13 @@ describe("daemon tool-runtime bootstrap with real storage", () => {
 
   it("completes startup steps against a real initDatabase", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "alaya-tool-runtime-authentic-"));
-    tempDirs.push(dataDir);
+    const configDir = await createToolRuntimeIsolatedConfigDir();
+    tempDirs.push(dataDir, configDir);
     for (const key of ENV_KEYS) {
       originalEnv[key] = process.env[key];
     }
     process.env.DATA_DIR = dataDir;
-    process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
+    process.env.ALAYA_CONFIG_DIR = configDir;
     process.env.CODEX_HOME = join(dataDir, "codex-home");
     process.env.HOME = join(dataDir, "home");
     process.env.OPENAI_API_KEY = "test-openai-key";

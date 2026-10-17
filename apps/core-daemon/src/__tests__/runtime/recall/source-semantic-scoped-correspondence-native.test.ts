@@ -1,3 +1,4 @@
+import { sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { afterAll, expect, it, vi } from "vitest";
 
 // Mechanism test: authored outputs only. Install guards before application imports.
@@ -139,7 +140,7 @@ async function publicInterpretation(session: Session, args: Record<string, unkno
   const envelope = result.structuredContent;
   if (envelope === undefined || !("output" in envelope)) throw new Error("public MCP interpretation output required");
   const output = SoulInterpretationResponseSchema.parse(envelope.output);
-  expect(output.provider_attempts).toBe(0);
+  expect(sourceSemanticExecutionPhases(output.execution).query_preparation.external_api_attempts).toBe(0);
   return output;
 }
 

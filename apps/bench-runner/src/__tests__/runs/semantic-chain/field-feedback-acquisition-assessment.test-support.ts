@@ -1,4 +1,4 @@
-import { canonicalJson, indexEntryCacheKey, SoulInterpretationRecallDeliverySchema, sourceSemanticQueryIdentity,
+import { sourceDisclosure, canonicalJson, indexEntryCacheKey, SoulInterpretationRecallDeliverySchema, sourceSemanticQueryIdentity,
   type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
 import { authorizedScopesFromAdmission, fieldContractSha256, preparedDeliveryId, sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { CLOCK, WS } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-access.test-support.js";
@@ -58,7 +58,7 @@ function qualifiedRaw(delivery: Delivery | undefined, frozen: FrozenCell) {
     const complete = source !== undefined && row.content_preview === source.text;
     const qualified = entry !== undefined && canonicalJson(entry.target) === canonicalJson(target)
       && qualifiers.some(qualifier => qualifier.evidence_kind === "source_evidence")
-      && disclosure?.proof_use.kind === "source_only";
+      && disclosure !== undefined && sourceDisclosure(disclosure).proof_use.kind === "source_only";
     return { result: row, source_id: source?.source_id ?? null, complete, qualified, qualifiers, disclosure: disclosure ?? null };
   });
   return { rows, delivered: rows.some(row => row.source_id === frozen.assessment_only.sufficient_source_id && row.complete && row.qualified) };

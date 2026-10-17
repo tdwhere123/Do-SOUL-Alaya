@@ -2,7 +2,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { z } from "zod";
 import { StorageDatabase } from "@do-soul/alaya-storage";
 import { authorizeSemanticScope, fieldContractSha256, projectSourceDisclosure, resolveCurrentSource } from "@do-soul/alaya-core";
-import { AlayaError, canonicalJson, sameSourceEvidenceRoot, sourceRecallTarget,
+import { AlayaError, encodeSourceDisclosure, sourceDisclosure, canonicalJson, sameSourceEvidenceRoot, sourceRecallTarget,
   type SoulMemorySearchResponse, type SourceRecordIdentity, type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
 import { withCachedSqliteSnapshot } from "../../snapshot/bound-file.js";
@@ -56,7 +56,7 @@ export function capturedSourceDisclosure(config: OrdinaryRecallArchiveConfig, so
   if (RepresentationAwareRecallProtocolVersionSchema.safeParse(config.protocol_package_version).success) return disclosure;
   if (source.source_representation !== undefined) conflict("historical capture contains later source representation metadata");
   // Prior producers called every retained source-record body original; never rewrite their archived output.
-  return { ...disclosure, material_kind: "original_body" as const };
+  return encodeSourceDisclosure({ ...sourceDisclosure(disclosure), material_kind: "original_body" });
 }
 
 function verifySequence(config: OrdinaryRecallCaptureConfig, calls: readonly CapturedOrdinaryRecallCall[],
@@ -181,7 +181,7 @@ export function verifyCapturedSourceResult(config: OrdinaryRecallArchiveConfig, 
       conflict("public source extent overstates delivered bytes or completeness");
     }
     if (RepresentationAwareRecallProtocolVersionSchema.safeParse(config.protocol_package_version).success &&
-        target.span.original_complete !== (disclosure.material_kind === "original_body")) {
+        target.span.original_complete !== (sourceDisclosure(disclosure).material_kind === "original_body")) {
       conflict("public original completeness differs from source representation");
     }
   }

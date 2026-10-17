@@ -1,4 +1,7 @@
 export * from "./runtime/config/index.js";
+export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
+export { SourceIndexBackfill, type SourceIndexBackfillInput } from "./source-index/source-index-backfill.js";
+export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";
 export * from "./governance/bankruptcy/budget-bankruptcy-service.js";
@@ -42,6 +45,11 @@ export {
 } from "./embedding-recall/constants.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
+export { resolveLocalArtifactTreeSha256 } from "./embedding-recall/local-onnx-artifacts.js";
+export type {
+  SourceEmbeddingInput, SourceEmbeddingOptions, SourceEmbeddingBindingOptions,
+  SourceEmbeddingResult, SourceEmbeddingBinding, SourceEmbeddingBindingResult,
+} from "./embedding-recall/source-embedding-runtime.js";
 export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export {
   importLocalOnnxTransformers,
@@ -55,7 +63,7 @@ export {
 } from "./embedding-recall/local-onnx.js";
 export * from "./runtime/runs/engine-binding-service.js";
 export * from "./shared/errors.js";
-export { fieldContractSha256 } from "./shared/field-hash.js";
+export { fieldContractSha256, fieldContractSha256Chunks, quoteFieldContractSha256Chunks } from "./shared/field-hash.js";
 export {
   createInMemoryFieldStores,
   type FieldFormationStores,
@@ -66,6 +74,15 @@ export {
   retainedSourceSpeaker
 } from "./memory/evidence-create/source-admission.js";
 export { createAuditedSourceAdmission, type AuditedSourceAdmission } from "./memory/evidence-create/audited-source-admission.js";
+export {
+  createAuditedSourceReplacement,
+  type AuditedSourceReplacement,
+  type SourceReplacementRequest,
+  type SourceReplacementPredecessor,
+  type SourceReplacementTransition,
+  type SourceReplacementOutcome
+} from "./memory/evidence-create/audited-source-replacement.js";
+export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
 export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
 export { authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
 export {
@@ -213,6 +230,11 @@ export {
 } from "./recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
 export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
+export { createSourceFeedbackSession, captureSourceFeedbackTerminalCause, type SourceFeedbackSessionInput, type SourceFeedbackSession,
+  type SourceFeedbackAction, type SourceFeedbackSettlement, type SourceFeedbackTerminalCause } from "./recall/runtime/source-feedback-session.js";
+// Named private Node consumers: daemon source-feedback execution and bench cache-only preparation.
+export type { SourceFeedbackCorrespondenceAction, SourceFeedbackCorrespondenceResult,
+  SourceFeedbackCorrespondenceHost } from "./recall/runtime/source-feedback-correspondence.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
 export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
 export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";

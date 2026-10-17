@@ -123,5 +123,6 @@ export function deliveredProofFixture(input: { interpretation?: SourceSemanticIn
   const offset = qualifiers.findIndex((row) => row.evidence_kind === "semantic_proof");
   if (offset < 0) throw new Error(`fixture must deliver a proof slot: ${JSON.stringify({ outcome: proof.outcome,
     bindings: proof.binding_results, usage: proof.resource_usage, entries: index.entries.length, completeness: proof.completeness })}`);
-  return { record, target, proof, index, entry: index.entries[offset]!, qualifier: qualifiers[offset]! };
+  return { record, target, proof, index, entry: index.entries[offset]!, qualifier: qualifiers[offset]!,
+    source_dependencies: executed.source_dependencies ?? [] };
 }

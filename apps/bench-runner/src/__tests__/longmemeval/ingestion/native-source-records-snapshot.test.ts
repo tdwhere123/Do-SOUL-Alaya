@@ -122,7 +122,7 @@ it("stops a selected Gemini source sample after its first failed key on dispatch
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-// This correctness E2E spans multiple cold SQLite/daemon sessions on Windows and macOS.
+// This correctness E2E spans multiple cold SQLite/daemon sessions; Linux coverage also instruments the full recovery chain.
 it("preserves both source clocks, revisions and every document newline through native installation", async (testContext) => {
   const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
     testContext.task.timeout, testContext.signal, undefined,
@@ -521,4 +521,4 @@ it("preserves both source clocks, revisions and every document newline through n
   expect(await benchPhase("recover-final-deliver", () => runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot]))).toBe(0);
   expect(readChainArtifact(join(recoveryRoot, "first-exposure.json"))).toMatchObject({
     replay_identity: firstExposure.replay_identity, stage_identity: firstExposure.stage_identity });
-}, process.platform === "win32" ? 120_000 : process.platform === "darwin" ? 60_000 : 30_000);
+}, process.platform === "win32" ? 120_000 : 60_000);

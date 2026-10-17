@@ -1,6 +1,6 @@
 import { evaluateBooleanHypergraph } from "@do-soul/alaya-graph-algorithms";
 import { vi } from "vitest";
-import { buildSourceReferenceCatalog, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
+import { encodeSourceDisclosure, sourceDisclosure, buildSourceReferenceCatalog, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
   sourceReferenceResolver, sourceSemanticInterpretationIdentity, sourceSemanticQueryIdentity,
   SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   type RequestBudget, type SourceSemanticCorrespondence, type SourceSemanticInterpretation, type SourceSemanticQuery
@@ -21,7 +21,7 @@ export const deploymentStatement = (input: number) => `${DEPLOYMENT} ${deploymen
 type BudgetRejection = Readonly<{ phase: string; requested_work: number; requested_bytes: number;
   remaining_work: number; remaining_bytes: number; spent_work: number; spent_bytes: number }>;
 type AuthoredSource = Readonly<{ id: string; inputs: readonly number[]; body: string; package: SourceSemanticLibraryPackage;
-  budget_rejections: readonly BudgetRejection[] }>;
+  budget_rejections: readonly BudgetRejection[]; dependencies: readonly string[] }>;
 export type SelectionTaskFixture = Readonly<{
   original: string; semantics: SourceSemanticQuery; alternatives: readonly (readonly number[])[];
   execution_budget: RequestBudget;
@@ -46,11 +46,60 @@ export function alternativeSelectionFixture(executionBudget: RequestBudget = SOU
   ], executionBudget);
 }
 
+/** Text gold is declared independently of package selection: five required statements, one per source. */
+export function textWindowSelectionFixture(longSource: boolean, longRoots = 1): SelectionTaskFixture {
+  const inputs = [1, 2, 3, 4, 5];
+  const original = `For ${DEPLOYMENT}, collect these required source statements: ${inputs.map(input => deploymentPredicates[input - 1]).join("; ")}.`;
+  return selectionFixture(original, [inputs], inputs.map(input => ({ id: `statement-${input}`, inputs: [input],
+    prefix: longSource && input <= longRoots ? "Unrelated source introduction.\n".repeat(200) : "" })), selectionExecutionBudget);
+}
+
+/** Three separately executed interpretations of one root, with complementary input support. */
+export function complementaryProofSelectionFixture() {
+  const original = `For ${DEPLOYMENT}, collect these required source statements: ${deploymentPredicates.slice(0, 3).join("; ")}.`;
+  const base = selectionFixture(original, [[1, 2, 3]], [
+    { id: "complementary", inputs: [1, 2, 3] }, { id: "later", inputs: [1] }
+  ], selectionExecutionBudget);
+  const source = base.sources[0]!, full = deploymentInterpretation(source.id, source.inputs, source.body);
+  const branches = source.inputs.map(input => {
+    const interpretation: SourceSemanticInterpretation = { ...full,
+      frames: full.frames.filter(row => row.id === `fInput${input}`),
+      mentions: full.mentions.filter(row => row.id === `mDeployment${input}` || row.id === `mPredicate${input}`),
+      referents: full.referents.map(row => ({ ...row, mentions: [`mDeployment${input}`] })),
+      entry_roots: [`fInput${input}`], asserted_at_scope: [`fInput${input}`] };
+    const { actual } = measuredProof({ interpretation, semantics: base.semantics,
+      correspondence: deploymentCorrespondence(interpretation, base.semantics, base.alternatives, [input]),
+      original, library: true, budget: selectionExecutionBudget });
+    const group: SourceSemanticLibraryPackage = { ...source.package, entry: actual.entry,
+      entries: actual.index.entries, explanations: actual.index.explanations ?? [], proofs: [actual.proof] };
+    return { proof: actual.proof, group, source: source.body, dependencies: actual.source_dependencies };
+  });
+  const later = base.sources[1]!;
+  return { fixture: { ...base, sources: [{ ...source, package: branches[0]!.group }, later],
+    pool: [...branches.map(row => row.group), later.package] } satisfies SelectionTaskFixture,
+  branches: [...branches, { proof: later.package.proofs[0]!, group: later.package,
+    source: later.body, dependencies: later.dependencies }] };
+}
+
+/** Authored nuisance text belongs to source bytes, never to evaluator gold or query inputs. */
+export function previewNoveltySelectionFixture(control: "partial_overlap" | "repeated_lines" | "irrelevant_novel"): SelectionTaskFixture {
+  const original = `For ${DEPLOYMENT}, collect these required source statements: ${deploymentPredicates.slice(0, 5).join("; ")}.`;
+  const gap = control === "partial_overlap" ? "x".repeat(1_200)
+    : control === "repeated_lines" ? "Repeated unrelated annotation.\n".repeat(40)
+      : Array.from({ length: 40 }, (_, i) => `Unrelated annotation number ${i}.\n`).join("");
+  return selectionFixture(original, [[1, 2, 3, 4, 5]], [
+    { id: "window-overlap", inputs: [1, 2], prefix: "Unrelated introduction.\n".repeat(50), gap },
+    ...[3, 4, 5].map(input => ({ id: `statement-${input}`, inputs: [input] }))
+  ], selectionExecutionBudget);
+}
+
 function selectionFixture(original: string, alternatives: readonly (readonly number[])[],
-  declarations: readonly Readonly<{ id: string; inputs: readonly number[] }>[], executionBudget: RequestBudget): SelectionTaskFixture {
+  declarations: readonly Readonly<{ id: string; inputs: readonly number[]; prefix?: string; gap?: string }>[], executionBudget: RequestBudget): SelectionTaskFixture {
   const inputs = [...new Set(alternatives.flat())];
   const semantics: SourceSemanticQuery = { ...query(original), return_variables: [],
-    requested_operation: { reading: alternatives.length === 1 ? "collect all thirteen required source statements" : "establish either complete alternative",
+    requested_operation: { reading: alternatives.length === 1
+      ? alternatives[0]!.length === 13 ? "collect all thirteen required source statements" : "collect all required source statements"
+      : "establish either complete alternative",
       support: { kind: "query_text", excerpt: original } },
     variables: [{ id: "deployment", sort: "entity", reference: { kind: "query_text", excerpt: DEPLOYMENT } },
       ...inputs.map(input => ({ id: `input${input}`, sort: "proposition" as const }))],
@@ -62,17 +111,19 @@ function selectionFixture(original: string, alternatives: readonly (readonly num
       answer_frames: [], evidence_inputs: inputs.map(input => ({ frames: [`qInput${input}`] }))
     })) };
   const sources = declarations.map(declaration => {
-    const body = declaration.inputs.map(deploymentStatement).join("\n");
-    const interpretation = deploymentInterpretation(declaration.id, declaration.inputs, body);
+    const separator = `\n${declaration.gap ?? ""}`;
+    const body = (declaration.prefix ?? "") + declaration.inputs.map(deploymentStatement).join(separator);
+    const interpretation = deploymentInterpretation(declaration.id, declaration.inputs, body,
+      Buffer.byteLength(declaration.prefix ?? ""), Buffer.byteLength(separator));
     const correspondence = deploymentCorrespondence(interpretation, semantics, alternatives, declaration.inputs);
     const { actual, budget_rejections } = measuredProof({ interpretation, semantics, correspondence, original,
       library: true, budget: executionBudget });
     const row: SourceSemanticLibraryPackage = { entry: actual.entry, entries: actual.index.entries,
       explanations: actual.index.explanations ?? [], proofs: [actual.proof], preview: body, access_position: 0,
-      payload_support: "available", source_disclosure: { material_kind: "original_body", source_binding: "unbound",
+      payload_support: "available", source_disclosure: encodeSourceDisclosure({ material_kind: "original_body", source_binding: "unbound",
         evaluated_as_of: CLOCK, validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
-        proof_use: { kind: "conditional_support", qualification: "not_world_claim" } } };
-    return { ...declaration, body, package: row, budget_rejections };
+        proof_use: { kind: "conditional_support", qualification: "not_world_claim" } }) };
+    return { ...declaration, body, package: row, budget_rejections, dependencies: actual.source_dependencies };
   });
   return { original, semantics, alternatives, execution_budget: executionBudget, sources, pool: sources.map(row => row.package) };
 }
@@ -94,12 +145,12 @@ function measuredProof(input: Parameters<typeof deliveredProofFixture>[0]) {
   finally { observe.mockRestore(); }
 }
 
-function deploymentInterpretation(id: string, inputs: readonly number[], body: string): SourceSemanticInterpretation {
+function deploymentInterpretation(id: string, inputs: readonly number[], body: string, prefixBytes = 0, separatorBytes = 1): SourceSemanticInterpretation {
   const digest = fieldContractSha256(body);
   const assertions = inputs.map((input, index) => ({ assertion_id: index + 1, text: deploymentStatement(input) }));
   const catalog = buildSourceReferenceCatalog(digest, assertions, fieldContractSha256);
   const resolver = sourceReferenceResolver(catalog, fieldContractSha256);
-  let offset = 0;
+  let offset = prefixBytes;
   const mentions: SourceSemanticInterpretation["mentions"][number][] = [];
   const assertion_locations: NonNullable<SourceSemanticInterpretation["source"]["assertion_locations"]>[number][] = [];
   const frames: SourceSemanticInterpretation["frames"] = inputs.map((input, index) => {
@@ -111,7 +162,7 @@ function deploymentInterpretation(id: string, inputs: readonly number[], body: s
         source_ref: resolver.referenceForSpan(assertion_id, [start, start + text.length]),
         utf8_span: [offset + start, offset + start + text.length] });
     }
-    offset += Buffer.byteLength(sentence) + 1;
+    offset += Buffer.byteLength(sentence) + separatorBytes;
     return { id: `fInput${input}`, assertion_ids: [assertion_id],
       context_owner: { kind: "source_act", source_act: "assertion" }, additional_support: [],
       predicate_support: { kind: "explicit", reading: deploymentPredicates[input - 1]!, mentions: [`mPredicate${input}`] },
@@ -217,5 +268,5 @@ export function rawSourceTwin(row: SourceSemanticLibraryPackage): SourceSemantic
     source_version: target.source_version, content_digest: target.content_digest,
     evidence_object_id: target.evidence_object_id, hypothesis_id: "library" });
   return { ...row, entry, entries: [entry], proofs: [], explanations: [], payload_support: "envelope_budget",
-    source_disclosure: { ...row.source_disclosure, proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+    source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(row.source_disclosure), proof_use: { kind: "source_only", qualification: "not_current_proof" } }) };
 }

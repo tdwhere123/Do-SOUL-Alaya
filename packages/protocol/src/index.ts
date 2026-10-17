@@ -24,8 +24,11 @@
  * - `shared` — primitives shared across the above.
  */
 export type { EnvLookup } from "./config/env-lookup.js";
-export { SourceDisclosureSchema, EvidenceTextDisclosuresSchema,
-  type SourceDisclosure, type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
+export * from "./recall/source-index.js";
+export type * from "./recall/source-index-query.js";
+export { SOURCE_DISCLOSURE_CODEC_VERSION, SourceDisclosureSchema, SourceDisclosureSemanticSchema,
+  encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosureProofUse, sourceDisclosure, decodeHistoricalSourceDisclosure, EvidenceTextDisclosuresSchema,
+  type SourceDisclosure, type SourceDisclosureSemantic, type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
 export * from "./garden/source-semantic-resources.js";
 export { sourceSemanticStructuralEdges, sourceSemanticContextContains, sourceSemanticSlotNodeId } from "./garden/source-semantic-structure.js";
 export {
@@ -173,7 +176,12 @@ export * from "./events/surface.js";
 export * from "./events/recall-context.js";
 export * from "./recall/selection/capture/capture-execution.js";
 export * from "./recall/selection/capture/capture-receipt-structures.js";
-export { canonicalJson } from "./recall/selection/capture/canonical-json.js";
+export { canonicalJson, canonicalJsonChunks } from "./recall/selection/capture/canonical-json.js";
+// Internal-consumer source entries for the daemon request/receipt owners, not wire contracts.
+export { capturePackSourceSemanticPreparationForRequest, capturePackSourceSemanticAcquisitionForRequest }
+  from "./garden/source-semantic-phase-codec.js";
+export { prepareSourceSemanticCanonicalSubtreesForRequest, type PreparedSourceSemanticCanonicalSubtrees }
+  from "./garden/source-semantic-canonical-preparation.js";
 export * from "./recall/selection/capture/canonical-selection-receipt.js";
 export * from "./events/green-governance.js";
 export * from "./events/budget.js";
@@ -250,7 +258,7 @@ export * from "./garden/identity-observation.js";
 export * from "./garden/source-interpretation.js";
 export * from "./garden/source-interpretation-packet.js";
 export * from "./recall/conditional-field/interpretation-coordinate.js";
-export { retargetInterpretationProduct, productEndpointId } from "./recall/conditional-field/product-identity.js";
+export { retargetInterpretationProduct, productEndpointId, sourceGoldRootIdentity } from "./recall/conditional-field/product-identity.js";
 export * from "./garden/locate-source-interpretation.js";
 export * from "./evidence/source-selection.js";
 export * from "./evidence/source-reference.js";
@@ -301,7 +309,7 @@ export {
   SourceSemanticLibraryDiscoverySchema, SourceSemanticLibraryOrderSchema,
   SourceSemanticQuerySupportSchema, SourceSemanticLibrarySlotQualifierSchema,
   SourceSemanticLibraryProofSchema, SourceSemanticLibraryUnprovedComputationSchema, SourceSemanticLibraryDeliverySchema,
-  SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport, sourceGoldRootIdentity,
+  SourceSemanticWorkerResultSchema, projectSourceSemanticQuerySupport,
   proofForLibraryEntry, sourceSemanticProofQualifier, proofForLibraryQualifier, verifySourceSemanticLibraryDelivery
 } from "./garden/source-semantic-worker.js";
 export type {
@@ -311,6 +319,10 @@ export type {
   SourceSemanticLibraryDiscovery, SourceSemanticLibraryOrder, SourceSemanticLibrarySlotQualifier
 } from "./garden/source-semantic-worker.js";
 export * from "./garden/source-semantic-access.js";
+export {
+  SourceSemanticUndeliveredConclusionSchema, sourceSemanticUndeliveredConclusion, sourceSemanticReasonControl
+} from "./garden/source-semantic-reason-delivery.js";
+export type { SourceSemanticUndeliveredConclusion } from "./garden/source-semantic-reason-delivery.js";
 export * from "./garden/source-semantic-identity.js";
 export { validateSchemaGroundingForSignal, type SchemaGroundingValidationResult,
   type SchemaGroundingValidationStatus } from "./garden/schema-grounding.js";

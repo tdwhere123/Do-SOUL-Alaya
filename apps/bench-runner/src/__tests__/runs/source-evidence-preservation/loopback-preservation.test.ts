@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { canonicalJson, type SourceDisclosure } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, sourceDisclosure, canonicalJson, type SourceDisclosure, type SourceDisclosureSemantic } from "@do-soul/alaya-protocol";
 import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { SOURCE_EVIDENCE_PRESERVATION_SCHEMA_NAME } from "../../../runs/provider-request/request-binding.js";
@@ -516,7 +516,7 @@ it("allows preserved identical unknown records with separate answer uncertaintie
     reference_originals: Array<{ source_disclosure: SourceDisclosure }>;
   };
   expect(prompt.question_as_of).toEqual({ kind: "unknown" });
-  expect(prompt.reference_originals[0]?.source_disclosure.source_time).toEqual({ kind: "unknown", reason: "not_recorded" });
+  expect(sourceDisclosure(prompt.reference_originals[0]!.source_disclosure).source_time).toEqual({ kind: "unknown", reason: "not_recorded" });
   expect(line.userPrompt).not.toMatch(/c01|question_as_of":\{"kind":"known"/u);
   expect(line.userPrompt).not.toMatch(/"event_time"/u);
   const interpreted = interpret(line, {
@@ -677,10 +677,10 @@ it("does not permit candidate delivery when preview, disclosure, or version iden
     { ...keep, preview_sha256: "f".repeat(64) },
     {
       ...keep,
-      source_disclosure: {
-        ...keep.source_disclosure,
-        source_time: { kind: "unknown" as const, reason: "not_recorded" as const }
-      }
+      source_disclosure: encodeSourceDisclosure({
+        ...sourceDisclosure(keep.source_disclosure),
+        source_time: { kind: "unknown", reason: "not_recorded" }
+      })
     }
   ] as const;
   for (const [label, candidate] of [
@@ -900,7 +900,7 @@ function sha(text: string): string {
 }
 
 function original(
-  root_id: string, content_digest: string, text: string, source_time: SourceDisclosure["source_time"],
+  root_id: string, content_digest: string, text: string, source_time: SourceDisclosureSemantic["source_time"],
   content_start = 0
 ) {
   const bytes = Buffer.byteLength(text, "utf8");
@@ -921,8 +921,8 @@ function original(
   };
 }
 
-function disclosure(source_time: SourceDisclosure["source_time"]): SourceDisclosure {
-  return {
+function disclosure(source_time: SourceDisclosureSemantic["source_time"]): SourceDisclosure {
+  return encodeSourceDisclosure({
     material_kind: "original_body",
     source_binding: "checked_record",
     evaluated_as_of: "2024-06-01T00:00:00.000Z",
@@ -930,7 +930,7 @@ function disclosure(source_time: SourceDisclosure["source_time"]): SourceDisclos
     validity: { kind: "unknown", reason: "not_recorded" },
     temporal_state: "unknown",
     proof_use: { kind: "source_only", qualification: "not_current_proof" }
-  };
+  });
 }
 
 function configOf(origin: string): CompileSeedExtractionConfig {

@@ -96,9 +96,9 @@ it("binds declared responsibility and exact cue bytes while checking full and li
     producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",
     generation_task: sourceSemanticGenerationTaskSummary(generation_task) };
   expect(SourceSemanticHandleDescriptorSchema.parse(descriptor).generation_task).not.toHaveProperty("original_query");
-  const full = { ...descriptor, interpretation: scoped, source_disclosure: { material_kind: "interpretation", source_binding: "unbound",
-    evaluated_as_of: "2026-10-09T00:00:00Z", validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
-    proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+  const full = { ...descriptor, interpretation: scoped, source_disclosure: [1, "interpretation", "unbound", null,
+    "2026-10-09T00:00:00Z", null, { kind: "unknown", reason: "unbound" }, "unknown",
+    { kind: "source_only", qualification: "not_current_proof" }] };
   expect(SourceSemanticHandleDescriptorSchema.parse(full).interpretation?.generation_task).toEqual(generation_task);
   expect(SourceSemanticHandleDescriptorSchema.safeParse({ ...full, generation_task: undefined }).success).toBe(false);
   expect(SourceSemanticHandleDescriptorSchema.safeParse({ ...full, interpretation }).success).toBe(false);

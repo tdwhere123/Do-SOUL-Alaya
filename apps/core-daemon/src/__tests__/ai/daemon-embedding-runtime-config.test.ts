@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isD2qActive,
   readEmbeddingRuntimeConfig,
@@ -12,6 +12,10 @@ const EXTRA_MISSING: LocalOnnxTransformersProbe = () => ({
   code: "ERR_MODULE_NOT_FOUND"
 });
 
+const environment = process.env;
+beforeEach(() => { process.env = {}; });
+afterEach(() => { process.env = environment; vi.restoreAllMocks(); });
+
 describe("readEmbeddingRuntimeConfig fail-closed openai", () => {
   it("throws when explicit openai is on and the secret cannot be resolved", () => {
     expect(() => readEmbeddingRuntimeConfig(new Map([
@@ -21,11 +25,56 @@ describe("readEmbeddingRuntimeConfig fail-closed openai", () => {
     ]), vi.fn(), EXTRA_MISSING)).toThrow(/ALAYA_OPENAI_SECRET_REF/);
   });
 
-  it("throws when explicit openai is on and no secret ref is written", () => {
-    expect(() => readEmbeddingRuntimeConfig(new Map([
+  it.each([undefined, "", "  "])("throws when explicit openai is on and the secret ref is %s", reference => {
+    const configEnv = new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "openai"],
-      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"]
-    ]), vi.fn(), EXTRA_MISSING)).toThrow(/ALAYA_EMBEDDING_PROVIDER=openai requires a resolvable ALAYA_OPENAI_SECRET_REF/);
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+      ...(reference === undefined ? [] : [["ALAYA_OPENAI_SECRET_REF", reference] as const])
+    ]);
+    const read = vi.spyOn(configEnv, "get");
+    expect(() => readEmbeddingRuntimeConfig(configEnv, vi.fn(), EXTRA_MISSING))
+      .toThrow(/ALAYA_EMBEDDING_PROVIDER=openai requires a resolvable ALAYA_OPENAI_SECRET_REF/);
+    expect(read).toHaveBeenCalledWith("ALAYA_OPENAI_SECRET_REF");
+  });
+
+  it("reads and resolves the selected openai reference without provider execution", () => {
+    process.env.EMBEDDING_FIXTURE_VALUE = "fixture-only";
+    const configEnv = new Map([
+      ["ALAYA_EMBEDDING_PROVIDER", "openai"],
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+      ["ALAYA_OPENAI_SECRET_REF", "env:EMBEDDING_FIXTURE_VALUE"]
+    ]);
+    const read = vi.spyOn(configEnv, "get");
+    expect(readEmbeddingRuntimeConfig(configEnv, vi.fn(), EXTRA_MISSING)).toMatchObject({
+      embeddingProviderKind: "openai", embeddingSupplementEnabled: true, embeddingApiKey: "fixture-only"
+    });
+    expect(read).toHaveBeenCalledWith("ALAYA_OPENAI_SECRET_REF");
+  });
+
+  it("keeps disabled openai with no reference as a null key rather than requiring credentials", () => {
+    const configEnv = new Map([
+      ["ALAYA_EMBEDDING_PROVIDER", "openai"],
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"]
+    ]);
+    const read = vi.spyOn(configEnv, "get");
+    expect(readEmbeddingRuntimeConfig(configEnv, vi.fn(), EXTRA_MISSING)).toMatchObject({
+      embeddingProviderKind: "openai", embeddingSupplementEnabled: false, embeddingApiKey: null
+    });
+    expect(read).toHaveBeenCalledWith("ALAYA_OPENAI_SECRET_REF");
+  });
+
+  it.each(["local_onnx", "off"] as const)("does not read the unused remote secret reference for %s", provider => {
+    const forbiddenRead = vi.fn(() => { throw new Error("unused remote credential lookup"); });
+    Object.defineProperty(process.env, "ALAYA_OPENAI_SECRET_REF", { get: forbiddenRead });
+    const configEnv = new Map([
+      ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
+      ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"]
+    ]);
+    const read = vi.spyOn(configEnv, "get");
+    const config = readEmbeddingRuntimeConfig(configEnv, vi.fn(), provider === "off" ? EXTRA_MISSING : EXTRA_AVAILABLE);
+    expect(config).toMatchObject({ embeddingProviderKind: provider, embeddingApiKey: null });
+    expect(forbiddenRead).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalledWith("ALAYA_OPENAI_SECRET_REF");
   });
 
   it("does not require an openai secret when the implicit provider is local_onnx", () => {

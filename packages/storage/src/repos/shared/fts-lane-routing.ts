@@ -73,9 +73,10 @@ export function queryFtsLaneRows(
   ));
 }
 
-export function tokenizeFtsQuery(queryText: string): readonly string[] {
+export function tokenizeFtsQuery(queryText: string,
+  options: Readonly<{ initializeCjk?: boolean }> = {}): readonly string[] {
   return tokenizeFtsQueryPolicy(queryText, {
     shouldSegmentToken: isCjkSegmentationCandidate,
-    segmentToken: segmentCjkRun
+    segmentToken: token => segmentCjkRun(token, { initialize: options.initializeCjk })
   });
 }

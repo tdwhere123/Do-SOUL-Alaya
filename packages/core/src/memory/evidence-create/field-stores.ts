@@ -11,8 +11,21 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import { newerSourceRecord } from "./source-observation-currentness.js";
 
+/**
+ * Request-local storage evidence, not a durable receipt or permission to retry.
+ * Projection readiness means the postcommit projection work completed. Deferred
+ * work is committed but still requires its owner-controlled checkpoint.
+ */
+export type FieldAtomicOutcome<T> =
+  | Readonly<{ status: "committed"; result: T; projection: "ready" | "deferred" }>
+  | Readonly<{ status: "committed"; result: T; projection: "unready"; cause: unknown }>
+  | Readonly<{ status: "not_committed"; cause: unknown }>
+  | Readonly<{ status: "unknown"; cause: unknown }>;
+
 export interface FieldFormationStores {
   runAtomic<T>(work: () => T): T;
+  /** Top-level transaction only; a savepoint cannot attest a durable commit. */
+  runAtomicWithOutcome?<T>(work: () => T): FieldAtomicOutcome<T>;
   getRecord(workspaceId: string, recordId: string): SourceRecordIdentity | null;
   /** Newest UTC instant, then greatest record identity; choose before body or scope filtering. */
   getCurrentRecord(workspaceId: string, sourceId: string): SourceRecordIdentity | null;
@@ -32,6 +45,16 @@ export interface FieldFormationStores {
   listFactors(workspaceId: string): readonly FactorDescriptor[];
   listIncidences(workspaceId: string): readonly FactorIncidence[];
   listRecordEvidenceBindings(workspaceId: string): readonly SourceRecordEvidenceBinding[];
+}
+
+/** Legacy stores cannot establish rollback from an arbitrary thrown exception. */
+export function runFieldAtomicWithOutcome<T>(stores: FieldFormationStores, work: () => T): FieldAtomicOutcome<T> {
+  try {
+    if (stores.runAtomicWithOutcome !== undefined) return stores.runAtomicWithOutcome(work);
+    return { status: "committed", result: stores.runAtomic(work), projection: "ready" };
+  } catch (cause) {
+    return { status: "unknown", cause };
+  }
 }
 
 export type StoredSourceRecord = Readonly<{
@@ -66,8 +89,25 @@ function bindFieldStores(maps: Readonly<{
   readonly jobs: Map<string, DerivationJobReceipt>;
   readonly evidenceBindings: Map<string, SourceRecordEvidenceBinding>;
 }>): FieldFormationStores {
+  let atomicDepth = 0;
+  const runAtomic = <T>(work: () => T): T => {
+    atomicDepth += 1;
+    try { return runInMemoryAtomic(maps, work); }
+    finally { atomicDepth -= 1; }
+  };
   return {
-    runAtomic: (work) => runInMemoryAtomic(maps, work),
+    runAtomic,
+    runAtomicWithOutcome<T>(work: () => T): FieldAtomicOutcome<T> {
+      if (atomicDepth !== 0) {
+        return { status: "not_committed", cause: new CoreError("CONFLICT", "source replacement requires a top-level transaction") };
+      }
+      try {
+        return { status: "committed", result: runAtomic(work), projection: "ready" };
+      } catch (cause) {
+        // runInMemoryAtomic restores every owned map before rethrowing.
+        return { status: "not_committed", cause };
+      }
+    },
     getRecord: (workspaceId, recordId) => maps.records.get(key(workspaceId, recordId)) ?? null,
     getCurrentRecord: (workspaceId, sourceId) => currentRecord(maps.records, workspaceId, sourceId),
     getStoredRecord: (workspaceId, recordId) => storedRecord(maps, workspaceId, recordId),

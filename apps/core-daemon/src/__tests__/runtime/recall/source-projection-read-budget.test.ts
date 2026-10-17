@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { indexEntryCacheKey, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, indexEntryCacheKey, type SourceSemanticWorkerRequest } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteEventLogRepo, SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -60,27 +60,29 @@ it("encodes retained excerpt and canonical projection disclosures with their exa
   for (const record of [ctx.raw, ctx.projection]) {
     const entry = result.index.entries.find(row => row.target.kind === "source_evidence" && row.target.root_id === record.identity);
     expect(entry).toBeDefined();
-    expect(result.source_disclosures[indexEntryCacheKey(entry!)]).toMatchObject({
+    expect(sourceDisclosure(result.source_disclosures[indexEntryCacheKey(entry!)]!)).toMatchObject({
       material_kind: record.source_representation!.kind, source_representation: record.source_representation });
   }
   const encoded = encodeSourceSemanticLibraryResponse(result);
   if (encoded.operation !== "recall") throw new Error("expected encoded library recall");
   expect(encoded.source_disclosures).toEqual(result.source_disclosures);
-  expect(encoded.results?.map(row => row.source_disclosure?.material_kind).sort()).toEqual(["canonical_projection", "retained_excerpt"]);
+  expect(encoded.results?.map(row => sourceDisclosure(row.source_disclosure!).material_kind).sort()).toEqual(["canonical_projection", "retained_excerpt"]);
 });
 
 it("reports an unfinished source observation and budget stop when dependency admission refuses its extent", async () => {
-  const ctx = await fixture(), reads = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
+  const ctx = await fixture(), find = SqliteFieldSourceRecordRepo.prototype.findByIdBounded;
+  const reads = vi.spyOn(SqliteFieldSourceRecordRepo.prototype, "findByIdBounded");
   const observe = (budget: typeof ACCESS_BUDGET) => {
     const ledger = new SourceSemanticReadBudget(budget);
     const pool = ctx.database.connection.transaction(() => observeSourceSemanticAccess(ctx.runtime, ctx.payload,
       ["project"], ledger, original, accessQuery(original), "query-conditioned-v1", budget, ctx.projection.source_id))();
     return { pool, ledger };
   };
-  observe(ACCESS_BUDGET);
-  const firstAllowance = reads.mock.calls[0]![4]!.workLimit!;
-  reads.mockClear();
-  const budget = { ...ACCESS_BUDGET, work_units: ACCESS_BUDGET.work_units - 2 * (firstAllowance - 6), finalization_reserve: 0 };
+  // Constrain the native dependency read itself; metadata packing has its own allowance.
+  reads.mockImplementationOnce(function (this: SqliteFieldSourceRecordRepo, workspace, id, length, offset, limits) {
+    return find.call(this, workspace, id, length, offset, { ...limits, workLimit: 6 });
+  });
+  const budget = ACCESS_BUDGET;
   const limited = observe(budget);
   expect(reads.mock.results[0]!.value).toMatchObject({ resourceLimited: true, dependencyWork: 0, nativeBytes: 0 });
   expect(limited.pool.access.source_candidates).toMatchObject([{ complete: false, read_bytes: 0,

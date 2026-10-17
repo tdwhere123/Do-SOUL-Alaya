@@ -293,13 +293,14 @@ export function encodeSourceSemanticLibraryResponse(
   result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>
 ): SoulInterpretationResponse {
   verifySourceSemanticLibraryDelivery(result, fieldContractSha256);
+  if (result.execution === undefined) throw new CoreError("VALIDATION", "Source library v2 requires actual execution accounting");
   const { kind: _kind, previews, coverage, ...rest } = result;
   const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true,
     result.source_disclosures);
   const omitted = results.some((row) => !row.budget_state.within_budget);
   const incomplete = omitted || coverage.payload !== "complete";
   return SoulInterpretationResponseSchema.parse({ operation: "recall", ...rest, results,
-    total_count: results.length, provider_attempts: 0,
+    total_count: results.length,
     index: incomplete ? { ...result.index, completeness: { ...result.index.completeness, payload: "partial" } } : result.index,
     coverage: { ...coverage, payload: omitted ? "truncated" : coverage.payload } });
 }

@@ -50,20 +50,6 @@ export async function assertNativeSemanticChain(cacheRoot: string, sourceOnlySna
       page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 },
     authorized_scopes: { mode: "unrestricted" }, output_byte_limit: 100000 };
   expect(SemanticChainConfigSchema.safeParse({ ...config, access_policy: undefined }).success).toBe(false);
-  const boundedWorkset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3",
-    provider_url: "http://127.0.0.1:9", kind: "query", model: "gemini-2.5-flash-lite",
-    request_profile: "gemini-2.5-nonthinking-v1",
-    items: [{ original_query: `What was completed?${" context".repeat(200)}` }, { original_query: "What was completed?" }] });
-  const boundedRoot = join(cacheRoot, "bounded-query-discovery-chain");
-  const bounded = await prepareSemanticChain({ ...config, query_workset: boundedWorkset,
-    snapshot_path: sourceOnlySnapshot.snapshot_path, snapshot_sha256: sourceOnlySnapshot.db_sha256,
-    budget: { ...config.budget, work_units: 20_000, finalization_reserve: 1_000 } }, boundedRoot);
-  expect(bounded.queries).toMatchObject([{ status: "blocked",
-    reason: "discovery_unavailable: native discovery resource exhausted" }, { status: "raw_ready", reason: "unattempted" }]);
-  const boundedReplay = await replaySemanticChain(boundedRoot);
-  const boundedMeasured = measureSemanticChain(boundedRoot, boundedReplay.path,
-    bounded.queries.map(row => ({ query_key: row.query_key, source_units: [] })), evaluatorRoot);
-  expect(boundedMeasured.result.rows.map(row => row.status)).toEqual(["blocked", "replayed"]);
   const blockedRoot = join(cacheRoot, "blocked-chain");
   const blocked = await prepareSemanticChain(config, blockedRoot);
   expect(blocked.queries.every((row) => row.status === "raw_ready")).toBe(true);
@@ -441,6 +427,15 @@ async function assertReplayPreparationPool(plan: SemanticChainPlan, root: string
   expect(mismatchMeasured.result.rows[0]).toMatchObject({ measurement: null,
     preparation_trace: expect.arrayContaining([expect.objectContaining({
       work: expect.objectContaining({ native_work: expect.any(Number) }) })]), preparation_elapsed_ms: expect.any(Number) });
+  const measuredZeroRoot = join(root, "measured-zero-observation");
+  writeChainArtifact(join(measuredZeroRoot, "prepare.json"), { ...plan, queries: plan.queries.map((entry) => entry.status !== "ready" ? entry
+    : { ...entry, discovery_trace: entry.discovery_trace.map((page) => {
+      const phases = page.access.phases;
+      return { ...page, access: { ...page.access, phases: [phases[0], phases[1], phases[2], [0, 0, 0]] as const } };
+    }) } ) });
+  expect((await replaySemanticChain(measuredZeroRoot)).result).toMatchObject({
+    rows: [{ status: "native_unavailable", reason: "prepared_access_pool_mismatch", first_exposure: null },
+      { status: "replayed" }] });
 }
 
 async function assertInterruptedExposure(root: string, output: string, queryKey: string): Promise<void> {

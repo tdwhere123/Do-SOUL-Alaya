@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SqliteFieldSourceRecordRepo, type StorageDatabase } from "@do-soul/alaya-storage";
-import { InformationIndexSchema, sourceIndexEntry } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, InformationIndexSchema, sourceIndexEntry } from "@do-soul/alaya-protocol";
 import { sourceRootEligible } from "../../../../../../packages/core/src/recall/conditional-field/observers/observation-admission.js";
 import { BoundedIndexPayload } from "../../../../../../packages/core/src/recall/runtime/index-payload.js";
 import { encodeRecallResult } from "../../../../../../packages/core/src/recall/runtime/recall-result-encoding.js";
@@ -47,11 +47,11 @@ describe("worker source-root hydrate", () => {
         page_budget: 5, identity_tie_break: "serialization" }
     }));
     const result = encodeRecallResult(index, payload.previews, undefined, payload.sourceMetadata);
-    expect(result.candidates[0]).toMatchObject({ content_preview: "Historical original body",
-      source_disclosure: { material_kind: "original_body", source_binding: "checked_record",
+    expect(result.candidates[0]).toMatchObject({ content_preview: "Historical original body" });
+    expect(sourceDisclosure(result.candidates[0]!.source_disclosure!)).toMatchObject({ material_kind: "original_body", source_binding: "checked_record",
         evaluated_as_of: asOf, validity: { kind: "bounded", from: "2026-09-01T00:00:00.000Z",
           to_exclusive: "2026-09-10T00:00:00.000Z" }, temporal_state: "within_interval",
-        proof_use: { kind: "source_only", qualification: "not_current_proof" } } });
+        proof_use: { kind: "source_only", qualification: "not_current_proof" } });
   });
 
   it("hydrates a native root through the request byte limit instead of loading the body", () => {

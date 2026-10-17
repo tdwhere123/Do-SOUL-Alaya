@@ -1,4 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
+import { CoreError } from "../../shared/errors.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -7,7 +8,14 @@ import {
   type LocalOnnxEmbeddingIpcRequest,
   type LocalOnnxEmbeddingIpcSuccess
 } from "./protocol.js";
-import { decodeLocalOnnxIpcVectors } from "./vectors.js";
+import { decodeLocalOnnxIpcVectors, decodeLocalOnnxSourceResults } from "./vectors.js";
+import { createEmbeddingDeadline } from "../local-onnx-inference-budget.js";
+import {
+  captureSourceEmbeddingInputs, captureSourceEmbeddingProfile, sourceEmbeddingRefusals,
+  type SourceEmbeddingBinding, type SourceEmbeddingBindingOptions, type SourceEmbeddingBindingResult
+} from "../source-embedding-runtime.js";
+
+type SourceIpcPayload = Pick<LocalOnnxEmbeddingIpcRequest, "bindingOptions" | "binding_id" | "profile_id" | "inputs">;
 
 export interface LocalOnnxEmbeddingIpcProcess {
   readonly pid?: number;
@@ -121,6 +129,49 @@ export class LocalOnnxEmbeddingIpcSession {
     return decodeLocalOnnxIpcVectors(response.vectors, texts.length);
   }
 
+  public async bindSourceEmbedding(options: SourceEmbeddingBindingOptions): Promise<SourceEmbeddingBindingResult> {
+    const captured = structuredClone(options);
+    const deadline = createEmbeddingDeadline(60_000);
+    try {
+      const response = await this.request("bind_source", undefined, deadline.signal, undefined, { bindingOptions: captured });
+      if (this.closed || this.child === null) return { status: "unsupported", reason: "stale_child" };
+      const binding = response.sourceBinding;
+      if (!binding) return { status: "unsupported", reason: "child_source_evidence_unavailable" };
+      if (binding.status === "unsupported") {
+        if (typeof binding.reason !== "string") throw new CoreError("OBLIGATION_VIOLATION", "Invalid Source binding refusal");
+        return Object.freeze({ ...binding });
+      }
+      if (binding.status !== "ready" || typeof binding.binding_id !== "string" || !binding.binding_id ||
+          typeof binding.profile_id !== "string") throw new CoreError("OBLIGATION_VIOLATION", "Invalid child Source binding");
+      const profile = captureSourceEmbeddingProfile(binding.profile, binding.profile_id);
+      if (profile.model_id !== this.modelId || profile.provider_kind !== "local_onnx" || profile.dimensions !== 384 ||
+          profile.window_bytes !== captured.window_bytes ||
+          (captured.max_input_tokens !== undefined && profile.max_input_tokens > captured.max_input_tokens)) {
+        throw new CoreError("OBLIGATION_VIOLATION", "Child Source profile configuration mismatch");
+      }
+      const epoch = this.childEpoch;
+      const profileId = binding.profile_id, bindingId = binding.binding_id;
+      return Object.freeze<SourceEmbeddingBinding>({ status: "ready", profile, profile_id: profileId,
+        embedInputs: async (inputs, callOptions) => {
+          const capturedInputs = captureSourceEmbeddingInputs(inputs);
+          callOptions = { ...callOptions };
+          if (this.closed || epoch !== this.childEpoch || this.child === null) return sourceEmbeddingRefusals(capturedInputs, "stale_child");
+          if (callOptions.profile_id !== profileId) return sourceEmbeddingRefusals(capturedInputs, "profile_mismatch");
+          const callDeadline = createEmbeddingDeadline(callOptions.timeoutMs, callOptions.signal);
+          try {
+            const result = await this.request("embed_source", undefined, callDeadline.signal, callOptions.timeoutMs,
+              { inputs: capturedInputs, binding_id: bindingId, profile_id: profileId }, epoch);
+            const returnedBinding = result.sourceBinding;
+            if (epoch !== this.childEpoch || this.child === null || callDeadline.signal.aborted || this.closed) return sourceEmbeddingRefusals(capturedInputs, "stale_child");
+            if (returnedBinding?.status !== "ready" || returnedBinding.binding_id !== bindingId ||
+                returnedBinding.profile_id !== profileId) throw new CoreError("OBLIGATION_VIOLATION", "Source response binding mismatch");
+            captureSourceEmbeddingProfile(returnedBinding.profile, profileId);
+            return decodeLocalOnnxSourceResults(result.sourceResults, capturedInputs, profile);
+          } finally { callDeadline.close(); }
+        } });
+    } finally { deadline.close(); }
+  }
+
   public async close(): Promise<void> {
     this.closed = true;
     const child = this.child;
@@ -143,15 +194,20 @@ export class LocalOnnxEmbeddingIpcSession {
     op: LocalOnnxEmbeddingIpcOp,
     texts: readonly string[] | undefined,
     signal: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
+    payload?: SourceIpcPayload,
+    expectedEpoch?: number
   ): Promise<LocalOnnxEmbeddingIpcSuccess> {
+    if (signal.aborted) throw ipcAbortError(signal);
     await this.waitForReaps();
+    if (signal.aborted) throw ipcAbortError(signal);
+    if (expectedEpoch !== undefined && expectedEpoch !== this.childEpoch) throw new CoreError("CONFLICT", "stale local ONNX child binding", { subCode: "CONCURRENT_MODIFICATION" });
     if (this.closed || this.exitError !== null) {
       throw this.exitError ?? new LocalOnnxEmbeddingChildExitedError(0, "SIGTERM");
     }
     const child = this.ensureChild();
     const id = ++this.nextId;
-    const message = this.buildRequest(id, op, texts, timeoutMs);
+    const message = { ...this.buildRequest(id, op, texts, timeoutMs), ...payload };
     refLocalOnnxEmbeddingChild(child);
     try {
       return await waitForLocalOnnxIpcResponse(
@@ -184,7 +240,7 @@ export class LocalOnnxEmbeddingIpcSession {
       }
       this.child = child;
       const epoch = this.childEpoch;
-      child.on("message", (message) => this.onMessage(message));
+      child.on("message", (message) => { if (epoch === this.childEpoch) this.onMessage(message); });
       child.on("exit", (code, exitSignal) => this.onExit(epoch, code, exitSignal));
       child.on("error", (error) => this.onSpawnError(epoch, error));
       // IPC must not pin the pager/daemon event loop after recall finishes.
@@ -371,7 +427,7 @@ function waitForLocalOnnxIpcResponse(
       onAbortRequest(ipcAbortError(signal));
     };
     if (signal.aborted) {
-      onAbort();
+      reject(ipcAbortError(signal));
       return;
     }
     signal.addEventListener("abort", onAbort, { once: true });

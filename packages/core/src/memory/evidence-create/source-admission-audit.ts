@@ -4,7 +4,12 @@ import {
   type EventLogEntry,
   type SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
-import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { bindEventPublisher, EventPublisherPropagationError, type EventPublisherInput } from "../../runtime/event-publisher.js";
+
+export type SourceAdmissionAuditOutcome =
+  | Readonly<{ status: "ready"; entry: Readonly<EventLogEntry> }>
+  | Readonly<{ status: "notification_failed"; entry: Readonly<EventLogEntry>; cause: unknown }>
+  | Readonly<{ status: "audit_incomplete"; audit: "not_appended" | "unknown"; cause: unknown }>;
 
 export async function appendSourceRecordAdmitted(
   eventLogRepo: {
@@ -14,11 +19,41 @@ export async function appendSourceRecordAdmitted(
   record: SourceRecordIdentity,
   runtimeNotifier: { notifyEntry(entry: EventLogEntry): void | Promise<void> }
 ): Promise<void> {
-  await bindEventPublisher({
-    eventLogRepo,
-    runtimeNotifier,
-    purpose: "source-admission-audit"
-  }).publish({
+  const outcome = await appendSourceRecordAdmittedWithOutcome(eventLogRepo, record, runtimeNotifier);
+  if (outcome.status !== "ready") throw outcome.cause;
+}
+
+/** One audit implementation for ordinary admission and predecessor-bound replacement. */
+export async function appendSourceRecordAdmittedWithOutcome(
+  eventLogRepo: Parameters<typeof appendSourceRecordAdmitted>[0],
+  record: SourceRecordIdentity,
+  runtimeNotifier: Parameters<typeof appendSourceRecordAdmitted>[2]
+): Promise<SourceAdmissionAuditOutcome> {
+  let attempted = false;
+  let appended: EventLogEntry | undefined;
+  try {
+    const entry = await bindEventPublisher({
+      eventLogRepo: { async append(event) {
+        attempted = true;
+        const retained = await eventLogRepo.append(event);
+        appended = retained;
+        return retained;
+      } },
+      runtimeNotifier,
+      purpose: "source-admission-audit"
+    }).publish(sourceRecordAdmittedEvent(record));
+    return { status: "ready", entry };
+  } catch (cause) {
+    if (cause instanceof EventPublisherPropagationError && appended === cause.entry) {
+      return { status: "notification_failed", entry: cause.entry, cause };
+    }
+    // A failed append may already have persisted its row. Never infer absence.
+    return { status: "audit_incomplete", audit: attempted ? "unknown" : "not_appended", cause };
+  }
+}
+
+function sourceRecordAdmittedEvent(record: SourceRecordIdentity): EventPublisherInput {
+  return {
     event_type: FieldGenerationEventType.SOUL_FIELD_SOURCE_RECORD_ADMITTED,
     entity_type: "source_record",
     entity_id: record.identity,
@@ -38,5 +73,5 @@ export async function appendSourceRecordAdmitted(
       valid_to: record.valid_to,
       operator_id: record.operator_id
     })
-  });
+  };
 }

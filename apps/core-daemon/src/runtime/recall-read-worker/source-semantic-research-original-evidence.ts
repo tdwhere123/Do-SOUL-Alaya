@@ -13,7 +13,7 @@ import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.j
 import { createRecallReadWorkerRuntime } from "./runtime.js";
 import {
   bindResearchSourceAccessPool, bindVerifiedResearchSourceRecords, type ResearchSourceObservation
-} from "./source-semantic-candidate-access.js";
+} from "./source-semantic-research-pool.js";
 import { prepareLibraryDelivery, deliverFrozenLibraryPage, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
 import { prepareLibraryPackages } from "./source-semantic-library-packages.js";
 import { sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";

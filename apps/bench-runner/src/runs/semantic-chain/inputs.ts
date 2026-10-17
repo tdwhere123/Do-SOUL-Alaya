@@ -16,6 +16,10 @@ import { join } from "node:path";
 /** Retained plans expose readable cache inputs without admitting the plan or its execution state. */
 export function semanticChainCacheInputPaths(value: unknown): readonly string[] {
   const paths: string[] = [];
+  for (const key of ["cache_root", "preparation_path"] as const) {
+    const path = retainedArtifactPathField(value, "config", "source_index", key);
+    if (path !== undefined) paths.push(path);
+  }
   const tokens = retainedArtifactField(value, "config", "max_output_tokens");
   const generationCap = retainedArtifactField(value, "config", "correspondence_generation", "max_output_tokens");
   const correspondenceTokens = typeof generationCap === "number" ? generationCap : tokens;

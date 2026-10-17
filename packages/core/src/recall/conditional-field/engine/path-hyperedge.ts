@@ -20,6 +20,7 @@ import { joinDerivation } from "./path-derivation.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import { transitionKey } from "./path-composition.js";
 import type { PathComputation } from "./path-effect-cursor.js";
+import { pairDemandRegistered, type RegisteredDemands } from "./path-routing.js";
 import {
   assignmentFromRow,
   groundPremiseAssignments,
@@ -89,6 +90,7 @@ type HyperedgeInput = Readonly<{
   readonly observedStates?: RetainedRows<ProductStateKey>;
   readonly physicalKinds?: readonly string[];
   readonly physicalKindSet?: ReadonlySet<string>;
+  readonly registeredDemands?: RegisteredDemands;
   readonly compiledPremises?: Map<QueryProgram, ProgramAutomaton>;
   readonly joinRows?: readonly AdjacencyRow[];
   /** Stable owner for sequence reach remembered across row deltas. */
@@ -261,6 +263,7 @@ function* relationAssignments(
     yield { kind: "work" };
     if (!physicalKinds.has(predicate) || !relationMatches(relation.relation_kind, predicate)) continue;
     const subject = productEndpointId(from);
+    if (pairDemandRegistered(input.registeredDemands, subject, predicate)) continue;
     yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
       relation_demand: { subject, predicate } } };
   }
@@ -288,6 +291,7 @@ function* nestedHyperedgeAssignments(
     bindingContexts: input.bindingContexts,
     observedStates: input.observedStates ?? input.liveStates,
     physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
+    registeredDemands: input.registeredDemands,
     compiledPremises: input.compiledPremises,
     ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
     ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),
@@ -396,6 +400,7 @@ function* extendSequenceState(
       yield { kind: "work" };
       if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
       const subject = productEndpointId(node);
+      if (pairDemandRegistered(input.registeredDemands, subject, predicate)) continue;
       yield { kind: "effect", effect: { observation_id: `demand:${subject}:${predicate}`,
         relation_demand: { subject, predicate } } };
     }
@@ -417,6 +422,7 @@ function* extendSequenceState(
       toProgramStates: hyperedge.to,
       observedStates: observed,
       physicalKinds: input.physicalKinds, physicalKindSet: input.physicalKindSet,
+      registeredDemands: input.registeredDemands,
       compiledPremises: input.compiledPremises,
       ...(input.reachOwner === undefined ? {} : { reachOwner: input.reachOwner }),
       ...(input.promotedIds === undefined ? {} : { promotedIds: input.promotedIds }),

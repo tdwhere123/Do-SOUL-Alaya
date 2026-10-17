@@ -289,10 +289,14 @@ daemon HTTP routes only and has its own contract surface (httpOnly session cooki
   + JSON over HTTP, no SSE / WebSocket).
 
 Source-bearing views across these surfaces use the Protocol `SourceDisclosure`
-contract and Core's read-time projection. The qualification is outside stored
-original or retained reduction text. Evidence HTTP and pointer reads preserve
-the existing workspace authorization and report unknown original validity when
-no checked source record is available.
+contract and Core's read-time projection. Live public and worker bytes are the
+version-1 lossless compact tuple; Inspector and other named readers expand it
+with `sourceDisclosure`. Historical Protocol 14–18 named objects are archive-only
+(`decodeHistoricalSourceDisclosure`) and are rejected as current ingress. The
+qualification is outside stored original or retained reduction text. Evidence
+HTTP and pointer reads preserve the existing workspace authorization and report
+unknown original validity when no checked source record is available. Detail:
+[`recall.md` Source disclosure](recall.md#source-disclosure).
 
 Persistent daemon HTTP authentication has an explicit operator-owned
 lifecycle: `ALAYA_REQUEST_TOKEN` remains stable across restarts, and changing
@@ -326,6 +330,39 @@ EventLog append + DB mutate (one transaction) -> in-process notification
 Field formation, projection-generation, and causal-usage writes use
 the verified persist-then-audit order: persist the receipt, then append
 EventLog from a separate audit helper. Audit still precedes broadcast.
+
+Predecessor-bound source replacement uses that same audited writer as
+ordinary retained-source admission (`createAuditedSourceReplacement`,
+wired as daemon `sourceRecordReplacement`). Possession of the Node
+capability is authority; it is not an MCP, CLI, or Inspector write
+surface and does not authorize a new public product API. The writer
+captures the request once, then compare-and-replaces only inside a
+top-level field transaction that still holds the expected current record
+(`workspace_id`, `source_id`, `identity`, `source_version`,
+`content_digest`). The replacement must keep that workspace and logical
+source, use a new `source_version`, and carry a strictly later
+`recorded_at`. Nested savepoints cannot attest a durable transition.
+Precommit refusal (`rejected`) leaves no replacement row, audit, or
+notification. Unknown commit evidence must not be rewritten as rollback
+or as a fabricated transition. After a durable commit, postcommit
+projection failure (`committed_projection_unready`) keeps the stored
+transition and does not append audit. `explicit_checkpoint` deferral is
+not a projection failure: the writer still appends the replacement
+admission audit and notifies after the receipt. It returns
+`committed_projection_deferred` when rebuilding is deferred to a later
+field projection checkpoint; that returned outcome does not change when
+the checkpoint runs. A completed immediate projection, acknowledged audit
+and successful notification return `ready`. An incomplete audit remains
+`committed_audit_incomplete` with `not_appended` or `unknown` append evidence;
+an acknowledged audit followed by notification failure remains
+`committed_notification_failed`. Neither rolls back the committed source
+transition. The observed pair is this writer's historical
+predecessor → replacement, not durable correction lineage, content
+truth, or later currentness; supersession during audit does not erase
+that pair. Predecessor bytes and event time remain stored. Independent
+contradictory source reports remain separate evidence, not replacements.
+This contract does not close a full feedback loop or cross-source
+chronology.
 
 Audit precedes broadcast. Every state change records an audit row
 before any consumer can observe it.
@@ -418,6 +455,31 @@ dispatch; worker SQLite connections are query-only and never append EventLog
 entries or materialize projections. This preserves the daemon's single-writer
 boundary while the main database connection remains open.
 
+Query-conditioned source embedding for `soul.interpretation` prepare/recall runs
+in the parent under `beforeSnapshotPreparation` and is attached privately as
+`prepared_query` on `conditionalField.sourceSemantics`. Public MCP/CLI payloads
+cannot supply vectors or selected profiles.
+
+A private Source-index producer is constructed with recall materialization
+wiring. It starts with other background services and stops during shutdown after
+the Garden background manager. It is not an MCP, CLI, or Inspector surface and is
+separate from Garden `EMBEDDING_BACKFILL`. Binding uses the daemon's local-only
+source-index entry (`local_onnx`); missing or API providers stay unbound for this
+producer. The producer drives Source-index lifecycle select/begin/capture,
+backfill steps, and activation CAS on a private local configuration revision.
+`root_complete` is not generation readiness. `SourceIndexLifecycle.unbind` atomically
+retires generations, clears active eligibility and advances the selection revision;
+retained configuration is historical, not a ready binding. Old captured selections,
+writes and activation cannot restore eligibility. Recovery starts a fresh generation,
+without encoding configuration absence as build failure.
+
+Passes are concurrency 1 with bounded rotating workspace/root visits and shared
+capture/backfill allowances. Stop and deadlines end local waiting without cancelling
+shared inference; native occupancy stays quarantined until settlement or provider
+close. Query preparation requires an eligible active generation. Local model artifacts
+must already be provisioned; this wiring does not download them. Mechanism-level
+cached-model checks do not establish default useful recall or natural-corpus effects.
+
 Each step records an audit row `daemon.startup.<step>.completed`. Tool
 calls that arrive before step 6 receive a fail-closed response.
 
@@ -439,7 +501,8 @@ Both produce candidates that flow through the Promotion Gate before
 becoming durable.
 
 Ordinary official-API extraction uses `source-interpretation-v1`. Protocol owns
-phrase location and Core owns source admission and observation publication;
+phrase location and Core owns source admission, predecessor-bound
+replacement, and observation publication;
 model predicate/role proposals do not certify their meaning. Interactive turns,
 post-turn tasks, and bench compile seeds retain the exact canonical extraction
 corpus before calling the provider or replaying its cache. Interactive artifact

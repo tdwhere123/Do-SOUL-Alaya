@@ -63,9 +63,9 @@ export function semanticLeaseGroupAccountingCost(count: number, retainedCount = 
 
 /** Capacity only: template leases are never installed or turned into capability identities. */
 export function preflightSemanticLeaseGroup<Lease extends Clock & { expires_at: string }>(
-  runtime: SourceSemanticReadRuntime, leases: readonly Lease[]): void {
+  runtime: SourceSemanticReadRuntime, leases: readonly Lease[], meter: SourceSemanticReadBudget): void {
   if (leases.length === 0) return;
-  admittedRows(runtime, leases.map((lease) => ({ id: Symbol(), lease })), sourceSemanticLifetimeNow(leases[0]!));
+  admittedRows(runtime, leases.map((lease) => ({ id: Symbol(), lease })), sourceSemanticLifetimeNow(leases[0]!), meter);
 }
 
 /** Publish all handles in one response together; older leases remain evictable. */
@@ -77,22 +77,25 @@ export function issueSemanticLeaseGroup(runtime: SourceSemanticReadRuntime,
     "preparation lease retention accounting");
   const ids: string[] = [];
   for (const { lease, issuedId } of issues) {
-    meter.retain(lease, "preparation lease");
+    meter.retain(lease, "preparation lease", "borrow");
     ids.push(issuedId ?? randomUUID());
   }
   const protectedIds = new Set(ids);
   if (protectedIds.size !== ids.length) throw new CoreError("CONFLICT", "duplicate source semantic preparation handle");
   const rows = admittedRows(runtime, issues.map(({ lease }, index) => ({ id: ids[index]!, lease })),
-    sourceSemanticLifetimeNow(issues[0]!.lease));
+    sourceSemanticLifetimeNow(issues[0]!.lease), meter);
   LEASES.set(runtime, rows);
   return ids;
 }
 
 function admittedRows<K extends string | symbol, Lease extends { expires_at: string }>(runtime: SourceSemanticReadRuntime,
-  issues: readonly Readonly<{ id: K; lease: Lease }>[], now: string): Map<string | K, LeaseRow<SourceSemanticLease | Lease>> {
+  issues: readonly Readonly<{ id: K; lease: Lease }>[], now: string,
+  meter: SourceSemanticReadBudget): Map<string | K, LeaseRow<SourceSemanticLease | Lease>> {
   const rows = new Map<string | K, LeaseRow<SourceSemanticLease | Lease>>(LEASES.get(runtime));
   for (const [id, row] of rows) if (row.lease.expires_at <= now) rows.delete(id);
-  for (const { id, lease } of issues) rows.set(id, { lease, bytes: 4 * canonicalJson(lease).length });
+  // Capacity retains the existing four-bytes-per-canonical-code-unit policy, not
+  // a serialized payload. Borrowing owned phases does not authorize a free encode.
+  for (const { id, lease } of issues) rows.set(id, { lease, bytes: 4 * meter.canonicalJsonLength(lease) });
   const protectedIds = new Set<string | K>(issues.map((issue) => issue.id));
   let bytes = [...rows.values()].reduce((sum, row) => sum + row.bytes, 0);
   for (const id of rows.keys()) {

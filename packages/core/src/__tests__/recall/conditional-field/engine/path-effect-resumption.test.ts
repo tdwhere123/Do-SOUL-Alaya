@@ -47,7 +47,7 @@ function preparedFrontier() {
   const prepared: FieldEngineState = { ...observed, pending_path_effects: {
     offset: 0, retained_bytes: 0, page, input,
     preparation: { effects, next_offset: effects.length, status: "complete", effect_index: 0, stage: "start",
-      facet_scan_index: 0, facet_resume_offset: observed.seen_identities.length,
+      facet_resume_offset: observed.seen_identities.length,
       pair_demands: observed.pair_demands, pair_bytes: 0, source_demands: observed.source_fact_demands,
       source_pending: observed.source_fact_pending_count, source_bytes: 0, retained_bytes: 128 + 8 * effects.length }
   } };
@@ -88,7 +88,6 @@ describe("bounded path effect continuation", () => {
         facet_resume_offset: offset, effects: [updated, ...preparation.effects.slice(1)] } } });
     expect(resumed.pending_path_effects?.preparation?.effect_index).toBe(1);
     expect(resumed.pending_path_effects?.preparation?.facet_resume_offset).toBe(offset);
-    expect(resumed.pending_path_effects?.preparation?.facet_scan_index).toBe(0);
     const completed = resumePathEffects({ ...resumed, remaining_exploration: 10000 });
     expect(completed.pending_path_effects).toBeUndefined();
     expect(completed.transitions.some(edge => edge.instance_id === "updated-edge" && edge.strength_milligrades === 400)).toBe(true);

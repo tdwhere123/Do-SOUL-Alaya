@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, cpSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,6 +106,26 @@ it("binds carriage-return edits when tracked attributes forbid text normalizatio
   const second = inspect(loaded, loaded).revision;
   expect(first).not.toBe(baseline);
   expect(second).not.toBe(first);
+});
+
+it("binds raw tracked changes without invoking a configured textconv helper", () => {
+  const loaded = checkout(), marker = join(loaded, "helper-ran");
+  writeFileSync(join(loaded, "textconv.cjs"), `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran"); console.log("constant");`);
+  writeFileSync(join(loaded, ".gitattributes"), "source.txt diff=fixture\n");
+  git(loaded, ["add", ".gitattributes", "textconv.cjs"]);
+  git(loaded, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "textconv fixture"]);
+  git(loaded, ["config", "diff.fixture.textconv", `"${process.execPath}" "${join(loaded, "textconv.cjs")}"`]);
+  const baseline = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "first raw change\n");
+  const first = inspect(loaded, loaded).revision;
+  writeFileSync(join(loaded, "source.txt"), "second raw change\n");
+  expect(first).not.toBe(baseline);
+  expect(inspect(loaded, loaded).revision).not.toBe(first);
+  expect(existsSync(marker)).toBe(false);
+  // Independent negative control: the configured authored helper really would run
+  // without the authority reader's explicit textconv refusal.
+  git(loaded, ["diff", "--no-ext-diff", "--binary", "HEAD", "--"]);
+  expect(existsSync(marker)).toBe(true);
 });
 
 it("preserves authority revision across canonical LF and CRLF checkout bytes", () => {

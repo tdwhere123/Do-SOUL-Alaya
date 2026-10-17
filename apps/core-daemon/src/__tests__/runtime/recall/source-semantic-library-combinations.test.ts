@@ -122,7 +122,7 @@ function base(ctx: Context, roots = 1): Parameters<typeof prepareLibraryDelivery
       unexamined_source_interpretation_count: 0, omitted_duplicate_bindings: 0, examination_cap: SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
       open_residuals: false, truncated: false },
     pool: { sources: records, descriptors: [], sourcePages: 1, interpretationPages: 0,
-      access: { ...sourceSemanticAccessReceiptValue("query-conditioned-v1", `sha256:${"ab".repeat(32)}`,
+      access: { ...sourceSemanticAccessReceiptValue(meter(), "query-conditioned-v1", `sha256:${"ab".repeat(32)}`,
         records.map(record => ({ source_id: record.source_id, record_id: record.identity, read_bytes: Buffer.byteLength(ctx.body),
           body_bytes: Buffer.byteLength(ctx.body), complete: true, signal: { source_text_score: 0, interpretation_reading_score: 0 } })),
         [], false, false, []), pool_id: `sha256:${"cd".repeat(32)}` } } };
@@ -150,7 +150,7 @@ function budgetForPair(ctx: Context) {
 it("delivers complementary whole proofs when their same-root union exceeds the envelope", () => {
   const candidates = packages(context), limit = budgetForPair(context);
   expect(candidates.incomplete).toBe(false);
-  expect(candidates.packages.map(row => row.proofs.length)).toEqual([3, 1, 1, 1, 0]);
+  expect(candidates.packages.map(row => row.proofs.length)).toEqual([3, 1, 1, 1, 0, 0]);
   const baseline = deliver(context, candidates.packages, limit, { baseline: true });
   expect(baseline.result.proofs).toHaveLength(1);
   const actual = deliver(context, candidates.packages, limit);

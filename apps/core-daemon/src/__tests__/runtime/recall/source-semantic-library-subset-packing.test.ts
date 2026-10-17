@@ -80,7 +80,8 @@ for (const caseName of ["coverage", "alternatives"] as const) {
   }, 60_000);
 }
 
-const frozenEnvelopes = [{ caseName: "coverage", limit: 513_305 }, { caseName: "alternatives", limit: 176_340 }] as const;
+// Protocol v2 envelopes measured by the exhaustive native pair controls above.
+const frozenEnvelopes = [{ caseName: "coverage", limit: 513_496 }, { caseName: "alternatives", limit: 176_533 }] as const;
 for (const { caseName, limit } of frozenEnvelopes) {
   it(`compares evidence-set selection for ${caseName} at the frozen native byte limit`, async () => {
     const authored = caseName === "coverage" ? coverageSelectionFixture(selectionExecutionBudget)

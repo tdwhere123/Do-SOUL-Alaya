@@ -5,6 +5,7 @@ import { ruleIdentity, transitionKey } from "./path-composition.js";
 import type { FieldEngineState } from "./field-engine.js";
 import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 import { selectSeedActivation } from "./path-composition-seed.js";
+import { indexFacetsByIdentity, type FacetIdentityIndex } from "./path-composition-facet.js";
 
 export type FieldRetentionIndex = Readonly<{
   rows: Pick<FieldEngineState, "observations" | "measurements" | "seeds" | "guaranteed_seeds" | "transitions"
@@ -18,6 +19,7 @@ export type FieldRetentionIndex = Readonly<{
   ruleRevisions: PersistentStringMap<string>;
   derivations: PersistentStringMap<Derivation>;
   facets: PersistentStringMap<true>;
+  facetsByIdentity: FacetIdentityIndex;
   discoveries: PersistentStringMap<true>;
 }>;
 
@@ -40,14 +42,21 @@ export function indexFieldRetention(state: Pick<FieldEngineState, "observations"
   for (const row of state.derivations) derivations = derivations.with(row.derivation_id, row);
   let facets = new PersistentStringMap<true>();
   for (const row of state.facets) facets = facets.with(row.path_id, true);
+  const facetsByIdentity = indexFacetsByIdentity(state.facets);
   let discoveries = new PersistentStringMap<true>();
   for (const row of state.discoveries) discoveries = discoveries.with(row.assertion_id, true);
   return { rows: { observations: RetainedSequence.from(state.observations), measurements: RetainedSequence.from(state.measurements),
     seeds: RetainedSequence.from(state.seeds), guaranteed_seeds: RetainedSequence.from(state.guaranteed_seeds),
     transitions: RetainedSequence.from(state.transitions), guaranteed_transitions: RetainedSequence.from(state.guaranteed_transitions),
     derivations: RetainedSequence.from(state.derivations), facets: RetainedSequence.from(state.facets), discoveries: RetainedSequence.from(state.discoveries) },
-    payloads, observations, measurements, transitions, ruleRevisions, derivations, facets, discoveries,
+    payloads, observations, measurements, transitions, ruleRevisions, derivations, facets, facetsByIdentity, discoveries,
     seeds: seedOffsets(state.seeds), guaranteedSeeds: seedOffsets(state.guaranteed_seeds) };
+}
+
+/** The identity index is valid only for the exact facet rows it was built from. */
+export function facetIdentityIndexOf(state: Pick<FieldEngineState, "facets" | "retained_index">): FacetIdentityIndex | undefined {
+  const index = state.retained_index;
+  return index !== undefined && index.rows.facets === state.facets ? index.facetsByIdentity : undefined;
 }
 
 export function indexObservationOffsets(

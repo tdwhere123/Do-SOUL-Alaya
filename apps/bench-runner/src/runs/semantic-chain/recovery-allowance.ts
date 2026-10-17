@@ -1,10 +1,12 @@
-import { mkdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { lstatSync, mkdirSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
 import { SourceSemanticWorkerWorkSchema } from "@do-soul/alaya-protocol";
 import { chainIdentity } from "./contract.js";
+import { boundedArtifactEntryExists, withBoundedStableRegularFile, withRootBoundDirectory }
+  from "../extraction/cache-audit/bounded-artifact-reader.js";
 
 const Amount = z.number().int().nonnegative().safe();
 export const RecoveryAllowanceSchema = z.object({
@@ -29,6 +31,7 @@ function withCycle<T>(rootInput: string, apply: (db: DatabaseSync, cycle: CycleR
     db.exec("CREATE TABLE IF NOT EXISTS effects (name TEXT PRIMARY KEY, identity TEXT NOT NULL, work_units INTEGER NOT NULL, memory_bytes INTEGER NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS native_observations (name TEXT PRIMARY KEY, work_json TEXT NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS read_observations (ordinal INTEGER PRIMARY KEY, label TEXT NOT NULL, input_bytes INTEGER NOT NULL)");
+    db.exec("CREATE TABLE IF NOT EXISTS effect_exclusion (singleton INTEGER PRIMARY KEY CHECK(singleton=1), name TEXT NOT NULL)");
     db.exec("BEGIN IMMEDIATE");
     try {
       const cycle = db.prepare("SELECT * FROM cycle LIMIT 1").get() as CycleRow | undefined;
@@ -79,8 +82,16 @@ export function reserveRecoveryRead(root: string, label: string, additionalPaths
     const allowance = RecoveryAllowanceSchema.parse(JSON.parse(cycle.allowance_json));
     let bytes = 0;
     for (const path of new Set([cycle.snapshot_path, ...additionalPaths].map(path => resolve(path)))) {
-      try { bytes += statSync(path).size; }
-      catch { /* Missing inputs are still charged the fixed admission floor and rejected by their reader. */ }
+      // Callers supply the bounded reader inventory, not a recursive cache/archive scan.
+      // Resolve-path duplicates count once; distinct hard-linked names remain distinct inputs.
+      if (!boundedArtifactEntryExists(path)) continue;
+      if (lstatSync(path).isDirectory()) {
+        withRootBoundDirectory({ root: path, label: "recovery input directory" }, () => undefined);
+        continue;
+      }
+      bytes += withRootBoundDirectory({ root: dirname(path), label: "recovery input parent" }, directory =>
+        withBoundedStableRegularFile({ path: join(directory, basename(path)),
+          maxBytes: allowance.max_input_bytes_per_read, label: "recovery input" }, (_descriptor, opened) => Number(opened.size)));
     }
     if (cycle.read_count >= allowance.max_read_admissions || bytes > allowance.max_input_bytes_per_read) {
       throw new AlayaError("UNAVAILABLE", `recovery read allowance cannot admit ${label}`);
@@ -95,7 +106,7 @@ export function reserveRecoveryRead(root: string, label: string, additionalPaths
 
 /** A named action spends once. The existing stage reservation owns no-retry and completion checks. */
 export function reserveRecoveryAction(root: string, name: string, identity: string,
-  workUnits: number, memoryBytes: number, completed: boolean): void {
+  workUnits: number, memoryBytes: number, completed: boolean, exclusiveRoot = false): void {
   withCycle(root, (db, cycle) => {
     const allowance = RecoveryAllowanceSchema.parse(JSON.parse(cycle.allowance_json));
     const prior = db.prepare("SELECT identity, work_units, memory_bytes FROM effects WHERE name=?").get(name) as
@@ -108,17 +119,22 @@ export function reserveRecoveryAction(root: string, name: string, identity: stri
       return;
     }
     if (completed) throw new AlayaError("CONFLICT", "durable recovery result lacks its prior numeric reservation");
+    const excluded = db.prepare("SELECT name FROM effect_exclusion WHERE singleton=1").get();
+    if (excluded !== undefined || exclusiveRoot && db.prepare("SELECT name FROM effects LIMIT 1").get() !== undefined) {
+      throw new AlayaError("CONFLICT", "source experiment root already has an effect reservation");
+    }
     if (cycle.effect_count >= allowance.max_effects) throw new AlayaError("UNAVAILABLE", "recovery effect allowance exhausted");
     reserveTotal(cycle, allowance, workUnits, memoryBytes);
     db.prepare("INSERT INTO effects VALUES (?, ?, ?, ?)").run(name, identity, workUnits, memoryBytes);
+    if (exclusiveRoot) db.prepare("INSERT INTO effect_exclusion VALUES (1, ?)").run(name);
     db.prepare("UPDATE cycle SET work_reserved=?, memory_reserved=?, effect_count=? WHERE identity=?").run(
       cycle.work_reserved + workUnits, cycle.memory_reserved + memoryBytes, cycle.effect_count + 1, cycle.identity);
   });
 }
 
-export function reserveRecoveryHostEffect(root: string, name: string, identity: string, completed: boolean): void {
+export function reserveRecoveryHostEffect(root: string, name: string, identity: string, completed: boolean, exclusiveRoot = false): void {
   const allowance = withCycle(root, (_db, cycle) => RecoveryAllowanceSchema.parse(JSON.parse(cycle.allowance_json)));
-  reserveRecoveryAction(root, name, identity, allowance.read_work_units, allowance.read_memory_bytes, completed);
+  reserveRecoveryAction(root, name, identity, allowance.read_work_units, allowance.read_memory_bytes, completed, exclusiveRoot);
 }
 
 function reserveTotal(cycle: CycleRow, allowance: RecoveryAllowance, work: number, memory: number): void {
@@ -146,6 +162,17 @@ export function recoveryAllowanceIdentity(root: string): string {
   } catch (cause) {
     if (cause instanceof AlayaError) throw cause;
     throw new AlayaError("CONFLICT", "recovery total allowance owner is malformed", { cause });
+  } finally { db.close(); }
+}
+
+/** Readback only: absence is not a new reservation or permission to execute. */
+export function readRecoveryAction(root: string, name: string) {
+  const path = join(resolve(root), "recovery-allowance.sqlite");
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = db.prepare("SELECT identity, work_units, memory_bytes FROM effects WHERE name=?").get(name) as
+      { identity: string; work_units: number; memory_bytes: number } | undefined;
+    return row;
   } finally { db.close(); }
 }
 

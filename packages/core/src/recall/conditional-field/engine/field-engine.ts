@@ -39,7 +39,8 @@ import {
   scheduleFairWork,
   type FairWorkRegion
 } from "../reference/schedule-fair-work.js";
-import { type HyperedgeCompletion, type HyperedgePremise } from "./path-composition-adjacency.js";
+import { type AdjacencyEffectsInput, type HyperedgeCompletion, type HyperedgePremise } from "./path-composition-adjacency.js";
+import type { StateEndpointIndex } from "./state-endpoint-index.js";
 import { facetBelongsToOutput, retainSamePathVectors } from "./path-composition-facet.js";
 import { collectIdentities, mergeSeeds } from "./path-composition-seed.js";
 import { mergeTransitions, transitionKey } from "./path-composition.js";
@@ -50,7 +51,7 @@ import type { BoundSourceFacts } from "./binding-environment.js";
 import type { GroundingProgress } from "./output-derivations.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import type { FieldGraphAdditions } from "./field-graph-preparation.js";
-import type { FieldRetentionIndex } from "./field-retention-index.js";
+import { facetIdentityIndexOf, type FieldRetentionIndex } from "./field-retention-index.js";
 import {
   affectedSubjectsOf,
   productSccs,
@@ -166,6 +167,9 @@ export type FieldEngineState = Readonly<{
   readonly seen_identities: RetainedRows<ProductStateKey>;
   readonly identity_index?: PersistentStringMap<ProductStateKey>;
   readonly ordered_identities?: PersistentStringMap<ProductStateKey>;
+  /** Offset of each node id in `seen_identities`; kept with `identity_index`. */
+  readonly identity_positions?: PersistentStringMap<number>;
+  readonly state_endpoint_index?: StateEndpointIndex;
   readonly retained_index?: FieldRetentionIndex;
   readonly identity_spool: RetainedRows<ProductStateKey>;
   readonly observations: RetainedRows<TypedObservation>;
@@ -180,7 +184,8 @@ export type FieldEngineState = Readonly<{
   /** Branch-private sequence frontier. Copies must not share one automaton cache. */
   readonly sequence_reach_owner?: object;
   readonly path_effect_frontier?: Readonly<{ identities: number; facets: RetainedRows<FacetVector>; discoveries: number;
-    sourceFacts?: PersistentStringMap<BoundSourceFacts> }>;
+    sourceFacts?: PersistentStringMap<BoundSourceFacts>;
+    demand_context?: Pick<AdjacencyEffectsInput, "interpretation" | "overlay" | "physicalKinds"> }>;
   readonly source_facts?: PersistentStringMap<BoundSourceFacts>;
   readonly source_fact_bytes?: number;
   readonly observed_relation_bytes?: number;
@@ -480,7 +485,8 @@ function rebuildPendingPathEffects(
     return markUnexecutedRebuild({ ...state, path_effect_frontier: undefined });
   }
   const withdrawnIds = new Set(state.withdrawn_leaves ?? []);
-  const { joinRows: _joinRows, sequenceReachOwner: _sequenceReachOwner, liveStateOffset: _liveStateOffset, ...options } = pending.input.options;
+  const { joinRows: _joinRows, sequenceReachOwner: _sequenceReachOwner, liveStateOffset: _liveStateOffset,
+    settledStateEndpoints: _settledStateEndpoints, ...options } = pending.input.options;
   return markUnexecutedRebuild({
     ...state,
     path_effect_frontier: undefined,
@@ -495,6 +501,7 @@ function rebuildPendingPathEffects(
           liveStateOffset: 0,
           liveStates: state.seen_identities,
           facets: state.facets,
+          facetIndex: facetIdentityIndexOf(state),
           discoveries: state.discoveries,
           bindingContexts: state.binding_contexts,
           ...(state.compiled_automaton === undefined ? {} : { compiledAutomaton: state.compiled_automaton })

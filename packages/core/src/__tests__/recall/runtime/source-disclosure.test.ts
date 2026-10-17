@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { projectSourceDisclosure } from "../../../recall/runtime/source-disclosure.js";
+import { sourceDisclosure } from "@do-soul/alaya-protocol";
+import { projectSourceDisclosure as projectWire } from "../../../recall/runtime/source-disclosure.js";
+const projectSourceDisclosure = (input: Parameters<typeof projectWire>[0]) => sourceDisclosure(projectWire(input));
 import { projectEvidenceRead } from "../../../memory/evidence-read-projection.js";
 
 const source = { valid_from: "2026-09-25T10:00:00.0000001Z",
@@ -66,10 +68,10 @@ describe("source disclosure", () => {
     const projected = projectEvidenceRead({ gist: "interpretation", excerpt: "joined mention" }, "2026-09-25T10:00:00Z");
     expect(projected.gist).toBe("interpretation");
     expect(projected.excerpt).toBe("joined mention");
-    expect(projected.text_disclosures.gist).toMatchObject({ material_kind: "retained_gist",
+    expect(sourceDisclosure(projected.text_disclosures.gist)).toMatchObject({ material_kind: "retained_gist",
       validity: { kind: "unknown", reason: "unbound" }, source_time: { kind: "unknown", reason: "unbound" },
       proof_use: { kind: "source_only", qualification: "not_current_proof" } });
-    expect(projected.text_disclosures.excerpt).toMatchObject({ material_kind: "retained_excerpt" });
+    expect(sourceDisclosure(projected.text_disclosures.excerpt!)).toMatchObject({ material_kind: "retained_excerpt" });
     expect(projected.text_disclosures.content).toEqual(projected.text_disclosures.excerpt);
   });
 });

@@ -8,6 +8,7 @@ import { processEnvLookup } from "../../config/daemon-config-environment.js";
 import {
   createSourceAdmissionPort,
   createAuditedSourceAdmission,
+  createAuditedSourceReplacement,
   fieldContractSha256,
   HqAnswerOverlapPairSource
 } from "@do-soul/alaya-core";
@@ -239,6 +240,7 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
     temporalRuntimeLease: input.temporalRuntimeLease,
     recallReadWorkerClient: input.recallReadWorkerClient,
     closeEmbeddingProvider: input.closeEmbeddingProvider,
+    sourceIndexProducer: input.sourceIndexProducer,
     intervalsToClear: [input.pathRelationEvictionTimer]
   };
 }
@@ -254,6 +256,12 @@ function createMemoryHqExports(input: FinalizeDaemonRuntimeWiringInput) {
 function createDaemonServiceExports(input: FinalizeDaemonRuntimeWiringInput) {
   return {
     sourceRecordAdmission: createAuditedSourceAdmission({
+      sha256: fieldContractSha256,
+      stores: input.fieldComposition.stores,
+      eventLogRepo: input.eventLogRepo,
+      runtimeNotifier: input.runtimeNotifier
+    }),
+    sourceRecordReplacement: createAuditedSourceReplacement({
       sha256: fieldContractSha256,
       stores: input.fieldComposition.stores,
       eventLogRepo: input.eventLogRepo,

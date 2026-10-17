@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
-import { SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, SourceSemanticResourceLedger, projectSourceSemanticQuerySupport, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../../shared/field-hash.js";
-import { selectSourceSemanticLibraryPage, type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
+import { selectSourceSemanticLibraryPage, selectSourceSemanticLibraryPageWithPairExchange,
+  type SourceSemanticLibraryPackage } from "../../../recall/runtime/source-semantic-library-selection.js";
 import { assembleSourceSemanticLibraryIndex, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry } from "../../../recall/runtime/source-semantic-library-recall.js";
 import { SOURCE_SEMANTIC_REASONING_BUDGET } from "../../../recall/runtime/source-semantic-reasoning.js";
 import { deliveredProofFixture, source, query, correspondenceFor } from "./source-semantic-proof-fixture.js";
@@ -10,11 +11,11 @@ import { alternativeSelectionFixture, compatibleTaskSupport, coverageSelectionFi
 } from "./source-semantic-selection-fixture.js";
 
 const budget = () => new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 20_000_000 });
-const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = {
+const disclosure: SourceSemanticLibraryPackage["source_disclosure"] = encodeSourceDisclosure({
   material_kind: "original_body", source_binding: "unbound", evaluated_as_of: "2026-09-18T00:00:00.000Z",
   validity: { kind: "unknown", reason: "unbound" }, temporal_state: "unknown",
   proof_use: { kind: "source_only", qualification: "not_current_proof" }
-};
+});
 const evidenceQuery: SourceSemanticQuery = { ...query(), requested_operation: { reading: "collect tools", support: { kind: "query_text", excerpt: "tools" } },
   alternatives: query().alternatives.map(row => ({ ...row, answer_frames: [], evidence_inputs: [{ frames: ["qUse"] }] })) };
 function witnessed(id: string, semantics = evidenceQuery): SourceSemanticLibraryPackage {
@@ -250,11 +251,11 @@ it("finishes this source's statements inside the default reasoning allowance", (
 });
 
 it("retains an ordered open prefix when the work allowance stops early", () => {
-  // Half the default allowance still stops before this source's last statement.
-  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 2 };
+  // A quarter of the default allowance stops before the last statement with indexed row deltas.
+  const allowance = { ...SOURCE_SEMANTIC_REASONING_BUDGET, work_units: Math.floor(SOURCE_SEMANTIC_REASONING_BUDGET.work_units / 4) };
   const original = coverageSelectionFixture(allowance), partial = original.pool[0]!, complete = coverageTask.pool[0]!;
   const proof = partial.proofs[0]!;
-  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 100_000, memory_bytes: 20_000_000,
+  expect(original.execution_budget).toMatchObject({ schema_version: 1, work_units: 50_000, memory_bytes: 20_000_000,
     page_budget: 100_000, finalization_reserve: 10_000, min_envelope: 10 });
   expect(root(partial)).toBe(root(complete));
   expect(proof.source_interpretation_id).toBe(complete.proofs[0]!.source_interpretation_id);
@@ -306,7 +307,7 @@ it("executes only the distinct source-bound deployment inputs without claiming t
   }
 });
 
-it("retains a strict one-exchange local maximum below the finite two-root coverage optimum", () => {
+it("keeps the default local maximum and measures the private bounded pair improvement", () => {
   const { pool } = coverageTask;
   const coverage = (rows: readonly SourceSemanticLibraryPackage[]) => deliveredInputNumbers(coverageTask, rows).length;
   expect(pool.map(row => coverage([row]))).toEqual([7, 4, 6, 6]);
@@ -317,14 +318,17 @@ it("retains a strict one-exchange local maximum below the finite two-root covera
   expect(optimum).toBe(12);
   expect(subsets.every(rows => compatibleTaskSupport(coverageTask, rows).complete_alternatives === 0)).toBe(true);
   for (const candidates of [pool, [...pool].reverse(), [...pool.slice(1), pool[0]!]]) {
-    const selected = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
-    expect(selected.map(root)).toEqual([root(pool[0]!), root(pool[1]!)]);
+    const baseline = selectSourceSemanticLibraryPage({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
+    expect(baseline.map(root)).toEqual([root(pool[0]!), root(pool[1]!)]);
+    expect(coverage(baseline)).toBe(11);
+    const selected = selectSourceSemanticLibraryPageWithPairExchange({ candidates, meter: budget(), fits: rows => rows.length <= 2 });
+    expect(selected.map(root).sort()).toEqual([root(pool[2]!), root(pool[3]!)].sort());
     expect(selected.map(row => row.selection_basis)).toEqual(["new_input", "new_input"]);
-    expect(coverage(selected)).toBe(11);
-    expect(new Set(selected.flatMap(executedInputNumbers)).size).toBe(11);
+    expect(coverage(selected)).toBe(12);
+    expect(new Set(selected.flatMap(executedInputNumbers)).size).toBe(12);
     for (const replacement of [pool[2]!, pool[3]!]) {
-      expect(coverage([selected[0]!, replacement])).toBeLessThan(11);
-      expect(coverage([replacement, selected[1]!])).toBeLessThan(11);
+      expect(coverage([pool[0]!, replacement])).toBeLessThan(11);
+      expect(coverage([replacement, pool[1]!])).toBeLessThan(11);
     }
     expect(compatibleTaskSupport(coverageTask, selected).complete_alternatives).toBe(0);
   }

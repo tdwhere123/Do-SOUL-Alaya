@@ -3,8 +3,10 @@ import { applyObserverPage, type FieldEngineState } from "../conditional-field/e
 import { forkSequenceReachOwner, transferSequenceReachCharge } from "../conditional-field/engine/sequence-reach.js";
 import { createAdjacencyEffectCursor, type AdjacencyEffectsInput } from "../conditional-field/engine/path-composition-adjacency.js";
 import type { PathEffectPreparation } from "../conditional-field/engine/path-effect-cursor.js";
-import { pairKey } from "../conditional-field/engine/path-routing.js";
+import { facetIdentityIndexOf } from "../conditional-field/engine/field-retention-index.js";
+import { pairInRegistry, pairKey } from "../conditional-field/engine/path-routing.js";
 import { productStateNodeId } from "../conditional-field/reference/bind-max-min.js";
+import { settledEndpointIndex } from "../conditional-field/engine/state-endpoint-index.js";
 
 const PREPARATION_BASE_BYTES = 128;
 
@@ -37,7 +39,10 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   if (state.remaining_exploration === 0) return interrupted(state, false);
   const owned = ownSequenceReach(state, pending);
   state = owned.state;
-  const options = owned.options;
+  const options = pending.cursor === undefined
+    ? { ...owned.options, settledStateEndpoints: settledEndpointIndex(state, pending),
+      registeredDemands: { pairs: state.pair_demands, sources: state.source_fact_demands } }
+    : owned.options;
   const cursor = pending.cursor ?? createAdjacencyEffectCursor(pending.input.rows, options,
     state.remaining_memory_bytes + pending.retained_bytes);
   if (cursor === undefined) return interrupted(state, true);
@@ -57,7 +62,7 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
   if (charged.remaining_memory_bytes < scratchBytes) return interrupted(charged, true);
   const preparation: PathEffectPreparation = {
     effects: advanced.effects, next_offset: advanced.offset, status: advanced.status,
-    effect_index: 0, stage: "start", facet_scan_index: 0,
+    effect_index: 0, stage: "start",
     facet_resume_offset: pending.facet_resume_offset ?? pending.input.options.liveStates.length,
     pair_demands: state.pair_demands, pair_bytes: 0,
     source_demands: state.source_fact_demands, source_pending: state.source_fact_pending_count, source_bytes: 0,
@@ -71,8 +76,7 @@ function beginPathEffectPreparation(state: FieldEngineState): FieldEngineState {
 function preparePathEffects(state: FieldEngineState): FieldEngineState {
   const pending = state.pending_path_effects!;
   const preparation = pending.preparation!;
-  const priorStates = pending.input.options.liveStates;
-  let { effect_index: index, stage, facet_scan_index: scan, facet_resume_offset: facetOffset,
+  let { effect_index: index, stage, facet_resume_offset: facetOffset,
     pair_demands: pairs, pair_bytes: pairBytes, source_demands: sources,
     source_pending: sourcePending, source_bytes: sourceBytes } = preparation;
   let work = state.remaining_exploration;
@@ -90,8 +94,8 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       if (demand !== undefined) {
         if (work === 0) break;
         work -= 1;
-        const key = pairKey(demand.subject, demand.predicate);
-        if (!pairs.has(key)) {
+        if (!pairInRegistry(pairs, demand.subject, demand.predicate)) {
+          const key = pairKey(demand.subject, demand.predicate);
           const bytes = 96 + Buffer.byteLength(key, "utf8");
           if (bytes > memory) { memoryBlocked = true; break; }
           pairs = pairs.with(key, true); pairBytes += bytes; memory -= bytes;
@@ -113,23 +117,24 @@ function preparePathEffects(state: FieldEngineState): FieldEngineState {
       stage = "facet";
     }
     // Admission keeps the first path_id, so a retained facet cannot widen the frontier.
+    // The identity insert is one unit, paid here with the offset lookup. Spend
+    // both only when both are available so a later commit cannot reject the page.
     if (stage === "facet" && effect.facet !== undefined && !state.retained_index?.facets.has(effect.facet.path_id)) {
       const target = effect.transition?.to ?? effect.hyperedge?.to;
+      const units = target === undefined ? 1 : 2;
+      if (work < units) break;
+      work -= units;
       if (target === undefined) facetOffset = 0;
       else {
-        const targetId = productStateNodeId(target);
-        while (scan < facetOffset && work > 0) {
-          const position = scan;
-          scan += 1; work -= 1;
-          if (productStateNodeId(priorStates.at(position)!) === targetId) facetOffset = position;
-        }
-        if (scan < facetOffset && work === 0) break;
+        // The earliest prior state of the target is where later states must rejoin.
+        const position = state.identity_positions?.get(productStateNodeId(target));
+        if (position !== undefined && position < facetOffset) facetOffset = position;
       }
     }
-    index += 1; stage = "start"; scan = 0;
+    index += 1; stage = "start";
   }
   const next: PathEffectPreparation = { ...preparation, effect_index: index, stage,
-    facet_scan_index: scan, facet_resume_offset: facetOffset, pair_demands: pairs,
+    facet_resume_offset: facetOffset, pair_demands: pairs,
     pair_bytes: pairBytes, source_demands: sources, source_pending: sourcePending, source_bytes: sourceBytes,
     retained_bytes: preparationBytes(preparation.effects.length) + pairBytes + sourceBytes };
   const charged = { ...state, pending_path_effects: { ...pending, preparation: next },
@@ -185,8 +190,8 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
   const next = semanticDelta ? { input: { rows: pending.input.rows, options: { ...prior,
     bindingContexts: applied.binding_contexts,
     liveStates: applied.seen_identities, liveStateOffset,
-    joinRows: undefined,
-    facets: applied.facets, discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
+    joinRows: undefined, settledStateEndpoints: undefined,
+    facets: applied.facets, facetIndex: facetIdentityIndexOf(applied), discoveries: applied.discoveries } }, offset: 0, retained_bytes: 0,
     population_checked: populationChecked,
     page: { ...page, observations: [], outcome: { ...page.outcome, status: "open" as const } } } : undefined;
   const frontierFacts = populationChecked ? applied.source_facts : state.path_effect_frontier?.sourceFacts;
@@ -197,6 +202,8 @@ function commitPathEffects(state: FieldEngineState): FieldEngineState {
     binding_context_bytes: finished ? applied.binding_contexts?.bytes : applied.binding_context_bytes,
     ...(finished && !semanticDelta ? { path_effect_frontier: { identities: applied.seen_identities.length,
       facets: applied.facets, discoveries: applied.discoveries.length,
+      ...(applied.state_endpoint_index !== undefined && applied.state_endpoint_index.rows.length > 0
+        ? { demand_context: { interpretation: prior.interpretation, overlay: prior.overlay, physicalKinds: prior.physicalKinds } } : {}),
       ...(frontierFacts === undefined ? {} : { sourceFacts: frontierFacts }) } } : {}),
     observation_gaps: { guards, measurements },
     pending_path_effects: finished ? next : { ...pending, preparation: undefined, guards_seen: guardsSeen,

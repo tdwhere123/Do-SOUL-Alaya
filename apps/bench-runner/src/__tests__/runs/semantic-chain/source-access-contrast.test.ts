@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, expect, it, vi } from "vitest";
 import { SoulInterpretationRequestSchema, SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema,
+  packSourceSemanticAcquisition, packSourceSemanticQueryPreparation, sourceSemanticAccessPhases,
+  sourceSemanticAcquisitionNotRun, sourceSemanticExecutionPhases, unavailableSourceQueryPreparation,
   type SoulInterpretationRequest, type SourceSemanticWorkerWork } from "@do-soul/alaya-protocol";
 import { sourceSemanticLibraryRequestIdentity } from "@do-soul/alaya-core";
 import { createSourceSemanticInterpretationHandler } from "../../../../../core-daemon/src/mcp-memory/tool/interpretation-handler.js";
@@ -104,7 +106,7 @@ function checkRound(round: Round) {
   expect(round.original_query).toBe(ORIGINAL_QUERY);
   for (const response of [round.prepare, round.delivery]) {
     if (response === undefined) continue;
-    expect(response.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(response.execution).query_preparation.external_api_attempts).toBe(0);
     expect(response.work.logical_work ?? response.work.native_work).toBeLessThanOrEqual(REQUEST_BUDGET.work_units);
     expect(response.work.logical_memory_bytes).toBeLessThanOrEqual(REQUEST_BUDGET.memory_bytes);
   }
@@ -244,7 +246,11 @@ it.each(["duplicate", "exhausted"] as const)("refuses a %s reservation before in
 });
 
 function accessReceipt(sourceIds: readonly string[], observedCount = sourceIds.length, delivery = false) {
-  return SourceSemanticAccessReceiptSchema.parse({ contract: "source-semantic-access-v1", policy: "query-conditioned-v1",
+  const preparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
+  const acquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
+  return SourceSemanticAccessReceiptSchema.parse({ contract: "source-semantic-access-v2",
+    phases: [2, packSourceSemanticQueryPreparation(preparation), packSourceSemanticAcquisition(acquisition), null],
+    policy: "query-conditioned-v1",
     input_id: `sha256:${"a".repeat(64)}`, pool_id: `sha256:${"b".repeat(64)}`,
     observed_source_count: observedCount, observed_interpretation_count: 0,
     source_candidates: sourceIds.map(source_id => ({ source_id,
@@ -256,6 +262,37 @@ function accessReceipt(sourceIds: readonly string[], observedCount = sourceIds.l
       omitted_source_count: observedCount - sourceIds.length, omitted_interpretation_count: 0 },
     unvisited_sources: false, unvisited_interpretations: false, stopping_reasons: [] });
 }
+
+it("packs current access phases and rejects expanded public v2 input without upgrading it", () => {
+  const preparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
+  const acquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
+  const receipt = accessReceipt(["s-1"]);
+  expect(receipt).not.toHaveProperty("preparation");
+  expect(receipt).not.toHaveProperty("acquisition");
+  expect(receipt).not.toHaveProperty("phase_accounting");
+  const expanded = sourceSemanticAccessPhases(receipt);
+  expect(expanded.preparation).toEqual(preparation);
+  expect(expanded.acquisition).toEqual(acquisition);
+  expect(expanded.phase_accounting.observation).toBeNull();
+  expect(expanded.phase_accounting.native_cpu).toBe("unknown");
+  const { phases, ...rest } = receipt;
+  expect(SourceSemanticAccessReceiptSchema.safeParse({
+    ...rest, preparation, acquisition, phase_accounting: expanded.phase_accounting
+  }).success).toBe(false);
+  expect(SourceSemanticAccessReceiptSchema.safeParse({ ...rest, contract: "source-semantic-access-v1" }).success)
+    .toBe(false);
+  const measured = SourceSemanticAccessReceiptSchema.parse({
+    ...receipt, phases: [phases[0], phases[1], phases[2], [0, 0, 0]] as const
+  });
+  expect(sourceSemanticAccessPhases(measured).phase_accounting.observation).toEqual({
+    work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: "unknown"
+  });
+  expect(SourceSemanticAccessReceiptSchema.safeParse({
+    ...measured, phases: [phases[0], phases[1], phases[2], {
+      work: 0, memory_bytes: 0, native_bytes: 0, sql_internal_work: 0
+    }] as never
+  }).success).toBe(false);
+});
 
 it("keeps overlapping receipt omissions distinct from unrepresented observed identities", () => {
   const sources = Array.from({ length: 16 }, (_, index) => `s-${index + 1}`);

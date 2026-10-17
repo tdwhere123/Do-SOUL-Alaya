@@ -41,6 +41,14 @@ type EvidenceSetContext = Readonly<{ alternatives: readonly (readonly string[])[
  * fits must encode the actual complete page, including proofs and source bytes.
  */
 export function selectSourceSemanticLibraryPage(input: SelectionInput): readonly SourceSemanticLibraryPackage[] {
+  return selectLibraryPage(input, false, false, false);
+}
+
+/**
+ * Bounded pair trial for finite selection diagnostics, not native delivery.
+ * Later unreserved pages can lose budget; remove when the objective comparison is settled.
+ */
+export function selectSourceSemanticLibraryPageWithPairExchange(input: SelectionInput): readonly SourceSemanticLibraryPackage[] {
   return selectLibraryPage(input, false);
 }
 
@@ -86,7 +94,8 @@ export function selectSourceSemanticLibraryPageWithEvidenceSetCoverage(
   return selectLibraryPage(input, false, input.order !== "source_access");
 }
 
-function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets = false): readonly SourceSemanticLibraryPackage[] {
+function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets = false, pairs = true): readonly SourceSemanticLibraryPackage[] {
+  const workBefore = input.meter.spentWork;
   const selected: SourceSemanticLibraryPackage[] = [];
   const covered = new Set<string>();
   const coveredTuples = new Set<string>();
@@ -145,11 +154,26 @@ function selectLibraryPage(input: SelectionInput, novelty: boolean, evidenceSets
     }
     if (input.order !== "source_access") improveCoverage(selected, input, supports, score, rootKey,
       evidence === undefined ? undefined : proofsByRoot);
+    if (pairs && !novelty && evidence === undefined && input.order !== "source_access" && selected.length > 0 && proofsByRoot.size > 0) {
+      improveWithPairAllowance(input.meter, input.meter.spentWork - workBefore,
+        () => improveCoverage(selected, input, supports, score, rootKey, proofsByRoot, true));
+    }
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     // A later candidate or continuation cannot revoke an already reserved page.
   }
   return selectionReasons(selected, supports);
+}
+
+/** The fit callback closes over this same ledger; bound its encoder work as well as the search. */
+function improveWithPairAllowance(meter: SourceSemanticResourceLedger, incumbentWork: number, improve: () => void): void {
+  const work = Math.min(200_000, incumbentWork, Math.floor(meter.work / 2));
+  const bytes = Math.min(16_000_000, Math.floor(meter.bytes / 2));
+  const heldWork = meter.work - work, heldBytes = meter.bytes - bytes;
+  meter.work = work; meter.bytes = bytes;
+  try { improve(); }
+  catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; }
+  finally { meter.work += heldWork; meter.bytes += heldBytes; }
 }
 
 function indexSupport(candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticResourceLedger,
@@ -190,13 +214,15 @@ function pageScore(input: SelectionInput, supports: ReadonlyMap<IndexEntry, Sour
 function improveCoverage(selected: SourceSemanticLibraryPackage[], input: SelectionInput,
   supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>, score: PageScore,
   rootKey: (row: SourceSemanticLibraryPackage) => string,
-  proofsByRoot?: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>): void {
-  let changed = true;
+  proofsByRoot?: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>, vacantSlots = false): void {
+  let changed = true, searchSingles = !vacantSlots;
+  if (vacantSlots) input.meter.charge(input.candidates.length * Math.max(1, Math.ceil(Math.log2(input.candidates.length))),
+    input.candidates.length * 8, "pair exchange candidate order");
   const candidates = [...input.candidates].sort((left, right) => compareCodeUnits(rootKey(left), rootKey(right)));
   while (changed) {
     changed = false;
     const before = score(selected);
-    exchange: for (const candidate of candidates) for (let position = 0; position < selected.length; position++) {
+    exchange: for (const candidate of searchSingles ? candidates : []) for (let position = 0; position < selected.length; position++) {
       input.meter.charge(1, 0, "evidence coverage exchange");
       const page = selected.map((row, index) => index === position ? candidate : row);
       if (new Set(page.map(rootKey)).size !== page.length || compareScores(score(page), before) >= 0) continue;
@@ -205,50 +231,28 @@ function improveCoverage(selected: SourceSemanticLibraryPackage[], input: Select
       if (!input.fits(delivered)) continue;
       selected.splice(0, selected.length, ...delivered); changed = true; break exchange;
     }
+    searchSingles = true;
     if (!changed && proofsByRoot !== undefined) {
-      changed = selected.length === 1
-        ? exchangeSingleton(selected, candidates, input, supports, score, before, rootKey, proofsByRoot)
-        : exchangeTwoRoots(selected, candidates, input, supports, score, before, rootKey, proofsByRoot);
+      changed = exchangeTwoRoots(selected, candidates, input, supports, score, before, rootKey, proofsByRoot, vacantSlots);
     }
   }
-}
-
-function exchangeSingleton(selected: SourceSemanticLibraryPackage[], candidates: readonly SourceSemanticLibraryPackage[],
-  input: SelectionInput, supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>,
-  score: PageScore, before: readonly number[], rootKey: (row: SourceSemanticLibraryPackage) => string,
-  proofsByRoot: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>): boolean {
-  const retained = rootKey(selected[0]!);
-  for (let first = 0; first < candidates.length; first++) for (let second = first + 1; second < candidates.length; second++) {
-    input.meter.charge(1, 0, "evidence singleton pair enumeration");
-    const left = candidates[first]!, right = candidates[second]!;
-    const leftRoot = rootKey(left), rightRoot = rootKey(right);
-    if (leftRoot === rightRoot || leftRoot === retained || rightRoot === retained) continue;
-    input.meter.charge(2, 32, "evidence singleton page copy");
-    const page = [left, right];
-    if (compareScores(score(page), before) >= 0) continue;
-    if (rawProofReserved(left, 0, input, supports, proofsByRoot.get(leftRoot))
-      || rawProofReserved(right, 1, input, supports, proofsByRoot.get(rightRoot))) continue;
-    input.meter.charge(2, 32, "evidence singleton selection reasons");
-    const delivered = selectionReasons(page, supports);
-    if (!input.fits(delivered)) continue;
-    input.meter.charge(2, 16, "evidence singleton accepted membership");
-    selected.splice(0, selected.length, ...delivered);
-    return true;
-  }
-  return false;
 }
 
 function exchangeTwoRoots(selected: SourceSemanticLibraryPackage[], candidates: readonly SourceSemanticLibraryPackage[],
   input: SelectionInput, supports: ReadonlyMap<IndexEntry, SourceSemanticQuerySupport | undefined>,
   score: PageScore, before: readonly number[], rootKey: (row: SourceSemanticLibraryPackage) => string,
-  proofsByRoot: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>): boolean {
+  proofsByRoot: ReadonlyMap<string, readonly SourceSemanticLibraryPackage[]>, vacantSlots: boolean): boolean {
   for (let first = 0; first < candidates.length; first++) for (let second = first + 1; second < candidates.length; second++) {
     input.meter.charge(1, 0, "evidence pair enumeration");
     const left = candidates[first]!, right = candidates[second]!;
     if (rootKey(left) === rootKey(right)) continue;
-    for (let a = 0; a < selected.length; a++) for (let b = a + 1; b < selected.length; b++) {
-      input.meter.charge(selected.length, selected.length * 16, "evidence two-root exchange");
-      const page = selected.map((row, index) => index === a ? left : index === b ? right : row);
+    // Vacant slots permit replacing one root by a pair, or adding a fitting pair.
+    const capacity = vacantSlots ? SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET : Math.max(2, selected.length);
+    for (let a = 0; a <= selected.length && a < capacity - 1; a++)
+      for (let b = a + 1; b <= selected.length + Number(a === selected.length) && b < capacity; b++) {
+      const length = Math.max(selected.length, b + 1);
+      input.meter.charge(length, length * 16, "evidence two-root exchange");
+      const page = [...selected]; page[a] = left; page[b] = right;
       if (new Set(page.map(rootKey)).size !== page.length || compareScores(score(page), before) >= 0) continue;
       if (rawProofReserved(left, a, input, supports, proofsByRoot.get(rootKey(left)))
         || rawProofReserved(right, b, input, supports, proofsByRoot.get(rootKey(right)))) continue;

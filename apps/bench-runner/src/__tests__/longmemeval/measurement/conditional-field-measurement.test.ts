@@ -1,6 +1,6 @@
 import { buildLongMemEvalQualityMetrics } from "../../../diagnostics/diagnostics.js";
 import { FirstExposureSession } from "../../../runs/measurement/first-exposure-session.js";
-import { SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 import { compileConditionalFieldQuery, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { measureConditionalFieldResponse, ConditionalFieldMeasurementSchema } from "../../../runs/measurement/conditional-field-measurement.js";
@@ -93,7 +93,7 @@ describe("conditional target measurement evidence", () => {
       index: { ...base.recallResult.index, entries: [{ ...entry, target }] },
       results: [{ ...result, object_kind: "source_evidence", target,
         source_disclosure: projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: NOW }) }] } };
-    expect(input.recallResult.results[0]?.source_disclosure).toMatchObject({
+    expect(sourceDisclosure(input.recallResult.results[0]!.source_disclosure!)).toMatchObject({
       source_binding: "unbound", source_time: { kind: "unknown", reason: "unbound" },
       validity: { kind: "unknown", reason: "unbound" } });
     input.recallResult = initialPage(input.recallResult);

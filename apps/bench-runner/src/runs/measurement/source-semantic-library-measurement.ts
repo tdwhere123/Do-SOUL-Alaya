@@ -2,9 +2,10 @@ import { z } from "zod";
 import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
+  SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts,
   SoulInterpretationRecallDeliverySchema, SourceSemanticLibraryDiscoverySchema, SourceSemanticCoverageSchema, SourceSemanticQueryStatusSchema,
   canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
-  type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus
+  type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus, type SourceEvidenceTarget
 } from "@do-soul/alaya-protocol";
 import { deliveredSourceSemanticLibraryProof, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import {
@@ -83,6 +84,40 @@ const MeasurementRecordSchema = z.discriminatedUnion("status", [
 ]);
 export type SourceSemanticLibraryMeasurement = z.infer<typeof MeasurementRecordSchema> | z.infer<typeof HistoricalValidatedMeasurementRecord>;
 type InvalidMeasurementReason = Extract<SourceSemanticLibraryMeasurement, { status: "invalid" }>["reason"];
+
+export interface DeliveredSourceInterval {
+  readonly rank: number;
+  readonly target: SourceEvidenceTarget;
+  /** Half-open UTF-8 byte offsets in the published body, not JS string offsets. */
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Exact public preview intervals after whole-page admission. The archive owner must first
+ * verify emitted previews against the sealed source; index spans alone can overstate exposure. */
+export function deliveredSourceSemanticLibraryIntervals(measurement: SourceSemanticLibraryMeasurement | null,
+  recallResult: unknown): readonly DeliveredSourceInterval[] | null {
+  if (measurement?.status !== "validated" || measurement.contract !== SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT) return null;
+  const admitted = admitSourceSemanticLibraryResponse({ recallResult,
+    firstExposurePage: measurement.first_exposure_page, requestBudget: measurement.request.budget });
+  if (admitted?.status !== "admitted" || recordInconsistency(measurement) !== undefined
+    || canonicalJson(admitted.index) !== canonicalJson(measurement.delivered_index)
+    || canonicalJson(admitted.qualifiers) !== canonicalJson(measurement.slot_qualifiers)) return null;
+  const parsed = SoulInterpretationResponseSchema.safeParse(recallResult);
+  if (!parsed.success || parsed.data.operation !== "recall" || parsed.data.results === undefined) return null;
+  const intervals: DeliveredSourceInterval[] = [];
+  for (const [offset, slot] of admitted.slots.entries()) {
+    const target = slot.target, result = parsed.data.results[offset];
+    if (target.kind !== "source_evidence" || target.span?.retained_extent !== "body" || result === undefined) return null;
+    const span = target.span;
+    const omitted = result.content_preview === "[payload omitted]" && !result.budget_state.within_budget;
+    const empty = result.content_preview === "[empty source]" && span.content_start === span.content_end;
+    const bytes = omitted || empty ? 0 : Buffer.byteLength(result.content_preview, "utf8");
+    if (bytes > span.content_end - span.content_start) return null;
+    intervals.push({ rank: slot.rank, target, start: span.content_start, end: span.content_start + bytes });
+  }
+  return intervals;
+}
 
 export interface SourceSemanticLibraryEvaluatorUsage {
   readonly proof_slots_checked: number;
@@ -258,7 +293,7 @@ function admitLibraryMeasurement(
     & { readonly query_semantics_status?: SourceSemanticQueryStatus };
 } | Extract<SourceSemanticLibraryMeasurement, { status: "invalid" }> | null {
   if (!isRecord(input.recallResult)) return null;
-  const zeroCall = zeroCallReason(input.recallResult);
+  const zeroCall = zeroCallReason(input.recallResult, pageBudget !== HISTORICAL_SOURCE_ONLY_PAGE_BUDGET);
   if (zeroCall !== null) return invalid(zeroCall);
   if (recalled === null) return null;
   if (recalled === "invalid") return invalid("invalid_response");
@@ -388,7 +423,13 @@ function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold:
   return { ...metric, any_at_1: unavailable, any_at_5: unavailable, any_at_10: unavailable };
 }
 
-function zeroCallReason(raw: Record<string, unknown>): InvalidMeasurementReason | null {
+function zeroCallReason(raw: Record<string, unknown>, requireExecution: boolean): InvalidMeasurementReason | null {
+  if (requireExecution || Object.hasOwn(raw, "execution")) {
+    const execution = SourceSemanticExecutionSchema.safeParse(raw.execution);
+    if (!execution.success || sourceSemanticExecutionExternalAttempts(execution.data) !== 0) {
+      return "missing_zero_call_evidence";
+    }
+  }
   if (Object.hasOwn(raw, "provider_calls") && raw.provider_calls !== 0) return "missing_zero_call_evidence";
   if (Object.hasOwn(raw, "provider_attempts") && raw.provider_attempts !== 0) return "missing_zero_call_evidence";
   if (Object.hasOwn(raw, "garden_enqueue") && raw.garden_enqueue !== 0) return "missing_zero_call_evidence";
