@@ -1,6 +1,6 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-  SourceSemanticResourceExhausted, canonicalJson, type SourceRecordIdentity,
+  SourceSemanticResourceExhausted, type SourceRecordIdentity,
   sourceSemanticGenerationTaskSummary, sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
   captureSourceSemanticQueryPreparation,
   packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,

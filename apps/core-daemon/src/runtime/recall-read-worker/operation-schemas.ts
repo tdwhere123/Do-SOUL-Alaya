@@ -23,6 +23,8 @@ import {
   type RecallReadWorkerOperation
 } from "./protocol.js";
 
+import { ResearchSourceAcquisitionReplySchema } from "./source-semantic-research-nominated-library.js";
+
 const EmptyObjectSchema = z.object({}).strict();
 const KeywordSearchSchema = z.object({
   workspaceId: z.string(),
@@ -286,7 +288,7 @@ const RESULT_SCHEMAS = {
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
   "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
-  "conditionalField.sourceSemantics": SourceSemanticWorkerResultSchema,
+  "conditionalField.sourceSemantics": z.union([SourceSemanticWorkerResultSchema, ResearchSourceAcquisitionReplySchema]),
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

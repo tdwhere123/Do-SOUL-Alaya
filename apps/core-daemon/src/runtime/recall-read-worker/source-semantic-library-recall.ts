@@ -23,6 +23,8 @@ import {
 import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticQueryInputIdentity,
   sourceSemanticRevision } from "./source-semantic-leases.js";
 
+import { captureResearchNominatedSourceDelivery, forkCapturedRequestBudget,
+  type ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
 import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
 import { prepareLibraryDelivery, deliverFrozenLibraryPage, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
@@ -34,10 +36,14 @@ type LibraryDiscovery = Readonly<{ descriptors: readonly SourceSemanticHandleDes
 /** Native library computation over one prepared query/scope and its bounded shared access pool. */
 export function runSourceSemanticLibraryRecall(
   runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget
-): SourceSemanticWorkerResult {
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
+  finalizeNativeRecall?: (result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => Extract<SourceSemanticWorkerResult, { kind: "recall" }>
+): SourceSemanticWorkerResult | ResearchSourceAcquisitionReply {
   const request = payload.request;
   if (request.kind !== "recall") throw new CoreError("VALIDATION", "recall kind mismatch");
+  if (payload.acquisition_control !== undefined && finalizeNativeRecall === undefined) {
+    throw new CoreError("OBLIGATION_VIOLATION", "private acquisition requires the native orchestration finalizer");
+  }
   meter.retain(request, "library request admission");
   const requestIdentity = fieldContractSha256(canonicalJson({ ...request, continuation: undefined }));
   const continuationLease = request.continuation === undefined ? undefined
@@ -51,7 +57,9 @@ export function runSourceSemanticLibraryRecall(
     const plan = continuationLease.library_plan;
     const offset = OFFSET_CURSOR.exec(request.continuation!.cursor);
     if (plan === undefined || offset === null) throw new CoreError("VALIDATION", "library continuation has no frozen membership");
-    return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, Number(offset[1]));
+    const result = deliverFrozenLibraryPage(runtime, payload, meter, request, plan, Number(offset[1]));
+    return payload.acquisition_control === undefined ? result : { kind: "research_acquisition", result: finalizeNativeRecall!(result),
+      private_delivery: captureResearchNominatedSourceDelivery(runtime.database, payload, undefined, meter, "frozen_continuation_has_no_live_pool") };
   }
   const currentClock = payload.as_of;
   const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
@@ -103,6 +111,10 @@ export function runSourceSemanticLibraryRecall(
   if (boundPool !== undefined) exploration.retain(boundPool, "leased access pool");
   const pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
     admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id);
+  // Use the existing cost-fork authority at the live observation seam: native
+  // branch execution and hydration are not captured as a second acquisition.
+  const capturedCosts = payload.acquisition_control === undefined ? undefined : forkCapturedRequestBudget(request, meter);
+  capturedCosts?.absorb(exploration);
   const sources = { sources: [...pool.sources], pages: pool.sourcePages,
     open: pool.access.unvisited_sources, truncated: pool.access.unvisited_sources };
   const discovered: LibraryDiscovery = { descriptors: pool.descriptors, interpretationPages: pool.interpretationPages,
@@ -113,9 +125,15 @@ export function runSourceSemanticLibraryRecall(
     : { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
       executedCount: 0, computeOpen: false, interpretationTruncated: false };
   explorationAbsorbed = true; meter.absorb(exploration);
-  return deliverLibraryPage(runtime, payload, authorized, meter, request, boundStatus,
+  // Diagnostic forks neither debit native delivery nor run if it refuses;
+  // the captured pool and costs remain inside this same connection/snapshot.
+  const result = deliverLibraryPage(runtime, payload, authorized, meter, request, boundStatus,
     admission.kind === "admitted" ? admission.query : undefined,
     sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
+  // Native work/execution must be sampled before diagnostic allocations. The
+  // orchestration owner supplies the same finalizer used by the default route.
+  return capturedCosts === undefined ? result : { kind: "research_acquisition", result: finalizeNativeRecall!(result),
+    private_delivery: captureResearchNominatedSourceDelivery(runtime.database, payload, pool, capturedCosts) };
   } finally { if (!explorationAbsorbed) meter.absorb(exploration); }
 }
 
@@ -294,7 +312,7 @@ function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSem
   query: SourceSemanticQuery | undefined,
   sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
   branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
-  publicRequestIdentity: string): SourceSemanticWorkerResult {
+  publicRequestIdentity: string): Extract<SourceSemanticWorkerResult, { kind: "recall" }> {
   const plan = prepareLibraryPlan(runtime, payload, authorized, meter, request, queryStatus,
     query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
   return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, 0);

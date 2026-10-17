@@ -12,13 +12,15 @@ import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runti
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
-  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase, type SourceSemanticLease } from "./source-semantic-leases.js";
+  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
+import type { ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
 import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalization.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
+type SourceSemanticWorkerReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply;
 
 /** The transaction's existing execution cache also owns the request-only capture. */
 export interface SourceSemanticRequestExecution {
@@ -29,9 +31,13 @@ export interface SourceSemanticRequestExecution {
 }
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerResult {
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime,
+  payload: Payload & { acquisition_control?: undefined }): SourceSemanticWorkerResult;
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply;
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply {
   const meter = new SourceSemanticReadBudget(payload.request.budget);
-  const run = (executionOf: SourceSemanticRequestExecution) => {
+  const run = (executionOf: SourceSemanticRequestExecution,
+    finalizeNativeRecall: (result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => {
     if (payload.prepared_query !== undefined) {
       meter.preparation = capturePackSourceSemanticPreparationForRequest({
         ...payload.prepared_query.receipt, ...(payload.prepared_query.supplemental === undefined ? {} : {
@@ -56,16 +62,22 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
     const authorized = scopes === null ? null : [...scopes].sort();
     if (payload.request.kind === "prepare_source" || payload.request.kind === "validate_source") return prepareSource(runtime, payload, authorized, meter);
     if (payload.request.kind === "prepare_query") return prepareQuery(runtime, payload, authorized, meter, executionOf);
-    if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter);
+    if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter, finalizeNativeRecall);
     return reasonSemantics(runtime, payload, authorized, meter);
   };
   return withSourceSemanticTransaction(runtime, payload, meter, executionOf => {
-    // The byte limit applies to the complete native envelope, including actual phase evidence.
-    const body = run(executionOf);
-    const execution = executionOf();
-    // Every operation returns a schema-admitted owned body, including frozen library pages.
-    // Attach only owner-computed fields; another full parse would copy all premises again.
-    const result: SourceSemanticWorkerResult = Object.freeze({ ...body, execution, work: Object.freeze(workOf(meter)) });
+    // One authority captures actual native phases/work for both routes. The
+    // controlled recall calls it before diagnostics can affect process RSS.
+    function finalizeNative(body: Extract<SourceSemanticWorkerResult, { kind: "recall" }>): Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
+    function finalizeNative(body: SourceSemanticWorkerResult): SourceSemanticWorkerResult;
+    function finalizeNative(body: SourceSemanticWorkerResult): SourceSemanticWorkerResult {
+      const execution = executionOf();
+      return Object.freeze({ ...body, execution, work: Object.freeze(workOf(meter)) });
+    }
+    const reply = run(executionOf, finalizeNative);
+    // The native sibling is already finalized; never resample after diagnostics.
+    if (reply.kind === "research_acquisition") return Object.freeze(reply);
+    const result = finalizeNative(reply);
     return result.kind === "reason" && payload.request.kind === "reason"
       ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;
   });
@@ -98,7 +110,11 @@ export function runResearchNominatedSourcePreparation(runtime: SourceSemanticRea
 }
 
 function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
-  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerResult): SourceSemanticWorkerResult {
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerResult): SourceSemanticWorkerResult;
+function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerReply): SourceSemanticWorkerReply;
+function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerReply): SourceSemanticWorkerReply {
   let execution: SourceSemanticExecution | undefined;
   let preparation: typeof meter.preparation | SourceSemanticQueryPreparation, acquisition: typeof meter.acquisition;
   function executionOf(): SourceSemanticExecution;

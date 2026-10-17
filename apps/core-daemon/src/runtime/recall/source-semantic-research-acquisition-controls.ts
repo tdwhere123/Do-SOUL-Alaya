@@ -1,7 +1,8 @@
-import { unavailableSourceQueryPreparation, type SourceSemanticQueryPreparation, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
+import { unavailableSourceQueryPreparation, type SourceSemanticQueryPreparation } from "@do-soul/alaya-protocol";
 import { CoreError, SourceIndexAcquisition } from "@do-soul/alaya-core";
 import type { RecallReadWorkerClient } from "./recall-read-worker-client.js";
 import type { SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
+import type { ResearchSourceAcquisitionReply } from "../recall-read-worker/source-semantic-research-nominated-library.js";
 
 type PreparedQuery = NonNullable<Parameters<NonNullable<RecallReadWorkerClient["researchAcquisition"]>["dispatch"]>[1]>;
 type ChannelControl = "lexical" | "vector" | "dual";
@@ -187,8 +188,8 @@ function physicalUnknown(cause: unknown) {
   };
 }
 
-function projectArm(result: SourceSemanticWorkerResult, control: ChannelControl) {
-  if (result.kind !== "recall") throw new CoreError("CONFLICT", "research acquisition arm lost recall result");
+function projectArm(reply: ResearchSourceAcquisitionReply, control: ChannelControl) {
+  const result = reply.result;
   // Same private-counterfactual stripping as nominated-library compare: drop routable delivery identities.
   const { delivery_id: _delivery, request_identity: _request, protocol_version: _protocol, order: _order,
     index, ...content } = result;
@@ -200,6 +201,8 @@ function projectArm(result: SourceSemanticWorkerResult, control: ChannelControl)
     work: result.work,
     execution: result.execution,
     full_envelope_bytes: Buffer.byteLength(JSON.stringify(result)),
+    // Costs remain cumulative fork quotes (including their shared baseline), not additive physical work.
+    private_delivery: reply.private_delivery,
     artifact: { ...content, index: privateIndex, frozen_plan_has_more: index.continuation !== null }
   };
 }

@@ -18,6 +18,9 @@ import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.j
 import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema,
   type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
 
+import type { ResearchSourceAcquisitionReply } from "../recall-read-worker/source-semantic-research-nominated-library.js";
+
+type SourceSemanticsReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply;
 type PreparedQuery = NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>;
 export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string; supplemental_navigation?: string;
   signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
@@ -60,7 +63,7 @@ export interface RecallReadWorkerClient {
       Promise<NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>>;
     dispatch(input: SourceSemanticsPublicPayload,
       prepared: NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>,
-      control: "lexical" | "vector" | "dual"): Promise<SourceSemanticWorkerResult>;
+      control: "lexical" | "vector" | "dual"): Promise<ResearchSourceAcquisitionReply>;
   }>;
   ready(): Promise<void>;
   close(): Promise<void>;
@@ -330,9 +333,13 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         throw new CoreError("OBLIGATION_VIOLATION", "recall read snapshot is not isolated onto a worker");
       }
       this.lifecycle.preparationDeadline().check();
-      return await this.lifecycle.request<SourceSemanticWorkerResult>("conditionalField.sourceSemantics", {
+      const reply = await this.lifecycle.request<SourceSemanticsReply>("conditionalField.sourceSemantics", {
         ...captured, prepared_query: capturedPrepared, acquisition_control: control
       });
+      if (reply.kind !== "research_acquisition") {
+        throw new CoreError("CONFLICT", "research acquisition requires its private reply");
+      }
+      return reply;
     }
   };
 
@@ -375,9 +382,12 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         const owner = handle === undefined ? undefined : this.deliveryOwner(handle);
         return await this.lifecycle.isolate(async () => {
           const worker = this.lifecycle.pinnedWorker()!;
-          const parsed = await this.lifecycle.request<SourceSemanticWorkerResult>(
+          const parsed = await this.lifecycle.request<SourceSemanticsReply>(
             "conditionalField.sourceSemantics", { ...captured,
               ...(prepared === undefined ? {} : { prepared_query: prepared }) });
+          if (parsed.kind === "research_acquisition") {
+            throw new CoreError("CONFLICT", "ordinary source execution cannot accept a private research reply");
+          }
           const issued = parsed.kind === "prepare_source" ? parsed.source_handle
             : parsed.kind === "prepare_query" ? parsed.query_handle : undefined;
           if (issued !== undefined) this.deliveryOwners.set(issued, worker);

@@ -5,23 +5,28 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
+import BetterSqlite3 from "better-sqlite3";
 import { sourceSemanticAccessPhases, sourceSemanticAcquisitionNotRun, sourceSemanticExecution, sourceSemanticExecutionPhases,
-  sourceDisclosure, qualifySourceDisclosure, hashLabeledIdentity,
+  sourceDisclosure, qualifySourceDisclosure, hashLabeledIdentity, SourceSemanticResourceExhausted, unavailableSourceQueryPreparation,
   type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
-import { encodeSourceSemanticLibraryResponse, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,
+import { encodeSourceSemanticLibraryResponse, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry, SourceIndexAcquisition,
   type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
-import { SqliteFieldEraseBarrierRepo } from "@do-soul/alaya-storage";
+import { SqliteFieldEraseBarrierRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { prepareNominatedLibraryWindows, type LibrarySourceNomination }
   from "../../../runtime/recall-read-worker/source-semantic-library-nominated-windows.js";
-import { projectResearchNativeProposals, researchNativeProposalSelector, compareResearchNominatedSourceLibrary }
+import { projectResearchNativeProposals, researchNativeProposalSelector, compareResearchNominatedSourceLibrary,
+  captureResearchNominatedSourceDelivery, ResearchSourceAcquisitionReplySchema, ResearchSourceDeliveryDiagnosticsSchema }
   from "../../../runtime/recall-read-worker/source-semantic-research-nominated-library.js";
+import * as candidateAccess from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
+import * as researchDelivery from "../../../runtime/recall-read-worker/source-semantic-research-nominated-library.js";
+import * as nominatedWindows from "../../../runtime/recall-read-worker/source-semantic-library-nominated-windows.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { complementaryProofSelectionFixture, rawSourceTwin }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
 import { query as incompatibleQuery } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
-import { nominatedLibraryContext, compareInGuardedWorker, BODY, CONDITION, ANSWER, digest, ACCESS_BUDGET, CLOCK, WS,
+import { nominatedLibraryContext, compareInGuardedWorker, BODY, CONDITION, ANSWER, ORIGINAL, digest, ACCESS_BUDGET, CLOCK, WS,
   type NominatedLibraryContext } from "./source-semantic-nominated-library.test-support.js";
 
 function captured(context: NominatedLibraryContext) {
@@ -132,6 +137,174 @@ it("matches prefix O1 at a tight cap where omitting captured phase bytes would a
     }
   } finally { await context.close(); }
 }, 60_000);
+
+it("composes private fitted non-prefix text from one live observation and one prepared finite-vector call", async () => {
+  const context = await nominatedLibraryContext();
+  let peer: BetterSqlite3.Database | undefined;
+  const observation = vi.spyOn(candidateAccess, "observeSourceSemanticAccess");
+  const preparation = vi.spyOn(SourceIndexAcquisition, "prepareQuery");
+  const embedded = vi.fn(async (inputs: readonly { input_id: string; text: string }[]) => inputs.map(input => ({
+    status: "embedded" as const, input_id: input.input_id, input_digest: digest(input.text),
+    vector: new Float32Array([1, 0, 0]), token_count: 2, truncated: false as const
+  })));
+  try {
+    const state = new SqliteSourceIndexRepository(context.database, fieldContractSha256).state(WS);
+    if (!("selection" in state)) throw new Error("authored source selection required");
+    const prepared = await SourceIndexAcquisition.prepareQuery({ navigation: ORIGINAL, selection: state.selection,
+      signal: new AbortController().signal, remainingMs: () => 60_000,
+      bind: async () => ({ status: "ready", profile: state.selection.configuration.profile,
+        profile_id: state.selection.profile_id, embedInputs: embedded }) });
+    expect(prepared.receipt.status).toBe("ready");
+    context.database.connection.exec("CREATE TABLE recall_snapshot_probe (value INTEGER NOT NULL); INSERT INTO recall_snapshot_probe VALUES (0)");
+    // Use a genuinely independent connection, not initDatabase's per-file cache.
+    peer = new BetterSqlite3(context.filename);
+    context.database.connection.exec("BEGIN DEFERRED");
+    expect(context.database.connection.prepare("SELECT value FROM recall_snapshot_probe").get()).toEqual({ value: 0 });
+    peer.prepare("UPDATE recall_snapshot_probe SET value = 1").run();
+    expect(peer.prepare("SELECT value FROM recall_snapshot_probe").get()).toEqual({ value: 1 });
+    const reply = runSourceSemanticWorker(context.runtime, { ...context.payload, prepared_query: prepared, acquisition_control: "dual" });
+    if (reply.kind !== "research_acquisition") throw new Error("private recall wrapper required");
+    expect(ResearchSourceAcquisitionReplySchema.safeParse(reply).success).toBe(true);
+    expect(context.database.connection.inTransaction).toBe(true);
+    // Repository transaction helpers may use nested savepoints. A replaced outer
+    // snapshot would expose the independently committed value instead of zero.
+    expect(context.database.connection.prepare("SELECT value FROM recall_snapshot_probe").get()).toEqual({ value: 0 });
+    expect(preparation).toHaveBeenCalledTimes(1);
+    expect(embedded).toHaveBeenCalledTimes(1);
+    expect(observation).toHaveBeenCalledTimes(1);
+    expect(observation.mock.calls[0]![0]).toBe(context.runtime);
+    const diagnostics = reply.private_delivery;
+    expect(diagnostics.status).toBe("complete");
+    const prefix = diagnostics.comparison!.hydration.prefix!, nominated = diagnostics.comparison!.hydration.nominated!;
+    expect(prefix.artifact.results!.some(row => row.content_preview?.includes(ANSWER))).toBe(false);
+    const delivered = nominated.artifact.results!.find(row => row.content_preview?.includes(CONDITION + ANSWER))!;
+    expect(delivered).toBeDefined();
+    if (delivered.target.kind !== "source_evidence" || delivered.target.span === undefined) throw new Error("located original-body text required");
+    expect(delivered.target.span.content_start).toBe(8192);
+    expect(delivered.content_preview).toBe(Buffer.from(BODY).subarray(delivered.target.span.content_start, delivered.target.span.content_end).toString("utf8"));
+    expect(sourceDisclosure(delivered.source_disclosure!).proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
+    expect(reply.result.previews && Object.values(reply.result.previews).some(text => text.includes(ANSWER))).toBe(false);
+    expect(reply.result).not.toHaveProperty("private_delivery");
+    expect(reply).not.toHaveProperty("execution");
+    expect(reply).not.toHaveProperty("work");
+    expect(Buffer.byteLength(JSON.stringify(reply))).toBeGreaterThan(Buffer.byteLength(JSON.stringify(reply.result)));
+    expect(diagnostics.captured.work.logical_work).toBeGreaterThan(0);
+    expect(diagnostics.captured.work.index_work).toBeGreaterThan(0);
+    for (const cost of diagnostics.costs) {
+      expect(cost.work.logical_work).toBeGreaterThanOrEqual(diagnostics.captured.work.logical_work!);
+      expect(cost.work.native_work).toBeGreaterThanOrEqual(diagnostics.captured.work.native_work);
+      expect(cost.work.index_work).toBe(diagnostics.captured.work.index_work);
+    }
+    for (const arm of [prefix, nominated, ...Object.values(diagnostics.comparison!.ordering)]) {
+      expect(arm!.artifact.execution).toEqual(diagnostics.captured.execution);
+      expect(arm!.full_envelope_bytes).toBeLessThanOrEqual(arm!.output_byte_limit);
+      expect(arm!.artifact).not.toHaveProperty("delivery_id");
+      expect(arm!.artifact.index).not.toHaveProperty("continuation");
+    }
+    context.database.connection.exec("ROLLBACK");
+    expect(context.database.connection.inTransaction).toBe(false);
+    expect(context.database.connection.prepare("SELECT value FROM recall_snapshot_probe").get()).toEqual({ value: 1 });
+    observation.mockClear();
+    const ordinary = runSourceSemanticWorker(context.runtime, { ...context.payload, prepared_query: prepared });
+    expect(ordinary.kind).toBe("recall");
+    expect(ordinary).not.toHaveProperty("private_delivery");
+    expect(ordinary).not.toHaveProperty("result");
+    expect(observation).toHaveBeenCalledTimes(1);
+    expect(preparation).toHaveBeenCalledTimes(1);
+    expect(embedded).toHaveBeenCalledTimes(1);
+  } finally {
+    if (context.database.connection.inTransaction) context.database.connection.exec("ROLLBACK");
+    peer?.close();
+    vi.restoreAllMocks(); await context.close();
+  }
+});
+
+it("retains native recall and completed prefix costs when nominated hydration exhausts its own fork", async () => {
+  const context = await nominatedLibraryContext();
+  const hydrateWindow = vi.spyOn(nominatedWindows, "prepareNominatedLibraryWindows").mockImplementation((_runtime, _payload, _authorized, meter) => {
+    meter.charge(7, 11, "authored nominated hydration failure");
+    throw new SourceSemanticResourceExhausted("authored nominated hydration failure");
+  });
+  try {
+    // Lexical control needs no embedding, and the real observation remains source-only.
+    const prepared = { receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested"),
+      vector: { status: "unavailable" as const, reason: SourceIndexAcquisition.channelNotRequested } };
+    const reply = runSourceSemanticWorker(context.runtime, { ...context.payload, prepared_query: prepared, acquisition_control: "lexical" });
+    if (reply.kind !== "research_acquisition") throw new Error("private recall wrapper required");
+    expect(reply.result.kind).toBe("recall");
+    expect(reply.result.index.entries.length).toBeGreaterThan(0);
+    const diagnostics = reply.private_delivery;
+    expect(ResearchSourceDeliveryDiagnosticsSchema.safeParse(diagnostics).success).toBe(true);
+    expect(diagnostics.status).toBe("partial");
+    expect(diagnostics.failure).toMatchObject({ phase: "authored nominated hydration failure" });
+    expect(diagnostics.comparison!.hydration.prefix).not.toBeNull();
+    expect(diagnostics.comparison!.hydration.nominated).toBeNull();
+    expect(diagnostics.costs.find(row => row.phase === "nominated_preparation")!.work.logical_work)
+      .toBeGreaterThan(diagnostics.captured.work.logical_work! + 7);
+    expect(diagnostics.costs.some(row => row.phase === "prefix")).toBe(true);
+    expect(hydrateWindow).toHaveBeenCalledTimes(1);
+  } finally { vi.restoreAllMocks(); await context.close(); }
+});
+
+it("captures native work and execution before diagnostics without resampling process RSS afterward", async () => {
+  const context = await nominatedLibraryContext();
+  const nativeRss = 999, diagnosticProcessRss = 1_000_000_000;
+  const memoryUsage = process.memoryUsage, captureDiagnostics = researchDelivery.captureResearchNominatedSourceDelivery;
+  let diagnosticStarted = false, samplesAtDiagnosticEnd = -1;
+  const samples = vi.spyOn(process, "memoryUsage").mockImplementation(() => ({
+    ...memoryUsage(), rss: diagnosticStarted ? diagnosticProcessRss : nativeRss
+  }));
+  const diagnostics = vi.spyOn(researchDelivery, "captureResearchNominatedSourceDelivery").mockImplementation((...args) => {
+    expect(context.database.connection.inTransaction).toBe(true);
+    diagnosticStarted = true;
+    const captured = captureDiagnostics(...args);
+    samplesAtDiagnosticEnd = samples.mock.calls.length;
+    return captured;
+  });
+  try {
+    const payload = { ...context.payload, prepared_query: {
+      receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested"),
+      vector: { status: "unavailable" as const, reason: SourceIndexAcquisition.channelNotRequested }
+    } };
+    const reply = runSourceSemanticWorker(context.runtime, { ...payload, acquisition_control: "lexical" });
+    if (reply.kind !== "research_acquisition") throw new Error("private recall wrapper required");
+    expect(diagnostics).toHaveBeenCalledTimes(1);
+    expect(reply.result.work.rss_bytes).toBe(nativeRss);
+    expect(Object.isFrozen(reply.result.work)).toBe(true);
+    expect(samples.mock.calls.length).toBe(samplesAtDiagnosticEnd);
+    expect(reply.result.execution).toEqual(reply.private_delivery.captured.execution);
+    expect(sourceSemanticExecutionPhases(reply.result.execution!).query_preparation)
+      .toMatchObject({ status: "not_requested", reason: SourceIndexAcquisition.channelNotRequested, submitted_inputs: 0 });
+    expect(sourceSemanticExecutionPhases(reply.result.execution!).acquisition.result?.vector.completion).toBe("not_run");
+    // Diagnostic RSS still samples this process; it is not an isolated allocation delta.
+    expect(reply.private_delivery.captured.work.rss_bytes).toBe(diagnosticProcessRss);
+    expect(reply.private_delivery.costs.length).toBeGreaterThan(0);
+    for (const cost of reply.private_delivery.costs) expect(cost.work.rss_bytes).toBe(diagnosticProcessRss);
+    diagnosticStarted = false;
+    const ordinary = runSourceSemanticWorker(context.runtime, payload);
+    if (ordinary.kind !== "recall") throw new Error("ordinary native recall required");
+    expect(ordinary.work.rss_bytes).toBe(nativeRss);
+    expect(diagnostics).toHaveBeenCalledTimes(1);
+  } finally { vi.restoreAllMocks(); await context.close(); }
+});
+
+it("distinguishes unattempted live-pool absence from lexical comparison without located nominations", async () => {
+  const context = await nominatedLibraryContext();
+  try {
+    const noPool = captureResearchNominatedSourceDelivery(context.database, context.payload, undefined, context.meter);
+    expect(noPool).toMatchObject({ status: "not_run", comparison: null, failure: null, costs: [] });
+    expect(noPool.captured.work.logical_work).toBe(context.meter.spentWork);
+    const reply = runSourceSemanticWorker(context.runtime, { ...context.payload, acquisition_control: "lexical", prepared_query: {
+      receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested"),
+      vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested }
+    } });
+    if (reply.kind !== "research_acquisition") throw new Error("private recall wrapper required");
+    expect(reply.private_delivery).toMatchObject({ status: "unavailable", reason: "no_located_nominations", failure: null });
+    expect(reply.private_delivery.comparison!.hydration.prefix).not.toBeNull();
+    expect(reply.private_delivery.comparison!.hydration.nominated!.artifact.results!.some(row => row.content_preview?.includes(ANSWER))).toBe(false);
+    expect(reply.private_delivery.costs.length).toBeGreaterThan(0);
+  } finally { await context.close(); }
+});
 
 it("rejects changed source tuples, record/logical-source confusion, digest, scope and erased bytes rather than redirecting", async () => {
   const context = await nominatedLibraryContext();
