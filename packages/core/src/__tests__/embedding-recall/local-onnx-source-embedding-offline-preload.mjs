@@ -127,7 +127,7 @@ for (const key of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFi
       const query = isAuthority ? args.slice(authorityConfig.length).filter(value => value !== "--no-pager") : args;
       const exact = expected => JSON.stringify(query) === JSON.stringify(expected);
       const permitted = key === "execFile" ? exact(["worktree", "list", "--porcelain"]) : isAuthority && (
-        exact(["rev-parse", "HEAD", "--show-toplevel"]) || exact(["diff", "--no-ext-diff", "--binary", "HEAD", "--"]) ||
+        exact(["rev-parse", "HEAD", "--show-toplevel"]) || exact(["diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--"]) ||
         exact(["ls-files", "--others", "--exclude-standard", "-z"]) ||
         query?.slice(0, 3).join(" ") === "hash-object --no-filters --" && query.length > 3 &&
           query.slice(3).every(path => !/(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(path)));

@@ -172,6 +172,20 @@ afterAll(async () => {
   }
 });
 
+it("admits the production authority tracked diff and refuses the same command without --no-textconv", () => {
+  const config = ["-c", "core.autocrlf=true", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+    "-c", "credential.helper=", "-c", "core.askPass="];
+  const env = { PATH: process.env.PATH };
+  const before = gitEnvs.length;
+  childProcess.execFileSync("git",
+    [...config, "--no-pager", "diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--"], { env });
+  expect(gitEnvs.length).toBe(before + 1);
+  expect(() => childProcess.execFileSync("git",
+    [...config, "--no-pager", "diff", "--no-ext-diff", "--binary", "HEAD", "--"], { env }))
+    .toThrow(/unexpected execFileSync/u);
+  expect(gitEnvs.length).toBe(before + 1);
+});
+
 it("records the actual sanitized git credential environment census", () => {
   childProcess.execFile("git", ["worktree", "list", "--porcelain"], {
     env: {
