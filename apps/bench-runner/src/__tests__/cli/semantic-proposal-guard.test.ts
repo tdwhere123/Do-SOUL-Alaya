@@ -4,7 +4,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readF
   rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, expect, it } from "vitest";
 
 const bench = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -35,6 +35,7 @@ function fixture() {
   writeFileSync(join(app, "package.json"), '{"type":"module"}\n');
   writeFileSync(join(root, ".gitignore"), "apps/bench-runner/dist/\napps/bench-runner/node_modules\napps/bench-runner/bin/\n");
   writeFileSync(join(root, "source.txt"), "original\n");
+  cpSync(join(repository, ".env.example"), join(root, ".env.example"));
   git(root, ["init", "--quiet"]); git(root, ["add", "."]);
   git(root, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "authored fixture"]);
   const workset = join(out, "workset.json"), preflight = join(out, "preflight.json"), cache = join(out, "absent-cache");
@@ -46,7 +47,7 @@ function fixture() {
   return { root, outer, out, app, workset, preflight, cache };
 }
 type Fixture = ReturnType<typeof fixture>;
-function run(f: Fixture, program?: string, optIn = true) {
+function run(f: Fixture, program?: string, optIn = true, readRoots: readonly string[] = []) {
   const preload = new URL(guard);
   if (optIn) preload.searchParams.set("authority_checkout", f.root);
   const argv = program === undefined
@@ -54,7 +55,8 @@ function run(f: Fixture, program?: string, optIn = true) {
       "--workset", f.workset, "--cache-root", f.cache, "--max-output-tokens", "4096", "--max-attempts-per-key", "1", "--preflight-out", f.preflight]
     : ["--input-type=module", "--eval", program];
   return spawnSync(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${repository}`,
-    `--allow-fs-read=${f.outer}`, "--allow-fs-read=/usr/bin/git", `--allow-fs-write=${f.out}`,
+    `--allow-fs-read=${f.outer}`, ...readRoots.map(root => `--allow-fs-read=${root}`),
+    "--allow-fs-read=/usr/bin/git", `--allow-fs-write=${f.out}`,
     "--import", preload.href, "--import", strict, ...argv], {
     cwd: f.root, env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
     encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024
@@ -120,6 +122,80 @@ it("prepares from a bound linked worktree without substituting its common checko
   expect(receipt(result.stderr).operations).toHaveLength(4);
 });
 
+const revisionProgram = (app: string) => `
+  const { readCurrentExtractionAuthorityRevision } = await import(${JSON.stringify(
+    pathToFileURL(join(app, "dist/runs/extraction/authority/inspection.js")).href)});
+  console.log(JSON.stringify({ revision: readCurrentExtractionAuthorityRevision() }));`;
+
+it("inspects the loaded repository including its public template through both provider-free guards", () => {
+  const outer = realpathSync(mkdtempSync(join(tmpdir(), "loaded-revision-guard-")));
+  roots.push(outer);
+  const root = realpathSync(repository), f = { root, outer, out: outer, app: bench,
+    workset: join(outer, "unused-workset"), preflight: join(outer, "unused-preflight"), cache: join(outer, "unused-cache") };
+  const common = git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]).toString().trim();
+  const expected = oracle(root), result = run(f, revisionProgram(bench), true, [common]);
+  expect(result.error, result.stderr).toBeUndefined(); expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout).revision).toBe(expected);
+  const evidence = receipt(result.stderr);
+  expect(evidence.credential_file_violations).toEqual([]);
+  expect(evidence.operations.length).toBeGreaterThanOrEqual(3);
+  expect(evidence.operations.every((row: { operation: string; cwd: string; credential_environment_count: number }) =>
+    row.operation === "process.execFileSync.authority-git.allowed" && row.cwd === root &&
+    row.credential_environment_count === 0)).toBe(true);
+  console.info("CHECKOUT_REVISION_GUARD_RECEIPT", JSON.stringify({ revision: expected,
+    credential_file_violations: evidence.credential_file_violations,
+    operations: evidence.operations.map(({ stack: _stack, ...row }: { stack: string }) => row) }));
+});
+
+it.each(["modified", "same-size edit", "staged replacement", "untracked", "symlink", "tracked symlink", "nested copy"])(
+  "refuses a %s public-template lookalike before reading its bytes through Git", kind => {
+    const f = fixture(), template = join(f.root, ".env.example");
+    if (kind === "modified" || kind === "staged replacement") writeFileSync(template, "authored-not-a-credential\n");
+    if (kind === "same-size edit") {
+      const bytes = readFileSync(template); bytes[0] = 33; writeFileSync(template, bytes);
+    }
+    if (kind === "staged replacement") git(f.root, ["add", ".env.example"]);
+    if (kind === "untracked") git(f.root, ["rm", "--cached", ".env.example"]);
+    if (kind === "symlink" || kind === "tracked symlink") {
+      rmSync(template); symlinkSync(join(repository, ".env.example"), template);
+      if (kind === "tracked symlink") git(f.root, ["add", ".env.example"]);
+    }
+    if (kind === "nested copy") {
+      mkdirSync(join(f.root, "nested")); cpSync(template, join(f.root, "nested/.env.example"));
+      git(f.root, ["add", "nested/.env.example"]);
+    }
+    const result = run(f, revisionProgram(f.app)), evidence = receipt(result.stderr);
+    expect(result.status).not.toBe(0);
+    expect(evidence.operations.filter((row: { blocked?: boolean }) => row.blocked)).toHaveLength(1);
+    expect(evidence.operations.filter((row: { operation: string }) => row.operation.endsWith("allowed")))
+      .toHaveLength(kind === "untracked" ? 3 : 0);
+    expect(evidence.credential_file_violations).toEqual([]);
+  }
+);
+
+it.each([".env", ".env.local", "service.env", ".aws/config", ".azure/token", "credentials.json", "auth.json", ".env.other.example"])(
+  "refuses tracked and untracked credential-shaped %s despite the public template", path => {
+    const f = fixture(), filename = join(f.root, path);
+    mkdirSync(dirname(filename), { recursive: true }); writeFileSync(filename, "authored-not-a-credential\n");
+    for (const tracked of [false, true]) {
+      if (tracked) git(f.root, ["add", "--force", "--", path]);
+      const result = run(f, revisionProgram(f.app)), evidence = receipt(result.stderr);
+      expect(result.status).not.toBe(0);
+      expect(evidence.operations.filter((row: { operation: string }) => row.operation.endsWith("allowed")))
+        .toHaveLength(tracked ? 0 : 3);
+      expect(evidence.operations.at(-1)).toMatchObject({ blocked: true });
+      expect(evidence.credential_file_violations).toEqual([]);
+    }
+  }
+);
+
+it("does not exempt the public template from provider-free filesystem credential guards", () => {
+  const f = fixture(), result = run(f, `import { readFileSync } from "node:fs"; readFileSync(".env.example");`);
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain("Credential file access forbidden");
+  expect(receipt(result.stderr).operations).toEqual([]);
+});
+
 it("retains default refusal without the explicit checkout opt-in", () => {
   const f = fixture(), result = run(f, undefined, false);
   expect(result.status).not.toBe(0); expect(result.stderr).toContain("process.execFileSync");
@@ -163,7 +239,9 @@ it.each([
   ["alternate worktree", ["core.worktree", "/forbidden"]],
   ["external attributes", ["core.attributesFile", "/forbidden"]],
   ["external excludes", ["core.excludesFile", "/forbidden"]],
-  ["promisor", ["remote.origin.promisor", "true"]]
+  ["promisor", ["remote.origin.promisor", "true"]],
+  ["credential helper", ["credential.helper", "forbidden-helper"]],
+  ["askpass helper", ["core.askPass", "forbidden-helper"]]
 ])("refuses unsupported %s configuration without executing Git or helpers", (_name, entry) => {
   const f = fixture(); git(f.root, ["config", ...entry]);
   const result = run(f);

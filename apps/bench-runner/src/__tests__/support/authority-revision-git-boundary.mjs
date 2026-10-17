@@ -128,13 +128,13 @@ function inspectMetadataTree(directory) {
   }
 }
 
-function assertRelativeWorktreePath(path) {
+function assertRelativeWorktreePath(path, sourceTemplate = false) {
   if (typeof path !== "string" || !path || isAbsolute(path) || path.includes("\\") ||
-      path.includes("\0") || credentialPath(path) || path.split("/").some(part => !part || part === "." || part === ".." || part === ".git")) refuse();
+      path.includes("\0") || (credentialPath(path) && !sourceTemplate) || path.split("/").some(part => !part || part === "." || part === ".." || part === ".git")) refuse();
 }
 
-function assertWorktreePath(checkout, path, symlink) {
-  assertRelativeWorktreePath(path);
+function assertWorktreePath(checkout, path, symlink, sourceTemplate = false) {
+  assertRelativeWorktreePath(path, sourceTemplate);
   const filename = join(checkout, path), parent = resolve(filename, "..");
   if (relative(checkout, realpathSync(parent)).split(sep).includes("..") || realpathSync(parent) !== parent) refuse();
   const stat = lstatSync(filename);
@@ -157,9 +157,21 @@ function inspectIndex(checkout, index) {
     const end = index.indexOf(0, offset);
     if (end < offset || end >= index.length - 20) refuse();
     const path = index.toString("utf8", offset, end);
-    assertRelativeWorktreePath(path);
+    // Only this repository's pinned public template is source, not credentials.
+    // Require its unchanged index stat cache as well as its authored blob; this
+    // never reads credential-shaped worktree bytes through the filesystem guard.
+    // A touched/replaced template fails closed under the stable-filesystem premise.
+    const sourceTemplate = path === ".env.example" && mode === 0o100644 &&
+      index.toString("hex", start + 40, start + 60) === "8473b1cedbcd8483b87b6a5c9978ed804cbd4438";
+    assertRelativeWorktreePath(path, sourceTemplate);
+    if (sourceTemplate) {
+      const stat = lstatSync(join(checkout, path), { bigint: true });
+      if (!stat.isFile() || stat.size !== BigInt(index.readUInt32BE(start + 36)) ||
+          stat.ctimeNs !== BigInt(index.readUInt32BE(start)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 4)) ||
+          stat.mtimeNs !== BigInt(index.readUInt32BE(start + 8)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 12))) refuse();
+    }
     // Deletions are real dirty state, not a reason to invent clean contents.
-    if (existsSync(join(checkout, path))) assertWorktreePath(checkout, path, mode === 0o120000);
+    if (existsSync(join(checkout, path))) assertWorktreePath(checkout, path, mode === 0o120000, sourceTemplate);
     offset = start + Math.ceil((end + 1 - start) / 8) * 8;
   }
   while (offset < index.length - 20) {
