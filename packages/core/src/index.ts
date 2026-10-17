@@ -230,6 +230,8 @@ export {
 } from "./recall/conditional-field/query/source-semantic-correspondence-producer-registry.js";
 export { reasonSourceInterpretation } from "./recall/runtime/source-interpretation-reasoning.js";
 export { reasonSourceSemanticInterpretation, executeSourceSemanticInterpretation } from "./recall/runtime/source-semantic-reasoning.js";
+export { createSourceFeedbackSession, captureSourceFeedbackTerminalCause, type SourceFeedbackSessionInput, type SourceFeedbackSession,
+  type SourceFeedbackAction, type SourceFeedbackSettlement, type SourceFeedbackTerminalCause } from "./recall/runtime/source-feedback-session.js";
 export { deliveredSourceSemanticLibraryProof } from "./recall/runtime/source-semantic-library-proof.js";
 export { projectSourceSemanticQuerySupport } from "@do-soul/alaya-protocol";
 export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-semantic-support-window.js";

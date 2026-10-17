@@ -23,6 +23,8 @@ export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; naviga
   signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
 export type SourceSemanticsExecutionPort = Readonly<{
   execute(input: SourceSemanticsPublicPayload): Promise<SourceSemanticWorkerResult>;
+  withExecutionScope<T>(input: { signal?: AbortSignal; timeoutMs: number },
+    work: (phase: () => "waiting" | "preparing" | "dispatched") => Promise<T>): Promise<T>;
   /** Capture/prepare before caller-owned beginDeferred, then execute within that caller's snapshot. */
   withPreparedExecution<T>(input: SourceSemanticsPublicPayload,
     work: (execute: () => Promise<SourceSemanticWorkerResult>) => Promise<T>): Promise<T>;
@@ -274,6 +276,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly sourceSemanticsPort: SourceSemanticsExecutionPort = {
+    withExecutionScope: async (input, work) => await this.lifecycle.executionScope(input, work),
     execute: async input => await this.withPreparedSourceExecution(input, execute => execute()),
     withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input, work)
   };

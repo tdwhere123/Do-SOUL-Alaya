@@ -6,6 +6,7 @@ const isolation = await vi.hoisted(async () => {
 afterEach(() => { expect(isolation.violations).toEqual([]); });
 afterAll(() => { isolation.restore(); });
 import { once } from "node:events";
+import { performance } from "node:perf_hooks";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -255,7 +256,7 @@ describe("recall read worker deadline and native quarantine", () => {
         callback = trigger.promise.then(async () => { callbackReady.resolve(); return await read(h.lifecycle, "leaked-callback"); });
         leaked = async () => await read(h.lifecycle, "unbound-function");
       });
-      const callbackResult = expect(callback).rejects.toThrow(/lease is no longer active/);
+      const callbackResult = expect(callback).rejects.toThrow(/snapshot execution scope is no longer active/u);
       trigger.resolve();
       await callbackReady.promise;
       await callbackResult;
@@ -266,12 +267,198 @@ describe("recall read worker deadline and native quarantine", () => {
       let unfinishedResult!: Promise<void>;
       await h.lifecycle.isolate(async () => {
         unfinished = read(h.lifecycle, "delay:1000");
-        unfinishedResult = expect(unfinished).rejects.toThrow(/snapshot ended with requests still running/);
+        unfinishedResult = expect(unfinished).rejects.toThrow(/snapshot execution scope is no longer active/u);
         await expect.poll(() => dispatched(h.events(), "delay:1000").length).toBe(1);
       });
       await unfinishedResult;
       expect(h.unavailable).toHaveBeenCalledTimes(1);
       await expect(read(h.lifecycle, "after-unfinished-work")).resolves.toEqual([]);
     } finally { trigger.resolve(); await callback?.catch(() => undefined); await unfinished?.catch(() => undefined); await h.cleanup(); }
+  });
+});
+
+// Deadline advances are explicit; Worker imports, messages and actual exit events remain real.
+function scopeClock() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  let now = performance.now();
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  return { advance: async (ms: number) => { now += ms; await vi.advanceTimersByTimeAsync(ms); },
+    restore: () => { clock.mockRestore(); vi.useRealTimers(); } };
+}
+
+describe("caller-linked native execution scopes", () => {
+  it("rejects a preaborted caller before invoking its callback or dispatching native work", async () => {
+    const h = await harness(1, 60_000), controller = new AbortController(), reason = new Error("caller already left");
+    controller.abort(reason);
+    try {
+      const before = h.posts.mock.calls.length;
+      const work = vi.fn(async () => await read(h.lifecycle, "preaborted"));
+      await expect(h.lifecycle.executionScope({ signal: controller.signal, timeoutMs: 60_000 }, work)).rejects.toBe(reason);
+      expect(work).not.toHaveBeenCalled();
+      expect(h.posts.mock.calls).toHaveLength(before);
+      expect(h.unavailable).not.toHaveBeenCalled();
+      await expect(read(h.lifecycle, "independent-after-preabort")).resolves.toEqual([]);
+    } finally { await h.cleanup(); }
+  });
+
+  it("removes an aborted slot waiter without dispatch or quarantine of another caller's lease", async () => {
+    const h = await harness(1, 60_000), opened = deferred(), release = deferred();
+    const holder = h.lifecycle.isolate(async () => { opened.resolve(); await release.promise; });
+    const controller = new AbortController(), reason = new Error("waiting caller left"), entered = deferred();
+    let phase!: () => string;
+    try {
+      await opened.promise;
+      const waiting = h.lifecycle.executionScope({ signal: controller.signal, timeoutMs: 60_000 }, async current => {
+        phase = current; entered.resolve(); return await read(h.lifecycle, "aborted-waiter");
+      });
+      const rejected = expect(waiting).rejects.toBe(reason);
+      await entered.promise;
+      expect(phase()).toBe("waiting");
+      controller.abort(reason);
+      await rejected;
+      expect(h.unavailable).not.toHaveBeenCalled();
+      expect(dispatched(h.events(), "aborted-waiter")).toHaveLength(0);
+      release.resolve(); await holder;
+      await expect(read(h.lifecycle, "after-aborted-waiter")).resolves.toEqual([]);
+      expect(dispatched(h.events(), "aborted-waiter")).toHaveLength(0);
+    } finally { release.resolve(); await holder.catch(() => undefined); await h.cleanup(); }
+  });
+
+  it("settles caller abort while real synchronous SQLite and its slot remain occupied until actual Worker exit", async () => {
+    const h = await harness(1, 60_000), controller = new AbortController(), reason = new Error("dispatched caller left");
+    let phase!: () => string;
+    try {
+      const original = h.workers[0]!, originalExit = once(original, "exit");
+      h.database.exec("BEGIN EXCLUSIVE");
+      const blocked = h.lifecycle.executionScope({ signal: controller.signal, timeoutMs: 60_000 }, async current => {
+        phase = current; return await read(h.lifecycle, "native-lock-until-release");
+      });
+      const rejected = expect(blocked).rejects.toBe(reason);
+      await expect.poll(() => h.events().some(event => event.kind === "sql-enter")).toBe(true);
+      expect(phase()).toBe("dispatched");
+      controller.abort(reason); await rejected;
+      expect(h.database.inTransaction).toBe(true);
+      expect(h.events().some(event => event.kind === "sql-return")).toBe(false);
+      expect(h.exited.has(original)).toBe(false);
+      expect(original.threadId).toBeGreaterThan(0);
+      expect(h.unavailable).toHaveBeenCalledExactlyOnceWith(original);
+      const queued = read(h.lifecycle, "after-caller-abort");
+      const result = expect(queued).resolves.toEqual([]);
+      // No timer or simulated exit releases the lock/slot. Only the explicit
+      // SQLite rollback below can let the original native call and Worker exit.
+      expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(1);
+      expect(h.posts.mock.calls.some(args => args[0].payload.workspaceId === "after-caller-abort")).toBe(false);
+      h.database.exec("ROLLBACK");
+      await Promise.all([result, originalExit]);
+      expect(h.exited.has(original)).toBe(true);
+      expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(2);
+      expect(dispatched(h.events(), "after-caller-abort")).toHaveLength(1);
+    } finally { await h.cleanup(); }
+  });
+
+  it("retires escaped ALS descendants so they cannot start a new native lease after scope return", async () => {
+    const h = await harness(1, 60_000), release = deferred();
+    let escaped!: Promise<unknown>;
+    try {
+      await h.lifecycle.executionScope({ timeoutMs: 60_000 }, async () => {
+        escaped = release.promise.then(async () => await read(h.lifecycle, "escaped-scope"));
+      });
+      const rejected = expect(escaped).rejects.toThrow(/execution scope is no longer active/u);
+      release.resolve(); await rejected;
+      expect(dispatched(h.events(), "escaped-scope")).toHaveLength(0);
+      expect(h.unavailable).not.toHaveBeenCalled();
+      await expect(read(h.lifecycle, "independent-after-scope-return")).resolves.toEqual([]);
+    } finally { release.resolve(); await escaped?.catch(() => undefined); await h.cleanup(); }
+  });
+
+  it("retires a nested caller scope's unawaited dispatch under a parent lease without freeing its physical slot", async () => {
+    const h = await harness(1, 60_000);
+    let unfinished!: Promise<unknown>;
+    try {
+      const original = h.workers[0]!, originalExit = once(original, "exit");
+      h.database.exec("BEGIN EXCLUSIVE");
+      const outer = h.lifecycle.isolate(async () => {
+        await h.lifecycle.executionScope({ timeoutMs: 60_000 }, async () => {
+          unfinished = read(h.lifecycle, "native-lock-until-release");
+          // Attach a handler before retirement can reject the intentionally unawaited call.
+          void unfinished.catch(() => undefined);
+          await expect.poll(() => h.events().some(event => event.kind === "sql-enter")).toBe(true);
+        });
+      });
+      await expect(outer).rejects.toThrow(/execution scope is no longer active/u);
+      await expect(unfinished).rejects.toThrow(/execution scope is no longer active/u);
+      expect(h.unavailable).toHaveBeenCalledExactlyOnceWith(original);
+      expect(h.exited.has(original)).toBe(false);
+      expect(h.database.inTransaction).toBe(true);
+      const queued = expect(read(h.lifecycle, "after-retired-dispatch")).resolves.toEqual([]);
+      expect(h.events().filter(event => event.kind === "spawn")).toHaveLength(1);
+      h.database.exec("ROLLBACK"); await Promise.all([queued, originalExit]);
+      expect(h.exited.has(original)).toBe(true);
+    } finally { await unfinished?.catch(() => undefined); await h.cleanup(); }
+  });
+
+  it("inherits the earlier parent deadline rather than resetting a nested scope's lifetime", async () => {
+    const h = await harness(1, 60_000), clock = scopeClock(), enterChild = deferred(), childEntered = deferred(), release = deferred();
+    let child!: Promise<unknown>;
+    try {
+      const outer = h.lifecycle.executionScope({ timeoutMs: 100 }, async () => {
+        await enterChild.promise;
+        child = h.lifecycle.executionScope({ timeoutMs: 1000 }, async () => {
+          expect(h.lifecycle.preparationDeadline().remainingMs()).toBe(40);
+          childEntered.resolve(); return await release.promise;
+        });
+        void child.catch(() => undefined); return await child;
+      });
+      const rejected = expect(outer).rejects.toThrow(/timed out after 100ms/u);
+      await clock.advance(60); enterChild.resolve(); await childEntered.promise;
+      const childRejected = expect(child).rejects.toThrow(/timed out/u);
+      await clock.advance(39);
+      expect(h.unavailable).not.toHaveBeenCalled();
+      await clock.advance(1); await Promise.all([rejected, childRejected]);
+    } finally { release.resolve(); clock.restore(); await h.cleanup(); }
+  });
+
+  it("does not allow a caller scope to override the configured native request ceiling", async () => {
+    const h = await harness(1, 60_000), clock = scopeClock(), release = deferred();
+    try {
+      const scoped = h.lifecycle.executionScope({ timeoutMs: 600_000 }, async () => {
+        expect(h.lifecycle.preparationDeadline().remainingMs()).toBe(60_000);
+        return await release.promise;
+      });
+      const rejected = expect(scoped).rejects.toThrow(/timed out after 60000ms/u);
+      await clock.advance(59_999);
+      await clock.advance(1); await rejected;
+      expect(h.unavailable).not.toHaveBeenCalled();
+    } finally { release.resolve(); clock.restore(); await h.cleanup(); }
+  });
+
+  it.each(["caller_abort", "deadline"] as const)("keeps parallel scopes' signals and deadlines independent after %s", async stop => {
+    const h = await harness(1, 60_000), clock = scopeClock(), leftRelease = deferred(), rightRelease = deferred();
+    const controller = new AbortController(), reason = new Error("only left caller cancelled");
+    let leftSignal!: AbortSignal, rightSignal!: AbortSignal, rightRemaining!: () => number;
+    let rightSettled = false;
+    try {
+      const left = h.lifecycle.executionScope({ signal: controller.signal, timeoutMs: 100 }, async () => {
+        leftSignal = h.lifecycle.preparationDeadline().signal;
+        return await h.lifecycle.beforeSnapshotPreparation(async () => await leftRelease.promise);
+      });
+      const leftRejected = stop === "caller_abort" ? expect(left).rejects.toBe(reason) : expect(left).rejects.toThrow(/timed out after 100ms/u);
+      const right = h.lifecycle.executionScope({ timeoutMs: 500 }, async () => {
+        const deadline = h.lifecycle.preparationDeadline();
+        rightSignal = deadline.signal; rightRemaining = () => deadline.remainingMs();
+        return await h.lifecycle.beforeSnapshotPreparation(async () => await rightRelease.promise);
+      }).finally(() => { rightSettled = true; });
+      const rightRejected = expect(right).rejects.toThrow(/timed out after 500ms/u);
+      expect(leftSignal).not.toBe(rightSignal);
+      if (stop === "caller_abort") controller.abort(reason);
+      await clock.advance(100); await leftRejected;
+      expect(leftSignal.aborted).toBe(true);
+      expect(rightSignal.aborted).toBe(false);
+      expect(rightRemaining()).toBe(400);
+      expect(rightSettled).toBe(false);
+      await clock.advance(399); expect(rightSettled).toBe(false);
+      await clock.advance(1); await rightRejected;
+      expect(h.unavailable).not.toHaveBeenCalled();
+    } finally { leftRelease.resolve(); rightRelease.resolve(); clock.restore(); await h.cleanup(); }
   });
 });

@@ -17,7 +17,10 @@ parentPort.on("message", async ({ id, operation, payload }) => {
     return;
   }
   record({ kind: "dispatch", id, operation, payload });
-  if (payload.workspaceId === "native-lock") {
+  if (payload.workspaceId === "native-lock" || payload.workspaceId === "native-lock-until-release") {
+    // The caller-scope test releases its real SQLite lock explicitly. Do not make
+    // retained occupancy depend on beating the ordinary five-second busy timeout.
+    if (payload.workspaceId === "native-lock-until-release") database.pragma("busy_timeout = 2147483647");
     record({ kind: "sql-enter", id });
     database.prepare("SELECT value FROM transport_probe").all();
     record({ kind: "sql-return", id });

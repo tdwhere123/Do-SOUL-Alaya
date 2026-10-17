@@ -34,6 +34,7 @@ type Pending = {
   readonly resource: Resource;
   readonly deadline: RecallReadWorkerDeadline;
   readonly operation: RecallReadWorkerOperation;
+  readonly abort: () => void;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
   readonly consumeSuccess?: (value: unknown) => SuccessConsumption;
@@ -95,6 +96,7 @@ export class RecallReadWorkerLifecycle {
       throw new CoreError("CONFLICT", "query preparation requires an unbegun snapshot scope");
     }
     if (resource !== undefined) resource.preparingQuery = true;
+    this.preparationDeadline().phase = "preparing";
     try { return await work(); }
     finally { if (resource !== undefined) resource.preparingQuery = false; }
   }
@@ -104,6 +106,20 @@ export class RecallReadWorkerLifecycle {
     if (deadline === undefined) throw new CoreError("OBLIGATION_VIOLATION", "query preparation requires a deadline scope");
     deadline.check();
     return deadline;
+  }
+
+  /** A caller-linked lifetime, not a read snapshot. Each action acquires its own native lease. */
+  public async executionScope<T>(input: { signal?: AbortSignal; timeoutMs: number },
+    work: (phase: () => "waiting" | "preparing" | "dispatched") => Promise<T>): Promise<T> {
+    this.assertOpen();
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) throw new CoreError("VALIDATION", "invalid source execution lifetime");
+    const inherited = this.deadlines.getStore();
+    const signals = [input.signal, inherited?.signal].filter((signal): signal is AbortSignal => signal !== undefined);
+    const deadline = new RecallReadWorkerDeadline("source execution scope",
+      Math.min(input.timeoutMs, this.options.requestTimeoutMs, inherited?.remainingMs() ?? input.timeoutMs),
+      signals.length === 0 ? undefined : AbortSignal.any(signals));
+    try { return await this.deadlines.run(deadline, () => deadline.run(() => work(() => deadline.phase))); }
+    finally { deadline.dispose(); }
   }
 
   public async withinDeadline<T>(operation: string, work: () => Promise<T>): Promise<T> {
@@ -204,6 +220,7 @@ export class RecallReadWorkerLifecycle {
   }
 
   private acquire(deadline: RecallReadWorkerDeadline, preferred?: Worker, index?: number): Promise<Resource> {
+    deadline.phase = "waiting";
     return new Promise((resolve, reject) => {
       const waiter: Waiter = { deadline, resolve, reject,
         ...(preferred === undefined ? {} : { preferred }),
@@ -295,6 +312,7 @@ export class RecallReadWorkerLifecycle {
     for (const [id, pending] of this.pending) {
       if (pending.resource !== resource) continue;
       this.pending.delete(id);
+      pending.deadline.signal.removeEventListener("abort", pending.abort);
       pending.reject(error);
     }
     // Do not clear the slot or create a replacement here. Termination is only a
@@ -310,10 +328,15 @@ export class RecallReadWorkerLifecycle {
     this.assertUsable(resource);
     const id = this.nextRequestId++;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resource, deadline, operation, reject,
+      // A nested caller scope can dispatch under an inherited native lease. Its
+      // retirement must still quarantine that physical work until actual exit.
+      const abort = () => this.quarantine(resource, deadline.signal.reason);
+      this.pending.set(id, { resource, deadline, operation, reject, abort,
         resolve: (value) => resolve(value as T),
         ...(consumeSuccess === undefined ? {} : { consumeSuccess }) });
+      deadline.signal.addEventListener("abort", abort, { once: true });
       try {
+        deadline.phase = "dispatched";
         resource.worker.postMessage({ protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
           id, operation, payload } satisfies RecallReadWorkerRequest);
       } catch (error) {
@@ -334,6 +357,7 @@ export class RecallReadWorkerLifecycle {
         pending.deadline.check();
         if (consumed !== undefined && !consumed.done) return;
         this.pending.delete(message.id);
+        pending.deadline.signal.removeEventListener("abort", pending.abort);
         pending.resolve(consumed?.value ?? parsed);
       } else {
         const error = message.error.core === undefined ? new Error(message.error.message)
@@ -342,6 +366,7 @@ export class RecallReadWorkerLifecycle {
         error.name = message.error.name;
         if (message.error.stack !== undefined) error.stack = message.error.stack;
         this.pending.delete(message.id);
+        pending.deadline.signal.removeEventListener("abort", pending.abort);
         // A worker-reported domain rejection is known failure, not a broken transport.
         pending.reject(error);
       }

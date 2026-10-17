@@ -6,11 +6,19 @@ export class RecallReadWorkerDeadline {
   private readonly controller = new AbortController();
   private readonly timer: ReturnType<typeof setTimeout>;
   private readonly error: Error;
+  private readonly retired: Error;
+  private readonly unlink: () => void;
+  public phase: "waiting" | "preparing" | "dispatched" = "waiting";
 
-  public constructor(operation: string, timeoutMs: number) {
+  public constructor(operation: string, timeoutMs: number, callerSignal?: AbortSignal) {
     this.expiresAt = performance.now() + timeoutMs;
     this.error = new Error(`recall read worker ${operation} timed out after ${timeoutMs}ms`);
+    this.retired = new Error(`recall read worker ${operation} execution scope is no longer active`);
     this.timer = setTimeout(() => this.controller.abort(this.error), timeoutMs);
+    const abort = () => this.controller.abort(callerSignal?.reason);
+    callerSignal?.addEventListener("abort", abort, { once: true });
+    this.unlink = () => callerSignal?.removeEventListener("abort", abort);
+    if (callerSignal?.aborted) abort();
   }
 
   public get signal(): AbortSignal {
@@ -51,5 +59,9 @@ export class RecallReadWorkerDeadline {
 
   public dispose(): void {
     clearTimeout(this.timer);
+    // ALS descendants can outlive the returned promise. Retire their admission,
+    // and notify the existing native owner before unlinking caller cancellation.
+    this.controller.abort(this.retired);
+    this.unlink();
   }
 }

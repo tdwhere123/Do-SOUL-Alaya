@@ -24,7 +24,7 @@ erasure, protocol integrity or dependency validation.
 | Source access | Open-library raw source membership does not require H/C proof; source-only delivery is supported | Shared work/page limits may still leave useful evidence unread or undelivered |
 | Interpretation | Q/H may carry located gaps; published interpretations remain unreviewed | A gap list or complete computation cannot certify that no meaning was silently omitted |
 | Conditional computation | Selected admitted Q/H/C premises determine legal bindings and dependency-bearing results | Formal validity does not establish premise fidelity, world truth or every possible interpretation |
-| Observation feedback | Attention can identify some represented unresolved conditions; access hints can guide fresh preparation | Attention is not a complete task frontier; a frozen continuation does not perform new discovery |
+| Observation feedback | Attention can identify some represented unresolved conditions; an explicit Node source-feedback session can turn a native accepted source-bound closure into a fresh `prepare_query` access hint | Attention is not a complete task frontier; default Recall does not loop this session; a frozen continuation does not perform new discovery |
 | Revision | Owned invalidation and dependency reevaluation preserve their specific lifecycle contracts | Detecting a semantic error, choosing a replacement and autonomous whole-task recovery are separate concerns |
 
 An uncertain cross-source connection can be useful as an exploration hypothesis
@@ -1508,6 +1508,28 @@ Each route meters its own work against the shared request ledger. A task perform
 another preparation must reserve and account for both calls and delivery in its
 outer total budget; this parameter does not establish a cross-request allowance or
 generate clues.
+
+An explicit request-local Core session
+(`packages/core/src/recall/runtime/source-feedback-session.ts`) can enqueue that
+hint from a native accepted source-bound one-shot `reason` closure: mention text
+on newly bound entity coordinates, not query literals, derived nodes, attention,
+or an opaque `binding_id`. The yield is fresh `prepare_query` navigation that
+keeps the captured original query, authorized scope identity and `as_of`, with the
+seed source id/version/digest retained as root provenance. It is not a joined proof,
+chronology settlement, source write,
+or frozen continuation, and observing those queries does not start another
+`reason`. Seed H/Q/C is selected input, not an authoritative demand; only native
+acceptance produces navigation. Each reserved action copies the same parent
+entitlement and child `action_budget`; unknown or cancelled occupancy holds that
+reservation and is never booked as zero. Recorded exposures are append-only.
+Finish always reports `joint_assessment.status: not_lowered`
+(`source_qualified_join_and_temporal_comparison_not_admitted`). The daemon adapter
+(`apps/core-daemon/src/runtime/recall/source-feedback-execution.ts`) is trusted
+Node wiring through `withExecutionScope`: a caller-linked abort and timeout
+lifetime, not a read snapshot, MCP delivery, or ordinary `soul.recall` loop.
+Execution certainty and terminal cause remain separate: worker loss, deadline
+expiry, and an in-flight caller abort can all leave unknown occupancy with its
+reservation held; the recorded cause distinguishes them.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. After snapshot,
