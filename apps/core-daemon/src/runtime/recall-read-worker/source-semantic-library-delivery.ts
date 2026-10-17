@@ -245,12 +245,7 @@ function reserveFinalProofPage(candidates: readonly SourceSemanticLibraryPackage
 /** Continuations reuse the frozen plan; no source access, solver replay or re-selection occurs. */
 export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   meter: SourceSemanticReadBudget, request: Request, plan: LibraryDeliveryPlan, offset: number): Recall {
-  let position = 0;
-  const pageIndex = plan.pages.findIndex(page => { const matches = position === offset; position += page.length; return matches; });
-  if (pageIndex < 0) throw new CoreError("VALIDATION", "library continuation offset is not a frozen page boundary");
-  const page = plan.pages[pageIndex]!;
-  const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
-    plan.page_access[pageIndex]!, sourceSemanticExecution(meter.preparation, meter.acquisition, meter));
+  const result = fitFrozenLibraryPage(meter, request, plan, offset);
   if (result.index.continuation !== null) {
     const continuation = result.index.continuation;
     issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,
@@ -258,11 +253,25 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
       authorized: plan.authorized, expires_at: plan.expires_at, revision: sourceSemanticRevision(runtime),
       continuation, request_identity: plan.request_identity, library_plan: plan }, meter, continuation.continuation_id);
   }
+  return { ...result, work: workOf(meter) };
+}
+
+/** Full native-envelope fitting without publishing or retaining a continuation capability.
+ * Private diagnostics may measure/encode this page, but must strip its non-issued identities.
+ */
+export function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
+  plan: LibraryDeliveryPlan, offset: number): Recall {
+  let position = 0;
+  const pageIndex = plan.pages.findIndex(page => { const matches = position === offset; position += page.length; return matches; });
+  if (pageIndex < 0) throw new CoreError("VALIDATION", "library continuation offset is not a frozen page boundary");
+  const page = plan.pages[pageIndex]!;
+  const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
+    plan.page_access[pageIndex]!, sourceSemanticExecution(meter.preparation, meter.acquisition, meter));
   const baseEncoded = encodeSourceSemanticLibraryResponse(result);
   meter.retain(baseEncoded, "library public serialization");
   // The reserved work receipt is an upper bound on the eventual metered receipt.
   let reservedBytes = Buffer.byteLength(JSON.stringify(baseEncoded))
-    + Buffer.byteLength(JSON.stringify(reservedWork(request))) - Buffer.byteLength(JSON.stringify(result.work));
+    + Buffer.byteLength(JSON.stringify(reservedLibraryWork(request))) - Buffer.byteLength(JSON.stringify(result.work));
   if (reservedBytes > request.output_byte_limit) {
     throw new CoreError("VALIDATION", "output budget cannot retain reserved source support");
   }
@@ -330,7 +339,7 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
     return [indexEntryCacheKey(row.entry), wire];
   }));
   const discovery = { ...base.discovery, access };
-  const work = reserveWork ? reservedWork(request) : workOf(meter);
+  const work = reserveWork ? reservedLibraryWork(request) : workOf(meter);
   const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget, execution,
     request_identity: base.public_request_identity,
     query_semantics_status: base.query_semantics_status,
@@ -348,7 +357,7 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
   if (result.kind !== "recall") throw new CoreError("OBLIGATION_VIOLATION", "library delivery result kind changed");
   return result;
 }
-function reservedWork(request: Request) {
+export function reservedLibraryWork(request: Request) {
   return { native_work: request.budget.work_units, index_work: request.budget.work_units,
     native_accounting: "partial" as const, logical_work: request.budget.work_units,
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,

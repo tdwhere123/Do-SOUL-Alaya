@@ -11,11 +11,11 @@ import { compileConditionalFieldQuery } from "../conditional-field/query/compile
 import { defaultView } from "../conditional-field/query/query-admission.js";
 import { admitSourceSemanticCorrespondence } from "../conditional-field/query/source-semantic-correspondence-admission.js";
 import { compileSourceSemanticExecution, type SourceSemanticExecutionPlan, type SourceSemanticGroupPhase } from "../conditional-field/query/compile-source-semantic-finite.js";
-import { withdrawDerivationLeaves, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
+import { type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { observeField } from "./conditional-field-observe.js";
 import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-semantic-premises.js";
 import { planSourceSemanticBranches } from "./source-semantic-branch-plan.js";
-import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
+import { traceSourceSemanticWithdrawals, withdrawSourceSemanticState, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 import { sourceSemanticProofDependencies } from "./source-semantic-delivery.js";
 import { unexecutedGroupAttention } from "./source-semantic-attention.js";
@@ -37,6 +37,8 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
   source_target?: SourceEvidenceTarget;
   /** Offline causal diagnostics only; never enabled by normal recall. */
   withdrawal_trial_limit?: number;
+  /** Native private delivery diagnostic: one selected leaf, paid by this execution's remaining ledger. */
+  shared_withdrawal?: Readonly<{ occurrence: string; leaf_kind: "source_interpretation_presence" }>;
 }>;
 type SourceSemanticComputationRequest = Omit<SourceSemanticReasoningRequest, "output_byte_limit">;
 const SourceSemanticComputationRequestSchema = SourceSemanticReasoningRequestSchema.unwrap().omit({ output_byte_limit: true }).readonly();
@@ -96,7 +98,8 @@ export function executeSourceSemanticInterpretation(input: ExecuteSourceSemantic
       meter.retain(input.source_interpretation, "source interpretation admission");
       meter.retain(input.query_semantics, "query semantics admission");
       meter.retain(input.semantic_correspondence, "semantic correspondence admission");
-      const prepared = reasonPrepared(input, original, request, meter, outputLimit);
+      const prepared = reasonPrepared(input.shared_withdrawal === undefined ? input : { ...input, withdrawal_trial_limit: 1 },
+        original, request, meter, outputLimit);
       body = prepared.body; index = prepared.index;
       withdrawalTrace = prepared.withdrawal_trace;
       if ((body.binding_results?.length ?? 0) > 0) sourceDependencies = sourceSemanticProofDependencies(body, meter);
@@ -182,11 +185,15 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   if (input.withdrawal_trial_limit === undefined) return { ...baseline, finalizeOptional };
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
-    baseline: finish(baseline.body), limit: input.withdrawal_trial_limit, project: (withdrawn, _leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(actualBudget);
+    baseline: finish(baseline.body), limit: input.withdrawal_trial_limit,
+    meter: input.shared_withdrawal === undefined ? undefined : meter,
+    select: input.shared_withdrawal === undefined ? undefined : leaf => leaf.leaf_kind === input.shared_withdrawal!.leaf_kind
+      && leaf.occurrence === input.shared_withdrawal!.occurrence,
+    project: (withdrawn, _leafId) => {
+      const trialMeter = input.shared_withdrawal === undefined ? new SourceSemanticResourceLedger(actualBudget) : meter;
       let trial: ResultBody;
       try {
-        trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
+        if (input.shared_withdrawal === undefined) trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
         const projected = projectSourceSemanticState({ ...projection, state: withdrawn, meter: trialMeter });
         trial = projected.body;
         if ((trial.binding_results?.length ?? 0) > 0) sourceSemanticProofDependencies(trial, trialMeter);
@@ -268,12 +275,17 @@ function observeCorrespondenceGroups(input: Readonly<{
   const actualBudget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET;
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state: runs[0]!.state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
-    baseline: finish(baseline.body), limit: input.input.withdrawal_trial_limit, project: (_withdrawn, leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(actualBudget);
+    baseline: finish(baseline.body), limit: input.input.withdrawal_trial_limit,
+    meter: input.input.shared_withdrawal === undefined ? undefined : meter,
+    select: input.input.shared_withdrawal === undefined ? undefined : leaf => leaf.leaf_kind === input.input.shared_withdrawal!.leaf_kind
+      && leaf.occurrence === input.input.shared_withdrawal!.occurrence,
+    project: (withdrawn, leafId) => {
+      const trialMeter = input.input.shared_withdrawal === undefined ? new SourceSemanticResourceLedger(actualBudget) : meter;
       try {
-        trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
+        if (input.input.shared_withdrawal === undefined) trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
         const trials = runs.map((run, index) => {
-          const state = leafId === undefined ? run.state : withdrawDerivationLeaves(run.state, leafId);
+          const state = leafId === undefined ? run.state : index === 0 ? withdrawn
+            : withdrawSourceSemanticState(run.state, leafId, input.input.shared_withdrawal === undefined ? undefined : meter);
           const result = projectSourceSemanticState({
             state, meter: trialMeter, remaining: run.remaining, query: run.query, snapshot, admission, population,
             execution: run.execution, sourceTarget, qualified

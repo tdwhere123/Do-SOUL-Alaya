@@ -28,6 +28,10 @@ import { captureResearchNominatedSourceDelivery, forkCapturedRequestBudget,
   type ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
 import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
 import { prepareLibraryDelivery, deliverFrozenLibraryPage, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
+// Private native support consumer; not a Core package-root/public proof API.
+import { sourceSemanticProofDependencies } from "@do-soul/alaya-core/dist/recall/runtime/source-semantic-delivery.js";
+import { captureResearchJointDelivery } from "./source-semantic-research-joint-delivery.js";
+import type { ResearchJointReply } from "./source-semantic-joint-boundary.js";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
 import { authorizedScopesFromAdmission } from "@do-soul/alaya-core";
 
@@ -39,13 +43,21 @@ export function runSourceSemanticLibraryRecall(
   runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   finalizeNativeRecall?: (result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => Extract<SourceSemanticWorkerResult, { kind: "recall" }>
-): SourceSemanticWorkerResult | ResearchSourceAcquisitionReply {
+): SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply {
   const request = payload.request;
   if (request.kind !== "recall") throw new CoreError("VALIDATION", "recall kind mismatch");
   if (payload.acquisition_control !== undefined && finalizeNativeRecall === undefined) {
     throw new CoreError("OBLIGATION_VIOLATION", "private acquisition requires the native orchestration finalizer");
   }
+  if (payload.joint_control !== undefined && (payload.acquisition_control !== undefined || request.continuation !== undefined
+    || finalizeNativeRecall === undefined)) throw new CoreError("VALIDATION", "private joint delivery requires its isolated initial native recall");
   meter.retain(request, "library request admission");
+  if (payload.joint_control !== undefined) {
+    meter.retain(payload.joint_control, "private joint boundary admission");
+    const bytes = meter.canonicalJsonLength(payload.joint_control);
+    meter.charge(bytes, bytes * 2, "private joint boundary identity");
+  }
+  // The native capability resumes without private control; diagnostics bind selection separately.
   const requestIdentity = fieldContractSha256(canonicalJson({ ...request, continuation: undefined }));
   const continuationLease = request.continuation === undefined ? undefined
     : readSemanticLease(runtime, payload, request.continuation.continuation_id, authorized, "library");
@@ -126,7 +138,7 @@ export function runSourceSemanticLibraryRecall(
   const branches = admission.kind === "admitted"
     ? executeLibraryBranches(runtime, payload, authorized, exploration,
       discovered.descriptors, request, admission.query, original)
-    : { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
+    : { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], withdrawals: [], pairs: 0,
       executedCount: 0, computeOpen: false, interpretationTruncated: false };
   explorationAbsorbed = true; meter.absorb(exploration);
   // Diagnostic forks neither debit native delivery nor run if it refuses;
@@ -136,6 +148,12 @@ export function runSourceSemanticLibraryRecall(
     sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
   // Native work/execution must be sampled before diagnostic allocations. The
   // orchestration owner supplies the same finalizer used by the default route.
+  if (payload.joint_control !== undefined) {
+    const native = finalizeNativeRecall!(result);
+    return captureResearchJointDelivery(native, runtime, payload, authorized,
+      meter, request, boundStatus, admission.kind === "admitted" ? admission.query : undefined,
+      sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
+  }
   return capturedCosts === undefined ? result : { kind: "research_acquisition", result: finalizeNativeRecall!(result),
     private_delivery: captureResearchNominatedSourceDelivery(runtime.database, payload, pool, capturedCosts,
       "live_access_pool_unavailable", lexicalCapture) };
@@ -221,7 +239,8 @@ function prepareResearchFixedSourceLibrary(runtime: SourceSemanticReadRuntime, p
 export function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   descriptors: readonly SourceSemanticHandleDescriptor[],
-  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, query: SourceSemanticQuery, original: string) {
+  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, query: SourceSemanticQuery, original: string,
+  withdrawal?: Readonly<{ interpretation_id: string; occurrence: string }>) {
   let interpretationTruncated = false;
   const semantic_correspondences = semanticCorrespondencesByInterpretation(request.semantic_correspondences ?? []);
   const proofGroups: { entries: ReturnType<typeof proofEntriesFromBranch>["entries"];
@@ -230,6 +249,8 @@ export function executeLibraryBranches(runtime: SourceSemanticReadRuntime, paylo
   const unproved: SourceSemanticLibraryUnprovedComputation[] = [];
   const examined: string[] = [];
   const supports: LibraryExecutedSupport[] = [];
+  const withdrawals: { interpretation_id: string; leaf_id: string; leaf: import("@do-soul/alaya-protocol").SourceSemanticConsumedLeaf;
+    support: LibraryExecutedSupport | null }[] = [];
   let pairs = 0, executedCount = 0, computeOpen = false;
   for (const descriptor of descriptors) {
     const prepared = semantic_correspondences.get(descriptor.interpretation_id) ?? [];
@@ -257,11 +278,25 @@ export function executeLibraryBranches(runtime: SourceSemanticReadRuntime, paylo
           source_interpretation: checked.bound, query_semantics: query, semantic_correspondence: semantic_correspondence, original_query: original,
           workspaceId: payload.workspace_id, scope: checked.stored.record.scope_class!,
           authorizedScopes: authorized, asOf: payload.as_of, sourceValidity: checked.stored.record,
-          source_target: checked.bound.source_target
+          source_target: checked.bound.source_target,
+          ...(withdrawal?.interpretation_id !== descriptor.interpretation_id ? {} : { shared_withdrawal: {
+            leaf_kind: "source_interpretation_presence" as const, occurrence: withdrawal.occurrence } })
         });
         executedCount += 1;
         if (executed.result.resource_usage !== undefined) {
           meter.charge(executed.result.resource_usage.work_units, executed.result.resource_usage.memory_bytes, "library branch");
+        }
+        for (const arm of executed.withdrawal_trace?.arms ?? []) {
+          const scoped = executed.index === null ? null : scopeSourceSemanticLibraryBranch({ ...executed.index,
+            explanations: arm.result.derivations }, arm.result);
+          const group = scoped === null ? null : proofEntriesFromBranch(scoped.index, scoped.result);
+          const support = scoped === null || group === null || group.entries.length === 0 ? null : {
+            proof: { ...scoped.result, original_query: original, source_record: checked.stored.record,
+              interpretation: aligned.interpretation, query: aligned.query,
+              semantic_correspondence: aligned.semantic_correspondence, context: aligned.context },
+            group, source: checked.stored.content_bytes, dependencies: sourceSemanticProofDependencies(arm.result, meter) };
+          meter.retain([arm.leaf, support], "private library withdrawal support");
+          withdrawals.push({ interpretation_id: aligned.interpretation_id, leaf_id: arm.leaf_id, leaf: arm.leaf, support });
         }
         if (executed.result.outcome.status === "resource_exhausted"
           || executed.result.completeness?.logical_index !== "complete") computeOpen = true;
@@ -308,7 +343,7 @@ export function executeLibraryBranches(runtime: SourceSemanticReadRuntime, paylo
     }
     if (pairs >= SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP) break;
   }
-  return { proofGroups, proofs, unproved, examined, supports, pairs, executedCount, computeOpen, interpretationTruncated };
+  return { proofGroups, proofs, unproved, examined, supports, withdrawals, pairs, executedCount, computeOpen, interpretationTruncated };
 }
 
 function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,

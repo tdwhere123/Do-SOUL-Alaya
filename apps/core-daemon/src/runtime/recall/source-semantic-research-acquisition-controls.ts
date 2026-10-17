@@ -23,7 +23,7 @@ type Comparison =
   | (ComparisonBase & Readonly<{ outcome: "failed"; failure: Failure }>);
 
 /** Adapter-needed capability only. Not the worker client, raw DB, or a public runtime property. */
-export type ResearchSourceAcquisitionPort = Pick<RecallReadWorkerClient, "researchAcquisition" | "readSnapshot">;
+export type ResearchSourceAcquisitionPort = Pick<RecallReadWorkerClient, "researchAcquisition" | "researchLibrary" | "readSnapshot">;
 
 const hosts = new WeakMap<object, ResearchSourceAcquisitionPort>();
 const NOT_COMPLETED: NotCompletedArm = { kind: "not_completed" };
@@ -38,7 +38,7 @@ export function bindResearchSourceAcquisitionClient(runtime: object, client: Res
   if (client.researchAcquisition === undefined || client.readSnapshot.isolate === undefined) {
     throw new CoreError("CONFLICT", "research acquisition controls require the native worker client");
   }
-  hosts.set(runtime, { researchAcquisition: client.researchAcquisition, readSnapshot: client.readSnapshot });
+  hosts.set(runtime, { researchAcquisition: client.researchAcquisition, researchLibrary: client.researchLibrary, readSnapshot: client.readSnapshot });
 }
 
 /**

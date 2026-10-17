@@ -14,13 +14,14 @@ import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudg
 import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
   sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
+import type { ResearchJointReply } from "./source-semantic-joint-boundary.js";
 import type { ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
 import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalization.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
-type SourceSemanticWorkerReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply;
+type SourceSemanticWorkerReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply;
 
 /** The transaction's existing execution cache also owns the request-only capture. */
 export interface SourceSemanticRequestExecution {
@@ -32,7 +33,7 @@ export interface SourceSemanticRequestExecution {
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
 export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime,
-  payload: Payload & { acquisition_control?: undefined }): SourceSemanticWorkerResult;
+  payload: Payload & { acquisition_control?: undefined; joint_control?: undefined }): SourceSemanticWorkerResult;
 export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply;
 export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply {
   const meter = new SourceSemanticReadBudget(payload.request.budget);
@@ -76,7 +77,7 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
     }
     const reply = run(executionOf, finalizeNative);
     // The native sibling is already finalized; never resample after diagnostics.
-    if (reply.kind === "research_acquisition") return Object.freeze(reply);
+    if (reply.kind === "research_acquisition" || reply.kind === "research_joint") return Object.freeze(reply);
     const result = finalizeNative(reply);
     return result.kind === "reason" && payload.request.kind === "reason"
       ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;

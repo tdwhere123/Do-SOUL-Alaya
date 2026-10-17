@@ -1560,6 +1560,29 @@ Constructor and entry must use matching compiled module identity. Missing bindin
 fails closed and a closed client retains its existing execution-scope refusal.
 This entry does not construct a seed or make ordinary Recall a feedback loop.
 
+A separate private worker adapter, `researchLibrary.recall`, can apply the fixed
+`private-two-h-chronology-v1` rule after native library execution in one snapshot.
+Core owns the rule; explicit selected coordinates must bind an actually executed
+Bridge/Review local closure and an independently qualified Approval closure. Typed
+key kind, issuer, project, exact normalization and value must agree; source-located
+explicit-offset event times must establish strict precedence. Missing, ambiguous,
+unsupported or non-assertive premises do not become a witnessed result. The
+assessment remains unreviewed and its world claim unknown; it does not change the
+feedback session's `not_lowered` result or add a public joint-proof field.
+The adapter tests delivery through the existing package, fit and encoder owners,
+then recomputes a budgeted Bridge-premise withdrawal with independent Approval
+preserved. This is a private causal diagnostic, not a durable source retraction.
+All private computation and transport consume the native request's remaining
+ledger; the reported private work includes that native prefix and must not be
+added to it again. Funded diagnostic failures preserve the native sibling; if even
+its minimal failure envelope cannot be funded, the private call fails closed with
+separate known native and diagnostic work. Native continuation identity and worker
+affinity remain ordinary; private fitting issues no hidden continuation leases.
+Only delivered, non-routable private pages and bounded dependencies escape; no
+joint cache or persistent graph is introduced. Ordinary MCP/default recall does
+not enable this adapter. Its guarded non-test benchmark caller is not yet wired;
+authored native-worker controls do not establish natural semantic fidelity.
+
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. After snapshot,
 host observation and conditional computation remain provider-free; query semantics

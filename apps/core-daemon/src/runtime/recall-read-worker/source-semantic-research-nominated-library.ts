@@ -12,7 +12,8 @@ import { workOf, type SourceSemanticWorkerPayload } from "./source-semantic-disc
 import { accessInputIdentity, bindAccessPoolIdentity, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import { bindVerifiedResearchSourceRecords } from "./source-semantic-research-pool.js";
 import { executeLibraryBranches, prepareSourceSemanticLibraryInputs } from "./source-semantic-library-recall.js";
-import { deliverFrozenLibraryPage, prepareLibraryDelivery, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
+import { fitFrozenLibraryPage, prepareLibraryDelivery, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
+import { chargeResearchTransport } from "./source-semantic-research-serialization.js";
 import { ResearchLexicalPrefixEvidenceSchema, type ResearchLexicalPrefixCapture } from "./source-semantic-research-lexical-prefix.js";
 
 type Proposal = Readonly<{ root: string; position: number; provenance: "primary" | "supplemental" | "legacy-access remainder" }>;
@@ -292,7 +293,7 @@ export function compareResearchNominatedSourceLibrary(database: StorageDatabase,
   const nominations = [acquisition, ...(acquisition.supplemental ?? [])].flatMap(phase => phase.result?.nominations ?? []);
   if (progress !== undefined) progress.located = nominations.some(row => row.vector !== null);
   const branches = query === undefined
-    ? { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
+    ? { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], withdrawals: [], pairs: 0,
       executedCount: 0, computeOpen: false, interpretationTruncated: false }
     : executeLibraryBranches(runtime, payload, authorized, meter, pool.descriptors, request, query, original);
   const requestIdentity = fieldContractSha256(canonicalJson({ ...request, continuation: undefined }));
@@ -318,21 +319,21 @@ export function compareResearchNominatedSourceLibrary(database: StorageDatabase,
   };
   const prefix = capture(false);
   if (lexicalCapture?.header !== undefined && progress?.lexical_prefix !== undefined) {
-    measureLexicalPrefix(runtime, payload, request, pool, records, prefix, lexicalCapture, progress);
+    measureLexicalPrefix(runtime, request, pool, records, prefix, lexicalCapture, progress);
   }
-  const prefixO1 = partial.hydration.prefix = measureArm(runtime, payload, request, prefix, "O1", "field", undefined, progress, "prefix");
+  const prefixO1 = partial.hydration.prefix = measureArm(request, prefix, "O1", "field", undefined, progress, "prefix");
   const nominated = capture(true);
   const nominatedO1 = partial.hydration.nominated = partial.ordering.o1 =
-    measureArm(runtime, payload, request, nominated, "O1", "field", undefined, progress, "nominated");
+    measureArm(request, nominated, "O1", "field", undefined, progress, "nominated");
   // Ranking contrasts consume the SAME captured nominated repertoire and total request envelope.
-  const access = partial.ordering.access = measureArm(runtime, payload, request, nominated, "access-order", "source_access", undefined, progress, "access");
-  const native = partial.ordering.native = measureArm(runtime, payload, request, nominated, "native-provenance", "source_access", acquisition, progress, "native");
+  const access = partial.ordering.access = measureArm(request, nominated, "access-order", "source_access", undefined, progress, "access");
+  const native = partial.ordering.native = measureArm(request, nominated, "native-provenance", "source_access", acquisition, progress, "native");
   return { kind: "PRIVATE_COUNTERFACTUAL" as const, query_semantics_status: status,
     hydration: { prefix: prefixO1, nominated: nominatedO1 }, ordering: { o1: nominatedO1, access, native } };
   });
 }
 
-function measureArm(runtime: Runtime, payload: SourceSemanticWorkerPayload, request: Request,
+function measureArm(request: Request,
   capture: { prepared: Prepared; preparation: SourceSemanticReadBudget }, policy: string,
   order: "field" | "source_access", acquisition?: SourceSemanticAcquisitionPhase,
   progress?: DeliveryProgress, phase: CostPhase = "prefix") {
@@ -344,7 +345,7 @@ function measureArm(runtime: Runtime, payload: SourceSemanticWorkerPayload, requ
   try { plan = prepareLibraryDelivery(capture.prepared.base, capture.prepared.packages, request, selection, order,
     proposals === undefined ? selectSourceSemanticLibraryPage : researchNativeProposalSelector(proposals), capture.prepared.execution); }
   finally { meter.absorb(selection); }
-  const result = deliverFrozenLibraryPage(runtime, payload, meter, request, plan, 0);
+  const result = fitFrozenLibraryPage(meter, request, plan, 0);
   meter.retain(result, "research full response encoding");
   const encoded = encodeSourceSemanticLibraryResponse(result);
   meter.retain(encoded, "research full encoded response");
@@ -369,13 +370,12 @@ function measureArm(runtime: Runtime, payload: SourceSemanticWorkerPayload, requ
       preview: row.preview, source_disclosure: row.source_disclosure, payload_support: row.payload_support })),
     frozen_pages: plan.pages.map(page => page.map(row => ({ target: row.entry.target, preview: row.preview, proofs: row.proofs }))) };
   meter.retain(arm, "research private artifact transport retention");
-  const transport = meter.canonicalJsonLength(arm);
-  meter.charge(transport, transport * 2, "research private artifact encoding and worker transport");
+  chargeResearchTransport(arm, meter);
   return arm;
   });
 }
 
-function measureLexicalPrefix(runtime: Runtime, payload: SourceSemanticWorkerPayload, request: Request,
+function measureLexicalPrefix(runtime: Runtime, request: Request,
   pool: SourceSemanticAccessPool, records: Parameters<ResearchLexicalPrefixCapture["evidence"]>[2],
   prefix: { prepared: Prepared; preparation: SourceSemanticReadBudget }, capture: ResearchLexicalPrefixCapture,
   progress: DeliveryProgress): void {
@@ -387,8 +387,7 @@ function measureLexicalPrefix(runtime: Runtime, payload: SourceSemanticWorkerPay
       preparation.charge(lexical.evidence.order.length, lexical.evidence.order.length * 32, "research lexical selector position map");
       const positions = new Map(lexical.evidence.order.map(row => [row.root, row.position]));
       const packages = projectProposalPackages(prefix.prepared.packages, positions, preparation);
-      const bytes = preparation.canonicalJsonLength(lexical.evidence);
-      preparation.charge(bytes, bytes * 2, "research lexical reply encoding and worker transport");
+      chargeResearchTransport(lexical.evidence, preparation);
       preparation.charge(1, 128, "research lexical prepared ordering frame");
       return { ...prefix.prepared, packages };
     });
@@ -397,9 +396,9 @@ function measureLexicalPrefix(runtime: Runtime, payload: SourceSemanticWorkerPay
       return;
     }
     const common = { prepared: prefix.prepared, preparation };
-    lexical.control = measureArm(runtime, payload, request, common, "O1", "field", undefined, progress, "lexical_control");
+    lexical.control = measureArm(request, common, "O1", "field", undefined, progress, "lexical_control");
     // Both fit forks start after the same real projection expenditure. Only access positions differ.
-    lexical.candidate = measureArm(runtime, payload, request, { prepared: projected, preparation },
+    lexical.candidate = measureArm(request, { prepared: projected, preparation },
       "original-query-lexical-prefix", "source_access", undefined, progress, "lexical_candidate");
     const evidence = lexical.evidence!;
     const partial = evidence.capture_status === "partial" || evidence.reader.completion !== "complete"
