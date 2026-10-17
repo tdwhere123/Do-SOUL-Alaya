@@ -19,7 +19,7 @@ import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/wo
 import { SemanticChainConfigSchema, assertChainSnapshot, readChainArtifact, withSemanticChainDaemon } from "../../../runs/semantic-chain/contract.js";
 import { inspectSemanticChainSourceIndex, prepareSemanticChainSourceIndex } from "../../../runs/semantic-chain/source-index-binding.js";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/freeze/db-copy.js";
-import { createSourceIndexProducer } from "../../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
+import { createSourceIndexProducer, type SourceIndexProducerPassRemaining } from "../../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
 import { configuration, fixture, publishSource, WORKSPACE } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 const roots: string[] = [];
@@ -30,13 +30,17 @@ afterEach(() => {
 });
 afterAll(() => isolation.restore());
 
-function setup(empty = false) {
+function setup(empty = false, sources = 2) {
   const root = mkdtempSync(join(tmpdir(), "source-binding-")); roots.push(root);
   const snapshot = join(root, "input.sqlite");
   const environment = fixture(snapshot);
   if (!empty) {
-    publishSource(environment, "Blue stone.");
-    publishSource(environment, "Green leaf.", "source-b");
+    if (sources === 2) {
+      publishSource(environment, "Blue stone.");
+      publishSource(environment, "Green leaf.", "source-b");
+    } else {
+      for (let index = 0; index < sources; index++) publishSource(environment, `Stone ${index}.`, `source-${index}`);
+    }
   }
   environment.database.close();
   const config = SemanticChainConfigSchema.parse({ snapshot_path: snapshot, snapshot_sha256: hashRegularFileNoFollow(snapshot),
@@ -53,9 +57,11 @@ function setup(empty = false) {
   return { root, config, execution: { cache_root: join(root, "model-cache"), model_id: "fixture-local-model" } };
 }
 
+const producerPassRemaining: Array<SourceIndexProducerPassRemaining | undefined> = [];
 function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-local-model",
   fault?: "backfill_failed" | "token_limit" | "binding_failed") {
   const checkpoint = vi.fn(async () => undefined);
+  producerPassRemaining.length = 0;
   vi.mocked(startBenchDaemon).mockImplementation(async options => {
     const database = initDatabase({ filename: join(options!.dataDirRoot!, "alaya.db") });
     let submitted = 0;
@@ -78,7 +84,10 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
                 vector: new Float32Array([0.6, 0.8, 0]) });
           } };
       } });
-    const handle = { dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: () => producer.runPass() },
+    const handle = { dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: (remaining?: SourceIndexProducerPassRemaining) => {
+      producerPassRemaining.push(remaining);
+      return producer.runPass(remaining);
+    } },
       checkpointFieldProjection: checkpoint,
       shutdown: vi.fn(async () => { await producer.stop(); database.close(); }) };
     // This narrow fixture exercises the stage through the normal producer/SQLite, not MCP/runtime readiness.
@@ -261,6 +270,124 @@ it("refuses a loaded profile whose actual model differs from the explicit execut
     reason: "source_profile_mismatch", setup: { status: "settled", binding: { status: "ready" } } });
   expect(checkpoint).not.toHaveBeenCalled();
   expect(existsSync(join(root, "different-model", "chain-config.json"))).toBe(false);
+});
+
+function setupSources(count: number) {
+  return setup(false, count);
+}
+
+it.each([[3, 2], [9, 8]] as const)(
+  "omitted one pass leaves %i sources incomplete at cap %i and explicit two passes enable only after all complete",
+  async (sources, cap) => {
+    const { root, config, execution } = setupSources(sources);
+    bindProducer(false, cap);
+    config.implementation_revision = readCurrentExtractionAuthorityRevision();
+    const omitted = await prepareSemanticChainSourceIndex(config, execution, join(root, `omitted-${sources}`));
+    expect(omitted.config).toBeNull();
+    expect(omitted.report).toMatchObject({ reason: "pending_targets", setup_passes: 1,
+      setup: { status: "partial", resources: { model_inputs: cap } }, setup_resources: { model_inputs: cap } });
+    expect(existsSync(join(root, `omitted-${sources}`, "source-index.sqlite"))).toBe(false);
+    bindProducer(false, cap);
+    config.implementation_revision = readCurrentExtractionAuthorityRevision();
+    const enabled = await prepareSemanticChainSourceIndex(config, execution, join(root, `enabled-${sources}`), undefined,
+      { maxPasses: 2 });
+    expect(enabled.config).not.toBeNull();
+    expect(enabled.report).toMatchObject({ admission: "prepared_complete", setup_passes: 2, setup: { status: "settled" } });
+    expect(enabled.report.setup_resources.model_inputs).toBe(sources);
+    expect(enabled.config!.source_index!.index).toMatchObject({
+      status: "ready", target_count: sources, completed_count: sources });
+    expect(config.budget).toEqual(enabled.config!.budget);
+  });
+
+it("debits remaining modelInputs onto the second pass and does not consume a fourth input", async () => {
+  const { root, config, execution } = setupSources(4);
+  bindProducer(false, 2);
+  config.implementation_revision = readCurrentExtractionAuthorityRevision();
+  const result = await prepareSemanticChainSourceIndex(config, execution, join(root, "remainder"), undefined,
+    { maxPasses: 2, modelInputs: 3 });
+  expect(result.config).toBeNull();
+  if (result.config !== null) throw new Error("expected setup failure");
+  expect(result.report.setup_passes).toBe(2);
+  expect(result.report.setup_resources.model_inputs).toBe(3);
+  expect(result.report.setup.resources.model_inputs).toBe(1);
+  expect(producerPassRemaining).toHaveLength(2);
+  expect(producerPassRemaining[0]).toMatchObject({ modelInputs: 3 });
+  expect(producerPassRemaining[1]).toMatchObject({ modelInputs: 1 });
+  expect(result.report.reason).toBe("pending_targets");
+  expect(existsSync(join(root, "remainder", "source-index.sqlite"))).toBe(false);
+});
+
+it("does not loop after failed, unsupported, deadline, or cancelled passes", async () => {
+  const { root, config, execution } = setup();
+  for (const [fault, reason] of [["backfill_failed", "fixture_inference_unavailable"], ["binding_failed", "fixture_binding_transport_failed"]] as const) {
+    bindProducer(false, 8, "fixture-local-model", fault);
+    const result = await prepareSemanticChainSourceIndex(config, execution, join(root, fault), undefined, { maxPasses: 4 });
+    expect(result.config).toBeNull();
+    if (result.config !== null) throw new Error("expected setup failure");
+    expect(result.report.setup_passes).toBe(1);
+    expect(result.report.reason).toBe(reason);
+  }
+  bindProducer(true);
+  const unsupported = await prepareSemanticChainSourceIndex(config, execution, join(root, "unsupported-loop"), undefined, { maxPasses: 4 });
+  expect(unsupported.config).toBeNull();
+  if (unsupported.config !== null) throw new Error("expected setup failure");
+  expect(unsupported.report.setup_passes).toBe(1);
+  expect(unsupported.report.reason).toBe("cached_model_unavailable");
+  const deadlinePass = { status: "deadline" as const, reason: "deadline_exceeded", binding: { status: "not_run" as const },
+    resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, accounting: "lower_bound" as const,
+    model_execution_work: "unknown" as const, warmup: "not_separately_measured" as const, elapsed_ms: 1,
+    limits: { intervalMs: 60_000, capturePage: 32, maxCapturePages: 16, maxRootsPerPass: 16, maxWorkspacesPerPass: 16,
+      work: 50_000, nativeBytes: 4 * 1024 * 1024, modelInputs: 8, inputBytes: 256 * 1024, maxBodyBytes: 4 * 1024 * 1024,
+      stepDeadlineMs: 30_000 } };
+  const cancelledPass = { ...deadlinePass, status: "cancelled" as const, reason: "caller_cancelled" };
+  for (const [name, receipt] of [["deadline", deadlinePass], ["cancelled", cancelledPass]] as const) {
+    const runPass = vi.fn(async () => receipt);
+    vi.mocked(startBenchDaemon).mockImplementationOnce(async options => ({
+      dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: runPass },
+      checkpointFieldProjection: vi.fn(async () => undefined),
+      shutdown: vi.fn(async () => undefined)
+    }) as unknown as Awaited<ReturnType<typeof startBenchDaemon>>);
+    const result = await prepareSemanticChainSourceIndex(config, execution, join(root, name), undefined, { maxPasses: 4 });
+    expect(result.config).toBeNull();
+    if (result.config !== null) throw new Error("expected setup failure");
+    expect(runPass).toHaveBeenCalledTimes(1);
+    expect(result.report.setup_passes).toBe(1);
+    expect(result.report.reason).toBe(receipt.reason);
+  }
+});
+
+it("reports zero-pass and total-allowance exhaustion without a ready generation", async () => {
+  const { root, config, execution } = setupSources(9);
+  const pin = () => { config.implementation_revision = readCurrentExtractionAuthorityRevision(); };
+  bindProducer(false);
+  pin();
+  const zero = await prepareSemanticChainSourceIndex(config, execution, join(root, "zero"), undefined, { maxPasses: 0 });
+  expect(zero.config).toBeNull();
+  expect(zero.report).toMatchObject({ reason: "setup_pass_exhausted", setup_passes: 0,
+    setup: { status: "not_run", reason: "setup_pass_exhausted", resources: { model_inputs: 0 } } });
+  bindProducer(false);
+  pin();
+  const empty = await prepareSemanticChainSourceIndex(config, execution, join(root, "empty-meter"), undefined,
+    { maxPasses: 4, modelInputs: 0 });
+  expect(empty.config).toBeNull();
+  expect(empty.report).toMatchObject({ reason: "setup_allowance_exhausted", setup_passes: 0,
+    setup: { status: "not_run", resources: { model_inputs: 0 } } });
+  bindProducer(false);
+  pin();
+  const spent = await prepareSemanticChainSourceIndex(config, execution, join(root, "spent"), undefined,
+    { maxPasses: 4, modelInputs: 8 });
+  expect(spent.config).toBeNull();
+  expect(spent.report).toMatchObject({ reason: "pending_targets", setup_passes: 1, setup_resources: { model_inputs: 8 } });
+  expect(existsSync(join(root, "spent", "source-index.sqlite"))).toBe(false);
+});
+
+it("rejects invalid setup allowances before starting a daemon", async () => {
+  const { root, config, execution } = setup();
+  await expect(prepareSemanticChainSourceIndex(config, execution, join(root, "neg"), undefined,
+    { maxPasses: -1 })).rejects.toThrow(/invalid Source setup allowance/u);
+  await expect(prepareSemanticChainSourceIndex(config, execution, join(root, "nan"), undefined,
+    { maxPasses: 1, modelInputs: Number.NaN })).rejects.toThrow(/invalid Source setup allowance/u);
+  expect(startBenchDaemon).not.toHaveBeenCalled();
 });
 
 it("rejects output aliases into inputs and leaves disabled configuration unbound", async () => {

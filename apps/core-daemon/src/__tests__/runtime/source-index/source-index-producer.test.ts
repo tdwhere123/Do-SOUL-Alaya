@@ -28,6 +28,7 @@ import {
   DEFAULT_LOCAL_ONNX_MODEL_ID,
   SourceIndexAcquisition,
   SourceIndexBackfill,
+  SourceIndexLifecycle,
   defaultLocalOnnxCacheDir,
   fieldContractSha256,
   type SourceEmbeddingInput,
@@ -43,6 +44,7 @@ import {
 import { initDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { seedWorkspaces } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 import {
+  BUDGET,
   WORKSPACE,
   eraseSource,
   fieldSha256,
@@ -577,5 +579,90 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     // The cancelled result was discarded; a fresh pass recovers the pending window.
     expect(embedInputs).toHaveBeenCalledTimes(2);
     expect(environment.index.state(WORKSPACE).status).toBe("ready");
+  });
+
+  it("restricts one pass to remaining modelInputs without raising the constructor cap", async () => {
+    const environment = fileEnvironment();
+    for (let index = 0; index < 3; index++) publishSource(environment, `body-${index}`, `source-${index}`);
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    const producer = producerFor(environment, bind);
+    expect(await producer.runPass({ modelInputs: 1 })).toMatchObject({
+      status: "partial", reason: "pending_targets", resources: { model_inputs: 1 },
+      limits: { modelInputs: 8 }
+    });
+    expect(embedInputs).toHaveBeenCalledTimes(1);
+    expect(embedInputs.mock.calls[0]![0]).toHaveLength(1);
+  });
+
+  it("rejects invalid remaining allowances before occupying a pass", async () => {
+    const environment = fileEnvironment();
+    publishSource(environment, "body");
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    const producer = producerFor(environment, bind);
+    await expect(producer.runPass({ modelInputs: -1 })).rejects.toThrow(/invalid Source producer pass remaining/u);
+    await expect(producer.runPass({ modelInputs: 1.5 })).rejects.toThrow(/invalid Source producer pass remaining/u);
+    await expect(producer.runPass({ modelInputs: Number.NaN })).rejects.toThrow(/invalid Source producer pass remaining/u);
+    await expect(producer.runPass({ stepDeadlineMs: 1 } as never)).rejects.toThrow(/invalid Source producer pass remaining/u);
+    expect(embedInputs).not.toHaveBeenCalled();
+  });
+
+  it("completes nine one-window sources across two constructor-capped passes", async () => {
+    const environment = fileEnvironment();
+    for (let index = 0; index < 9; index++) publishSource(environment, `Stone ${index}.`, `source-${index}`);
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    const producer = producerFor(environment, bind, { modelInputs: 8 });
+    expect(await producer.runPass()).toMatchObject({ status: "partial" });
+    expect(embedInputs.mock.calls.length).toBe(8);
+    for (let pass = 0; pass < 4 && environment.index.state(WORKSPACE).status !== "ready"; pass++) {
+      await producer.runPass();
+    }
+    expect(environment.index.state(WORKSPACE)).toMatchObject({ status: "ready" });
+    expect(embedInputs.mock.calls.length).toBe(9);
+  });
+
+  it("walks sixteen already-complete roots with flat counts then embeds only the pending tail", async () => {
+    const environment = fileEnvironment();
+    for (let index = 0; index < 18; index++) {
+      publishSource(environment, "Alpha uses tools.", `source-${index}`);
+    }
+    const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
+    const ready = await bind({ window_bytes: sourceIndexWindowBytes(32), max_input_tokens: 32 });
+    expect(ready.status).toBe("ready");
+    if (ready.status !== "ready") throw new Error("fixture bind required");
+    const lifecycle = new SourceIndexLifecycle(environment.index, fieldSha256);
+    const backfill = new SourceIndexBackfill(lifecycle);
+    const selection = lifecycle.select(WORKSPACE, { revision: "source-index-local.v1", profile: ready.profile });
+    const generation = lifecycle.begin(selection);
+    lifecycle.capture(WORKSPACE, generation.generation_id, 32, BUDGET);
+    const roots = environment.index.listTargets(WORKSPACE, generation.generation_id, null, 32);
+    expect(roots).toHaveLength(18);
+    const stepBudget = { work: 100_000, native_bytes: 16 * 1024 * 1024, model_inputs: 64, input_bytes: 1024 * 1024,
+      max_body_bytes: 4 * 1024 * 1024 };
+    const signal = new AbortController().signal;
+    for (const root of roots.slice(0, 17)) {
+      const result = await backfill.step({
+        selection, generation_id: generation.generation_id, root_key: root.root_key, binding: ready,
+        budget: stepBudget, deadline_ms: Date.now() + 60_000, signal
+      });
+      expect(result.status).toBe("root_complete");
+    }
+    expect(environment.index.generation(WORKSPACE, generation.generation_id)).toMatchObject({
+      status: "building", target_count: 18, completed_count: 17, enumeration_complete: true
+    });
+    expect(environment.index.state(WORKSPACE).status).not.toBe("ready");
+    const constructed = embedInputs.mock.calls.length;
+    expect(constructed).toBe(17);
+    const producer = producerFor(environment, bind);
+    const first = await producer.runPass();
+    expect(embedInputs.mock.calls.length).toBe(constructed);
+    expect(environment.index.generation(WORKSPACE, generation.generation_id)).toMatchObject({
+      completed_count: 17, target_count: 18, status: "building"
+    });
+    expect(first.status).toBe("partial");
+    const second = await producer.runPass();
+    expect(embedInputs.mock.calls.length).toBe(constructed + 1);
+    expect(embedInputs.mock.calls.at(-1)?.[0]).toHaveLength(1);
+    expect(second).toMatchObject({ status: "settled" });
+    expect(environment.index.state(WORKSPACE)).toMatchObject({ status: "ready" });
   });
 });

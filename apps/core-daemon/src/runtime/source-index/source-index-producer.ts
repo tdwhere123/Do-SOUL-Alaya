@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   SOURCE_INDEX_MAX_BODY_BYTES,
   SourceIndexOperationError,
   type SourceIndexBackfillBudget,
@@ -49,6 +50,12 @@ export interface SourceIndexProducerInput {
   readonly limits?: Partial<SourceIndexProducerLimits>;
 }
 
+const PASS_REMAINING_KEYS = ["work", "nativeBytes", "modelInputs", "inputBytes",
+  "maxCapturePages", "maxRootsPerPass"] as const;
+/** Internal-consumer restriction of one pass; never raises constructor caps. */
+export type SourceIndexProducerPassRemaining = Partial<Pick<SourceIndexProducerLimits,
+  typeof PASS_REMAINING_KEYS[number]>>;
+
 type PassOutcome = Readonly<{
   status: "settled" | "busy" | "stopped" | Exclude<SourceIndexBackfillResult["status"], "root_complete">;
   reason: string;
@@ -72,6 +79,7 @@ type Pass = {
   spent: { work: number; native_bytes: number; model_inputs: number; input_bytes: number };
   capturePages: number;
   visitedRoots: number;
+  limits: SourceIndexProducerLimits;
 };
 
 /** Conservative private UTF-8 byte window, not the observation-chunk policy. */
@@ -135,7 +143,8 @@ export class SourceIndexProducer {
     if (this.inFlight !== null) await this.inFlight;
   }
 
-  public async runPass(): Promise<SourceIndexProducerPassReceipt> {
+  public async runPass(remaining?: SourceIndexProducerPassRemaining): Promise<SourceIndexProducerPassReceipt> {
+    const limits = restrictPassLimits(this.limits, remaining);
     if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping && !this.started) {
       return { status: this.stopping ? "stopped" : "busy", reason: this.stopping ? "producer_stopped" : "producer_occupied",
         binding: { status: "not_run" },
@@ -144,7 +153,7 @@ export class SourceIndexProducer {
     }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
-    const work = Promise.resolve().then(() => this.executePass());
+    const work = Promise.resolve().then(() => this.executePass(limits));
     this.inFlight = work;
     try { return await work; }
     finally { if (this.inFlight === work) this.inFlight = null; }
@@ -157,14 +166,14 @@ export class SourceIndexProducer {
     return work;
   }
 
-  private async executePass(): Promise<SourceIndexProducerPassReceipt> {
+  private async executePass(limits: SourceIndexProducerLimits): Promise<SourceIndexProducerPassReceipt> {
     const started = performance.now();
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), this.limits.stepDeadlineMs);
     const pass: Pass = { signal: AbortSignal.any([this.signal.signal, deadline.signal]),
       deadline: Date.now() + this.limits.stepDeadlineMs, binding: { status: "not_run" },
       outcome: { status: "settled", reason: "pass_complete" },
-      spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0 };
+      spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0, limits };
     try {
       await this.reconcilePass(pass);
     } catch (error) {
@@ -192,9 +201,18 @@ export class SourceIndexProducer {
       ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
     const tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
     if (binding.status === "unsupported") pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+    const seen = new Set<string>();
+    let wrapped = false;
     for (let count = 0; count < this.limits.maxWorkspacesPerPass && !pass.signal.aborted; count++) {
-      const workspace = this.nextWorkspace() ?? (count === 0 ? this.nextWorkspace() : null);
-      if (workspace === null) return;
+      // nextWorkspace clears afterWorkspace when the ring ends. Wrap once so a later pass
+      // can resume the first incomplete workspace after visiting a later empty one.
+      let workspace = this.nextWorkspace();
+      if (workspace === null && !wrapped) {
+        wrapped = true;
+        workspace = this.nextWorkspace();
+      }
+      if (workspace === null || seen.has(workspace)) return;
+      seen.add(workspace);
       // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
       this.afterWorkspace = workspace;
       if (tracked.status !== "ready") {
@@ -224,7 +242,7 @@ export class SourceIndexProducer {
     const generation = this.lifecycle.begin(selection);
     if (generation.status === "ready" || generation.status === "valid_empty") {
       this.targetCursors.delete(workspaceId);
-      return null;
+      return { status: "settled", reason: "pass_complete" };
     }
     const captured = this.captureUntilComplete(workspaceId, generation, pass);
     if (pass.signal.aborted) return null;
@@ -236,10 +254,10 @@ export class SourceIndexProducer {
   private captureUntilComplete(workspaceId: string, initial: SourceIndexGeneration, pass: Pass): SourceIndexGeneration {
     let generation = initial;
     while (!generation.enumeration_complete && !pass.signal.aborted &&
-        pass.capturePages < this.limits.maxCapturePages && this.hasBudget(pass)) {
+        pass.capturePages < pass.limits.maxCapturePages && this.hasBudget(pass)) {
       pass.capturePages++;
       const result = this.lifecycle.capture(workspaceId, generation.generation_id, this.limits.capturePage,
-        remainingBudget(this.limits, pass.spent));
+        remainingBudget(pass.limits, pass.spent));
       pass.spent.work += result.resources.work;
       pass.spent.native_bytes += result.resources.native_bytes;
       generation = result.generation;
@@ -256,7 +274,7 @@ export class SourceIndexProducer {
       cursor = { generation: generationId, after: null };
       this.targetCursors.set(workspace, cursor);
     }
-    while (!pass.signal.aborted && this.hasBudget(pass) && pass.visitedRoots < this.limits.maxRootsPerPass) {
+    while (!pass.signal.aborted && this.hasBudget(pass) && pass.visitedRoots < pass.limits.maxRootsPerPass) {
       // One metadata row per visit, including already-complete targets. Never scan/skip an unbounded prefix.
       const target = this.repository.listTargets(workspace, generationId, cursor.after, 1)[0];
       if (target === undefined) { this.targetCursors.delete(workspace); return null; }
@@ -264,7 +282,7 @@ export class SourceIndexProducer {
       const previousRoot = cursor.after;
       cursor.after = target.root_key;
       const pending = this.lifecycle.pendingWindows(workspace, generationId, target.root_key, 1,
-        remainingBudget(this.limits, pass.spent));
+        remainingBudget(pass.limits, pass.spent));
       pass.spent.work += pending.resources.work;
       pass.spent.native_bytes += pending.resources.native_bytes;
       if (pending.status === "stale" || pending.status === "superseded" || pending.status === "unbound") {
@@ -272,7 +290,7 @@ export class SourceIndexProducer {
       }
       if (pending.status === "ready" && pending.ordinals.length === 0) continue;
       const result = await this.backfill.step({ selection, generation_id: generationId,
-        root_key: target.root_key, binding, budget: remainingBudget(this.limits, pass.spent),
+        root_key: target.root_key, binding, budget: remainingBudget(pass.limits, pass.spent),
         deadline_ms: pass.deadline, signal: pass.signal });
       pass.spent.work += result.resources.work;
       pass.spent.native_bytes += result.resources.native_bytes;
@@ -291,7 +309,7 @@ export class SourceIndexProducer {
   }
 
   private hasBudget(pass: Pass): boolean {
-    const left = remainingBudget(this.limits, pass.spent);
+    const left = remainingBudget(pass.limits, pass.spent);
     return left.work > 0 && left.native_bytes > 0 && left.model_inputs > 0 && left.input_bytes > 0;
   }
 
@@ -351,6 +369,30 @@ function remainingBudget(limits: SourceIndexProducerLimits, spent: Pass["spent"]
   return { work: Math.max(0, limits.work - spent.work), native_bytes: Math.max(0, limits.nativeBytes - spent.native_bytes),
     model_inputs: Math.max(0, limits.modelInputs - spent.model_inputs), input_bytes: Math.max(0, limits.inputBytes - spent.input_bytes),
     max_body_bytes: limits.maxBodyBytes };
+}
+
+function restrictPassLimits(
+  constructed: SourceIndexProducerLimits, remaining?: SourceIndexProducerPassRemaining
+): SourceIndexProducerLimits {
+  if (remaining === undefined) return constructed;
+  if (remaining === null || typeof remaining !== "object" || Array.isArray(remaining)) {
+    throw new AlayaError("VALIDATION", "invalid Source producer pass remaining");
+  }
+  for (const key of Object.keys(remaining)) {
+    if (!(PASS_REMAINING_KEYS as readonly string[]).includes(key)) {
+      throw new AlayaError("VALIDATION", "invalid Source producer pass remaining");
+    }
+  }
+  const next = { ...constructed };
+  for (const key of PASS_REMAINING_KEYS) {
+    if (!Object.hasOwn(remaining, key)) continue;
+    const value = remaining[key];
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+      throw new AlayaError("VALIDATION", "invalid Source producer pass remaining");
+    }
+    next[key] = Math.min(constructed[key], value);
+  }
+  return next;
 }
 
 function boundedProducerFailureReason(reason: string): string {
