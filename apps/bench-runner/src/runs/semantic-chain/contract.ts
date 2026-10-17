@@ -153,25 +153,31 @@ export function assertChainSnapshot(config: SemanticChainConfig): void {
   assertSemanticChainSourceIndex(config);
 }
 
+type SemanticChainDaemonOptions = Readonly<{ signal?: AbortSignal; embeddingStartupProbe?: "omit" }>;
 export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
-  body: (daemon: BenchDaemonHandle) => Promise<T>): Promise<T> {
+  body: (daemon: BenchDaemonHandle) => Promise<T>, options: SemanticChainDaemonOptions = {}): Promise<T> {
+  const captured = { ...options };
+  captured.signal?.throwIfAborted();
   assertChainSnapshot(config);
-  return runBenchDaemonOperation(() => runBoundSemanticChainDaemon(config, root, body));
+  return runBenchDaemonOperation(() => runBoundSemanticChainDaemon(config, root, body, captured));
 }
 
 async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
-  body: (daemon: BenchDaemonHandle) => Promise<T>): Promise<T> {
+  body: (daemon: BenchDaemonHandle) => Promise<T>, options: SemanticChainDaemonOptions): Promise<T> {
+  const { signal, embeddingStartupProbe } = options;
   mkdirSync(root, { recursive: true });
   const directory = mkdtempSync(join(root, "native-session-"));
   let daemon: BenchDaemonHandle | undefined;
   let complete = false;
   try {
+    signal?.throwIfAborted();
     restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
+    signal?.throwIfAborted();
     const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
       sourceSemanticInterpretationClock: config.interpretation_clock,
-      ...(config.source_index === undefined ? { embeddingMode: "disabled" as const } : {
-        embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const,
-        embeddingStartupProbe: "omit" as const,
+      ...(config.source_index === undefined ? { embeddingMode: "disabled" as const,
+        ...(embeddingStartupProbe === undefined ? {} : { embeddingStartupProbe }) } : {
+        embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const, embeddingStartupProbe: "omit" as const,
         cachedLocalEmbedding: { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id } }),
       fieldProjectionAdmissionMode: "explicit_checkpoint" });
     daemon = started;
@@ -179,6 +185,7 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
     removeDataDirWhenBenchDaemonCancelled(directory);
     const scope = currentBenchScope();
     if (scope === undefined) throw new AlayaError("CANCELLED", "bench work has no owning scope");
+    signal?.throwIfAborted();
     const result = await trackBenchBody(scope, () => body(started));
     complete = true;
     return result;

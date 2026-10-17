@@ -3,7 +3,7 @@ import { AlayaError, SoulInterpretationRequestSchema, SoulInterpretationResponse
   canonicalJson, SourceSemanticCorrespondencePreparationOptionsSchema,
   SOURCE_SEMANTIC_CORRESPONDENCE_FULL_CATALOG_POLICY, sourceSemanticCorrespondenceCacheMaterial,
   sourceSemanticCorrespondenceGenerationPolicies, sourceSemanticQueryIdentity,
-  sourceSemanticReasonControl, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
+  sourceSemanticReasonControl, sourceRecallTarget, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -13,11 +13,14 @@ import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, withSemantic
 import { parseSemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { admitInitialQualified, initialSourcePhysicalOwner } from "./recovery-publication.js";
-import { reserveRecoveryEffect } from "./recovery-window.js";
+import { reserveRecoveryEffect, type RecoveryWindow } from "./recovery-window.js";
+import { readVerifiedNativeSourceSnapshot } from "../snapshot/source-records/native.js";
 import { parseSourceSemanticInteractivePreflight } from "../extraction/fill/source-semantic-interactive-preflight.js";
 import { inspectOptionalCompleteSourceResponse } from "../extraction/cache/source-interactive-binding.js";
 import { reserveRecoveryRead, reserveRecoveryAction, reserveRecoveryHostEffect,
-  recordRecoveryNativeWork } from "./recovery-allowance.js";
+  recordRecoveryNativeWork, recoveryAllowanceIdentity } from "./recovery-allowance.js";
+import { createSourceFeedbackCorrespondenceCache } from "./source-feedback-correspondence-cache.js";
+import { readSourceExperiment, runSourceFeedbackExperiment, type SourceFeedbackExperimentInput } from "./source-experiment.js";
 
 type RecoveryReasonRound = { identity?: string; qualified_snapshot_identity?: string;
   results?: { source_interpretation_id?: string; status?: string; response?: { result?: unknown } }[] };
@@ -152,7 +155,24 @@ export function nominateRecoverySource(window: readonly RecoveryWindowSource[], 
   return selectRecoveryNomination(window, settled.publication_identity, reason, eligible);
 }
 
+function feedbackNomination(input: SourceFeedbackExperimentInput, reason: RecoveryReasonRound) {
+  const legacy = input.legacy;
+  if (legacy === undefined) throw new AlayaError("CONFLICT", "feedback has no captured recovery projection authority");
+  const sourceWindow = legacy.source_window as RecoveryWindowSource[];
+  const eligible = sourceWindow.filter(row => row.source_id === input.session.source_id &&
+    row.record_id === input.session.source_target.root_id && row.source_version === input.session.source_target.source_version &&
+    row.content_digest === input.session.source_target.content_digest);
+  return selectRecoveryNomination(sourceWindow, legacy.qualified_snapshot_identity, reason, eligible);
+}
+
 function recoveryNomination(root: string, reason: RecoveryReasonRound) {
+  if (readChainArtifact(join(root, "source-experiment-input.json")) !== undefined) {
+    const experiment = readSourceExperiment(root);
+    if (experiment.input === undefined || experiment.execution === undefined || reason.identity !== experiment.identity) {
+      throw new AlayaError("CONFLICT", "nomination differs from retained feedback seed");
+    }
+    return feedbackNomination(experiment.input, reason);
+  }
   const { window, settled } = admitInitialQualified(root);
   return nominateRecoverySource(window.window, settled, reason);
 }
@@ -170,15 +190,15 @@ export function admitRecoveryNomination(rootInput: string) {
   return expected;
 }
 
-/** The first conditional branch runs handleless against the newly qualified sealed SQLite. */
-export async function reasonInitialRecovery(rootInput: string) {
-  const root = resolve(rootInput);
-  reserveRecoveryRead(root, "initial handleless reason inputs");
+function admitInitialReasonInputs(root: string, feedback = false) {
   const { window, settled } = admitInitialQualified(root);
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(window.initial_chain_root, "prepare.json")));
   const query = plan.queries[0];
   if (query?.status !== "ready" || plan.queries.length !== 1) {
     throw new AlayaError("CONFLICT", "initial reason requires the frozen admitted original query");
+  }
+  if (feedback && plan.config.correspondence_cache_owners !== undefined) {
+    throw new AlayaError("CONFLICT", "feedback requires one frozen C cache root, not alternate cache owners");
   }
   const selected = settled.descriptor_export.slice(0, plan.config.correspondence_pair_cap);
   const preparation = { correspondence_demand: plan.config.correspondence_demand,
@@ -201,9 +221,26 @@ export async function reasonInitialRecovery(rootInput: string) {
     throw new AlayaError("CONFLICT", "initial correspondence denominator changed");
   }
   const cacheRoot = resolve(plan.config.correspondence_cache_root);
-  const rows = workset === null ? [] : readSemanticChainProposalResults(workset, cacheRoot,
-    plan.config.correspondence_generation?.max_output_tokens ?? plan.config.max_output_tokens);
+  const tokens = plan.config.correspondence_generation?.max_output_tokens ?? plan.config.max_output_tokens;
+  const rows = workset === null ? [] : readSemanticChainProposalResults(workset, cacheRoot, tokens);
   const current = bindRecoveryReasonCorrespondence(rows, selected, query, preparation);
+  return { window, settled, plan, query, workset, rows, current };
+}
+
+/** Old windows remain one-shot; only a fresh explicitly frozen feedback window can select the private session. */
+export async function reasonInitialRecovery(rootInput: string, options: Readonly<{ signal?: AbortSignal }> = {}) {
+  const capturedOptions = { ...options }, signal = capturedOptions.signal, root = resolve(rootInput);
+  if (Object.keys(capturedOptions).some(key => key !== "signal")) {
+    throw new AlayaError("VALIDATION", "feedback selection must be bound at recovery-window freeze, not supplied as late options");
+  }
+  const frozen = readChainArtifact(join(root, "recovery-window.json")) as { contract?: string } | undefined;
+  const retainedInput = readChainArtifact(join(root, "source-experiment-input.json")) as SourceFeedbackExperimentInput | undefined;
+  if (retainedInput !== undefined && retainedInput.legacy?.window_identity !== chainIdentity(frozen)) {
+    throw new AlayaError("CONFLICT", "feedback frozen window changed on resumption");
+  }
+  if (frozen?.contract === "source-semantic-recovery-feedback-window-v1") return reasonInitialFeedback(root, { signal });
+  reserveRecoveryRead(root, "initial handleless reason inputs");
+  const { window, settled, plan, query, workset, rows, current } = admitInitialReasonInputs(root);
   const resultPath = join(root, "initial-reason.json");
   const identity = chainIdentity({ window: chainIdentity(window), qualified: settled.publication_identity,
     workset: workset === null ? null : chainIdentity(workset),
@@ -268,4 +305,102 @@ export async function reasonInitialRecovery(rootInput: string) {
   writeChainArtifact(resultPath, result);
   writeChainArtifact(join(root, "source-nomination.json"), recoveryNomination(root, result));
   return result;
+}
+
+/** Repair is a projection of the retained matching seed exposure, never readiness or another worker call. */
+async function projectInitialFeedback(root: string, state: Awaited<ReturnType<typeof runSourceFeedbackExperiment>>) {
+  if (state.execution === undefined || state.input === undefined) return state;
+  const { input, execution } = state, seed = input.session.seed;
+  if (input.legacy === undefined) throw new AlayaError("CONFLICT", "feedback has no captured recovery projection authority");
+  const exposure = execution.trace.exposures.find(row => row.result.kind === "reason" &&
+    row.result.result?.outcome.status === "interpreted" && row.result.coverage.payload === "complete" &&
+    row.result.result.source_interpretation_id === seed.source_interpretation_id &&
+    canonicalJson(row.result.result.source_target) === canonicalJson(input.session.source_target) &&
+    canonicalJson(row.result.query) === canonicalJson(seed.query_semantics) &&
+    canonicalJson(row.result.semantic_correspondence) === canonicalJson(seed.semantic_correspondence));
+  const prior = readChainArtifact(join(root, "initial-reason.json"));
+  const nomination = readChainArtifact(join(root, "source-nomination.json"));
+  if (exposure === undefined) {
+    if (prior !== undefined || nomination !== undefined) throw new AlayaError("CONFLICT", "feedback has no seed exposure for retained legacy projection");
+    writeChainArtifact(join(root, "source-experiment-projection.json"), { identity: state.identity, seed_exposure_id: null });
+    return readSourceExperiment(root);
+  }
+  const conversion = await import("../../../../core-daemon/dist/mcp-memory/tool/interpretation-handler.js");
+  const response = conversion.mcpFromWorker(exposure.result);
+  if (response.operation !== "reason") throw new AlayaError("CONFLICT", "retained seed exposure changed operation");
+  const result = { contract: "source-semantic-initial-reason-v1", identity: state.identity,
+    qualified_snapshot_identity: input.legacy.qualified_snapshot_identity, status: "reasoned",
+    results: [{ source_interpretation_id: seed.source_interpretation_id, status: "reasoned",
+      proposal_status: input.legacy.proposal_status, response }] };
+  const expected = feedbackNomination(input, result);
+  writeChainArtifact(join(root, "initial-reason.json"), result);
+  writeChainArtifact(join(root, "source-nomination.json"), expected);
+  writeChainArtifact(join(root, "source-experiment-projection.json"), { identity: state.identity, seed_exposure_id: exposure.exposure_id });
+  return readSourceExperiment(root);
+}
+
+function recoveryFeedbackSeedTarget(root: string, window: RecoveryWindow,
+  source: { source_id: string; source_version: string; record_id: string }) {
+  reserveRecoveryRead(root, "admit actual seed source target", [window.native_snapshot_path]);
+  const record = readVerifiedNativeSourceSnapshot(window.native_snapshot_path).records.find(row =>
+    row.source_id === source.source_id && row.record.identity === source.record_id && row.source_version === source.source_version)?.record;
+  if (record === undefined) throw new AlayaError("CONFLICT", "feedback seed source target is unavailable");
+  return sourceRecallTarget({ workspace_id: record.workspace_id, root_kind: "source_record", root_id: record.identity,
+    source_version: record.source_version, content_digest: record.content_digest, evidence_object_id: record.evidence_object_id });
+}
+
+async function reasonInitialFeedback(root: string, options: Readonly<{ signal?: AbortSignal }>) {
+  const retained = readSourceExperiment(root);
+  if (retained.status === "unsettled_unknown") return retained;
+  if (retained.execution !== undefined) return projectInitialFeedback(root, retained);
+  options.signal?.throwIfAborted();
+  reserveRecoveryRead(root, "initial feedback reason inputs");
+  const { window, settled, plan, query, workset, current } = admitInitialReasonInputs(root, true);
+  if (!("feedback" in window)) throw new AlayaError("CONFLICT", "feedback requires a fresh frozen policy");
+  const admitted = current.filter(({ row }) => row.status === "interpreted" && row.received !== undefined &&
+    "semantic_correspondence" in row.received && row.received.semantic_correspondence !== undefined && row.shard !== undefined);
+  if (admitted.length !== 1 || workset === null) return { status: "blocked" as const,
+    reason: admitted.length === 0 ? "missing_admitted_seed" : "ambiguous_admitted_seed", admitted_seed_count: admitted.length,
+    seed_candidates: current.map(({ row, descriptor }) => ({ key: row.line.key, status: row.status,
+      source_interpretation_id: descriptor.source_interpretation_id, cache_identity: row.cache_identity })) };
+  const { row, descriptor } = admitted[0]!;
+  const source = settled.descriptor_export.find(candidate => candidate.descriptor.source_interpretation_id === descriptor.source_interpretation_id);
+  if (source === undefined || row.received === undefined || !("semantic_correspondence" in row.received) ||
+      row.received.semantic_correspondence === undefined || row.cache_identity === null) {
+    throw new AlayaError("CONFLICT", "feedback seed lacks its physical H/Q/C authority");
+  }
+  const request = row.line.request as SourceSemanticCorrespondenceRequest;
+  if (request.revision !== undefined || workset.revision_parent_cache_root !== undefined) return { status: "blocked" as const, reason: "seed_revision_unsupported" };
+  const { model, provider_url, request_profile, producer_id, producer_version } = workset;
+  const correspondence = {
+    cache_root: resolve(plan.config.correspondence_cache_root),
+    max_output_tokens: plan.config.correspondence_generation?.max_output_tokens ?? plan.config.max_output_tokens,
+    producer: { model, provider_url, request_profile, ...(producer_id === undefined ? {} : { producer_id }),
+      ...(producer_version === undefined ? {} : { producer_version }) },
+    ...(request.generation_policy === undefined ? {} : { generation_policy: request.generation_policy }),
+    ...(plan.config.correspondence_demand === undefined ? {} : { correspondence_demand: plan.config.correspondence_demand,
+      correspondence_cap: plan.config.correspondence_cap! })
+  };
+  const sourceTarget = recoveryFeedbackSeedTarget(root, window, source);
+  const parent = recoveryAllowanceIdentity(root), config = { ...plan.config,
+    snapshot_path: settled.snapshot_path, snapshot_sha256: settled.snapshot_sha256 };
+  const policy = createSourceFeedbackCorrespondenceCache(correspondence);
+  const requestId = chainIdentity({ window: chainIdentity(window), qualified: settled.publication_identity, key: row.line.key });
+  const input: SourceFeedbackExperimentInput = { contract: window.feedback.execution_version, config,
+    context: { workspace_id: config.workspace_id, as_of: config.interpretation_clock, authorized_scopes: config.authorized_scopes },
+    session: { request_id: requestId, parent_entitlement_id: parent, workspace_id: config.workspace_id,
+      original_query: query.original_query, scope_identity: canonicalJson([null, config.authorized_scopes]), as_of: config.interpretation_clock,
+      source_id: source.source_id, source_target: sourceTarget,
+      seed: { kind: "reason", accepts_unreviewed_conditional_results: true, original_query: query.original_query,
+        source_interpretation_id: descriptor.source_interpretation_id, query_semantics: query.query_semantics,
+        semantic_correspondence: row.received.semantic_correspondence, budget: window.feedback.action_budget, output_byte_limit: config.output_byte_limit },
+      budget: window.feedback.budget, action_budget: window.feedback.action_budget, correspondence_policy_id: policy.policy_id },
+    seed_interpretation: descriptor.interpretation, correspondence, timeout_ms: window.feedback.timeout_ms,
+    legacy: { window_identity: chainIdentity(window), qualified_snapshot_identity: settled.publication_identity,
+      proposal_status: row.status, source_window: window.window },
+    seed_cache: { key: row.line.key, cache_identity: row.cache_identity,
+      workset: { ...workset, items: [workset.items[current.findIndex(candidate => candidate.row.line.key === row.line.key)]!] },
+      cache_root: correspondence.cache_root, max_output_tokens: correspondence.max_output_tokens,
+      historical_production: row.shard?.usage === undefined ? { status: "unknown" } : { status: "reported", usage: row.shard.usage } } };
+  return projectInitialFeedback(root, await runSourceFeedbackExperiment(input, root, options));
 }

@@ -6,7 +6,7 @@ import { SourceSemanticsPublicPayloadSchema, type SourceSemanticsPublicPayload }
 import type { SourceSemanticsExecutionPort } from "./recall-read-worker-client.js";
 import type { AlayaDaemonRuntime } from "../daemon/lifecycle/daemon-runtime-types.js";
 
-const runtimePorts = new WeakMap<AlayaDaemonRuntime, SourceSemanticsExecutionPort>();
+const runtimePorts = new WeakMap<object, SourceSemanticsExecutionPort>();
 
 /** Named consumer: createAlayaDaemonRuntime. The existing client retains lifetime/close ownership. */
 export function bindSourceFeedbackExecutionPort(runtime: AlayaDaemonRuntime, port: SourceSemanticsExecutionPort): void {
@@ -17,8 +17,9 @@ export function bindSourceFeedbackExecutionPort(runtime: AlayaDaemonRuntime, por
 export type SourceFeedbackRuntimeInput = Omit<Parameters<typeof executeSourceFeedback>[0], "port">;
 
 /** Private daemon/bench Node friend entry. Import from the same dist owner as the runtime constructor.
- * No raw client/port escape, public runtime property, worker operation or seed construction. */
-export async function executeSourceFeedbackForRuntime(runtime: AlayaDaemonRuntime, input: SourceFeedbackRuntimeInput) {
+ * No raw client/port escape, public runtime property, worker operation or seed construction.
+ * Object identity and registry membership own admission across source/dist type declarations. */
+export async function executeSourceFeedbackForRuntime(runtime: object, input: SourceFeedbackRuntimeInput) {
   const port = runtimePorts.get(runtime);
   if (port === undefined) throw new CoreError("CONFLICT", "source feedback execution port is not bound");
   return await executeSourceFeedback({ ...input, port });

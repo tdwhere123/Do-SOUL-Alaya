@@ -149,6 +149,17 @@ export function recoveryAllowanceIdentity(root: string): string {
   } finally { db.close(); }
 }
 
+/** Readback only: absence is not a new reservation or permission to execute. */
+export function readRecoveryAction(root: string, name: string) {
+  const path = join(resolve(root), "recovery-allowance.sqlite");
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const row = db.prepare("SELECT identity, work_units, memory_bytes FROM effects WHERE name=?").get(name) as
+      { identity: string; work_units: number; memory_bytes: number } | undefined;
+    return row;
+  } finally { db.close(); }
+}
+
 /** Actual worker meters are retained independently of the no-refund reservation. */
 export function recordRecoveryNativeWork(root: string, name: string, workInput: unknown): void {
   const work = SourceSemanticWorkerWorkSchema.parse(workInput);

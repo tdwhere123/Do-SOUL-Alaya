@@ -227,7 +227,8 @@ async function executeWorker(input: Dependencies, context: McpMemoryToolCallCont
     authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
     expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request });
 }
-function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
+/** Private bench feedback projection also consumes this conversion, never another worker call. */
+export function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
   if (result.kind === "validate_source") throw new CoreError("OBLIGATION_VIOLATION", "internal preparation cannot escape as an MCP response");
   if (result.kind === "recall") {
     return encodeSourceSemanticLibraryResponse(result);
