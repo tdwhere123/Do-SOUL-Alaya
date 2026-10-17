@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../app.js";
 import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
 import { closeServer, finalizeServerClose, type CloseableHttpServer } from "./daemon-server-close.js";
@@ -121,7 +122,10 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     startBackgroundServices,
     runSourceIndexPass: async () => {
       if (state.backgroundStarted || state.shuttingDown !== null || input.sourceIndexProducer?.runPass === undefined) {
-        throw new Error("Source-only preparation requires an idle, unscheduled daemon producer");
+        throw new AlayaError(
+          "UNAVAILABLE",
+          "Source-only preparation requires an idle, unscheduled daemon producer"
+        );
       }
       return await input.sourceIndexProducer.runPass();
     },
