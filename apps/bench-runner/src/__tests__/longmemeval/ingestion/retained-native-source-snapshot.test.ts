@@ -237,6 +237,7 @@ it("preserves version 1 manifest bytes and default source request identities", a
   expect(readFileSync(nativeSourceSnapshotManifestPath(snapshotPath))).toEqual(bytes);
 });
 
+// Two restore/checkpoint daemon cycles plus fill and public delivery; not the default unit-test timeout.
 it("carries retained author and attribution through outgoing H, audited publication and public delivery", async () => {
   const snapshotPath = path("chain.sqlite"); await admission(snapshotPath);
   const sourceDirectory = path("source-preparation-daemon");
@@ -350,4 +351,4 @@ it("carries retained author and attribution through outgoing H, audited publicat
   writeFileSync(`${publishedPath}.publication.json`, JSON.stringify(changed));
   expect(() => readNativeSourcePublicationReport(publishedPath, snapshotPath)).toThrow(/retained metadata/u);
   expect(readFileSync(retainedPath)).toEqual(original);
-});
+}, 60_000);
