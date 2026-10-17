@@ -113,7 +113,8 @@ const PAYLOAD_SCHEMAS = {
     as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
     request: SourceInterpretationReasoningRequestSchema }).strict(),
   "conditionalField.sourceSemantics": SourceSemanticsPublicPayloadSchema.extend({
-    prepared_query: PreparedQuerySchema.optional()
+    prepared_query: PreparedQuerySchema.optional(),
+    acquisition_control: z.enum(["lexical", "vector", "dual"]).optional()
   }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,

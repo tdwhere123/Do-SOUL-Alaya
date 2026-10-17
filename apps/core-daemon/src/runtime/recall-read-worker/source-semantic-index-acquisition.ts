@@ -19,6 +19,7 @@ export function acquireSourceSemanticIndex(input: Readonly<{
   runtime: SourceSemanticReadRuntime; workspace: string; navigation: string; authorized: readonly string[] | null;
   meter: SourceSemanticReadBudget; metadataMeter: SourceSemanticReadBudget; vector: SourceIndexQueryVector;
   supplemental?: Route; canonicalBytes: number; sourceCost: (length: number) => SourceSemanticResourceBudget;
+  control?: Parameters<SourceIndexAcquisition["nominate"]>[2];
 }>): { phase: SourceSemanticAcquisitionPhase; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
   const { meter } = input;
   const quote = quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes));
@@ -44,7 +45,7 @@ export function acquireSourceSemanticIndex(input: Readonly<{
     const acquisition = new SourceIndexAcquisition(new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256),
       fieldContractSha256);
     const run = (route: Route, remaining: Allowance): SourceSemanticAcquisitionPhase =>
-      acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter);
+      acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter, input.control);
     phase = run(input, allowance);
     const nominations = phase.result?.nominations.map(row => row.source) ?? [];
     const hint = input.supplemental;
@@ -83,7 +84,8 @@ export function acquireSourceSemanticIndex(input: Readonly<{
 }
 
 function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, authorized: readonly string[] | null,
-  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget): SourceSemanticAcquisitionPhase {
+  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget,
+  control?: Parameters<SourceIndexAcquisition["nominate"]>[2]): SourceSemanticAcquisitionPhase {
   let phase = { ...sourceSemanticAcquisitionNotRun("acquisition_envelope_allowance"), allowance, budget: meter.remaining() };
   if (allowance.max_attempts === 0 || allowance.max_roots === 0) return { ...phase, reason: "shared_nomination_allowance" };
   try {
@@ -103,7 +105,7 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
       vector: route.vector, allowance, budget }, scope => {
         try { authorizeSemanticScope(scope, authorized); return "admitted"; }
         catch { return "denied"; }
-      });
+      }, control);
     meter.absorbIndex(result.resources);
     const failed = result.resource_refusals.some(row => row.phase === "acquisition_failed_unknown_additional_cost");
     return { ...phase, status: failed ? "failed" : "executed", reason: failed ? "acquisition_failed" : null,

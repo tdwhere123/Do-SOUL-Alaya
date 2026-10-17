@@ -9,7 +9,7 @@ import {
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents,
   type SourceSemanticAcquisitionPhase, type SourceSemanticCompactAcquisition, type PreparedSourceSemanticCanonicalSubtrees
 } from "@do-soul/alaya-protocol";
-import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
+import { CoreError, SourceIndexAcquisition, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
   projectSourceDisclosure } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget, semanticSourceTupleIdentity } from "../field/source-semantic-read-stores.js";
@@ -90,6 +90,10 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     unionCompletion.source(record); retainedTuples.add(tuple);
   };
   const controlled = sourceId !== undefined || sourcePreviewExtents !== undefined || preferredSourceIds !== undefined || policyName === "canonical-v1";
+  SourceIndexAcquisition.assertControl({
+    control: payload.acquisition_control, vector: payload.prepared_query?.vector, receipt: payload.prepared_query?.receipt,
+    navigation: original, request: payload.request, scoped: controlled
+  });
   const prepare = meter.preparation ?? packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
     payload.prepared_query?.receipt ?? unavailableSourceQueryPreparation(
       controlled ? "controlled_or_scoped_access" : "preparation_scope_unavailable", controlled ? "not_requested" : "unavailable"), meter), meter);
@@ -117,7 +121,8 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
             vector: payload.prepared_query?.vector ?? { status: "unavailable", reason: sourceSemanticPreparationReason(prepare, meter) ?? "preparation_unavailable" },
             ...(accessHint === undefined || accessHint === original ? {} : { supplemental: { navigation: accessHint,
               vector: payload.prepared_query?.supplemental?.vector ?? { status: "unavailable", reason: "hint_preparation_unavailable" } } }),
-            canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost });
+            canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost,
+            control: payload.acquisition_control });
           releaseCanonical = observed.releaseCanonical;
           acquisition = observed.phase;
           if (next !== null) {

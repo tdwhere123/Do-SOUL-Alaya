@@ -35,7 +35,7 @@ import {
   normalizeWorkerCount,
   resolveDefaultWorkerUrl
 } from "../recall-read-worker/client-config.js";
-import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
+import { CoreError, SourceIndexAcquisition, encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import { readRecallTierWindowOverIpc } from "../recall-read-worker/tier-window-client.js";
 import {
   createWorkerMemoryRepo,
@@ -54,6 +54,14 @@ export interface RecallReadWorkerClient {
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
   readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
   readonly sourceSemanticsPort?: SourceSemanticsExecutionPort;
+  /** Named consumer: compareResearchSourceAcquisitionControls. */
+  readonly researchAcquisition?: Readonly<{
+    prepareQuery(input: SourceSemanticsPublicPayload):
+      Promise<NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>>;
+    dispatch(input: SourceSemanticsPublicPayload,
+      prepared: NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>,
+      control: "lexical" | "vector" | "dual"): Promise<SourceSemanticWorkerResult>;
+  }>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -279,6 +287,53 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     withExecutionScope: async (input, work) => await this.lifecycle.executionScope(input, work),
     execute: async input => await this.withPreparedSourceExecution(input, execute => execute()),
     withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input, work)
+  };
+
+  /** Named consumer: compareResearchSourceAcquisitionControls. Production execute never sets acquisition_control. */
+  public readonly researchAcquisition = {
+    prepareQuery: async (input: SourceSemanticsPublicPayload): Promise<PreparedQuery> => {
+      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
+      const request = captured.request;
+      if (request.kind !== "recall" || request.original_query === undefined || request.query_handle !== undefined
+        || request.continuation !== undefined || request.access_policy === "canonical-v1") {
+        throw new CoreError("VALIDATION", "research acquisition controls require one initial query-conditioned recall");
+      }
+      if (this.prepareSourceQuery === undefined) {
+        throw new CoreError("CONFLICT", "query preparation requires an embedding preparation binding");
+      }
+      if (this.lifecycle.snapshotHasBegun()) {
+        throw new CoreError("CONFLICT", "query preparation requires an unbegun snapshot scope");
+      }
+      const navigation = request.original_query;
+      const deadline = this.lifecycle.preparationDeadline();
+      const prepared = structuredClone(await this.lifecycle.beforeSnapshotPreparation(() => this.prepareSourceQuery!({
+        workspace_id: captured.workspace_id, navigation,
+        signal: deadline.signal, remainingMs: () => deadline.remainingMs()
+      })));
+      try { deadline.check(); return prepared; }
+      catch (error) {
+        if (typeof error === "object" && error !== null) {
+          Object.defineProperty(error, "researchPreparedQuery", { value: prepared, enumerable: false });
+        }
+        throw error;
+      }
+    },
+    dispatch: async (input: SourceSemanticsPublicPayload, prepared: PreparedQuery, control: "lexical" | "vector" | "dual") => {
+      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
+      const capturedPrepared = structuredClone(prepared);
+      SourceIndexAcquisition.assertControl({
+        control, vector: capturedPrepared.vector, receipt: capturedPrepared.receipt,
+        navigation: captured.request.kind === "recall" ? captured.request.original_query : undefined,
+        request: captured.request
+      });
+      if (this.lifecycle.pinnedWorker() === undefined) {
+        throw new CoreError("OBLIGATION_VIOLATION", "recall read snapshot is not isolated onto a worker");
+      }
+      this.lifecycle.preparationDeadline().check();
+      return await this.lifecycle.request<SourceSemanticWorkerResult>("conditionalField.sourceSemantics", {
+        ...captured, prepared_query: capturedPrepared, acquisition_control: control
+      });
+    }
   };
 
   private async withPreparedSourceExecution<T>(input: SourceSemanticsPublicPayload,

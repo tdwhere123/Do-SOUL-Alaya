@@ -3,11 +3,12 @@ import {
   sourceIndexConfigurationId, type SourceIndexSelection, type SourceIndexQueryVector, type SourceSemanticQueryPreparation,
   BoundedIdSchema, SourceIndexProfileSchema, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
   canonicalJson, hashContentDigest, sourceGoldRootIdentity, sourceIndexProfileId,
+  unavailableSourceQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
   type SourceIndexQueryRepository, type SourceIndexQueryResources, type SourceIndexRootNomination,
   type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding, type SourceIndexVectorCandidate,
-  type SourceIndexVectorCursor
+  type SourceIndexVectorCursor, type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
@@ -30,16 +31,85 @@ type SourceQueryPreparationInput = Readonly<{
 }>;
 type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceSemanticQueryPreparation }>;
 type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
+type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
  * Nomination does not run inference, read bodies, select delivery packages or publish public receipts.
  */
 export class SourceIndexAcquisition {
+  /** Disabled-channel receipts; not infrastructure unavailability. Named consumers: nominate/prepareQuery/assertControl. */
+  public static readonly channelNotRequested = "acquisition_channel_not_requested";
+
+  /** Fail closed before bind or SQL. Omitted control is production both-channels. */
+  public static assertControl(input: Readonly<{
+    control?: SourceAcquisitionChannelControl; vector?: SourceIndexQueryVector; receipt?: SourceSemanticQueryPreparation;
+    navigation?: string; scoped?: boolean;
+    request?: Pick<SourceSemanticWorkerRequest, "kind"> & Readonly<{
+      original_query?: string; query_handle?: unknown; continuation?: unknown; continuation_handle?: unknown;
+      source_handle?: unknown; access_policy?: string; source_preview_extents?: unknown;
+    }>;
+  }>): void {
+    const control = input.control;
+    if (control === undefined) return;
+    if (control !== "lexical" && control !== "vector" && control !== "dual") {
+      throw new CoreError("VALIDATION", "invalid source acquisition channel control");
+    }
+    if (input.scoped === true) {
+      throw new CoreError("VALIDATION", "acquisition channel control cannot use scoped or canonical access");
+    }
+    const request = input.request;
+    if (request !== undefined) {
+      if (request.kind !== "recall" || request.query_handle !== undefined || request.continuation !== undefined
+        || request.continuation_handle !== undefined || request.source_handle !== undefined
+        || request.access_policy === "canonical-v1" || request.source_preview_extents !== undefined) {
+        throw new CoreError("VALIDATION", "acquisition channel control requires one initial query-conditioned recall");
+      }
+      if (input.navigation !== undefined && request.original_query !== undefined
+        && request.original_query !== input.navigation) {
+        throw new CoreError("VALIDATION", "acquisition channel control navigation does not match the original query");
+      }
+    }
+    if (input.request !== undefined && input.receipt === undefined) {
+      throw new CoreError("VALIDATION", "acquisition channel control requires captured query preparation");
+    }
+    if (control === "lexical") {
+      if (input.vector?.status === "available") {
+        throw new CoreError("VALIDATION", "lexical acquisition control cannot carry a query embedding");
+      }
+      if (input.receipt !== undefined && (input.receipt.status !== "not_requested"
+        || input.receipt.reason !== SourceIndexAcquisition.channelNotRequested)) {
+        throw new CoreError("VALIDATION", "lexical acquisition control requires not_requested preparation");
+      }
+      return;
+    }
+    if (input.vector?.status !== "available") {
+      throw new CoreError("VALIDATION", "vector acquisition control requires a prepared query vector");
+    }
+    if (input.navigation !== undefined && input.vector.input_digest !== sourceEmbeddingInputDigest(input.navigation)) {
+      throw new CoreError("VALIDATION", "prepared query vector does not match navigation");
+    }
+    if (input.receipt !== undefined && input.receipt.status !== "ready") {
+      throw new CoreError("VALIDATION", "vector acquisition control requires ready query preparation");
+    }
+  }
+
   /** Private inference before the native snapshot. Observe the selected configuration; never create one. */
-  public static async prepareQuery(input: SourceQueryPreparationInput): Promise<PreparedSourceQuery> {
-    // Capture both texts and the selected configuration before the first asynchronous bind.
+  public static async prepareQuery(input: SourceQueryPreparationInput,
+    control?: SourceAcquisitionChannelControl): Promise<PreparedSourceQuery> {
+    // Capture both texts, the selected configuration and control before the first asynchronous bind.
     // The same binding/profile serves both distinct routes; a failed hint cannot replace original work.
+    const capturedControl = control;
+    if (capturedControl === "lexical") {
+      SourceIndexAcquisition.assertControl({ control: capturedControl, navigation: input.navigation });
+      return {
+        vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested },
+        receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested")
+      };
+    }
+    if (capturedControl !== undefined && capturedControl !== "vector" && capturedControl !== "dual") {
+      throw new CoreError("VALIDATION", "invalid source acquisition channel control");
+    }
     const { navigation, supplemental_navigation, signal, remainingMs } = input;
     const selection = structuredClone(input.selection), bind = input.bind;
     let binding: Promise<SourceEmbeddingBindingResult> | undefined;
@@ -107,10 +177,13 @@ export class SourceIndexAcquisition {
 
   public constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256) {}
 
-  public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission): SourceIndexAcquisitionResult {
+  public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
+    control?: SourceAcquisitionChannelControl): SourceIndexAcquisitionResult {
     validateInput(input, admitScope);
+    const capturedControl = control;
+    SourceIndexAcquisition.assertControl({ control: capturedControl, vector: input.vector, navigation: input.navigation_text });
     const captured = { ...input, allowance: { ...input.allowance }, budget: { ...input.budget } };
-    return new AcquisitionQuery(this.repository, this.sha256, captured, admitScope).run();
+    return new AcquisitionQuery(this.repository, this.sha256, captured, admitScope, capturedControl).run();
   }
 }
 
@@ -140,7 +213,8 @@ class AcquisitionQuery {
   private limited = false;
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
-    private readonly input: SourceIndexAcquisitionInput, private readonly admitScope: SourceIndexScopeAdmission) {
+    private readonly input: SourceIndexAcquisitionInput, private readonly admitScope: SourceIndexScopeAdmission,
+    private readonly control?: SourceAcquisitionChannelControl) {
     this.meter = new SourceSemanticResourceLedger(input.budget);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
@@ -157,14 +231,20 @@ class AcquisitionQuery {
       this.meter.charge(1, 2048 + 8 * this.input.allowance.max_roots, "source acquisition result envelope");
       this.prepareInput();
       this.stage = "lexical";
-      const lexical = this.repository.readLexicalCandidates(this.input.workspace_id, this.input.navigation_text,
-        this.input.allowance.max_attempts, this.meter.remaining());
-      this.lexicalCandidates = lexical.candidates;
-      this.lexical = { completion: lexical.completion, reason: lexical.reason,
-        index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
-      if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
-      this.absorb(lexical.resources);
-      this.stage = "vector"; this.scanVectors();
+      if (this.control === "vector") {
+        this.lexical = { completion: "not_run", index_coverage: "partial",
+          reason: SourceIndexAcquisition.channelNotRequested, limitations: [], tokenization: null };
+      } else {
+        const lexical = this.repository.readLexicalCandidates(this.input.workspace_id, this.input.navigation_text,
+          this.input.allowance.max_attempts, this.meter.remaining());
+        this.lexicalCandidates = lexical.candidates;
+        this.lexical = { completion: lexical.completion, reason: lexical.reason,
+          index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
+        if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
+        this.absorb(lexical.resources);
+      }
+      this.stage = "vector";
+      if (this.control !== "lexical") this.scanVectors();
       this.stage = "nomination"; this.nominatePrefix();
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
@@ -176,7 +256,8 @@ class AcquisitionQuery {
       }
       this.limited = true;
     }
-    const complete = !this.limited && this.counts.native_unknown === 0 && this.lexical.completion === "complete" &&
+    const lexicalDone = this.lexical.completion === "complete" || this.control === "vector" && this.lexical.completion === "not_run";
+    const complete = !this.limited && this.counts.native_unknown === 0 && lexicalDone &&
       (this.vector.completion === "complete" || this.vector.completion === "not_run");
     return {
       policy: "source-index-interleaved-prefix.v1", navigation_digest: this.navigationDigest,
@@ -197,6 +278,12 @@ class AcquisitionQuery {
     this.meter.charge(this.input.navigation_text.length, 0, "source navigation digest");
     this.navigationDigest = hashContentDigest(this.input.navigation_text, this.sha256);
     const vector = this.input.vector;
+    if (this.control === "lexical") {
+      this.vector = { completion: "not_run", state: null, reason: SourceIndexAcquisition.channelNotRequested,
+        inspected_windows: 0, invalid_windows: 0, ranking: "exact_over_inspected_subset", validation: "not_applicable",
+        input: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested } };
+      return;
+    }
     if (vector.status === "unavailable") {
       this.meter.retain(vector.reason);
       this.vector = { ...this.vector, completion: "unavailable", reason: vector.reason };

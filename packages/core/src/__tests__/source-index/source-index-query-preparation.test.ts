@@ -323,4 +323,18 @@ describe("simulated query-preparation adapters, no native inference", () => {
     expectReceipt(unsupported.receipt, { status: "unavailable", reason: "opaque_api_unbound", method: "not_run",
       submitted_inputs: 0, external_api_attempts: null, binding_work: "unknown", execution_work: "not_run" });
   });
+
+  it("lexical control does not bind or embed and reports not_requested", async () => {
+    const bind = vi.fn(async () => { throw new Error("bind must not run"); });
+    const prepared = await SourceIndexAcquisition.prepareQuery({
+      navigation: NAVIGATION, selection: selectionFor(profile()), bind,
+      signal: new AbortController().signal, remainingMs: () => 5_000
+    }, "lexical");
+    expect(bind).not.toHaveBeenCalled();
+    expect(prepared.vector).toEqual({ status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested });
+    expect(prepared.receipt.status).toBe("not_requested");
+    expect(prepared.receipt.reason).toBe(SourceIndexAcquisition.channelNotRequested);
+    expect(prepared.receipt.submitted_inputs).toBe(0);
+    expect(prepared.receipt.elapsed_ms).toBe(0);
+  });
 });
