@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { IsoDatetimeStringSchema } from "@do-soul/alaya-protocol";
 import { deriveAddressableSpanViews } from "@do-soul/alaya-core";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
+import { resolveBenchDaemonConfigRoot } from "../../../harness/daemon/daemon-config-directory.js";
 import { loadDatasetWindowWithIdentity } from "../../../datasets/longmemeval/ingestion/fetch.js";
 import { buildLongMemEvalRoundMessages, pairSessionIntoRounds, type LongMemEvalQuestion } from "../../../datasets/longmemeval/ingestion/dataset.js";
 import { requireLongMemEvalTimestamp } from "../../../datasets/longmemeval/ingestion/source-time.js";
@@ -20,13 +21,23 @@ import { SourceRecordsDatasetSchema, SourceRecordsManifestSchema, createSourceRe
 export type PrepareSourceRecordsInput = Readonly<{
   snapshotPath: string; dataDirRoot: string; dataDir?: string; pinnedMetaRoot?: string;
   offset: number; limit: number; recordedAt: string; producerCommit: string;
+  /** Private execution effects, not retained source identity or reasoning/model setup. */
+  importEffects?: SourceRecordsImportEffects;
 }>;
+const ImportEffectsSchema = z.object({
+  configDirectoryRoot: z.string().min(1), sqliteWriteQueue: z.literal("disabled"),
+  embeddingStartupProbe: z.literal("omit"), gardenCompute: z.literal("disabled")
+}).strict();
+export type SourceRecordsImportEffects = Readonly<z.infer<typeof ImportEffectsSchema>>;
 const PreparationSchema = z.object({
   artifact_domain: z.literal("source_records"), dataset: SourceRecordsDatasetSchema,
   recorded_at: IsoDatetimeStringSchema, snapshot_path: z.string().min(1)
 }).strict();
 
 export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsInput): Promise<SourceRecordsManifest> {
+  const parsedEffects = input.importEffects === undefined ? undefined : ImportEffectsSchema.parse(input.importEffects);
+  const importEffects = parsedEffects === undefined ? undefined : { ...parsedEffects,
+    configDirectoryRoot: resolveBenchDaemonConfigRoot(parsedEffects.configDirectoryRoot) };
   const snapshotPath = resolve(input.snapshotPath);
   const dataDirRoot = resolve(input.dataDirRoot);
   if (snapshotPath === join(dataDirRoot, BENCH_DAEMON_DB_FILENAME)) throw new Error("snapshot must differ from live DB");
@@ -46,7 +57,8 @@ export async function prepareSourceRecordsSnapshot(input: PrepareSourceRecordsIn
       }
       return manifest;
     }
-    const daemon = await startBenchDaemon({ dataDirRoot, embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
+    const daemon = await startBenchDaemon({ ...importEffects, dataDirRoot, embeddingMode: "disabled",
+      fieldProjectionAdmissionMode: "explicit_checkpoint" });
     let sidecar: SourceRecordsSidecar;
     try {
       sidecar = await importMessages(daemon, loaded.questions, dataset, input.recordedAt, snapshotPath);

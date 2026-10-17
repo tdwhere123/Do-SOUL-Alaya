@@ -1,6 +1,6 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
@@ -47,6 +47,7 @@ import { initializeBenchDaemon } from "./daemon/daemon-startup.js";
 import { reloadBenchWorkingDatabase } from "./daemon/runtime/daemon-db-pragmas.js";
 import {
   createBenchDaemonConfigDirectoryLease,
+  resolveBenchDaemonConfigRoot,
   type BenchDaemonConfigDirectoryLease
 } from "./daemon/daemon-config-directory.js";
 import {
@@ -56,6 +57,7 @@ import {
   restoreEnv
 } from "./daemon/daemon-support.js";
 import {
+  assertBenchDaemonLaunchEffects,
   resolveBenchDaemonManagedEnvKeys,
   type BenchDaemonLaunchConfig
 } from "./daemon/daemon-environment.js";
@@ -113,6 +115,8 @@ async function createBenchDaemonState(
   opts: BenchDaemonOptions,
   preparedLaunch: BenchDaemonLaunchConfig | undefined
 ): Promise<BenchDaemonState> {
+  assertBenchDaemonLaunchEffects(opts);
+  const configRoot = opts.configDirectoryRoot === undefined ? undefined : resolveBenchDaemonConfigRoot(opts.configDirectoryRoot);
   const defaultWorkspaceId = opts.workspaceId ?? "bench-workspace-1";
   const defaultRunId = opts.runId ?? "bench-run-1";
   const activeContext = { workspaceId: defaultWorkspaceId, runId: defaultRunId };
@@ -132,6 +136,10 @@ async function createBenchDaemonState(
     dataDir,
     embeddingMode,
     embeddingProviderKind,
+    configDirectoryRoot: configRoot,
+    sqliteWriteQueue: opts.sqliteWriteQueue,
+    gardenCompute: opts.gardenCompute,
+    embeddingStartupProbe: opts.embeddingStartupProbe,
     ...(opts.cachedLocalEmbedding === undefined ? {} : { ambientEnv: { ...process.env,
       ALAYA_LOCAL_EMBEDDING_CACHE_DIR: opts.cachedLocalEmbedding.cache_root,
       ALAYA_LOCAL_EMBEDDING_MODEL: opts.cachedLocalEmbedding.model_id } }),
@@ -139,6 +147,13 @@ async function createBenchDaemonState(
     reviewerToken: opts.reviewerToken
   });
   assertPreparedLaunchMatches(launch, { dataDir, embeddingMode, embeddingProviderKind });
+  if (configRoot !== undefined && dirname(launch.configDir) !== configRoot ||
+      opts.sqliteWriteQueue !== undefined && launch.sqliteWriteQueue !== opts.sqliteWriteQueue ||
+      opts.gardenCompute !== undefined && launch.gardenCompute !== opts.gardenCompute ||
+      opts.embeddingStartupProbe !== undefined && launch.embeddingStartupProbe !== undefined &&
+        opts.embeddingStartupProbe !== launch.embeddingStartupProbe) {
+    throw new Error("prepared bench daemon launch does not match requested effects");
+  }
   const configDirectory = createBenchDaemonConfigDirectoryLease(launch.configDir);
   const managedEnvKeys = resolveBenchDaemonManagedEnvKeys(launch.environment, process.env);
   const savedEnv = snapshotManagedEnv(managedEnvKeys);
@@ -148,7 +163,7 @@ async function createBenchDaemonState(
     activeContext,
     embeddingMode,
     embeddingProviderKind,
-    embeddingStartupProbe: opts.embeddingStartupProbe,
+    embeddingStartupProbe: opts.embeddingStartupProbe ?? launch.embeddingStartupProbe,
     expectedReconciliationBasis,
     recallWeightOverrides,
     relationProjectionAdmissionMode,
