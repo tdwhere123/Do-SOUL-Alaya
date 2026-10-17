@@ -29,8 +29,8 @@ it.each([{ name: "omitted", accessHint: undefined }, { name: "maximum-length", a
       expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: "orchid irrigation" };
     const attempt = (allowance: { work_units: number; memory_bytes: number }) => {
       const parent = new SourceSemanticReadBudget(allowance);
-      // Isolate the explicit quote boundary; production's separate half-budget ceiling
-      // is checked through the real observation owner in completion-retention tests.
+      // Isolate the explicit quote boundary; parent-only borrowing and complete
+      // finalization are checked through the observation owner in retention tests.
       const child = new SourceSemanticReadBudget(allowance);
       child.charge(107, 229, "already observed header");
       let error: unknown;

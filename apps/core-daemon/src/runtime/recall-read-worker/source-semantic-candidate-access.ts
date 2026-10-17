@@ -1,25 +1,30 @@
 import {
   SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
-  SourceSemanticResourceExhausted, canonicalJson, canonicalJsonChunks, type SourceRecordIdentity,
+  SourceSemanticResourceExhausted, canonicalJson, type SourceRecordIdentity,
   sourceSemanticGenerationTaskSummary, sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation,
   captureSourceSemanticQueryPreparation,
   packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,
-  sourceSemanticAcquisitionResources, sourceSemanticPreparationReason, sourceSemanticAccessPhases,
+  sourceSemanticPreparationReason,
   type SourceSemanticAccessReceipt, type SourceSemanticAccessSignal, type SourceSemanticAccessPolicy,
-  type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents
+  type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents,
+  type SourceSemanticAcquisitionPhase, type SourceSemanticCompactAcquisition, type PreparedSourceSemanticCanonicalSubtrees
 } from "@do-soul/alaya-protocol";
-import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256, fieldContractSha256Chunks,
+import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
   projectSourceDisclosure } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget, semanticSourceTupleIdentity } from "../field/source-semantic-read-stores.js";
 import { admissionOf, loadVerified, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
-import { sourceSemanticRevision } from "./source-semantic-leases.js";
 import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
+import type { SourceSemanticRequestExecution } from "./source-semantic-reasoning.js";
 import { beginCanonicalSourceText, readSourceText } from "./source-semantic-source-observation.js";
 import { acquireSourceSemanticIndex } from "./source-semantic-index-acquisition.js";
 import { SourceSemanticUnionCompletion } from "./source-semantic-empty-population-budget.js";
-import { sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
+import { bindAccessPoolIdentity, sourceSemanticObservationAccounting,
+  sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
+// Research pool and nominated-library owners still import this entry. Remove this
+// forwarding export when those consumers import the receipt owner directly.
+export { bindAccessPoolIdentity } from "./source-semantic-access-receipts.js";
 
 type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number];
 type InterpretationObservation = SourceSemanticAccessReceipt["interpretation_candidates"][number];
@@ -38,7 +43,8 @@ export type SourceSemanticAccessPool = Readonly<{
   sourcePages: number; interpretationPages: number;
 }>;
 type EmptyCompletion = Readonly<{
-  leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery }>;
+  leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery;
+  executionOf?: SourceSemanticRequestExecution }>;
 
 export function accessInputIdentity(original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget,
   policy: SourceSemanticAccessPolicy, sourceId?: string, sourcePreviewExtents?: SourceSemanticPreviewExtents,
@@ -47,37 +53,6 @@ export function accessInputIdentity(original: string, query: SourceSemanticQuery
     source_id: sourceId, budget, policy, contract: "source-semantic-access-v2",
     ...(accessHint === undefined ? {} : { access_hint: accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { source_preview_extents: sourcePreviewExtents }) });
-}
-
-export function bindAccessPoolIdentity<Receipt extends Omit<SourceSemanticAccessReceipt, "trace" | "pool_id">>(
-  runtime: SourceSemanticReadRuntime, workspace: string, authorized: readonly string[] | null, receipt: Receipt,
-  meter: SourceSemanticReadBudget
-): Receipt & { pool_id: string } {
-  // Bind expanded original/supplemental phase meaning, before adding pool_id or a trace.
-  const { phases: _phases, ...fields } = receipt;
-  // Expansion borrows every scalar string from immutable tuples or fixed literals.
-  // Charge its new object/array frames, then stream canonical scalars to the hash.
-  const expanded = { ...fields, ...sourceSemanticAccessPhases(receipt, {
-    charge: (work, bytes, phase) => meter.charge(work, bytes, phase),
-    retain: (value, phase) => retainPhaseFrames(value, meter, phase)
-  }) };
-  meter.charge(4, 512 + Object.keys(expanded).length * 24 + 32, "source access identity frames");
-  const material = { receipt: expanded, workspace, authorized, revision: sourceSemanticRevision(runtime) };
-  return { ...receipt, pool_id: `sha256:${fieldContractSha256Chunks(canonicalJsonChunks(material, meter), meter)}` };
-}
-
-/** Decoder strings are borrowed; only container frames and reference slots are allocated. */
-function retainPhaseFrames(value: unknown, meter: SourceSemanticReadBudget, phase?: string): void {
-  const pending = [value];
-  meter.charge(0, 8, phase);
-  while (pending.length) {
-    const row = pending.pop();
-    meter.charge(1, 0, phase);
-    if (row === null || typeof row !== "object") continue;
-    const values = Array.isArray(row) ? row : Object.values(row);
-    meter.charge(1, Array.isArray(row) ? 64 + values.length * 16 : 128 + values.length * 24, phase);
-    for (const child of values) pending.push(child);
-  }
 }
 
 export function previewExtent(record: SourceRecordIdentity,
@@ -101,6 +76,10 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   if (sourceId !== undefined && accessHint !== undefined) {
     throw new CoreError("VALIDATION", "source-scoped access cannot use an access hint");
   }
+  // Only the request owner's actual fused capture proves the public ownership entry was omitted.
+  // Keep the exact pre-child allowance: no new tuple, borrower closure or eligibility scan here.
+  if (meter.preparation !== undefined && completion?.executionOf?.(meter.preparation) !== undefined) meter.charge(1, 16, "source phase request ownership bridge");
+  let identity: PreparedSourceSemanticCanonicalSubtrees | undefined;
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter, accessHint);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
   const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
@@ -115,8 +94,9 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     payload.prepared_query?.receipt ?? unavailableSourceQueryPreparation(
       controlled ? "controlled_or_scoped_access" : "preparation_scope_unavailable", controlled ? "not_requested" : "unavailable"), meter), meter);
   if (payload.prepared_query !== undefined) meter.preparation = prepare;
-  let acquisition = packSourceSemanticAcquisition(sourceSemanticAcquisitionNotRun(
-    controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter), absorbed = false;
+  let acquisition: SourceSemanticCompactAcquisition | SourceSemanticAcquisitionPhase | undefined = packSourceSemanticAcquisition(
+    sourceSemanticAcquisitionNotRun(controlled ? "controlled_or_scoped_access" : "observation_allowance"), meter);
+  let absorbed = false;
   let releaseCanonical: () => void = () => undefined;
   let canonicalRecord: SourceRecordIdentity | undefined;
   let canonicalRead: ReturnType<typeof beginCanonicalSourceText> | undefined;
@@ -127,7 +107,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   else unionCompletion.preparationBase({ runtime, parent: meter, child: observation, records: [], sourcePages: 0,
     policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
     suppliedQuerySemantics: completion.suppliedQuerySemantics, accessHint, sourcePreviewExtents,
-    phases: { preparation: prepare, acquisition } });
+    phases: { preparation: prepare, acquisition: acquisition as SourceSemanticCompactAcquisition } });
   const sources = sourceId === undefined ? listEligibleSemanticSources(runtime.database, payload.workspace_id, observation, authorized,
     preferredSourceIds, { nominations: [], beforeRetain,
       ...(sourcePreviewExtents !== undefined || preferredSourceIds !== undefined || policyName === "canonical-v1" ? {} : {
@@ -139,7 +119,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
               vector: payload.prepared_query?.supplemental?.vector ?? { status: "unavailable", reason: "hint_preparation_unavailable" } } }),
             canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost });
           releaseCanonical = observed.releaseCanonical;
-          acquisition = observed.phase; observation.acquisition = acquisition;
+          acquisition = observed.phase;
           if (next !== null) {
             // Execute only the guaranteed first native extent before admitting acquisition metadata.
             // Its read state and deferred allowance survive the catalog and resume at the census seam.
@@ -151,7 +131,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
               releaseCanonical = canonicalRead.release;
             }
           }
-          unionCompletion.metadata(acquisition);
+          unionCompletion.metadata(observation.acquisition!);
           return observed.nominations;
         }
       }) })
@@ -178,24 +158,55 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     interpretations = observeInterpretations(runtime, payload, authorized, observation, policy, records, byId, sourceRows, stops,
       sourceId, completion === undefined ? undefined : () => {
         releaseCanonical();
-        unionCompletion.emptyCompletion({
-        runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
-        policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
-        suppliedQuerySemantics: completion.suppliedQuerySemantics, accessHint, sourcePreviewExtents,
-        phases: { preparation: prepare, acquisition }
-      }); }, sourcePreviewExtents, beforeRetain, unionCompletion,
+        identity = unionCompletion.emptyCompletion({
+          runtime, parent: meter, child: observation, records, sourcePages: sources.pages,
+          policy: policyName, budget, orderCost: policy.orderCost, leaseContext: completion.leaseContext,
+          suppliedQuerySemantics: completion.suppliedQuerySemantics, accessHint, sourcePreviewExtents,
+          phases: { preparation: prepare, acquisition: observation.acquisition ?? acquisition as SourceSemanticCompactAcquisition },
+          borrowPreparation: completion.executionOf,
+          acquisitionCapture: Array.isArray(acquisition) ? undefined : acquisition as SourceSemanticAcquisitionPhase | undefined
+        }); }, sourcePreviewExtents, beforeRetain, unionCompletion,
       () => { if (canonicalRead === undefined) releaseCanonical(); }, canonicalRead?.resume, sourceReader);
   } finally {
     // The navigation/header child already ran even when completion planning fails.
     canonicalRead?.close(); releaseCanonical(); unionCompletion.release();
     absorbed = true; meter.absorb(observation);
   }
+  return finalizeObservedSourceAccess(runtime, payload.workspace_id, authorized, meter, policy, policyName, records, sources, interpretations,
+    sourceRows, byId, stops, original, query, budget, sourceId,
+    prepare, observation.acquisition ?? acquisition as SourceSemanticCompactAcquisition, observation,
+    sourcePreviewExtents, accessHint, identity);
+  } finally {
+    // The prepared identity survives completion-hold release but never the request.
+    identity?.close(); identity = undefined; acquisition = undefined;
+    completion?.executionOf?.("retire_prepare");
+    canonicalRead?.close(); releaseCanonical(); unionCompletion.release();
+    if (!absorbed) meter.absorb(observation);
+  }
+}
+
+/** Observation is complete and absorbed before ordering/identity publication begins.
+ * Keep this finalization phase separate without allocating a request-context copy. */
+function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, workspace: string, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget, policy: Policy, policyName: SourceSemanticAccessPolicy, records: readonly SourceRecordIdentity[],
+  sources: { open: boolean; truncated: boolean; pages: number }, interpretations: ReturnType<typeof observeInterpretations>,
+  sourceRows: Map<string, SourceObservation>, byId: Map<string, SourceRecordIdentity>, stops: Set<Stop>,
+  original: string, query: SourceSemanticQuery | undefined, budget: RequestBudget, sourceId: string | undefined,
+  preparation: SourceSemanticAccessReceipt["phases"][1], acquisition: SourceSemanticCompactAcquisition,
+  observation: SourceSemanticReadBudget, sourcePreviewExtents?: SourceSemanticPreviewExtents, accessHint?: string,
+  identity?: PreparedSourceSemanticCanonicalSubtrees): SourceSemanticAccessPool {
   for (const record of records) if (!sourceRows.has(record.identity)) sourceRows.set(record.identity, {
     source_id: record.source_id, record_id: record.identity, read_bytes: 0, body_bytes: null, complete: false, signal: UNKNOWN
   });
   if ([...sourceRows.values()].some(row => !row.complete)) stops.add("source_tail");
-  const reconciled = interpretations.rows.map(row => ({ ...row, signal: { ...row.signal,
-    source_text_score: sourceRows.get(row.record_id)?.signal.source_text_score ?? null } }));
+  // Fixed result arrays preserve the original map allocations without adding a
+  // second captured request environment at this finalization boundary.
+  const reconciled = new Array<InterpretationObservation>(interpretations.rows.length);
+  for (let index = 0; index < reconciled.length; index++) {
+    const row = interpretations.rows[index]!;
+    reconciled[index] = { ...row, signal: { ...row.signal,
+      source_text_score: sourceRows.get(row.record_id)?.signal.source_text_score ?? null } };
+  }
   const reconciliation = SourceSemanticReadBudget.signalReconciliationCost(reconciled.length);
   meter.charge(reconciliation.work_units, reconciliation.memory_bytes, "access final source signal reconciliation");
   meter.retain(reconciled, "access reconciled interpretation signals");
@@ -204,24 +215,20 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   const orderedInterpretations = policy.order(reconciled.map((row) => ({ ...row, identity: row.interpretation_id })), meter)
     .map(({ identity: _identity, ...row }) => row);
   const inputId = accessInputIdentity(original, query, budget, policyName, sourceId, sourcePreviewExtents, accessHint);
-  const indexResources = sourceSemanticAcquisitionResources(acquisition, meter);
-  meter.charge(1, 24, "source phase observation tuple allocation");
+  const accounting = sourceSemanticObservationAccounting(acquisition, observation, meter);
   const receipt = sourceSemanticAccessReceiptValue(meter, policyName, inputId, orderedSources, orderedInterpretations,
     sources.open || sources.truncated || orderedSources.some((row) => !row.complete), interpretations.open, [...stops],
-    sourcePreviewExtents, { preparation: prepare, acquisition, observation: indexResources === null ? null : [
-      observation.spentWork - indexResources[0], observation.spentBytes - indexResources[1],
-      observation.nativeBytes - indexResources[2]] });
+    sourcePreviewExtents, { preparation, acquisition, observation: accounting });
   meter.retain(receipt, "access receipt identity", "borrow");
-  const access = bindAccessPoolIdentity(runtime, payload.workspace_id, authorized, receipt, meter);
-  return { sources: orderedSources.map((row) => byId.get(row.record_id)!),
-    descriptors: orderedInterpretations.map((row) => interpretations.descriptors.get(row.interpretation_id)!),
+  const access = bindAccessPoolIdentity(runtime, workspace, authorized, receipt, meter, identity);
+  const selectedSources = new Array<SourceRecordIdentity>(orderedSources.length);
+  for (let index = 0; index < selectedSources.length; index++) selectedSources[index] = byId.get(orderedSources[index]!.record_id)!;
+  const descriptors = new Array<SourceSemanticHandleDescriptor>(orderedInterpretations.length);
+  for (let index = 0; index < descriptors.length; index++) descriptors[index] = interpretations.descriptors.get(orderedInterpretations[index]!.interpretation_id)!;
+  return { sources: selectedSources, descriptors,
     access, ...(accessHint === undefined ? {} : { accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
     sourcePages: sources.pages, interpretationPages: interpretations.pages };
-  } finally {
-    canonicalRead?.close(); releaseCanonical(); unionCompletion.release();
-    if (!absorbed) meter.absorb(observation);
-  }
 }
 
 function restrictedSource(runtime: SourceSemanticReadRuntime, workspace: string, sourceId: string,

@@ -114,7 +114,7 @@ it("reuses a complete one-page raw quote while rechecking the actual retained le
       quote.mockClear(); preflight.mockClear();
       const before = held(input.parent), spent = input.parent.spentBytes;
       expect(before.memory_bytes).toBeGreaterThan(0);
-      empty.call(this, input);
+      const identityPreparation = empty.call(this, input);
       expect(quote).not.toHaveBeenCalled();
       expect(preflight).toHaveBeenCalledTimes(1);
       const [runtime, rows] = preflight.mock.calls[0]!;
@@ -125,6 +125,7 @@ it("reuses a complete one-page raw quote while rechecking the actual retained le
       expect(input.parent.spentBytes).toBeGreaterThan(spent);
       expect(input.child.bytes + before.memory_bytes + input.child.spentBytes).toBeLessThanOrEqual(input.parent.bytes);
       reused++;
+      return identityPreparation;
     });
     const budget = { ...QUERY_BUDGET, memory_bytes: 300_000 };
     const result = runSourceSemanticWorker({ database: fixture.database } as RecallReadWorkerRuntime, {

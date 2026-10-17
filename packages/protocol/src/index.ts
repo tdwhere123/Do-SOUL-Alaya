@@ -177,6 +177,11 @@ export * from "./events/recall-context.js";
 export * from "./recall/selection/capture/capture-execution.js";
 export * from "./recall/selection/capture/capture-receipt-structures.js";
 export { canonicalJson, canonicalJsonChunks } from "./recall/selection/capture/canonical-json.js";
+// Internal-consumer source entries for the daemon request/receipt owners, not wire contracts.
+export { capturePackSourceSemanticPreparationForRequest, capturePackSourceSemanticAcquisitionForRequest }
+  from "./garden/source-semantic-phase-codec.js";
+export { prepareSourceSemanticCanonicalSubtreesForRequest, type PreparedSourceSemanticCanonicalSubtrees }
+  from "./garden/source-semantic-canonical-preparation.js";
 export * from "./recall/selection/capture/canonical-selection-receipt.js";
 export * from "./events/green-governance.js";
 export * from "./events/budget.js";

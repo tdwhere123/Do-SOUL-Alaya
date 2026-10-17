@@ -1,5 +1,5 @@
 import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
-  packSourceSemanticAcquisition, type SourceSemanticCompactAcquisition, type SourceSemanticAcquisitionPhase,
+  capturePackSourceSemanticAcquisitionForRequest, type SourceSemanticCompactAcquisition, type SourceSemanticAcquisitionPhase,
   type SourceIndexQueryVector, type SourceIndexTarget, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
@@ -19,16 +19,23 @@ export function acquireSourceSemanticIndex(input: Readonly<{
   runtime: SourceSemanticReadRuntime; workspace: string; navigation: string; authorized: readonly string[] | null;
   meter: SourceSemanticReadBudget; metadataMeter: SourceSemanticReadBudget; vector: SourceIndexQueryVector;
   supplemental?: Route; canonicalBytes: number; sourceCost: (length: number) => SourceSemanticResourceBudget;
-}>): { phase: SourceSemanticCompactAcquisition; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
+}>): { phase: SourceSemanticAcquisitionPhase; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
   const { meter } = input;
   const quote = quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes));
   let release: (() => void) | undefined, handedOff = false;
   let phase = sourceSemanticAcquisitionNotRun("canonical_observation_allowance");
-  const finish = (nominations: readonly SourceIndexTarget[] = []) => {
-    const compact = packSourceSemanticAcquisition(phase, input.metadataMeter);
+  function finish(capture: SourceSemanticAcquisitionPhase, compact: SourceSemanticCompactAcquisition): void;
+  function finish(nominations?: readonly SourceIndexTarget[]): ReturnType<typeof acquireSourceSemanticIndex>;
+  function finish(value: SourceSemanticAcquisitionPhase | readonly SourceIndexTarget[] = [], compact?: SourceSemanticCompactAcquisition) {
+    if (compact !== undefined) {
+      // Keep the codec's actual owned capture in the existing side slot. The
+      // observation ledger and all receipts continue carrying only compact data.
+      phase = value as SourceSemanticAcquisitionPhase; meter.acquisition = compact; return;
+    }
+    capturePackSourceSemanticAcquisitionForRequest(phase, input.metadataMeter, finish);
     handedOff = true;
-    return { phase: compact, nominations, releaseCanonical: () => release?.() };
-  };
+    return { phase, nominations: value as readonly SourceIndexTarget[], releaseCanonical: () => release?.() };
+  }
   try {
     release = meter.hold(quote);
     const budget = meter.remaining(), attempts = Math.min(128, budget.work_units);

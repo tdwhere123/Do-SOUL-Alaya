@@ -9,8 +9,8 @@ import { createSourceSemanticAccessPolicy, fieldContractSha256 } from "@do-soul/
 import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { query as incompatibleQuery } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { canonicalJson, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
-  sourceSemanticExecution, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted, SourceSemanticResourceLedger,
-  type SourceSemanticCompactAcquisition } from "@do-soul/alaya-protocol";
+  sourceSemanticExecution, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted, SourceSemanticResourceLedger
+} from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
 import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
@@ -28,8 +28,12 @@ function runtime(fixture: IndexFixture) { return { database: fixture.database } 
 async function preparedVector(fixture: IndexFixture) {
   return fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal, remainingMs: () => 60_000 });
 }
-function expandedAcquisition(phase: SourceSemanticCompactAcquisition) {
-  return sourceSemanticExecutionPhases(sourceSemanticExecution(undefined, phase)).acquisition;
+function checkedAcquisitionCapture(result: ReturnType<typeof acquireSourceSemanticIndex>, meter: SourceSemanticReadBudget) {
+  const phase = sourceSemanticExecutionPhases(sourceSemanticExecution(undefined, meter.acquisition!)).acquisition;
+  expect(result.phase).toEqual(phase);
+  expect(Object.isFrozen(result.phase)).toBe(true);
+  expect(Array.isArray(meter.acquisition)).toBe(true);
+  return phase;
 }
 
 it("unions an unannotated vector-only root outside the same-budget canonical census through real SQLite", async () => {
@@ -264,7 +268,7 @@ it("reports an actual bounded acquisition refusal with its native cost rather th
       workspace: WS, navigation: ORIGINAL, authorized: ["project"], meter, metadataMeter, vector: prepared.vector,
       canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost }))();
     try {
-      const phase = expandedAcquisition(result.phase);
+      const phase = checkedAcquisitionCapture(result, meter);
       expect(phase).toMatchObject({ status: "executed", accounting: "complete", result: { completion: "partial" } });
       expect(phase.result?.resource_refusals.length).toBeGreaterThan(0);
       expect(phase.result?.vector.completion).not.toBe("complete");
@@ -329,7 +333,7 @@ it("preserves completed original nominations and failed hint expenditure with on
       navigation: ORIGINAL, vector: prepared.vector, supplemental: { navigation: "Harbor", vector: prepared.supplemental!.vector },
       authorized: ["project"], meter, metadataMeter, canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost }))();
     try {
-      const phase = expandedAcquisition(result.phase), hint = phase.supplemental![0]!;
+      const phase = checkedAcquisitionCapture(result, meter), hint = phase.supplemental![0]!;
       expect(phase.status).toBe("executed");
       expect(result.nominations.map(row => row.source_id)).toEqual(["raw"]);
       expect(hint).toMatchObject({ status: "failed", accounting: "partial", result: { nominations: [], resource_refusals: [
@@ -353,7 +357,7 @@ it("does not refill the root allowance for a hint after original native discover
       navigation: ORIGINAL, vector: prepared.vector, supplemental: { navigation: "Unrelated irrigation", vector: prepared.supplemental!.vector },
       authorized: ["project"], meter, metadataMeter, canonicalBytes: 8, sourceCost: policy.sourceCost }))();
     try {
-      const phase = expandedAcquisition(result.phase);
+      const phase = checkedAcquisitionCapture(result, meter);
       expect(phase.result?.nominations).toHaveLength(16);
       expect(result.nominations).toHaveLength(16);
       expect(phase.supplemental?.[0]).toMatchObject({ status: "not_run", reason: "shared_nomination_allowance",
@@ -379,7 +383,7 @@ it("keeps original nominations and remaining hint budget when union references e
       navigation: ORIGINAL, vector: prepared.vector, supplemental: { navigation: "Harbor", vector: prepared.supplemental!.vector },
       authorized: ["project"], meter, metadataMeter, canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost }))();
     try {
-      const phase = expandedAcquisition(result.phase), hint = phase.supplemental![0]!, remaining = meter.remaining();
+      const phase = checkedAcquisitionCapture(result, meter), hint = phase.supplemental![0]!, remaining = meter.remaining();
       expect(phase.status).toBe("executed");
       expect(result.nominations.map(row => row.source_id)).toEqual(["raw"]);
       expect(remaining.work_units).toBeGreaterThan(0);
@@ -405,7 +409,7 @@ it("admits an overlapping source identity once while keeping both route occurren
       navigation: ORIGINAL, vector: prepared.vector, supplemental: { navigation: "Harbor", vector: prepared.supplemental!.vector },
       authorized: ["project"], meter, metadataMeter, canonicalBytes: Buffer.byteLength(RAW), sourceCost: policy.sourceCost }))();
     try {
-      const phase = expandedAcquisition(result.phase);
+      const phase = checkedAcquisitionCapture(result, meter);
       const original = phase.result?.nominations.find(row => row.source.source_id === "raw");
       const hinted = phase.supplemental?.[0]?.result?.nominations.find(row => row.source.source_id === "raw");
       expect(original?.source.root_key).toBe(hinted?.source.root_key);

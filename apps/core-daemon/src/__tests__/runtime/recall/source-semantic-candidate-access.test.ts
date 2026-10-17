@@ -614,13 +614,17 @@ it("reads a raw-only body beyond the general observation half after proving no c
       return absorb.call(this, child);
     });
     try {
+      const directMeter = new SourceSemanticReadBudget(budget);
       const direct = database.connection.transaction(() => observeSourceSemanticAccess(runtime,
         { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
           request: { kind: "prepare_query", original_query: original, budget } },
-        ["project"], new SourceSemanticReadBudget(budget), original, undefined, "query-conditioned-v1", budget, undefined,
+        ["project"], directMeter, original, undefined, "query-conditioned-v1", budget, undefined,
         { leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
           expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: original } }))();
       expect(direct.access.source_candidates[0]?.complete).toBe(true);
+      expect(direct.access.unvisited_sources).toBe(false);
+      expect(directMeter.spentWork).toBeLessThanOrEqual(budget.work_units);
+      expect(directMeter.spentBytes).toBeLessThanOrEqual(budget.memory_bytes);
       const prepared = await accessCall(execute, { kind: "prepare_query", original_query: original, budget });
       expect(prepared.outcome).toEqual({ status: "preparation_required", missing: "query_semantics" });
       expect(prepared.access?.source_candidates).toEqual([expect.objectContaining({ source_id: "raw", complete: true })]);
@@ -628,6 +632,14 @@ it("reads a raw-only body beyond the general observation half after proving no c
       expect(prepared.query_handle).toBeDefined();
       expect(childSpend).toEqual([expect.any(Number)]);
       expect(childSpend[0]).toBeGreaterThan(Math.floor(budget.work_units / 2));
+      expect(prepared.work.logical_work).toBeLessThanOrEqual(budget.work_units);
+      expect(prepared.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
+      const recalled = await accessCall(execute, { kind: "recall", accepts_unreviewed_conditional_results: true,
+        query_handle: prepared.query_handle!, semantic_correspondences: [], budget, output_byte_limit: 1_000_000 });
+      expect(recalled.discovery.access?.pool_id).toBe(prepared.access?.pool_id);
+      expect(recalled.index.entries).toHaveLength(1);
+      expect(recalled.work.logical_work).toBeLessThanOrEqual(budget.work_units);
+      expect(recalled.work.logical_memory_bytes).toBeLessThanOrEqual(budget.memory_bytes);
     } finally { spy.mockRestore(); database.close(); closeCachedDatabase(filename); }
   });
 });

@@ -3,8 +3,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { canonicalJson, canonicalJsonChunks, canonicalJsonLength } from "../../recall/selection/capture/canonical-json.js";
+import { canonicalJson, canonicalJsonChunks, canonicalJsonLength, CanonicalJsonSubtrees } from "../../recall/selection/capture/canonical-json.js";
+import { SourceSemanticResourceLedger } from "../../garden/source-semantic-resources.js";
 import { sourceTextDigest } from "../../relations/relation-assertion.js";
+
+function quoteUnpreparedChunks(value: unknown, execution: SourceSemanticResourceLedger,
+  planner: Pick<SourceSemanticResourceLedger, "charge"> = { charge() {} }) {
+  return new CanonicalJsonSubtrees(undefined, undefined, planner).quote(value, execution, planner);
+}
 
 const MIXED_KEYS = { a: 1, B: 2, "": 0 } as const;
 const MIXED_KEYS_CANONICAL = '{"":0,"B":2,"a":1}';
@@ -47,6 +53,38 @@ describe("canonicalJson", () => {
     }
     expect(() => canonicalJsonLength(undefined)).toThrow(/no root string/u);
     expect(() => canonicalJsonLength(1, { charge() { throw new Error("size exhausted"); } })).toThrow("size exhausted");
+  });
+
+  it("quotes identical chunk boundaries and escaping without encoding string scalars", () => {
+    const text = Array.from({ length: 65_536 }, (_, code) => String.fromCharCode(code)).join("");
+    const value = { z: [undefined, , Symbol("omitted"), () => undefined, text, "\ud800", "\udfff", "\ud800x\udfff", "\ud800\udfff", "\udfff\ud800"],
+      a: { absent: undefined, quoted: '"\\', negativeZero: -0, finite: 1e-7, nan: NaN, infinity: Infinity } };
+    const chunks = [...canonicalJsonChunks(value)];
+    const execution = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const planning = new SourceSemanticResourceLedger({ work_units: 1_000_000, memory_bytes: 4_000_000 });
+    const stringify = vi.spyOn(JSON, "stringify");
+    let sizes: number[], serialized: unknown[];
+    try {
+      sizes = [...quoteUnpreparedChunks(value, execution, planning)];
+      serialized = stringify.mock.calls.map(([value]) => value);
+    } finally { stringify.mockRestore(); }
+    expect(sizes).toEqual(chunks.map(chunk => Buffer.byteLength(chunk, "utf8")));
+    expect(serialized.every(value => typeof value === "number")).toBe(true);
+    expect(execution.spentBytes).toBeGreaterThan(planning.spentBytes + text.length);
+  });
+
+  it("rejects cycles and unencodable scalars in execution and cost-only quotation", () => {
+    const cycle: unknown[] = []; cycle.push(cycle);
+    for (const value of [undefined, Symbol("root"), () => undefined, 1n, { nested: 1n }, cycle]) {
+      const execution = new SourceSemanticResourceLedger({ work_units: 10_000, memory_bytes: 1_000_000 });
+      expect(() => [...canonicalJsonChunks(value)]).toThrow(TypeError);
+      expect(() => [...quoteUnpreparedChunks(value, execution)]).toThrow(TypeError);
+    }
+    const shared = { text: "borrowed" };
+    const value = [shared, shared];
+    const execution = new SourceSemanticResourceLedger({ work_units: 10_000, memory_bytes: 1_000_000 });
+    expect([...quoteUnpreparedChunks(value, execution)])
+      .toEqual([...canonicalJsonChunks(value)].map(chunk => Buffer.byteLength(chunk, "utf8")));
   });
 
   it("is independent of process locale", () => {

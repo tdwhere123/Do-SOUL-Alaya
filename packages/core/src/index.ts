@@ -63,7 +63,7 @@ export {
 } from "./embedding-recall/local-onnx.js";
 export * from "./runtime/runs/engine-binding-service.js";
 export * from "./shared/errors.js";
-export { fieldContractSha256, fieldContractSha256Chunks } from "./shared/field-hash.js";
+export { fieldContractSha256, fieldContractSha256Chunks, quoteFieldContractSha256Chunks } from "./shared/field-hash.js";
 export {
   createInMemoryFieldStores,
   type FieldFormationStores,

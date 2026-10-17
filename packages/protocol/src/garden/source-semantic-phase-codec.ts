@@ -29,6 +29,43 @@ export function captureSourceSemanticAcquisition(value: unknown, meter?: Meter):
     "source phase semantic acquisition capture", meter), meter);
 }
 
+/** Exported internal-consumer ingress: hand off only the actual captured/packed pair.
+ * Unlike public semantic capture, the direct call chain needs no CAPTURED entry. */
+export function capturePackSourceSemanticPreparationForRequest(value: unknown, meter: Meter,
+  consume: (capture: SourceSemanticQueryPreparation, compact: SourceSemanticCompactPreparation) => void): SourceSemanticCompactPreparation {
+  const owned = SourceSemanticResourceLedger.capture(value, value => SourceSemanticQueryPreparationSchema.parse(value),
+    "source phase semantic preparation capture", meter);
+  traverse(owned, meter, "source phase preparation packing traversal");
+  const compact = packPreparation(owned, meter);
+  meter.retain(compact, "source phase packed preparation allocation", "immutable");
+  consume(owned, compact);
+  return compact;
+}
+
+export function capturePackSourceSemanticAcquisitionForRequest(value: unknown, meter: Meter,
+  consume: (capture: SourceSemanticAcquisitionPhase, compact: SourceSemanticCompactAcquisition) => void): SourceSemanticCompactAcquisition {
+  const owned = SourceSemanticResourceLedger.capture(value, value => SourceSemanticAcquisitionPhaseSchema.parse(value),
+    "source phase acquisition packing capture", meter, "packing_intermediate");
+  traverse(owned, meter, "source phase acquisition packing traversal");
+  const compact = packAcquisition(owned, meter);
+  meter.retain(compact, "source phase packed acquisition allocation", "immutable");
+  consume(owned, compact);
+  return compact;
+}
+
+/** Package-internal normal-form rule owned by this codec, not a caller assertion.
+ * Expansion omits root supplemental when slot 3 is absent; nested retained leaves
+ * (including their own undefined fields) are not reconstructed or normalized. */
+export function sourceSemanticCanonicalPhaseCapture<T extends SourceSemanticQueryPreparation | SourceSemanticAcquisitionPhase>(
+  compact: SourceSemanticCompactPreparation | SourceSemanticCompactAcquisition, capture: T | undefined,
+  meter: Pick<Meter, "charge">): T | undefined {
+  meter.charge(2, 0, "source phase canonical capture eligibility");
+  if (capture === undefined) return undefined;
+  if (compact[3] !== undefined) return capture;
+  meter.charge(1, 0, "source phase canonical supplemental key check");
+  return Object.hasOwn(capture, "supplemental") ? undefined : capture;
+}
+
 /** Traversal work and its pending references, without pretending to retain another expanded copy. */
 function traverse(value: unknown, meter: Meter | undefined, phase: string): void {
   if (meter === undefined) return;
@@ -255,15 +292,22 @@ export function sourceSemanticExecutionPhases(value: SourceSemanticExecution, me
   return { contract: "source-semantic-execution-v3", semantic_generation_attempts: 0,
     query_preparation: expandPreparation(value[1], meter), acquisition: expandAcquisition(value[2], meter) };
 }
-export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter): Readonly<{
-  preparation: SourceSemanticQueryPreparation; acquisition: SourceSemanticAcquisitionPhase; phase_accounting: SourceSemanticPhaseAccounting }> {
+export function sourceSemanticAccessPhases(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter) {
+  return sourceSemanticAccessPhasesWithCaptures(access, meter);
+}
+
+/** Package-internal adapter seam; public decoding always expands both phases. */
+export function sourceSemanticAccessPhasesWithCaptures(access: Readonly<{ phases: SourceSemanticAccessPhases }>, meter?: Meter,
+  preparation?: SourceSemanticQueryPreparation, acquisition?: SourceSemanticAcquisitionPhase): Readonly<{
+    preparation: SourceSemanticQueryPreparation; acquisition: SourceSemanticAcquisitionPhase; phase_accounting: SourceSemanticPhaseAccounting }> {
   meter?.charge(5, 64 + 3 * 8 + 3 * 24 + 4 * (11 + 11 + 16), "source phase expanded access framing");
   const observation = access.phases[3];
   const phase_accounting: SourceSemanticPhaseAccounting = { observation: observation === null ? null : {
     work: observation[0], memory_bytes: observation[1], native_bytes: observation[2], sql_internal_work: "unknown" },
     completion: "included_in_worker_work_not_separately_measured", native_cpu: "unknown", deadline: "soft_quarantine_until_exit" };
   meter?.retain(phase_accounting, "source phase observation expansion");
-  return { preparation: expandPreparation(access.phases[1], meter), acquisition: expandAcquisition(access.phases[2], meter), phase_accounting };
+  return { preparation: preparation ?? expandPreparation(access.phases[1], meter),
+    acquisition: acquisition ?? expandAcquisition(access.phases[2], meter), phase_accounting };
 }
 /** Narrow readers preserve null without allocating or expanding complete phases. */
 export function sourceSemanticExecutionExternalAttempts(value: SourceSemanticExecution): number | null {
