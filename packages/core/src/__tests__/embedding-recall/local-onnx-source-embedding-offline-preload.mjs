@@ -12,6 +12,16 @@ import { syncBuiltinESMExports } from "node:module";
 import { fileURLToPath } from "node:url";
 import { installProviderFreeBoundary } from "../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.ts";
 
+const preloadSpecifier = import.meta.url;
+const sourceAllocation = parseSourceAllocation(new URL(preloadSpecifier));
+const allocatedInputCap = sourceAllocation === null ? null : Object.freeze(parseInputCap());
+if (sourceAllocation !== null && allocatedInputCap === null) throw new Error("Invalid offline inference input cap");
+// Query configuration is a test-launch capability, not an application/env API.
+// A different import URL must not create a fresh allocation in the same process.
+const installation = Symbol.for("alaya.source-embedding-offline-guard");
+if (globalThis[installation]) throw new Error("Offline Source guard is already installed");
+Object.defineProperty(globalThis, installation, { value: true });
+
 // The shared guard owns credential filtering/file refusal. This stricter local
 // inference fixture also forbids loopback and non-fetch transports.
 const shared = installProviderFreeBoundary();
@@ -26,17 +36,19 @@ const requests = [];
 const attemptedSends = [];
 const dispatchedSends = [];
 const blockedSends = [];
+const reservedSends = [];
+const forwardUnknownSends = [];
+let explicitRunInputs = 0;
+let reservedBytes = 0;
 const readOnlyGitCalls = [];
 const allowReadOnlyGit = !childMode && process.env.ALAYA_SOURCE_EMBEDDING_OFFLINE_ALLOW_GIT === "1";
 const ALLOWED_CHILD_OPS = new Set(["warmup", "bind_source", "embed_source", "close"]);
 let responses = 0;
 let restored = false;
-let explicitRunInputs = 0;
 let warmupAttempted = 0;
 let warmupDispatched = 0;
 let observedApplicationReplies = 0;
 let reportedOutcome = null;
-const preloadSpecifier = import.meta.url;
 const childImportArgv = ["--import", preloadSpecifier];
 const reportedOutcomes = new Set(["success", "failure", "probe_failure"]);
 const credentialKey = key => /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key);
@@ -47,7 +59,8 @@ const snapshot = phase => {
     preload_specifier: preloadSpecifier,
     credential_environment_count: credentialCount(),
     transport_guards: [...transportGuards], violations: [...shared.violations],
-    local_responses: responses
+    local_responses: responses,
+    ...allocationRecord()
   };
   return childMode
     ? { ...common, exec_argv: [...process.execArgv] }
@@ -130,20 +143,66 @@ function parseInputCap() {
   return null;
 }
 
-function payloadCounts(message) {
-  if (message.inputs !== undefined && !Array.isArray(message.inputs)) {
-    deny("opaque inference inputs");
-  }
-  if (message.texts !== undefined && !Array.isArray(message.texts)) {
-    deny("opaque inference texts");
-  }
-  const inputs = Array.isArray(message.inputs) ? message.inputs.length : 0;
-  const texts = Array.isArray(message.texts) ? message.texts.length : 0;
-  return { inputs, texts, total: inputs + texts };
+function parseSourceAllocation(url) {
+  const names = ["source_input_cap", "source_utf8_byte_cap"];
+  if (names.every(name => !url.searchParams.has(name))) return null;
+  const values = names.map(name => {
+    const entries = url.searchParams.getAll(name);
+    const raw = entries[0];
+    const value = Number(raw);
+    if (entries.length !== 1 || !/^(?:0|[1-9][0-9]*)$/u.test(raw ?? "") || !Number.isSafeInteger(value)) {
+      throw new Error(`Invalid offline Source allocation: ${name}`);
+    }
+    return value;
+  });
+  return Object.freeze({ source_inputs: values[0], utf8_bytes: values[1] });
 }
 
-function sendMeta(op, payload) {
-  return { op, inputs: payload.inputs, texts: payload.texts };
+function cumulativeInputCap(inputCap) {
+  const explicitCap = inputCap?.explicit ? inputCap.cap : null;
+  if (sourceAllocation === null) return explicitCap;
+  // An allocation adds a constraint; it never enlarges an explicit legacy ceiling.
+  return explicitCap === null ? sourceAllocation.source_inputs : Math.min(sourceAllocation.source_inputs, explicitCap);
+}
+
+function allocationRecord() {
+  const inputCap = allocatedInputCap ?? parseInputCap();
+  const totals = rows => rows.reduce((sum, row) => ({ sends: sum.sends + 1,
+    source_inputs: sum.source_inputs + (row.inputs ?? 0) + (row.texts ?? 0), utf8_bytes: sum.utf8_bytes + (row.utf8_bytes ?? 0)
+  }), { sends: 0, source_inputs: 0, utf8_bytes: 0 });
+  return {
+    input_cap: inputCap?.cap ?? null, input_cap_source: inputCap === null ? "invalid" : inputCap.explicit ? "explicit" : "default",
+    input_cap_scope: "per_send",
+    cumulative_input_cap: cumulativeInputCap(inputCap),
+    cumulative_input_cap_source: sourceAllocation !== null
+      ? inputCap?.explicit ? "allocation_and_explicit" : "allocation" : inputCap?.explicit ? "explicit" : "unconfigured",
+    explicit_cumulative_input_cap: inputCap?.explicit ? inputCap.cap : null,
+    cumulative_input_reserved: explicitRunInputs,
+    source_allocation: sourceAllocation === null ? { status: "unconfigured" }
+      : { status: "configured", scope: "per_process", ...sourceAllocation },
+    allocation_usage: { reserved: totals(reservedSends), dispatched: totals(dispatchedSends),
+      blocked: totals(blockedSends), forward_unknown: totals(forwardUnknownSends),
+      inference_occupancy: requests.some(row => row.op !== "close") ? "unknown" : "none_observed" },
+    warmup: { attempted: warmupAttempted, dispatched: warmupDispatched, model_execution_work: "unknown" },
+    // Child checkpoints carry counts, not quadratic copies of the complete run.
+    last_blocked_send: blockedSends.length > 0 ? { ...blockedSends.at(-1) } : null
+  };
+}
+
+function payloadCounts(message) {
+  let utf8Bytes = 0;
+  for (const key of ["inputs", "texts"]) {
+    if (message[key] === undefined) continue;
+    if (!Array.isArray(message[key])) throw new Error(`opaque inference ${key}`);
+    for (const input of message[key]) {
+      const text = typeof input === "string" ? input : key === "inputs" ? input?.text : undefined;
+      if (typeof text !== "string") throw new Error(`opaque inference ${key} text`);
+      utf8Bytes += Buffer.byteLength(text, "utf8");
+    }
+  }
+  const inputs = message.inputs?.length ?? 0;
+  const texts = message.texts?.length ?? 0;
+  return { inputs, texts, total: inputs + texts, utf8_bytes: utf8Bytes };
 }
 
 function refuseSend(kind, meta) {
@@ -151,35 +210,45 @@ function refuseSend(kind, meta) {
   deny(kind);
 }
 
-function guardChildSend(message, send, rest) {
-  if (typeof message?.op !== "string") {
-    return Reflect.apply(send, this, [message, ...rest]);
-  }
-  const payload = payloadCounts(message);
-  const meta = sendMeta(message.op, payload);
+function guardChildSend(offered, send, rest) {
+  // Validate and forward the same capture: getters, mutation and toJSON cannot
+  // change the charged strings after the admission decision.
+  let message;
+  try { message = structuredClone(offered); } catch { return refuseSend("uncapturable inference payload", {}); }
+  if (typeof message?.op !== "string") return Reflect.apply(send, this, [message, ...rest]);
+  let payload;
+  try { payload = payloadCounts(message); } catch (error) { return refuseSend(error.message, { op: message.op }); }
+  const inputCap = allocatedInputCap ?? parseInputCap();
+  const meta = { op: message.op, inputs: payload.inputs, texts: payload.texts, utf8_bytes: payload.utf8_bytes,
+    input_cap: inputCap?.cap ?? null, input_cap_source: inputCap === null ? "invalid" : inputCap.explicit ? "explicit" : "default" };
   attemptedSends.push(meta);
   if (message.op === "warmup") warmupAttempted += 1;
-  const parsed = parseInputCap();
-  if (parsed === null) refuseSend("invalid inference input cap", meta);
-  const cap = parsed?.cap ?? 2;
-  const explicit = parsed?.explicit === true;
-  if (!ALLOWED_CHILD_OPS.has(message.op)) {
-    refuseSend(`unexpected model-bearing op ${message.op}`, meta);
-  }
-  if (message.op !== "embed_source" && payload.total !== 0) {
-    refuseSend(`${message.op} with model inputs`, meta);
-  }
+  if (inputCap === null) refuseSend("invalid inference input cap", meta);
+  if (!ALLOWED_CHILD_OPS.has(message.op)) refuseSend(`unexpected model-bearing op ${message.op}`, meta);
+  if (message.op !== "embed_source" && payload.total !== 0) refuseSend(`${message.op} with model inputs`, meta);
   if (message.op === "embed_source") {
-    if (payload.total > cap) refuseSend("pre-send inference input cap", meta);
-    if (explicit && explicitRunInputs + payload.total > cap) {
-      refuseSend("pre-send inference input cap", meta);
+    if (payload.total > inputCap.cap) refuseSend("pre-send inference input cap", meta);
+    // Both constraints reserve against the existing run counter, never competing meters.
+    const totalCap = cumulativeInputCap(inputCap);
+    if (totalCap !== null && payload.total > totalCap - explicitRunInputs) {
+      refuseSend(sourceAllocation === null ? "pre-send inference input cap" : "cumulative Source input cap", meta);
     }
-    if (explicit) explicitRunInputs += payload.total;
+    if (sourceAllocation !== null && payload.utf8_bytes > sourceAllocation.utf8_bytes - reservedBytes) {
+      refuseSend("cumulative Source UTF-8 byte cap", meta);
+    }
+    // Reservation survives a throwing/unknown forward and cannot fund a retry.
+    if (totalCap !== null) explicitRunInputs += payload.total;
+    reservedBytes += payload.utf8_bytes;
+    reservedSends.push(meta);
   }
-  if (message.op === "warmup") warmupDispatched += 1;
   requests.push({ op: message.op, inputs: message.op === "embed_source" ? payload.total : payload.inputs });
+  let result;
+  try { result = Reflect.apply(send, this, [message, ...rest]); }
+  catch (error) { forwardUnknownSends.push(meta); report("forward_unknown"); throw error; }
+  if (message.op === "warmup") warmupDispatched += 1;
   dispatchedSends.push(meta);
-  return Reflect.apply(send, this, [message, ...rest]);
+  report("dispatch");
+  return result;
 }
 
 function childExitUnknown() {
@@ -235,7 +304,6 @@ function childExitRecord(child, index) {
 }
 
 function receiptRecord(reason) {
-  const parsed = parseInputCap();
   const unknown = childExitUnknown();
   return {
     kind: "alaya-source-embedding-offline-parent-guard-receipt",
@@ -244,12 +312,12 @@ function receiptRecord(reason) {
     pid: process.pid,
     preload_specifier: preloadSpecifier,
     configured_child_exec_argv: [...childImportArgv],
-    input_cap: parsed?.cap ?? null,
-    input_cap_source: parsed === null ? "invalid" : parsed.explicit ? "explicit" : "default",
+    ...allocationRecord(),
     attempted_sends: attemptedSends.map(row => ({ ...row })),
+    reserved_sends: reservedSends.map(row => ({ ...row })),
     dispatched_sends: dispatchedSends.map(row => ({ ...row })),
     blocked_sends: blockedSends.map(row => ({ ...row })),
-    warmup: { attempted: warmupAttempted, dispatched: warmupDispatched, model_execution_work: "unknown" },
+    forward_unknown_sends: forwardUnknownSends.map(row => ({ ...row })),
     credential_environment_count: credentialCount(),
     transport_guards: [...transportGuards],
     violations: [...shared.violations],
@@ -278,7 +346,12 @@ function writeGuardReceipts(reason) {
       phase: row.phase, pid: row.pid, preload_specifier: row.preload_specifier,
       exec_argv: row.exec_argv, credential_environment_count: row.credential_environment_count,
       transport_guards: row.transport_guards, violations: row.violations,
-      local_responses: row.local_responses
+      local_responses: row.local_responses,
+      input_cap: row.input_cap, input_cap_source: row.input_cap_source, input_cap_scope: row.input_cap_scope,
+      cumulative_input_cap: row.cumulative_input_cap, cumulative_input_cap_source: row.cumulative_input_cap_source,
+      explicit_cumulative_input_cap: row.explicit_cumulative_input_cap,
+      cumulative_input_reserved: row.cumulative_input_reserved, last_blocked_send: row.last_blocked_send,
+      source_allocation: row.source_allocation, allocation_usage: row.allocation_usage, warmup: row.warmup
     })),
     children: children.map((child, index) => childExitRecord(child, index))
   }));
@@ -293,9 +366,12 @@ replace(childProcess, "fork", function (script, args, options) {
       options?.execArgv?.length !== 0 || options.env?.NODE_OPTIONS !== undefined) {
     return deny("unexpected subprocess or production fork configuration");
   }
+  const inputCap = allocatedInputCap ?? parseInputCap();
+  if (inputCap === null) return deny("invalid inference input cap");
   const child = nativeFork(script, args, {
     ...options, execArgv: [...childImportArgv],
-    env: { ...options.env, ALAYA_SOURCE_EMBEDDING_OFFLINE_CHILD: "1" }
+    env: { ...options.env, ALAYA_SOURCE_EMBEDDING_OFFLINE_CHILD: "1",
+      ALAYA_SOURCE_EMBEDDING_OFFLINE_INPUT_CAP: inputCap.explicit ? String(inputCap.cap) : "" }
   });
   const observation = { pid: child.pid, script, preload: preloadSpecifier, exited: false, code: null, signal: null };
   childHandles.push(child);
@@ -321,6 +397,14 @@ if (childMode) {
   if (!nativeSend || importIndex < 0 || process.execArgv[importIndex + 1] !== preloadSpecifier) {
     throw new Error("Offline child preload has no guarded IPC establishment channel");
   }
+  // Guard the existing IPC ingress before any application listener/inference.
+  const emit = process.emit;
+  Object.defineProperty(process, "emit", { configurable: true, writable: true, value: function (event, ...args) {
+    if (event !== "message") return Reflect.apply(emit, this, [event, ...args]);
+    const forward = message => Reflect.apply(emit, this, [event, message, ...args.slice(1)]);
+    return guardChildSend.call(this, args[0], forward, []);
+  } });
+  restores.push(() => { delete process.emit; });
   // A caught refusal still reaches the parent. Each application response carries
   // a preceding guard checkpoint; IPC cannot silently turn a refusal into green.
   replace(process, "send", function (message, ...rest) {
