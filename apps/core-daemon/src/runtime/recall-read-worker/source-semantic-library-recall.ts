@@ -23,6 +23,7 @@ import {
 import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticQueryInputIdentity,
   sourceSemanticRevision } from "./source-semantic-leases.js";
 
+import { ResearchLexicalPrefixCapture } from "./source-semantic-research-lexical-prefix.js";
 import { captureResearchNominatedSourceDelivery, forkCapturedRequestBudget,
   type ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
 import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
@@ -109,8 +110,11 @@ export function runSourceSemanticLibraryRecall(
     throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
   }
   if (boundPool !== undefined) exploration.retain(boundPool, "leased access pool");
+  const lexicalCapture = payload.acquisition_control === undefined ? undefined
+    : new ResearchLexicalPrefixCapture(payload, forkCapturedRequestBudget(request, meter));
   const pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
-    admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id);
+    admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id,
+    undefined, undefined, undefined, undefined, lexicalCapture);
   // Use the existing cost-fork authority at the live observation seam: native
   // branch execution and hydration are not captured as a second acquisition.
   const capturedCosts = payload.acquisition_control === undefined ? undefined : forkCapturedRequestBudget(request, meter);
@@ -133,7 +137,8 @@ export function runSourceSemanticLibraryRecall(
   // Native work/execution must be sampled before diagnostic allocations. The
   // orchestration owner supplies the same finalizer used by the default route.
   return capturedCosts === undefined ? result : { kind: "research_acquisition", result: finalizeNativeRecall!(result),
-    private_delivery: captureResearchNominatedSourceDelivery(runtime.database, payload, pool, capturedCosts) };
+    private_delivery: captureResearchNominatedSourceDelivery(runtime.database, payload, pool, capturedCosts,
+      "live_access_pool_unavailable", lexicalCapture) };
   } finally { if (!explorationAbsorbed) meter.absorb(exploration); }
 }
 

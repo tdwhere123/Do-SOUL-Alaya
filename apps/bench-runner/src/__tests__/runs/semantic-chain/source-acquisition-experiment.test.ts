@@ -132,6 +132,18 @@ it("launches the exact early guard, prepares physically once, runs three native 
     if (arm.kind !== "PRIVATE_COUNTERFACTUAL") throw new Error("arm missing");
     expect(arm.request_budget).toEqual(BUDGET); expect(arm.control).toBe(control);
     expect(arm.artifact).not.toHaveProperty("private_delivery"); expect(arm.full_envelope_bytes).toBeGreaterThan(0);
+    const lexical = arm.private_delivery.lexical_prefix!;
+    expect(lexical).toBeDefined();
+    if (control === "vector") {
+      expect(lexical).toMatchObject({ status: "not_run", reason: "lexical_channel_not_requested", evidence: null, candidate: null });
+    } else {
+      expect(lexical.status).toBe("complete");
+      expect(lexical.evidence!.reader.tokenization!.terms).toContain("tools");
+      expect(lexical.evidence!.reader_limit).toBe(128);
+      expect(lexical.control!.package_repertoire).toEqual(lexical.candidate!.package_repertoire);
+      expect(lexical.candidate!.artifact.results![0]!.content_preview).toBe(BODY);
+      expect(lexical.evidence!.resources.sql_internal_work).toBe("unknown");
+    }
   }
   expect(effects(h.root).effects).toHaveLength(1); expect(effects(h.root).meters).toEqual([]);
   const guard = readChainArtifact(join(h.root, "source-experiment-guard.json")) as { parent: { dispatched_sends: { op: string }[]; children: { exited: boolean }[] } };

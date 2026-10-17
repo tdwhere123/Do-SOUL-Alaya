@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { canonicalJson, sourceSemanticAccessPhases, sourceSemanticExecution, SourceSemanticResourceExhausted,
-  SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema, IndexEntrySchema,
+  SoulInterpretationResponseSchema, SourceSemanticWorkerResultSchema, IndexEntrySchema, SourceDisclosureSchema, SourceSemanticLibrarySlotQualifierSchema,
   type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticQuery, authorizedScopesFromAdmission, encodeSourceSemanticLibraryResponse,
   fieldContractSha256, selectSourceSemanticLibraryPage, sourceGoldRootIdentity,
@@ -13,6 +13,7 @@ import { accessInputIdentity, bindAccessPoolIdentity, type SourceSemanticAccessP
 import { bindVerifiedResearchSourceRecords } from "./source-semantic-research-pool.js";
 import { executeLibraryBranches, prepareSourceSemanticLibraryInputs } from "./source-semantic-library-recall.js";
 import { deliverFrozenLibraryPage, prepareLibraryDelivery, type LibraryPageSelector } from "./source-semantic-library-delivery.js";
+import { ResearchLexicalPrefixEvidenceSchema, type ResearchLexicalPrefixCapture } from "./source-semantic-research-lexical-prefix.js";
 
 type Proposal = Readonly<{ root: string; position: number; provenance: "primary" | "supplemental" | "legacy-access remainder" }>;
 type Prepared = ReturnType<typeof prepareSourceSemanticLibraryInputs>;
@@ -36,7 +37,9 @@ const PrivateArmSchemaOwner = z.object({
   full_envelope_bytes: z.number().int().nonnegative(), output_byte_limit: z.number().int().positive(),
   fit_template: z.literal("unchanged native full envelope; not an executed evidence_support ranking claim"),
   artifact: PrivateArtifactSchema,
-  package_repertoire: z.array(z.object({ target: IndexEntrySchema.unwrap().shape.target, proofs: nativeShape.proofs.unwrap() }).strict()),
+  package_repertoire: z.array(z.object({ target: IndexEntrySchema.unwrap().shape.target, proofs: nativeShape.proofs.unwrap(),
+    preview: z.string(), source_disclosure: SourceDisclosureSchema,
+    payload_support: SourceSemanticLibrarySlotQualifierSchema.unwrap().shape.payload_support }).strict()),
   frozen_pages: z.array(z.array(z.object({ target: IndexEntrySchema.unwrap().shape.target,
     preview: z.string(), proofs: nativeShape.proofs.unwrap() }).strict()))
 }).strict();
@@ -52,15 +55,42 @@ const ComparisonSchema: ReturnType<ComparisonSchemaType["strict"]> = z.object({ 
   hydration: z.object({ prefix: PrivateArmSchema.nullable(), nominated: PrivateArmSchema.nullable() }).strict(),
   ordering: z.object({ o1: PrivateArmSchema.nullable(), access: PrivateArmSchema.nullable(), native: PrivateArmSchema.nullable() }).strict()
 }).strict();
-const PhaseCostSchema = z.object({ phase: z.enum(["shared", "prefix_preparation", "nominated_preparation", "prefix", "nominated", "access", "native"]),
+const ComparisonStateSchema = z.object({
+  status: z.enum(["not_run", "unavailable", "partial", "complete"]), reason: z.string().nullable(),
+  failure: z.object({ name: z.string(), message: z.string(), code: z.string().nullable(), phase: z.string().nullable() }).strict().nullable()
+}).strict();
+type ComparisonState = z.output<typeof ComparisonStateSchema>;
+const LexicalComparisonSchemaOwner = z.object({
+  ...ComparisonStateSchema.shape,
+  capture_cost: z.object({ work_units: z.number().int().nonnegative(), memory_bytes: z.number().int().nonnegative() }).strict(),
+  evidence: ResearchLexicalPrefixEvidenceSchema.nullable(), control: PrivateArmSchema.nullable(), candidate: PrivateArmSchema.nullable()
+}).strict().superRefine((value, context) => {
+  if (value.status === "complete" && (value.reason !== null || value.evidence === null || value.control === null || value.candidate === null)
+    || value.status !== "complete" && value.reason === null
+    || value.status !== "partial" && value.failure !== null
+    || value.status === "not_run" && (value.evidence !== null || value.control !== null || value.candidate !== null)) {
+    context.addIssue({ code: "custom", message: "lexical contrast must preserve unavailable, partial and complete states" });
+  }
+  if (value.control !== null && value.candidate !== null && (canonicalJson(value.control.package_repertoire) !== canonicalJson(value.candidate.package_repertoire)
+    || value.control.output_byte_limit !== value.candidate.output_byte_limit)) {
+    context.addIssue({ code: "custom", message: "lexical contrast must preserve the identical raw prefix population" });
+  }
+  if (value.evidence !== null && value.control !== null) {
+    const roots = new Set(value.control.package_repertoire.flatMap(row => row.target.kind === "source_evidence" && row.proofs.length === 0
+      ? [sourceGoldRootIdentity(row.target)] : []));
+    if (value.evidence.order.length !== roots.size || value.evidence.order.some((row, index) => row.position !== index || !roots.delete(row.root))) {
+      context.addIssue({ code: "custom", message: "lexical order must contain exactly the authorized prefix repertoire" });
+    }
+  }
+});
+type LexicalComparison = z.output<typeof LexicalComparisonSchemaOwner>;
+const LexicalComparisonSchema: z.ZodType<LexicalComparison, z.input<typeof LexicalComparisonSchemaOwner>> = LexicalComparisonSchemaOwner;
+const PhaseCostSchema = z.object({ phase: z.enum(["shared", "prefix_preparation", "nominated_preparation", "prefix", "nominated", "access", "native",
+  "lexical_projection", "lexical_control", "lexical_candidate"]),
   work: nativeShape.work }).strict();
 
 /** Daemon-private diagnostics, never a native envelope or answer/consumer-benefit claim. */
-const deliveryStateShape = {
-  kind: z.literal("PRIVATE_COUNTERFACTUAL"), status: z.enum(["not_run", "unavailable", "partial", "complete"]),
-  reason: z.string().nullable(),
-  failure: z.object({ name: z.string(), message: z.string(), code: z.string().nullable(), phase: z.string().nullable() }).strict().nullable()
-};
+const deliveryStateShape = { kind: z.literal("PRIVATE_COUNTERFACTUAL"), ...ComparisonStateSchema.shape };
 const deliveryCostShape = {
   captured: z.object({ work: nativeShape.work, execution: nativeShape.execution.unwrap() }).strict(),
   // Each phase is cumulative within its own counterfactual fork, not an additive physical-work total.
@@ -68,13 +98,24 @@ const deliveryCostShape = {
 };
 const deliveryDiagnosticsShape: typeof deliveryStateShape & typeof deliveryCostShape & {
   comparison: z.ZodNullable<typeof ComparisonSchema>;
-} = { ...deliveryStateShape, ...deliveryCostShape, comparison: ComparisonSchema.nullable() };
+  lexical_prefix: z.ZodOptional<typeof LexicalComparisonSchema>;
+  nominated_comparison: z.ZodOptional<typeof ComparisonStateSchema>;
+} = { ...deliveryStateShape, ...deliveryCostShape, comparison: ComparisonSchema.nullable(),
+  lexical_prefix: LexicalComparisonSchema.optional(), nominated_comparison: ComparisonStateSchema.optional() };
 type DeliveryDiagnosticsSchemaType = ReturnType<z.ZodObject<typeof deliveryDiagnosticsShape>["strict"]>;
 const ResearchSourceDeliveryDiagnosticsSchemaOwner: DeliveryDiagnosticsSchemaType = z.object(deliveryDiagnosticsShape).strict().superRefine((value, context) => {
   const complete = value.comparison !== null && [...Object.values(value.comparison.hydration),
     ...Object.values(value.comparison.ordering)].every(arm => arm !== null);
-  if (value.status === "complete" && (!complete || value.reason !== null)
-    || value.status === "partial" && value.failure === null
+  const nominated = value.nominated_comparison;
+  const aggregate = nominated === undefined ? undefined : aggregateComparisonState(nominated, value.lexical_prefix);
+  if (value.lexical_prefix !== undefined && nominated === undefined
+    || aggregate !== undefined && (value.status !== aggregate.status || value.reason !== aggregate.reason
+      || canonicalJson(value.failure) !== canonicalJson(aggregate.failure))
+    || (nominated ?? value).status === "complete" && (!complete || (nominated ?? value).reason !== null)
+    || nominated === undefined && value.status === "partial" && value.failure === null
+    || nominated !== undefined && (nominated.status !== "complete" && nominated.reason === null
+      || nominated.status === "partial" && nominated.failure === null
+      || nominated.status !== "partial" && nominated.failure !== null)
     || value.status !== "partial" && value.failure !== null
     || value.status !== "complete" && value.reason === null
     || value.status === "not_run" && (value.comparison !== null || value.costs.length !== 0)) {
@@ -93,30 +134,53 @@ const ResearchSourceAcquisitionReplySchemaOwner: AcquisitionReplySchemaType = z.
 export type ResearchSourceAcquisitionReply = z.output<typeof ResearchSourceAcquisitionReplySchemaOwner>;
 export const ResearchSourceAcquisitionReplySchema: z.ZodType<ResearchSourceAcquisitionReply,
   z.input<typeof ResearchSourceAcquisitionReplySchemaOwner>> = ResearchSourceAcquisitionReplySchemaOwner;
-type DeliveryProgress = Pick<ResearchSourceDeliveryDiagnostics, "costs" | "comparison"> & { located: boolean };
+type DeliveryProgress = Pick<ResearchSourceDeliveryDiagnostics, "costs" | "comparison" | "lexical_prefix"> & { located: boolean };
 type CostPhase = z.infer<typeof PhaseCostSchema>["phase"];
 
 /** A failed diagnostic keeps its native sibling and all already measured fork costs/results. */
 export function captureResearchNominatedSourceDelivery(database: StorageDatabase, payload: SourceSemanticWorkerPayload,
   pool: SourceSemanticAccessPool | undefined, capturedCosts: SourceSemanticReadBudget,
-  notRunReason = "live_access_pool_unavailable"): ResearchSourceDeliveryDiagnostics {
+  notRunReason = "live_access_pool_unavailable", lexicalCapture?: ResearchLexicalPrefixCapture): ResearchSourceDeliveryDiagnostics {
   const captured = { work: workOf(capturedCosts), execution: sourceSemanticExecution(capturedCosts.preparation, capturedCosts.acquisition) };
-  const progress: DeliveryProgress = { costs: [], comparison: null, located: false };
+  const progress: DeliveryProgress = { costs: [], comparison: null, located: false,
+    ...(lexicalCapture === undefined ? {} : { lexical_prefix: { status: lexicalCapture.header !== undefined ? "partial"
+      : lexicalCapture.limit > 0 ? "unavailable" : "not_run",
+      reason: lexicalCapture.reason ?? "comparison_not_completed", failure: null, capture_cost: lexicalCapture.cost(),
+      evidence: null, control: null, candidate: null } }) };
   if (pool === undefined) return { kind: "PRIVATE_COUNTERFACTUAL", status: "not_run", reason: notRunReason,
     captured, costs: [], comparison: null, failure: null };
   try {
-    compareResearchNominatedSourceLibrary(database, payload, pool, capturedCosts, progress);
-    return { kind: "PRIVATE_COUNTERFACTUAL", status: progress.located ? "complete" : "unavailable",
-      reason: progress.located ? null : "no_located_nominations", captured, costs: progress.costs, comparison: progress.comparison, failure: null };
+    compareResearchNominatedSourceLibrary(database, payload, pool, capturedCosts, progress, lexicalCapture);
+    const nominated: ComparisonState = { status: progress.located ? "complete" : "unavailable",
+      reason: progress.located ? null : "no_located_nominations", failure: null };
+    return deliveryDiagnostics(nominated, progress, captured);
   } catch (error) {
-    return { kind: "PRIVATE_COUNTERFACTUAL", status: "partial", reason: "comparison_failed", captured,
-      costs: progress.costs, comparison: progress.comparison, failure: {
-        name: error instanceof Error ? error.name : "UnknownError",
-        message: error instanceof Error ? error.message.slice(0, 512) : "private comparison failed",
-        code: error instanceof CoreError ? error.code : null,
-        phase: error instanceof SourceSemanticResourceExhausted ? error.phase : null
-      } };
+    return deliveryDiagnostics({ status: "partial", reason: "comparison_failed", failure: comparisonFailure(error) }, progress, captured);
   }
+}
+
+/** Independent sibling states remain visible; success cannot conceal an unavailable or failed comparison. */
+function aggregateComparisonState(nominated: ComparisonState, lexical?: ComparisonState): ComparisonState {
+  if (lexical === undefined) return nominated;
+  const failure = nominated.failure ?? lexical.failure;
+  if (failure !== null) return { status: "partial", reason: "comparison_failed", failure };
+  if (nominated.status !== lexical.status) return { status: "partial", reason: "comparison_states_differ", failure: null };
+  return { status: nominated.status, reason: nominated.status === "complete" ? null
+    : nominated.reason === lexical.reason ? nominated.reason : `comparisons_${nominated.status}`, failure: null };
+}
+
+function deliveryDiagnostics(nominated: ComparisonState, progress: DeliveryProgress,
+  captured: ResearchSourceDeliveryDiagnostics["captured"]): ResearchSourceDeliveryDiagnostics {
+  return { kind: "PRIVATE_COUNTERFACTUAL", ...aggregateComparisonState(nominated, progress.lexical_prefix),
+    captured, costs: progress.costs, comparison: progress.comparison, lexical_prefix: progress.lexical_prefix,
+    ...(progress.lexical_prefix === undefined ? {} : { nominated_comparison: nominated }) };
+}
+
+function comparisonFailure(error: unknown): NonNullable<ComparisonState["failure"]> {
+  return { name: error instanceof Error ? error.name : "UnknownError",
+    message: error instanceof Error ? error.message.slice(0, 512) : "private comparison failed",
+    code: error instanceof CoreError ? error.code : null,
+    phase: error instanceof SourceSemanticResourceExhausted ? error.phase : null };
 }
 
 function retainPhaseCost<T>(progress: DeliveryProgress | undefined, phase: CostPhase,
@@ -159,19 +223,24 @@ export function projectResearchNativeProposals(candidates: readonly SourceSemant
 }
 
 /** Ordering projection only: the existing selector still owns variants, root occupancy and fit. */
-export function researchNativeProposalSelector(proposals: readonly Proposal[]): LibraryPageSelector {
+export function researchNativeProposalSelector(proposals: readonly Pick<Proposal, "root" | "position">[]): LibraryPageSelector {
   const positions = new Map(proposals.map(row => [row.root, row.position]));
   return input => {
-    input.meter.charge(input.candidates.length, input.candidates.length * 256, "research private ordering projection");
-    const candidates = input.candidates.map(row => {
-      const position = positions.get(packageRoot(row));
-      if (position === undefined) throw new CoreError("CONFLICT", "package is outside the frozen proposal sequence");
-      return { ...row, access_position: position };
-    });
+    const candidates = projectProposalPackages(input.candidates, positions, input.meter);
     // Stable equal positions preserve all prepared window/qualification variants of a root.
     // A rejected root advances to the next GLOBAL proposal, never a same-route refill.
     return selectSourceSemanticLibraryPage({ ...input, candidates, order: "source_access" });
   };
+}
+
+function projectProposalPackages(candidates: readonly SourceSemanticLibraryPackage[], positions: ReadonlyMap<string, number>,
+  meter: Pick<SourceSemanticReadBudget, "charge">): SourceSemanticLibraryPackage[] {
+  meter.charge(candidates.length, candidates.length * 256, "research private ordering projection");
+  return candidates.map(row => {
+    const position = positions.get(packageRoot(row));
+    if (position === undefined) throw new CoreError("CONFLICT", "package is outside the frozen proposal sequence");
+    return { ...row, access_position: position };
+  });
 }
 
 /**
@@ -180,7 +249,8 @@ export function researchNativeProposalSelector(proposals: readonly Proposal[]): 
  * No acquisition, producer, provider, feedback or continuation protocol is introduced here.
  */
 export function compareResearchNominatedSourceLibrary(database: StorageDatabase, payload: SourceSemanticWorkerPayload,
-  pool: SourceSemanticAccessPool, capturedCosts: SourceSemanticReadBudget, progress?: DeliveryProgress) {
+  pool: SourceSemanticAccessPool, capturedCosts: SourceSemanticReadBudget, progress?: DeliveryProgress,
+  lexicalCapture?: ResearchLexicalPrefixCapture) {
   const request = payload.request;
   if (request.kind !== "recall" || request.original_query === undefined || request.query_handle !== undefined
     || request.continuation !== undefined || request.access_policy !== "query-conditioned-v1") {
@@ -191,6 +261,7 @@ export function compareResearchNominatedSourceLibrary(database: StorageDatabase,
   if (authorized === undefined) throw new CoreError("VALIDATION", "research comparison requires admitted scopes");
   const runtime = createRecallReadWorkerRuntime(database), meter = forkCapturedRequestBudget(request, capturedCosts);
   return retainPhaseCost(progress, "shared", meter, () => {
+  lexicalCapture?.carryInto(meter);
   meter.retain([request, pool], "research captured request and access pool");
   const admission = admitSourceSemanticQuery(request.query_semantics, original);
   const query = admission.kind === "admitted" ? admission.query : undefined;
@@ -201,13 +272,21 @@ export function compareResearchNominatedSourceLibrary(database: StorageDatabase,
   if (bindAccessPoolIdentity(runtime, payload.workspace_id, authorized, receipt, meter).pool_id !== pool_id) {
     throw new CoreError("CONFLICT", "research access scope or source revision changed");
   }
+  // Nested keys preserve the exact conjunction and first-match semantics, even for duplicate observations.
+  meter.charge(1, 64, "research observation lookup frame");
+  const byRecord = new Map<string, Map<string, (typeof pool.access.source_candidates)[number]>>();
+  for (const row of pool.access.source_candidates) {
+    meter.charge(1, 64, "research observation lookup entry");
+    let bySource = byRecord.get(row.record_id);
+    if (bySource === undefined) { bySource = new Map(); byRecord.set(row.record_id, bySource); }
+    if (!bySource.has(row.source_id)) bySource.set(row.source_id, row);
+  }
+  meter.charge(pool.sources.length, pool.sources.length * 256, "research captured observation binding");
   const observations = pool.sources.map(record => {
-    const row = pool.access.source_candidates.find(row => row.record_id === record.identity && row.source_id === record.source_id);
+    const row = byRecord.get(record.identity)?.get(record.source_id);
     if (row === undefined) throw new CoreError("CONFLICT", "captured source observation is missing");
     return { ...row, source_version: record.source_version, content_digest: record.content_digest };
   });
-  meter.charge(pool.sources.length * pool.access.source_candidates.length, observations.length * 256,
-    "research captured observation binding");
   const records = bindVerifiedResearchSourceRecords(runtime, payload.workspace_id, authorized, meter, observations);
   const acquisition = sourceSemanticAccessPhases(pool.access, meter).acquisition;
   const nominations = [acquisition, ...(acquisition.supplemental ?? [])].flatMap(phase => phase.result?.nominations ?? []);
@@ -238,6 +317,9 @@ export function compareResearchNominatedSourceLibrary(database: StorageDatabase,
     });
   };
   const prefix = capture(false);
+  if (lexicalCapture?.header !== undefined && progress?.lexical_prefix !== undefined) {
+    measureLexicalPrefix(runtime, payload, request, pool, records, prefix, lexicalCapture, progress);
+  }
   const prefixO1 = partial.hydration.prefix = measureArm(runtime, payload, request, prefix, "O1", "field", undefined, progress, "prefix");
   const nominated = capture(true);
   const nominatedO1 = partial.hydration.nominated = partial.ordering.o1 =
@@ -263,7 +345,11 @@ function measureArm(runtime: Runtime, payload: SourceSemanticWorkerPayload, requ
     proposals === undefined ? selectSourceSemanticLibraryPage : researchNativeProposalSelector(proposals), capture.prepared.execution); }
   finally { meter.absorb(selection); }
   const result = deliverFrozenLibraryPage(runtime, payload, meter, request, plan, 0);
+  meter.retain(result, "research full response encoding");
   const encoded = encodeSourceSemanticLibraryResponse(result);
+  meter.retain(encoded, "research full encoded response");
+  const encodedBytes = meter.canonicalJsonLength(encoded);
+  meter.charge(encodedBytes, encodedBytes * 2, "research full encoded response transport");
   if (encoded.operation !== "recall" || encoded.index === undefined) {
     throw new CoreError("OBLIGATION_VIOLATION", "research fit envelope lost its recall index");
   }
@@ -273,12 +359,58 @@ function measureArm(runtime: Runtime, payload: SourceSemanticWorkerPayload, requ
     protocol_version: _protocol, index, ...content } = encoded;
   const { continuation: _continuation, ...privateIndex } = index;
   const artifact = { ...content, index: privateIndex, frozen_plan_has_more: index.continuation !== null };
-  return { kind: "PRIVATE_COUNTERFACTUAL" as const, policy, proposals,
-    full_envelope_bytes: Buffer.byteLength(JSON.stringify(encoded)), output_byte_limit: request.output_byte_limit,
+  meter.charge(capture.prepared.packages.length + plan.pages.reduce((sum, page) => sum + page.length, 0),
+    capture.prepared.packages.length * 256 + plan.pages.reduce((sum, page) => sum + page.length * 256, 0),
+    "research package and frozen page transport references");
+  const arm = { kind: "PRIVATE_COUNTERFACTUAL" as const, policy, proposals,
+    full_envelope_bytes: encodedBytes, output_byte_limit: request.output_byte_limit,
     fit_template: "unchanged native full envelope; not an executed evidence_support ranking claim" as const,
-    artifact, package_repertoire: capture.prepared.packages.map(row => ({ target: row.entry.target, proofs: row.proofs })),
+    artifact, package_repertoire: capture.prepared.packages.map(row => ({ target: row.entry.target, proofs: row.proofs,
+      preview: row.preview, source_disclosure: row.source_disclosure, payload_support: row.payload_support })),
     frozen_pages: plan.pages.map(page => page.map(row => ({ target: row.entry.target, preview: row.preview, proofs: row.proofs }))) };
+  meter.retain(arm, "research private artifact transport retention");
+  const transport = meter.canonicalJsonLength(arm);
+  meter.charge(transport, transport * 2, "research private artifact encoding and worker transport");
+  return arm;
   });
+}
+
+function measureLexicalPrefix(runtime: Runtime, payload: SourceSemanticWorkerPayload, request: Request,
+  pool: SourceSemanticAccessPool, records: Parameters<ResearchLexicalPrefixCapture["evidence"]>[2],
+  prefix: { prepared: Prepared; preparation: SourceSemanticReadBudget }, capture: ResearchLexicalPrefixCapture,
+  progress: DeliveryProgress): void {
+  const lexical = progress.lexical_prefix!;
+  try {
+    const preparation = forkCapturedRequestBudget(request, prefix.preparation);
+    const projected = retainPhaseCost(progress, "lexical_projection", preparation, () => {
+      lexical.evidence = capture.evidence(runtime, pool.access.pool_id, records, prefix.prepared.packages, preparation);
+      preparation.charge(lexical.evidence.order.length, lexical.evidence.order.length * 32, "research lexical selector position map");
+      const positions = new Map(lexical.evidence.order.map(row => [row.root, row.position]));
+      const packages = projectProposalPackages(prefix.prepared.packages, positions, preparation);
+      const bytes = preparation.canonicalJsonLength(lexical.evidence);
+      preparation.charge(bytes, bytes * 2, "research lexical reply encoding and worker transport");
+      preparation.charge(1, 128, "research lexical prepared ordering frame");
+      return { ...prefix.prepared, packages };
+    });
+    if (lexical.evidence!.reader.completion === "unavailable" || lexical.evidence!.reader.completion === "not_run") {
+      lexical.status = "unavailable"; lexical.reason = lexical.evidence!.reader.reason ?? "lexical_reader_unavailable";
+      return;
+    }
+    const common = { prepared: prefix.prepared, preparation };
+    lexical.control = measureArm(runtime, payload, request, common, "O1", "field", undefined, progress, "lexical_control");
+    // Both fit forks start after the same real projection expenditure. Only access positions differ.
+    lexical.candidate = measureArm(runtime, payload, request, { prepared: projected, preparation },
+      "original-query-lexical-prefix", "source_access", undefined, progress, "lexical_candidate");
+    const evidence = lexical.evidence!;
+    const partial = evidence.capture_status === "partial" || evidence.reader.completion !== "complete"
+      || lexical.control.artifact.coverage?.payload === "truncated" || lexical.candidate.artifact.coverage?.payload === "truncated";
+    lexical.status = partial ? "partial" : "complete";
+    lexical.reason = partial ? evidence.capture_reason ?? evidence.reader.reason ?? "partial_delivery" : null;
+  } catch (error) {
+    lexical.status = "partial";
+    lexical.reason = error instanceof SourceSemanticResourceExhausted ? "lexical_comparison_resource_exhausted" : "lexical_comparison_failed";
+    lexical.failure = comparisonFailure(error);
+  }
 }
 
 /** Replay the captured call's phases as well as its costs, not a new native-only execution. */

@@ -19,6 +19,7 @@ import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import type { SourceSemanticRequestExecution } from "./source-semantic-reasoning.js";
 import { beginCanonicalSourceText, readSourceText } from "./source-semantic-source-observation.js";
 import { acquireSourceSemanticIndex } from "./source-semantic-index-acquisition.js";
+import type { ResearchLexicalPrefixCapture } from "./source-semantic-research-lexical-prefix.js";
 import { SourceSemanticUnionCompletion } from "./source-semantic-empty-population-budget.js";
 import { bindAccessPoolIdentity, sourceSemanticObservationAccounting,
   sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
@@ -69,7 +70,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
   sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents,
-  preferredSourceIds?: readonly string[], accessHint?: string): SourceSemanticAccessPool {
+  preferredSourceIds?: readonly string[], accessHint?: string, lexicalCapture?: ResearchLexicalPrefixCapture): SourceSemanticAccessPool {
   if (sourceId !== undefined && preferredSourceIds !== undefined) {
     throw new CoreError("VALIDATION", "source-scoped access cannot use source nomination");
   }
@@ -122,7 +123,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
             ...(accessHint === undefined || accessHint === original ? {} : { supplemental: { navigation: accessHint,
               vector: payload.prepared_query?.supplemental?.vector ?? { status: "unavailable", reason: "hint_preparation_unavailable" } } }),
             canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost,
-            control: payload.acquisition_control });
+            control: payload.acquisition_control, lexicalCapture });
           releaseCanonical = observed.releaseCanonical;
           acquisition = observed.phase;
           if (next !== null) {

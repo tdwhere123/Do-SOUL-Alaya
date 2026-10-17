@@ -192,7 +192,9 @@ describe("native worker acquisition controls", () => {
       expect(vectorAcq.result?.lexical.reason).toBe(SourceIndexAcquisition.channelNotRequested);
       const dualAcq = sourceSemanticAccessPhases(dual.artifact.discovery.access!).acquisition;
       expect(dualAcq.result?.lexical.completion).not.toBe("not_run");
-      expect(lexical.private_delivery).toMatchObject({ status: "unavailable", reason: "no_located_nominations", failure: null });
+      expect(lexical.private_delivery).toMatchObject({ status: "partial", reason: "comparison_states_differ", failure: null,
+        nominated_comparison: { status: "unavailable", reason: "no_located_nominations", failure: null },
+        lexical_prefix: { status: "not_run", reason: "supplied_query_semantics_not_absence" } });
       const reply = replies.get("dual")!;
       expect(parseWorkerOperationResult("conditionalField.sourceSemantics", reply)).toEqual(reply);
       for (const malformed of [
@@ -200,7 +202,8 @@ describe("native worker acquisition controls", () => {
         { ...reply, result: { ...reply.result, private_delivery: reply.private_delivery } },
         { ...reply, private_delivery: { ...reply.private_delivery, status: "not_run" } }
       ]) expect(() => parseWorkerOperationResult("conditionalField.sourceSemantics", malformed)).toThrow();
-      const notRun = { ...reply, private_delivery: { ...reply.private_delivery, status: "not_run",
+      const { lexical_prefix: _lexical, nominated_comparison: _nominated, ...legacyDelivery } = reply.private_delivery;
+      const notRun = { ...reply, private_delivery: { ...legacyDelivery, status: "not_run",
         reason: "live_access_pool_unavailable", comparison: null, costs: [] } };
       expect(parseWorkerOperationResult("conditionalField.sourceSemantics", notRun)).toEqual(notRun);
       for (const arm of [lexical, vector, dual]) {
@@ -642,7 +645,10 @@ describe("private runtime binding", () => {
       ]);
       for (const control of ["vector", "dual"] as const) {
         const arm = completedArm(comparison.arm_envelopes[control]), diagnostics = arm.private_delivery;
-        expect(diagnostics.status).toBe("complete");
+        expect(diagnostics).toMatchObject({ status: "partial", reason: "comparison_states_differ", failure: null,
+          nominated_comparison: { status: "complete", reason: null },
+          lexical_prefix: control === "vector" ? { status: "not_run", reason: "lexical_channel_not_requested" }
+            : { status: "partial", reason: "partial_delivery" } });
         const prefix = diagnostics.comparison!.hydration.prefix!, nominated = diagnostics.comparison!.hydration.nominated!;
         expect(prefix.artifact.results!.some(row => row.content_preview?.includes(ANSWER))).toBe(false);
         const row = nominated.artifact.results!.find(row => row.content_preview?.includes(CONDITION + ANSWER))!;

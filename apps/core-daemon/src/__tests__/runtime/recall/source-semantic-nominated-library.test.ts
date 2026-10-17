@@ -236,7 +236,9 @@ it("composes private fitted non-prefix text from one live observation and one pr
     expect(observation).toHaveBeenCalledTimes(1);
     expect(observation.mock.calls[0]![0]).toBe(context.runtime);
     const diagnostics = reply.private_delivery;
-    expect(diagnostics.status).toBe("complete");
+    expect(diagnostics).toMatchObject({ status: "partial", reason: "comparison_states_differ", failure: null,
+      nominated_comparison: { status: "complete", reason: null },
+      lexical_prefix: { status: "partial", reason: "partial_delivery" } });
     const prefix = diagnostics.comparison!.hydration.prefix!, nominated = diagnostics.comparison!.hydration.nominated!;
     expect(prefix.artifact.results!.some(row => row.content_preview?.includes(ANSWER))).toBe(false);
     const delivered = nominated.artifact.results!.find(row => row.content_preview?.includes(CONDITION + ANSWER))!;
@@ -361,7 +363,8 @@ it("distinguishes unattempted live-pool absence from lexical comparison without 
       vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested }
     } });
     if (reply.kind !== "research_acquisition") throw new Error("private recall wrapper required");
-    expect(reply.private_delivery).toMatchObject({ status: "unavailable", reason: "no_located_nominations", failure: null });
+    expect(reply.private_delivery).toMatchObject({ status: "partial", reason: "comparison_states_differ", failure: null,
+      nominated_comparison: { status: "unavailable", reason: "no_located_nominations", failure: null } });
     expect(reply.private_delivery.comparison!.hydration.prefix).not.toBeNull();
     expect(reply.private_delivery.comparison!.hydration.nominated!.artifact.results!.some(row => row.content_preview?.includes(ANSWER))).toBe(false);
     expect(reply.private_delivery.costs.length).toBeGreaterThan(0);
