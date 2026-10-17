@@ -16,12 +16,14 @@ import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, rea
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
 import type { ResearchJointReply } from "./source-semantic-joint-boundary.js";
 import type { ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
+import type { QualifiedSourceSelectionReply } from "./source-semantic-qualified-selection-boundary.js";
+import { compareResearchQualifiedSourceSelection } from "./source-semantic-qualified-selection.js";
 import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalization.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
-type SourceSemanticWorkerReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply;
+type SourceSemanticWorkerReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply | QualifiedSourceSelectionReply;
 
 /** The transaction's existing execution cache also owns the request-only capture. */
 export interface SourceSemanticRequestExecution {
@@ -33,12 +35,13 @@ export interface SourceSemanticRequestExecution {
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
 export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime,
-  payload: Payload & { acquisition_control?: undefined; joint_control?: undefined }): SourceSemanticWorkerResult;
+  payload: Payload & { acquisition_control?: undefined; joint_control?: undefined; qualified_control?: undefined }): SourceSemanticWorkerResult;
 export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply;
 export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply {
   const meter = new SourceSemanticReadBudget(payload.request.budget);
   const run = (executionOf: SourceSemanticRequestExecution,
     finalizeNativeRecall: (result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => {
+    if (payload.qualified_control !== undefined) return compareResearchQualifiedSourceSelection(runtime, payload, meter);
     if (payload.prepared_query !== undefined) {
       meter.preparation = capturePackSourceSemanticPreparationForRequest({
         ...payload.prepared_query.receipt, ...(payload.prepared_query.supplemental === undefined ? {} : {
@@ -77,7 +80,7 @@ export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payloa
     }
     const reply = run(executionOf, finalizeNative);
     // The native sibling is already finalized; never resample after diagnostics.
-    if (reply.kind === "research_acquisition" || reply.kind === "research_joint") return Object.freeze(reply);
+    if (reply.kind === "research_acquisition" || reply.kind === "research_joint" || reply.kind === "research_qualified_selection") return Object.freeze(reply);
     const result = finalizeNative(reply);
     return result.kind === "reason" && payload.request.kind === "reason"
       ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;
@@ -168,11 +171,13 @@ function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, paylo
         coverage: IDLE, work: workOf(meter) });
     }
     const work = workOf(meter);
+    // Qualified forks are counterfactual cumulative receipts, never an additive physical total.
+    const physical = payload.qualified_control === undefined ? {} : { physical_total: "unknown" as const };
     if (error instanceof SourceReferenceCapacityExceeded) throw new CoreError("VALIDATION", error.message,
-      { details: { admission: "unsupported_source", capacity: error.reason, work,
+      { details: { admission: "unsupported_source", capacity: error.reason, work, ...physical,
         ...(current === undefined ? {} : { execution: current }) } });
-    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work, ...(current === undefined ? {} : { execution: current }) } });
-    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work, ...(current === undefined ? {} : { execution: current }) } });
+    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work, ...physical, ...(current === undefined ? {} : { execution: current }) } });
+    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work, ...physical, ...(current === undefined ? {} : { execution: current }) } });
     throw error;
   } finally { executionOf("retire_prepare"); }
 }

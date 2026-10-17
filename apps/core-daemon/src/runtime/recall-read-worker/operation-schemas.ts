@@ -25,6 +25,7 @@ import {
 
 import { SourceSemanticJointSelectionSchema, ResearchJointReplySchema } from "./source-semantic-joint-boundary.js";
 import { ResearchSourceAcquisitionReplySchema } from "./source-semantic-research-nominated-library.js";
+import { QualifiedSourceSelectionSchema, QualifiedSourceSelectionReplySchema } from "./source-semantic-qualified-selection-boundary.js";
 
 const EmptyObjectSchema = z.object({}).strict();
 const KeywordSearchSchema = z.object({
@@ -118,7 +119,8 @@ const PAYLOAD_SCHEMAS = {
   "conditionalField.sourceSemantics": SourceSemanticsPublicPayloadSchema.extend({
     prepared_query: PreparedQuerySchema.optional(),
     acquisition_control: z.enum(["lexical", "vector", "dual"]).optional(),
-    joint_control: SourceSemanticJointSelectionSchema.optional()
+    joint_control: SourceSemanticJointSelectionSchema.optional(),
+    qualified_control: QualifiedSourceSelectionSchema.optional()
   }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
@@ -290,7 +292,7 @@ const RESULT_SCHEMAS = {
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
   "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
-  "conditionalField.sourceSemantics": z.union([SourceSemanticWorkerResultSchema, ResearchSourceAcquisitionReplySchema, ResearchJointReplySchema]),
+  "conditionalField.sourceSemantics": z.union([SourceSemanticWorkerResultSchema, ResearchSourceAcquisitionReplySchema, ResearchJointReplySchema, QualifiedSourceSelectionReplySchema]),
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

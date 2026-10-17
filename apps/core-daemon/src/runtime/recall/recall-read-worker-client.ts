@@ -22,7 +22,9 @@ import { SourceSemanticJointSelectionSchema, type ResearchJointReply } from "../
 import type { SourceSemanticJointSelection } from "@do-soul/alaya-core/dist/recall/conditional-field/query/source-semantic-joint-witness.js";
 import type { ResearchSourceAcquisitionReply } from "../recall-read-worker/source-semantic-research-nominated-library.js";
 
-type SourceSemanticsReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply;
+import { QualifiedSourceSelectionSchema, type QualifiedSourceSelection, type QualifiedSourceSelectionReply }
+  from "../recall-read-worker/source-semantic-qualified-selection-boundary.js";
+type SourceSemanticsReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply | QualifiedSourceSelectionReply;
 type LibraryReply = SourceSemanticWorkerResult | ResearchJointReply;
 function ordinarySourceResult(reply: LibraryReply): SourceSemanticWorkerResult {
   if (reply.kind === "research_joint") throw new CoreError("CONFLICT", "ordinary source execution cannot accept a private joint reply");
@@ -73,10 +75,11 @@ export interface RecallReadWorkerClient {
       prepared: NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>,
       control: "lexical" | "vector" | "dual"): Promise<ResearchSourceAcquisitionReply>;
   }>;
-  /** Private adapter for the planned guarded compareSemanticChainSourceAcquisition Q-present mode.
-   * Its bench caller is a separate integration slice, not wired by this declaration. */
+  /** Private guarded source experiment consumer; ordinary recall retains its preparation path. */
   readonly researchLibrary?: Readonly<{ recall(input: SourceSemanticsPublicPayload,
-    selection?: SourceSemanticJointSelection): Promise<LibraryReply> }>;
+    selection?: SourceSemanticJointSelection): Promise<LibraryReply>;
+    compareQualified(input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection): Promise<QualifiedSourceSelectionReply>;
+  }>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -358,6 +361,25 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly researchLibrary = {
+    compareQualified: async (input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection): Promise<QualifiedSourceSelectionReply> => {
+      // Admission precedes every worker effect; this path intentionally never calls withPreparedSourceExecution.
+      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
+      const qualified = QualifiedSourceSelectionSchema.parse(structuredClone(population));
+      if (captured.request.kind !== "recall" || captured.request.original_query === undefined ||
+          captured.request.query_semantics === undefined || captured.request.query_handle !== undefined ||
+          captured.request.continuation !== undefined || captured.request.access_policy !== "query-conditioned-v1") {
+        throw new CoreError("VALIDATION", "qualified comparison requires direct Q-present recall");
+      }
+      if (this.lifecycle.pinnedWorker() === undefined || !this.lifecycle.snapshotHasBegun()) {
+        throw new CoreError("CONFLICT", "qualified comparison requires its caller-owned native read snapshot");
+      }
+      this.lifecycle.preparationDeadline().check();
+      const reply = await this.lifecycle.request<SourceSemanticsReply>("conditionalField.sourceSemantics", {
+        ...captured, qualified_control: qualified
+      });
+      if (reply.kind !== "research_qualified_selection") throw new CoreError("CONFLICT", "qualified comparison reply mismatch");
+      return reply;
+    },
     recall: async (input: SourceSemanticsPublicPayload, selection?: SourceSemanticJointSelection): Promise<LibraryReply> => {
       return await this.withPreparedSourceExecution(input, execute => execute(), selection);
     }
@@ -410,6 +432,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
             "conditionalField.sourceSemantics", { ...captured,
               ...(prepared === undefined ? {} : { prepared_query: prepared }),
               ...(joint === undefined ? {} : { joint_control: joint }) });
+          if (parsed.kind === "research_qualified_selection") throw new CoreError("CONFLICT", "ordinary source execution cannot accept a qualified comparison");
           if (parsed.kind === "research_acquisition") {
             throw new CoreError("CONFLICT", "ordinary source execution cannot accept a private research reply");
           }

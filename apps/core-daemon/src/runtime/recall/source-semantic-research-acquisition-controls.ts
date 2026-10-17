@@ -1,9 +1,13 @@
 import { unavailableSourceQueryPreparation, type SourceSemanticQueryPreparation } from "@do-soul/alaya-protocol";
 import { CoreError, SourceIndexAcquisition } from "@do-soul/alaya-core";
 import type { RecallReadWorkerClient } from "./recall-read-worker-client.js";
-import type { SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
+import { SourceSemanticsPublicPayloadSchema, type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
 import type { ResearchSourceAcquisitionReply } from "../recall-read-worker/source-semantic-research-nominated-library.js";
 
+import { QualifiedSourceSelectionSchema, type QualifiedSourceSelection, type QualifiedSourceSelectionReply }
+  from "../recall-read-worker/source-semantic-qualified-selection-boundary.js";
+
+type QualifiedComparisonFailure = { phase: "begin" | "selection" | "cleanup"; cause: unknown; earlier?: QualifiedComparisonFailure };
 type PreparedQuery = NonNullable<Parameters<NonNullable<RecallReadWorkerClient["researchAcquisition"]>["dispatch"]>[1]>;
 type ChannelControl = "lexical" | "vector" | "dual";
 type NotCompletedArm = Readonly<{ kind: "not_completed" }>;
@@ -84,6 +88,34 @@ export async function compareResearchSourceAcquisitionControls(
     } as Comparison;
     throw error;
   }
+}
+
+/** Guarded Bench's Q-present mode. No query/vector preparation, even on unavailable inputs.
+ * Retain a completed worker result before rollback or execution-scope cleanup can fail. */
+export async function compareResearchSourceQualifiedSelection(client: ResearchSourceAcquisitionPort,
+  input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection,
+  options: Readonly<{ signal?: AbortSignal; timeoutMs: number }>) {
+  const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
+  const fixed = QualifiedSourceSelectionSchema.parse(structuredClone(population));
+  const host = client.researchLibrary, scope = client.researchAcquisition, snapshot = client.readSnapshot;
+  if (host === undefined || scope === undefined || snapshot.isolate === undefined) {
+    throw new CoreError("CONFLICT", "qualified comparison requires the native library worker");
+  }
+  let selection: QualifiedSourceSelectionReply | undefined, failure: QualifiedComparisonFailure | undefined;
+  let phase: QualifiedComparisonFailure["phase"] = "begin";
+  try {
+    await scope.withExecutionScope(options, () => snapshot.isolate!(async () => {
+      try {
+        await snapshot.beginDeferred(); phase = "selection";
+        selection = await host.compareQualified(captured, fixed);
+      } catch (cause) { failure = { phase, cause }; }
+      phase = "cleanup";
+      try { await snapshot.rollback(); }
+      catch (cause) { failure = { phase, cause, ...(failure === undefined ? {} : { earlier: failure }) }; }
+    }));
+  } catch (cause) { failure = { phase, cause, ...(failure === undefined ? {} : { earlier: failure }) }; }
+  return { kind: "PRIVATE_QUALIFIED_SELECTION" as const, outcome: failure === undefined ? selection!.status : "failed" as const,
+    selection, ...(failure === undefined ? {} : { failure }) };
 }
 
 async function runComparison(

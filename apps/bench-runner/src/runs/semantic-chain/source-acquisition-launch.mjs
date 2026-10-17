@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const candidate = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -14,6 +15,10 @@ const pinnedPaths = [guardPath, receiptPath,
   "apps/bench-runner/src/__tests__/support/read-only-git-boundary.mjs",
   "apps/bench-runner/src/runs/semantic-chain/source-acquisition-launch.mjs", applicationPath,
   "apps/bench-runner/dist/runs/semantic-chain/source-experiment.js",
+  "apps/bench-runner/dist/runs/semantic-chain/source-qualified-selection-input.js",
+  "apps/bench-runner/dist/runs/snapshot/source-records/native.js",
+  "apps/bench-runner/dist/runs/semantic-proposal/fill.js",
+  "apps/bench-runner/dist/runs/semantic-proposal/workset.js",
   "apps/bench-runner/dist/runs/semantic-chain/contract.js",
   "apps/bench-runner/dist/runs/semantic-chain/recovery-allowance.js",
   "apps/bench-runner/dist/runs/semantic-chain/source-index-binding.js",
@@ -23,6 +28,15 @@ const pinnedPaths = [guardPath, receiptPath,
   "apps/core-daemon/dist/runtime/recall/recall-read-worker-deadline.js",
   "apps/core-daemon/dist/runtime/recall/recall-read-worker.js",
   "apps/core-daemon/dist/runtime/recall-read-worker/operation-schemas.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-qualified-selection-boundary.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-qualified-selection.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-reasoning.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-research-nominated-library.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-research-pool.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-library-recall.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-library-delivery.js",
+  "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-research-serialization.js",
+  "packages/core/dist/recall/runtime/source-semantic-library-selection.js",
   "apps/core-daemon/dist/mcp-memory/tool/interpretation-handler.js",
   "packages/core/dist/embedding-recall/local-onnx-process/child.js"];
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -76,6 +90,15 @@ async function runOwnedChild() {
   process.on("message", message => { if (message?.kind === "cancel_source_acquisition") caller.abort(message.reason); });
   process.send?.({ kind: "source_acquisition_guarded", identity, pid: process.pid, active, deadline });
   // All application imports are below the actual active-reference inspection.
+  if (envelope.payload.qualified_selection !== undefined) {
+    assert.deepEqual(envelope.payload.guard_allocation, { source_inputs: 0, utf8_bytes: 0 });
+    registerHooks({ load(url, context, next) {
+      if (/(?:\/node_modules\/)(?:@huggingface\/transformers|@xenova\/transformers|onnxruntime-node|onnxruntime-web)(?:\/|$)/u.test(url)) {
+        assert.fail("qualified selection forbids model runtime loading");
+      }
+      return next(url, context);
+    } });
+  }
   const application = await import(pathToFileURL(join(candidate, applicationPath)).href);
   await application.executeGuardedSourceAcquisition(root, identity, { signal: caller.signal, deadline, active });
   // No restoration here: enforcement remains installed through reconciliation and process exit.

@@ -14,7 +14,7 @@ import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import type { SourceFeedbackRuntimeInput } from "../../../../core-daemon/src/runtime/recall/source-feedback-execution.js";
 
-import type { SourceAcquisitionExperimentInput, SourceAcquisitionComparison } from "./source-acquisition-experiment.js";
+import type { SourceAcquisitionExperimentInput, SourceAcquisitionComparison, SourceQualifiedAcquisitionComparison } from "./source-acquisition-experiment.js";
 
 type FeedbackTrace = ReturnType<ReturnType<typeof createSourceFeedbackSession>["finish"]>;
 // Shared with the retained one-shot daemon admission: modes cannot compete under different names.
@@ -33,12 +33,14 @@ export type SourceFeedbackExperimentInput = Readonly<{
   seed_cache: { key: string; cache_identity: string; historical_production: unknown;
     workset: SemanticProposalWorkset; cache_root: string; max_output_tokens: number };
 }>;
-type Execution = { identity: string } & ({ trace: FeedbackTrace } | { comparison: SourceAcquisitionComparison });
+type ExperimentResult = { trace: FeedbackTrace } | { comparison: SourceAcquisitionComparison } |
+  { qualified_comparison: SourceQualifiedAcquisitionComparison } |
+  { qualified_failure: { phase: string; diagnostic: unknown; population: NonNullable<SourceAcquisitionExperimentInput["qualified_selection"]> } };
+type Execution = { identity: string } & ExperimentResult;
 type Lifetime = { identity: string; status: "closed" | "failed";
   phase: "startup" | "feedback" | "comparison" | "cleanup" | "reconciliation" | "launch"; diagnostic?: unknown };
 
-export function publishSourceExperimentResult(root: string, identity: string, result: Omit<Extract<Execution, { trace: FeedbackTrace }>, "identity"> |
-  Omit<Extract<Execution, { comparison: SourceAcquisitionComparison }>, "identity">): void {
+export function publishSourceExperimentResult(root: string, identity: string, result: ExperimentResult): void {
   writeChainArtifact(join(root, "source-experiment-result.json"), { identity, ...captureSourceExperimentValue(result) as object });
 }
 export function publishSourceExperimentLifetime(root: string, lifetime: Lifetime): void {
@@ -101,7 +103,8 @@ export function readSourceExperiment(rootInput: string) {
   if ((execution !== undefined || lifetime !== undefined || projection !== undefined) && input === undefined ||
       execution !== undefined && (execution.identity !== identity || reservation === undefined ||
         input?.contract === "source-feedback-experiment-v1" && !("trace" in execution) ||
-        input?.contract === "source-acquisition-experiment-v1" && !("comparison" in execution)) ||
+        input?.contract === "source-acquisition-experiment-v1" && (input.qualified_selection === undefined ? !("comparison" in execution)
+          : !("qualified_comparison" in execution) && !("qualified_failure" in execution))) ||
       lifetime !== undefined && lifetime.identity !== identity || projection !== undefined && (projection.identity !== identity || execution === undefined) ||
       reservation !== undefined && input !== undefined && (reservation.identity !== identity || reservation.work_units !== (input.contract === "source-feedback-experiment-v1" ? input.session.budget.work_units : input.host_admission.read_work_units) ||
         reservation.memory_bytes !== (input.contract === "source-feedback-experiment-v1" ? input.session.budget.memory_bytes : input.host_admission.read_memory_bytes))) {

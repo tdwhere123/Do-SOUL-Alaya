@@ -29,7 +29,7 @@ const nativeShape = SourceSemanticWorkerResultSchema.options[4].unwrap().shape;
 const { operation: _operation, order: _order, delivery_id: _delivery, request_identity: _request,
   protocol_version: _protocol, index: _index, ...privateContentShape } = SoulInterpretationResponseSchema.options[4].unwrap().shape;
 const { continuation: _continuation, ...privateIndexShape } = nativeShape.index.unwrap().shape;
-const PrivateArtifactSchema = z.object({ ...privateContentShape,
+export const PrivateArtifactSchema = z.object({ ...privateContentShape,
   index: z.object(privateIndexShape).strict(), frozen_plan_has_more: z.boolean() }).strict();
 const ProposalSchema = z.object({ root: z.string(), position: z.number().int().nonnegative(),
   provenance: z.enum(["primary", "supplemental", "legacy-access remainder"]) }).strict();
