@@ -51,5 +51,31 @@ or invalid cache must fail clearly, without switching to another cache, inventin
 a degraded result, or automatically calling a model. Fill/rebuild remains a
 separate explicit, authorized workflow. Do not commit generated caches or results.
 
+## Explicit task-persona inputs
+
+Source-message import and query preparation default to unknown attribution. The
+Bench-only opt-in `longmemeval-question-local-persona-v1` represents the task's
+question-local presented user across its actual history sessions and current query.
+It does not authenticate common human authorship, establish truth, or connect
+users across questions. Assistant authors remain unknown, including quoted user
+text. Empty source messages remain present with unknown attribution and no invented
+utterance spans; empty queries remain invalid. The policy requires the pinned dataset identity and matching original inputs;
+custom metadata cannot enable it.
+
+For an existing sealed source-records snapshot, `source-snapshot prepare` accepts
+`--attribution-policy longmemeval-question-local-persona-v1` together with
+`--parent-snapshot <sealed-parent-db>` and the ordinary preparation flags. Use a
+fresh output directory and a strictly later recorded time. The importer preserves
+complete parent membership and seals old/new record mappings; it does not rebind
+metadata under an old version or seal a selected subset as the full population.
+Historical source/question clocks remain distinct from the new capture time.
+
+`source-snapshot query-input --data-dir <local-longmemeval-data> --offset <original-row>
+--question-id <original-id> --attribution-policy longmemeval-question-local-persona-v1`
+emits an original-query workset item with the same scoped attribution and an explicit
+approved-context explanation. Omitting the policy keeps attribution unknown.
+Subsequent C production still needs source-grounded correspondence justification;
+this input policy is not a semantic admission, model-call grant or recall result.
+
 See the [reproduction and local-history guide](../README.md) for runtime settings,
 metric definitions, archive integrity, and comparison requirements.

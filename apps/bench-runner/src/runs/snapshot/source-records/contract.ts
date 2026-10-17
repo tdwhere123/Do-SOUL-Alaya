@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { LongMemEvalPersonaSuccessorSchema, longMemEvalPersonaSourceVersion } from
+  "../../../datasets/longmemeval/ingestion/task-persona.js";
 import { isDeepStrictEqual } from "node:util";
-import { IsoDatetimeStringSchema, SourceRecordIdentitySchema, AddressableSourceSpanSchema,
-  verifySourceRecordIdentity, verifyAddressableSourceSpan } from "@do-soul/alaya-protocol";
+import { AlayaError, IsoDatetimeStringSchema, SourceRecordIdentitySchema, AddressableSourceSpanSchema,
+  hashContentDigest, verifySourceRecordIdentity, verifyAddressableSourceSpan } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { readRegularFileNoFollow, hashRegularFileNoFollow, sha256Buffer } from "../bound-file.js";
 import { atomicWriteJson } from "../materialize.js";
@@ -22,6 +24,7 @@ export const SourceRecordsDatasetSchema = z.object({
 const HeaderSchema = z.object({
   schema_version: z.literal(2), artifact_domain: z.literal("source_records"),
   dataset: SourceRecordsDatasetSchema, recorded_at: IsoDatetimeStringSchema,
+  persona_successor: LongMemEvalPersonaSuccessorSchema.optional(),
   questions: z.array(z.object({ question_id: z.string().min(1), interpretation_clock: IsoDatetimeStringSchema }).strict())
 }).strict();
 const MessageSchema = z.object({
@@ -30,6 +33,7 @@ const MessageSchema = z.object({
   message_id: z.string().min(1), message_index: z.number().int().nonnegative(),
   source_observed_at: IsoDatetimeStringSchema,
   role: z.enum(["user", "assistant"]), content_state: z.enum(["empty", "retained"]),
+  predecessor: SourceRecordIdentitySchema.optional(),
   record: SourceRecordIdentitySchema, spans: z.array(AddressableSourceSpanSchema).readonly()
 }).strict();
 const ShardSchema = z.object({ sha256: Digest, message_count: z.number().int().positive(),
@@ -41,7 +45,7 @@ const ManifestBody = z.object({
   schema_version: z.literal(2), artifact_domain: z.literal("source_records"),
   dataset: SourceRecordsDatasetSchema, recorded_at: IsoDatetimeStringSchema,
   message_count: z.number().int().nonnegative(), db_sha256: Digest,
-  sidecar_sha256: Digest, producer_commit: z.string().regex(/^[a-f0-9]{40}$/u)
+  sidecar_sha256: Digest, persona_successor: LongMemEvalPersonaSuccessorSchema.optional(), producer_commit: z.string().regex(/^[a-f0-9]{40}$/u)
 }).strict();
 export const SourceRecordsManifestSchema = ManifestBody.extend({ manifest_sha256: Digest }).strict();
 export type SourceRecordsManifest = z.infer<typeof SourceRecordsManifestSchema>;
@@ -112,6 +116,7 @@ export function inspectSourceRecordsArtifact(snapshotPath: string, onMessage?: (
   const { shards, message_count, ...header } = sidecar;
   validateHeader(header);
   if (!isDeepStrictEqual(sidecar.dataset, manifest.dataset) || sidecar.recorded_at !== manifest.recorded_at ||
+      !isDeepStrictEqual(sidecar.persona_successor, manifest.persona_successor) ||
       message_count !== manifest.message_count || new Set(shards.map((shard) => shard.sha256)).size !== shards.length) {
     throw new Error("source_records sidecar binding mismatch");
   }
@@ -133,10 +138,30 @@ export function inspectSourceRecordsArtifact(snapshotPath: string, onMessage?: (
 
 function validateHeader(input: unknown): z.infer<typeof HeaderSchema> {
   const header = HeaderSchema.parse(input);
+  if (header.persona_successor !== undefined && header.persona_successor.source_version !==
+      longMemEvalPersonaSourceVersion(header.persona_successor.parent_manifest_sha256, header.recorded_at)) {
+    throw new AlayaError("CONFLICT", "source_records persona successor version binding mismatch");
+  }
   if (!isDeepStrictEqual(header.questions.map((q) => q.question_id), header.dataset.question_ids)) {
     throw new Error("source_records question clock binding mismatch");
   }
   return header;
+}
+
+function verifyPersonaPredecessor(message: SourceRecordsMessage): void {
+  const old = message.predecessor, next = message.record;
+  if (old === undefined) throw new AlayaError("CONFLICT", "source_records persona successor lacks predecessor mapping");
+  verifySourceRecordIdentity(old, fieldContractSha256);
+  const emptySource = message.content_state === "empty" && message.spans.length === 0 &&
+    next.content_digest === hashContentDigest("", fieldContractSha256);
+  if (old.workspace_id !== next.workspace_id || old.source_id !== next.source_id ||
+      old.source_version === next.source_version || old.identity === next.identity ||
+      Date.parse(old.recorded_at) >= Date.parse(next.recorded_at) || old.content_digest !== next.content_digest ||
+      old.speaker !== next.speaker || old.event_time !== next.event_time || old.valid_from !== next.valid_from ||
+      old.valid_to !== next.valid_to || old.scope_class !== next.scope_class ||
+      next.attribution_context?.status !== (emptySource ? "unknown" : "captured")) {
+    throw new AlayaError("CONFLICT", "source_records persona predecessor binding mismatch");
+  }
 }
 
 function messageValidator(header: z.infer<typeof HeaderSchema>): (input: unknown) => SourceRecordsMessage {
@@ -148,12 +173,16 @@ function messageValidator(header: z.infer<typeof HeaderSchema>): (input: unknown
     const occurrence = JSON.stringify([message.question_id, message.session_index, message.message_index]);
     if (!questions.has(message.question_id) || occurrences.has(occurrence) ||
         record.workspace_id !== buildLongMemEvalQuestionRuntimeIdentity(message.question_id).workspaceId ||
-        record.source_id !== message.message_id || record.source_version !== header.dataset.sha256 ||
+        record.source_id !== message.message_id ||
+        record.source_version !== (header.persona_successor?.source_version ?? header.dataset.sha256) ||
         record.recorded_at !== header.recorded_at || record.speaker !== message.role || record.scope_class !== "project" ||
         record.evidence_object_id !== null || record.event_time !== null || record.valid_from !== null || record.valid_to !== null ||
-        (message.content_state === "empty" && message.spans.length !== 0)) {
+        (message.content_state === "empty" && (message.spans.length !== 0 ||
+          record.content_digest !== hashContentDigest("", fieldContractSha256)))) {
       throw new Error("source_records message binding mismatch");
     }
+    if (header.persona_successor !== undefined) verifyPersonaPredecessor(message);
+    else if (message.predecessor !== undefined) throw new AlayaError("CONFLICT", "source_records predecessor requires persona successor binding");
     occurrences.add(occurrence);
     verifySourceRecordIdentity(record, fieldContractSha256);
     for (const span of message.spans) {
