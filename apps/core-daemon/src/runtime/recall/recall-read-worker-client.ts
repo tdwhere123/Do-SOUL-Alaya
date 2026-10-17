@@ -59,6 +59,7 @@ export interface RecallReadWorkerClient {
   readonly sourceSemanticsPort?: SourceSemanticsExecutionPort;
   /** Named consumer: compareResearchSourceAcquisitionControls. */
   readonly researchAcquisition?: Readonly<{
+    withExecutionScope: SourceSemanticsExecutionPort["withExecutionScope"];
     prepareQuery(input: SourceSemanticsPublicPayload):
       Promise<NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>>;
     dispatch(input: SourceSemanticsPublicPayload,
@@ -294,6 +295,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   /** Named consumer: compareResearchSourceAcquisitionControls. Production execute never sets acquisition_control. */
   public readonly researchAcquisition = {
+    withExecutionScope: this.sourceSemanticsPort.withExecutionScope,
     prepareQuery: async (input: SourceSemanticsPublicPayload): Promise<PreparedQuery> => {
       const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
       const request = captured.request;

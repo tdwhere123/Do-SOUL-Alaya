@@ -14,9 +14,12 @@ import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import type { SourceFeedbackRuntimeInput } from "../../../../core-daemon/src/runtime/recall/source-feedback-execution.js";
 
+import type { SourceAcquisitionExperimentInput, SourceAcquisitionComparison } from "./source-acquisition-experiment.js";
+
 type FeedbackTrace = ReturnType<ReturnType<typeof createSourceFeedbackSession>["finish"]>;
 // Shared with the retained one-shot daemon admission: modes cannot compete under different names.
-const ACTION = "initial-reason-daemon";
+export const SOURCE_EXPERIMENT_ACTION = "initial-reason-daemon";
+const ACTION = SOURCE_EXPERIMENT_ACTION;
 export type SourceFeedbackExperimentInput = Readonly<{
   contract: "source-feedback-experiment-v1";
   config: SemanticChainConfig;
@@ -30,9 +33,17 @@ export type SourceFeedbackExperimentInput = Readonly<{
   seed_cache: { key: string; cache_identity: string; historical_production: unknown;
     workset: SemanticProposalWorkset; cache_root: string; max_output_tokens: number };
 }>;
-type Execution = { identity: string; trace: FeedbackTrace };
+type Execution = { identity: string } & ({ trace: FeedbackTrace } | { comparison: SourceAcquisitionComparison });
 type Lifetime = { identity: string; status: "closed" | "failed";
-  phase: "startup" | "feedback" | "cleanup"; diagnostic?: unknown };
+  phase: "startup" | "feedback" | "comparison" | "cleanup" | "reconciliation" | "launch"; diagnostic?: unknown };
+
+export function publishSourceExperimentResult(root: string, identity: string, result: Omit<Extract<Execution, { trace: FeedbackTrace }>, "identity"> |
+  Omit<Extract<Execution, { comparison: SourceAcquisitionComparison }>, "identity">): void {
+  writeChainArtifact(join(root, "source-experiment-result.json"), { identity, ...captureSourceExperimentValue(result) as object });
+}
+export function publishSourceExperimentLifetime(root: string, lifetime: Lifetime): void {
+  writeChainArtifact(join(root, "source-experiment-lifetime.json"), captureSourceExperimentValue(lifetime));
+}
 
 /** JSON persistence owns diagnostics too: Error, cycles and non-JSON abort reasons cannot vanish.
  * Normal optional undefined fields are absent; diagnostic values retain an explicit tagged form. */
@@ -81,22 +92,50 @@ export function captureSourceExperimentValue(value: unknown, diagnostic = false)
 /** Readback only. In particular, no cache readiness, snapshot hash, worker startup or reservation. */
 export function readSourceExperiment(rootInput: string) {
   const root = resolve(rootInput);
-  const input = readChainArtifact(join(root, "source-experiment-input.json")) as SourceFeedbackExperimentInput | undefined;
+  const input = readChainArtifact(join(root, "source-experiment-input.json")) as SourceFeedbackExperimentInput | SourceAcquisitionExperimentInput | undefined;
   const execution = readChainArtifact(join(root, "source-experiment-result.json")) as Execution | undefined;
   const lifetime = readChainArtifact(join(root, "source-experiment-lifetime.json")) as Lifetime | undefined;
   const projection = readChainArtifact(join(root, "source-experiment-projection.json")) as { identity: string } | undefined;
   const reservation = existsSync(join(root, "recovery-allowance.sqlite")) ? readRecoveryAction(root, ACTION) : undefined;
   const identity = input === undefined ? undefined : chainIdentity(input);
   if ((execution !== undefined || lifetime !== undefined || projection !== undefined) && input === undefined ||
-      execution !== undefined && (execution.identity !== identity || reservation === undefined) ||
+      execution !== undefined && (execution.identity !== identity || reservation === undefined ||
+        input?.contract === "source-feedback-experiment-v1" && !("trace" in execution) ||
+        input?.contract === "source-acquisition-experiment-v1" && !("comparison" in execution)) ||
       lifetime !== undefined && lifetime.identity !== identity || projection !== undefined && (projection.identity !== identity || execution === undefined) ||
-      reservation !== undefined && input !== undefined && (reservation.identity !== identity || reservation.work_units !== input.session.budget.work_units ||
-        reservation.memory_bytes !== input.session.budget.memory_bytes)) {
+      reservation !== undefined && input !== undefined && (reservation.identity !== identity || reservation.work_units !== (input.contract === "source-feedback-experiment-v1" ? input.session.budget.work_units : input.host_admission.read_work_units) ||
+        reservation.memory_bytes !== (input.contract === "source-feedback-experiment-v1" ? input.session.budget.memory_bytes : input.host_admission.read_memory_bytes))) {
     throw new AlayaError("CONFLICT", "source experiment durable authorities disagree");
   }
+  const acquisition = input?.contract === "source-acquisition-experiment-v1" ? readAcquisitionLifetime(root, identity!, lifetime) : undefined;
   return { status: execution !== undefined ? projection === undefined ? "result_ready" as const : "complete" as const
       : reservation === undefined ? "not_started" as const : "unsettled_unknown" as const,
-    identity, input, execution, lifetime: lifetime ?? { status: reservation === undefined ? "not_started" as const : "unknown" as const }, projection };
+    identity, input, execution, lifetime: acquisition?.lifetime ?? lifetime ?? { status: reservation === undefined ? "not_started" as const : "unknown" as const }, projection,
+    ...(acquisition === undefined ? {} : { acquisition: acquisition.evidence }) };
+}
+
+function readAcquisitionLifetime(root: string, identity: string, lifetime?: Lifetime) {
+  const artifact = (name: string) => readChainArtifact(join(root, `source-experiment-${name}.json`)) as
+    { identity: string; pid?: number; parent_pid?: number; deadline?: number; code?: number | null; signal?: string | null; error?: unknown;
+      guarded?: { identity: string; pid: number; deadline: number; active: { pid: number } } } | undefined;
+  const dispatch = artifact("dispatch"), admission = artifact("child-admission"), child = artifact("child"),
+    guard = artifact("guard"), reconciliation = artifact("reconciliation"), launch = artifact("launch");
+  for (const record of [dispatch, admission, child, guard, reconciliation, launch]) {
+    if (record !== undefined && record.identity !== identity) throw new AlayaError("CONFLICT", "acquisition lifetime identity changed");
+  }
+  if (admission !== undefined && (dispatch === undefined || admission.parent_pid !== dispatch.parent_pid || admission.deadline !== dispatch.deadline) ||
+      child !== undefined && (admission === undefined || child.pid !== admission.pid) ||
+      launch?.guarded != null && (launch.pid !== launch.guarded.pid || launch.guarded.identity !== identity ||
+        launch.guarded.active.pid !== launch.pid || launch.guarded.deadline !== dispatch?.deadline || admission !== undefined && admission.pid !== launch.pid)) {
+    throw new AlayaError("CONFLICT", "acquisition process receipts disagree");
+  }
+  const evidence = { dispatch, admission, child, guard, reconciliation, launch };
+  if (lifetime?.status !== "closed") return { lifetime, evidence };
+  if (launch === undefined) return { lifetime: { status: "unknown" as const, phase: "launch" as const }, evidence };
+  if (launch.code !== 0 || launch.signal !== null || launch.error !== undefined || launch.guarded == null || reconciliation === undefined || admission === undefined) {
+    return { lifetime: { identity, status: "failed" as const, phase: "launch" as const, diagnostic: launch }, evidence };
+  }
+  return { lifetime, evidence };
 }
 
 function admitExperiment(input: SourceFeedbackExperimentInput, root: string): void {
@@ -204,12 +243,12 @@ export async function runSourceFeedbackExperiment(inputValue: SourceFeedbackExpe
       const trace = await execution.executeSourceFeedbackForRuntime(daemon.runtime, { session: input.session, context: input.context,
         correspondence: createSourceFeedbackCorrespondenceCache(input.correspondence), signal: linked, timeoutMs: remaining });
       // This is authoritative before shutdown. Failure in cleanup cannot erase it or reopen dispatch.
-      writeChainArtifact(join(root, "source-experiment-result.json"), { identity, trace: captureSourceExperimentValue(trace) });
+      publishSourceExperimentResult(root, identity, { trace });
       phase = "cleanup";
     }, { signal, embeddingStartupProbe: "omit" });
-    writeChainArtifact(join(root, "source-experiment-lifetime.json"), { identity, status: "closed", phase });
+    publishSourceExperimentLifetime(root, { identity, status: "closed", phase });
   } catch (error) {
-    writeChainArtifact(join(root, "source-experiment-lifetime.json"), { identity, status: "failed", phase,
+    publishSourceExperimentLifetime(root, { identity, status: "failed", phase,
       diagnostic: captureSourceExperimentValue(error, true) });
   }
   return readSourceExperiment(root);

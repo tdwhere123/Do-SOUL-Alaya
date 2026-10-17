@@ -42,7 +42,7 @@ export function bindResearchSourceAcquisitionClient(runtime: object, client: Res
 }
 
 /**
- * Named consumer: compareResearchSourceAcquisitionControls / upcoming bench runner.
+ * Named consumer: compareSemanticChainSourceAcquisition.
  * Removal: same gate as bindResearchSourceAcquisitionClient.
  */
 export function researchSourceAcquisitionClient(runtime: object): ResearchSourceAcquisitionPort {
@@ -52,11 +52,12 @@ export function researchSourceAcquisitionClient(runtime: object): ResearchSource
 }
 
 /**
- * Named bench consumer (upcoming runner). One physical prepare, one worker, one read snapshot,
+ * Named bench consumer: compareSemanticChainSourceAcquisition. One physical prepare, one worker, one read snapshot,
  * three counterfactual arms. Not MCP, ranking, nominated hydration, or a second recall pipeline.
  */
 export async function compareResearchSourceAcquisitionControls(
-  client: ResearchSourceAcquisitionPort, input: SourceSemanticsPublicPayload
+  client: ResearchSourceAcquisitionPort, input: SourceSemanticsPublicPayload,
+  options?: Readonly<{ signal?: AbortSignal; timeoutMs: number }>
 ) {
   const captured = structuredClone(input);
   const host = client.researchAcquisition, snapshot = client.readSnapshot;
@@ -64,15 +65,23 @@ export async function compareResearchSourceAcquisitionControls(
     throw new CoreError("CONFLICT", "research acquisition controls require the native worker client");
   }
   let retained: Comparison | undefined;
+  let progress: ComparisonBase | undefined;
+  let activePhase: Failure["phase"] = "prepare";
   try {
-    const comparison = await snapshot.isolate(async () => {
-      const result = await runComparison(host, snapshot, captured);
+    const run = () => snapshot.isolate!(async () => {
+      const result = await runComparison(host, snapshot, captured, (value, phase) => { progress = value; activePhase = phase; });
       retained = result;
       return result;
     });
+    const comparison = options === undefined ? await run() : await host.withExecutionScope(options, run);
     return comparison;
   } catch (error) {
     if (retained !== undefined) return withCleanupFailure(retained, error, "unknown");
+    if (options !== undefined) return {
+      ...(progress ?? { kind: "PRIVATE_COUNTERFACTUAL", physical_prepare_once: physicalUnknown(error), arm_envelopes: NOT_COMPLETED_ARMS }),
+      outcome: progress === undefined ? "failed" : "partial", failure: { phase: activePhase, cause: error },
+      cleanup: { rollback: "unknown", worker_reusable: false }
+    } as Comparison;
     throw error;
   }
 }
@@ -80,7 +89,8 @@ export async function compareResearchSourceAcquisitionControls(
 async function runComparison(
   host: NonNullable<ResearchSourceAcquisitionPort["researchAcquisition"]>,
   snapshot: ResearchSourceAcquisitionPort["readSnapshot"],
-  captured: SourceSemanticsPublicPayload
+  captured: SourceSemanticsPublicPayload,
+  checkpoint: (value: ComparisonBase, phase: Failure["phase"]) => void
 ): Promise<Comparison> {
   let prepared: PreparedQuery | undefined;
   try { prepared = structuredClone(await host.prepareQuery(captured)); }
@@ -93,6 +103,7 @@ async function runComparison(
     };
   }
   const physical = physicalFromPrepared(prepared);
+  checkpoint({ kind: "PRIVATE_COUNTERFACTUAL", physical_prepare_once: physical, arm_envelopes: NOT_COMPLETED_ARMS }, "begin");
   if (prepared.vector.status !== "available" || prepared.receipt.status !== "ready") {
     return {
       kind: "PRIVATE_COUNTERFACTUAL", outcome: "unavailable",
@@ -120,8 +131,13 @@ async function runComparison(
         receipt: unavailableSourceQueryPreparation(SourceIndexAcquisition.channelNotRequested, "not_requested"),
         vector: { status: "unavailable", reason: SourceIndexAcquisition.channelNotRequested }
       };
+      checkpoint({ kind: "PRIVATE_COUNTERFACTUAL", physical_prepare_once: physical, arm_envelopes: NOT_COMPLETED_ARMS }, "lexical");
       arms.lexical = projectArm(await host.dispatch(captured, lexicalPrepared, "lexical"), "lexical");
+      checkpoint({ kind: "PRIVATE_COUNTERFACTUAL", physical_prepare_once: physical,
+        arm_envelopes: { lexical: arms.lexical, vector: NOT_COMPLETED, dual: NOT_COMPLETED } }, "vector");
       arms.vector = projectArm(await host.dispatch(captured, structuredClone(prepared), "vector"), "vector");
+      checkpoint({ kind: "PRIVATE_COUNTERFACTUAL", physical_prepare_once: physical,
+        arm_envelopes: { lexical: arms.lexical, vector: arms.vector, dual: NOT_COMPLETED } }, "dual");
       arms.dual = projectArm(await host.dispatch(captured, structuredClone(prepared), "dual"), "dual");
       result = {
         kind: "PRIVATE_COUNTERFACTUAL", outcome: "complete",

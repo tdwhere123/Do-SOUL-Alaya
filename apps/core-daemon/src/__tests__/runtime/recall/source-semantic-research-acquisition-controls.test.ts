@@ -510,6 +510,35 @@ describe("native worker acquisition controls", () => {
     } finally { snapshot.beginDeferred = realBegin; await h.cleanup(); }
   });
 
+  it("preserves the actual lexical arm when caller cancellation stops the remaining scoped arms", async () => {
+    const h = await queryClient(), caller = new AbortController();
+    const host = h.client.researchAcquisition!, dispatch = host.dispatch.bind(host), posts = observePosts();
+    vi.spyOn(host, "dispatch").mockImplementation(async (input, prepared, control) => {
+      if (control === "vector") caller.abort({ authored: "stop-after-lexical" });
+      return await dispatch(input, prepared, control);
+    });
+    try {
+      const result = await compareResearchSourceAcquisitionControls(h.client, recallInput(), { signal: caller.signal, timeoutMs: 5000 });
+      expect(result.outcome).toBe("partial");
+      expect(result.physical_prepare_once.submitted_inputs).toBe(1);
+      expect(result.arm_envelopes.lexical.kind).toBe("PRIVATE_COUNTERFACTUAL");
+      expect(result.arm_envelopes.vector.kind).toBe("not_completed");
+      expect(result.arm_envelopes.dual.kind).toBe("not_completed");
+      expect(posts.calls().filter(row => row.request.operation === "conditionalField.sourceSemantics")).toHaveLength(1);
+    } finally { await h.cleanup(); }
+  });
+
+  it("bounds physical preparation by the caller execution scope without starting any native arm", async () => {
+    const h = await queryClient({ embed: async () => await new Promise(() => undefined) });
+    try {
+      const result = await compareResearchSourceAcquisitionControls(h.client, recallInput(), { timeoutMs: 20 });
+      expect(result.outcome).toBe("failed");
+      expect(result.physical_prepare_once.submitted_inputs).toBe("unknown");
+      expect(result.arm_envelopes.lexical.kind).toBe("not_completed");
+      expect(result.cleanup).toMatchObject({ rollback: "unknown", worker_reusable: false });
+    } finally { await h.cleanup(); }
+  });
+
   it("production execute never attaches acquisition_control", async () => {
     const h = await queryClient();
     const posts = observePosts();
@@ -529,6 +558,7 @@ describe("native worker acquisition controls", () => {
 describe("private runtime binding", () => {
   const fakePort = (): ResearchSourceAcquisitionPort => ({
     researchAcquisition: {
+      withExecutionScope: async (_input, work) => await work(() => "waiting"),
       prepareQuery: async () => { throw new Error("fake prepare"); },
       dispatch: async () => { throw new Error("fake dispatch"); }
     },
@@ -601,7 +631,7 @@ describe("private runtime binding", () => {
       const replies = captureReplies(port.researchAcquisition!);
       // The fixture's local capture is never copied to or restored inside the daemon.
       const { prepared_query: _fixturePreparation, acquisition_control: _fixtureControl, ...input } = context.payload;
-      const comparison = await distAdapter.compareResearchSourceAcquisitionControls(port, input);
+      const comparison = await distAdapter.compareResearchSourceAcquisitionControls(port, input, { timeoutMs: 30_000 });
       expect(comparison.outcome).toBe("complete");
       expectRetainedReplies(comparison, replies);
       expect(prepare).toHaveBeenCalledTimes(1);

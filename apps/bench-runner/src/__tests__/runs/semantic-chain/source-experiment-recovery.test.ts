@@ -14,6 +14,8 @@ vi.mock("../../../runs/semantic-chain/recovery-allowance.js", () => ({ readRecov
 vi.mock("../../../runs/semantic-proposal/fill.js", () => ({ readSemanticProposalResults: fixture.admission }));
 import { readSourceExperiment, runSourceFeedbackExperiment, type SourceFeedbackExperimentInput } from "../../../runs/semantic-chain/source-experiment.js";
 
+import type { SourceAcquisitionExperimentInput } from "../../../runs/semantic-chain/source-acquisition-experiment.js";
+
 const input = { contract: "source-feedback-experiment-v1", session: { budget: { work_units: 900, memory_bytes: 800 } } } as SourceFeedbackExperimentInput;
 const identity = JSON.stringify(input);
 function frozen() { fixture.artifacts.set("source-experiment-input.json", input); }
@@ -84,6 +86,18 @@ it("returns durable feedback for projection-only repair even after cleanup faile
   expect(state).toMatchObject({ status: "result_ready", execution: { trace: { status: "unknown" } }, lifetime: { status: "failed" } });
   fixture.artifacts.set("source-experiment-projection.json", { identity, seed_exposure_id: null });
   expect(readSourceExperiment("/fixture").status).toBe("complete");
+  expect(fixture.admission).not.toHaveBeenCalled(); expect(fixture.reserve).not.toHaveBeenCalled(); expect(fixture.daemon).not.toHaveBeenCalled();
+});
+
+it.each(["partial", "unavailable", "failed"])("reads retained acquisition %s with unknown physical totals without live admission or projection", outcome => {
+  const acquisition = { contract: "source-acquisition-experiment-v1", host_admission: { read_work_units: 1, read_memory_bytes: 2 } } as SourceAcquisitionExperimentInput;
+  const identity = JSON.stringify(acquisition);
+  fixture.artifacts.set("source-experiment-input.json", acquisition);
+  fixture.reservation = { identity, work_units: 1, memory_bytes: 2 };
+  const comparison = { kind: "PRIVATE_COUNTERFACTUAL", outcome, physical_prepare_once: { submitted_inputs: "unknown", elapsed_ms: "unknown" },
+    arm_envelopes: { lexical: { kind: "not_completed" }, vector: { kind: "not_completed" }, dual: { kind: "not_completed" } } };
+  fixture.artifacts.set("source-experiment-result.json", { identity, comparison });
+  expect(readSourceExperiment("/fixture")).toMatchObject({ status: "result_ready", execution: { comparison }, lifetime: { status: "unknown" } });
   expect(fixture.admission).not.toHaveBeenCalled(); expect(fixture.reserve).not.toHaveBeenCalled(); expect(fixture.daemon).not.toHaveBeenCalled();
 });
 

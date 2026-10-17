@@ -168,7 +168,7 @@ function feedbackNomination(input: SourceFeedbackExperimentInput, reason: Recove
 function recoveryNomination(root: string, reason: RecoveryReasonRound) {
   if (readChainArtifact(join(root, "source-experiment-input.json")) !== undefined) {
     const experiment = readSourceExperiment(root);
-    if (experiment.input === undefined || experiment.execution === undefined || reason.identity !== experiment.identity) {
+    if (experiment.input?.contract !== "source-feedback-experiment-v1" || experiment.execution === undefined || reason.identity !== experiment.identity) {
       throw new AlayaError("CONFLICT", "nomination differs from retained feedback seed");
     }
     return feedbackNomination(experiment.input, reason);
@@ -310,7 +310,11 @@ export async function reasonInitialRecovery(rootInput: string, options: Readonly
 /** Repair is a projection of the retained matching seed exposure, never readiness or another worker call. */
 async function projectInitialFeedback(root: string, state: Awaited<ReturnType<typeof runSourceFeedbackExperiment>>) {
   if (state.execution === undefined || state.input === undefined) return state;
-  const { input, execution } = state, seed = input.session.seed;
+  const { input, execution } = state;
+  if (input.contract !== "source-feedback-experiment-v1" || !("trace" in execution)) {
+    throw new AlayaError("CONFLICT", "acquisition cannot project a feedback seed");
+  }
+  const seed = input.session.seed;
   if (input.legacy === undefined) throw new AlayaError("CONFLICT", "feedback has no captured recovery projection authority");
   const exposure = execution.trace.exposures.find(row => row.result.kind === "reason" &&
     row.result.result?.outcome.status === "interpreted" && row.result.coverage.payload === "complete" &&

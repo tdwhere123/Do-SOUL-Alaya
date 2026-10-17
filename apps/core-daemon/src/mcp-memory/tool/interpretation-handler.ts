@@ -220,12 +220,17 @@ function checkedSourceFromDisclosure(wire: Extract<SourceSemanticWorkerResult, {
 async function executeWorker(input: Dependencies, context: McpMemoryToolCallContext, request: SourceSemanticWorkerRequest,
   authorized_scopes: AuthorizedScopesAdmission): Promise<SourceSemanticWorkerResult> {
   if (input.sourceSemanticsPort === undefined) throw new ToolUnavailableError("soul.interpretation worker is not wired into this daemon");
+  return input.sourceSemanticsPort.execute(buildSourceSemanticWorkerPayload(input, context, request, authorized_scopes));
+}
+
+/** Pure private payload construction shared by the handler and guarded acquisition consumer. */
+export function buildSourceSemanticWorkerPayload(input: Pick<Dependencies, "now" | "interpretationClock">,
+  context: Pick<McpMemoryToolCallContext, "workspaceId" | "agentTarget" | "sessionId" | "runId">,
+  request: SourceSemanticWorkerRequest, authorized_scopes: AuthorizedScopesAdmission) {
   const now = input.now();
-  const asOf = input.interpretationClock ?? now;
-  return input.sourceSemanticsPort.execute({ workspace_id: context.workspaceId, as_of: asOf,
-    lifetime_now: now,
+  return { workspace_id: context.workspaceId, as_of: input.interpretationClock ?? now, lifetime_now: now,
     authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
-    expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request });
+    expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request };
 }
 /** Private bench feedback projection also consumes this conversion, never another worker call. */
 export function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {

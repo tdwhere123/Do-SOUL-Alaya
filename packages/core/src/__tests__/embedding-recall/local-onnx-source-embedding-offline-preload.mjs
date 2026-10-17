@@ -2,6 +2,7 @@ import childProcess from "node:child_process";
 import dns from "node:dns";
 import dgram from "node:dgram";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import http2 from "node:http2";
@@ -21,11 +22,16 @@ if (sourceAllocation !== null && allocatedInputCap === null) throw new Error("In
 // A different import URL must not create a fresh allocation in the same process.
 const installation = Symbol.for("alaya.source-embedding-offline-guard");
 if (globalThis[installation]) throw new Error("Offline Source guard is already installed");
-Object.defineProperty(globalThis, installation, { value: true });
+const instance = Object.freeze({});
+Object.defineProperty(globalThis, installation, { value: instance });
 
 // The shared guard owns credential filtering/file refusal. This stricter local
 // inference fixture also forbids loopback and non-fetch transports.
 const shared = installProviderFreeBoundary();
+const activeReferences = [];
+for (const owner of [fs, fsp]) for (const key of ["readFile", "readFileSync", "open", "openSync", "createReadStream"]) {
+  if (typeof owner[key] === "function") activeReferences.push({ owner, key, value: owner[key] });
+}
 const restores = [];
 const childMode = process.env.ALAYA_SOURCE_EMBEDDING_OFFLINE_CHILD === "1";
 const nativeSend = process.send?.bind(process);
@@ -91,6 +97,7 @@ function replace(owner, key, value) {
     throw new Error(`Cannot establish offline guard for ${key}`);
   }
   Object.defineProperty(owner, key, { ...descriptor, value });
+  activeReferences.push({ owner, key, value });
   restores.push(() => Object.defineProperty(owner, key, descriptor));
 }
 function block(owner, key, label) {
@@ -435,19 +442,42 @@ function restore() {
   syncBuiltinESMExports();
 }
 
-export const isolation = {
+export const isolation = Object.freeze({
+  /** Owned launch admission checks the installed functions and this module instance, not a marker.
+   * Recheck without unused after shutdown; the guard is retained until reconciliation completes. */
+  assertActive({ preload, inputs, bytes, unused = false }) {
+    if (restored || globalThis[installation] !== instance || preload !== preloadSpecifier || childMode ||
+        sourceAllocation?.source_inputs !== inputs || sourceAllocation?.utf8_bytes !== bytes ||
+        allocatedInputCap?.explicit !== false || allocatedInputCap?.cap !== 2 ||
+        activeReferences.some(({ owner, key, value }) => owner[key] !== value) ||
+        shared.violations.length !== 0 || credentialCount() !== 0 ||
+        process.execArgv.length !== 2 || process.execArgv[0] !== "--import" || process.execArgv[1] !== preloadSpecifier ||
+        unused && (childHandles.length !== 0 || children.length !== 0 || requests.length !== 0 || attemptedSends.length !== 0 ||
+          warmupAttempted !== 0 || observedApplicationReplies !== 0 || responses !== 0 ||
+          reservedSends.length !== 0 || blockedSends.length !== 0 || explicitRunInputs !== 0 || reservedBytes !== 0)) {
+      throw new Error("Offline Source guard is not active with the expected unused launch allocation");
+    }
+    return { ...snapshot("active_inspection"), installed_references: activeReferences.length };
+  },
+  receipts: reason => ({ parent: receiptRecord(reason), child: {
+    kind: "alaya-source-embedding-offline-child-guard-receipt", reports: structuredClone(childReports),
+    children: children.map((child, index) => childExitRecord(child, index))
+  } }),
   children, childReports, requests, readOnlyGitCalls, attemptedSends, dispatchedSends, blockedSends,
   snapshot: () => snapshot("parent_checkpoint"),
   writeReceipts: writeGuardReceipts,
-  async close() {
-    if (restored) return;
+  async closeChildren() {
     for (let index = 0; index < childHandles.length; index += 1) {
       await reapChild(childHandles[index], children[index]);
     }
     const unknown = childExitUnknown();
     writeGuardReceipts(unknown ? "close_exit_unknown" : "close");
     if (unknown) throw new Error("Offline isolation close did not confirm child exit");
+  },
+  async close() {
+    if (restored) return;
+    await this.closeChildren();
     restore();
   },
   restore
-};
+});

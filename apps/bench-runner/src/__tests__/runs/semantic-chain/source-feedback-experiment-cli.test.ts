@@ -198,7 +198,10 @@ it("runs the compiled existing entry through real Core/daemon/cache and repairs 
   const cacheBefore = cacheDigest(cache);
   const failed = await child(recovery, "projection"); expect(failed.code, `${failed.stderr}\n${failed.stdout.slice(-8192)}`).toBe(2);
   const retained = readSourceExperiment(recovery); expect(retained.status).toBe("result_ready");
-  expect(retained.execution?.trace.exposures.map(row => row.result.kind)).toEqual(["prepare_source", "validate_source", "reason", "prepare_query", "reason"]);
+  if (retained.execution === undefined || !("trace" in retained.execution) || retained.input?.contract !== "source-feedback-experiment-v1") {
+    throw new Error("expected retained feedback seed and trace");
+  }
+  expect(retained.execution.trace.exposures.map(row => row.result.kind)).toEqual(["prepare_source", "validate_source", "reason", "prepare_query", "reason"]);
   expect(retained.execution?.trace.qualification).toMatchObject({ status: "local" });
   expect(retained.execution?.trace.preparations?.[0]).toMatchObject({ status: "ready", new_dispatches: 0 });
   const bytes = readFileSync(join(recovery, "source-experiment-result.json")), allowanceBefore = allowanceState(recovery);
@@ -250,7 +253,8 @@ it("durably retains real worker-loss uncertainty without projecting a seed or re
   const state = readSourceExperiment(recovery);
   expect(state).toMatchObject({ status: "complete", execution: { trace: { status: "unknown",
     accounting: { reserved_work: BUDGET.work_units, reserved_memory_bytes: BUDGET.memory_bytes } } } });
-  expect(state.execution?.trace.terminal_cause?.kind).toBe("execution_error");
+  if (state.execution === undefined || !("trace" in state.execution)) throw new Error("expected feedback uncertainty trace");
+  expect(state.execution.trace.terminal_cause?.kind).toBe("execution_error");
   expect(existsSync(join(recovery, "initial-reason.json"))).toBe(false);
   expect(existsSync(join(recovery, "source-nomination.json"))).toBe(false);
   const bytes = readFileSync(join(recovery, "source-experiment-result.json")), allowanceBefore = allowanceState(recovery);

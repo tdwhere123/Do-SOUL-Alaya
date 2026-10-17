@@ -29,6 +29,7 @@ function withCycle<T>(rootInput: string, apply: (db: DatabaseSync, cycle: CycleR
     db.exec("CREATE TABLE IF NOT EXISTS effects (name TEXT PRIMARY KEY, identity TEXT NOT NULL, work_units INTEGER NOT NULL, memory_bytes INTEGER NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS native_observations (name TEXT PRIMARY KEY, work_json TEXT NOT NULL)");
     db.exec("CREATE TABLE IF NOT EXISTS read_observations (ordinal INTEGER PRIMARY KEY, label TEXT NOT NULL, input_bytes INTEGER NOT NULL)");
+    db.exec("CREATE TABLE IF NOT EXISTS effect_exclusion (singleton INTEGER PRIMARY KEY CHECK(singleton=1), name TEXT NOT NULL)");
     db.exec("BEGIN IMMEDIATE");
     try {
       const cycle = db.prepare("SELECT * FROM cycle LIMIT 1").get() as CycleRow | undefined;
@@ -95,7 +96,7 @@ export function reserveRecoveryRead(root: string, label: string, additionalPaths
 
 /** A named action spends once. The existing stage reservation owns no-retry and completion checks. */
 export function reserveRecoveryAction(root: string, name: string, identity: string,
-  workUnits: number, memoryBytes: number, completed: boolean): void {
+  workUnits: number, memoryBytes: number, completed: boolean, exclusiveRoot = false): void {
   withCycle(root, (db, cycle) => {
     const allowance = RecoveryAllowanceSchema.parse(JSON.parse(cycle.allowance_json));
     const prior = db.prepare("SELECT identity, work_units, memory_bytes FROM effects WHERE name=?").get(name) as
@@ -108,17 +109,22 @@ export function reserveRecoveryAction(root: string, name: string, identity: stri
       return;
     }
     if (completed) throw new AlayaError("CONFLICT", "durable recovery result lacks its prior numeric reservation");
+    const excluded = db.prepare("SELECT name FROM effect_exclusion WHERE singleton=1").get();
+    if (excluded !== undefined || exclusiveRoot && db.prepare("SELECT name FROM effects LIMIT 1").get() !== undefined) {
+      throw new AlayaError("CONFLICT", "source experiment root already has an effect reservation");
+    }
     if (cycle.effect_count >= allowance.max_effects) throw new AlayaError("UNAVAILABLE", "recovery effect allowance exhausted");
     reserveTotal(cycle, allowance, workUnits, memoryBytes);
     db.prepare("INSERT INTO effects VALUES (?, ?, ?, ?)").run(name, identity, workUnits, memoryBytes);
+    if (exclusiveRoot) db.prepare("INSERT INTO effect_exclusion VALUES (1, ?)").run(name);
     db.prepare("UPDATE cycle SET work_reserved=?, memory_reserved=?, effect_count=? WHERE identity=?").run(
       cycle.work_reserved + workUnits, cycle.memory_reserved + memoryBytes, cycle.effect_count + 1, cycle.identity);
   });
 }
 
-export function reserveRecoveryHostEffect(root: string, name: string, identity: string, completed: boolean): void {
+export function reserveRecoveryHostEffect(root: string, name: string, identity: string, completed: boolean, exclusiveRoot = false): void {
   const allowance = withCycle(root, (_db, cycle) => RecoveryAllowanceSchema.parse(JSON.parse(cycle.allowance_json)));
-  reserveRecoveryAction(root, name, identity, allowance.read_work_units, allowance.read_memory_bytes, completed);
+  reserveRecoveryAction(root, name, identity, allowance.read_work_units, allowance.read_memory_bytes, completed, exclusiveRoot);
 }
 
 function reserveTotal(cycle: CycleRow, allowance: RecoveryAllowance, work: number, memory: number): void {

@@ -402,6 +402,32 @@ console.log(JSON.stringify({ errors, observed, nativeCalls, getterReads,
 process.stdout.write("", () => process.exit());
 `;
 
+it("proves installed references and unused frozen caps rather than accepting a marker or replaced guard", () => {
+  const directory = mkdtempSync(join(tmpdir(), "source-guard-active-inspection-"));
+  try {
+    const url = new URL(preload.href); url.search = "source_input_cap=1&source_utf8_byte_cap=4";
+    const script = join(directory, "inspect.mjs");
+    writeFileSync(script, `import assert from "node:assert/strict";
+      import childProcess from "node:child_process";
+      const { isolation } = await import(${JSON.stringify(url.href)});
+      const policy = { preload: ${JSON.stringify(url.href)}, inputs: 1, bytes: 4, unused: true };
+      assert(isolation.assertActive(policy).installed_references > 20);
+      assert.throws(() => isolation.assertActive({ ...policy, bytes: 5 }));
+      const guarded = childProcess.fork;
+      childProcess.fork = () => { throw new Error("replaced fork must never dispatch"); };
+      assert.throws(() => isolation.assertActive(policy), /not active/);
+      childProcess.fork = guarded;
+      isolation.assertActive(policy);
+      isolation.restore();
+      assert.throws(() => isolation.assertActive(policy), /not active/);
+    `);
+    const env = { ...process.env }; delete env.NODE_OPTIONS; delete env.ALAYA_SOURCE_EMBEDDING_OFFLINE_INPUT_CAP;
+    delete env.ALAYA_SOURCE_EMBEDDING_OFFLINE_CHILD;
+    const result = nativeSpawnSync(process.execPath, ["--import", url.href, script], { env, encoding: "utf8", timeout: 15_000 });
+    expect(result.status, result.stderr).toBe(0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 type BoundaryOptions = {
   query?: string; perSend?: string; bypassParent?: boolean; throwForward?: boolean;
   reconfigure?: boolean; mutateEnv?: boolean; captureGetter?: boolean;
