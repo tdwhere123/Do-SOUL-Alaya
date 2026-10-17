@@ -2,7 +2,8 @@ import { performance } from "node:perf_hooks";
 
 /** Caller latency is bounded; this does not interrupt synchronous worker SQLite. */
 export class RecallReadWorkerDeadline {
-  private readonly expiresAt: number;
+  private readonly startedAt: number;
+  private readonly timeoutMs: number;
   private readonly controller = new AbortController();
   private readonly timer: ReturnType<typeof setTimeout>;
   private readonly error: Error;
@@ -11,7 +12,8 @@ export class RecallReadWorkerDeadline {
   public phase: "waiting" | "preparing" | "dispatched" = "waiting";
 
   public constructor(operation: string, timeoutMs: number, callerSignal?: AbortSignal) {
-    this.expiresAt = performance.now() + timeoutMs;
+    this.startedAt = performance.now();
+    this.timeoutMs = timeoutMs;
     this.error = new Error(`recall read worker ${operation} timed out after ${timeoutMs}ms`);
     this.retired = new Error(`recall read worker ${operation} execution scope is no longer active`);
     this.timer = setTimeout(() => this.controller.abort(this.error), timeoutMs);
@@ -27,12 +29,14 @@ export class RecallReadWorkerDeadline {
 
   public remainingMs(): number {
     this.check();
-    return Math.max(0, this.expiresAt - performance.now());
+    // (now + timeout) - now can exceed the original maximum; never report above it.
+    return Math.min(this.timeoutMs, Math.max(0, this.timeoutMs - (performance.now() - this.startedAt)));
   }
 
   public check(): void {
-    // Check the clock as well as the timer: a queued message can beat an overdue timer.
-    if (!this.signal.aborted && performance.now() >= this.expiresAt) {
+    // Check elapsed against the original maximum: a queued message can beat an overdue timer,
+    // and now + timeout can round past the configured ceiling.
+    if (!this.signal.aborted && performance.now() - this.startedAt >= this.timeoutMs) {
       this.controller.abort(this.error);
     }
     this.signal.throwIfAborted();

@@ -62,3 +62,21 @@ it("checks the monotonic clock even when an overdue timer has not yet executed",
     expect(work).not.toHaveBeenCalled();
   } finally { deadline.dispose(); }
 });
+
+it("clamps monotonic roundoff so remaining cannot exceed the original timeout maximum", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  // (now + 60000) - now exceeds 60000 at this timestamp; remaining must keep the original maximum.
+  let now = 5536.123456789;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
+  const deadline = new RecallReadWorkerDeadline("ceiling", 60_000);
+  try {
+    expect((now + 60_000) - now).toBeGreaterThan(60_000);
+    expect(deadline.remainingMs()).toBe(60_000);
+    now += 10;
+    expect(deadline.remainingMs()).toBe(59_990);
+    now += 59_989;
+    expect(deadline.remainingMs()).toBe(1);
+    now += 1;
+    expect(() => deadline.check()).toThrow(/timed out after 60000ms/u);
+  } finally { deadline.dispose(); }
+});
