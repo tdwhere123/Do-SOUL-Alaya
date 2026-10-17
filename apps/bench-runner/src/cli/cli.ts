@@ -28,6 +28,9 @@ include oracle|s|m; \`s\` is the operator bench.
 
 Usage:
   alaya-bench-runner source-snapshot prepare --snapshot <db> --data-dir-root <isolated-dir> --limit N --recorded-at <ISO> [--offset N] [--data-dir <path>] [--pinned-meta-root <path>] [--producer-commit <full-sha>]
+    Opt-in persona successor: --attribution-policy longmemeval-question-local-persona-v1 --parent-snapshot <sealed-db>; requires the official dataset pin, complete parent membership, fresh output and later recorded time.
+  alaya-bench-runner source-snapshot query-input --offset N --question-id <id> [--data-dir <path>] [--attribution-policy longmemeval-question-local-persona-v1]
+    Provider-free original query item for a semantic-proposal workset; persona context is task-local, not authenticated human identity.
   alaya-bench-runner source-snapshot inspect --snapshot <db> --question-id <id> --query <text> [--max-results N] [--max-pages N]
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--expected-reconciliation-basis rule_only|garden_llm] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]

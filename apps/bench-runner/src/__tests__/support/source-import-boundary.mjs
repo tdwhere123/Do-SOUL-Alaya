@@ -17,6 +17,7 @@ import { createReadOnlyGitExecutionPolicy } from "./read-only-git-boundary.mjs";
 // SQLite read worker. This is a JS effect guard, not an OS sandbox or filesystem jail.
 const shared = installProviderFreeBoundary();
 export const operations = [];
+const restores = [];
 const require = createRequire(import.meta.url);
 const readOnlyGitPolicy = workers.isMainThread ? createReadOnlyGitExecutionPolicy() : null;
 const nativeExecFile = cp.execFile;
@@ -54,6 +55,7 @@ function replace(owner, key, value) {
   const descriptor = Object.getOwnPropertyDescriptor(owner, key);
   if (typeof descriptor?.value !== "function") throw new Error(`Cannot guard ${key}`);
   Object.defineProperty(owner, key, { ...descriptor, value });
+  restores.push(() => Object.defineProperty(owner, key, descriptor));
 }
 function block(owner, key, label) { replace(owner, key, () => deny(label)); }
 for (const [owner, keys, label] of [
@@ -95,7 +97,7 @@ replace(workers, "Worker", class extends NativeWorker {
     super(url, { ...options, execArgv: ["--import", import.meta.url] });
   }
 });
-registerHooks({
+const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
     const result = nextResolve(specifier, context);
     if (forbiddenModule(specifier) || forbiddenModule(result.url)) {
@@ -113,13 +115,24 @@ export function receipt() {
   return { operations: [...operations], credential_file_violations: [...shared.violations],
     pinned_read_worker: readWorker, native_pins: [...nativePins], thread_id: workers.threadId };
 }
-process.on("uncaughtExceptionMonitor", error => {
+const monitor = error => {
   process.stderr.write(`[source-import-guard] uncaught ${error.stack ?? String(error)}\n`);
-});
-process.on("exit", () => {
+};
+const onExit = () => {
   process.stderr.write(`[source-import-guard-receipt] ${JSON.stringify(receipt())}\n`);
   if (shared.violations.length > 0 || operations.some(row => row.blocked)) {
     process.exitCode = 1;
   }
-});
+};
+process.on("uncaughtExceptionMonitor", monitor);
+process.on("exit", onExit);
+
+/** Vitest callers restore process-wide effects after their isolated file. Child
+ * fixture imports retain the guard until exit, as before. */
+export function restore() {
+  hooks.deregister();
+  process.off("uncaughtExceptionMonitor", monitor); process.off("exit", onExit);
+  for (const restore of restores.reverse()) restore();
+  shared.restore(); syncBuiltinESMExports();
+}
 export const pinnedReadWorker = fileURLToPath(readWorker);
