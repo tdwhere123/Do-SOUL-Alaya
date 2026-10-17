@@ -18,10 +18,13 @@ import { currentBenchScope, removeDataDirWhenBenchDaemonCancelled, runBenchDaemo
   trackBenchBody } from "../../harness/daemon-task.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { isAuthorityRevision } from "../extraction/authority/receipt.js";
+import { SemanticChainSourceIndexBindingSchema, assertSemanticChainSourceIndex } from "./source-index-binding.js";
+import { SemanticChainSourceFailureSchema } from "./source-index-observation.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 export const SemanticChainConfigSchema = z.object({
   snapshot_path: z.string().min(1), snapshot_sha256: Digest,
+  source_index: SemanticChainSourceIndexBindingSchema.optional(),
   implementation_revision: z.string().refine(isAuthorityRevision), interpretation_clock: z.string().datetime(),
   workspace_id: z.string().min(1), run_id: z.string().min(1),
   query_workset: SemanticProposalWorksetSchema.refine((value) => value.kind === "query", "query workset required"),
@@ -62,7 +65,8 @@ const Discovery = {
   unvisited_source_interpretation_count: z.number().int().nonnegative().nullable(), discovery_truncated: z.boolean()
 };
 export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
-  z.object({ ...QueryBase, status: z.literal("blocked"), reason: z.string() }).strict(),
+  z.object({ ...QueryBase, status: z.literal("blocked"), reason: z.string(),
+    discovery_failure: SemanticChainSourceFailureSchema.optional() }).strict(),
   z.object({ ...QueryBase, status: z.literal("raw_ready"), reason: z.string(),
     query_semantics_unavailable: SourceSemanticQueryUnavailableReasonSchema,
     ...Discovery }).strict(),
@@ -146,6 +150,7 @@ export function writeChainJson(path: string, value: unknown): void {
 export function assertChainSnapshot(config: SemanticChainConfig): void {
   if (hashRegularFileNoFollow(config.snapshot_path) !== config.snapshot_sha256) throw new AlayaError("CONFLICT", "semantic chain snapshot changed");
   if (readCurrentExtractionAuthorityRevision() !== config.implementation_revision) throw new AlayaError("CONFLICT", "semantic chain implementation changed");
+  assertSemanticChainSourceIndex(config);
 }
 
 export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
@@ -164,8 +169,13 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
     restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
     const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
       sourceSemanticInterpretationClock: config.interpretation_clock,
-      embeddingMode: "disabled", fieldProjectionAdmissionMode: "explicit_checkpoint" });
+      ...(config.source_index === undefined ? { embeddingMode: "disabled" as const } : {
+        embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const,
+        embeddingStartupProbe: "omit" as const,
+        cachedLocalEmbedding: { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id } }),
+      fieldProjectionAdmissionMode: "explicit_checkpoint" });
     daemon = started;
+    if (config.source_index !== undefined) assertSemanticChainSourceIndex(config, join(directory, "alaya.db"));
     removeDataDirWhenBenchDaemonCancelled(directory);
     const scope = currentBenchScope();
     if (scope === undefined) throw new AlayaError("CANCELLED", "bench work has no owning scope");

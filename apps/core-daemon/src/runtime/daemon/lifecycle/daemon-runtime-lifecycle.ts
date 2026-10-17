@@ -61,7 +61,8 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
-  sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void> }>;
+  sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void>;
+    runPass?(): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt> }>;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
@@ -91,6 +92,7 @@ const BACKGROUND_STOP_TIMEOUT_MS = 30_000;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
+  runSourceIndexPass(): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
   runGardenEmbeddingBackfillPass(
@@ -117,6 +119,12 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
 
   return Object.freeze({
     startBackgroundServices,
+    runSourceIndexPass: async () => {
+      if (state.backgroundStarted || state.shuttingDown !== null || input.sourceIndexProducer?.runPass === undefined) {
+        throw new Error("Source-only preparation requires an idle, unscheduled daemon producer");
+      }
+      return await input.sourceIndexProducer.runPass();
+    },
     runGardenBackgroundPass: async () => {
       await awaitStartupBackgroundPassInFlight(state);
       try {

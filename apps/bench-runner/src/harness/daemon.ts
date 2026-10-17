@@ -125,10 +125,16 @@ async function createBenchDaemonState(
   const embeddingMode = opts.embeddingMode ?? preparedLaunch?.embeddingMode ?? "disabled";
   const embeddingProviderKind = opts.embeddingProviderKind ??
     preparedLaunch?.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
+  if (opts.cachedLocalEmbedding !== undefined && (embeddingMode !== "env" || embeddingProviderKind !== "local_onnx" || preparedLaunch !== undefined)) {
+    throw new AlayaError("VALIDATION", "cached-local execution requires an explicit local embedding launch");
+  }
   const launch = preparedLaunch ?? createBenchDaemonLaunchConfig({
     dataDir,
     embeddingMode,
     embeddingProviderKind,
+    ...(opts.cachedLocalEmbedding === undefined ? {} : { ambientEnv: { ...process.env,
+      ALAYA_LOCAL_EMBEDDING_CACHE_DIR: opts.cachedLocalEmbedding.cache_root,
+      ALAYA_LOCAL_EMBEDDING_MODEL: opts.cachedLocalEmbedding.model_id } }),
     reviewerIdentity: opts.reviewerIdentity,
     reviewerToken: opts.reviewerToken
   });

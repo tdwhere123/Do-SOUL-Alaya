@@ -1,6 +1,7 @@
 import { AlayaError } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import { prepareSemanticChain } from "./prepare.js";
+import { prepareSemanticChainSourceIndex } from "./source-index-binding.js";
 import { writeDirectLazyConfig } from "./bind-lazy.js";
 import { replaySemanticChain, measureSemanticChain } from "./replay.js";
 import { interveneSemanticChain } from "./intervene.js";
@@ -27,7 +28,7 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
   try {
     const [operation, ...rest] = args;
     const flags = new Map<string, string>();
-    const allowed = new Set(["--root", "--config", "--replay", "--gold", "--evaluator-root", "--arm", "--out", "--leaf-trials",
+    const allowed = new Set(["--root", "--config", "--execution", "--replay", "--gold", "--evaluator-root", "--arm", "--out", "--leaf-trials",
       "--population", "--source-preflight", "--source-cache-root", "--source-owners",
       "--source-physical-preflight", "--recorded-at", "--producer-commit", "--source-cap"]);
     for (let index = 0; index < rest.length; index += 2) {
@@ -59,6 +60,8 @@ export async function runSemanticChainLauncher(args: readonly string[]): Promise
       ...(flags.get("--source-physical-preflight") === undefined ? {} : {
         childPhysicalPreflightPath: flags.get("--source-physical-preflight")! }) });
     else if (operation === "recover-final-deliver") result = await deliverFinalRecoveryFirstExposure(required("--root"));
+    else if (operation === "prepare-source-index") result = await prepareSemanticChainSourceIndex(
+      json(required("--config")), json(required("--execution")), required("--root"));
     else if (operation === "prepare") result = await prepareSemanticChain(json(required("--config")), required("--root"));
     else if (operation === "bind-lazy") result = await writeDirectLazyConfig({ root: required("--root"),
       chainConfig: json(required("--config")), population: json(required("--population")),

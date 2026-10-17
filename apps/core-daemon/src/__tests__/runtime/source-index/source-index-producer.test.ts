@@ -27,6 +27,7 @@ afterAll(() => { isolation.restore(); });
 import {
   DEFAULT_LOCAL_ONNX_MODEL_ID,
   SourceIndexAcquisition,
+  SourceIndexBackfill,
   defaultLocalOnnxCacheDir,
   fieldContractSha256,
   type SourceEmbeddingInput,
@@ -35,6 +36,8 @@ import {
 import {
   hashContentDigest,
   sourceIndexProfileId,
+  SourceIndexOperationError,
+  type SourceIndexBackfillResult,
   type SourceIndexProfile
 } from "@do-soul/alaya-protocol";
 import { initDatabase, SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
@@ -164,7 +167,8 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const environment = fileEnvironment();
     publishSource(environment, "Alpha uses tools.");
     const { bind } = labeledBind({ max_input_tokens: 32 });
-    await producerFor(environment, bind).runPass();
+    const receipt = await producerFor(environment, bind).runPass();
+    expect(receipt).toMatchObject({ status: "settled", reason: "pass_complete", binding: { status: "ready" } });
     const state = environment.index.state(WORKSPACE);
     expect(state).toMatchObject({
       status: "ready",
@@ -215,7 +219,12 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
       limits: {}
     });
     producers.push(producer);
-    await producer.runPass();
+    const receipt = await producer.runPass();
+    expect(receipt).toMatchObject({ status: "failed", reason: "labeled_inference_unavailable",
+      resources: { model_inputs: 2, input_bytes: Buffer.byteLength("first source bodysecond source body") },
+      accounting: "lower_bound", model_execution_work: "unknown" });
+    expect(receipt.resources.work).toBeGreaterThan(0);
+    expect(receipt.resources.native_bytes).toBeGreaterThan(0);
     const failed = environment.index.state(WORKSPACE);
     expect(failed).toMatchObject({ status: "failed", active_generation_id: null });
     if (failed.status === "unknown") throw new Error("failed generation must remain selected");
@@ -243,12 +252,62 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
       "SELECT count(*) AS n FROM source_index_vectors WHERE workspace_id=?").get(WORKSPACE)).toEqual({ n: 2 });
   });
 
+  it("retains a thrown binding failure reason instead of returning a settled pass", async () => {
+    const environment = fileEnvironment();
+    const receipt = await producerFor(environment, async () => { throw new Error("binding_transport_unavailable"); }).runPass();
+    expect(receipt).toMatchObject({ status: "failed", reason: "binding_transport_unavailable", binding: { status: "not_run" },
+      resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, model_execution_work: "unknown" });
+  });
+
+  it("retains an unbind exception instead of masking it with unsupported binding", async () => {
+    const environment = fileEnvironment();
+    vi.spyOn(SqliteSourceIndexRepository.prototype, "unbind").mockImplementationOnce(() => { throw new Error("unbind_write_failed"); });
+    const fail = vi.spyOn(SqliteSourceIndexRepository.prototype, "fail");
+    const receipt = await producerFor(environment, async () => ({ status: "unsupported", reason: "runtime_missing" })).runPass();
+    expect(receipt).toMatchObject({ status: "failed", reason: "unbind_write_failed", binding: { status: "unsupported" } });
+    expect(fail).not.toHaveBeenCalled();
+  });
+
+  it("retains known native costs and the thrown failure reason from capture", async () => {
+    const environment = fileEnvironment();
+    publishSource(environment, "source body");
+    vi.spyOn(SqliteSourceIndexRepository.prototype, "capturePage").mockImplementationOnce(() => {
+      throw new SourceIndexOperationError(new Error("capture_page_unavailable"), { work: 17, native_bytes: 23 });
+    });
+    const receipt = await producerFor(environment, labeledBind().bind).runPass();
+    expect(receipt).toMatchObject({ status: "failed", reason: "capture_page_unavailable", accounting: "lower_bound",
+      resources: { work: 17, native_bytes: 23, model_inputs: 0, input_bytes: 0 }, model_execution_work: "unknown" });
+  });
+
+  it.each(["partial", "resource_exhausted", "token_limit", "unsupported", "stale", "superseded", "unbound", "cancelled", "deadline"] as const)(
+    "retains returned %s and spent work without publishing or failing the generation", async status => {
+      const environment = fileEnvironment();
+      publishSource(environment, "source body");
+      const result: SourceIndexBackfillResult = { status, reason: `bounded_${status}`, accepted_vectors: 0,
+        resources: { work: 7, native_bytes: 11, native_accounting: "partial", sql_internal_work: "unknown",
+          model_inputs_submitted: 2, model_input_bytes_submitted: 8, token_count_observed: 0,
+          inputs_without_token_count: 2, model_execution_work: "unknown" } };
+      vi.spyOn(SourceIndexBackfill.prototype, "step").mockResolvedValueOnce(result);
+      const activate = vi.spyOn(SqliteSourceIndexRepository.prototype, "activate");
+      const fail = vi.spyOn(SqliteSourceIndexRepository.prototype, "fail");
+      const receipt = await producerFor(environment, labeledBind().bind).runPass();
+      expect(receipt).toMatchObject({ status, reason: `bounded_${status}`,
+        resources: { model_inputs: 2, input_bytes: 8 }, accounting: "lower_bound", model_execution_work: "unknown" });
+      expect(receipt.resources.work).toBeGreaterThanOrEqual(7);
+      expect(receipt.resources.native_bytes).toBeGreaterThanOrEqual(11);
+      expect(activate).not.toHaveBeenCalledWith(WORKSPACE, expect.any(String));
+      expect(fail).not.toHaveBeenCalled();
+    }
+  );
+
   it("resumes pending windows after interrupted backfill and file-backed reopen", async () => {
     const environment = fileEnvironment();
     publishSource(environment, "Alpha猫\nβeta!終");
     const first = labeledBind();
-    await producerFor(environment, first.bind, { modelInputs: 1 }).runPass();
+    const partial = await producerFor(environment, first.bind, { modelInputs: 1 }).runPass();
+    expect(partial).toMatchObject({ status: "resource_exhausted", reason: "model_input_budget", resources: { model_inputs: 1 } });
     expect(environment.index.state(WORKSPACE)).toMatchObject({ active_generation_id: null });
+    expect(environment.index.state(WORKSPACE).status).not.toBe("failed");
     expect(first.embedInputs).toHaveBeenCalledTimes(1);
     const reopened = reopen(environment);
     const second = labeledBind();
@@ -309,9 +368,12 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     await producer.runPass();
     expect(environment.index.state(WORKSPACE)).toMatchObject({ status: "ready" });
     bind = async () => ({ status: "unsupported", reason: "labeled_local_runtime_missing" });
-    await producer.runPass();
+    const fail = vi.spyOn(SqliteSourceIndexRepository.prototype, "fail");
+    const receipt = await producer.runPass();
+    expect(receipt).toMatchObject({ status: "unsupported", reason: "labeled_local_runtime_missing" });
+    expect(fail).not.toHaveBeenCalled();
     expect(environment.index.state(WORKSPACE)).toMatchObject({
-      active_generation_id: null
+      status: "unbound", active_generation_id: null
     });
     expect(environment.index.state(WORKSPACE).status).not.toBe("ready");
   });
@@ -441,7 +503,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const gate = deferred<Awaited<ReturnType<SourceIndexProducerBind>>>();
     const bind = vi.fn<SourceIndexProducerBind>(() => gate.promise);
     const producer = producerFor(environment, bind, { stepDeadlineMs: 20 });
-    await producer.runPass();
+    expect(await producer.runPass()).toMatchObject({ status: "deadline", reason: "deadline_exceeded" });
     expect(bind).toHaveBeenCalledTimes(1);
     await producer.stop();
     producer.start();
@@ -470,7 +532,7 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     publishSource(environment, "second source body", "source-b");
     const { bind, embedInputs } = labeledBind({ max_input_tokens: 32 });
     const producer = producerFor(environment, bind, { maxRootsPerPass: 1 });
-    await producer.runPass();
+    expect(await producer.runPass()).toMatchObject({ status: "partial", reason: "pending_targets" });
     const incomplete = environment.index.state(WORKSPACE);
     expect(incomplete.status).not.toBe("ready");
     if (incomplete.status !== "unknown") expect(incomplete.active_generation_id).toBeNull();
@@ -499,10 +561,10 @@ describe("daemon Source-index producer through file-backed SQLite", () => {
     const producer = producerFor(environment, bind);
     const running = producer.runPass();
     await started.promise;
-    await producer.runPass();
+    expect(await producer.runPass()).toMatchObject({ status: "busy", reason: "producer_occupied" });
     expect(embedInputs).toHaveBeenCalledTimes(1);
     await producer.stop();
-    await running;
+    expect(await running).toMatchObject({ status: "stopped", reason: "producer_stopped", resources: { model_inputs: 1 } });
     await producer.runPass();
     producer.start();
     await producer.runPass();

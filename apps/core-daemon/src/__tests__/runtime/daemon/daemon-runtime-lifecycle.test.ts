@@ -37,6 +37,7 @@ function createControls(
     ) => Promise<void>;
     recallReadWorkerClient: { close(): Promise<void> };
     closeEmbeddingProvider: () => Promise<void>;
+    sourceIndexProducer: Parameters<typeof createDaemonLifecycleControls>[0]["sourceIndexProducer"];
     database: { close(): void };
     temporalRuntimeLease: { release(): Promise<void> };
     backgroundManagerStop: () => Promise<unknown>;
@@ -92,6 +93,7 @@ function createControls(
     globalMemoryRecallInvalidationSubscription: null,
     recallReadWorkerClient: overrides.recallReadWorkerClient,
     closeEmbeddingProvider: overrides.closeEmbeddingProvider,
+    sourceIndexProducer: overrides.sourceIndexProducer,
     database: overrides.database ?? { close: vi.fn() },
     temporalRuntimeLease: overrides.temporalRuntimeLease,
     requestProtection: {
@@ -117,6 +119,30 @@ function createControls(
 }
 
 describe("createDaemonLifecycleControls", () => {
+  it("runs one Source-only pass without Garden and refuses preparation once scheduling or shutdown begins", async () => {
+    const sourceIndexProducer = { start: vi.fn(), stop: vi.fn(async () => undefined),
+      runPass: vi.fn<NonNullable<NonNullable<Parameters<typeof createDaemonLifecycleControls>[0]["sourceIndexProducer"]>["runPass"]>>() };
+    const { controls, runBackgroundPass, runBulkEnrichPass, runEmbeddingBackfillPass } = createControls("env", { sourceIndexProducer });
+    await controls.runSourceIndexPass();
+    expect(sourceIndexProducer.runPass).toHaveBeenCalledTimes(1);
+    expect(sourceIndexProducer.start).not.toHaveBeenCalled();
+    expect(runBackgroundPass).not.toHaveBeenCalled();
+    expect(runBulkEnrichPass).not.toHaveBeenCalled();
+    expect(runEmbeddingBackfillPass).not.toHaveBeenCalled();
+    controls.startBackgroundServices();
+    await expect(controls.runSourceIndexPass()).rejects.toThrow(/idle, unscheduled/u);
+    await controls.shutdown();
+    await expect(controls.runSourceIndexPass()).rejects.toThrow(/idle, unscheduled/u);
+    expect(sourceIndexProducer.runPass).toHaveBeenCalledTimes(1);
+    expect(sourceIndexProducer.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses Source preparation when no producer is wired", async () => {
+    const { controls } = createControls("env");
+    await expect(controls.runSourceIndexPass()).rejects.toThrow(/idle, unscheduled/u);
+    await controls.shutdown();
+  });
+
   it("forwards cache-only embedding backfill mode to Garden", async () => {
     const { controls, runEmbeddingBackfillPass } = createControls("env");
 

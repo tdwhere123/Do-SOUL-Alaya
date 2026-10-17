@@ -48,7 +48,8 @@ const REFLINK_UNSUPPORTED = new Set([
 
 export function checkpointAndCopyBenchDb(
   liveDbPath: string,
-  snapshotDbPath: string
+  snapshotDbPath: string,
+  options?: Readonly<{ keepLiveConnection?: boolean }>
 ): void {
   const db = initDatabase({ filename: liveDbPath });
   try {
@@ -68,7 +69,9 @@ export function checkpointAndCopyBenchDb(
       throw new Error(`cannot freeze live bench DB: incomplete WAL checkpoint (${detail})`);
     }
   } finally {
-    closeCachedDatabase(liveDbPath);
+    // A quiescent setup may immediately consume the sealed generation with the same provider/client.
+    // Its daemon remains the connection/shutdown owner; the default still closes standalone freezes.
+    if (options?.keepLiveConnection !== true) closeCachedDatabase(liveDbPath);
   }
   atomicCopy(liveDbPath, snapshotDbPath);
 }

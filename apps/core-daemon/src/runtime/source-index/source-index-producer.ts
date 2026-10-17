@@ -1,6 +1,8 @@
 import {
   SOURCE_INDEX_MAX_BODY_BYTES,
+  SourceIndexOperationError,
   type SourceIndexBackfillBudget,
+  type SourceIndexBackfillResult,
   type SourceIndexConfiguration,
   type SourceIndexGeneration,
   type SourceIndexSelection
@@ -47,10 +49,26 @@ export interface SourceIndexProducerInput {
   readonly limits?: Partial<SourceIndexProducerLimits>;
 }
 
+type PassOutcome = Readonly<{
+  status: "settled" | "busy" | "stopped" | Exclude<SourceIndexBackfillResult["status"], "root_complete">;
+  reason: string;
+}>;
+export type SourceIndexProducerPassReceipt = PassOutcome & Readonly<{
+  binding: Readonly<{ status: "not_run" }> | Omit<Extract<SourceEmbeddingBindingResult, { status: "ready" }>, "embedInputs"> |
+    Extract<SourceEmbeddingBindingResult, { status: "unsupported" }>;
+  resources: Readonly<{ work: number; native_bytes: number; model_inputs: number; input_bytes: number }>;
+  accounting: "lower_bound";
+  model_execution_work: "unknown";
+  warmup: "not_separately_measured";
+  elapsed_ms: number;
+  limits: SourceIndexProducerLimits;
+}>;
 type ReadyBinding = Extract<SourceEmbeddingBindingResult, { status: "ready" }>;
 type Pass = {
   signal: AbortSignal;
   deadline: number;
+  binding: SourceIndexProducerPassReceipt["binding"];
+  outcome: PassOutcome;
   spent: { work: number; native_bytes: number; model_inputs: number; input_bytes: number };
   capturePages: number;
   visitedRoots: number;
@@ -74,7 +92,7 @@ export class SourceIndexProducer {
   private started = false;
   private stopping = false;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private inFlight: Promise<void> | null = null;
+  private inFlight: Promise<SourceIndexProducerPassReceipt> | null = null;
   private signal = new AbortController();
   // A caller timeout is not native settlement. Only the shared provider lifecycle can kill it.
   private readonly nativeWork = new Set<Promise<unknown>>();
@@ -117,13 +135,18 @@ export class SourceIndexProducer {
     if (this.inFlight !== null) await this.inFlight;
   }
 
-  public async runPass(): Promise<void> {
-    if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping && !this.started) return;
+  public async runPass(): Promise<SourceIndexProducerPassReceipt> {
+    if (this.inFlight !== null || this.nativeWork.size > 0 || this.stopping && !this.started) {
+      return { status: this.stopping ? "stopped" : "busy", reason: this.stopping ? "producer_stopped" : "producer_occupied",
+        binding: { status: "not_run" },
+        resources: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 },
+        accounting: "lower_bound", model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: 0, limits: this.limits };
+    }
     if (this.stopping) { this.stopping = false; this.signal = new AbortController(); }
     // Defer entry until the occupancy slot is installed (including synchronous bind failures).
     const work = Promise.resolve().then(() => this.executePass());
     this.inFlight = work;
-    try { await work; }
+    try { return await work; }
     finally { if (this.inFlight === work) this.inFlight = null; }
   }
 
@@ -134,36 +157,56 @@ export class SourceIndexProducer {
     return work;
   }
 
-  private async executePass(): Promise<void> {
+  private async executePass(): Promise<SourceIndexProducerPassReceipt> {
+    const started = performance.now();
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(), this.limits.stepDeadlineMs);
     const pass: Pass = { signal: AbortSignal.any([this.signal.signal, deadline.signal]),
-      deadline: Date.now() + this.limits.stepDeadlineMs,
+      deadline: Date.now() + this.limits.stepDeadlineMs, binding: { status: "not_run" },
+      outcome: { status: "settled", reason: "pass_complete" },
       spent: { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 }, capturePages: 0, visitedRoots: 0 };
     try {
-      if (pass.signal.aborted) return;
-      const binding = await waitLocally(this.trackNative(() => bindIndexProfile(this.input.bindSourceEmbedding,
-        () => !pass.signal.aborted)), pass.signal);
-      if (pass.signal.aborted) return;
-      const tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
-      for (let count = 0; count < this.limits.maxWorkspacesPerPass && !pass.signal.aborted; count++) {
-        const workspace = this.nextWorkspace() ?? (count === 0 ? this.nextWorkspace() : null);
-        if (workspace === null) return;
-        // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
-        this.afterWorkspace = workspace;
-        if (tracked.status !== "ready") {
-          this.lifecycle.unbind(workspace);
-          this.targetCursors.delete(workspace);
-        } else {
-          await this.reconcileWorkspace(workspace, tracked, pass);
-          if (!this.hasBudget(pass)) return;
-        }
-      }
+      await this.reconcilePass(pass);
     } catch (error) {
-      if (!pass.signal.aborted) this.input.warn("source index producer pass failed", {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      if (error instanceof SourceIndexOperationError) {
+        pass.spent.work += error.resources.work;
+        pass.spent.native_bytes += error.resources.native_bytes;
+      }
+      const reason = boundedProducerFailureReason(error instanceof Error ? error.message : String(error));
+      pass.outcome = { status: "failed", reason };
+      if (!pass.signal.aborted) this.input.warn("source index producer pass failed", { error: reason });
     } finally { clearTimeout(timer); }
+    // A deadline may precede native settlement; these are observed lower bounds, not a native-call census.
+    const outcome: PassOutcome = this.signal.signal.aborted ? { status: "stopped", reason: "producer_stopped" }
+      : deadline.signal.aborted ? { status: "deadline", reason: "deadline_exceeded" } : pass.outcome;
+    return { ...outcome, binding: pass.binding, resources: { ...pass.spent }, accounting: "lower_bound", limits: this.limits,
+      model_execution_work: "unknown", warmup: "not_separately_measured", elapsed_ms: performance.now() - started };
+  }
+
+  private async reconcilePass(pass: Pass): Promise<void> {
+    if (pass.signal.aborted) return;
+    const binding = await waitLocally(this.trackNative(() => bindIndexProfile(this.input.bindSourceEmbedding,
+      () => !pass.signal.aborted)), pass.signal);
+    if (pass.signal.aborted) return;
+    pass.binding = binding.status === "ready"
+      ? { status: "ready", profile_id: binding.profile_id, profile: binding.profile } : binding;
+    const tracked = binding.status === "ready" ? this.trackBinding(binding) : binding;
+    if (binding.status === "unsupported") pass.outcome = { status: binding.status, reason: boundedProducerFailureReason(binding.reason) };
+    for (let count = 0; count < this.limits.maxWorkspacesPerPass && !pass.signal.aborted; count++) {
+      const workspace = this.nextWorkspace() ?? (count === 0 ? this.nextWorkspace() : null);
+      if (workspace === null) return;
+      // Advance even when this workspace consumes the remaining allowance; later ones cannot starve.
+      this.afterWorkspace = workspace;
+      if (tracked.status !== "ready") {
+        this.lifecycle.unbind(workspace);
+        this.targetCursors.delete(workspace);
+      } else {
+        const outcome = await this.reconcileWorkspace(workspace, tracked, pass);
+        // Keep normal workspace rotation, but never let a later success erase a terminal refusal.
+        if (outcome !== null && pass.outcome.status === "settled") pass.outcome = outcome;
+        if (!this.hasBudget(pass)) return;
+      }
+    }
   }
 
   private trackBinding(binding: ReadyBinding): ReadyBinding {
@@ -173,7 +216,7 @@ export class SourceIndexProducer {
       binding.embedInputs(inputs, { profile_id: options.profile_id, timeoutMs: 0 })) };
   }
 
-  private async reconcileWorkspace(workspaceId: string, binding: ReadyBinding, pass: Pass): Promise<void> {
+  private async reconcileWorkspace(workspaceId: string, binding: ReadyBinding, pass: Pass): Promise<PassOutcome | null> {
     const configuration: SourceIndexConfiguration = {
       revision: SOURCE_INDEX_LOCAL_CONFIGURATION_REVISION, profile: binding.profile
     };
@@ -181,12 +224,13 @@ export class SourceIndexProducer {
     const generation = this.lifecycle.begin(selection);
     if (generation.status === "ready" || generation.status === "valid_empty") {
       this.targetCursors.delete(workspaceId);
-      return;
+      return null;
     }
     const captured = this.captureUntilComplete(workspaceId, generation, pass);
-    if (pass.signal.aborted) return;
-    await this.backfillTargets(selection, captured.generation_id, binding, pass);
-    if (!pass.signal.aborted) this.publishIfReady(workspaceId, captured.generation_id);
+    if (pass.signal.aborted) return null;
+    const outcome = await this.backfillTargets(selection, captured.generation_id, binding, pass);
+    if (outcome !== null) return outcome;
+    return pass.signal.aborted ? null : this.publishIfReady(workspaceId, captured.generation_id);
   }
 
   private captureUntilComplete(workspaceId: string, initial: SourceIndexGeneration, pass: Pass): SourceIndexGeneration {
@@ -205,7 +249,7 @@ export class SourceIndexProducer {
   }
 
   private async backfillTargets(selection: SourceIndexSelection, generationId: string,
-    binding: ReadyBinding, pass: Pass): Promise<void> {
+    binding: ReadyBinding, pass: Pass): Promise<PassOutcome | null> {
     const workspace = selection.workspace_id;
     let cursor = this.targetCursors.get(workspace);
     if (cursor?.generation !== generationId) {
@@ -215,7 +259,7 @@ export class SourceIndexProducer {
     while (!pass.signal.aborted && this.hasBudget(pass) && pass.visitedRoots < this.limits.maxRootsPerPass) {
       // One metadata row per visit, including already-complete targets. Never scan/skip an unbounded prefix.
       const target = this.repository.listTargets(workspace, generationId, cursor.after, 1)[0];
-      if (target === undefined) { this.targetCursors.delete(workspace); return; }
+      if (target === undefined) { this.targetCursors.delete(workspace); return null; }
       pass.visitedRoots++;
       const previousRoot = cursor.after;
       cursor.after = target.root_key;
@@ -223,7 +267,9 @@ export class SourceIndexProducer {
         remainingBudget(this.limits, pass.spent));
       pass.spent.work += pending.resources.work;
       pass.spent.native_bytes += pending.resources.native_bytes;
-      if (pending.status === "stale" || pending.status === "superseded") return;
+      if (pending.status === "stale" || pending.status === "superseded" || pending.status === "unbound") {
+        return { status: pending.status, reason: boundedProducerFailureReason(pending.reason) };
+      }
       if (pending.status === "ready" && pending.ordinals.length === 0) continue;
       const result = await this.backfill.step({ selection, generation_id: generationId,
         root_key: target.root_key, binding, budget: remainingBudget(this.limits, pass.spent),
@@ -232,16 +278,16 @@ export class SourceIndexProducer {
       pass.spent.native_bytes += result.resources.native_bytes;
       pass.spent.model_inputs += result.resources.model_inputs_submitted;
       pass.spent.input_bytes += result.resources.model_input_bytes_submitted;
-      if (result.status === "cancelled" || result.status === "deadline") { cursor.after = previousRoot; return; }
-      if (result.status === "stale" || result.status === "superseded") return;
+      if (result.status === "root_complete") continue;
+      const reason = boundedProducerFailureReason(result.reason);
+      cursor.after = previousRoot;
       if (result.status === "failed") {
-        cursor.after = previousRoot;
-        const reason = boundedProducerFailureReason(result.reason);
         this.lifecycle.fail(workspace, generationId, reason);
         this.input.warn("source index producer backfill failed", { workspace_id: workspace, reason });
-        return;
       }
+      return { status: result.status, reason };
     }
+    return null;
   }
 
   private hasBudget(pass: Pass): boolean {
@@ -249,15 +295,19 @@ export class SourceIndexProducer {
     return left.work > 0 && left.native_bytes > 0 && left.model_inputs > 0 && left.input_bytes > 0;
   }
 
-  private publishIfReady(workspaceId: string, generationId: string): void {
+  private publishIfReady(workspaceId: string, generationId: string): PassOutcome {
     const generation = this.repository.generation(workspaceId, generationId);
-    if (generation === null || !generation.enumeration_complete ||
-        generation.completed_count !== generation.target_count ||
-        generation.status === "failed" || generation.status === "retired") return;
+    if (generation === null) return { status: "unbound", reason: "missing_generation" };
+    if (generation.status === "failed") return { status: "failed", reason: generation.reason ?? "generation_failed" };
+    if (generation.status === "retired") return { status: "superseded", reason: "generation_retired" };
+    if (!generation.enumeration_complete || generation.completed_count !== generation.target_count) {
+      return { status: "partial", reason: !generation.enumeration_complete ? "capture_incomplete" : "pending_targets" };
+    }
     const published = this.lifecycle.publish(workspaceId, generationId);
-    if (published.status === "rejected") this.input.warn("source index producer activation refused", {
-      workspace_id: workspaceId, reason: published.reason
-    });
+    if (published.status === "accepted") return { status: "settled", reason: "pass_complete" };
+    this.input.warn("source index producer activation refused", { workspace_id: workspaceId, reason: published.reason });
+    return { status: published.reason === "stale" || published.reason === "superseded" ? published.reason : "partial",
+      reason: published.reason };
   }
 
   private nextWorkspace(): string | null {
@@ -304,5 +354,5 @@ function remainingBudget(limits: SourceIndexProducerLimits, spent: Pass["spent"]
 }
 
 function boundedProducerFailureReason(reason: string): string {
-  return reason.length >= 1 && reason.length <= 256 ? reason : "backfill_failed";
+  return reason.slice(0, 256) || "backfill_failed";
 }

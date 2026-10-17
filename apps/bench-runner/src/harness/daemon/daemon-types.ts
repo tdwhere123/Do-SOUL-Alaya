@@ -64,6 +64,8 @@ export interface BenchDaemonOptions {
   readonly runId?: string;
   readonly embeddingMode?: BenchEmbeddingMode;
   readonly embeddingStartupProbe?: AlayaDaemonRuntimeOptions["embeddingStartupProbe"];
+  /** Explicit cached-local execution; no ambient model/cache fallback. Requires env/local_onnx. */
+  readonly cachedLocalEmbedding?: Readonly<{ cache_root: string; model_id: string }>;
   // Selects which provider the bench daemon points the embedding subsystem at
   // when embeddingMode === "env". OpenAI is explicit opt-in; the local ONNX
   // provider is the product default. Ignored when embeddingMode is "disabled".
