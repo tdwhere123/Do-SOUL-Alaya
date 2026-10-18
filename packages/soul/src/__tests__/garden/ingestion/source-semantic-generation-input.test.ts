@@ -68,6 +68,12 @@ describe("source semantic generation presentation", () => {
     expect(full.source_request.original_source).toBe(request.source_request.original_source);
     expect(full.source_request.source_assertions).toEqual(request.source_request.source_assertions);
     expect(full.source_request.generation_task?.original_query).toBe(generationTask.original_query);
+    const fullView = JSON.parse(sourceSemanticGenerationInput(full));
+    expect(fullView.source_request).toEqual({ ...JSON.parse(sourceSemanticGenerationInput(request)).source_request,
+      generation_task: { contract: "source-semantic-generation-task-v1", context: "complete_original_source",
+        responsibility: { kind: "all_supplied_meaning" } } });
+    expect(fullView.response_schema).toEqual(sourceSemanticResponseJsonSchema(request));
+    expect(fullView.source_request.generation_task).not.toHaveProperty("original_query");
     expect(sourceSemanticSystemPrompt(full)).not.toBe(sourceSemanticSystemPrompt(request));
     expect(() => buildSourceSemanticRequest({ ...selected, assertionIds: [1], sourceScope: undefined, generationTask }))
       .toThrow(/complete.source/u);
@@ -75,18 +81,49 @@ describe("source semantic generation presentation", () => {
       ...request.source_request, original_source: input.sourceCorpus.trim() + " changed" } })).toThrow(/original source/u);
   });
 
-  it("keeps profiles and full revision context while rejecting presentation changes within a parent chain", () => {
+  it("projects only exhaustive task metadata while retaining identical query text in source evidence", () => {
+    const sourceCorpus = "Who saw Mira?", generationTask = { contract: "source-semantic-generation-task-v1" as const,
+      context: "complete_original_source" as const, original_query: sourceCorpus,
+      responsibility: { kind: "all_supplied_meaning" as const } };
+    const request = buildSourceSemanticRequest({ ...selected, sourceCorpus, assertionIds: [1], generationTask });
+    const retained = JSON.stringify(request), view = JSON.parse(sourceSemanticGenerationInput(request));
+    expect(view).toEqual({ contract: "source-semantic-generation-view-v1",
+      response_schema: sourceSemanticResponseJsonSchema(request), source_request: {
+        source_scope: "complete-source", resource_limits: { output_byte_limit: 1048576 },
+        attribution_context: { contract: "utterance-attribution-v1", status: "unknown" },
+        source_assertions: [{ assertion_id: 1, text: sourceCorpus, source_role: "user" }],
+        generation_task: { contract: "source-semantic-generation-task-v1", context: "complete_original_source",
+          responsibility: { kind: "all_supplied_meaning" } }, original_source: sourceCorpus
+      } });
+    expect(view.source_request.generation_task).not.toHaveProperty("original_query");
+    expect(request.source_request.generation_task).toEqual(generationTask);
+    expect(JSON.stringify(request)).toBe(retained);
+    const { generation_view_contract: _view, ...legacyBody } = request.source_request;
+    const legacy = parseSourceSemanticRequest({ ...request, source_request: legacyBody });
+    expect(sourceSemanticGenerationInput(legacy)).toBe(JSON.stringify(legacy));
+    expect(JSON.parse(sourceSemanticGenerationInput(legacy)).source_request.generation_task).toEqual(generationTask);
+  });
+
+  it.each([false, true])("keeps profiles and full revision context with exhaustive task %s", exhaustive => {
     const profile = { contract: "source-interpretation-profile-v1" as const, description: "Observed acts",
       predicates: [{ symbol: "see", meaning: "Seeing", governing_roles: [] }], roles: [{ symbol: "actor", meaning: "Observer" }] };
-    const parent = buildSourceSemanticRequest({ ...selected, profile });
+    const generationTask = exhaustive ? { contract: "source-semantic-generation-task-v1" as const,
+      context: "complete_original_source" as const, original_query: " Which place? \n",
+      responsibility: { kind: "all_supplied_meaning" as const } } : undefined;
+    const parent = buildSourceSemanticRequest({ ...selected, profile, generationTask });
     const revision = prepareSourceSemanticRevision(parent, "{broken", [], { responseCompletion: "complete" });
-    const child = buildSourceSemanticRequest({ ...selected, profile, revision });
+    const child = buildSourceSemanticRequest({ ...selected, profile, generationTask, revision });
     const view = JSON.parse(sourceSemanticGenerationInput(child));
     expect(view.profile).toEqual(profile);
     expect(view.source_request.revision).toEqual(revision);
     expect(view.source_request.revision.previous_response).toBe("{broken");
     expect(JSON.parse(view.source_request.revision.parent_request_json)).toEqual(parent);
-    expect(() => buildSourceSemanticRequest({ ...input, profile, revision })).toThrow(/different original source/u);
+    if (exhaustive) {
+      expect(view.source_request.generation_task).not.toHaveProperty("original_query");
+      expect(JSON.parse(view.source_request.revision.parent_request_json).source_request.generation_task.original_query)
+        .toBe(generationTask!.original_query);
+    }
+    expect(() => buildSourceSemanticRequest({ ...input, profile, generationTask, revision })).toThrow(/different original source/u);
     const legacy = buildSourceSemanticRequest(input);
     expect(() => buildSourceSemanticRequest({ ...selected, revision: prepareSourceSemanticRevision(legacy, "{bad", [],
       { responseCompletion: "complete" }) })).toThrow(/different original source/u);

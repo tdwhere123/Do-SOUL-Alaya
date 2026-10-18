@@ -1,3 +1,4 @@
+import { sourceSemanticGenerationTaskSummary } from "@do-soul/alaya-protocol";
 import {
   parseSourceSemanticRequest, sourceSemanticResponseJsonSchema, type SourceSemanticRequest
 } from "./source-semantic-request.js";
@@ -17,7 +18,9 @@ export function sourceSemanticGenerationInput(requestValue: SourceSemanticReques
       ...(source.attribution_context.status === "captured" ? { assertion_locations: source.assertion_locations } : {}),
       source_assertions: source.source_assertions,
       ...(source.generation_task === undefined ? {} : {
-        generation_task: source.generation_task, original_source: source.original_source
+        generation_task: source.generation_task.responsibility.kind === "all_supplied_meaning"
+          ? sourceSemanticGenerationTaskSummary(source.generation_task) : source.generation_task,
+        original_source: source.original_source
       }),
       ...(source.revision === undefined ? {} : { revision: source.revision })
     },

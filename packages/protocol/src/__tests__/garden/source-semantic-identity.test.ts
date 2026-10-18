@@ -81,16 +81,18 @@ it("keeps query-semantics identity independent of source interpretation", () => 
   expect(SourceSemanticQuerySchema.safeParse({ ...query, source_interpretation_id: digest }).success).toBe(false);
 });
 
-it("binds declared responsibility and exact cue bytes while checking full and lightweight task disclosure", () => {
+it.each([{ kind: "original_query_task", other_meaning: "unassessed" }, { kind: "all_supplied_meaning" }] as const)(
+  "binds exact cue bytes and descriptor consistency for $kind responsibility", responsibility => {
   const generation_task = { contract: "source-semantic-generation-task-v1" as const, context: "complete_original_source" as const,
-    original_query: "What was sent?", responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
+    original_query: "What was sent?", responsibility };
   const scoped = { ...interpretation, generation_task };
   const identity = sourceSemanticInterpretationIdentity(scoped, sha);
   expect(identity).not.toBe(sourceSemanticInterpretationIdentity(interpretation, sha));
   expect(sourceSemanticInterpretationIdentity({ ...scoped, generation_task: { ...generation_task, original_query: "What was sent? " } }, sha))
     .not.toBe(identity);
   expect(sourceSemanticInterpretationIdentity({ ...scoped, generation_task: { ...generation_task,
-    responsibility: { kind: "all_supplied_meaning" } } }, sha)).not.toBe(identity);
+    responsibility: responsibility.kind === "original_query_task" ? { kind: "all_supplied_meaning" }
+      : { kind: "original_query_task", other_meaning: "unassessed" } } }, sha)).not.toBe(identity);
   expect(sourceSemanticInterpretationPreimage(interpretation)).not.toHaveProperty("generation_task");
   const descriptor = { interpretation_id: identity, source_id: "src", source_version: "1", content_digest: digest,
     producer_id: "producer", producer_version: "p1", contract_version: "source-interpretation-v4",

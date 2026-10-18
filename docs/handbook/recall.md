@@ -924,8 +924,17 @@ sibling through that host-bound draft owner after source-handle admission and be
 existing publication. The field is caller-declared responsibility, not verified
 generation history or completeness. H identity binds the exact cue bytes.
 Full delivery includes the task; lightweight descriptors disclose responsibility
-without repeating the cue. Later use under another query remains task-scoped and
-cannot establish omitted-fact absence. Explicit abstention has no H and is not a
+without repeating the cue. In the selected generation view, `all_supplied_meaning`
+uses that same Protocol task summary without `original_query`; `original_query_task`
+retains the exact cue. The retained host task, source bytes, catalog, roles,
+attribution and response schema are unchanged. Selected cache identity binds both
+host JSON and exact model JSON, so this private projection requires fresh wire
+and request authority even when the host digest is unchanged. Unselected legacy
+serialization and undeclared tasks are unchanged. Revision parent request JSON
+remains complete and may contain the cue; only first-attempt task projection is
+cue-free, not source content or revision ancestry. Removing this unnecessary cue
+does not establish semantic fidelity or completeness. Later use under another query
+remains task-scoped and cannot establish omitted-fact absence. Explicit abstention has no H and is not a
 corpus absence certificate. Raw text plus catalog duplication consumes the same
 finite input budget in both modes. Without a task the existing bytes and identities
 are preserved. Native population membership, inspection, preflight and publication

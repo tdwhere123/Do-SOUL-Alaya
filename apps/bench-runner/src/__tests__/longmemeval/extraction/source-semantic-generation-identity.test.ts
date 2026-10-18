@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
 import * as soul from "@do-soul/alaya-soul";
 import { SOURCE_SEMANTIC_INLINE_GENERATION_CONTRACT, INTERN_SEMANTIC_REQUEST_MODEL,
   INTERN_SEMANTIC_REQUEST_PROFILE, INTERN_SEMANTIC_PROVIDER_URL } from "@do-soul/alaya-protocol";
@@ -165,6 +170,86 @@ describe("source semantic retained and physical generation identities", () => {
     vi.spyOn(soul, "officialApiExtractionResponseSchemaPreimage").mockReturnValue('{"type":"null"}');
     expect(computeCacheKey(config.model, config.requestProfile, line.systemPrompt, line.userPrompt)).not.toBe(line.key);
     expect(() => parseSourceSemanticRequestLine({ ...line, userPrompt: line.userPrompt.replace("Mira saw Mira", "Mira saw Oren") }, config)).toThrow(/identity mismatch/u);
+  });
+
+  it.each([{ kind: "all_supplied_meaning" }, { kind: "original_query_task", other_meaning: "unassessed" }] as const)(
+    "preserves unselected $kind task bytes, cache material and actual Gemini/chat wire", responsibility => {
+    const generationTask = { contract: "source-semantic-generation-task-v1" as const,
+      context: "complete_original_source" as const, original_query: " Which place? \n", responsibility };
+    const host = soul.buildSourceSemanticRequest({ ...input, generationTask });
+    const schema = JSON.stringify(soul.sourceSemanticResponseJsonSchema(host));
+    for (const native of [config, { model: INTERN_SEMANTIC_REQUEST_MODEL, requestProfile: INTERN_SEMANTIC_REQUEST_PROFILE,
+      modelFamily: INTERN_SEMANTIC_REQUEST_MODEL, providerUrl: INTERN_SEMANTIC_PROVIDER_URL, apiKey: null }]) {
+      const line = prepareSourceSemanticRequestLine(host, ["unit"], native);
+      const expected = createHash("sha256").update([native.model, native.requestProfile, line.systemPrompt,
+        JSON.stringify(host), native === config ? geminiGenerationSchemaCacheMaterial(schema) : schema].join("\0")).digest("hex");
+      expect(line.userPrompt).toBe(JSON.stringify(host));
+      expect(line.key).toBe(expected);
+      expect(line.requestSha256).toBe(requestEnvelopeDigest(line.userPrompt));
+      const wire = prepareSourceSemanticRequestWire(native, line, 4096), body = JSON.parse(wire.body);
+      expect(sourceSemanticRequestWireDigest(native, line, 4096)).toBe(native === config
+        ? requestEnvelopeDigest(line.userPrompt) : requestEnvelopeDigest(JSON.stringify([wire.url.href, wire.body])));
+      const userInput = native === config ? body.contents[0].parts[0].text : body.messages[1].content;
+      expect(userInput).toBe(line.userPrompt);
+      expect(JSON.parse(userInput).source_request.generation_task).toEqual(generationTask);
+      if (responsibility.kind === "original_query_task") {
+        const selectedHost = soul.buildSourceSemanticRequest({ ...input, generationTask,
+          generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT });
+        const projected = JSON.parse(expectedView());
+        projected.source_request.generation_task = generationTask;
+        projected.source_request.original_source = input.sourceCorpus;
+        const selectedLine = prepareSourceSemanticRequestLine(selectedHost, ["unit"], native);
+        expect(selectedLine.systemPrompt).toBe(line.systemPrompt);
+        const selectedBody = JSON.parse(prepareSourceSemanticRequestWire(native, selectedLine, 4096).body);
+        expect(native === config ? selectedBody.contents[0].parts[0].text : selectedBody.messages[1].content)
+          .toBe(JSON.stringify(projected));
+      }
+    }
+  });
+
+  it.each([false, true])("binds exhaustive task projection to Gemini and chat wire with revision %s", revised => {
+    const generationTask = { contract: "source-semantic-generation-task-v1" as const,
+      context: "complete_original_source" as const, original_query: " Which place? \n",
+      responsibility: { kind: "all_supplied_meaning" as const } };
+    const parent = soul.buildSourceSemanticRequest({ ...input,
+      generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, generationTask });
+    const host = revised ? soul.buildSourceSemanticRequest({ ...input,
+      generationViewContract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT, generationTask,
+      revision: soul.prepareSourceSemanticRevision(parent, "{bad", [], { responseCompletion: "complete" }) }) : parent;
+    const projected = JSON.parse(expectedView(soul.sourceSemanticResponseJsonSchema(host)));
+    projected.source_request.generation_task = { contract: "source-semantic-generation-task-v1",
+      context: "complete_original_source", responsibility: { kind: "all_supplied_meaning" } };
+    projected.source_request.original_source = input.sourceCorpus;
+    if (revised) projected.source_request.revision = host.source_request.revision;
+    const expected = JSON.stringify(projected), oldView = JSON.stringify({ ...projected,
+      source_request: { ...projected.source_request, generation_task: generationTask } });
+    expect(soul.sourceSemanticGenerationInput(host)).toBe(expected);
+    for (const native of [config, { model: INTERN_SEMANTIC_REQUEST_MODEL, requestProfile: INTERN_SEMANTIC_REQUEST_PROFILE,
+      modelFamily: INTERN_SEMANTIC_REQUEST_MODEL, providerUrl: INTERN_SEMANTIC_PROVIDER_URL, apiKey: null }]) {
+      const presentation = soul.sourceSemanticGenerationPresentation(JSON.stringify(host))!;
+      const inputSpy = vi.spyOn(soul, "sourceSemanticGenerationInput").mockReturnValue(oldView);
+      const presentationSpy = vi.spyOn(soul, "sourceSemanticGenerationPresentation")
+        .mockReturnValue({ ...presentation, modelInputJson: oldView });
+      const oldLine = prepareSourceSemanticRequestLine(host, ["unit"], native);
+      const oldWire = prepareSourceSemanticRequestWire(native, oldLine, 4096);
+      const oldDigest = sourceSemanticRequestWireDigest(native, oldLine, 4096);
+      inputSpy.mockRestore(); presentationSpy.mockRestore();
+      const line = prepareSourceSemanticRequestLine(host, ["unit"], native);
+      const wire = prepareSourceSemanticRequestWire(native, line, 4096);
+      expect(line.userPrompt).toBe(oldLine.userPrompt);
+      expect(line.requestSha256).toBe(oldLine.requestSha256);
+      expect(line.key).not.toBe(oldLine.key);
+      expect(wire.body).not.toBe(oldWire.body);
+      expect(sourceSemanticRequestWireDigest(native, line, 4096)).not.toBe(oldDigest);
+      expect(() => parseSourceSemanticRequestLine(oldLine, native)).toThrow(/identity mismatch/u);
+      const body = JSON.parse(wire.body);
+      expect(native === config ? body.contents[0].parts[0].text : body.messages[1].content).toBe(expected);
+      if (native === config) expect(encodeGeminiGenerateContent(line, {
+        model: native.model, requestProfile: native.requestProfile, maxOutputTokens: 4096 })).toEqual(body);
+    }
+    expect(host.source_request.generation_task).toEqual(generationTask);
+    if (revised) expect(JSON.parse(projected.source_request.revision.parent_request_json)
+      .source_request.generation_task).toEqual(generationTask);
   });
 
   it("requires configuration, retained generation and request selectors to agree", () => {
