@@ -14,6 +14,7 @@ import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReserv
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import { dirname } from "node:path";
+import { correspondenceModelViewInputPaths } from "./correspondence-model-view.js";
 import { settledAttemptUsageDigest } from "../extraction/authority/attempt-ledger/outcome.js";
 
 export function semanticProposalLookup(
@@ -34,6 +35,7 @@ export function semanticProposalCacheInputPaths(
 ): readonly string[] {
   const paths = [cacheRoot];
   for (const item of workset.items) {
+    paths.push(...correspondenceModelViewInputPaths(item));
     // A malformed sibling request must not erase independently readable cache paths.
     let line: SemanticProposalLine;
     try { line = materializeSemanticProposalLines({ ...workset, items: [item] }, maxOutputTokens)[0]!; }

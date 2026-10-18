@@ -9,6 +9,7 @@ import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissi
   SourceSemanticCorrespondenceGenerationPolicySchema } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
+import { CorrespondenceModelViewSchema } from "../semantic-proposal/correspondence-model-view.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
@@ -32,6 +33,7 @@ export const SemanticChainConfigSchema = z.object({
   correspondence_cache_owners: z.array(z.object({ key: Digest, cache_root: z.string().min(1) }).strict())
     .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).optional(),
   max_output_tokens: z.number().int().min(1).max(65536),
+  correspondence_model_view: CorrespondenceModelViewSchema.optional(),
   correspondence_generation: z.object({ model: z.string().min(1), request_profile: z.string().min(1),
     provider_url: z.string().min(1), max_output_tokens: z.number().int().min(1).max(65536) }).strict().optional(),
   discovery_page_cap: z.number().int().min(1).max(64),

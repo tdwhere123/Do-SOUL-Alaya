@@ -21,6 +21,9 @@ import {
   bindSemanticProviderRequest, semanticProviderRequestCacheKey, SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME
 } from "../provider-request/request-binding.js";
 
+import { CorrespondenceModelViewSchema, projectCorrespondenceModelView, CORRESPONDENCE_MODEL_VIEW_GUIDANCE }
+  from "./correspondence-model-view.js";
+
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
 export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
@@ -57,6 +60,7 @@ const CorrespondenceItemSchema = z.object({
   admitted_query_semantics: z.unknown(),
   source_interpretation_descriptors: z.array(z.unknown()).min(1).max(1),
   generation_policy: SourceSemanticCorrespondenceGenerationPolicySchema.optional(),
+  selected_model_view: CorrespondenceModelViewSchema.optional(),
   revision: SourceSemanticProposalRevisionSchema.optional()
 }).strict();
 
@@ -101,6 +105,8 @@ export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWo
 export function materializeSemanticProposalLines(
   workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger
 ): readonly SemanticProposalLine[] {
+  // Capture the complete caller input before validation or any sealed-reference reads.
+  workset = structuredClone(workset);
   meter?.retain(workset, "semantic proposal request construction input");
   meter?.canonicalJsonLength(workset);
   if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
@@ -137,8 +143,12 @@ export function materializeSemanticProposalLines(
       ...(parsed.generation_policy === undefined ? {} : { generation_policy: parsed.generation_policy }),
       ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
     });
-    const line = bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request), request,
-      sourceSemanticCorrespondenceResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
+    const schema = sourceSemanticCorrespondenceResponseJsonSchema(request);
+    const view = parsed.selected_model_view === undefined ? undefined : projectCorrespondenceModelView({
+      selection: parsed.selected_model_view, request });
+    const line = bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request) +
+      (view === undefined ? "" : CORRESPONDENCE_MODEL_VIEW_GUIDANCE), request,
+      schema, parsed.original_query, maxOutputTokens, view);
     meter?.retain(line, "semantic proposal request and encoded cache identity");
     meter?.canonicalJsonLength(line);
     return line;
@@ -182,14 +192,15 @@ function bindLine(
   request: SourceSemanticQueryRequest | SourceSemanticCorrespondenceRequest,
   responseJsonSchema: object,
   original_query: string,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  modelView?: ReturnType<typeof projectCorrespondenceModelView>
 ): SemanticProposalLine {
   if (!isNativeGeminiRequestProfile(workset.request_profile) && !isChatSemanticRequestProfile(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
-  const userPrompt = JSON.stringify(kind === "semantic_correspondence"
+  const userPrompt = JSON.stringify(modelView ?? (kind === "semantic_correspondence"
     ? { ...request, response_schema: responseJsonSchema }
-    : request);
+    : request));
   const config = { model: workset.model, providerUrl: workset.provider_url,
     requestProfile: workset.request_profile, apiKey: null };
   const binding = semanticProposalRequestBinding(config, { systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema });

@@ -10,6 +10,7 @@ import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js
 import { sourceRecordsArtifactInputPaths } from "../snapshot/source-records/contract.js";
 import { readVerifiedPersonaSuccessorMembership } from "../snapshot/source-records/persona-successor.js";
 import { SemanticProposalWorksetSchema, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
+import { assertCorrespondenceModelViewSelection } from "../semantic-proposal/correspondence-model-view.js";
 import { chainIdentity, type SemanticChainConfig } from "./contract.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -43,6 +44,7 @@ export function qualifiedSelectionInputPaths(config: SemanticChainConfig, input:
 /** Read-only producer readmission. Configured paths and caller JSON never establish readiness.
  * The complete native seal is checked independently of the selected fixed subset. */
 export function admitSourceQualifiedSelection(config: SemanticChainConfig, input: SourceQualifiedSelectionInput) {
+  ({ config, input } = structuredClone({ config, input }));
   const meter = new SourceSemanticResourceLedger(config.budget);
   meter.retain(input, "qualified producer admission");
   const full = readVerifiedNativeSourceSnapshot(config.snapshot_path);
@@ -103,6 +105,7 @@ export function admitSourceQualifiedSelection(config: SemanticChainConfig, input
     const c = row.correspondence;
     if (c === undefined) continue;
     if (c.workset.kind !== "semantic_correspondence") throw new AlayaError("VALIDATION", "qualified C artifact has wrong producer kind");
+    assertCorrespondenceModelViewSelection(c.workset.items, config.correspondence_model_view, config);
     const result = read(c.workset, c.cache_root, c.max_output_tokens, c.artifact);
     const request = result.line.request as SourceSemanticCorrespondenceRequest, h = request.source_interpretation_descriptors[0];
     if (request.original_query !== q.line.original_query || canonicalJson(request.admitted_query_semantics) !== canonicalJson(query_semantics) ||
