@@ -927,13 +927,19 @@ Full delivery includes the task; lightweight descriptors disclose responsibility
 without repeating the cue. In the selected generation view, `all_supplied_meaning`
 uses that same Protocol task summary without `original_query`; `original_query_task`
 retains the exact cue. The retained host task, source bytes, catalog, roles,
-attribution and response schema are unchanged. Selected cache identity binds both
-host JSON and exact model JSON, so this private projection requires fresh wire
-and request authority even when the host digest is unchanged. Unselected legacy
-serialization and undeclared tasks are unchanged. Revision parent request JSON
-remains complete and may contain the cue; only first-attempt task projection is
-cue-free, not source content or revision ancestry. Removing this unnecessary cue
-does not establish semantic fidelity or completeness. Later use under another query
+attribution and response schema are unchanged. As a private selected-view extension,
+`all_supplied_meaning` revision model views omit only `parent_request_json`, removing
+the serialized host ancestry from both v1 and v2 revision inputs. The complete host
+revision and its nested parent requests remain retained and validated unchanged.
+Revision instructions, digests, completion, revision number, structural diagnostics,
+source review and exact previous-response bytes remain in the model view; source,
+author and feedback text are not recursively redacted and may contain the cue.
+Selected cache identity binds both host JSON and exact model JSON, so this extension
+requires fresh cache/wire identity and request authority even when the host digest
+is unchanged; prior sealed receipts do not authorize it. Unselected serialization,
+undeclared tasks, selected `original_query_task` revisions and no-revision bytes
+are unchanged. Removing serialized host ancestry does not establish semantic
+fidelity or completeness. Later use under another query
 remains task-scoped and cannot establish omitted-fact absence. Explicit abstention has no H and is not a
 corpus absence certificate. Raw text plus catalog duplication consumes the same
 finite input budget in both modes. Without a task the existing bytes and identities
