@@ -23,6 +23,7 @@ import {
 
 import { CorrespondenceModelViewSchema, projectCorrespondenceModelView, CORRESPONDENCE_MODEL_VIEW_GUIDANCE }
   from "./correspondence-model-view.js";
+import { queryRevisionObserverGuidance, type QueryRevisionObserverView } from "./query-revision-observer-view.js";
 
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
 export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
@@ -103,10 +104,14 @@ export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWo
 }
 
 export function materializeSemanticProposalLines(
-  workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger
+  workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger,
+  queryRevisionObserverView?: QueryRevisionObserverView
 ): readonly SemanticProposalLine[] {
   // Capture the complete caller input before validation or any sealed-reference reads.
   workset = structuredClone(workset);
+  if (queryRevisionObserverView !== undefined && (workset.kind !== "query" || workset.items.length !== 1)) {
+    throw new AlayaError("VALIDATION", "query revision observer view requires one query revision item");
+  }
   meter?.retain(workset, "semantic proposal request construction input");
   meter?.canonicalJsonLength(workset);
   if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
@@ -127,8 +132,15 @@ export function materializeSemanticProposalLines(
         ...(parsed.generation_presentation === undefined ? {} : { generation_presentation: parsed.generation_presentation }),
         ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
       });
-      return bindLine(workset, "query", sourceSemanticQuerySystemPrompt(request), request, sourceSemanticQueryResponseJsonSchema(request),
-        parsed.original_query, maxOutputTokens);
+      const guidance = queryRevisionObserverView === undefined ? "" : queryRevisionObserverGuidance(request,
+        queryRevisionObserverView, resolveSemanticProposalRevisionParent(workset, item, maxOutputTokens));
+      const line = bindLine(workset, "query", sourceSemanticQuerySystemPrompt(request) + guidance,
+        request, sourceSemanticQueryResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
+      if (queryRevisionObserverView !== undefined) {
+        meter?.retain(line, "observer query revision request and encoded cache identity");
+        meter?.canonicalJsonLength(line);
+      }
+      return line;
     });
   }
   const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID;

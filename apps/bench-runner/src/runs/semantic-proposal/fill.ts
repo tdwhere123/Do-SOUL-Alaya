@@ -38,6 +38,8 @@ import {
   type SemanticProposalShard
 } from "./artifact.js";
 
+import { captureQueryRevisionObserverView, type QueryRevisionObserverView } from "./query-revision-observer-view.js";
+
 export type ProposalAttemptClass = ProviderRequestAttemptClass;
 
 export function classifyProposalOutcome(
@@ -54,9 +56,10 @@ export function classifyProposalOutcome(
 }
 
 export function prepareSemanticProposal(
-  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number, maxAttemptsPerKey?: number
+  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number, maxAttemptsPerKey?: number,
+  queryRevisionObserverView?: QueryRevisionObserverView
 ) {
-  const lines = materializeSemanticProposalLines(workset, maxOutputTokens);
+  const lines = materializeSemanticProposalLines(workset, maxOutputTokens, undefined, queryRevisionObserverView);
   assertRetainedProposalRevisionParents(workset, cacheRoot, maxOutputTokens, lines);
   const cachedKeys = new Set<string>();
   for (const line of lines) {
@@ -82,17 +85,21 @@ export async function executeSemanticProposalFill(input: Readonly<{
   authority: SemanticProposalAuthority;
   config: CompileSeedExtractionConfig;
   extractor?: ReturnType<typeof createSemanticProviderHttpExtractor>;
+  queryRevisionObserverView?: QueryRevisionObserverView;
 }>) {
   refuseRecallCampaignLiveExtraction("extraction_write");
   const authority = verifySemanticProposalAuthority(input.authority);
   assertSemanticProposalExecutionRoot(authority.execution_scope, input.cacheRoot);
-  input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path };
+  input = { ...input, authority, cacheRoot: authority.execution_scope.execution_root_path,
+    ...(input.queryRevisionObserverView === undefined ? {} : {
+      queryRevisionObserverView: captureQueryRevisionObserverView(input.queryRevisionObserverView)
+    }) };
   if (authority.kind !== input.workset.kind || authority.model !== input.workset.model ||
       authority.request_profile !== input.workset.request_profile) {
     throw new AlayaError("CONFLICT", "semantic proposal authority does not bind this workset");
   }
   const maxOutputTokens = authority.limits.max_output_tokens;
-  const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens);
+  const lines = materializeSemanticProposalLines(input.workset, maxOutputTokens, undefined, input.queryRevisionObserverView);
   assertRetainedProposalRevisionParents(input.workset, input.cacheRoot, maxOutputTokens, lines);
   assertAuthorizedProposalRequest(input, lines, maxOutputTokens);
   const authorized = new Set(authority.keys);
@@ -104,6 +111,9 @@ export async function executeSemanticProposalFill(input: Readonly<{
       input.cacheRoot, line.key, semanticProposalLookup(input.workset, line, maxOutputTokens)
     );
     const existing = state.shard;
+    if (input.queryRevisionObserverView !== undefined && authority.keys.length > 0 && !authorized.has(line.key)) {
+      throw new AlayaError("CONFLICT", "query revision observer view differs from authorized request keys");
+    }
     if (existing !== undefined) {
       const prior = replayCachedProposalShard(line, existing).classified;
       if (isChatSemanticRequestProfile(input.workset.request_profile) &&
@@ -115,6 +125,9 @@ export async function executeSemanticProposalFill(input: Readonly<{
       continue;
     }
     if (!authorized.has(line.key)) {
+      if (input.queryRevisionObserverView !== undefined) {
+        throw new AlayaError("CONFLICT", "query revision observer view differs from authorized request keys");
+      }
       continue;
     }
     dispatch.push(line);
@@ -169,7 +182,8 @@ export async function executeSemanticProposalFill(input: Readonly<{
 function summarize(
   input: Parameters<typeof executeSemanticProposalFill>[0], cacheHits: number, newlyAdmitted: number, attempts: number
 ) {
-  const rows = readSemanticProposalResults(input.workset, input.cacheRoot, input.authority.limits.max_output_tokens);
+  const rows = readSemanticProposalResults(input.workset, input.cacheRoot, input.authority.limits.max_output_tokens,
+    undefined, input.queryRevisionObserverView);
   const count = (...statuses: readonly string[]) => rows.filter(row => statuses.includes(row.status)).length;
   return {
     requested: rows.length, cache_hits: cacheHits, newly_admitted: newlyAdmitted,
@@ -202,15 +216,15 @@ function assertAuthorizedProposalRequest(
 
 /** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
 export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number,
-  meter?: SourceSemanticResourceLedger) {
+  meter?: SourceSemanticResourceLedger, queryRevisionObserverView?: QueryRevisionObserverView) {
   if (meter !== undefined) return withBoundedArtifactReadMeter(meter,
-    () => readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, meter));
-  return readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens);
+    () => readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, meter, queryRevisionObserverView));
+  return readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, undefined, queryRevisionObserverView);
 }
 
 function readMeteredSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number,
-  meter?: SourceSemanticResourceLedger) {
-  const lines = materializeSemanticProposalLines(workset, maxOutputTokens, meter);
+  meter?: SourceSemanticResourceLedger, queryRevisionObserverView?: QueryRevisionObserverView) {
+  const lines = materializeSemanticProposalLines(workset, maxOutputTokens, meter, queryRevisionObserverView);
   assertRetainedProposalRevisionParents(workset, cacheRoot, maxOutputTokens, lines);
   return lines.map((line) => {
     const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
