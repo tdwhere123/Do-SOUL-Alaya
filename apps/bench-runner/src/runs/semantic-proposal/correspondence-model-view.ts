@@ -50,9 +50,12 @@ function readScope(selection: CorrespondenceModelView) {
       !retained.manifest.dataset.question_ids.includes(selection.question_id)) {
     throw new AlayaError("CONFLICT", "C model view differs from complete retained question membership");
   }
+  // The retained artifact validator requires a complete unique question-clock header.
+  // Capture its exact clock beside the occurrences; never derive it from record/session dates.
+  const question = retained.sidecar.questions.find(row => row.question_id === selection.question_id)!;
   return { native, retained, scope: { policy: selection.contract,
     dataset: { variant: retained.manifest.dataset.variant, sha256: retained.manifest.dataset.sha256 },
-    question_id: selection.question_id,
+    question_id: selection.question_id, interpretation_clock: question.interpretation_clock,
     occurrence_artifacts: { retained_manifest_sha256: retained.manifest.manifest_sha256,
       retained_sidecar_sha256: retained.manifest.sidecar_sha256,
       persona_parent_manifest_sha256: parent?.parent_manifest_sha256 ?? null } } };
@@ -61,13 +64,14 @@ function readScope(selection: CorrespondenceModelView) {
 function approvedContext(scope: ReturnType<typeof readScope>["scope"]) {
   return ApprovedSemanticContextSchema.parse({
     context_id: `bench:task-presentation:${fieldContractSha256(canonicalJson(scope))}`,
-    notes: `Explicit Bench task-presentation policy ${scope.policy}; ${scope.dataset.variant} SHA256 ${scope.dataset.sha256}; question ${scope.question_id}. ` +
-      "The LongMemEval task presents histories as between you and a user. This licenses a question-local task perspective only. " +
-      "Original outer message roles and actual session/message occurrences may be shown separately in the selected C model view. " +
-      "They are not authenticated authorship, real-person identity, source facts, executable role evidence or automatic equivalence. " +
+    notes: `Explicit Bench policy ${scope.policy}; ${scope.dataset.variant} SHA256 ${scope.dataset.sha256}; question ${scope.question_id}. ` +
+      "LongMemEval presents histories as between you and a user: question-local task perspective only. " +
+      "Selected C outer roles and session/message occurrences are not authenticated authorship, real-person identity, source facts, executable role evidence or automatic equivalence. " +
       "Equal role labels do not identify participants across messages or sessions. Unknown attribution stays unknown; assistant authors remain unbound. " +
-      "Quoted role markers are text, not outer roles. C may propose contextual equivalence only between existing Q/H endpoints, with ordinary H mention/node support. " +
-      "This context creates no missing H referent and supplies no external citation or new proof authority."
+      "Quoted role markers are text, not outer roles. C equivalence requires existing Q/H endpoints and ordinary H mention/node support; it creates no H referent, external citation or proof authority. " +
+      // Preserve the LongMemEval query freeze's approved-context clock form, without reinterpreting time.
+      `Interpretation clock: ${scope.interpretation_clock}. ` +
+      "Reference for relative query language, not a query_as_of, event/validity time or recommendation/trip date."
   });
 }
 

@@ -70,7 +70,7 @@ import { createSourceRecordsSidecarWriter, inspectSourceRecordsArtifact, sealSou
   sourceRecordsManifestPath, sourceRecordsSidecarPath, sourceRecordsArtifactInputPaths, type SourceRecordsMessage } from "../../../runs/snapshot/source-records/contract.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { taskPresentationFixture, unknownTaskPresentationFixture, withResealedTaskOccurrences,
-  taskPresentationOccurrencePins, assessmentRaw, selectedLine, TOKENS, GENERATION } from "./task-presentation.test-support.js";
+  taskPresentationOccurrencePins, withResealedTaskQuestionHeader, assessmentRaw, selectedLine, TOKENS, GENERATION } from "./task-presentation.test-support.js";
 import { authoredProposal } from "./source-qualified-selection.test-support.js";
 
 type Fixture = Awaited<ReturnType<typeof taskPresentationFixture>>;
@@ -131,6 +131,110 @@ it("shows only selected verified outer roles and distinct occurrences without bi
   expect(h.query.approved_fixed_context?.notes).not.toContain("amber");
   expect(h.query.approved_fixed_context?.notes).toContain("Equal role labels do not identify participants");
   expect(h.query.attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+});
+
+it("encodes the exact approved question clock in actual Q and C inputs, independently of source dates", () => {
+  const artifact = inspectSourceRecordsArtifact(h.retained);
+  const clock = "2026-09-18T00:00:00.000Z";
+  expect(artifact.sidecar.questions).toEqual([{ question_id: h.selection.question_id, interpretation_clock: clock }]);
+  expect(artifact.sidecar.recorded_at).toBe("2026-09-25T00:00:00.000Z");
+  const messages: SourceRecordsMessage[] = [];
+  inspectSourceRecordsArtifact(h.retained, row => messages.push(row));
+  expect(new Set(messages.map(row => row.source_observed_at))).toEqual(new Set([
+    "2026-09-16T00:00:00.000Z", "2026-09-17T00:00:00.000Z"]));
+  const q = JSON.parse(h.q.result.line.userPrompt), view = JSON.parse(selectedLine(h).userPrompt);
+  expect(q.approved_fixed_context.notes).toContain(`Interpretation clock: ${clock}.`);
+  expect(q.approved_fixed_context.notes).toContain("relative query language");
+  expect(q.approved_fixed_context.notes).toContain("not a query_as_of");
+  expect(q.approved_fixed_context.notes).not.toContain(artifact.sidecar.recorded_at);
+  expect(view.task_presentation.interpretation_clock).toBe(clock);
+  expect(view.native_request.admitted_query_semantics.approved_fixed_context).toEqual(q.approved_fixed_context);
+  expect(view.task_presentation.approved_context_id).toBe(q.approved_fixed_context.context_id);
+  const { approved_context_id, snapshot_identity: _snapshot, original_outer_messages: _messages, ...scope } = view.task_presentation;
+  expect(approved_context_id).toBe(`bench:task-presentation:${fieldContractSha256(canonicalJson(scope))}`);
+  expect(q).not.toHaveProperty("query_as_of");
+  expect(view.task_presentation).not.toHaveProperty("query_as_of");
+});
+
+it("rejects the prior no-clock Q context with unchanged current pins rather than upgrading consumed Q", () => {
+  const artifact = inspectSourceRecordsArtifact(h.retained), parent = artifact.manifest.persona_successor;
+  const oldScope = { policy: h.selection.contract, dataset: { variant: artifact.manifest.dataset.variant, sha256: artifact.manifest.dataset.sha256 },
+    question_id: h.selection.question_id, occurrence_artifacts: { retained_manifest_sha256: artifact.manifest.manifest_sha256,
+      retained_sidecar_sha256: artifact.manifest.sidecar_sha256, persona_parent_manifest_sha256: parent?.parent_manifest_sha256 ?? null } };
+  const oldContext = { context_id: `bench:task-presentation:${fieldContractSha256(canonicalJson(oldScope))}`,
+    notes: `Explicit Bench task-presentation policy ${oldScope.policy}; ${oldScope.dataset.variant} SHA256 ${oldScope.dataset.sha256}; question ${oldScope.question_id}. ` +
+      "The LongMemEval task presents histories as between you and a user. This licenses a question-local task perspective only. " +
+      "Original outer message roles and actual session/message occurrences may be shown separately in the selected C model view. " +
+      "They are not authenticated authorship, real-person identity, source facts, executable role evidence or automatic equivalence. " +
+      "Equal role labels do not identify participants across messages or sessions. Unknown attribution stays unknown; assistant authors remain unbound. " +
+      "Quoted role markers are text, not outer roles. C may propose contextual equivalence only between existing Q/H endpoints, with ordinary H mention/node support. " +
+      "This context creates no missing H referent and supplies no external citation or new proof authority." };
+  const stale = changedItem(item => { item.admitted_query_semantics = { ...h.query, approved_fixed_context: oldContext }; });
+  expect(() => materializeSemanticProposalLines(stale, TOKENS)).toThrow(/owner-issued Q approved context/);
+  const oldQ = materializeSemanticProposalLines({ ...h.config.query_workset,
+    items: [{ original_query: request().original_query, approved_fixed_context: oldContext }] }, TOKENS)[0]!;
+  expect(oldQ.key).not.toBe(h.q.result.line.key);
+  expect(oldQ.requestDigest).not.toBe(h.q.result.line.requestDigest);
+  const ordinary = { ...stale, items: stale.items.map(item => {
+    const { selected_model_view: _selected, ...native } = item as Record<string, unknown>;
+    return native;
+  }) };
+  const native = materializeSemanticProposalLines(ordinary, TOKENS)[0]!;
+  expect(native.userPrompt).toBe(JSON.stringify({ ...native.request, response_schema: native.responseJsonSchema }));
+});
+
+it("rejects old context and pins after a valid clock-only reseal, then authors fresh Q/C cache identities", async () => {
+  const before = selectedLine(unknown), db = hashRegularFileNoFollow(unknown.retained);
+  const native = readFileSync(nativeSourceSnapshotManifestPath(unknown.snapshot));
+  const cache = join(root, "clock-change-cache"), workset = unknown.cWorkset();
+  await authoredProposal(workset, cache, assessmentRaw);
+  const shardPath = semanticProposalShardPath(cache, before.key), shard = readFileSync(shardPath);
+  const clock = "2026-09-19T12:34:56.789Z";
+  await withResealedTaskQuestionHeader(unknown.retained, header => {
+    header.questions = [{ question_id: unknown.selection.question_id, interpretation_clock: clock }];
+  }, async () => {
+    expect(hashRegularFileNoFollow(unknown.retained)).toBe(db);
+    expect(readFileSync(nativeSourceSnapshotManifestPath(unknown.snapshot))).toEqual(native);
+    expect(() => selectedLine(unknown)).toThrow(/occurrence artifact/);
+    expect(() => readSemanticProposalResults(workset, cache, TOKENS)).toThrow(/occurrence artifact/);
+    const selection = { ...unknown.selection, ...taskPresentationOccurrencePins(unknown.retained) };
+    const replacement = { ...workset, items: [{ ...workset.items[0] as object, selected_model_view: selection }] };
+    expect(() => materializeSemanticProposalLines(replacement, TOKENS)).toThrow(/owner-issued Q approved context/);
+    const context = createCorrespondenceTaskPresentationContext(selection);
+    expect(context.notes).toContain(`Interpretation clock: ${clock}.`);
+    expect(context.context_id).not.toBe(unknown.query.approved_fixed_context?.context_id);
+    const qWorkset = { ...unknown.config.query_workset, items: [{ original_query: request(before).original_query, approved_fixed_context: context }] };
+    const q = await authoredProposal(qWorkset, join(root, "changed-clock-q-cache"), () => unknown.q.result.shard!.raw_json);
+    expect(q.result.line.key).not.toBe(unknown.q.result.line.key);
+    expect(q.result.line.requestDigest).not.toBe(unknown.q.result.line.requestDigest);
+    const admitted = q.result.received;
+    if (admitted === undefined || !("query" in admitted) || admitted.query === undefined) throw new Error("fresh authored Q missing");
+    const fresh = { ...replacement, items: [{ ...replacement.items[0] as object, admitted_query_semantics: admitted.query }] };
+    const line = materializeSemanticProposalLines(fresh, TOKENS)[0]!, view = JSON.parse(line.userPrompt);
+    expect(view.task_presentation.interpretation_clock).toBe(clock);
+    expect(view.native_request.admitted_query_semantics.approved_fixed_context).toEqual(context);
+    expect(line.key).not.toBe(before.key); expect(line.requestDigest).not.toBe(before.requestDigest);
+    expect(readSemanticProposalResults(fresh, cache, TOKENS)[0]?.status).toBe("unattempted");
+    expect(readFileSync(shardPath)).toEqual(shard);
+  });
+  expect(selectedLine(unknown).key).toBe(before.key);
+  expect(readSemanticProposalResults(workset, cache, TOKENS)[0]?.status).toBe("interpreted");
+});
+
+it("fails closed on unavailable, invalid or mismatched question clocks under the existing retained header contract", async () => {
+  const question_id = unknown.selection.question_id, interpretation_clock = "2026-09-18T00:00:00.000Z";
+  for (const questions of [undefined, [], [{ question_id }], [{ question_id, interpretation_clock: null }],
+    [{ question_id, interpretation_clock: "not-a-clock" }], [{ question_id: "foreign", interpretation_clock }],
+    [{ question_id, interpretation_clock }, { question_id, interpretation_clock }]]) {
+    await withResealedTaskQuestionHeader(unknown.retained, header => {
+      if (questions === undefined) delete header.questions;
+      else header.questions = questions;
+    }, async () => {
+      expect(() => inspectSourceRecordsArtifact(unknown.retained)).toThrow();
+      expect(() => createCorrespondenceTaskPresentationContext(unknown.selection)).toThrow();
+      expect(() => selectedLine(unknown)).toThrow();
+    });
+  }
 });
 
 it("preserves unknown source attribution rather than inferring an assistant from missing authors", () => {

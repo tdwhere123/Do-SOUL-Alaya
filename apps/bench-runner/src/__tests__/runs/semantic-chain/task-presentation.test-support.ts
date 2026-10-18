@@ -130,6 +130,23 @@ export function taskPresentationOccurrencePins(path: string) {
     persona_parent: parent === undefined ? null : { snapshot_path: parent.parent_snapshot, manifest_sha256: parent.parent_manifest_sha256 } };
 }
 
+/** Change only authored question-header bytes, including invalid inputs for fail-closed checks. */
+export async function withResealedTaskQuestionHeader(path: string, change: (header: Record<string, unknown>) => void,
+  check: () => Promise<void>) {
+  const artifact = inspectSourceRecordsArtifact(path);
+  const indexPath = sourceRecordsSidecarPath(path), manifestPath = sourceRecordsManifestPath(path);
+  const index = readFileSync(indexPath), manifest = readFileSync(manifestPath);
+  try {
+    const header: Record<string, unknown> = structuredClone(artifact.sidecar);
+    change(header);
+    writeFileSync(indexPath, JSON.stringify(header));
+    const { manifest_sha256: _old, ...body } = artifact.manifest;
+    writeFileSync(manifestPath, JSON.stringify(sealSourceRecordsManifest({ ...body,
+      sidecar_sha256: hashRegularFileNoFollow(indexPath) })));
+    await check();
+  } finally { writeFileSync(indexPath, index); writeFileSync(manifestPath, manifest); }
+}
+
 /** Reseal only authored occurrence metadata; restore the original files even on a failing assertion. */
 export async function withResealedTaskOccurrences(path: string, change: (rows: SourceRecordsMessage[]) => void, check: () => Promise<void>) {
   const messages: SourceRecordsMessage[] = [], artifact = inspectSourceRecordsArtifact(path, row => messages.push(row));
