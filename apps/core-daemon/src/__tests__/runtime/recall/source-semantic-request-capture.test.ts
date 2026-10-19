@@ -19,8 +19,7 @@ import * as protocol from "@do-soul/alaya-protocol";
 import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
 import { sourcePhaseFixture } from "../../../../../../packages/protocol/src/__tests__/garden/source-semantic-canonical.test-support.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
-import { runSourceSemanticWorker, runResearchNominatedSourcePreparation,
-  type SourceSemanticRequestExecution } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
+import { runSourceSemanticWorker, type SourceSemanticRequestExecution } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 
@@ -77,7 +76,7 @@ it("has exactly the old parent cost and child allowance, with one execution tupl
   expect(Object.isFrozen(phase)).toBe(false);
 });
 
-it.each(["ordinary preparation", "research preparation", "library exploration", "direct observation"] as const)
+it.each(["ordinary preparation", "library exploration", "direct observation"] as const)
 ("preserves the nonfused split and pays capture ownership only after it for %s", path => {
   const { runtime, payload: preparedPayload } = fixture();
   const payload = { ...preparedPayload, prepared_query: undefined,
@@ -92,18 +91,14 @@ it.each(["ordinary preparation", "research preparation", "library exploration", 
       memory_bytes: expected.bytes - Math.min(Math.floor(expected.bytes / 4), libraryRequest.output_byte_limit * 8 + 65536)
     });
   } else if (path !== "direct observation") {
-    if (path === "research preparation") expected.read(2, 9, "research source index query output");
     expected.retain(undefined, "query semantics admission");
   }
   createSourceSemanticAccessPolicy(ORIGINAL, undefined, "query-conditioned-v1", expected);
   const split = { work_units: Math.floor(expected.work / 2), memory_bytes: Math.floor(expected.bytes / 2) };
   const prefix = { work: expected.spentWork, bytes: expected.spentBytes };
-  const controlled = path === "research preparation";
   protocol.packSourceSemanticQueryPreparation(protocol.captureSourceSemanticQueryPreparation(
-    protocol.unavailableSourceQueryPreparation(controlled ? "controlled_or_scoped_access" : "preparation_scope_unavailable",
-      controlled ? "not_requested" : "unavailable"), expected), expected);
-  protocol.packSourceSemanticAcquisition(protocol.sourceSemanticAcquisitionNotRun(
-    controlled ? "controlled_or_scoped_access" : "observation_allowance"), expected);
+    protocol.unavailableSourceQueryPreparation("preparation_scope_unavailable", "unavailable"), expected), expected);
+  protocol.packSourceSemanticAcquisition(protocol.sourceSemanticAcquisitionNotRun("observation_allowance"), expected);
   const charges = vi.spyOn(protocol.SourceSemanticResourceLedger.prototype, "charge");
   let observedParent: SourceSemanticReadBudget, observedChild: SourceSemanticReadBudget;
   entry.observe.mockImplementation((parent: SourceSemanticReadBudget, child: SourceSemanticReadBudget) => {
@@ -122,7 +117,6 @@ it.each(["ordinary preparation", "research preparation", "library exploration", 
   });
   const run = () => {
     if (path === "ordinary preparation") return runSourceSemanticWorker(runtime, payload);
-    if (path === "research preparation") return runResearchNominatedSourcePreparation(runtime, payload, ["nominated"]);
     if (path === "library exploration") return runSourceSemanticWorker(runtime, { ...payload, request: libraryRequest });
     return observeSourceSemanticAccess(runtime, payload, ["project"], new SourceSemanticReadBudget(BUDGET),
       ORIGINAL, undefined, "query-conditioned-v1", BUDGET);

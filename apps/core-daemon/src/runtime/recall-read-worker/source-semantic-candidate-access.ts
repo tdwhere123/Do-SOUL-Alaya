@@ -9,7 +9,7 @@ import {
   type SourceSemanticHandleDescriptor, type SourceSemanticQuery, type RequestBudget, type SourceSemanticPreviewExtents,
   type SourceSemanticAcquisitionPhase, type SourceSemanticCompactAcquisition, type PreparedSourceSemanticCanonicalSubtrees
 } from "@do-soul/alaya-protocol";
-import { CoreError, SourceIndexAcquisition, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
+import { CoreError, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity, fieldContractSha256,
   projectSourceDisclosure } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { listEligibleSemanticSources, sourceSemanticReadStores, SourceSemanticReadBudget, semanticSourceTupleIdentity } from "../field/source-semantic-read-stores.js";
@@ -19,13 +19,9 @@ import type { QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import type { SourceSemanticRequestExecution } from "./source-semantic-reasoning.js";
 import { beginCanonicalSourceText, readSourceText } from "./source-semantic-source-observation.js";
 import { acquireSourceSemanticIndex } from "./source-semantic-index-acquisition.js";
-import type { ResearchLexicalPrefixCapture } from "./source-semantic-research-lexical-prefix.js";
 import { SourceSemanticUnionCompletion } from "./source-semantic-empty-population-budget.js";
 import { bindAccessPoolIdentity, sourceSemanticObservationAccounting,
   sourceSemanticAccessReceiptValue, preparationAccessReceiptValue } from "./source-semantic-access-receipts.js";
-// Research pool and nominated-library owners still import this entry. Remove this
-// forwarding export when those consumers import the receipt owner directly.
-export { bindAccessPoolIdentity } from "./source-semantic-access-receipts.js";
 
 type SourceObservation = SourceSemanticAccessReceipt["source_candidates"][number];
 type InterpretationObservation = SourceSemanticAccessReceipt["interpretation_candidates"][number];
@@ -70,7 +66,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, original: string,
   query: SourceSemanticQuery | undefined, policyName: SourceSemanticAccessPolicy, budget: RequestBudget,
   sourceId?: string, completion?: EmptyCompletion, sourcePreviewExtents?: SourceSemanticPreviewExtents,
-  preferredSourceIds?: readonly string[], accessHint?: string, lexicalCapture?: ResearchLexicalPrefixCapture): SourceSemanticAccessPool {
+  preferredSourceIds?: readonly string[], accessHint?: string): SourceSemanticAccessPool {
   if (sourceId !== undefined && preferredSourceIds !== undefined) {
     throw new CoreError("VALIDATION", "source-scoped access cannot use source nomination");
   }
@@ -91,10 +87,6 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
     unionCompletion.source(record); retainedTuples.add(tuple);
   };
   const controlled = sourceId !== undefined || sourcePreviewExtents !== undefined || preferredSourceIds !== undefined || policyName === "canonical-v1";
-  SourceIndexAcquisition.assertControl({
-    control: payload.acquisition_control, vector: payload.prepared_query?.vector, receipt: payload.prepared_query?.receipt,
-    navigation: original, request: payload.request, scoped: controlled
-  });
   const prepare = meter.preparation ?? packSourceSemanticQueryPreparation(captureSourceSemanticQueryPreparation(
     payload.prepared_query?.receipt ?? unavailableSourceQueryPreparation(
       controlled ? "controlled_or_scoped_access" : "preparation_scope_unavailable", controlled ? "not_requested" : "unavailable"), meter), meter);
@@ -122,8 +114,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
             vector: payload.prepared_query?.vector ?? { status: "unavailable", reason: sourceSemanticPreparationReason(prepare, meter) ?? "preparation_unavailable" },
             ...(accessHint === undefined || accessHint === original ? {} : { supplemental: { navigation: accessHint,
               vector: payload.prepared_query?.supplemental?.vector ?? { status: "unavailable", reason: "hint_preparation_unavailable" } } }),
-            canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost,
-            control: payload.acquisition_control, lexicalCapture });
+            canonicalBytes: next === null ? 0 : bodyBytes, sourceCost: policy.sourceCost });
           releaseCanonical = observed.releaseCanonical;
           acquisition = observed.phase;
           if (next !== null) {

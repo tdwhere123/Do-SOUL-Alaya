@@ -3,22 +3,15 @@ import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
 import { sourceDisclosure } from "@do-soul/alaya-protocol";
 import {
-  proofForLibraryEntry, projectSourceSemanticQuerySupport, selectSourceSemanticLibraryPage, sourceGoldRootIdentity
+  proofForLibraryEntry, projectSourceSemanticQuerySupport, sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
-import { closeCachedDatabase, openReadOnlyDatabase } from "@do-soul/alaya-storage";
-import { selectSourceSemanticLibraryPageWithReturnedTupleNovelty } from
-  "../../../../../../packages/core/src/recall/runtime/source-semantic-library-selection.js";
-import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
-import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
-import { deliverResearchFixedSourceLibrary, runSourceSemanticLibraryRecall } from
-  "../../../runtime/recall-read-worker/source-semantic-library-recall.js";
-import { ACCESS_BUDGET, CLOCK, WS, accessCall, withAccessLibrary } from "./source-semantic-access.test-support.js";
+import { ACCESS_BUDGET, accessCall, withAccessLibrary } from "./source-semantic-access.test-support.js";
 import {
   CLASS_NOUN, CLASS_READING, EXISTING_TEST_WORK_UNITS, FIXTURE_NOTES, NON_TOOL_LABEL, ORIGINAL, OUTPUT_BYTE_LIMITS,
   PAYLOAD_TOKENS, REQUIRED_LABELS, UNKNOWN_UTTERANCE_ATTRIBUTION, aliceUsesDraft, bodyClassFromSource, bodyLabelFromSource,
-  correspondenceOf, encodedPage, encodedRecall, encodeBytes, fixtureSources, indexEntryCacheKey, isNonToolNote, namedLimitFits, pageLabels,
+  correspondenceOf, encodedPage, encodeBytes, fixtureSources, indexEntryCacheKey, isNonToolNote, namedLimitFits, pageLabels,
   pageRoots, proofClassTexts, proofTools, publishedInterpretation, queryOf, recallRequest,
-  researchFixedInputs, sentenceFor, sqliteSources, type Recall
+  sentenceFor, sqliteSources, type Recall
 } from "./source-semantic-library-binding-coverage.js";
 
 const RECEIPT_DIRECTORY = process.env.BINDING_COVERAGE_RECEIPT && process.env.BINDING_COVERAGE_RECEIPT.length > 0
@@ -31,31 +24,6 @@ async function writeReceipt(name: string, body: unknown) {
   await mkdir(RECEIPT_DIRECTORY, { recursive: true });
   const text = typeof body === "string" ? (body.endsWith("\n") ? body : `${body}\n`) : `${JSON.stringify(body, null, 2)}\n`;
   await writeFile(join(RECEIPT_DIRECTORY, name), text);
-}
-
-function pageIdentity(recall: Recall) {
-  const encoded = encodedPage(recall);
-  return {
-    roots: pageRoots(recall),
-    previews: recall.index.entries.map((entry) => recall.previews?.[indexEntryCacheKey(entry)] ?? null),
-    proofs: (recall.proofs ?? []).map((proof) => ({
-      source_interpretation_id: proof.source_interpretation_id,
-      query_semantics_id: proof.query_semantics_id,
-      semantic_correspondence_id: proof.semantic_correspondence_id,
-      conditional_computation_id: proof.conditional_computation_id,
-      mentions: proof.interpretation.mentions.map((mention) => ({
-        id: mention.id, text: mention.text, assertion_id: mention.assertion_id, source_ref: mention.source_ref
-      })),
-      referents: proof.interpretation.referents,
-      binding_results: (proof.binding_results ?? []).map((binding) => ({
-        binding_id: binding.binding_id, returned: binding.returned, bindings: binding.bindings,
-        explanation_ids: binding.explanation_ids, query_complete: binding.query_complete
-      }))
-    })),
-    slot_qualifiers: recall.slot_qualifiers,
-    source_disclosures: recall.source_disclosures,
-    public_disclosures: (encoded.results ?? []).map((row) => row.source_disclosure)
-  };
 }
 
 function publicRows(recall: Recall) {
@@ -142,70 +110,6 @@ function assertOriginals(
   expect(pageLabels(recall)).not.toContain(NON_TOOL_LABEL);
 }
 
-function assertCappedOccupancy(persisted: Awaited<ReturnType<typeof sqliteSources>>, recall: Recall,
-  correspondences: Correspondences, rawCount: number) {
-  const encoded = encodedPage(recall), rows = publicRows(recall), bytes = encodeBytes(encoded);
-  expect(recall.request_budget).toEqual(ACCESS_BUDGET);
-  expect(recall.index.entries).toHaveLength(2 + rawCount);
-  expect(new Set(pageRoots(recall)).size).toBe(2 + rawCount);
-  expect(recall.proofs ?? []).toHaveLength(2);
-  expect(recall.index.continuation).not.toBeNull();
-  expect(rows).toHaveLength(2 + rawCount);
-  expect(encoded.results).toHaveLength(2 + rawCount);
-  expect(recall.slot_qualifiers).toHaveLength(2 + rawCount);
-  expect(bytes).toBeLessThanOrEqual(200_000);
-  for (const [index, row] of rows.entries()) {
-    const stored = persisted.find(item => item.record_id === row.root_id);
-    expect(stored).toBeDefined();
-    expect(recall.index.entries[index]!.target).toMatchObject({ kind: "source_evidence", workspace_id: WS,
-      root_kind: "source_record", root_id: stored!.record_id,
-      source_version: stored!.source_version, content_digest: stored!.content_digest,
-      span: { content_start: 0, content_end: Buffer.byteLength(stored!.source_body!), content_complete: true } });
-    expect(encoded.index!.entries[index]).toEqual(recall.index.entries[index]);
-    expect(row.qualifier_index).toBe(index);
-    expect(row.preview).toBe(stored!.source_body);
-    expect(row.public_preview).toBe(stored!.source_body);
-    expect(row.within_budget).toBe(true);
-    expect(row.max_total_tokens).toBe(PAYLOAD_TOKENS);
-    const proof = proofForLibraryEntry(recall.index.entries[index]!, recall.proofs ?? []);
-    if (row.evidence_kind === "source_evidence") {
-      expect(proof).toBeUndefined();
-      expect(row.selection_basis).toBe("source_access");
-      expect(row.payload_support).toBe("not_applicable");
-      expect(row.source_interpretation_id).toBeUndefined();
-      expect(row.query_semantics_id).toBeUndefined();
-      expect(row.semantic_correspondence_id).toBeUndefined();
-      expect(row.conditional_computation_id).toBeUndefined();
-      expect(recall.slot_qualifiers[index]!.witnesses).toBeUndefined();
-      expect(recall.slot_qualifiers[index]!.support).toBeUndefined();
-      expect(row.proof_use).toEqual({ kind: "source_only", qualification: "not_current_proof" });
-      continue;
-    }
-    expect(row.evidence_kind).toBe("semantic_proof");
-    expect(row.payload_support).toBe("available");
-    expect(proof).toBeDefined();
-    expect(proof!.source_record).toMatchObject({ workspace_id: WS, source_id: stored!.source_id,
-      identity: stored!.record_id, source_version: stored!.source_version, content_digest: stored!.content_digest });
-    expect(proof!.query).toEqual(queryOf());
-    expect(proof!.semantic_correspondence).toEqual(correspondences.find(item =>
-      item.source_interpretation_id === proof!.source_interpretation_id));
-    expect(row.source_interpretation_id).toBe(proof!.source_interpretation_id);
-    expect(row.query_semantics_id).toBe(proof!.query_semantics_id);
-    expect(row.semantic_correspondence_id).toBe(proof!.semantic_correspondence_id);
-    expect(row.conditional_computation_id).toBe(proof!.conditional_computation_id);
-    expect(proofTools(proof)).toEqual([bodyLabelFromSource(stored!.source_body)]);
-    expect(proofClassTexts(proof)).toEqual([CLASS_NOUN]);
-    expect(proofTools(proof)).not.toContain(NON_TOOL_LABEL);
-    expect(row.proof_use).toEqual({ kind: "conditional_support", qualification: "not_world_claim" });
-  }
-  const proofRows = rows.filter(row => row.evidence_kind === "semantic_proof");
-  const rawRows = rows.filter(row => row.evidence_kind === "source_evidence");
-  expect(proofRows).toHaveLength(2);
-  expect(rawRows).toHaveLength(rawCount);
-  assertUnrepresentedEnumeration(recall);
-  return { rows, proofRows, rawRows, bytes };
-}
-
 function assertCrowdedOmission(
   persisted: readonly { record_id: string; source_body: string | null }[],
   recall: Recall,
@@ -245,31 +149,6 @@ function assertUnrepresentedEnumeration(recall: Recall, query = queryOf()) {
   }
 }
 
-type Correspondences = NonNullable<ReturnType<typeof recallRequest>["semantic_correspondences"]>;
-
-function researchPayload(ids: ReadonlyMap<string, readonly string[]>, outputByteLimit: number = OUTPUT_BYTE_LIMITS.schema_max,
-  semanticCorrespondences?: Correspondences) {
-  const request = recallRequest(ids, ACCESS_BUDGET.work_units, outputByteLimit);
-  return {
-    workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named" as const, scopes: ["project"] },
-    request: semanticCorrespondences === undefined ? request : { ...request, semantic_correspondences: semanticCorrespondences }
-  };
-}
-
-function deliverResearch(filename: string, ids: ReadonlyMap<string, readonly string[]>,
-  rawRows: Parameters<typeof deliverResearchFixedSourceLibrary>[2],
-  descriptors: Parameters<typeof deliverResearchFixedSourceLibrary>[3],
-  selectPage?: Parameters<typeof deliverResearchFixedSourceLibrary>[4],
-  outputByteLimit: number = OUTPUT_BYTE_LIMITS.schema_max, semanticCorrespondences?: Correspondences) {
-  const database = openReadOnlyDatabase(filename);
-  try {
-    return deliverResearchFixedSourceLibrary(database, researchPayload(ids, outputByteLimit, semanticCorrespondences), rawRows, descriptors, selectPage);
-  } finally {
-    database.close();
-    closeCachedDatabase(filename);
-  }
-}
-
 it("compiled worker baseline omits Pixel and charger on the ten-source fixture", async () => {
   await withAccessLibrary(fixtureSources(), async ({ execute, filename, ids }) => {
     const persisted = await sqliteSources(filename);
@@ -305,8 +184,19 @@ it("compiled worker baseline omits Pixel and charger on the ten-source fixture",
       expect(published.interpretation.mentions.some((mention) => mention.text === note.label)).toBe(true);
       expect(published.interpretation.mentions.some((mention) => mention.text === CLASS_NOUN)).toBe(true);
     }
+    expect(queryOf().requested_operation).toEqual({ reading: "enumerate", support: { kind: "query_text", excerpt: ORIGINAL } });
+    expect(queryOf().alternatives[0]!.answer_frames).toEqual([]);
+    expect(queryOf().alternatives[0]!.evidence_inputs).toEqual([{ frames: ["qUse", "qKind"] }]);
+    expect(queryOf().return_variables).toEqual([]);
+    expect(queryOf().gaps).toEqual([{
+      kind: "aggregate", affected_ids: ["tools"], support: [{ kind: "query_text", excerpt: "which tools" }],
+      description: "Complete tool enumeration is not executed; class-qualified use remains a local witness."
+    }]);
+    expect(queryOf().attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
+    expect(queryOf().variables.find(row => row.id === "tools")?.reference).toBeUndefined();
     const worker = await accessCall(execute, recallRequest(ids));
     expect(worker.kind).toBe("recall");
+    expect(worker.request_budget).toEqual(ACCESS_BUDGET);
     const encoded = encodedPage(worker);
     const bytes = encodeBytes(encoded);
     expect(bytes).toBeLessThanOrEqual(OUTPUT_BYTE_LIMITS.schema_max);
@@ -323,207 +213,6 @@ it("compiled worker baseline omits Pixel and charger on the ten-source fixture",
       named_limit_fit_arithmetic_not_native_rerun: namedLimitFits(bytes), rows,
       existing_test_work_units: EXISTING_TEST_WORK_UNITS, existing_test_work_truncated: true,
       existing_test_work_coverage: limited.coverage, work: worker.work
-    });
-  });
-}, 120000);
-
-it("research fixed-pool entry delivers default three names and novelty five without module substitution", async () => {
-  await withAccessLibrary(fixtureSources(), async ({ execute, filename, ids }) => {
-    const persisted = await sqliteSources(filename);
-    expect(persisted).toHaveLength(10);
-    const pool = await researchFixedInputs(filename, ids);
-    expect(pool.rawRows).toHaveLength(10);
-    expect(new Set(pool.rawRows.map((row) => row.record_id)).size).toBe(10);
-    expect(pool.rawRows.every((row) => row.complete && row.body_bytes !== null && row.read_bytes === row.body_bytes)).toBe(true);
-    expect(pool.descriptors).toHaveLength(10);
-    const worker = await accessCall(execute, recallRequest(ids));
-    expect(worker.kind).toBe("recall");
-    expect(worker.request_budget).toEqual(ACCESS_BUDGET);
-    const before = persisted.map((row) => ({
-      source_id: row.source_id, record_id: row.record_id, source_version: row.source_version,
-      content_digest: row.content_digest, source_body: row.source_body
-    }));
-    const omitted = deliverResearch(filename, ids, pool.rawRows, pool.descriptors);
-    const injected = deliverResearch(filename, ids, pool.rawRows, pool.descriptors, selectSourceSemanticLibraryPage);
-    const omittedEncoded = encodedRecall(omitted.encoded);
-    const injectedEncoded = encodedRecall(injected.encoded);
-    expect(omitted.provenance).toBe("research_fixed_pool");
-    expect(injected.provenance).toBe("research_fixed_pool");
-    expect(omitted.result.request_budget).toEqual(ACCESS_BUDGET);
-    expect(injected.result.request_budget).toEqual(omitted.result.request_budget);
-    expect(omitted.result.request_budget).toEqual(worker.request_budget);
-    expect(pageIdentity(injected.result)).toEqual(pageIdentity(omitted.result));
-    expect(injectedEncoded.results).toEqual(omittedEncoded.results);
-    expect(injected.result.request_identity).toEqual(omitted.result.request_identity);
-    expect(injected.result.delivery_id).toEqual(omitted.result.delivery_id);
-    expect(queryOf().requested_operation).toEqual({ reading: "enumerate", support: { kind: "query_text", excerpt: ORIGINAL } });
-    expect(queryOf().alternatives[0]!.answer_frames).toEqual([]);
-    expect(queryOf().alternatives[0]!.evidence_inputs).toEqual([{ frames: ["qUse", "qKind"] }]);
-    expect(queryOf().return_variables).toEqual([]);
-    expect(queryOf().gaps).toEqual([{
-      kind: "aggregate", affected_ids: ["tools"],
-      support: [{ kind: "query_text", excerpt: "which tools" }],
-      description: "Complete tool enumeration is not executed; class-qualified use remains a local witness."
-    }]);
-    expect(queryOf().attribution_context).toEqual(UNKNOWN_UTTERANCE_ATTRIBUTION);
-    expect(queryOf().alternatives[0]!.frames.some((frame) => frame.predicate_reading === CLASS_READING)).toBe(true);
-    expect(queryOf().variables.find((row) => row.id === "tools")?.reference).toBeUndefined();
-    const defaultRows = publicRows(omitted.result);
-    assertOriginals(persisted, omitted.result, defaultRows, omittedEncoded);
-    assertUnrepresentedEnumeration(omitted.result);
-    const defaultLabels = assertCrowdedOmission(persisted, omitted.result, defaultRows);
-    expect(pageLabels(omitted.result)).toEqual(pageLabels(worker));
-    expect(encodeBytes(omittedEncoded)).toBeLessThanOrEqual(OUTPUT_BYTE_LIMITS.schema_max);
-    expect((omittedEncoded.results ?? []).every((row) => row.budget_state.within_budget)).toBe(true);
-    const candidate = deliverResearch(filename, ids, pool.rawRows, pool.descriptors,
-      selectSourceSemanticLibraryPageWithReturnedTupleNovelty);
-    const candidateEncoded = encodedRecall(candidate.encoded);
-    expect(candidate.provenance).toBe("research_fixed_pool");
-    expect(candidate.result.request_budget).toEqual(ACCESS_BUDGET);
-    expect(encodeBytes(candidateEncoded)).toBeLessThanOrEqual(OUTPUT_BYTE_LIMITS.schema_max);
-    expect((candidateEncoded.results ?? []).every((row) => row.budget_state.within_budget)).toBe(true);
-    expect(pageLabels(candidate.result)).toEqual([...REQUIRED_LABELS].sort());
-    expect(pageLabels(candidate.result)).not.toContain(NON_TOOL_LABEL);
-    const candidateRows = publicRows(candidate.result);
-    expect(candidateRows).toHaveLength(5);
-    assertOriginals(persisted, candidate.result, candidateRows, candidateEncoded);
-    assertUnrepresentedEnumeration(candidate.result);
-    expect(new Set(pageRoots(candidate.result)).size).toBe(5);
-    const bodyLabels = bodyLabelsForRows(persisted, candidateRows);
-    expect([...new Set(bodyLabels)].sort()).toEqual([...REQUIRED_LABELS].sort());
-    expect(bodyLabels).toHaveLength(5);
-    expect(bodyLabels).not.toContain(NON_TOOL_LABEL);
-    for (const label of REQUIRED_LABELS) expect(bodyLabels.filter((item) => item === label)).toHaveLength(1);
-    expect(() => deliverResearch(filename, ids, pool.rawRows, pool.descriptors, selectSourceSemanticLibraryPage,
-      OUTPUT_BYTE_LIMITS.test_capped)).toThrow(/output budget cannot retain reserved source support/u);
-    const continuation = omitted.result.index.continuation;
-    expect(continuation).not.toBeNull();
-    if (continuation === null) throw new Error("default page must carry a research continuation");
-    {
-      const ordinary = openReadOnlyDatabase(filename);
-      try {
-        expect(() => runSourceSemanticLibraryRecall(
-          createRecallReadWorkerRuntime(ordinary),
-          { workspace_id: WS, as_of: CLOCK, authorized_scopes: { mode: "named", scopes: ["project"] },
-            request: { ...recallRequest(ids), continuation } },
-          ["project"],
-          new SourceSemanticReadBudget(ACCESS_BUDGET)
-        )).toThrow(/expired|handle|continuation/i);
-      } finally {
-        ordinary.close();
-        closeCachedDatabase(filename);
-      }
-    }
-    expect(() => deliverResearch(filename, ids, pool.rawRows.slice(0, 6), pool.descriptors))
-      .toThrow(/research window requires ten fully read distinct raw roots/);
-    const after = await sqliteSources(filename);
-    expect(after).toEqual(before);
-    const defaultBytes = encodeBytes(omittedEncoded);
-    const candidateBytes = encodeBytes(candidateEncoded);
-    await writeReceipt("candidate.json", {
-      arm: "research_fixed_pool_novelty", claim: "not compiled worker",
-      correspondence_fixture: "all_ten_source_interpretations",
-      same_fixture_default_matches_compiled_worker_labels: pageLabels(omitted.result).join(",") === pageLabels(worker).join(","),
-      labels: pageLabels(candidate.result), body_labels: bodyLabels, default_labels: defaultLabels,
-      non_tool_label: NON_TOOL_LABEL, class_reading: CLASS_READING,
-      distinct_roots: new Set(pageRoots(candidate.result)).size, encode_bytes: candidateBytes,
-      default_encode_bytes: defaultBytes, payload_tokens: PAYLOAD_TOKENS,
-      named_limit_fit_arithmetic_not_native_rerun: namedLimitFits(candidateBytes),
-      default_named_limit_fit_arithmetic_not_native_rerun: namedLimitFits(defaultBytes),
-      within_budget: (candidateEncoded.results ?? []).map((row) => row.budget_state.within_budget),
-      rows: candidateRows, work: candidate.result.work, default_work: omitted.result.work
-    });
-    await writeReceipt("report.md", [
-      "# Native qualified delivery",
-      "",
-      "Constructed semantic capacity on the ten-root native selector fixture. Not natural-language producer fidelity.",
-      "Q does not represent a complete answer to which tools Alice uses. requested_operation enumerate stays not_executed; qUse and qKind are one evidence input; answer_frames are empty; tools remains an aggregate gap.",
-      "H class premises are implicit lexical support on `tool`, attached to the same object as use.",
-      "C maps the class predicate to that H frame and keeps original qUse/qKind endpoints; entity keys/excerpts are not class proof.",
-      "One Pixel duplicate was replaced by a use-only coffee source. Ten-root research window is unchanged. Old cohort-budget metrics were not overwritten.",
-      "",
-      `- default labels: ${defaultLabels.join(", ")}`,
-      `- novelty labels: ${pageLabels(candidate.result).join(", ")}`,
-      `- default encode bytes: ${defaultBytes}`,
-      `- novelty encode bytes: ${candidateBytes}`,
-      `- default work: ${JSON.stringify(omitted.result.work)}`,
-      `- novelty work: ${JSON.stringify(candidate.result.work)}`,
-      `- named limit fit (novelty): ${JSON.stringify(namedLimitFits(candidateBytes))}`,
-      "- capped all-C deferral: see capped-all-correspondences.json (two proofs plus coffee raw; fitting tool proofs deferred)",
-      "- capped two-C occupancy: see capped-two-correspondences.json (five slots, two proofs, three sources without applicable C)",
-      "- isolated coffee control: see measured result in class-controls.json",
-      ""
-    ].join("\n"));
-  });
-}, 180000);
-
-it("defers fitting tool proofs instead of consuming raw twins under the capped all-correspondence fixture", async () => {
-  await withAccessLibrary(fixtureSources(), async ({ filename, ids }) => {
-    const persisted = await sqliteSources(filename), pool = await researchFixedInputs(filename, ids);
-    const correspondences = recallRequest(ids).semantic_correspondences!;
-    expect(persisted).toHaveLength(10);
-    expect(pool.rawRows).toHaveLength(10);
-    expect(pool.descriptors).toHaveLength(10);
-    expect(correspondences).toHaveLength(10);
-    const recalled = deliverResearch(filename, ids, pool.rawRows, pool.descriptors,
-      selectSourceSemanticLibraryPageWithReturnedTupleNovelty, 200_000);
-    const checked = assertCappedOccupancy(persisted, recalled.result, correspondences, 1);
-    const coffee = persisted.find(row => row.source_id === "note-coffee-cup")!;
-    expect(checked.rawRows.map(row => row.root_id)).toEqual([coffee.record_id]);
-    expect(checked.rawRows.map(row => row.preview)).toEqual([sentenceFor(NON_TOOL_LABEL, "non_tool")]);
-    const deliveredRoots = new Set(checked.rows.map(row => row.root_id));
-    const deferred = persisted.filter(row => bodyClassFromSource(row.source_body) === CLASS_NOUN
-      && !deliveredRoots.has(row.record_id));
-    expect(deferred).toHaveLength(7);
-    expect(checked.rawRows.every(row => !deferred.some(source => source.record_id === row.root_id))).toBe(true);
-    expect(await sqliteSources(filename)).toEqual(persisted);
-    await writeReceipt("capped-all-correspondences.json", {
-      arm: "research_fixed_pool_novelty", correspondence_fixture: "all_ten_source_interpretations",
-      supplied_correspondence_count: correspondences.length, output_byte_limit: 200_000,
-      occupied_slots: checked.rows.length, proved_slots: checked.proofRows.length,
-      raw_slots: checked.rawRows.length, encode_bytes: checked.bytes,
-      continuation: recalled.result.index.continuation !== null,
-      deferred_tool_source_ids: deferred.map(row => row.source_id), rows: checked.rows, work: recalled.result.work
-    });
-  });
-}, 120000);
-
-it("fills five capped slots with two qualified proofs and three raw sources when only two correspondences are supplied", async () => {
-  await withAccessLibrary(fixtureSources(), async ({ filename, ids }) => {
-    const persisted = await sqliteSources(filename), pool = await researchFixedInputs(filename, ids);
-    const proofSourceIds = ["note-pixel-desk", "note-charger-desk"];
-    const correspondences = proofSourceIds.map(sourceId => {
-      expect(ids.get(sourceId)).toHaveLength(1);
-      return correspondenceOf(ids.get(sourceId)![0]!, queryOf());
-    });
-    expect(persisted).toHaveLength(10);
-    expect(pool.rawRows).toHaveLength(10);
-    expect(pool.descriptors).toHaveLength(10);
-    expect(correspondences).toHaveLength(2);
-    for (const correspondence of correspondences) {
-      expect(recallRequest(ids).semantic_correspondences).toContainEqual(correspondence);
-    }
-    // Keep every original source and published H. Only these two actual C
-    // premises enter this request; all other roots remain honest raw evidence.
-    const recalled = deliverResearch(filename, ids, pool.rawRows, pool.descriptors,
-      selectSourceSemanticLibraryPageWithReturnedTupleNovelty, 200_000, correspondences);
-    const checked = assertCappedOccupancy(persisted, recalled.result, correspondences, 3);
-    expect(checked.rows).toHaveLength(5);
-    expect(new Set(pageRoots(recalled.result)).size).toBe(5);
-    expect(new Set(recalled.result.proofs!.map(proof => proof.source_record.source_id))).toEqual(new Set(proofSourceIds));
-    expect(pageLabels(recalled.result)).toEqual(["Pixel", "charger"]);
-    const provedRoots = new Set(persisted.filter(row => proofSourceIds.includes(row.source_id)).map(row => row.record_id));
-    expect(checked.rawRows.every(row => !provedRoots.has(row.root_id!))).toBe(true);
-    expect(recalled.result.discovery.examined_source_interpretation_ids.slice().sort())
-      .toEqual(correspondences.map(row => row.source_interpretation_id).sort());
-    expect(await sqliteSources(filename)).toEqual(persisted);
-    await writeReceipt("capped-two-correspondences.json", {
-      arm: "research_fixed_pool_novelty", correspondence_fixture: "two_declared_tool_sources",
-      supplied_correspondence_source_ids: proofSourceIds, supplied_correspondence_count: correspondences.length,
-      retained_source_count: persisted.length, retained_source_interpretation_count: pool.descriptors.length,
-      output_byte_limit: 200_000, occupied_slots: checked.rows.length, proved_slots: checked.proofRows.length,
-      raw_slots: checked.rawRows.length, raw_rows_are_qualified_tool_proofs: false, encode_bytes: checked.bytes,
-      continuation: recalled.result.index.continuation !== null, rows: checked.rows, work: recalled.result.work
     });
   });
 }, 120000);

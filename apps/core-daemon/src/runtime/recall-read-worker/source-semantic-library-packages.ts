@@ -8,8 +8,7 @@ import type { SourceSemanticReadBudget } from "../field/source-semantic-read-sto
 import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { admissionOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 
-import { LIBRARY_SOURCE_DISPLAY_BYTES as DISPLAY_BYTES, prepareNominatedLibraryWindows,
-  type LibrarySourceNomination } from "./source-semantic-library-nominated-windows.js";
+import { LIBRARY_SOURCE_DISPLAY_BYTES as DISPLAY_BYTES } from "./source-semantic-library-nominated-windows.js";
 export type LibraryExecutedSupport = Readonly<{
   proof: SourceSemanticLibraryProof;
   group: Pick<SourceSemanticLibraryPackage, "entries" | "explanations">;
@@ -19,25 +18,14 @@ export type LibraryExecutedSupport = Readonly<{
 /** Hydration consumes actual execution origins and current authorized source bytes. */
 export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
-  sources: readonly IndexEntry[], executed: readonly LibraryExecutedSupport[],
-  researchNominations?: readonly LibrarySourceNomination[]) {
+  sources: readonly IndexEntry[], executed: readonly LibraryExecutedSupport[]) {
   const prepared: ReturnType<typeof supportPackages>[] = [];
-  let positions: Map<string, number> | undefined;
-  if (researchNominations?.some(row => row.vector?.window !== undefined)) {
-    meter.charge(1 + researchNominations.length, 64, "library nominated source index");
-    positions = new Map();
-  }
   let incomplete = false;
   for (const [position, entry] of sources.entries()) {
     if (entry.target.kind !== "source_evidence") continue;
     const root = sourceGoldRootIdentity(entry.target);
     const branches = executed.filter(row => row.proof.source_target !== undefined && sourceGoldRootIdentity(row.proof.source_target) === root);
     try {
-      if (positions !== undefined) {
-        // Reuse the baseline identity computation, not a second canonicalization of every tuple.
-        meter.charge(1, positions.has(root) ? 0 : 64 + root.length * 2, "library nominated source index");
-        if (!positions.has(root)) positions.set(root, position);
-      }
       const retained = readSource(runtime, payload, authorized, meter, entry);
       if (retained === undefined) { incomplete = true; continue; }
       const disclosure = projectSourceDisclosure({ material_kind: "original_body", evaluated_as_of: payload.as_of,
@@ -56,7 +44,7 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
       if (!(error instanceof SourceSemanticResourceExhausted)
         && !(error instanceof CoreError && (error.code === "NOT_FOUND" || admissionOf(error) === "filtered"))) throw error;
       incomplete = true;
-      if (error instanceof SourceSemanticResourceExhausted) { positions = undefined; break; }
+      if (error instanceof SourceSemanticResourceExhausted) break;
     }
   }
   const packages = prepared.flatMap(row => row.packages);
@@ -64,35 +52,6 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
   catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     incomplete = true;
-  }
-  if (researchNominations !== undefined) {
-    // Optional private hydration follows all baseline reservations. Preserve every legal
-    // window/qualification variant; root deduplication is the selector's separate job.
-    const nominated = prepareNominatedLibraryWindows(runtime, payload, authorized, meter, sources, researchNominations, positions);
-    meter.charge(1, 64, "library nominated variant index");
-    const byPosition = new Map<number, SourceSemanticLibraryPackage[]>();
-    for (const window of nominated) {
-      const variants = byPosition.get(window.access_position);
-      meter.charge(1, 8 + (variants === undefined ? 128 : 0), "library nominated variant index");
-      if (variants === undefined) byPosition.set(window.access_position, [window]);
-      else variants.push(window);
-    }
-    meter.charge(0, 64, "library nominated variant references");
-    const expanded: SourceSemanticLibraryPackage[] = [];
-    for (const candidate of packages) {
-      meter.charge(1, 8, "library nominated variant references");
-      if (candidate.proofs.length === 0) {
-        const variants = byPosition.get(candidate.access_position);
-        if (variants !== undefined) {
-          meter.charge(variants.length, variants.length * 8, "library nominated variant references");
-          expanded.push(...variants);
-          // Insert all variants exactly once, before this position's first raw package.
-          byPosition.delete(candidate.access_position);
-        }
-      }
-      expanded.push(candidate);
-    }
-    return { packages: expanded, incomplete };
   }
   return { packages, incomplete };
 }

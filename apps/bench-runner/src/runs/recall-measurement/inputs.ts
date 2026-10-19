@@ -12,13 +12,10 @@ import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { ProviderRawAttemptIdentityError } from "../extraction/fill/provider-raw-attempt.js";
 import { ExtractionAttemptLimitError } from "../extraction/authority/attempt-ledger.js";
 import { join } from "node:path";
-import { assertCorrespondenceModelViewSelection, correspondenceModelViewInputPaths }
-  from "../semantic-cache/correspondence-model-view.js";
 
 /** Retained plans expose readable cache inputs without admitting the plan or its execution state. */
 export function semanticChainCacheInputPaths(value: unknown): readonly string[] {
-  const paths: string[] = [...correspondenceModelViewInputPaths({
-    selected_model_view: retainedArtifactField(value, "config", "correspondence_model_view") })];
+  const paths: string[] = [];
   for (const key of ["cache_root", "preparation_path"] as const) {
     const path = retainedArtifactPathField(value, "config", "source_index", key);
     if (path !== undefined) paths.push(path);
@@ -82,7 +79,7 @@ export function readSemanticChainProposalResults(workset: SemanticProposalWorkse
   });
 }
 
-export function semanticChainProposalStates(results: ReturnType<typeof readSemanticChainProposalResults>) {
+function semanticChainProposalStates(results: ReturnType<typeof readSemanticChainProposalResults>) {
   return results.map((row) => ({ key: row.line.key, raw: row.shard?.raw_digest ?? null,
     status: row.status, cache_identity: row.cache_identity }));
 }
@@ -107,9 +104,6 @@ export function semanticChainQueryAvailability(row: ReturnType<typeof readSemant
 /** All consumers of a prepared plan bind the same current query-semantics cache state and denominator. */
 export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   const config = plan.config;
-  assertCorrespondenceModelViewSelection(plan.correspondence_workset?.items ?? [], config.correspondence_model_view, config);
-  if (config.correspondence_model_view !== undefined && plan.correspondence_workset !== null) materializeSemanticProposalLines(plan.correspondence_workset,
-    config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens);
   const queries = readSemanticChainProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
   const expected = queries.map((row) => row.line.key).sort();
   const recorded = plan.queries.map((row) => row.query_key).sort();
@@ -146,7 +140,7 @@ export function readSemanticChainCorrespondences(plan: SemanticChainPlan, arm: "
 }
 
 /** Each exact C key retains its own physical attempt root, including warm unchanged keys. */
-export function readSemanticChainCorrespondenceOwners(workset: SemanticProposalWorkset, defaultRoot: string,
+function readSemanticChainCorrespondenceOwners(workset: SemanticProposalWorkset, defaultRoot: string,
   cap: number, owners?: readonly { key: string; cache_root: string }[]) {
   const lines = materializeSemanticProposalLines(workset, cap);
   if (owners !== undefined && (owners.length !== lines.length ||

@@ -83,6 +83,16 @@ describe("recall read worker operation schemas", () => {
     })).toThrow();
   });
 
+  it("rejects private source controls while retaining native preparation", () => {
+    const payload = { workspace_id: "workspace-1", as_of: CLOCK,
+      authorized_scopes: { mode: "named", scopes: ["project"] },
+      request: { kind: "prepare_source", source_id: "source-1", budget: recallPayload(undefined).budget } };
+    expect(parseWorkerOperationPayload("conditionalField.sourceSemantics", payload)).toEqual(payload);
+    for (const control of ["acquisition_control", "joint_control", "qualified_control"]) {
+      expect(() => parseWorkerOperationPayload("conditionalField.sourceSemantics", { ...payload, [control]: "lexical" })).toThrow();
+    }
+  });
+
   it("rejects a missing result field on the main-thread schema", () => {
     const constraint = SoulActiveConstraintSchema.parse({
       object_id: "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",

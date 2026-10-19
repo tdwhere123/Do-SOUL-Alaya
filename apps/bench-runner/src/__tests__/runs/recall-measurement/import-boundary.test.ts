@@ -6,7 +6,12 @@ import { expect, it } from "vitest";
 
 it("keeps retained measurement and comparison imports independent of private research pipelines", () => {
   const sourceRoot = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
-  const pending = ["runs/recall-measurement/launch.ts", "runs/longmemeval-semantic/launch.ts",
+  for (const path of ["runs/semantic-chain", "runs/semantic-proposal", "cli/semantic-proposal-fill",
+    "runs/semantic-cache/correspondence-model-view.ts", "runs/semantic-cache/query-revision-observer-view.ts",
+    "runs/semantic-cache/correspondence-generation-context.ts"]) {
+    expect(existsSync(resolve(sourceRoot, path)), path).toBe(false);
+  }
+  const pending = ["cli/cli.ts", "runs/recall-measurement/launch.ts", "runs/longmemeval-semantic/launch.ts",
     "runs/source-access-diagnostic/launch.ts", "runs/page-support-comparison/input.ts",
     "runs/recall-measurement/ordinary/ordinary-recall.ts", "diagnostics/diagnostics.ts"]
     .map(path => resolve(sourceRoot, path));
@@ -18,7 +23,7 @@ it("keeps retained measurement and comparison imports independent of private res
     visited.add(path);
     expect(path).not.toMatch(forbidden);
     const source = readFileSync(path, "utf8");
-    expect(source).not.toMatch(/\b(?:researchAcquisition|researchLibrary|SourceSemanticJointSelection|QualifiedSourceSelection|ResearchSourceObservation|bindResearchFixedSourcePool)\b/u);
+    expect(source).not.toMatch(/\b(?:researchAcquisition|researchLibrary|SourceSemanticJointSelection|QualifiedSourceSelection|ResearchSourceObservation|bindResearchFixedSourcePool|executeSemanticProposalFill|prepareRetainedSemanticProposalRevision|deliverLivePreparedSemanticChain|selectObservedSettledCorrespondence)\b/u);
     for (const imported of ts.preProcessFile(source, true, true).importedFiles) {
       if (!imported.fileName.startsWith(".")) continue;
       const target = resolve(dirname(path), imported.fileName.replace(/\.js$/u, ".ts"));

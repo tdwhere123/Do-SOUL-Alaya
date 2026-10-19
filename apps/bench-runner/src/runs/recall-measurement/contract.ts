@@ -9,7 +9,6 @@ import { AlayaError, canonicalJson, RequestBudgetSchema, AuthorizedScopesAdmissi
   SourceSemanticCorrespondenceGenerationPolicySchema } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SemanticProposalWorksetSchema } from "../semantic-cache/workset.js";
-import { CorrespondenceModelViewSchema } from "../semantic-cache/correspondence-model-view.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
@@ -33,12 +32,11 @@ export const SemanticChainConfigSchema = z.object({
   correspondence_cache_owners: z.array(z.object({ key: Digest, cache_root: z.string().min(1) }).strict())
     .max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP).optional(),
   max_output_tokens: z.number().int().min(1).max(65536),
-  correspondence_model_view: CorrespondenceModelViewSchema.optional(),
   correspondence_generation: z.object({ model: z.string().min(1), request_profile: z.string().min(1),
     provider_url: z.string().min(1), max_output_tokens: z.number().int().min(1).max(65536) }).strict().optional(),
   discovery_page_cap: z.number().int().min(1).max(64),
   source_preview_extents: SourceSemanticPreviewExtentsSchema.optional(),
-  // Candidate opportunity per query; the proposal authority owns global spend.
+  // Retained candidate opportunity per query, not provider execution authority.
   correspondence_pair_cap: z.number().int().min(0).max(SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP),
   // Protocol owns the paired demand selection and total request cap, distinct from the H cap.
   ...SourceSemanticCorrespondencePreparationOptionsSchema.unwrap().shape,
@@ -83,8 +81,7 @@ export const SemanticChainQuerySchema = z.discriminatedUnion("status", [
     }).strict()).optional(),
   }).strict()
 ]);
-// Retained v6/v1-access plans are deliberately unsupported, not upgraded. Remove this cutover boundary
-// only after all retained v6 chain, lazy-qualification and recovery artifacts have been retired.
+// Retained v6/v1-access plans are deliberately unsupported, not upgraded.
 export const SEMANTIC_CHAIN_PLAN_CONTRACT = "source-semantic-chain-plan-v7" as const;
 export const SemanticChainPlanSchema = z.object({
   contract: z.literal(SEMANTIC_CHAIN_PLAN_CONTRACT), input_identity: Digest,

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "@do-soul/alaya-protocol";
@@ -8,8 +8,8 @@ import { isCompleteSemanticFinish } from "../compile-seed/http/semantic-provider
 import { ExtractionTransportProvenanceSchema, type ExtractionTransportProvenance } from "../extraction/transport-route.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 
-export const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v3" as const;
-export const SEMANTIC_PROPOSAL_SHARD_MAX_BYTES = 32 * 1024 * 1024;
+const SEMANTIC_PROPOSAL_CACHE_CONTRACT = "source-semantic-proposal-cache-v3" as const;
+const SEMANTIC_PROPOSAL_SHARD_MAX_BYTES = 32 * 1024 * 1024;
 
 export class SemanticProposalIdentityError extends Error {
   constructor(message: string) {
@@ -67,13 +67,6 @@ export type SemanticProposalLookup = Readonly<{
 
 export function semanticProposalShardPath(cacheRoot: string, key: string): string {
   return join(cacheRoot, key.slice(0, 2), `${key}.json`);
-}
-
-export function readSemanticProposalShard(cacheRoot: string, key: string): SemanticProposalShard | undefined {
-  const path = semanticProposalShardPath(cacheRoot, key);
-  if (!existsSync(path)) return undefined;
-  return ShardSchema.parse(JSON.parse(readBoundedCanonicalUtf8Artifact({ path,
-    maxBytes: SEMANTIC_PROPOSAL_SHARD_MAX_BYTES, label: "semantic proposal shard" })));
 }
 
 export function inspectSemanticProposalShard(
@@ -164,27 +157,4 @@ export function hasVerifiedProposalCompletion(shard: SemanticProposalShard): boo
 export function hasAdmittedProposalOutcome(shard: SemanticProposalShard): boolean {
   return shard.admitted === true && proposalOutcomeStatus(shard) === "interpreted" &&
     hasVerifiedProposalCompletion(shard);
-}
-
-export function listSemanticProposalKeys(cacheRoot: string, kind: SemanticProposalKind): ReadonlySet<string> {
-  const keys = new Set<string>();
-  if (!existsSync(cacheRoot)) return keys;
-  for (const bucket of readdirSync(cacheRoot, { withFileTypes: true })) {
-    if (!bucket.isDirectory() || !/^[0-9a-f]{2}$/u.test(bucket.name)) continue;
-    for (const file of readdirSync(join(cacheRoot, bucket.name))) {
-      if (!/^[0-9a-f]{64}\.json$/u.test(file)) continue;
-      const key = file.slice(0, 64);
-      if (bucket.name !== key.slice(0, 2)) {
-        throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
-      }
-      const shard = ShardSchema.safeParse(JSON.parse(readBoundedCanonicalUtf8Artifact({
-        path: join(cacheRoot, bucket.name, file), maxBytes: SEMANTIC_PROPOSAL_SHARD_MAX_BYTES,
-        label: "semantic proposal shard inventory" })));
-      if (!shard.success || shard.data.cache_key !== key) {
-        throw new SemanticProposalIdentityError(`semantic proposal cache identity mismatch: ${key}`);
-      }
-      if (shard.data.kind === kind) keys.add(shard.data.cache_key);
-    }
-  }
-  return keys;
 }

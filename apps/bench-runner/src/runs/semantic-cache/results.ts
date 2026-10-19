@@ -12,10 +12,8 @@ import { materializeSemanticProposalLines, resolveSemanticProposalRevisionParent
 import { readSemanticProposalAttemptState, semanticProposalLookup } from "./attempt.js";
 import { hasAdmittedProposalOutcome, hasVerifiedProposalCompletion, proposalOutcomeStatus,
   SemanticProposalIdentityError, type SemanticProposalShard } from "./artifact.js";
-import type { QueryRevisionObserverView } from "./query-revision-observer-view.js";
-import type { CorrespondenceGenerationContext } from "./correspondence-generation-context.js";
 
-export function classifyProposalOutcome(
+function classifyProposalOutcome(
   outcome: Readonly<{ status: string; reason?: string }>, finishReason?: string | null,
   requestProfile = "gemini-2.5-nonthinking-v1"
 ): ProviderRequestAttemptClass {
@@ -27,17 +25,17 @@ export function classifyProposalOutcome(
   return "terminal";
 }
 
-/** Offline consumers use the same exact-request lookup, receiver and Core admission as fill. */
+/** Read-only consumers revalidate exact request, physical evidence and Core admission. */
 export function readSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number,
-  meter?: SourceSemanticResourceLedger, queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext) {
+  meter?: SourceSemanticResourceLedger) {
   if (meter !== undefined) return withBoundedArtifactReadMeter(meter,
-    () => readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, meter, queryRevisionObserverView, correspondenceGenerationContext));
-  return readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, undefined, queryRevisionObserverView, correspondenceGenerationContext);
+    () => readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens, meter));
+  return readMeteredSemanticProposalResults(workset, cacheRoot, maxOutputTokens);
 }
 
 function readMeteredSemanticProposalResults(workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number,
-  meter?: SourceSemanticResourceLedger, queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext) {
-  const lines = materializeSemanticProposalLines(workset, maxOutputTokens, meter, queryRevisionObserverView, correspondenceGenerationContext);
+  meter?: SourceSemanticResourceLedger) {
+  const lines = materializeSemanticProposalLines(workset, maxOutputTokens, meter);
   assertRetainedProposalRevisionParents(workset, cacheRoot, maxOutputTokens, lines);
   return lines.map((line) => {
     const state = readSemanticProposalAttemptState(cacheRoot, line.key, semanticProposalLookup(workset, line, maxOutputTokens));
@@ -72,7 +70,7 @@ function readMeteredSemanticProposalResults(workset: SemanticProposalWorkset, ca
   });
 }
 
-export function assertRetainedProposalRevisionParents(workset: SemanticProposalWorkset, cacheRoot: string,
+function assertRetainedProposalRevisionParents(workset: SemanticProposalWorkset, cacheRoot: string,
   maxOutputTokens: number, lines: readonly SemanticProposalLine[]): void {
   const revised = lines.some(line => line.request.revision !== undefined);
   if (revised !== (workset.revision_parent_cache_root !== undefined)) {
@@ -93,7 +91,7 @@ export function assertRetainedProposalRevisionParents(workset: SemanticProposalW
   }
 }
 
-export function completeProposalParentRaw(workset: SemanticProposalWorkset, cacheRoot: string,
+function completeProposalParentRaw(workset: SemanticProposalWorkset, cacheRoot: string,
   maxOutputTokens: number, parent: SemanticProposalLine): string {
   const state = readSemanticProposalAttemptState(cacheRoot, parent.key,
     semanticProposalLookup(workset, parent, maxOutputTokens));
@@ -114,7 +112,7 @@ type CachedProposalReplay =
   | Readonly<{ state: "unparsed"; classified: "terminal" | "incomplete" | "empty" }>
   | Readonly<{ state: "parsed"; classified: ProviderRequestAttemptClass; received: ReturnType<typeof receiveLine> }>;
 
-export function replayCachedProposalShard(
+function replayCachedProposalShard(
   line: SemanticProposalLine, shard: SemanticProposalShard, meter?: SourceSemanticResourceLedger
 ): CachedProposalReplay {
   // Accounting rejection must not be reinterpreted as admitted output or abstention.

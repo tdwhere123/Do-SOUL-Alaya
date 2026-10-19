@@ -10,7 +10,6 @@ import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } fr
 import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
 import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
-import { createSemanticProviderHttpExtractor } from "../../../runs/compile-seed/http/semantic-provider-http.js";
 import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
 import { preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
@@ -21,10 +20,9 @@ import { parseSourcePublicationAssociations, publishSourceSemanticSnapshot } fro
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { LongMemEvalNativeSemanticConfigSchema } from "../../../runs/longmemeval-semantic/contract.js";
 import { prepareLongMemEvalSemanticRun, verifyLongMemEvalQuestionPublication } from "../../../runs/longmemeval-semantic/execute.js";
-import { readChainArtifact } from "../../../runs/semantic-chain/contract.js";
-import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
-import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
+import { readChainArtifact } from "../../../runs/recall-measurement/contract.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";
+import { seedRetainedSemanticCache } from "../../runs/semantic-cache/retained-cache.test-support.js";
 
 const MODEL = "step-3.5-flash-2603";
 const PROFILE = "step-3.5-2603-low-json-schema-v1" as const;
@@ -193,24 +191,8 @@ it("joins two native Step owners for a later original question and retains unsup
       alternatives: [{ conditions: [{ kind: "statement", key: "condition", predicate: "complete",
         arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "Fixture" }] }] }],
       gaps: [] });
-  const queryPreflight = prepareSemanticProposal(frozen.query_workset, frozen.config.query_cache_root, 4096, 1);
-  const queryAuthority = pinSemanticProposalAuthority({ preflight: queryPreflight,
-    inputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.input_usd_equivalent_per_million,
-    outputUsdPerMillion: STEP_PLAN_QUOTE_BASIS.output_usd_equivalent_per_million });
-  const queryConfig = { providerUrl: STEP_PLAN_QUOTE_BASIS.selected_provider_url,
-    model: MODEL, requestProfile: PROFILE, apiKey: "fixture" };
-  const queryWire = `data: ${JSON.stringify({ choices: [{ delta: { content: queryRawJson }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } })}\n\ndata: [DONE]\n\n`;
-  const queryFetch = vi.fn<typeof fetch>(async (url) => {
-    expect(String(url)).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
-    return new Response(queryWire, { headers: { "content-type": "text/event-stream" } });
-  });
-  const queryFill = await executeSemanticProposalFill({ workset: frozen.query_workset,
-    cacheRoot: frozen.config.query_cache_root, authority: queryAuthority,
-    config: queryConfig,
-    extractor: createSemanticProviderHttpExtractor(queryConfig, "source_semantic_proposal", queryFetch) });
-  expect(queryFill.newly_admitted).toBe(1);
-  expect(queryFetch).toHaveBeenCalledTimes(1);
+  const retained = seedRetainedSemanticCache(frozen.query_workset, frozen.config.query_cache_root, 4096, () => queryRawJson);
+  expect(retained.admittedCount).toBe(1);
   const prepared = await prepareLongMemEvalSemanticRun(freezeRoot);
   if (prepared.result.contract !== "longmemeval-native-semantic-prepared-v1") throw new Error("native preparation required");
   expect(prepared.result.rows).toMatchObject([{ question_id: "target", status: "prepared" }]);

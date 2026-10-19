@@ -62,6 +62,7 @@
         "src/index.ts",
         "src/embedding-recall/local-onnx-embedding-client.ts",
         "src/embedding-recall/local-onnx-process/child.ts",
+        "src/recall/conditional-field/query/source-semantic-joint-witness.ts",
         "src/__tests__/**/*.test.ts"
       ],
       "project": ["src/**/*.ts", "tsconfig.json"]

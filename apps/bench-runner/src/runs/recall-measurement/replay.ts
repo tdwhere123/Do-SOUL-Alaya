@@ -42,7 +42,7 @@ export function inspectSemanticChainReplayTarget(root: string, arm: "retained" |
       semanticChainReplayRowPath(root, identity, query.query_key)])) };
 }
 
-export function semanticChainReplayPath(root: string, identity: string): string {
+function semanticChainReplayPath(root: string, identity: string): string {
   return join(root, `replay-${identity}.json`);
 }
 
@@ -142,39 +142,7 @@ export async function closeSemanticChainReplayFromDurableRows(root: string,
   return scope === undefined ? operation() : trackBenchOperation(scope, operation);
 }
 
-/** Deliver one already prepared live pool; the caller owns its prior native admission. */
-export async function deliverLivePreparedSemanticChain(root: string, daemon: BenchDaemonHandle,
-  liveHandles: ReadonlyMap<string, string | undefined>) {
-  refuseBenchWorkAfterCancel();
-  const { plan, config, semantic_correspondences, identity, rowPaths } = inspectSemanticChainReplayTarget(root, "retained");
-  if (plan.queries.length !== 1 || plan.queries[0]?.status !== "ready") {
-    throw new AlayaError("CONFLICT", "live prepared delivery requires one admitted query");
-  }
-  const query = plan.queries[0];
-  const handle = liveHandles.get(query.query_key);
-  if (handle === undefined || handle.length === 0) {
-    throw new AlayaError("CONFLICT", "live prepared delivery lost its actual native handle");
-  }
-  const rowPath = rowPaths.get(query.query_key)!;
-  const { ready, outcomes } = semanticChainQueryCorrespondences(query, semantic_correspondences);
-  if (readChainArtifact(rowPath) === undefined) {
-    const reservation = `${rowPath}.reserved`;
-    if (readChainArtifact(reservation) !== undefined) {
-      throw new AlayaError("CONFLICT", "live native first exposure was reserved without a durable row");
-    }
-    writeChainArtifact(reservation, { replay_identity: identity, query_key: query.query_key });
-    const started = performance.now();
-    await deliverPreparedSemanticChainQuery({ daemon, config, query,
-      prepared: { query_handle: handle, discovery: query }, ready, outcomes,
-      rowPath, replayIdentity: identity, preparationElapsed: 0, preparationError: null, started });
-  }
-  refuseBenchWorkAfterCancel();
-  const aggregate = await closeSemanticChainReplayFromDurableRows(root);
-  if (aggregate === null) throw new AlayaError("CONFLICT", "live prepared delivery has no durable response row");
-  return aggregate;
-}
-
-/** The same live-handle recall, immutable response row and first-exposure owner serve replay and recovery. */
+/** Native replay and guarded local-index measurement share one first-exposure owner. */
 export async function deliverPreparedSemanticChainQuery(input: Readonly<{
   daemon: BenchDaemonHandle; config: SemanticChainConfig;
   query: Exclude<SemanticChainPlan["queries"][number], { status: "blocked" }>;

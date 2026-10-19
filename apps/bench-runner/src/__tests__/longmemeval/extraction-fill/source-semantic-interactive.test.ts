@@ -38,7 +38,6 @@ import type { LongMemEvalExpansionCapability } from "../../../datasets/longmemev
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "./fixture.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
 import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
-import { assertNativeSemanticChain } from "./semantic-chain.test-support.js";
 import { assertNativeLongMemEvalArm } from "./native-semantic-arm.test-support.js";
 import { tableCompletedResponse } from "./source-semantic-table-response.test-support.js";
 
@@ -158,12 +157,6 @@ it("fills complete-source open semantics through interactive generateContent wit
   expect(report.source_interpretation_binding_complete).toBe(true);
   expect(report.sources.every((source) => source.source_interpretation_binding?.kind === "host_publication_association")).toBe(true);
   const providerCalls = fixture.fetchMock.mock.calls.length;
-  const sourceOnly = await publishSourceSemanticSnapshot({
-    snapshotPath: join(cacheRoot, "source-only.sqlite"), dataDirRoot: join(cacheRoot, "source-only-publication"),
-    recordedAt: "2026-09-21T00:00:00.000Z", producerCommit: "a".repeat(40),
-    populations: [{ name: "fixture", dataDir, pinnedMetaRoot, model: MODEL, requestProfile: REQUEST_PROFILE }]
-  });
-  await assertNativeSemanticChain(cacheRoot, sourceOnly);
   await assertNativeLongMemEvalArm(dataDir, pinnedMetaRoot, [cacheRoot]);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(providerCalls);
   // Nine complete-source questions, two publications, and the native arm take about ninety seconds; a loaded Windows runner crosses four minutes and leaves a daemon that blocks the next test.

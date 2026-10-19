@@ -21,16 +21,8 @@ import {
   bindSemanticProviderRequest, semanticProviderRequestCacheKey, SOURCE_SEMANTIC_PROPOSAL_SCHEMA_NAME
 } from "../provider-request/request-binding.js";
 
-import { CorrespondenceModelViewSchema, projectCorrespondenceModelView, CORRESPONDENCE_MODEL_VIEW_GUIDANCE }
-  from "./correspondence-model-view.js";
-import { queryRevisionObserverGuidance, type QueryRevisionObserverView } from "./query-revision-observer-view.js";
-
-import { captureCorrespondenceGenerationContext, contextualCorrespondenceDescriptors, type CorrespondenceGenerationContext }
-  from "./correspondence-generation-context.js";
-
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
-export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
-export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
+const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
 
 export function semanticProposalWorksetContract(requestProfile: string) {
   return isChatSemanticRequestProfile(requestProfile)
@@ -47,7 +39,6 @@ const RetainedSemanticQueryParentSchema = z.object({
   provider_url: z.string().min(1),
   max_output_tokens: z.number().int().positive()
 }).strict();
-export type RetainedSemanticQueryParent = z.infer<typeof RetainedSemanticQueryParentSchema>;
 
 const QueryItemSchema = z.object({
   original_query: z.string().min(1).max(8192),
@@ -64,7 +55,6 @@ const CorrespondenceItemSchema = z.object({
   admitted_query_semantics: z.unknown(),
   source_interpretation_descriptors: z.array(z.unknown()).min(1).max(1),
   generation_policy: SourceSemanticCorrespondenceGenerationPolicySchema.optional(),
-  selected_model_view: CorrespondenceModelViewSchema.optional(),
   revision: SourceSemanticProposalRevisionSchema.optional()
 }).strict();
 
@@ -107,18 +97,10 @@ export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWo
 }
 
 export function materializeSemanticProposalLines(
-  workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger,
-  queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext
+  workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger
 ): readonly SemanticProposalLine[] {
   // Capture the complete caller input before validation or any sealed-reference reads.
   workset = structuredClone(workset);
-  if (queryRevisionObserverView !== undefined && (workset.kind !== "query" || workset.items.length !== 1)) {
-    throw new AlayaError("VALIDATION", "query revision observer view requires one query revision item");
-  }
-  const context = correspondenceGenerationContext === undefined ? undefined : captureCorrespondenceGenerationContext(correspondenceGenerationContext);
-  if (context !== undefined && (workset.kind !== "semantic_correspondence" || workset.items.length !== 1)) {
-    throw new AlayaError("VALIDATION", "correspondence generation context requires one correspondence workset item");
-  }
   meter?.retain(workset, "semantic proposal request construction input");
   meter?.canonicalJsonLength(workset);
   if (workset.contract !== semanticProposalWorksetContract(workset.request_profile)) {
@@ -139,46 +121,33 @@ export function materializeSemanticProposalLines(
         ...(parsed.generation_presentation === undefined ? {} : { generation_presentation: parsed.generation_presentation }),
         ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
       });
-      const guidance = queryRevisionObserverView === undefined ? "" : queryRevisionObserverGuidance(request,
-        queryRevisionObserverView, resolveSemanticProposalRevisionParent(workset, item, maxOutputTokens));
-      const line = bindLine(workset, "query", sourceSemanticQuerySystemPrompt(request) + guidance,
+      return bindLine(workset, "query", sourceSemanticQuerySystemPrompt(request),
         request, sourceSemanticQueryResponseJsonSchema(request), parsed.original_query, maxOutputTokens);
-      if (queryRevisionObserverView !== undefined) {
-        meter?.retain(line, "observer query revision request and encoded cache identity");
-        meter?.canonicalJsonLength(line);
-      }
-      return line;
     });
   }
   const producer_id = workset.producer_id ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID;
   const producer_version = workset.producer_version ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION;
   return workset.items.map((item) => {
     const parsed = CorrespondenceItemSchema.parse(item);
-    if (context !== undefined && (parsed.revision !== undefined || parsed.generation_policy?.kind === "branch_demand")) {
-      throw new AlayaError("VALIDATION", "correspondence context requires first-generation full assessment");
-    }
     const descriptors = parsed.source_interpretation_descriptors as SourceSemanticCorrespondenceRequest["source_interpretation_descriptors"];
     const request = buildSourceSemanticCorrespondenceRequest({
       original_query: parsed.original_query,
       admitted_query_semantics: parsed.admitted_query_semantics as SourceSemanticCorrespondenceRequest["admitted_query_semantics"],
-      source_interpretation_descriptors: context === undefined ? descriptors : contextualCorrespondenceDescriptors(descriptors, context),
+      source_interpretation_descriptors: descriptors,
       producer_id, producer_version,
       ...(parsed.generation_policy === undefined ? {} : { generation_policy: parsed.generation_policy }),
       ...(parsed.revision === undefined ? {} : { revision: parsed.revision })
     });
     const schema = sourceSemanticCorrespondenceResponseJsonSchema(request);
-    const view = parsed.selected_model_view === undefined ? undefined : projectCorrespondenceModelView({
-      selection: parsed.selected_model_view, request });
-    const line = bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request) +
-      (view === undefined ? "" : CORRESPONDENCE_MODEL_VIEW_GUIDANCE), request,
-      schema, parsed.original_query, maxOutputTokens, view);
+    const line = bindLine(workset, "semantic_correspondence", sourceSemanticCorrespondenceSystemPrompt(request), request,
+      schema, parsed.original_query, maxOutputTokens);
     meter?.retain(line, "semantic proposal request and encoded cache identity");
     meter?.canonicalJsonLength(line);
     return line;
   });
 }
 
-/** Select the physical parent identically for revision preparation, validation and input containment. */
+/** Bind retained revisions to the same physical parent for readmission and input containment. */
 export function resolveSemanticProposalRevisionParent(
   workset: SemanticProposalWorkset, item: unknown, maxOutputTokens: number
 ): SemanticProposalLine {
@@ -215,15 +184,14 @@ function bindLine(
   request: SourceSemanticQueryRequest | SourceSemanticCorrespondenceRequest,
   responseJsonSchema: object,
   original_query: string,
-  maxOutputTokens: number,
-  modelView?: ReturnType<typeof projectCorrespondenceModelView>
+  maxOutputTokens: number
 ): SemanticProposalLine {
   if (!isNativeGeminiRequestProfile(workset.request_profile) && !isChatSemanticRequestProfile(workset.request_profile)) {
     throw new AlayaError("VALIDATION", "semantic proposal fill requires a native semantic request profile");
   }
-  const userPrompt = JSON.stringify(modelView ?? (kind === "semantic_correspondence"
+  const userPrompt = JSON.stringify(kind === "semantic_correspondence"
     ? { ...request, response_schema: responseJsonSchema }
-    : request));
+    : request);
   const config = { model: workset.model, providerUrl: workset.provider_url,
     requestProfile: workset.request_profile, apiKey: null };
   const binding = semanticProposalRequestBinding(config, { systemPrompt, userPrompt, maxOutputTokens, responseJsonSchema });

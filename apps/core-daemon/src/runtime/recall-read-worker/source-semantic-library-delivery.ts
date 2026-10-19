@@ -259,7 +259,7 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
 /** Full native-envelope fitting without publishing or retaining a continuation capability.
  * Private diagnostics may measure/encode this page, but must strip its non-issued identities.
  */
-export function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
+function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
   plan: LibraryDeliveryPlan, offset: number): Recall {
   let position = 0;
   const pageIndex = plan.pages.findIndex(page => { const matches = position === offset; position += page.length; return matches; });
@@ -357,7 +357,7 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
   if (result.kind !== "recall") throw new CoreError("OBLIGATION_VIOLATION", "library delivery result kind changed");
   return result;
 }
-export function reservedLibraryWork(request: Request) {
+function reservedLibraryWork(request: Request) {
   return { native_work: request.budget.work_units, index_work: request.budget.work_units,
     native_accounting: "partial" as const, logical_work: request.budget.work_units,
     native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,

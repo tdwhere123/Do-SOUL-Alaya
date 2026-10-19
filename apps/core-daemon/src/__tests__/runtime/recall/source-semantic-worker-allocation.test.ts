@@ -22,7 +22,7 @@ import { parseWorkerOperationResult } from "../../../runtime/recall-read-worker/
 import { serializeWorkerError } from "../../../runtime/recall-read-worker/protocol-validation.js";
 import { RECALL_READ_WORKER_PROTOCOL_VERSION } from "../../../runtime/recall-read-worker/protocol.js";
 import { createRecallReadWorkerRuntime, type RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
-import { runResearchNominatedSourcePreparation, runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
+import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { CLOCK, ORIGINAL, QUERY_BUDGET, RAW, SCOPES, WS, withIndexedSources, type IndexFixture }
   from "./source-semantic-index-acquisition.test-support.js";
 
@@ -344,21 +344,3 @@ it("keeps original CoreError work when acquisition changes then observation leav
     expect(lastTuple).toBeLessThan(failedIndex);
   });
 }, 60_000);
-
-it("returns resource_exhausted native evidence when early research read exhausts without a phase change", async () => {
-  await withAdmittedSource(async runtime => {
-    const ids = ["raw"] as const;
-    const work = 1 + ids.length;
-    const bytes = ids.reduce((sum, id) => sum + Buffer.byteLength(id, "utf8"), 0);
-    const charged = collectCharges(() => runResearchNominatedSourcePreparation(runtime,
-      payload({ kind: "prepare_query", original_query: ORIGINAL, budget: { ...PREFLIGHT, work_units: work - 1 } }), ids));
-    expect(charged.value).toMatchObject({ kind: "prepare_query", outcome: { status: "resource_exhausted" },
-      candidates: [], truncated: true });
-    expect((charged.value as { execution: unknown }).execution).toBe("native_reasoning_only");
-    expect(charged.value.work).toMatchObject({ native_work: 0, native_bytes: 0, logical_work: 0 });
-    expect(charged.calls.filter(row => row.kind === "charge" && row.phase === "research source index query output")).toEqual([
-      expect.objectContaining({ work, bytes, ok: false })]);
-    expect(charged.calls.some(row => row.phase === "research source index query output" && row.ok)).toBe(false);
-    expect(charged.calls.some(row => row.phase === EXEC_TUPLE)).toBe(false);
-  });
-});

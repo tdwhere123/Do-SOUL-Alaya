@@ -14,11 +14,10 @@ import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/sour
 import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
 import { parseSourcePublicationAssociations, publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
-import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { LongMemEvalNativeSemanticConfigSchema } from "../../../runs/longmemeval-semantic/contract.js";
 import { verifyLongMemEvalQuestionPublication } from "../../../runs/longmemeval-semantic/execute.js";
-import { readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { readChainArtifact } from "../../../runs/recall-measurement/contract.js";
 
 const MODEL = "gemini-2.5-flash-lite";
 const REQUEST_PROFILE = "gemini-2.5-nonthinking-v1" as const;
@@ -110,7 +109,7 @@ async function prepareWindowOwner(root: string, offset: number) {
   return { cacheRoot: root, retainedPreparationPath, preflight };
 }
 
-it("prepares the fixed CLI window and publishes one admitted interpretation at both original positions and dates", async () => {
+it("prepares a fixed window and publishes one admitted interpretation at both original positions and dates", async () => {
   const f = await fixture();
   const population = { ...f.population, questionWindow: { offset: 1, limit: 1 } };
   const config = join(cacheRoot, "association-config.json"), out = join(cacheRoot, "prepared.json");
@@ -119,7 +118,8 @@ it("prepares the fixed CLI window and publishes one admitted interpretation at b
   const retained = [f.preflightPath, join(cacheRoot, "manifest.json"), ...f.preflight.planned_requests.map(line => cacheFilePath(cacheRoot, line.key))];
   const before = retained.map(path => readFileSync(path, "utf8"));
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  expect(await runSemanticChainLauncher(["associate", "--config", config, "--out", out])).toBe(0);
+  await prepareSourcePublicationAssociations(population,
+    [{ cacheRoot, retainedPreparationPath: f.preflightPath }], out);
   const sidecar = JSON.parse(readFileSync(`${out}.associations.json`, "utf8"));
   expect(sidecar.contract).toBe("source-publication-associations-v2");
   const associations = sidecar.publicationAssociations;
@@ -227,7 +227,8 @@ it("rejects duplicate or foreign retained request identity before writing associ
   writeFileSync(config, JSON.stringify({ ...f.population, questionWindow: { offset: -1, limit: 1 },
     cacheOwners: [{ cacheRoot, retainedPreparationPath: f.preflightPath }] }));
   vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-  expect(await runSemanticChainLauncher(["associate", "--config", config, "--out", join(cacheRoot, "bad.json")])).toBe(2);
+  await expect(prepareSourcePublicationAssociations({ ...f.population, questionWindow: { offset: -1, limit: 1 } },
+    [{ cacheRoot, retainedPreparationPath: f.preflightPath }], join(cacheRoot, "bad.json"))).rejects.toThrow();
   expect(existsSync(join(cacheRoot, "bad.json"))).toBe(false);
   writeFileSync(f.preflightPath, JSON.stringify(f.preflight));
   const duplicateBucket = join(cacheRoot, line.key.startsWith("ff") ? "ee" : "ff");
@@ -371,7 +372,7 @@ it("composes earlier and current owning roots for one original question with uns
   writeFileSync(config, JSON.stringify({ ...population, cacheOwners: owners.map(({ cacheRoot, retainedPreparationPath }) =>
     ({ cacheRoot, retainedPreparationPath })) }));
   vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  expect(await runSemanticChainLauncher(["associate", "--config", config, "--out", out])).toBe(0);
+  await prepareSourcePublicationAssociations(population, owners, out);
   const result = readChainArtifact(out) as { source_occurrences: number; unsupported_source_occurrences: number;
     ready_request_keys: number; sources: { status: string }[] };
   const associations = parseSourcePublicationAssociations(JSON.parse(readFileSync(`${out}.associations.json`, "utf8")));

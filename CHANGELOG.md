@@ -25,6 +25,15 @@ and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 These uncommitted changes are unreviewed. A 300000-unit preparation regression is
 currently failing. Do not treat this section as acceptance or readiness.
 
+Private daemon research acquisition, joint-delivery and qualified-selection
+channels, and bench `semantic-chain` / `semantic-proposal` producer orchestration
+have been removed. Native measurement now belongs to `runs/recall-measurement/`;
+shared read-only request/cache identity belongs to `runs/semantic-cache/`.
+The public source index and native Q/H/C contracts remain intact. Nominated-window
+hydration remains explicitly retained but dormant, not a new production route.
+This removal does not change ordinary recall ranking, budgets or algorithms;
+historical research artifacts remain available separately from executable code.
+
 Current access receipts use `source-semantic-access-v2` with required typed compact
 `phases`: version-2 tuple `[2, preparation, acquisition, observation|null]`.
 Public `execution` is the `native_reasoning_only` literal or version-2 tuple

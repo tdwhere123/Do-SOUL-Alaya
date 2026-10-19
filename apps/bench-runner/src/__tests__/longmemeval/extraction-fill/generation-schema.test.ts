@@ -15,7 +15,7 @@ import { encodeGeminiGenerateContent } from "../../../runs/extraction/fill/batch
 import { projectGeminiGenerationSchema, geminiGenerationSchemaCacheMaterial,
   countGeminiEnvelopeExpandedNodes } from "../../../runs/extraction/fill/batch/generation-schema.js";
 import { computeCacheKey } from "../../../runs/compile-seed/cache/cache-key.js";
-import { proposalCacheKey } from "../../../runs/semantic-proposal/workset.js";
+import { proposalCacheKey } from "../../../runs/semantic-cache/workset.js";
 import { createGeminiHttpExtractor } from "../../../runs/compile-seed/http/gemini-http.js";
 import { tableCompletedResponse, inlineCompletedResponse } from "./source-semantic-table-response.test-support.js";
 

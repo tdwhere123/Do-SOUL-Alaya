@@ -8,7 +8,6 @@ import { runDiagnosticLoopCommand } from "./diagnostic-loop/command.js";
 import { runEmitEmbeddingCacheOverlayCommand } from
   "./emit-embedding-cache-overlay/command.js";
 import { runProviderPreflightCommand } from "./provider-preflight/command.js";
-import { runSemanticProposalFillCommand } from "./semantic-proposal-fill/command.js";
 import { peelExtractionFillLazyFlags } from "./extraction-fill/lazy-field-flags.js";
 import { peelExtractionBatchFlags } from "./extraction-fill/batch-flags.js";
 import { runBatchCampaignCommand } from "./extraction-fill/campaign-command.js";
@@ -30,7 +29,7 @@ Usage:
   alaya-bench-runner source-snapshot prepare --snapshot <db> --data-dir-root <isolated-dir> --limit N --recorded-at <ISO> [--offset N] [--data-dir <path>] [--pinned-meta-root <path>] [--producer-commit <full-sha>]
     Opt-in persona successor: --attribution-policy longmemeval-question-local-persona-v1 --parent-snapshot <sealed-db>; requires the official dataset pin, complete parent membership, fresh output and later recorded time.
   alaya-bench-runner source-snapshot query-input --offset N --question-id <id> [--data-dir <path>] [--attribution-policy longmemeval-question-local-persona-v1]
-    Provider-free original query item for a semantic-proposal workset; persona context is task-local, not authenticated human identity.
+    Provider-free original query item for retained request identity; persona context is task-local, not authenticated human identity.
   alaya-bench-runner source-snapshot inspect --snapshot <db> --question-id <id> --query <text> [--max-results N] [--max-pages N]
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
   alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--expected-reconciliation-basis rule_only|garden_llm] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
@@ -53,9 +52,6 @@ Usage:
     Explicit Intern format profiles are diagnostic only; provider support and enforcement are unverified.
   alaya-bench-runner provider-preflight --mode retire-obsolete --extraction-cache-root <dir> --expected-path <dir> --profile <profile> [--confirm-retire]
     Replay requires the canonical sealed request manifest and a credentialless environment. Probe requires credentials and a catalog binding. Retire-obsolete is a path/lock preflight and does not delete.
-  alaya-bench-runner semantic-proposal-fill --kind query|semantic_correspondence --action prepare|authorize|fill --workset <json> --cache-root <dir> [--max-output-tokens N]
-    prepare writes --preflight-out. authorize reads --preflight and writes --receipt-out with prices. fill reads --authority.
-    Interactive Gemini streamGenerateContent; query/semantic correspondence schemas are caller-owned. Do not import runCli in-process when HTTPS_PROXY must be honored — use this bin.
   alaya-bench-runner extraction-fill --extraction-open-semantics [--generation-task-json <task.json>] --extraction-source-packing complete-source --extraction-preflight-out <new-report.json> [--extraction-preflight-keys <keys.json>] [--extraction-preflight-output-token-cap N]
     --generation-task-json <path> reads a protocol generation task; requires --extraction-open-semantics. Use the same task for preflight, authorize-extraction, select-extraction-target, and execution.
     Provider-free Step source preparation defaults to 4096 output tokens; an explicit positive safe cap binds its encoded request and quoted bound.
@@ -103,9 +99,6 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "provider-preflight") {
     return runProviderPreflightCommand(rest);
-  }
-  if (command === "semantic-proposal-fill") {
-    return runSemanticProposalFillCommand(rest);
   }
   if (command === "extraction-fill") {
     return dispatchExtractionFill(rest);

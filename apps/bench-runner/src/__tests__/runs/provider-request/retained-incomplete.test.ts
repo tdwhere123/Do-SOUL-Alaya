@@ -9,7 +9,7 @@ import { bindProviderRawAttempt, providerRawAttemptPath, readProviderRawAttempt,
 import { executeProviderRequestLine, replayExistingProviderRequestRaws, type ProviderRequestLine,
   type ProviderRequestPhysicalContext } from "../../../runs/provider-request/execution.js";
 import { MAX_COMPLETE_PROVIDER_HTTP_RESPONSE_BYTES, readProviderResponseWithEvidence } from "../../../../../../packages/engine-gateway/src/provider/chat-completion/response-evidence.js";
-import { syntheticGeminiBody } from "../semantic-proposal/gemini-response-evidence.test-support.js";
+import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

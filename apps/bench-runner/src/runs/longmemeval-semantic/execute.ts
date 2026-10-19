@@ -27,7 +27,7 @@ export const LongMemEvalPublicationSchema = QuestionPublicationSchema.extend({ p
     ctx.addIssue({ code: "custom", path: ["sources"], message: "source-only publication cannot contain a published interpretation" });
   }
 });
-/** This frozen arm never executes a published interpretation; generic semantic-chain replay may do so. */
+/** This frozen arm never executes a published interpretation; native measurement replay may do so. */
 export const LongMemEvalSourceOnlyResponseSchema = z.object({ proofs: z.array(z.never()).optional() }).passthrough();
 export const LongMemEvalSourceOnlyReplaySchema = z.object({ rows: z.array(z.object({
   response: LongMemEvalSourceOnlyResponseSchema.nullish()
