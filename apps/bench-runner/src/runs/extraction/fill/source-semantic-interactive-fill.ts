@@ -1,4 +1,5 @@
 import { interactiveSourceTransportBinding } from "../request-profile.js";
+import { formatTransportDiagnostic } from "./transport-diagnostic.js";
 import { isChatSemanticRequestProfile, AlayaError } from "@do-soul/alaya-protocol";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -283,8 +284,12 @@ async function dispatchInteractiveLine(
     if (isLocalPersistenceFailure(cause)) throw cause;
     const outcome = readLiveTransportFailure(cause);
     if (outcome === undefined || outcome.transportFailures.length === 0) throw cause;
-    appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
-      `${line.key}\t${cause instanceof Error ? cause.message : String(cause)}\n`);
+    try {
+      appendFileSync(join(input.cacheRoot, "interactive-extract-errors.log"),
+        `${line.key}\t${formatTransportDiagnostic(cause)}\n`);
+    } catch {
+      // Optional diagnostics must not suppress the original failure's raw retention or settlement.
+    }
     const response = readGeminiFailureResponse(cause);
     const nativeChatResponse = readNativeChatFailureResponse(cause);
     const raw = writeProviderRawAttempt({
