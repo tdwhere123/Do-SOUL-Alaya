@@ -117,8 +117,7 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
       if (current === null || stored === null) throw new Error("admitted exposure source expected");
       exposure_sources.push({ record: current, body: stored.content_bytes });
       const bytes = Buffer.byteLength(source.body);
-      return { source_id: source.id, record_id: proofRecord.identity, source_version: proofRecord.source_version,
-        content_digest: proofRecord.content_digest, read_bytes: bytes, body_bytes: bytes, complete: true,
+      return { source_id: source.id, record_id: proofRecord.identity, read_bytes: bytes, body_bytes: bytes, complete: true,
         signal: { source_text_score: 0, interpretation_reading_score: 0 } };
     });
     const inputId = accessInputIdentity(fixture.original, fixture.semantics, selectionExecutionBudget, "query-conditioned-v1");

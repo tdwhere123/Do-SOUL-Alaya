@@ -113,14 +113,17 @@ it("rejects changed tuples, logical-source substitution, digest, scope and erase
 });
 
 it("keeps missing locations absent, refuses oversized or split UTF-8 coordinates and discloses clipped context", async () => {
-  const context = await windowContext();
+  // Clipping is the page-shared preview allowance, not the byte cap alone: five roots
+  // share 2,000 tokens (400 tokens ≈ 1,600 ASCII characters) for each preview.
+  const context = await windowContext([BODY, BODY, BODY, BODY, BODY]);
   try {
     expect(context.hydrate([{ ...context.nomination(8192, 8230), vector: null }])).toEqual([]);
     expect(() => context.hydrate([context.nomination(4096, 8193)])).toThrow(/display bounds/u);
     const emoji = Buffer.byteLength(BODY.slice(0, BODY.indexOf("😀")));
     expect(() => context.hydrate([context.nomination(emoji + 1, emoji + 4)])).toThrow(/unavailable|UTF-8/u);
     expect(() => context.hydrate([context.nomination(emoji, emoji + 3)])).toThrow(/unavailable|UTF-8/u);
-    const start = 8000, end = Buffer.byteLength(BODY);
+    // A display-cap-sized window of ordinary text still exceeds the shared preview allowance.
+    const start = 4096, end = 8192;
     const [clipped] = context.hydrate([context.nomination(start, end)]);
     expect(clipped!.preview).not.toContain("�");
     expect(Buffer.byteLength(clipped!.preview)).toBeLessThan(end - start);

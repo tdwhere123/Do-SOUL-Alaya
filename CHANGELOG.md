@@ -76,9 +76,6 @@ Extension registration commits descriptor audit, descriptor and tool-spec
 changes atomically instead of compensating asynchronous writes. Janitor hot
 demotion rolls back both updates and audit when a selected candidate changed.
 
-These uncommitted changes are unreviewed. A 300000-unit preparation regression is
-currently failing. Do not treat this section as acceptance or readiness.
-
 Private daemon research acquisition, joint-delivery and qualified-selection
 channels, and bench `semantic-chain` / `semantic-proposal` producer orchestration
 have been removed. Native measurement now belongs to `runs/recall-measurement/`;
