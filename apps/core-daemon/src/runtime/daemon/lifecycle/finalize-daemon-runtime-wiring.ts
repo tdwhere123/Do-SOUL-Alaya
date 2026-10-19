@@ -35,6 +35,7 @@ export async function finalizeDaemonRuntimeFromWiring(
 function createBootstrapMcpToolingInput(input: FinalizeDaemonRuntimeWiringInput) {
   return {
     eventLogRepo: input.eventLogRepo,
+    eventPublisher: input.eventPublisher,
     extensionDescriptorRepo: input.extensionDescriptorRepo,
     now: () => new Date().toISOString(),
     runtimeNotifier: input.runtimeNotifier,

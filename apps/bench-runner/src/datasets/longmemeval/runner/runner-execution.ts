@@ -18,6 +18,7 @@ import {
   type LongMemEvalQuestionRunInput,
   type LongMemEvalWorkerResult
 } from "./question/runner-question.js";
+import { LongMemEvalQuestionQaError } from "./question/runner-question-result.js";
 import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
 import type { LongMemEvalSnapshotQuestion } from "../../../runs/snapshot/materialize.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
@@ -312,19 +313,25 @@ async function collectLongMemEvalQuestionSafely(
   question: LongMemEvalQuestion,
   run: () => Promise<LongMemEvalWorkerResult>
 ): Promise<boolean> {
+  let result: LongMemEvalWorkerResult | undefined;
+  let qaFailure: QaChatError | undefined;
   try {
-    const result = await run();
+    result = await run();
+  } catch (error) {
+    if (!(error instanceof QaChatError)) throw error;
+    qaFailure = error;
+    if (error instanceof LongMemEvalQuestionQaError) result = error.recallResult;
+  }
+  if (result !== undefined) {
     const diagnostics = await context.diagnosticsSpool.append(result.diagnostics);
     execution.collected.push({ ...result, diagnostics });
     writeLongMemEvalQuestionProgress(questionIndex, context.window.length, question.question_id, result);
-    return true;
-  } catch (error) {
-    if (!(error instanceof QaChatError)) throw error;
-    execution.questionFailures += 1;
-    execution.failedQuestionIds.push(question.question_id);
-    writeLongMemEvalQuestionFailure(questionIndex, context.window.length, question.question_id, error);
-    return false;
   }
+  if (qaFailure === undefined) return true;
+  execution.questionFailures += 1;
+  execution.failedQuestionIds.push(question.question_id);
+  writeLongMemEvalQuestionFailure(questionIndex, context.window.length, question.question_id, qaFailure);
+  return false;
 }
 
 function buildQuestionRunInput(
@@ -412,7 +419,7 @@ function writeLongMemEvalQuestionFailure(
 ): void {
   process.stderr.write(
     `[${questionIndex + 1}/${totalQuestions}] ${questionId.slice(0, 8)} FAILED — ` +
-      `skipped: ${error.message}\n`
+      `${error.message}\n`
   );
 }
 

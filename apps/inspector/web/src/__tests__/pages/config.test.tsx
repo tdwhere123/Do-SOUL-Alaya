@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { ManifestationBudgetConfigSchema } from "@do-soul/alaya-protocol";
 import ConfigPage from "../../pages/config";
 import { ConfigSection, type SectionMeta } from "../../pages/config-section";
 import { ToastProvider } from "../../components/toast";
@@ -66,6 +67,15 @@ describe("ConfigPage", () => {
           embedding_enabled: false
         });
       }
+      if (url.endsWith("/config/ws-1/garden-compute")) {
+        return jsonResponse({
+          provider_kind: "local_heuristics",
+          provider_url: null,
+          model_id: null,
+          secret_ref: null,
+          enabled: false
+        });
+      }
       if (url.endsWith("/config/ws-1/manifestation-budget")) {
         return jsonResponse({
           success: true,
@@ -82,7 +92,8 @@ describe("ConfigPage", () => {
               lens_requires_task_coupling: true,
               lens_requires_governance_ceiling: true
             },
-            updated_at: "2026-05-18T00:00:00.000Z"
+            updated_at: "2026-05-18T00:00:00.000Z",
+            source: "stored"
           }
         });
       }
@@ -150,6 +161,55 @@ describe("ConfigPage", () => {
         )
       ).toBe(true);
     });
+  });
+
+  it("patches only editable manifestation budget fields, not read metadata", async () => {
+    renderConfig();
+    const stanceCap = await screen.findByLabelText(/stance bias cap/i) as HTMLInputElement;
+    await act(async () => {
+      await userEvent.clear(stanceCap);
+      await userEvent.type(stanceCap, "12");
+    });
+    const budgetHeading = screen.getByRole("heading", { name: /Manifestation Budget/i });
+    const budgetSection = budgetHeading.closest("div.mb-12") as HTMLElement;
+    await act(async () => {
+      await userEvent.click(within(budgetSection).getByRole("button", { name: /commit budget/i }));
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+    });
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    const body = JSON.parse(String((patchCall[1] as RequestInit).body));
+    expect(body.source).toBeUndefined();
+    expect(body.stance_bias_cap).toBe(12);
+    expect(ManifestationBudgetConfigSchema.unwrap().partial().strict().safeParse(body).success).toBe(true);
+  });
+
+  it("renders runtime provider panels read-only with the CLI configuration path", async () => {
+    renderConfig();
+    const embeddingHeading = await screen.findByRole("heading", { name: /Embedding Supplement/i });
+    const embeddingPanel = embeddingHeading.closest("div.mb-12") as HTMLElement;
+    expect(within(embeddingPanel).getByRole("note").textContent).toMatch(/read-only/i);
+    expect(within(embeddingPanel).queryAllByRole("button")).toHaveLength(0);
+    expect(within(embeddingPanel).queryAllByRole("textbox")).toHaveLength(0);
+
+    const gardenHeading = await screen.findByRole("heading", { name: /Garden Compute/i });
+    const gardenPanel = gardenHeading.closest("div.mb-12") as HTMLElement;
+    expect(within(gardenPanel).getByText(/alaya install --non-interactive/i)).toBeTruthy();
+    expect(within(gardenPanel).queryAllByRole("button")).toHaveLength(0);
+    expect(within(gardenPanel).queryAllByRole("textbox")).toHaveLength(0);
+  });
+
+  it("labels strategy flags as stored-only without an enforcement consumer", async () => {
+    renderConfig();
+    const strategyHeading = await screen.findByRole("heading", { name: /Strategy & Guardrails/i });
+    const strategySection = strategyHeading.closest("div.mb-12") as HTMLElement;
+    const notice = within(strategySection).getByRole("note");
+    expect(notice.textContent).toMatch(/stored values only/i);
+    expect(notice.textContent).toMatch(/does not change agent policy/i);
+    expect(within(strategySection).queryAllByRole("button")).toHaveLength(0);
+    expect(within(strategySection).queryAllByRole("textbox")).toHaveLength(0);
   });
 
   it("shows restart banner after PATCH that returns requires_daemon_restart", async () => {

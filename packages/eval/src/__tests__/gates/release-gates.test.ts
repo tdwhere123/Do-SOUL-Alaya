@@ -94,6 +94,23 @@ it("gates LongMemEval budget drops by share while retaining count details", () =
   });
 });
 
+it("treats an absent budget-drop distribution as missing rather than a passing zero", () => {
+  const metrics = passingQualityMetrics(500);
+  delete metrics.budget_drop_distribution.max_entries;
+  const gate = collectReleaseHardGates(buildBudgetGatePayload(metrics)).find((item) =>
+    item.id.includes("budget_dropped")
+  );
+
+  expect(gate).toMatchObject({
+    id: "longmemeval_s_budget_dropped_rate",
+    label: "budget_dropped_share",
+    current: null,
+    target: 0.02,
+    passed: false,
+    missing: true
+  });
+});
+
 it("keeps unified-selector score non-monotonicity diagnostic-only", () => {
   const base = buildPayload("abc1234");
   const payload: KpiPayload = {

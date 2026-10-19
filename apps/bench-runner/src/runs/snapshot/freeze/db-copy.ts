@@ -2,14 +2,17 @@ import {
   closeSync,
   copyFileSync,
   constants,
+  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
+  realpathSync,
   renameSync,
   rmSync
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   assertRelationProjectionCurrent,
   closeCachedDatabase,
@@ -45,6 +48,7 @@ const REFLINK_UNSUPPORTED = new Set([
   "EINVAL",
   "EPERM"
 ]);
+const DESTINATION_SQLITE_SIDECARS = ["-wal", "-shm"] as const;
 
 export function checkpointAndCopyBenchDb(
   liveDbPath: string,
@@ -95,6 +99,7 @@ export function atomicCopy(
   toPath: string,
   copyFile: CopyFileFn = copyFileSync
 ): void {
+  assertDistinctCopyDestination(fromPath, toPath);
   copyOpenedSourceAtomically(
     (copy) => withRegularFileNoFollow(fromPath, copy),
     toPath,
@@ -110,6 +115,7 @@ function copyOpenedSourceAtomically(
   expectedSha256: string | undefined
 ): void {
   mkdirSync(dirname(toPath), { recursive: true });
+  prepareOwnedCopyDestination(toPath);
   const tmpPath = `${toPath}.${randomUUID()}.tmp`;
   let target: number | undefined;
   try {
@@ -166,6 +172,7 @@ export function cloneCachedSealedSnapshot(input: {
   if (cached !== input.expectedSha256) {
     throw new Error("recall-eval snapshot DB SHA-256 mismatch");
   }
+  assertDistinctCopyDestination(input.sourcePath, input.targetPath);
   copyOpenedSourceAtomically(
     (copy) => withCachedRegularFileNoFollow({
       filePath: input.sourcePath,
@@ -176,6 +183,23 @@ export function cloneCachedSealedSnapshot(input: {
     input.copyFile ?? copyFileSync,
     input.expectedSha256
   );
+}
+
+function assertDistinctCopyDestination(fromPath: string, toPath: string): void {
+  if (resolve(fromPath) === resolve(toPath) ||
+      (existsSync(toPath) && realpathSync(fromPath) === realpathSync(toPath))) {
+    throw new AlayaError("VALIDATION_FAILED", `${toPath} copy destination must differ from its source`);
+  }
+}
+
+function prepareOwnedCopyDestination(destinationPath: string): void {
+  // Restore/install already close a cached dest then drop dest WAL/SHM. Do that
+  // here so freeze hashing cannot seal a replaced main beside leftover dest WAL.
+  // Source sidecars stay untouched; a live dest handle must be released first.
+  closeCachedDatabase(destinationPath);
+  for (const suffix of DESTINATION_SQLITE_SIDECARS) {
+    rmSync(`${destinationPath}${suffix}`, { force: true });
+  }
 }
 
 function isReflinkUnsupported(error: unknown): boolean {

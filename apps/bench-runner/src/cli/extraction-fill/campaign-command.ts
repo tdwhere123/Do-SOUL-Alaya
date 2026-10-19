@@ -1,5 +1,8 @@
 import process from "node:process";
-import { runBatchCampaign } from "../../runs/extraction/fill/batch-campaign.js";
+import {
+  classifyBatchCampaignFailure,
+  runBatchCampaign
+} from "../../runs/extraction/fill/batch-campaign.js";
 import { ExtractionFillInterruptedError, withExtractionFillSignalScope } from "./signal-scope.js";
 
 export async function runBatchCampaignCommand(args: readonly string[]): Promise<number> {
@@ -17,7 +20,11 @@ export async function runBatchCampaignCommand(args: readonly string[]): Promise<
     return result.status === "complete" ? 0 : 2;
   } catch (cause) {
     if (cause instanceof ExtractionFillInterruptedError) return cause.exitCode;
-    process.stderr.write("Batch campaign could not continue; inspect its manifest and current window state\n");
+    // The stop may predate the first published window state, and provider
+    // messages may carry request content; report only the bounded category.
+    process.stderr.write(`Batch campaign stopped: ${classifyBatchCampaignFailure(cause)}; ` +
+      "the failure may predate any published window state, so check the manifest path, " +
+      "its JSON, and referenced artifacts, then the published state\n");
     return 2;
   }
 }

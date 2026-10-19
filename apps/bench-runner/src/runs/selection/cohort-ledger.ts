@@ -16,11 +16,15 @@ export function renderLongMemEvalCohortLedger(
   selectionContract?: LongMemEvalSelectionContract
 ): string {
   const diagnosticIds = new Set(questions.map((question) => question.question_id));
-  const duplicateFailures = failedQuestionIds.filter((id) => diagnosticIds.has(id));
-  if (duplicateFailures.length > 0) {
-    throw new Error(`LongMemEval cohort ledger duplicates failed question: ${duplicateFailures[0]}`);
+  if (new Set(failedQuestionIds).size !== failedQuestionIds.length) {
+    throw new Error("LongMemEval cohort ledger refuses duplicate failed question IDs");
   }
-  const rows = buildCohortRows(questions, failedQuestionIds, selectionContract);
+  // A later QA failure does not replace an independently observed Recall row.
+  const rows = buildCohortRows(
+    questions,
+    failedQuestionIds.filter((id) => !diagnosticIds.has(id)),
+    selectionContract
+  );
   const ids = rows.map((row) => row.question_id);
   if (new Set(ids).size !== ids.length) {
     throw new Error("LongMemEval cohort ledger refuses duplicate question IDs");

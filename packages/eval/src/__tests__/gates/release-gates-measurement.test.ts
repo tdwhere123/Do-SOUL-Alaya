@@ -169,6 +169,29 @@ it("does not apply the embedding inference activation gate outside embedding-on 
   }
 });
 
+it.each([
+  [undefined, true],
+  [0, false],
+  [0.999, false],
+  [1, true]
+] as const)(
+  "requires a claimable inference mean for the LoCoMo embedding-on p95 gate (%s)",
+  (mean, claimable) => {
+    const payload = withEmbeddingActivation(buildLocomoPayload(1982, 1982, 0.95), mean);
+    const gate = collectReleaseHardGates(payload).find(
+      (candidate) => candidate.id === "recall_p95_embedding_on"
+    );
+
+    expect(gate).toMatchObject({
+      current: claimable ? 110 : null,
+      target: 1100,
+      passed: claimable,
+      missing: !claimable
+    });
+    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(claimable);
+  }
+);
+
   it("keeps staged public coverage out of latest-passing after report gates pass", () => {
     const payload = buildCurrentLongMemPayload({
       benchName: "public",

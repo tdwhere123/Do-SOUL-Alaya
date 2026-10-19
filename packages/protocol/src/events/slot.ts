@@ -14,13 +14,15 @@ import { TransitionCausedBySchema } from "./memory-governance.js";
 const slotEventTypeValues = [
   "soul.slot.created",
   "soul.slot.winner_changed",
-  "soul.conflict_matrix_edge.created"
+  "soul.conflict_matrix_edge.created",
+  "soul.conflict_matrix_edge.deleted"
 ] as const;
 
 export const SlotEventType = {
   SOUL_SLOT_CREATED: "soul.slot.created",
   SOUL_SLOT_WINNER_CHANGED: "soul.slot.winner_changed",
-  SOUL_CONFLICT_MATRIX_EDGE_CREATED: "soul.conflict_matrix_edge.created"
+  SOUL_CONFLICT_MATRIX_EDGE_CREATED: "soul.conflict_matrix_edge.created",
+  SOUL_CONFLICT_MATRIX_EDGE_DELETED: "soul.conflict_matrix_edge.deleted"
 } as const;
 
 export const SlotEventTypeSchema = z.enum(slotEventTypeValues);
@@ -54,10 +56,15 @@ export const SoulConflictMatrixEdgeCreatedPayloadSchema = SlotObjectPayloadObjec
   edge_type: ConflictEdgeTypeSchema
 }).readonly();
 
+// Deletion retains the same edge identity and endpoints as creation. The
+// owning transition supplies the envelope's actor, timestamp, and revision.
+export const SoulConflictMatrixEdgeDeletedPayloadSchema = SoulConflictMatrixEdgeCreatedPayloadSchema;
+
 const slotPayloadSchemas = {
   [SlotEventType.SOUL_SLOT_CREATED]: SoulSlotCreatedPayloadSchema,
   [SlotEventType.SOUL_SLOT_WINNER_CHANGED]: SoulSlotWinnerChangedPayloadSchema,
-  [SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_CREATED]: SoulConflictMatrixEdgeCreatedPayloadSchema
+  [SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_CREATED]: SoulConflictMatrixEdgeCreatedPayloadSchema,
+  [SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_DELETED]: SoulConflictMatrixEdgeDeletedPayloadSchema
 } as const;
 
 const SlotEventBaseObjectSchema = z.object({
@@ -96,15 +103,23 @@ const SoulConflictMatrixEdgeCreatedEventObjectSchema = createSlotEventObjectSche
   SoulConflictMatrixEdgeCreatedPayloadSchema
 );
 
+const SoulConflictMatrixEdgeDeletedEventObjectSchema = createSlotEventObjectSchema(
+  SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_DELETED,
+  SoulConflictMatrixEdgeDeletedPayloadSchema
+);
+
 export const SoulSlotCreatedEventSchema = SoulSlotCreatedEventObjectSchema.readonly();
 export const SoulSlotWinnerChangedEventSchema = SoulSlotWinnerChangedEventObjectSchema.readonly();
 export const SoulConflictMatrixEdgeCreatedEventSchema =
   SoulConflictMatrixEdgeCreatedEventObjectSchema.readonly();
+export const SoulConflictMatrixEdgeDeletedEventSchema =
+  SoulConflictMatrixEdgeDeletedEventObjectSchema.readonly();
 
 const SlotEventUnionSchema = z.discriminatedUnion("event_type", [
   SoulSlotCreatedEventObjectSchema,
   SoulSlotWinnerChangedEventObjectSchema,
-  SoulConflictMatrixEdgeCreatedEventObjectSchema
+  SoulConflictMatrixEdgeCreatedEventObjectSchema,
+  SoulConflictMatrixEdgeDeletedEventObjectSchema
 ]);
 
 export const SlotEventSchema = SlotEventUnionSchema.readonly();

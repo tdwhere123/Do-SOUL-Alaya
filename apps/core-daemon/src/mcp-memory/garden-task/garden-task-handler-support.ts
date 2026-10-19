@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  CandidateMemorySignalMemoryRefKeys,
   EdgeClassifyTaskPayloadSchema,
   GardenTaskKind,
   GardenRole,
@@ -17,10 +16,6 @@ export type WarnPort = (message: string, meta: Record<string, unknown>) => void;
 export type GardenCompletionCandidateSignal = NonNullable<
   NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
 >[number];
-type CandidateSignalGraphRefKey = (typeof CandidateMemorySignalMemoryRefKeys)[number];
-type CandidateSignalGraphRefInput = {
-  readonly raw_payload: Readonly<Record<string, unknown>>;
-} & Partial<Record<CandidateSignalGraphRefKey, readonly string[]>>;
 
 export class GardenTaskValidationError extends McpToolError {
   public constructor(message: string) {
@@ -161,29 +156,4 @@ export function toSilentAlreadyClaimed(taskId: string) {
     kind: "unknown",
     payload: {}
   };
-}
-
-export function normalizeCandidateSignalGraphRefs<T extends CandidateSignalGraphRefInput>(
-  input: T,
-  warn: WarnPort
-): T {
-  const normalized = { ...input };
-  for (const key of CandidateMemorySignalMemoryRefKeys) {
-    if (!hasOwnProperty(normalized.raw_payload, key)) {
-      continue;
-    }
-    const rawRefs = normalized.raw_payload[key];
-    if (!Array.isArray(rawRefs) || !rawRefs.every((entry) => typeof entry === "string")) {
-      warn("garden.complete_task candidate signal graph refs were not a string array; dropping invalid refs.", {
-        graph_ref_key: key
-      });
-      continue;
-    }
-    normalized[key] = rawRefs;
-  }
-  return normalized;
-}
-
-function hasOwnProperty(record: Readonly<Record<string, unknown>>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(record, key);
 }

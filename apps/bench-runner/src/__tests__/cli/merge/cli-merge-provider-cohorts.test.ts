@@ -23,6 +23,10 @@ describe("merged provider-returned scorable cohort", () => {
     const merged = merge(shards);
     expect(merged.kpi.r_at_5_with_embedding_returned).toBe(0.5);
     expect(merged.kpi.provider_returned_rate).toBe(1);
+    expect(merged.kpi.provider_pending_rate).toBe(0);
+    expect(merged.kpi.provider_failed_rate).toBe(0);
+    expect(merged.kpi.provider_not_requested_rate).toBe(0);
+    expect(merged.kpi.query_embedding_unusable_rate).toBe(0);
     expect(merged).toMatchObject({ evaluated_count: 5, answerable_evaluated_count: 2 });
   });
 
@@ -31,6 +35,26 @@ describe("merged provider-returned scorable cohort", () => {
     expect(merged.kpi.r_at_5_with_embedding_returned).toBe(1);
     expect(merged.kpi.provider_returned_rate).toBe(1);
     expect(merged).toMatchObject({ evaluated_count: 4, answerable_evaluated_count: 1 });
+  });
+
+  it("omits provider rates when a sibling shard has no provider accounting", () => {
+    const measured = providerShard("a", [true], 0);
+    const unmeasured = providerShard("b", [true], 0);
+    const payload = structuredClone(unmeasured.payload);
+    delete payload.kpi.provider_returned_rate;
+    delete payload.kpi.provider_pending_rate;
+    delete payload.kpi.provider_failed_rate;
+    delete payload.kpi.provider_not_requested_rate;
+    delete payload.kpi.query_embedding_unusable_rate;
+    const merged = merge([measured, { ...unmeasured, payload }]);
+    // The nonreporting shard stays in the denominator; its rates do not become zero.
+    expect(merged).toMatchObject({ evaluated_count: 2, answerable_evaluated_count: 2 });
+    expect(merged.kpi.r_at_5).toBe(1);
+    for (const field of ["provider_returned_rate", "provider_pending_rate",
+      "provider_failed_rate", "provider_not_requested_rate",
+      "query_embedding_unusable_rate"] as const) {
+      expect(merged.kpi[field]).toBeUndefined();
+    }
   });
 
   it.each(["missing ledger", "legacy ledger", "partial diagnostics"])(

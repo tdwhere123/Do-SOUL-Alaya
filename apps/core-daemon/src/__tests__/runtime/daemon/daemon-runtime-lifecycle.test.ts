@@ -297,7 +297,6 @@ describe("createDaemonLifecycleControls", () => {
 
     const shutdown = controls.shutdown();
     await vi.advanceTimersByTimeAsync(30_000);
-    await shutdown;
 
     expect(lifecycleState.drainState.forced).toBe(true);
     expect(lifecycleState.inFlight.count).toBe(1);
@@ -305,6 +304,10 @@ describe("createDaemonLifecycleControls", () => {
       "daemon shutdown drain timed out with in-flight requests",
       expect.objectContaining({ inFlight: 1, forced_drain: true })
     );
+    expect(database.close).not.toHaveBeenCalled();
+    lifecycleState.inFlight.count = 0;
+    await vi.advanceTimersByTimeAsync(250);
+    await shutdown;
     expect(database.close).toHaveBeenCalledTimes(1);
   });
 
@@ -506,7 +509,8 @@ describe("createDaemonLifecycleControls", () => {
       closeIdleConnections,
       closeAllConnections
     }));
-    const { controls, warn } = createControls("env", { processPort, serverFactory });
+    const database = { close: vi.fn() };
+    const { controls, warn } = createControls("env", { processPort, serverFactory, database });
 
     const server = await controls.startHttpServer({ port: 0 });
     const shutdownPromise = server.close();
@@ -514,8 +518,11 @@ describe("createDaemonLifecycleControls", () => {
     expect(closeIdleConnections).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(closeAllConnections).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await expect(shutdownPromise).resolves.toBeUndefined();
+    await Promise.all([
+      expect(shutdownPromise).rejects.toThrow("daemon HTTP server close timed out"),
+      vi.advanceTimersByTimeAsync(1_000)
+    ]);
+    expect(database.close).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "daemon HTTP server close timed out; forcing exit",
       expect.objectContaining({ result: "timed_out" })

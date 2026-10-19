@@ -385,7 +385,9 @@ const hoisted = vi.hoisted(() => {
       streamMessage: apiConversationEngineStreamMessage
     };
   });
-  const serverClose = vi.fn();
+  const serverClose = vi.fn((callback?: (error?: Error) => void) => {
+    callback?.();
+  });
   return {
     conversationToolSpecs,
     resetToolSpecMap,

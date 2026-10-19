@@ -1,3 +1,4 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
 import { exitLifecycleProcess, type LifecycleProcessPort, type LifecycleWarnLogger } from "./daemon-signal-shutdown.js";
 import { type LifecycleTimerPort, unrefTimer } from "./daemon-runtime-timing.js";
 
@@ -8,6 +9,8 @@ export type CloseServerResult =
   | "timed_out";
 
 export type CloseableHttpServer = {
+  // A supplied callback, not return or function arity, acknowledges transport closure.
+  // Even successful closure does not acknowledge cancellation of handler work.
   close(callback?: (error?: Error) => void): void;
   closeIdleConnections?(): void;
   closeAllConnections?(): void;
@@ -31,7 +34,7 @@ export function finalizeServerClose(
     });
     processPort.exitCode = 1;
     exitLifecycleProcess(processPort, 1);
-    return;
+    throw new AlayaError("UNAVAILABLE", "daemon HTTP server close timed out");
   }
   if (closeResult !== "closed") {
     warnLogger.warn("daemon HTTP server shutdown needed compatibility fallback", {
@@ -65,31 +68,15 @@ export async function closeServer(
 }
 
 function beginServerClose(server: CloseableHttpServer): Promise<ServerCloseOutcome> {
-  const close = server.close.bind(server) as (callback?: (error?: Error) => void) => void;
-  if (close.length === 0) {
-    return Promise.resolve(closeServerWithoutCallback(close));
-  }
-
   return new Promise<ServerCloseOutcome>((resolveClose) => {
     try {
-      close((error?: Error) => {
+      server.close((error?: Error) => {
         resolveClose(normalizeCloseCallbackError(error));
       });
     } catch (error) {
       resolveClose(normalizeCloseThrownError(error));
     }
   });
-}
-
-function closeServerWithoutCallback(
-  close: (callback?: (error?: Error) => void) => void
-): ServerCloseOutcome {
-  try {
-    close();
-    return { status: "closed" };
-  } catch (error) {
-    return normalizeCloseThrownError(error);
-  }
 }
 
 function normalizeCloseCallbackError(error: Error | undefined): ServerCloseOutcome {

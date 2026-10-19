@@ -74,6 +74,12 @@ export interface ClaimLifecycleTransitionOptions {
   readonly effectDecisionReceipt?: EffectDecisionReceipt;
 }
 
+/** Apply only after appending eventInput in the same synchronous SQLite transaction. */
+export interface PreparedClaimLifecycleTransition {
+  readonly eventInput: EventPublisherInput;
+  apply(): Readonly<ClaimForm>;
+}
+
 export interface ClaimRuntimeNotifierPort {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
 }

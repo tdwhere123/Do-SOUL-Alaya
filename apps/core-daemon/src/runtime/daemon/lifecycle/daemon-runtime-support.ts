@@ -4,12 +4,13 @@ import { readFile } from "node:fs/promises";
 import {
   AcceptedBy,
   DEFAULT_SOUL_CONFIG,
+  EngineError,
+  EngineErrorKind,
   ProjectMappingState,
   parseEnvBoolean,
   parseEnvOptionalBoolean,
   type AgentRuntimePort,
-  type EngineBinding,
-  type EngineBindingSummary,
+  type EngineBindingTestPort,
   type GlobalMemoryEntry,
   type GardenBacklogThresholds
 } from "@do-soul/alaya-protocol";
@@ -347,14 +348,14 @@ export function createGlobalMemoryRecallPort(params: {
   });
 }
 
-export function createEngineBindingTester() {
+export function createEngineBindingTester(): EngineBindingTestPort {
   return {
-    testBinding: async (binding: EngineBinding): Promise<EngineBindingSummary & { readonly available_models: readonly string[] }> => ({
-      provider_type: binding.provider,
-      base_url: binding.base_url ?? null,
-      model: binding.model,
-      available_models: []
-    })
+    testBinding: async () => {
+      throw new EngineError(
+        "Connection testing is unavailable in this daemon; credentials have not been checked.",
+        EngineErrorKind.MODEL_ERROR
+      );
+    }
   };
 }
 

@@ -114,7 +114,8 @@ describe("SqliteSlotRepo", () => {
       SLOT_ID_1,
       CLAIM_ID_2,
       "2026-03-21T01:00:00.000Z",
-      "2026-03-21T01:00:00.000Z"
+      "2026-03-21T01:00:00.000Z",
+      CLAIM_ID_1
     );
 
     expect(updated.winner_claim_id).toBe(CLAIM_ID_2);

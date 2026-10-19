@@ -23,7 +23,8 @@ export interface BankruptcyStoreEntry {
 
 export interface BudgetBankruptcyServiceEventLogPort {
   append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  queryByRunAndEventType(runId: string, eventType: string): Promise<readonly EventLogEntry[]>;
 }
 
 export interface BudgetBankruptcyServiceProposalPort {
@@ -38,6 +39,7 @@ export interface BudgetBankruptcyServiceProposalPort {
     proposal: Readonly<Proposal>;
     events: readonly EventLogEntry[];
   }>>;
+  /** Repair a pending projection from an already committed resolution, without appending history. */
   update(
     proposalId: string,
     patch: {
@@ -45,6 +47,17 @@ export interface BudgetBankruptcyServiceProposalPort {
       readonly last_updated_at: string;
     }
   ): Promise<Readonly<Proposal>>;
+  updateWithEvents(
+    proposalId: string,
+    patch: {
+      readonly resolution_state: ProposalResolutionStateValue;
+      readonly last_updated_at: string;
+    },
+    events: readonly EventPublisherInput[]
+  ): Promise<Readonly<{
+    proposal: Readonly<Proposal>;
+    events: readonly EventLogEntry[];
+  }>>;
   findById(proposalId: string): Promise<Readonly<Proposal> | null>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
 }

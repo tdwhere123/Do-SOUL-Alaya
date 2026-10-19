@@ -415,7 +415,7 @@ describe("post-turn extract Garden task", () => {
     });
   });
 
-  it("ignores raw_payload graph ref keys when completing Garden tasks (first-class fields only)", async () => {
+  it("preserves first-class graph refs and ignores raw-payload arrays when completing Garden tasks", async () => {
     const harness = await createRoutingHarness({ provider_kind: "host_worker" });
     harness.enqueuePostTurnTask();
     await harness.runScheduler();
@@ -445,9 +445,11 @@ describe("post-turn extract Garden task", () => {
                 domain_tags: ["preference"],
                 confidence: 0.78,
                 evidence_refs: ["evidence-1"],
+                source_memory_refs: ["memory-a"],
                 raw_payload: {
                   observation: "user prefers vitest watch mode",
-                  source_memory_refs: "legacy metadata, not a graph hint"
+                  source_memory_refs: ["raw-memory"],
+                  incompatible_with_refs: ["raw-conflict"]
                 }
               }
             ]
@@ -463,10 +465,12 @@ describe("post-turn extract Garden task", () => {
     expect(signals.find((signal) => signal.object_kind === "memory_entry")).toMatchObject({
       source: SignalSource.GARDEN_COMPILE,
       signal_state: "triaged",
-      source_memory_refs: [],
+      source_memory_refs: ["memory-a"],
+      incompatible_with_refs: [],
       raw_payload: {
         observation: "user prefers vitest watch mode",
-        source_memory_refs: "legacy metadata, not a graph hint"
+        source_memory_refs: ["raw-memory"],
+        incompatible_with_refs: ["raw-conflict"]
       }
     });
     expect(signals.find((signal) => signal.object_kind === "source_turn")).toMatchObject({

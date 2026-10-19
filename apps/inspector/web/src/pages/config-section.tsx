@@ -4,7 +4,7 @@ import { clsx } from "clsx";
 import { apiFetch, type ApiError } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { useToasts } from "../components/toast";
-import { ToggleSwitch } from "../components/config-form-fields";
+import { ReadOnlyFieldRow, ToggleSwitch } from "../components/config-form-fields";
 import type { SectionKey } from "./config-page-state";
 import { useI18n } from "../i18n/locale";
 import type { DictKey } from "../i18n/dict";
@@ -16,6 +16,8 @@ export interface SectionMeta {
   readonly title: string;
   readonly titleKey?: DictKey;
   readonly icon: ReactNode;
+  readonly readOnly?: boolean;
+  readonly noticeKey?: DictKey;
 }
 
 interface ConfigSectionProps {
@@ -165,14 +167,23 @@ function ConfigSectionView(props: { readonly meta: SectionMeta; readonly title: 
   return (
     <div className="mb-12 border-b border-beige-200 pb-8">
       <ConfigSectionHeader meta={props.meta} title={props.title} dirty={props.state.dirty} t={props.t} />
+      {props.meta.noticeKey ? (
+        <p role="note" className="mb-4 rounded border border-beige-300 bg-beige-200/50 px-4 py-3 text-xs text-ink-700/80">
+          {props.t(props.meta.noticeKey)}
+        </p>
+      ) : null}
       <div className="space-y-4">
         {props.state.current
-          ? Object.entries(props.state.current).map(([key, value]) => (
-              <ConfigFieldRow key={key} fieldKey={key} value={value} onChange={(next) => props.state.handleChange(key, next)} t={props.t} />
-            ))
+          ? Object.entries(props.state.current).map(([key, value]) =>
+              props.meta.readOnly ? (
+                <ReadOnlyFieldRow key={key} label={key} value={value} />
+              ) : (
+                <ConfigFieldRow key={key} fieldKey={key} value={value} onChange={(next) => props.state.handleChange(key, next)} t={props.t} />
+              )
+            )
           : null}
       </div>
-      <ConfigSectionActions state={props.state} t={props.t} />
+      {props.meta.readOnly ? null : <ConfigSectionActions state={props.state} t={props.t} />}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,8 +10,29 @@ import assert from "node:assert/strict";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const installScript = path.join(repoRoot, "scripts/install.sh");
+const uninstallScript = path.join(repoRoot, "scripts/uninstall.sh");
 const vacuumScript = path.join(repoRoot, "scripts/vacuum-into.mjs");
 const locatorScript = path.join(repoRoot, "scripts/resolve-live-db-path.mjs");
+
+function runUninstall(work, env, args = []) {
+  return spawnSync("bash", [uninstallScript, ...args], {
+    cwd: work,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ALAYA_PURGE_YES: "1",
+      ALAYA_DETACH_TARGETS: " ",
+      ...env
+    }
+  });
+}
+
+function writeSentinel(dir) {
+  mkdirSync(dir, { recursive: true });
+  const sentinel = path.join(dir, "sentinel");
+  writeFileSync(sentinel, "keep-me");
+  return sentinel;
+}
 
 function locateLiveDb(env, cwd = repoRoot) {
   const result = spawnSync(process.execPath, [locatorScript], {
@@ -28,6 +49,11 @@ function locateLiveDb(env, cwd = repoRoot) {
 
 test("install.sh prints a pnpm 12-compatible optional embedding command", () => {
   const source = readFileSync(installScript, "utf8");
+  const uninstallSource = readFileSync(uninstallScript, "utf8");
+  assert.doesNotMatch(source, /ALAYA_BIN_DIR=\/usr\//);
+  assert.match(source, /ALAYA_HOME=\/opt\/alaya ALAYA_BIN_DIR=\/opt\/alaya\/bin/);
+  assert.match(uninstallSource, /\. "\$SCRIPT_DIR\/install\.sh"/);
+  assert.doesNotMatch(uninstallSource, /\beval\b|awk '\/\^reject_unsafe_path/);
   assert.doesNotMatch(source, /pnpm add .*--no-frozen-lockfile/);
   assert.match(
     source,
@@ -150,6 +176,150 @@ test("live db locator resolves relative toml and DATA_DIR against the launch dir
   }
 });
 
+test("uninstall refuses unsafe destructive targets and preserves sentinels", () => {
+  const cases = [
+    {
+      label: "ALAYA_HOME=$HOME",
+      args: [],
+      env: (work, home) => ({ ALAYA_HOME: home, ALAYA_BIN_DIR: path.join(work, "bin"), ALAYA_CONFIG_DIR: path.join(work, "config") }),
+      refuse: /ALAYA_HOME cannot be \$HOME/
+    },
+    {
+      label: "ALAYA_CONFIG_DIR=$HOME --purge",
+      args: ["--purge"],
+      env: (work, home) => ({ ALAYA_HOME: path.join(work, "install"), ALAYA_BIN_DIR: path.join(work, "bin"), ALAYA_CONFIG_DIR: home }),
+      refuse: /ALAYA_CONFIG_DIR cannot be \$HOME/,
+      keepInstall: true
+    },
+    {
+      label: "ALAYA_BIN_DIR=/usr/local/bin",
+      args: [],
+      env: (work, home) => ({
+        ALAYA_HOME: path.join(home, ".local", "share", "do-soul-alaya"),
+        ALAYA_BIN_DIR: "/usr/local/bin",
+        ALAYA_CONFIG_DIR: path.join(work, "config")
+      }),
+      refuse: /ALAYA_BIN_DIR points at a system path/,
+      keepInstall: true
+    }
+  ];
+  for (const tc of cases) {
+    const work = mkdtempSync(path.join(tmpdir(), "alaya-uninstall-refuse-"));
+    try {
+      const home = path.join(work, "home");
+      const sentinel = writeSentinel(home);
+      const env = tc.env(work, home);
+      if (tc.keepInstall) {
+        mkdirSync(env.ALAYA_HOME, { recursive: true });
+        writeFileSync(path.join(env.ALAYA_HOME, "marker"), "install-body");
+      }
+      const result = runUninstall(work, { HOME: home, ...env }, tc.args);
+      assert.notEqual(result.status, 0, `${tc.label}\n${result.stdout}\n${result.stderr}`);
+      assert.match(`${result.stdout}\n${result.stderr}`, tc.refuse, tc.label);
+      assert.equal(readFileSync(sentinel, "utf8"), "keep-me", tc.label);
+      if (tc.keepInstall) {
+        assert.equal(existsSync(path.join(env.ALAYA_HOME, "marker")), true, tc.label);
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+});
+
+test("uninstall removes contained default paths and keeps HOME sentinels", () => {
+  for (const purge of [false, true]) {
+    const work = mkdtempSync(path.join(tmpdir(), "alaya-uninstall-valid-"));
+    try {
+      const home = path.join(work, "home");
+      const installDir = path.join(home, ".local", "share", "do-soul-alaya");
+      const bakDir = `${installDir}.bak`;
+      const binDir = path.join(home, ".local", "bin");
+      const configDir = path.join(home, ".config", "alaya");
+      for (const dir of [installDir, bakDir, binDir, configDir]) mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(installDir, "marker"), "install-body");
+      writeFileSync(path.join(bakDir, "old"), "rollback");
+      writeFileSync(path.join(configDir, "alaya.db"), "durable");
+      writeFileSync(path.join(binDir, "alaya"), "shim");
+      const sentinel = writeSentinel(home);
+      const result = runUninstall(work, {
+        HOME: home, XDG_CONFIG_HOME: "", ALAYA_CONFIG_DIR: "",
+        ALAYA_HOME: installDir, ALAYA_BIN_DIR: binDir
+      }, purge ? ["--purge", "--remove-bak"] : ["--remove-bak"]);
+      assert.equal(result.status, 0, `${purge}\n${result.stdout}\n${result.stderr}`);
+      assert.equal(existsSync(installDir), false);
+      assert.equal(existsSync(bakDir), false);
+      assert.equal(existsSync(path.join(binDir, "alaya")), false);
+      assert.equal(existsSync(path.join(configDir, "alaya.db")), !purge);
+      assert.equal(readFileSync(sentinel, "utf8"), "keep-me");
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+});
+
+test("uninstall unlinks a contained ALAYA_HOME symlink without deleting its target", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-uninstall-symlink-"));
+  try {
+    const home = path.join(work, "home");
+    const target = path.join(work, "unrelated");
+    const link = path.join(work, "alaya-home");
+    mkdirSync(target, { recursive: true });
+    writeFileSync(path.join(target, "payload"), "keep-target");
+    symlinkSync(target, link);
+    const sentinel = writeSentinel(home);
+    const result = runUninstall(work, {
+      HOME: home,
+      ALAYA_HOME: link,
+      ALAYA_BIN_DIR: path.join(work, "bin"),
+      ALAYA_CONFIG_DIR: path.join(work, "config")
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(existsSync(link), false);
+    assert.equal(readFileSync(path.join(target, "payload"), "utf8"), "keep-target");
+    assert.equal(readFileSync(sentinel, "utf8"), "keep-me");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("install.sh path admission is sourced without installer effects and still runs via stdin", () => {
+  const work = mkdtempSync(path.join(tmpdir(), "alaya-install-share-"));
+  try {
+    const home = path.join(work, "home");
+    const sentinel = writeSentinel(home);
+    const sourced = spawnSync("bash", ["-c", `
+      set -euo pipefail
+      source "$1"
+      command -v reject_unsafe_path >/dev/null
+      command -v reject_recursive_delete_target >/dev/null
+      test -z "\${REPO+x}"
+      test -z "\${TMP_DIR+x}"
+    `, "source-install", installScript], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: home }
+    });
+    assert.equal(sourced.status, 0, sourced.stderr);
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      ALAYA_HOME: home,
+      ALAYA_BIN_DIR: path.join(work, "bin"),
+      ALAYA_VERSION: "v0.3.11"
+    };
+    for (const result of [
+      spawnSync("bash", [installScript], { cwd: work, encoding: "utf8", env }),
+      spawnSync("bash", ["-s"], { cwd: work, encoding: "utf8", env, input: readFileSync(installScript) })
+    ]) {
+      assert.notEqual(result.status, 0, result.stderr);
+      assert.match(`${result.stdout}\n${result.stderr}`, /ALAYA_HOME cannot be \$HOME/);
+      assert.equal(readFileSync(sentinel, "utf8"), "keep-me");
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
 test("uninstall purge follows XDG and explicit config overrides, preserving the other directory", () => {
   for (const explicit of [false, true]) {
     const work = mkdtempSync(path.join(tmpdir(), "alaya-uninstall-"));
@@ -163,11 +333,11 @@ test("uninstall purge follows XDG and explicit config overrides, preserving the 
         mkdirSync(dir, { recursive: true });
         writeFileSync(path.join(dir, "alaya.db"), "fixture durable state");
       }
-      const result = spawnSync("bash", [path.join(repoRoot, "scripts/uninstall.sh"), "--purge"], {
-        cwd: work, encoding: "utf8", env: { ...process.env, HOME: home, XDG_CONFIG_HOME: xdg,
-          ALAYA_CONFIG_DIR: explicit ? override : "", ALAYA_HOME: path.join(work, "install"),
-          ALAYA_BIN_DIR: path.join(work, "bin"), ALAYA_PURGE_YES: "1", ALAYA_DETACH_TARGETS: " " }
-      });
+      const result = runUninstall(work, {
+        HOME: home, XDG_CONFIG_HOME: xdg,
+        ALAYA_CONFIG_DIR: explicit ? override : "", ALAYA_HOME: path.join(work, "install"),
+        ALAYA_BIN_DIR: path.join(work, "bin")
+      }, ["--purge"]);
       assert.equal(result.status, 0, result.stderr);
       assert.equal(existsSync(defaultConfig), true);
       assert.equal(existsSync(explicit ? override : xdgConfig), false);

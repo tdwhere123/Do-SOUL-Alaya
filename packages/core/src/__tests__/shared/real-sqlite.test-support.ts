@@ -41,14 +41,15 @@ async function createBaseRealSqliteDatabase(registerDatabase: RegisterDatabase, 
 }
 
 export async function createResolutionServiceRealStorage(
-  registerDatabase: RegisterDatabase
+  registerDatabase: RegisterDatabase,
+  filename = ":memory:"
 ): Promise<
   RealSqliteFixture & {
     readonly eventLogRepo: SqliteEventLogRepo;
     readonly claimFormRepo: SqliteClaimFormRepo;
   }
 > {
-  const database = await createBaseRealSqliteDatabase(registerDatabase);
+  const database = await createBaseRealSqliteDatabase(registerDatabase, filename);
   const eventLogRepo = new SqliteEventLogRepo(database);
   const claimFormRepo = new SqliteClaimFormRepo(database);
   return { database, eventLogRepo, claimFormRepo };

@@ -4,11 +4,11 @@ import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseNonEmptyString } from "../shared/validators.js";
 
 export interface ToolSpecServiceRepoPort {
-  insert(spec: ToolSpec): Promise<Readonly<ToolSpec>>;
-  update(spec: ToolSpec): Promise<Readonly<ToolSpec>>;
-  findById(toolId: string): Promise<Readonly<ToolSpec> | null>;
+  insertSync(spec: ToolSpec): Readonly<ToolSpec>;
+  updateSync(spec: ToolSpec): Readonly<ToolSpec>;
+  findByIdSync(toolId: string): Readonly<ToolSpec> | null;
   list(): Promise<readonly Readonly<ToolSpec>[]>;
-  delete?(toolId: string): Promise<void>;
+  deleteSync?(toolId: string): void;
 }
 
 export interface ToolSpecServiceDependencies {
@@ -19,21 +19,31 @@ export class ToolSpecService {
   public constructor(private readonly deps: ToolSpecServiceDependencies) {}
 
   public async register(spec: ToolSpec): Promise<Readonly<ToolSpec>> {
+    return this.registerSync(spec);
+  }
+
+  public registerSync(spec: ToolSpec): Readonly<ToolSpec> {
     const parsedSpec = parseToolSpec(spec);
     this.validateInvariants(parsedSpec);
-
-    return parseToolSpec(await this.deps.toolSpecRepo.insert(parsedSpec));
+    return parseToolSpec(this.deps.toolSpecRepo.insertSync(parsedSpec));
   }
 
   public async update(spec: ToolSpec): Promise<Readonly<ToolSpec>> {
+    return this.updateSync(spec);
+  }
+
+  public updateSync(spec: ToolSpec): Readonly<ToolSpec> {
     const parsedSpec = parseToolSpec(spec);
     this.validateInvariants(parsedSpec);
-
-    return parseToolSpec(await this.deps.toolSpecRepo.update(parsedSpec));
+    return parseToolSpec(this.deps.toolSpecRepo.updateSync(parsedSpec));
   }
 
   public async findById(toolId: string): Promise<Readonly<ToolSpec>> {
-    const spec = await this.deps.toolSpecRepo.findById(toolId);
+    return this.findByIdSync(toolId);
+  }
+
+  public findByIdSync(toolId: string): Readonly<ToolSpec> {
+    const spec = this.deps.toolSpecRepo.findByIdSync(toolId);
 
     if (spec === null) {
       throw new CoreError("NOT_FOUND", "Tool spec not found");
@@ -47,13 +57,17 @@ export class ToolSpecService {
   }
 
   public async delete(toolId: string): Promise<void> {
+    this.deleteSync(toolId);
+  }
+
+  public deleteSync(toolId: string): void {
     const parsedToolId = parseNonEmptyString(toolId, "toolId");
 
-    if (this.deps.toolSpecRepo.delete === undefined) {
+    if (this.deps.toolSpecRepo.deleteSync === undefined) {
       throw new CoreError("CONFLICT", `Tool spec deletion is unavailable for ${parsedToolId}.`);
     }
 
-    await this.deps.toolSpecRepo.delete(parsedToolId);
+    this.deps.toolSpecRepo.deleteSync(parsedToolId);
   }
 
   private validateInvariants(spec: Readonly<ToolSpec>): void {

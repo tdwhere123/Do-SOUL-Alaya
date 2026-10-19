@@ -4,6 +4,7 @@ import {
   BudgetBankruptcyService,
   CanonicalAliasService,
   ClaimService,
+  CoreError,
   HealthJournalService,
   ProjectMappingService,
   ProposalService,
@@ -235,6 +236,13 @@ function createSlotClaimRuntime(
     claimRepo: input.claimFormRepo,
     conflictMatrixRepo: input.conflictMatrixRepo,
     claimService: {
+      prepareLifecycleTransition: async (...args) => {
+        const claimService = claimServiceRef.current;
+        if (claimService === null) {
+          throw new CoreError("CONFLICT", "ArbitrationService claimService used before ClaimService initialization.");
+        }
+        return await claimService.prepareLifecycleTransition(...args);
+      },
       transitionLifecycle: async (...args) => {
         const claimService = claimServiceRef.current;
         if (claimService === null) {

@@ -91,6 +91,15 @@ export interface McpMemoryProposalWorkflowProposalRepo {
       readonly now?: string;
     }
   ): Promise<readonly Readonly<SoulPendingProposalSummary>[]>;
+  // invariant: total_count is the count of pending proposals matching the same
+  // workspace/since filter findPendingSummaries applies, never the returned page
+  // length. `since` is a created_at lower bound, not a backward-pagination
+  // cursor — the response carries no continuation, so a truncated page cannot
+  // be walked backwards by moving `since`.
+  countPendingSummaries(
+    workspaceId: string,
+    options?: { readonly since?: string | null }
+  ): Promise<number>;
   acceptPendingMemoryUpdateWithEvents?(
     proposalId: string,
     updatedAt: string,

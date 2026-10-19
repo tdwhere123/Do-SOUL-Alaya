@@ -2,13 +2,17 @@ import { randomUUID } from "node:crypto";
 
 import {
   ClaimLifecycleState,
+  SlotEventType,
+  SoulConflictMatrixEdgeDeletedPayloadSchema,
   TransitionCausedBy,
   type ClaimForm,
   type ConflictMatrixEdge,
   type Slot
 } from "@do-soul/alaya-protocol";
 
+import type { PreparedClaimLifecycleTransition } from "../claims/claim-service-types.js";
 import { CoreError } from "../../shared/errors.js";
+import { isPromiseLike } from "../../shared/promise-utils.js";
 import { bindEventPublisher } from "../../runtime/event-publisher.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 
@@ -84,7 +88,7 @@ export class ArbitrationService {
       throw new CoreError("NOT_FOUND", "Conflict matrix edge not found");
     }
 
-    await this.dependencies.conflictMatrixRepo.delete(parsedEdgeId);
+    await this.deleteEdgesAtomically([existing], "user_action");
   }
 
   public async rebuildConflictMatrix(workspaceId: string): Promise<ConflictMatrixRebuildResult> {
@@ -99,15 +103,41 @@ export class ArbitrationService {
       (edge) => !claimIds.has(edge.source_claim_id) || !claimIds.has(edge.target_claim_id)
     );
 
-    for (const edge of orphanedEdges) {
-      await this.dependencies.conflictMatrixRepo.delete(edge.object_id);
-    }
+    await this.deleteEdgesAtomically(orphanedEdges, TransitionCausedBy.SYSTEM);
 
     return {
       total_edges: edges.length,
       orphaned_deleted: orphanedEdges.length,
       valid_edges: edges.length - orphanedEdges.length
     };
+  }
+
+  private async deleteEdgesAtomically(edges: readonly Readonly<ConflictMatrixEdge>[], causedBy: string): Promise<void> {
+    if (edges.length === 0) return;
+    const eventInputs = edges.map((edge) => ({
+      event_type: SlotEventType.SOUL_CONFLICT_MATRIX_EDGE_DELETED,
+      entity_type: "conflict_matrix_edge",
+      entity_id: edge.object_id,
+      workspace_id: edge.workspace_id,
+      run_id: null,
+      caused_by: causedBy,
+      payload_json: SoulConflictMatrixEdgeDeletedPayloadSchema.parse({
+        object_id: edge.object_id,
+        object_kind: edge.object_kind,
+        workspace_id: edge.workspace_id,
+        run_id: null,
+        source_claim_id: edge.source_claim_id,
+        target_claim_id: edge.target_claim_id,
+        edge_type: edge.edge_type
+      })
+    }));
+    await this.eventPublisher().appendManyWithMutation(eventInputs, () => {
+      for (const edge of edges) {
+        if (isPromiseLike(this.dependencies.conflictMatrixRepo.deleteSync(edge.object_id))) {
+          throw new CoreError("CONFLICT", "Conflict matrix deletion must be synchronous");
+        }
+      }
+    });
   }
 
   public async arbitrateSlot(slotId: string, options: {
@@ -262,12 +292,19 @@ export class ArbitrationService {
         ? null
         : candidates.find((claim) => claim.object_id === slot.winner_claim_id) ?? null;
 
-    await this.transitionIncumbentClaimIfNeeded(incumbentClaim, winnerClaimId, options);
-    await this.transitionWinnerClaimIfNeeded(winnerClaim, options);
+    const transitions = [
+      await this.prepareIncumbentTransition(incumbentClaim, winnerClaimId, options),
+      await this.prepareWinnerTransition(winnerClaim, options)
+    ].filter((transition): transition is PreparedClaimLifecycleTransition => transition !== null);
     const timestamp = this.now();
     return await this.eventPublisher().appendManyWithMutation(
-      [buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp)],
-      () => this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp)
+      [...transitions.map((transition) => transition.eventInput), buildWinnerChangedEntry(slot, winnerClaimId, options, timestamp)],
+      () => {
+        for (const transition of transitions) {
+          transition.apply();
+        }
+        return this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, timestamp, timestamp, slot.winner_claim_id);
+      }
     );
   }
 
@@ -316,21 +353,21 @@ export class ArbitrationService {
     return { sourceClaim, targetClaim };
   }
 
-  private async transitionIncumbentClaimIfNeeded(
+  private async prepareIncumbentTransition(
     incumbentClaim: Readonly<ClaimForm> | null,
     winnerClaimId: string,
     options: WinnerChangeOptions
-  ): Promise<void> {
+  ): Promise<PreparedClaimLifecycleTransition | null> {
     if (
       incumbentClaim === null ||
       incumbentClaim.object_id === winnerClaimId ||
       (incumbentClaim.claim_status !== ClaimLifecycleState.WINNER &&
         incumbentClaim.claim_status !== ClaimLifecycleState.ACTIVE)
     ) {
-      return;
+      return null;
     }
 
-    await this.dependencies.claimService.transitionLifecycle(
+    return await this.dependencies.claimService.prepareLifecycleTransition(
       incumbentClaim.object_id,
       ClaimLifecycleState.SUPERSEDED,
       `${options.lifecycleReasonPrefix}_superseded`,
@@ -339,20 +376,20 @@ export class ArbitrationService {
     );
   }
 
-  private async transitionWinnerClaimIfNeeded(
+  private async prepareWinnerTransition(
     winnerClaim: Readonly<ClaimForm> | null,
     options: WinnerChangeOptions
-  ): Promise<void> {
+  ): Promise<PreparedClaimLifecycleTransition | null> {
     if (
       winnerClaim === null ||
       winnerClaim.claim_status === ClaimLifecycleState.WINNER ||
       (winnerClaim.claim_status !== ClaimLifecycleState.ACTIVE &&
         winnerClaim.claim_status !== ClaimLifecycleState.CONTESTED)
     ) {
-      return;
+      return null;
     }
 
-    await this.dependencies.claimService.transitionLifecycle(
+    return await this.dependencies.claimService.prepareLifecycleTransition(
       winnerClaim.object_id,
       ClaimLifecycleState.WINNER,
       `${options.lifecycleReasonPrefix}_winner`,

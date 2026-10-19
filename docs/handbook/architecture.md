@@ -266,9 +266,14 @@ surfaces are:
   `127.0.0.1:5174` with a per-launch httpOnly session; serves seven primary
   routes (`/overview`, `/governance`, `/memory-browser`, `/graph`,
   `/system`, `/recall`, `/bench-trend`) plus legacy redirects into
-  those pages. Inspector writes are
-  limited to daemon runtime parameters per invariant §21; memory
-  ontology writes still go through the proposal / governance path.
+  those pages. Inspector writes are limited to workspace runtime
+  parameters per invariant §21; embedding/Garden provider-secret forms
+  and agent-strategy flags are read-only affordances, so provider and
+  secret changes go through `alaya install`. Memory ontology writes
+  still go through the proposal / governance path. When both
+  `ALAYA_REVIEWER_TOKEN` and `ALAYA_REVIEWER_IDENTITY` are configured,
+  `alaya inspect` forwards them to the Inspector child and review
+  requests use that bound identity.
   The frontend code stays domainized under `apps/inspector/web/src/`
   (`app/`, `api/`, `components/`, `i18n/`, `pages/`, `utils/`) while
   frontend tests live under the aggregated
@@ -312,20 +317,32 @@ sufficient for multi-host exposure, `X-Alaya-Desktop` is not authentication,
 desktop originless bypass is hard-disabled, and loopback remains the supported
 default.
 
+The `POST /workspaces/:id/engine-binding/test` probe does not test a
+provider or credentials in this daemon. It fails with an unavailable
+model error (`Connection testing is unavailable in this daemon;
+credentials have not been checked.`); an absent probe is not evidence
+that a binding works.
+
 `ALAYA_RETAIN_UNROUTED_FACTS` is default-off: Garden keeps unrouted
 high-confidence facts only when the env is `1` or `true`.
 
 ## Runtime Write Model
 
 EventPublisher-owned runtime transitions stay EventLog-first. The
-durable pair shares one SQLite transaction
-(`appendManyWithMutation`): EventLog append and the owned mutate
-commit together. In-process notification runs after that commit.
+durable pair shares one SQLite transaction (`appendManyWithMutation`,
+or the storage-owned proposal-resolution transaction used by
+`updatePendingResolutionWithEvents`): EventLog append and the owned
+mutate commit together. In-process notification runs after that commit.
 
 ```text
 EventLog append + DB mutate (one transaction) -> in-process notification
                                               (RuntimeNotifier listeners)
 ```
+
+Post-commit notification failure does not roll back a committed
+mutation. Mutation callers keep the durable result and record a
+post-commit propagation diagnostic; lease and session-override caches
+invalidate instead of restoring a precommit snapshot.
 
 Field formation, projection-generation, and causal-usage writes use
 the verified persist-then-audit order: persist the receipt, then append
@@ -365,7 +382,20 @@ This contract does not close a full feedback loop or cross-source
 chronology.
 
 Audit precedes broadcast. Every state change records an audit row
-before any consumer can observe it.
+before any consumer can observe it. Budget-bankruptcy resolution stores
+the proposal decision and its `soul.budget.bankruptcy_resolved` audit in
+one transaction; a committed resolution is terminal, and recovery
+repairs a stale pending projection without appending another event.
+Slot election composes any incumbent/winner claim lifecycle CAS
+transitions, the `soul.slot.winner_changed` audit, and an expected-winner
+slot CAS in one transaction. Explicit conflict-edge deletion and orphan
+repair append `soul.conflict_matrix_edge.deleted` and delete the batch in
+one transaction; a failed delete rolls back both audit and removals.
+Extension registration commits its descriptor audit, descriptor and tool-spec
+changes together through synchronous persistence behind EventPublisher; it
+has no asynchronous compensation window. Janitor hot demotion appends its
+audit before the guarded update in the same transaction. A changed candidate
+set rolls back the whole batch, leaving remaining hot rows for a later sweep.
 
 The in-process notification interface is **`RuntimeNotifier`**, exported
 from `packages/core/src/runtime/event-publisher.ts`:
@@ -482,6 +512,15 @@ cached-model checks do not establish default useful recall or natural-corpus eff
 
 Each step records an audit row `daemon.startup.<step>.completed`. Tool
 calls that arrive before step 6 receive a fail-closed response.
+
+Shutdown reverses that order. New HTTP requests receive `503` while the
+daemon drains tracked in-flight handlers. If the drain deadline expires,
+it closes the HTTP transport and then keeps waiting for those handlers
+instead of cancelling them; background services, other runtime resources,
+and SQLite are released only after the in-flight count reaches zero. HTTP
+close completion comes from the Node `close` callback, not function arity
+or return; a close callback error or timeout aborts teardown rather than
+reporting a closed transport.
 
 ## Signal Ingestion
 

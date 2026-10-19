@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   GardenRole,
   GardenTaskKind,
   GardenTier,
@@ -58,7 +59,10 @@ export interface JanitorMemoryTieringPort {
     workspaceId: string,
     criteria: JanitorHotDemotionCriteria
   ): Promise<readonly HotDemotionCandidate[]>;
-  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
+  // Mechanical hot->cold apply. Returns the ids that actually left hot;
+  // omitted ids were not hot+active (retired, already cold, missing, or
+  // concurrently changed). Janitor rolls back a batch if any selected id is missing.
+  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): readonly string[];
 }
 
 type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
@@ -237,11 +241,9 @@ export class Janitor {
       maxLastHitAgeMs: JANITOR_CONSTANTS.HOT_DEMOTION_THRESHOLD_MS,
       minActivationScore: JANITOR_CONSTANTS.HOT_DEMOTION_MIN_ACTIVATION
     });
-    const objectIds = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id);
-
-    if (objectIds.length > 0) {
-      await this.applyHotIndexDemotion(task, objectIds);
-    }
+    const selectedIds = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id);
+    const objectIds =
+      selectedIds.length === 0 ? [] : await this.applyHotIndexDemotion(task, selectedIds);
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
       retentionAudit,
@@ -251,14 +253,30 @@ export class Janitor {
     return result;
   }
 
+  // invariant: EventLog drafts for the unique selected ids are appended first;
+  // the sync mutate runs the guarded hot->cold UPDATE RETURNING. If the applied
+  // set differs, throw so the SQLite transaction rolls back both the audit rows
+  // and the UPDATE. The next scheduled sweep can reconsider remaining hot rows.
   private async applyHotIndexDemotion(
     task: GardenTaskDescriptor,
-    objectIds: readonly string[]
-  ): Promise<void> {
+    selectedIds: readonly string[]
+  ): Promise<readonly string[]> {
+    const requestedIds = [...new Set(selectedIds)];
     await this.publishEventLogsMutation(
-      this.buildHotIndexDemotionEvents(task, objectIds, this.now()),
-      () => this.tieringPort.demoteToWarm(task.workspace_id, objectIds)
+      this.buildHotIndexDemotionEvents(task, requestedIds, this.now()),
+      () => {
+        const appliedIds = this.tieringPort.demoteToWarm(task.workspace_id, requestedIds);
+        const appliedSet = new Set(appliedIds);
+        if (
+          appliedIds.length !== requestedIds.length ||
+          requestedIds.some((entryId) => !appliedSet.has(entryId))
+        ) {
+          throw new AlayaError("CONFLICT",
+            `hot index demotion applied a different id set than selected in ${task.workspace_id}`);
+        }
+      }
     );
+    return requestedIds;
   }
 
   private buildTtlCleanupEvents(

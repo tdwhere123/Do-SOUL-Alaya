@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { realpath, unlink, type FileHandle } from "node:fs/promises";
 import path from "node:path";
-import type { WriteFileToolInput } from "@do-soul/alaya-protocol";
+import { AlayaError, type WriteFileToolInput } from "@do-soul/alaya-protocol";
 import {
   applyPrivateCreatedFileMode,
   PRIVATE_FILE_MODE
@@ -115,7 +115,12 @@ async function writeContainedFile(
     }
     const buffer = Buffer.from(content, "utf8");
     await handle.truncate(0);
-    await handle.write(buffer, 0, buffer.length, 0);
+    let written = 0;
+    while (written < buffer.length) {
+      const { bytesWritten } = await handle.write(buffer, written, buffer.length - written, written);
+      if (bytesWritten === 0) throw new AlayaError("WRITE_ERROR", "File write made no progress");
+      written += bytesWritten;
+    }
     await handle.close();
     handle = undefined;
     return {

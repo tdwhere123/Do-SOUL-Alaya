@@ -205,26 +205,12 @@ export async function runAlayaMcpStdioServer(
 }
 
 function toMcpTool(tool: AlayaMemoryToolDefinition): Tool {
-  // inputSchema is a JSON-Schema-derived Record<string, unknown>; the
-  // MCP SDK's Tool shape requires the canonical { type: "object", properties,
-  // required, additionalProperties } subset, so we shallow-spread the derived
-  // JSON Schema rather than re-typing each field.
-  const derived = tool.inputSchema as {
-    properties?: Record<string, object>;
-    required?: readonly string[];
-    additionalProperties?: boolean;
-  };
+  // Preserve the authoritative derived schema, including union constraints.
+  // MCP requires the object envelope even when a union has no top-level type.
   return {
     name: tool.name,
     description: tool.description,
-    inputSchema: {
-      type: "object",
-      ...(derived.properties === undefined ? {} : { properties: { ...derived.properties } }),
-      ...(derived.required === undefined ? {} : { required: [...derived.required] }),
-      ...(derived.additionalProperties === undefined
-        ? {}
-        : { additionalProperties: derived.additionalProperties })
-    },
+    inputSchema: { ...structuredClone(tool.inputSchema), type: "object" },
     annotations: tool.annotations
   };
 }

@@ -22,7 +22,7 @@ export function buildEventLogAppendPayloadStatement(
 ): SqliteWriteStatement {
   // Validate envelope fields before crossing the worker boundary; revision is
   // provisional here and replaced by the worker subquery.
-  parseEventLogEntry({
+  const entry = parseEventLogEntry({
     ...event,
     event_id: identities.eventId,
     revision: 0,
@@ -41,7 +41,7 @@ export function buildEventLogAppendPayloadStatement(
       event.caused_by,
       event.entity_type,
       event.entity_id,
-      JSON.stringify(event.payload_json),
+      JSON.stringify(entry.payload_json),
       identities.createdAt
     ]
   };

@@ -15,6 +15,7 @@ import {
   type Slot
 } from "@do-soul/alaya-protocol";
 
+import type { ClaimService } from "../claims/claim-service.js";
 import { CoreError } from "../../shared/errors.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
 
@@ -24,7 +25,8 @@ export interface ArbitrationServiceSlotRepoPort {
     objectId: string,
     winnerClaimId: string | null,
     incumbentSince: string | null,
-    updatedAt: string
+    updatedAt: string,
+    expectedWinnerClaimId: string | null
   ): Readonly<Slot>;
 }
 
@@ -41,10 +43,11 @@ export interface ArbitrationServiceConflictMatrixRepoPort {
     sourceClaimId: string,
     targetClaimId: string
   ): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
-  delete(objectId: string): Promise<void>;
+  deleteSync(objectId: string): void;
 }
 
 export interface ArbitrationServiceClaimServicePort {
+  prepareLifecycleTransition: ClaimService["prepareLifecycleTransition"];
   transitionLifecycle(
     objectId: string,
     newState: ClaimLifecycleStateType,

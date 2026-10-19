@@ -23,7 +23,7 @@ import { SourceInterpretationEventTypeSchema } from "./source-interpretation.js"
 import { TrustStateEventTypeSchema } from "../governance/trust-state.js";
 import {
   BoundedIdSchema,
-  BoundedJsonObjectSchema,
+  boundedJsonObjectSchema,
   BoundedLabelSchema,
   IsoDatetimeStringSchema,
   NonNegativeIntSchema
@@ -83,6 +83,17 @@ export const EventTypeSchema = z.union([
 ]);
 
 /**
+ * Serialized UTF-16 code units, not bytes. Sixfold JSON escaping of sixteen
+ * legacy 65536-character fields uses 6 Mi characters; reserve another 2 Mi for
+ * structure and other fields. This preserves ordinary maximum text/reason
+ * events, not every combination of schema-valid fields or unbounded arrays.
+ * The aggregate is an independent admission condition: refuse, never truncate.
+ */
+export const EVENT_LOG_PAYLOAD_MAX_CHARS = 8 * 1024 * 1024;
+export const EventLogPayloadSchema = boundedJsonObjectSchema(EVENT_LOG_PAYLOAD_MAX_CHARS)
+  .meta({ "x-maxSerializedChars": EVENT_LOG_PAYLOAD_MAX_CHARS });
+
+/**
  * EventLogEntry validates the envelope shape only — event_type is validated against the full
  * union, but payload_json is stored as an opaque record. Payload structure is intentionally
  * validated by each phase's parse helpers (e.g. parseGraphAuditorEventPayload) at the consumer
@@ -98,7 +109,7 @@ export const EventLogEntrySchema = z.object({
   run_id: BoundedIdSchema.nullable(),
   caused_by: BoundedIdSchema.nullable(),
   revision: NonNegativeIntSchema,
-  payload_json: BoundedJsonObjectSchema,
+  payload_json: EventLogPayloadSchema,
   created_at: IsoDatetimeStringSchema
 }).strict().readonly();
 

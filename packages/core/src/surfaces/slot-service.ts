@@ -40,7 +40,8 @@ export interface SlotServiceSlotRepoPort {
     objectId: string,
     winnerClaimId: string | null,
     incumbentSince: string | null,
-    updatedAt: string
+    updatedAt: string,
+    expectedWinnerClaimId: string | null
   ): Readonly<Slot>;
 }
 
@@ -376,7 +377,7 @@ export class SlotService {
       })
     };
     return await this.eventPublisher().appendManyWithMutation([eventInput], (entries) => {
-      const updated = this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now);
+      const updated = this.dependencies.slotRepo.updateWinner(slot.object_id, winnerClaimId, now, now, slot.winner_claim_id);
       const event = entries[0];
       if (event !== undefined) {
         deferredNotifyEvents?.push(event);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RequestBudgetSchema, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
+import { AlayaError, RequestBudgetSchema, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
 
 const Policy = SourceSemanticAccessPolicySchema;
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -133,3 +133,24 @@ export const NOT_EXERCISED = {
   delivered_top5: "not_exercised", proof: "not_exercised", payload: "not_exercised",
   first_exposure: "not_exercised"
 } as const;
+
+export class UnverifiedProviderCallEvidenceError extends AlayaError {
+  public constructor(message: string) {
+    super("CONFLICT", message);
+    this.name = "UnverifiedProviderCallEvidenceError";
+  }
+}
+
+/**
+ * The diagnostic envelope's literal zero is admissible only when the native
+ * execution receipt itself reports zero external attempts. A nullable count is
+ * unknown evidence, not observed zero, and must reject the run instead of being
+ * promoted to zero.
+ */
+export function assertNoProviderCalls(attempts: number | null): void {
+  if (attempts !== 0) {
+    throw new UnverifiedProviderCallEvidenceError(
+      "native execution receipt does not verify zero diagnostic provider calls"
+    );
+  }
+}

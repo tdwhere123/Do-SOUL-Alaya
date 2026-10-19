@@ -9,7 +9,6 @@ import {
   type BankruptcyDossier,
   type BudgetBankruptcyState,
   type BudgetSnapshot,
-  type EventLogEntry,
   type Proposal,
   type RuntimeMode as RuntimeModeValue
 } from "@do-soul/alaya-protocol";
@@ -35,9 +34,7 @@ import {
 import {
   buildEmptyBudgetSnapshot,
   buildPendingProposalSnapshot,
-  buildRecoveredEntry,
-  normalizeProposalDossierRef,
-  requireDeclaredEvent
+  recoverBankruptcyEntry
 } from "./budget-bankruptcy-service-recovery.js";
 import type {
   ActiveBankruptcyKind,
@@ -128,30 +125,10 @@ export class BudgetBankruptcyService {
 
     const resolutionState =
       action === "accept" ? ProposalResolutionState.ACCEPTED : ProposalResolutionState.REJECTED;
-    await this.appendResolvedEvent(
-      entry,
-      proposal.proposal_id,
-      action === "accept" ? option.option_id : null,
-      resolutionState,
-      runId,
-      workspaceId,
-      occurredAt,
-      "user"
+    const resolved = await this.resolveProposal(
+      entry, proposal, option, resolutionState, runId, workspaceId, occurredAt, "user"
     );
-    const updatedProposal = await this.dependencies.proposalService.update(proposal.proposal_id, {
-      resolution_state: resolutionState,
-      last_updated_at: occurredAt
-    });
-    this.setStateStoreEntry(
-      runId,
-      createStoreEntry(
-        buildResolvedState(entry.state, option.option_kind, action === "accept", occurredAt),
-        entry.dossier,
-        updatedProposal.proposal_id,
-        entry.pressureRatio
-      )
-    );
-    return updatedProposal;
+    return resolved.proposal;
   }
 
   public async getSnapshot(runId: string, now: string): Promise<Readonly<BudgetSnapshot>> {
@@ -238,11 +215,11 @@ export class BudgetBankruptcyService {
     workspaceId: string
   ): Promise<BudgetBankruptcyDeclareResult> {
     const occurredAt = ensureIsoDatetime(this.now(), "now");
-    const effectiveMode = this.getStickyCurrentMode(runId, params.currentMode);
     const existingProposal = await this.getActivePendingProposal(runId);
     if (existingProposal !== null) {
       throw new CoreError("CONFLICT", "A bankruptcy is already pending");
     }
+    const effectiveMode = this.getStickyCurrentMode(runId, params.currentMode);
 
     const artifacts = this.buildDeclarationArtifacts(params, effectiveMode, occurredAt);
     const committed = await this.dependencies.proposalService.createWithEvents({
@@ -273,14 +250,11 @@ export class BudgetBankruptcyService {
   }
 
   private async getActivePendingProposal(runId: string): Promise<Readonly<Proposal> | null> {
-    const existing = this.getStateStoreEntry(runId);
-    if (existing !== undefined) {
-      const proposal = await this.dependencies.proposalService.findById(existing.proposalId);
-      if (proposal !== null && proposal.resolution_state === ProposalResolutionState.PENDING) {
-        return proposal;
-      }
-    }
-    return await this.dependencies.proposalService.findPendingByRunId(runId);
+    const entry = await this.resolveSnapshotEntry(runId);
+    const proposal = entry === null ? null : await this.dependencies.proposalService.findById(entry.proposalId);
+    return proposal?.resolution_state === ProposalResolutionState.PENDING
+      ? proposal
+      : await this.dependencies.proposalService.findPendingByRunId(runId);
   }
 
   private buildDeclarationArtifacts(
@@ -319,36 +293,13 @@ export class BudgetBankruptcyService {
     }
 
     const resolvedAt = ensureIsoDatetime(this.now(), "now");
-    await this.appendResolvedEvent(
-      entry,
-      proposal.proposal_id,
-      autoOption.option_id,
-      ProposalResolutionState.AUTO_APPLIED,
-      runId,
-      workspaceId,
-      resolvedAt,
-      "system"
+    return await this.resolveProposal(
+      entry, proposal, autoOption, ProposalResolutionState.AUTO_APPLIED,
+      runId, workspaceId, resolvedAt, "system"
     );
-    const updatedProposal = await this.dependencies.proposalService.update(proposal.proposal_id, {
-      resolution_state: ProposalResolutionState.AUTO_APPLIED,
-      last_updated_at: resolvedAt
-    });
-    const updatedEntry = createStoreEntry(
-      buildResolvedState(entry.state, autoOption.option_kind, true, resolvedAt),
-      entry.dossier,
-      updatedProposal.proposal_id,
-      entry.pressureRatio
-    );
-    this.setStateStoreEntry(runId, updatedEntry);
-    return { state: updatedEntry.state, dossier: updatedEntry.dossier, proposal: updatedProposal };
   }
 
   private async resolveSnapshotEntry(runId: string): Promise<BankruptcyStoreEntry | null> {
-    const existing = this.getStateStoreEntry(runId) ?? null;
-    if (existing !== null) {
-      return existing;
-    }
-
     try {
       return await this.getOrRecoverEntry(runId);
     } catch (error) {
@@ -361,22 +312,30 @@ export class BudgetBankruptcyService {
 
   private async getOrRecoverEntry(runId: string): Promise<BankruptcyStoreEntry> {
     const existing = this.getStateStoreEntry(runId);
-    if (existing !== undefined) {
-      return existing;
+    let proposal = existing === undefined
+      ? await this.dependencies.proposalService.findPendingByRunId(runId)
+      : await this.dependencies.proposalService.findById(existing.proposalId);
+    if (proposal === null && existing === undefined) {
+      const resolutions = await this.dependencies.eventLogRepo.queryByRunAndEventType(
+        runId, BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED
+      );
+      const latest = resolutions.at(-1);
+      if (latest !== undefined) {
+        const payload = SoulBudgetBankruptcyResolvedPayloadSchema.parse(latest.payload_json);
+        proposal = await this.dependencies.proposalService.findById(payload.proposal_id);
+        if (proposal === null) {
+          throw new CoreError("CONFLICT", "Committed bankruptcy resolution is missing its proposal");
+        }
+      }
     }
-
-    const pendingProposal = await this.dependencies.proposalService.findPendingByRunId(runId);
-    if (pendingProposal === null) {
+    if (proposal === null && existing !== undefined) {
+      throw new CoreError("CONFLICT", "Cached bankruptcy is missing its proposal");
+    }
+    if (proposal === null) {
       throw new CoreError("NOT_FOUND", "No active bankruptcy found for run");
     }
 
-    const dossierRef = normalizeProposalDossierRef(pendingProposal.dossier_ref);
-    if (dossierRef === null) {
-      throw new CoreError("VALIDATION", "Pending bankruptcy proposal is missing dossier_ref");
-    }
-
-    const declaredEvent = await requireDeclaredEvent(this.dependencies, dossierRef);
-    const recovered = buildRecoveredEntry(dossierRef, pendingProposal.proposal_id, declaredEvent);
+    const recovered = await recoverBankruptcyEntry(this.dependencies, proposal, existing);
     this.setStateStoreEntry(runId, recovered);
     return recovered;
   }
@@ -425,21 +384,25 @@ export class BudgetBankruptcyService {
     };
   }
 
-  private async appendResolvedEvent(
+  private async resolveProposal(
     entry: BankruptcyStoreEntry,
-    proposalId: string,
-    optionIdApplied: string | null,
+    proposal: Readonly<Proposal>,
+    option: Readonly<Proposal["proposal_options"][number]>,
     resolutionState: ProposalResolutionState,
     runId: string,
     workspaceId: string,
     occurredAt: string,
     causedBy: "system" | "user"
-  ): Promise<EventLogEntry> {
-    return await bindEventPublisher({
-      eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier,
-      purpose: "BudgetBankruptcyService"
-    }).publish({
+  ): Promise<BudgetBankruptcyDeclareResult> {
+    const accepted = resolutionState !== ProposalResolutionState.REJECTED;
+    const updatedEntry = createStoreEntry(
+      buildResolvedState(entry.state, option.option_kind, accepted, occurredAt),
+      entry.dossier, proposal.proposal_id, entry.pressureRatio
+    );
+    const committed = await this.dependencies.proposalService.updateWithEvents(proposal.proposal_id, {
+      resolution_state: resolutionState,
+      last_updated_at: occurredAt
+    }, [{
       event_type: BudgetEventType.SOUL_BUDGET_BANKRUPTCY_RESOLVED,
       entity_type: "bankruptcy_dossier",
       entity_id: entry.dossier.runtime_id,
@@ -448,14 +411,21 @@ export class BudgetBankruptcyService {
       caused_by: causedBy,
       payload_json: SoulBudgetBankruptcyResolvedPayloadSchema.parse({
         bankruptcy_id: entry.state.bankruptcy_id,
-        proposal_id: proposalId,
+        proposal_id: proposal.proposal_id,
         resolution_state: resolutionState,
-        option_id_applied: optionIdApplied,
+        option_id_applied: accepted ? option.option_id : null,
         run_id: runId,
         workspace_id: workspaceId,
         occurred_at: occurredAt
       })
-    });
+    }]);
+    this.setStateStoreEntry(runId, updatedEntry);
+    await bindEventPublisher({
+      eventLogRepo: this.dependencies.eventLogRepo,
+      runtimeNotifier: this.dependencies.runtimeNotifier,
+      purpose: "BudgetBankruptcyService"
+    }).propagateCommitted(committed.events);
+    return { state: updatedEntry.state, dossier: updatedEntry.dossier, proposal: committed.proposal };
   }
 }
 

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -20,7 +20,7 @@ import { publishAdmittedSourceSemanticInterpretation } from "../../extraction/ca
 import type { ExtractionRequestProfile } from "../../extraction/request-profile.js";
 import { hashRegularFileNoFollow } from "../bound-file.js";
 import { currentBenchScope, trackBenchBody, trackBenchOperation, refuseBenchWorkAfterCancel } from "../../../harness/daemon-task.js";
-import { checkpointAndCopyBenchDb } from "../freeze/db-copy.js";
+import { checkpointAndCopyBenchDb, cloneCachedSealedSnapshot } from "../freeze/db-copy.js";
 import { withSnapshotPublishLock } from "../freeze/publish-lock.js";
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { censusCompleteSourceRecords, censusNativeSourceRecords, type SourceCensus, type SourceCensusRecord } from "./census.js";
@@ -286,7 +286,11 @@ function copyAdmittedNativeSources(sourceSnapshotPath: string, outputPath: strin
       native.manifest.identity !== census.dataset_sha256 || native.records.length !== census.records.length) {
     throw new AlayaError("CONFLICT", "native publication source differs from verified complete census");
   }
-  copyFileSync(resolve(sourceSnapshotPath), outputPath);
+  cloneCachedSealedSnapshot({
+    sourcePath: resolve(sourceSnapshotPath),
+    targetPath: outputPath,
+    expectedSha256: native.manifest.db_sha256
+  });
   return census.records.map((source, index) => {
     const record = native.records[index]?.record;
     if (record === undefined || record.identity !== source.native_record_id) {

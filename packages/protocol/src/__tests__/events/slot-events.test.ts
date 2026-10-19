@@ -16,7 +16,8 @@ describe("slot events", () => {
     const expected = [
       "soul.slot.created",
       "soul.slot.winner_changed",
-      "soul.conflict_matrix_edge.created"
+      "soul.conflict_matrix_edge.created",
+      "soul.conflict_matrix_edge.deleted"
     ];
 
     expect(Object.values(SlotEventType)).toEqual(expected);

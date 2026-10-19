@@ -28,7 +28,9 @@ export interface GardenJanitorMemoryTieringPort {
     workspaceId: string,
     criteria: GardenJanitorHotDemotionCriteria
   ): Promise<readonly GardenHotDemotionCandidate[]>;
-  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
+  // Mechanical hot->cold apply. Returns the object_ids this call actually
+  // moved off hot; omitted ids were not hot+active at UPDATE time.
+  demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): readonly string[];
 }
 
 export interface GardenLowActivityMemoryRecord {

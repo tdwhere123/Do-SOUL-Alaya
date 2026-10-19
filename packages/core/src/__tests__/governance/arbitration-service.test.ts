@@ -10,6 +10,9 @@ import {
   type Slot
 } from "@do-soul/alaya-protocol";
 import { ArbitrationService, type ArbitrationServiceDependencies } from "../../governance/proposals/arbitration-service.js";
+import { ClaimService } from "../../governance/claims/claim-service.js";
+import { bindEventPublisher } from "../../runtime/event-publisher.js";
+import { createDependencies as createClaimDependencies } from "./claim-service.test-support.js";
 
 const SLOT_ID = "33333333-3333-4333-8333-333333333333";
 const CLAIM_ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -86,6 +89,7 @@ function createDependencies(seed: {
   readonly dependencies: ArbitrationServiceDependencies;
   readonly order: string[];
   readonly transitionSpy: ReturnType<typeof vi.fn>;
+  readonly prepareTransitionSpy: ReturnType<typeof vi.fn>;
   readonly updateWinnerSpy: ReturnType<typeof vi.fn>;
   readonly broadcastSpy: ReturnType<typeof vi.fn>;
   readonly appendSpy: ReturnType<typeof vi.fn>;
@@ -96,19 +100,19 @@ function createDependencies(seed: {
   let slotState = seed.slot ? Object.freeze({ ...seed.slot }) : null;
   const eventLog: EventLogEntry[] = [];
 
-  const transitionSpy = vi.fn(async (claimId, nextState) => {
+  const updateStatusSync = vi.fn((claimId, nextState, updatedAt, expectedStatus) => {
     const existing = claims.get(claimId);
-
-    if (existing !== undefined) {
-      claims.set(claimId, Object.freeze({ ...existing, claim_status: nextState }));
+    if (existing === undefined || existing.claim_status !== expectedStatus) {
+      throw new Error("claim CAS failed");
     }
-
-    return claims.get(claimId) as ClaimForm;
+    const updated = Object.freeze({ ...existing, claim_status: nextState, updated_at: updatedAt });
+    claims.set(claimId, updated);
+    return updated;
   });
 
-  const updateWinnerSpy = vi.fn((_slotId, winnerClaimId, incumbentSince, updatedAt) => {
-    if (slotState === null) {
-      throw new Error("missing slot");
+  const updateWinnerSpy = vi.fn((_slotId, winnerClaimId, incumbentSince, updatedAt, expectedWinnerClaimId) => {
+    if (slotState === null || slotState.winner_claim_id !== expectedWinnerClaimId) {
+      throw new Error("slot CAS failed");
     }
 
     slotState = Object.freeze({
@@ -134,6 +138,26 @@ function createDependencies(seed: {
     eventLog.push(event);
     return event;
   });
+
+  const eventLogRepo = {
+    append: appendSpy,
+    queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
+      eventLog.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
+    ),
+    transactional: identityTxn
+  };
+  const { dependencies: claimDependencies } = createClaimDependencies();
+  const claimService = new ClaimService({
+    ...claimDependencies,
+    claimFormRepo: {
+      ...claimDependencies.claimFormRepo,
+      findById: async (objectId) => claims.get(objectId) ?? null,
+      updateStatusSync
+    },
+    eventPublisher: bindEventPublisher({ eventLogRepo, runtimeNotifier: { notifyEntry: broadcastSpy }, purpose: "Arbitration test" })
+  });
+  const transitionSpy = vi.spyOn(claimService, "transitionLifecycle");
+  const prepareTransitionSpy = vi.spyOn(claimService, "prepareLifecycleTransition");
 
   const dependencies: ArbitrationServiceDependencies = {
     generateObjectId: () => EDGE_ID,
@@ -165,20 +189,13 @@ function createDependencies(seed: {
             (edge.source_claim_id === targetClaimId && edge.target_claim_id === sourceClaimId)
         )
       ),
-      delete: vi.fn(async (objectId: string) => {
-        edges.delete(objectId);
+      deleteSync: vi.fn((objectId: string) => {
+        order.push("repo_delete");
+        if (!edges.delete(objectId)) throw new Error("missing conflict edge");
       })
     },
-    claimService: {
-      transitionLifecycle: transitionSpy
-    },
-    eventLogRepo: {
-      append: appendSpy,
-      queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
-        eventLog.filter((event) => event.entity_type === entityType && event.entity_id === entityId)
-      ),
-      transactional: identityTxn
-    },
+    claimService,
+    eventLogRepo,
     runtimeNotifier: {
       notifyEntry: broadcastSpy
     }
@@ -188,6 +205,7 @@ function createDependencies(seed: {
     dependencies,
     order,
     transitionSpy,
+    prepareTransitionSpy,
     updateWinnerSpy,
     broadcastSpy,
     appendSpy
@@ -238,7 +256,7 @@ describe("ArbitrationService", () => {
   it("deleteEdge returns NOT_FOUND for an edge bound to a different workspace and does not delete", async () => {
     const edge = createEdge({ workspace_id: "workspace-other" });
     const { dependencies } = createDependencies({ edges: [edge] });
-    const deleteSpy = dependencies.conflictMatrixRepo.delete as ReturnType<typeof vi.fn>;
+    const deleteSpy = dependencies.conflictMatrixRepo.deleteSync as ReturnType<typeof vi.fn>;
     const service = new ArbitrationService(dependencies);
 
     await expect(service.deleteEdge(edge.object_id, WORKSPACE_ID)).rejects.toMatchObject({
@@ -313,9 +331,9 @@ describe("ArbitrationService", () => {
   it("changes winner when challenger has exception_to edge and supersedes incumbent", async () => {
     const slot = createSlot({ winner_claim_id: CLAIM_ID_A });
     const claimA = createClaim({ object_id: CLAIM_ID_A, claim_status: ClaimLifecycleState.ACTIVE });
-    const claimB = createClaim({ object_id: CLAIM_ID_B, claim_status: ClaimLifecycleState.ACTIVE });
+    const claimB = createClaim({ object_id: CLAIM_ID_B, claim_status: ClaimLifecycleState.CONTESTED });
     const edge = createEdge({ source_claim_id: CLAIM_ID_B, target_claim_id: CLAIM_ID_A, edge_type: "exception_to" });
-    const { dependencies, transitionSpy, updateWinnerSpy, broadcastSpy } = createDependencies({
+    const { dependencies, prepareTransitionSpy, updateWinnerSpy, broadcastSpy } = createDependencies({
       slot,
       claims: [claimA, claimB],
       edges: [edge]
@@ -327,29 +345,29 @@ describe("ArbitrationService", () => {
     expect(result.decision).toBe("winner_changed");
     expect(result.winner_claim_id).toBe(CLAIM_ID_B);
     expect(updateWinnerSpy).toHaveBeenCalledTimes(1);
-    expect(transitionSpy).toHaveBeenCalledTimes(2);
-    expect(transitionSpy).toHaveBeenCalledWith(
+    expect(prepareTransitionSpy).toHaveBeenCalledTimes(2);
+    expect(prepareTransitionSpy).toHaveBeenCalledWith(
       CLAIM_ID_A,
       ClaimLifecycleState.SUPERSEDED,
       "arbitration_superseded",
       "system",
       { skipSlotElection: true }
     );
-    expect(transitionSpy).toHaveBeenCalledWith(
+    expect(prepareTransitionSpy).toHaveBeenCalledWith(
       CLAIM_ID_B,
       ClaimLifecycleState.WINNER,
       "arbitration_winner",
       "system",
       { skipSlotElection: true }
     );
-    expect(broadcastSpy).toHaveBeenCalledTimes(1);
+    expect(broadcastSpy).toHaveBeenCalledTimes(3);
   });
 
   it("resolves slot conflict with review cause and manual reason codes", async () => {
     const slot = createSlot({ winner_claim_id: CLAIM_ID_A });
     const claimA = createClaim({ object_id: CLAIM_ID_A, claim_status: ClaimLifecycleState.WINNER });
     const claimB = createClaim({ object_id: CLAIM_ID_B, claim_status: ClaimLifecycleState.CONTESTED });
-    const { dependencies, transitionSpy, updateWinnerSpy, appendSpy } = createDependencies({
+    const { dependencies, prepareTransitionSpy, updateWinnerSpy, appendSpy } = createDependencies({
       slot,
       claims: [claimA, claimB],
       edges: []
@@ -360,14 +378,14 @@ describe("ArbitrationService", () => {
 
     expect(updated.winner_claim_id).toBe(CLAIM_ID_B);
     expect(updateWinnerSpy).toHaveBeenCalledTimes(1);
-    expect(transitionSpy).toHaveBeenCalledWith(
+    expect(prepareTransitionSpy).toHaveBeenCalledWith(
       CLAIM_ID_A,
       ClaimLifecycleState.SUPERSEDED,
       "manual_resolution_superseded",
       "review",
       { skipSlotElection: true }
     );
-    expect(transitionSpy).toHaveBeenCalledWith(
+    expect(prepareTransitionSpy).toHaveBeenCalledWith(
       CLAIM_ID_B,
       ClaimLifecycleState.WINNER,
       "manual_resolution_winner",
@@ -472,7 +490,7 @@ describe("ArbitrationService", () => {
       edge_type: "supports"
     });
 
-    const { dependencies } = createDependencies({
+    const { dependencies, order, appendSpy, broadcastSpy } = createDependencies({
       claims: [claimA, claimB],
       edges: [validEdge, orphanedEdge]
     });
@@ -487,6 +505,12 @@ describe("ArbitrationService", () => {
     });
 
     await expect(service.listEdgesByWorkspace(WORKSPACE_ID)).resolves.toHaveLength(1);
+    expect(order).toEqual(["event_log", "repo_delete"]);
+    expect(appendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      event_type: "soul.conflict_matrix_edge.deleted", entity_id: orphanedEdge.object_id, caused_by: "system",
+      payload_json: expect.objectContaining({ source_claim_id: "claim-missing", target_claim_id: CLAIM_ID_B })
+    }));
+    expect(broadcastSpy).toHaveBeenCalledTimes(1);
   });
 });
 

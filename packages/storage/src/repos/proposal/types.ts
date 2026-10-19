@@ -113,6 +113,13 @@ export interface FindPendingSummariesOptions {
   readonly now?: string;
 }
 
+// invariant: `since` is a created_at lower bound on the retained queue window,
+// not a backward-pagination cursor. A caller that pages the queue forward must
+// carry its own continuation; the repo never infers one from `since`.
+export interface CountPendingSummariesOptions {
+  readonly since?: string | null;
+}
+
 export interface ProposalListPageOptions {
   readonly limit: number;
   readonly offset: number;
@@ -231,6 +238,13 @@ export interface ProposalRepo {
     workspaceId: string,
     options?: FindPendingSummariesOptions
   ): Promise<readonly Readonly<PendingProposalSummary>[]>;
+  // COUNT(*) over the same workspace/pending/since filter findPendingSummaries
+  // applies, ignoring its LIMIT. The authority for a truthful matching total:
+  // a page's length is not a queue size.
+  countPendingSummaries(
+    workspaceId: string,
+    options?: CountPendingSummariesOptions
+  ): Promise<number>;
   findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null>;
   assignReviewer(input: ProposalReviewerAssignmentInput): Promise<Readonly<ProposalReviewerAssignment>>;
   findReviewerAssignment(proposalId: string): Promise<Readonly<ProposalReviewerAssignment> | null>;
