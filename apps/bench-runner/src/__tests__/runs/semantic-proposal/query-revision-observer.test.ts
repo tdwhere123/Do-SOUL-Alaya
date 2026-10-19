@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { qualifiedSelectionFixture } from "../semantic-chain/source-qualified-selection.test-support.js";
 import { admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "../../../runs/semantic-chain/source-qualified-selection-input.js";
 import { chainIdentity, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import type { readSourceExperiment } from "../../../runs/semantic-chain/source-experiment.js";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -71,7 +72,7 @@ function rejectedBody(presentation: Presentation): string {
 }
 
 async function fixture(presentation: Presentation = "flat-carrier-v1") {
-  const root = mkdtempSync(join(tmpdir(), "query-revision-observer-")); roots.push(root);
+  const root = canonicalPath(mkdtempSync(join(tmpdir(), "query-revision-observer-"))); roots.push(root);
   const parentRoot = join(root, "parent"), childRoot = join(root, "child");
   const item = { original_query: MIRA_QUERY, generation_presentation: presentation };
   const workset = parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v4", kind: "query",

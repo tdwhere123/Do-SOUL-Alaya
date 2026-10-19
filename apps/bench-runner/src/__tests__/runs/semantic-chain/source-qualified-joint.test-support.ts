@@ -12,6 +12,7 @@ import { JOINT_QUESTION, jointQuery, jointSource, jointCorrespondence, jointSele
 import { correspondenceAssessmentJson } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-producer-fixture.js";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/materialize.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { admitRetainedNativeSourceSnapshot } from "../../../runs/snapshot/source-records/native.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -28,6 +29,7 @@ const GUARD = `--import=${new URL("../../support/strict-provider-free-cli-bootst
 /** Current publications and received authored Q/C, never signed or caller-invented local proofs. */
 export async function withQualifiedJointFixture(directory: string,
   body: (fixture: { input: SourceAcquisitionExperimentInput; sources: { id: string; text: string }[] }) => Promise<void>) {
+  directory = canonicalPath(directory);
   // Four wrong-ticket approvals precede the required Approval in the native identity tie-break.
   // This plants a first-page omission without adding proofs beyond the unchanged allowance.
   const sources = [jointSource("a", true), ...[1, 2, 4, 5].map(n => jointSource(`b${n}`, false, { value: `OTHER-${n}` })),

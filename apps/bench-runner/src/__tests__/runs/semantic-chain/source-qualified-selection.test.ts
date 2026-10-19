@@ -4,7 +4,7 @@ const boundary = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,6 +69,22 @@ function result(state: ReturnType<typeof readSourceExperiment>) {
   if (state.execution === undefined || !("qualified_comparison" in state.execution)) throw new Error(canonicalJson(state));
   return state.execution.qualified_comparison;
 }
+
+it("canonicalizes an aliased fixture directory while production still rejects an aliased frozen root", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "qualified-selection-alias-")); roots.push(directory);
+  const physical = join(directory, "physical"), alias = join(directory, "alias");
+  mkdirSync(physical); symlinkSync(physical, alias, process.platform === "win32" ? "junction" : "dir");
+  const h = await qualifiedSelectionFixture(join(alias, "fixture"));
+  const expected = join(realpathSync(physical), "fixture");
+  expect(h.directory).toBe(expected);
+  expect(h.input.root).toBe(join(expected, "experiment"));
+  const rejected = await invoke({ ...h.input, root: join(alias, "fixture", "experiment") });
+  expect(rejected).toMatchObject({ status: "blocked", phase: "admission", execution_started: false,
+    lifetime: { status: "not_started" }, diagnostic: { message: "acquisition requires its canonical frozen root" } });
+  const state = await invoke(h.input);
+  expect(state.lifetime.status, canonicalJson(state)).toBe("closed");
+  expect(result(state).comparison?.outcome).toBe("complete");
+}, 120_000);
 
 it("runs authored sixteen through the compiled guarded consumer, both native selectors, encoded spans/proofs and immutable recovery", async () => {
   const h = await fixture(), state = await invoke(h.input), qualified = result(state);

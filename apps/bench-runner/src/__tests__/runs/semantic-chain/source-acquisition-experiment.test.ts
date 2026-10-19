@@ -17,6 +17,7 @@ import { startBenchDaemon } from "../../../harness/daemon.js";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/materialize.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
 import { inspectSemanticChainSourceIndex } from "../../../runs/semantic-chain/source-index-binding.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -42,7 +43,7 @@ afterEach(async () => {
 afterAll(() => { writeFileSync(childPath, childBytes); expect(boundary.violations).toEqual([]); boundary.restore(); });
 
 async function fixture(options: { unavailable?: boolean; delay_ms?: number; close_exit_code?: number } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), "source-acquisition-experiment-")); roots.push(directory);
+  const directory = canonicalPath(mkdtempSync(join(tmpdir(), "source-acquisition-experiment-"))); roots.push(directory);
   const data = join(directory, "authored-source"), cache = join(directory, "synthetic-model-cache"), root = join(directory, "execution");
   mkdirSync(cache);
   for (const [name, value] of Object.entries({ ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false", ALAYA_EMBEDDING_PROVIDER: "local_onnx",

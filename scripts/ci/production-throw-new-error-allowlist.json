@@ -1235,6 +1235,10 @@
     "max": 17,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
+  "apps/bench-runner/src/runs/semantic-chain/source-acquisition-runtime-channel.mjs": {
+    "max": 2,
+    "reason": "Built-ins-only acquisition IPC bootstrap is loaded before guard establishment and application admission; importing the application error framework here would cross that boundary."
+  },
   "apps/bench-runner/src/runs/snapshot/bound-file.ts": {
     "max": 19,
     "reason": "remaining production throw new Error; convert to AlayaError family"

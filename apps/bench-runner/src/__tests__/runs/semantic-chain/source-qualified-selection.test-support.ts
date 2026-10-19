@@ -17,6 +17,7 @@ import { startBenchDaemon } from "../../../harness/daemon.js";
 import { admitRetainedNativeSourceSnapshot } from "../../../runs/snapshot/source-records/native.js";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/materialize.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
+import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
@@ -73,6 +74,8 @@ export function correspondenceRaw(prompt: string) {
 }
 
 export async function qualifiedSelectionFixture(directory: string) {
+  // Freeze physical paths before deriving inputs or output roots under an aliased temp directory.
+  directory = canonicalPath(directory);
   const task = alternativeSelectionFixture(selectionExecutionBudget), data = join(directory, "source"), root = join(directory, "experiment");
   const filename = join(data, "alaya.db"), snapshot = join(directory, "native.sqlite"), qCache = join(directory, "q-cache");
   const bodies = [...task.sources.map(row => ({ id: row.id, body: row.body })),
