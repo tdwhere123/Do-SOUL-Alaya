@@ -39,10 +39,8 @@ import {
 } from "./repair/preserved-valid-closure.js";
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
-import {
-  inspectExtractionCacheWriterLock,
-  nonCredentialChildEnv
-} from "../fill/manifest/writer-lock.js";
+import { inspectExtractionCacheWriterLock } from "../fill/manifest/writer-lock.js";
+import { nonCredentialChildEnv } from "../fill/manifest/non-credential-child-env.js";
 
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 

@@ -19,13 +19,13 @@ import {
   assertNamedLeaseRootIdentity,
   prepareWriterLockDirectory,
   publishWriterLock,
-  readProcessStartIdentity,
   removeOwnedWriterLockDirectory,
   runCleanupActions,
   throwWithCleanupFailures,
   type LeaseOwnerBinding,
   type WriterLockHold
 } from "./writer-lock.js";
+import { readProcessStartIdentity } from "./process-start-identity.js";
 export type { DirectoryIdentity };
 
 export interface ExtractionCacheWriteLease {

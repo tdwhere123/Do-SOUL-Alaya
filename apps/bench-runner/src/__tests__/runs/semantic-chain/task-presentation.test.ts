@@ -49,6 +49,17 @@ vi.mock("../../../runs/extraction/fill/manifest/kernel-write-lease.js", () => ({
   isKernelWriteLeaseActive: () => false
 }));
 
+// Observe only this fixture process; no subprocess permission or production lease is supplied.
+const fixtureProcess = vi.hoisted(() => ({ identity: "123456789", observe: vi.fn<(pid: number) => string>() }));
+vi.mock("../../../runs/extraction/fill/manifest/process-start-identity.js", () => ({
+  readProcessStartIdentity: fixtureProcess.observe.mockImplementation(pid => {
+    if (pid !== process.pid) throw new Error("fixture cannot observe another process");
+    return fixtureProcess.identity;
+  })
+}));
+
+import { acquireExtractionCacheWriteLease } from "../../../runs/extraction/fill/manifest/fill-root-guard.js";
+import { readProcessStartIdentity } from "../../../runs/extraction/fill/manifest/process-start-identity.js";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +106,40 @@ afterAll(async () => {
   expect(fixtureLocks.active).toBe(0);
   process.stdout.write(`TASK_PRESENTATION_GUARD ${JSON.stringify({ blocked_operations: blocked.length, forbidden_credentials: forbidden.length,
     allowed_read_workers: receipt.operations.filter((row: { operation: string }) => row.operation === "worker.create.allowed").length })}\n`);
+});
+
+it("consults the fixture process observation on real lease acquisition and release", () => {
+  fixtureProcess.observe.mockClear();
+  const cache = join(root, "observation-lease");
+  const lease = acquireExtractionCacheWriteLease(cache);
+  try {
+    expect(fixtureProcess.observe).toHaveBeenCalledWith(process.pid);
+    expect(JSON.parse(readFileSync(join(cache, ".extraction-fill.lock", "owner.json"), "utf8")))
+      .toMatchObject({ pid: process.pid, process_start_identity: fixtureProcess.identity, token: lease.generation });
+  } finally {
+    fixtureProcess.observe.mockClear();
+    lease.release();
+  }
+  expect(fixtureProcess.observe).toHaveBeenCalledWith(process.pid);
+  expect(existsSync(join(cache, ".extraction-fill.lock"))).toBe(false);
+  expect(() => readProcessStartIdentity(process.pid + 1)).toThrow("fixture cannot observe another process");
+});
+
+it.each(["observation", "token"] as const)("rejects changed %s through the real lease release owner", change => {
+  const cache = join(root, `changed-${change}-lease`), identity = fixtureProcess.identity;
+  const lease = acquireExtractionCacheWriteLease(cache);
+  const ownerPath = join(cache, ".extraction-fill.lock", "owner.json");
+  const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+  if (change === "observation") fixtureProcess.identity = "987654321";
+  else writeFileSync(ownerPath, JSON.stringify({ ...owner, token: "replacement-token" }));
+  try {
+    expect(() => lease.release()).toThrow(/ownership changed before release/u);
+    expect(existsSync(ownerPath)).toBe(true);
+    expect(fixtureLocks.active).toBe(0);
+  } finally {
+    fixtureProcess.identity = identity;
+    rmSync(cache, { recursive: true, force: true });
+  }
 });
 
 function request(line = selectedLine(h)) { return line.request as SourceSemanticCorrespondenceRequest; }
