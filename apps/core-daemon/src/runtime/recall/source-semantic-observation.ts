@@ -13,10 +13,10 @@ const runtimeScopes = new WeakMap<object, SourceSemanticObservationScope>();
 
 /** Private bench composition boundary: construction and registry lookup share one module graph.
  * The package-owned runtime type also avoids separate source/dist nominal class declarations. */
-export async function createSourceObservedRuntime(options: Omit<AlayaDaemonRuntimeOptions, "sourceSemanticObservations">):
+export async function createSourceObservedRuntime(options: AlayaDaemonRuntimeOptions):
 Promise<Readonly<{ runtime: AlayaDaemonRuntime; observeSourceSemantics: SourceSemanticObservationScope }>> {
   const { createAlayaDaemonRuntime } = await import("../../index.js");
-  const runtime = await createAlayaDaemonRuntime({ ...options, sourceSemanticObservations: true });
+  const runtime = await createAlayaDaemonRuntime(options);
   return { runtime, observeSourceSemantics: (limits, work) => observeSourceSemanticsForRuntime(runtime, limits, work) };
 }
 
@@ -26,7 +26,7 @@ export function bindSourceSemanticObservation(runtime: AlayaDaemonRuntime, scope
 }
 
 /** Private Node friend entry. Use the SAME compiled module identity as createAlayaDaemonRuntime.
- * Explicitly opt in at startup, then wrap only the requested job's ordinary native calls.
+ * Explicit request scopes opt in only the wrapped job's ordinary native calls.
  * No labels enter the worker. Work failures retain their original error and correlated observations. */
 export async function observeSourceSemanticsForRuntime<T>(runtime: object, options: SourceSemanticObservationOptions,
   work: () => Promise<T>): Promise<SourceSemanticObservedCall<T>> {

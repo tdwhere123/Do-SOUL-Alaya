@@ -35,13 +35,19 @@ and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 
 ### Private recall measurement
 
-Opt-in bench observations retain request-correlated worker events and logical
-costs without adding fields to public MCP responses or changing recall policy.
-The measurement owner captures library continuations in the same session and
-invokes ordinary `soul.recall` through its actual public entry. Both use one
-consumer-message visibility scorer. Frozen-output attribution keeps missing,
-partial and unavailable evidence explicit; diagnostic membership is not proof
-of visible text, and logical accounting is not a physical resource measurement.
+Private recall measurement is a bench adapter, not a public diagnostic surface:
+it adds no MCP response field and changes no recall policy. A bench-only startup
+option selects the compiled daemon module so runtime construction and scope
+lookup share one module identity; the binding itself is inert, and only an
+explicit request-scoped job records request-correlated source-semantic worker
+events and logical costs. The measurement owner captures library continuations
+in the same first-exposure session and invokes ordinary `soul.recall` through
+its actual public entry. Delivery capture keeps slot, interval and
+first-exposure evidence for the single `consumer-message-visibility-v1` scorer
+over frozen answer-turn labels instead of defining @K visibility itself.
+Frozen-output attribution keeps missing, partial and unavailable evidence
+explicit; diagnostic membership is not proof of visible text, and logical
+accounting is not a physical resource measurement.
 
 ### Retained-boundary corrections
 

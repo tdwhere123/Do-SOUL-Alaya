@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, SoulInterpretationResponseSchema,
-  type SoulInterpretationResponse } from "@do-soul/alaya-protocol";
+  type SoulInterpretationResponse, type SourceRecordIdentity } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } from "../../harness/daemon-task.js";
 import { callMcpTool, readBenchMcpToolOutput, type BenchMcpToolCapture } from "../../harness/daemon/runtime/daemon-mcp-support.js";
@@ -16,7 +16,7 @@ import type { SourceSemanticObservedCall } from "../../../../core-daemon/src/run
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import { admitSealedSemanticChainLibraryDelivery, semanticChainLibraryRecallRequest } from "./library-admission.js";
 import { assertChainSnapshot, chainIdentity, readChainArtifact, SemanticChainPlanSchema, withSemanticChainDaemon,
-  writeChainArtifact } from "./contract.js";
+  writeChainArtifact, type SemanticChainPlan } from "./contract.js";
 import { readSemanticChainCorrespondences, semanticChainCacheInputPaths, semanticChainQueryCorrespondences,
   verifySemanticChainQueries } from "./inputs.js";
 import { executeSemanticChainQuery, ReplaySchema } from "./replay.js";
@@ -41,8 +41,35 @@ export type SemanticChainLibraryCaptureOptions = Readonly<{
     Promise<SourceSemanticObservedCall<T>>;
 }>;
 
+type SemanticChainLibraryCaptureHeader = z.infer<typeof HeaderSchema>;
+type SemanticChainLibraryCaptureInitial = z.infer<typeof ReplaySchema>["rows"][number];
+const ExecutionObservationSchema = z.object({ capture_identity: z.string(), query_key: z.string(),
+  status: z.enum(["available", "unavailable", "not_observed", "overflow"]), observations: z.array(z.unknown()),
+  outcome: z.enum(["success", "failure"]), error: z.unknown().optional() }).strict();
+type SemanticChainLibraryObservedExecution = z.infer<typeof ExecutionObservationSchema>;
+type SemanticChainLibraryRunObservation =
+  | Readonly<{ status: "unobserved"; observations: null }>
+  | SemanticChainLibraryObservedExecution;
+
+/** Blocked rows keep empty records; unadmitted partials omit them; admitted pages retain sealed identities. */
+type SemanticChainLibraryCaptureRow =
+  | Readonly<{ query_key: string; status: "blocked"; reason: string; pages: readonly ConsumerVisibilityPage[];
+      initial: null; source_records: readonly SourceRecordIdentity[];
+      execution_observation: Readonly<{ status: "not_run"; observations: null }> }>
+  | Readonly<{ query_key: string; status: "partial"; reason: string; pages: readonly ConsumerVisibilityPage[];
+      initial: SemanticChainLibraryCaptureInitial | null; source_records?: undefined;
+      execution_observation: SemanticChainLibraryRunObservation }>
+  | Readonly<{ query_key: string; status: "captured" | "partial"; reason: string; pages: readonly ConsumerVisibilityPage[];
+      initial: SemanticChainLibraryCaptureInitial; source_records: readonly SourceRecordIdentity[];
+      execution_observation: SemanticChainLibraryRunObservation }>;
+
+type SemanticChainLibraryCaptureResult = Readonly<{
+  header: SemanticChainLibraryCaptureHeader; plan: SemanticChainPlan; rows: readonly SemanticChainLibraryCaptureRow[];
+}>;
+
 /** Private, no-gold execution. Every invocation owns a fresh output root; never resumes or re-exposes a reservation. */
-export async function captureSemanticChainLibrary(root: string, outputRoot: string, options: SemanticChainLibraryCaptureOptions) {
+export async function captureSemanticChainLibrary(root: string, outputRoot: string, options: SemanticChainLibraryCaptureOptions):
+  Promise<SemanticChainLibraryCaptureResult & Readonly<{ path: string }>> {
   const operation = async () => {
     refuseBenchWorkAfterCancel();
     if (options.maxPages !== 1 && options.maxPages !== 2) throw new AlayaError("VALIDATION", "library capture permits one or two pages");
@@ -165,7 +192,7 @@ async function continueLibraryCapture(daemon: BenchDaemonHandle, directory: stri
 }
 
 /** Frozen archive admission can recover an observed first page even if page 2 or aggregation was interrupted. */
-export function admitSemanticChainLibraryCapture(root: string, outputRoot: string) {
+export function admitSemanticChainLibraryCapture(root: string, outputRoot: string): SemanticChainLibraryCaptureResult {
   const plan = SemanticChainPlanSchema.parse(readChainArtifact(join(root, "prepare.json")));
   assertChainSnapshot(plan.config);
   verifySemanticChainQueries(plan);
@@ -177,17 +204,16 @@ export function admitSemanticChainLibraryCapture(root: string, outputRoot: strin
     || header.correspondence_identity !== retained.identity) throw new AlayaError("CONFLICT", "library capture owner changed");
   const aggregate = readChainArtifact(join(output, "capture.json"));
   if (aggregate !== undefined) same(aggregate, { contract: CONTRACT, identity, query_keys: plan.queries.map(query => query.query_key) });
-  const rows = plan.queries.map(query => {
+  const rows = plan.queries.map((query): SemanticChainLibraryCaptureRow => {
     if (query.status === "blocked") return { query_key: query.query_key, status: "blocked" as const, reason: query.reason, pages: [],
       initial: null, source_records: [], execution_observation: { status: "not_run", observations: null } };
     const directory = join(output, query.query_key);
     const stopValue = readChainArtifact(join(directory, "stop.json"));
     const stop = stopValue === undefined ? undefined : StopSchema.parse(stopValue);
     const observed = readChainArtifact(join(directory, "execution-observation.json"));
-    const execution_observation = observed === undefined ? { status: "unobserved", observations: null }
-      : z.object({ capture_identity: z.literal(identity), query_key: z.literal(query.query_key),
-        status: z.enum(["available", "unavailable", "not_observed", "overflow"]), observations: z.array(z.unknown()),
-        outcome: z.enum(["success", "failure"]), error: z.unknown().optional() }).strict().parse(observed);
+    const execution_observation: SemanticChainLibraryRunObservation = observed === undefined
+      ? { status: "unobserved", observations: null }
+      : ExecutionObservationSchema.extend({ capture_identity: z.literal(identity), query_key: z.literal(query.query_key) }).parse(observed);
     const raw = readChainArtifact(join(directory, "initial.json"));
     if (raw === undefined) return { query_key: query.query_key, status: "partial" as const,
       reason: stop?.reason ?? "initial_delivery_unobserved", pages: [unobservedPage(1, "initial_delivery_unobserved")], initial: null, execution_observation };

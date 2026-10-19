@@ -588,6 +588,21 @@ and downstream utilization unavailable when the response supplies no such
 evidence. Native-fork synthetic pagination verifies the real worker route;
 it does not establish replayability of a historical dataset snapshot.
 
+Private recall measurement is bench-only observation, not a public diagnostic
+surface or a recall-policy change. Runtime construction binds the observation
+scope inertly; only an explicit request-scoped job collects source-semantic
+worker events and bounded logical costs, whose event/byte limits bound the
+record rather than the delivered result
+([`source-semantic-observation`](../../apps/core-daemon/src/runtime/recall/source-semantic-observation.ts)).
+Library capture reuses one `FirstExposureSession` for the first page and its
+continuation; the ordinary arm invokes `soul.recall` through a real MCP client
+and the public tool handler, and leaves library-only request dimensions
+unmapped. One consumer-message visibility scorer evaluates frozen answer-turn
+labels and retains unknowns when required delivery evidence is incomplete.
+Attribution and cost rows stay request-correlated: diagnostic membership is not visible
+text, debit and allowance sums are logical rather than physical memory, SQLite
+work or IPC time, and the observation is not complete causal attribution.
+
 Continuation in the benchmark reuses the active question/source/working-file
 identity and skips repeated warmup. Lost or changed process/source state
 invalidates continuation before creating a fresh working copy. An old cache's

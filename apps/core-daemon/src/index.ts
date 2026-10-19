@@ -77,8 +77,6 @@ export interface AlayaDaemonRuntimeOptions {
   /** Defaults to eager; "omit" skips the probe without establishing readiness. */
   readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly sourceSemanticInterpretationClock?: string;
-  /** Private recall-measurement consumer only; off by default. No public tool schema change. */
-  readonly sourceSemanticObservations?: boolean;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }
@@ -113,9 +111,8 @@ export async function createAlayaDaemonRuntime(
     });
     const runtimeRecallReadWorkerClient = recallAndCore.recallWiring.recallReadWorkerClient;
     if (runtimeRecallReadWorkerClient !== null) {
-      if (options.sourceSemanticObservations === true) {
-        bindSourceSemanticObservation(runtime, runtimeRecallReadWorkerClient.observeSourceSemantics);
-      }
+      // Binding is inert; collection requires an explicit private request scope.
+      bindSourceSemanticObservation(runtime, runtimeRecallReadWorkerClient.observeSourceSemantics);
       if (runtimeRecallReadWorkerClient.sourceSemanticsPort !== undefined) {
         bindSourceFeedbackExecutionPort(runtime, runtimeRecallReadWorkerClient.sourceSemanticsPort);
       }
