@@ -3,21 +3,22 @@ const isolation = await vi.hoisted(async () => {
   const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
   return installProviderFreeBoundary();
 });
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { sourceSemanticAccessPhases } from "@do-soul/alaya-protocol";
 import { prepareNativeSourceRecordsSnapshot } from "../../../runs/snapshot/source-records/native.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
-import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
-import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
-import { replaySemanticChain, measureSemanticChain, ReplaySchema } from "../../../runs/semantic-chain/replay.js";
-import { SemanticChainConfigSchema, assertChainSnapshot } from "../../../runs/semantic-chain/contract.js";
+import { parseSemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";
+import { prepareSemanticChain } from "../../../runs/recall-measurement/prepare.js";
+import { replaySemanticChain, measureSemanticChain, ReplaySchema } from "../../../runs/recall-measurement/replay.js";
+import { SemanticChainConfigSchema, assertChainSnapshot } from "../../../runs/recall-measurement/contract.js";
+import { runRecallMeasurementLauncher } from "../../../runs/recall-measurement/launch.js";
 
 afterAll(() => isolation.restore());
 
 it("preserves disabled raw Source preparation, sealed replay and evaluator admission without model requests", async () => {
-  const root = mkdtempSync(join(tmpdir(), "disabled-source-chain-"));
+  const root = mkdtempSync(join(tmpdir(), "source-only-replay-"));
   const text = "The blue stone is kept in the cedar box.";
   try {
     const snapshot = await prepareNativeSourceRecordsSnapshot({ snapshotPath: join(root, "input.sqlite"),
@@ -58,6 +59,15 @@ it("preserves disabled raw Source preparation, sealed replay and evaluator admis
     expect(replayPreparation).toMatchObject({ status: "unavailable", method: "not_run", submitted_inputs: 0, external_api_attempts: 0 });
     const measured = measureSemanticChain(chainRoot, replay.path, [{ query_key: query.query_key, source_units: [] }], join(root, "evaluator"));
     expect(measured.result.rows[0]).toMatchObject({ status: "replayed", measurement: { status: "validated" } });
+    const goldPath = join(root, "gold.json");
+    writeFileSync(goldPath, JSON.stringify([{ query_key: query.query_key, source_units: [] }]));
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      expect(await runRecallMeasurementLauncher(["measure", "--root", chainRoot, "--replay", replay.path,
+        "--gold", goldPath, "--evaluator-root", join(root, "cli-evaluator")])).toBe(0);
+      expect(JSON.parse(String(stdout.mock.calls.at(-1)?.[0])).result.rows[0]).toMatchObject({
+        status: "replayed", measurement: { status: "validated" } });
+    } finally { stdout.mockRestore(); }
     assertChainSnapshot(config);
     expect(isolation.violations).toEqual([]);
   } finally { rmSync(root, { recursive: true, force: true }); }

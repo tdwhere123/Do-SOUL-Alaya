@@ -23,7 +23,7 @@ import * as proposalAttempts from "../../../runs/semantic-proposal/attempt.js";
 import { readSemanticProposalShard } from "../../../runs/semantic-proposal/artifact.js";
 import { ledgerPath } from "../../../runs/extraction/authority/attempt-ledger.js";
 import { settledAttemptUsageDigest } from "../../../runs/extraction/authority/attempt-ledger/outcome.js";
-import { inspectPopulationAttemptScopes } from "../../../runs/longmemeval-semantic/population-attempts.js";
+import { inspectPopulationAttemptScopes } from "../../../runs/semantic-chain/longmemeval-population-attempts.js";
 import { readProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { INTERN_DISCOVERY_QUOTE_BASIS } from "../../../runs/extraction/authority/intern-quote.js";
 import { isExtractionRequestProfile } from "../../../runs/extraction/request-profile.js";

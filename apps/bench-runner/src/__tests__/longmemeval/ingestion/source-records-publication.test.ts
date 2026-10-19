@@ -30,11 +30,11 @@ import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semanti
 import * as experimentContract from "../../../runs/longmemeval-semantic/contract.js";
 import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
 import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
-import * as semanticReplay from "../../../runs/semantic-chain/replay.js";
-import { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
+import * as semanticReplay from "../../../runs/recall-measurement/replay.js";
+import { measureSemanticChain } from "../../../runs/recall-measurement/replay.js";
 import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { chainIdentity, SemanticChainPlanSchema, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { chainIdentity, SemanticChainPlanSchema, readChainArtifact, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 
 const roots = new Set<string>();

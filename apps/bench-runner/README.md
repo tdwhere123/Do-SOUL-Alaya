@@ -161,6 +161,21 @@ state or another first exposure. Missing native proofs remain `not_exercised`;
 baseline mismatch and resource failure do not establish a causal effect. The
 existing `without_semantic_correspondences` replay remains a separate recompilation control.
 
+For a retained native snapshot and exact chain configuration, the measurement-only
+entry preserves the existing prepare/replay/measure arguments and artifact contracts:
+
+```bash
+node apps/bench-runner/dist/runs/recall-measurement/launch.js prepare --root ROOT --config CONFIG
+node apps/bench-runner/dist/runs/recall-measurement/launch.js replay --root ROOT --arm retained
+node apps/bench-runner/dist/runs/recall-measurement/launch.js measure --root ROOT --replay REPLAY_PATH --gold GOLD_PATH --evaluator-root EVALUATOR_ROOT
+```
+
+This entry does not import the private semantic-chain/proposal pipelines. Exact
+retained request/cache identities are shared read-only owners; no provider fill or
+recovery window runs here. With absent Q/C caches, the original question still
+uses native source discovery and delivery. Existing lazy/population research
+operations have a separate temporary `semantic-chain/longmemeval-launch.js` entry.
+
 For a bounded LongMemEval-S source-only development baseline, use the maintained
 entry below. Its [configuration](src/runs/longmemeval-semantic/contract.ts) requires
 the original dataset directory, pinned metadata directory, SHA-256 and question
@@ -174,7 +189,7 @@ only its question date supplies approved fixed context and the interpretation cl
 node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js freeze --root ROOT --config CONFIG
 node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js prepare --root ROOT
 node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js replay --root ROOT --prepared PREPARED_PATH
-node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js measure --root ROOT --replay REPLAY_PATH
+node apps/bench-runner/dist/runs/longmemeval-semantic/launch.js measure --root ROOT --replay REPLAY_PATH --evaluator-root EVALUATOR_ROOT
 ```
 
 Each selected question gets its complete original haystack in an isolated source

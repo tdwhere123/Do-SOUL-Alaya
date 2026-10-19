@@ -1,5 +1,5 @@
 import type { SoulInterpretationResponse } from "@do-soul/alaya-protocol";
-import type { admitOrdinaryRecallObservation } from "./ordinary-recall.js";
+import type { admitOrdinaryRecallObservation } from "../../recall-measurement/ordinary/ordinary-recall.js";
 
 type OrdinaryEvidence = ReturnType<typeof admitOrdinaryRecallObservation>["evidence"];
 type LibraryDelivery = Extract<SoulInterpretationResponse, { operation: "recall" }>;

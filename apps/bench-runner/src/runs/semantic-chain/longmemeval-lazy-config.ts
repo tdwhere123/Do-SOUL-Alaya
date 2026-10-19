@@ -4,9 +4,9 @@ import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/boun
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
 import { verifySemanticChainQueries } from "../semantic-chain/inputs.js";
 import { admitNativeLazyConfig, type NativeSourceRequestScope } from "../semantic-chain/bind-lazy.js";
-import { readLongMemEvalSemanticFreeze, loadFrozenLongMemEvalDataset } from "./contract.js";
+import { readLongMemEvalSemanticFreeze, loadFrozenLongMemEvalDataset } from "../longmemeval-semantic/contract.js";
 import { ExperimentPreparedSchema, verifyLongMemEvalQuestionPublication,
-  verifyLongMemEvalQuestionChain } from "./execute.js";
+  verifyLongMemEvalQuestionChain } from "../longmemeval-semantic/execute.js";
 
 export type LongMemEvalLazyConfigInput = Readonly<{
   root: string;

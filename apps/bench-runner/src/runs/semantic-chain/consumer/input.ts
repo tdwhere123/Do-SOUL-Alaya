@@ -1,17 +1,17 @@
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, isStepSemanticRequestProfile, stepSemanticRequestModel } from "@do-soul/alaya-protocol";
-import { admitSemanticChainReplay } from "../replay.js";
-import { semanticChainCacheInputPaths } from "../inputs.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact } from "../contract.js";
+import { admitSemanticChainReplay } from "../../recall-measurement/replay.js";
+import { semanticChainCacheInputPaths } from "../../recall-measurement/inputs.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "../../recall-measurement/contract.js";
 import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-path.js";
 import { bindSemanticProviderRequest, semanticProviderRequestCacheKey } from "../../provider-request/request-binding.js";
 import { PROVIDER_REQUEST_TIMEOUT_POLICY, providerRequestTimeout, type ProviderRequestLine } from "../../provider-request/execution.js";
 import type { ExtractionTransportProvenance } from "../../extraction/transport-route.js";
-import { admitOrdinaryRecallObservation } from "./ordinary-recall.js";
+import { admitOrdinaryRecallObservation } from "../../recall-measurement/ordinary/ordinary-recall.js";
 import { exactLibraryProofReferenceView, exactOrdinaryMetadataReferenceView } from "./evidence-reference-view.js";
 import { ORDINARY_RECALL_CAPTURE_CONTRACT, ORDINARY_RECALL_MULTI_SOURCE_CAPTURE_CONTRACT, ORDINARY_RECALL_PUBLIC_SEMANTICS,
-  OrdinaryRecallProtocolVersionSchema } from "./ordinary-recall-contract.js";
+  OrdinaryRecallProtocolVersionSchema } from "../../recall-measurement/ordinary/ordinary-recall-contract.js";
 
 export const TASK_CONSUMER_KIND = "task_consumer" as const;
 export const TASK_CONSUMER_SCHEMA_NAME = "qualified_task_answer";

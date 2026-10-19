@@ -2,7 +2,7 @@ import { z } from "zod";
 import { samePhysicalLocation } from "../fs/opened-contained-path.js";
 import { AlayaError, canonicalJson, hashSourceRecordId } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceSemanticLibraryQueryIdentity } from "@do-soul/alaya-core";
-import { chainIdentity } from "../semantic-chain/contract.js";
+import { chainIdentity } from "../recall-measurement/contract.js";
 import { LongMemEvalSemanticFreezeSchema, assertLongMemEvalSemanticRows,
   type LongMemEvalSemanticFreeze } from "../longmemeval-semantic/contract.js";
 import { LongMemEvalPreparedSchema, LongMemEvalReplaySchema, LongMemEvalPublicationSchema,

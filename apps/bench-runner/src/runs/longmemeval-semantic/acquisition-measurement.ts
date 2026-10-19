@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { measureSemanticChain, ReplaySchema } from "../semantic-chain/replay.js";
+import type { measureSemanticChain, ReplaySchema } from "../recall-measurement/replay.js";
 import { deliveredSourceSemanticLibraryIntervals } from "../measurement/source-semantic-library-measurement.js";
 import { sourceTargetJoinsGold, type SourceGoldUnit } from "../measurement/source-gold-join.js";
 import type { AnswerTurnGold } from "./answer-spans.js";

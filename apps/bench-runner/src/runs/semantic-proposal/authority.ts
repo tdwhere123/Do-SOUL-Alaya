@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { proposalAttemptLineage } from "../semantic-cache/identity.js";
 import { readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
 import { isChatSemanticRequestProfile, isInternSemanticRequestProfile, AlayaError, canonicalJson } from "@do-soul/alaya-protocol";
@@ -273,13 +274,8 @@ function assertProposalQuote(input: SemanticProposalPreflight | SemanticProposal
   }
 }
 
-/** Revision, root binding and receipt identity never renew this ledger's attempts. */
-export function proposalAttemptLineage(input: Pick<SemanticProposalAuthority,
-  "kind" | "model" | "request_profile" | "transport_provenance">): string {
-  return createHash("sha256").update(canonicalJson({ contract: "semantic-proposal-execution-lineage-v1",
-    kind: input.kind, model: input.model, request_profile: input.request_profile,
-    transport_provenance: input.transport_provenance })).digest("hex");
-}
+// Compatibility for existing proposal authorities; remove with the gated research deletion.
+export { proposalAttemptLineage } from "../semantic-cache/identity.js";
 
 export function readSemanticProposalAuthority(path: string): SemanticProposalAuthority {
   return verifySemanticProposalAuthority(AuthoritySchema.parse(JSON.parse(readFileSync(path, "utf8"))));

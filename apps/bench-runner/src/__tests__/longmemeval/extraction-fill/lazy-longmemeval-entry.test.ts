@@ -16,13 +16,13 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION, prepareSourceSemanticRequestLine,
   sourceSemanticArtifactPreparations } from "../../../runs/extraction/request-artifact.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
-import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
-import { writeLongMemEvalLazyConfig } from "../../../runs/longmemeval-semantic/lazy-config.js";
+import { runLongMemEvalSemanticLauncher } from "../../../runs/semantic-chain/longmemeval-launch.js";
+import { writeLongMemEvalLazyConfig } from "../../../runs/semantic-chain/longmemeval-lazy-config.js";
 import { writeDirectLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
 import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
 import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
-import { measureLongMemEvalLazyFirstExposure } from "../../../runs/longmemeval-semantic/lazy-measure.js";
+import { measureLongMemEvalLazyFirstExposure } from "../../../runs/semantic-chain/longmemeval-lazy-measure.js";
 import { prepareLazyQualificationWindow, sealLazyQualificationFinal,
   replayLazyQualifiedFirstExposure } from "../../../runs/semantic-chain/lazy-qualification.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../../../runs/semantic-chain/contract.js";

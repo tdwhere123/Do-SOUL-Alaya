@@ -15,7 +15,7 @@ import { observeSourceAccessDiagnostic } from "../../../runs/source-access-diagn
 import { evaluateSourceAccessDiagnostic } from "../../../runs/source-access-diagnostic/evaluate.js";
 import { runSourceAccessDiagnosticLauncher } from "../../../runs/source-access-diagnostic/launch.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, withSemanticChainDaemon,
-  writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+  writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import { SourceAccessDiagnosticEvaluationSchema, SourceAccessDiagnosticObservationSchema,
   type SourceAccessDiagnosticObservation } from "../../../runs/source-access-diagnostic/contract.js";
 

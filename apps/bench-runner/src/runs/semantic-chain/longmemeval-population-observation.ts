@@ -9,13 +9,13 @@ import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { admitLazyFinal, admitLazyWindow, readLazyQualifiedExposureState } from "../semantic-chain/lazy-qualification.js";
 import { materializeSemanticProposalLines } from "../semantic-proposal/workset.js";
-import { admitLongMemEvalLazyConfig } from "./lazy-config.js";
-import { admitLongMemEvalLazyMeasurement, measureLongMemEvalLazyFirstExposure } from "./lazy-measure.js";
-import { summarizeLongMemEvalOutcomes } from "./measure.js";
+import { admitLongMemEvalLazyConfig } from "./longmemeval-lazy-config.js";
+import { admitLongMemEvalLazyMeasurement, measureLongMemEvalLazyFirstExposure } from "./longmemeval-lazy-measure.js";
+import { summarizeLongMemEvalOutcomes } from "../longmemeval-semantic/measure.js";
 import { admitNativeFreeze, PopulationSchema, readLongMemEvalLazyPopulationForObservation,
-  STAGES, StageRecordSchema, stageRecord, type Population } from "./population.js";
+  STAGES, StageRecordSchema, stageRecord, type Population } from "./longmemeval-population.js";
 import { inspectPopulationAttemptScopes, PopulationAttemptEvidenceSchema, PopulationAttemptScopeSchema,
-  type PopulationAttemptScope } from "./population-attempts.js";
+  type PopulationAttemptScope } from "./longmemeval-population-attempts.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const ProducerCoverageSchema = z.object({ frozen_members: z.number().int().nonnegative(),

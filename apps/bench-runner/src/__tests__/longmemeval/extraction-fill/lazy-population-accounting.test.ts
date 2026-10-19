@@ -10,18 +10,18 @@ import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-recor
 import { preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
-import { measureLongMemEvalLazyFirstExposure } from "../../../runs/longmemeval-semantic/lazy-measure.js";
+import { measureLongMemEvalLazyFirstExposure } from "../../../runs/semantic-chain/longmemeval-lazy-measure.js";
 import { summarizeLongMemEvalOutcomes } from "../../../runs/longmemeval-semantic/measure.js";
-import { inspectPopulationAttemptScopes } from "../../../runs/longmemeval-semantic/population-attempts.js";
+import { inspectPopulationAttemptScopes } from "../../../runs/semantic-chain/longmemeval-population-attempts.js";
 import { forkSettledExtractionAttemptLedger, openExtractionAttemptLedger } from
   "../../../runs/extraction/authority/attempt-ledger.js";
 import { chainIdentity, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
 import { freezeLongMemEvalLazyPopulation,
   readLongMemEvalLazyPopulation, runLongMemEvalLazyPopulationStage } from
-  "../../../runs/longmemeval-semantic/population.js";
+  "../../../runs/semantic-chain/longmemeval-population.js";
 import { observeLongMemEvalLazyPopulation } from
-  "../../../runs/longmemeval-semantic/population-observation.js";
-import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
+  "../../../runs/semantic-chain/longmemeval-population-observation.js";
+import { runLongMemEvalSemanticLauncher } from "../../../runs/semantic-chain/longmemeval-launch.js";
 
 const roots: string[] = [];
 let cacheRoot: string, dataDir: string, pinnedMetaRoot: string;

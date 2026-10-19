@@ -9,7 +9,7 @@ import { sourceGoldUnitFromPublishedRoot, sourceTargetJoinsGold } from "../measu
 import { readLongMemEvalSemanticFreeze, loadFrozenLongMemEvalDataset } from "../longmemeval-semantic/contract.js";
 import { LongMemEvalPreparedSchema, verifyLongMemEvalQuestionChain,
   verifyLongMemEvalQuestionPublication } from "../longmemeval-semantic/execute.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "../recall-measurement/contract.js";
 import { SourceAccessDiagnosticObservationSchema, SourceAccessDiagnosticEvaluationSchema,
   type SourceAccessArtifactRef, type SourceAccessDiagnosticObservation,
   type SourceAccessDiagnosticRow, type SourceAccessDiagnosticEvaluation,

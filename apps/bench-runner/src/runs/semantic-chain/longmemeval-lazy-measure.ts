@@ -8,11 +8,10 @@ import { retainedSourceRequestInputKeys, sourceCacheInputPaths } from "../extrac
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
-import { QuestionPublicationSchema, longMemEvalQuestionInputPaths } from "./execute.js";
-import { loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "./contract.js";
-import { admitLongMemEvalLazyConfig, type LongMemEvalLazyConfigInput } from "./lazy-config.js";
-import { joinLongMemEvalGold } from "./measure.js";
-import { longMemEvalMetricOutcome } from "./measure.js";
+import { QuestionPublicationSchema, longMemEvalQuestionInputPaths } from "../longmemeval-semantic/execute.js";
+import { loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "../longmemeval-semantic/contract.js";
+import { admitLongMemEvalLazyConfig, type LongMemEvalLazyConfigInput } from "./longmemeval-lazy-config.js";
+import { joinLongMemEvalGold, longMemEvalMetricOutcome } from "../longmemeval-semantic/measure.js";
 import { isContainedPath } from "../fs/opened-contained-path.js";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
 import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";

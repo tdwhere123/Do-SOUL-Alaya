@@ -15,7 +15,7 @@ import { providerRawAttemptPath, providerRawSuccessEvidenceState, readProviderRa
   writeProviderRawAttempt } from "../../../runs/extraction/fill/provider-raw-attempt.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
 import { readSemanticChainProposalResults } from "../../../runs/semantic-chain/inputs.js";
-import { inspectPopulationAttemptScopes } from "../../../runs/longmemeval-semantic/population-attempts.js";
+import { inspectPopulationAttemptScopes } from "../../../runs/semantic-chain/longmemeval-population-attempts.js";
 import { openSemanticProposalAttemptLedger } from "../../../runs/semantic-proposal/attempt.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";

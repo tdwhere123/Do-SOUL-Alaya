@@ -1832,8 +1832,10 @@ delivery contract and resource policy. Its order declaration derives from Core's
 native order, and measurement requires the delivered order to match that
 freeze. Native measurement uses `longmemeval-native-semantic-measurement-v3`;
 historical artifacts retain their original declarations. Existing publication and
-generic semantic-chain owners perform preparation, snapshot reopen, discovery,
-correspondence receive, public recall and initial exposure.
+generic `recall-measurement` owners perform preparation, snapshot reopen, discovery,
+public recall and initial exposure. The read-only `semantic-cache` owner shares
+exact retained request identities and native Q/C cache admission with research
+fill, without importing its paid execution or recovery orchestration.
 The opt-in Bench task consumer API in
 [`semantic-chain/consumer`](../../apps/bench-runner/src/runs/semantic-chain/consumer/input.ts)
 admits one retained native replay before preparing the exact original question,

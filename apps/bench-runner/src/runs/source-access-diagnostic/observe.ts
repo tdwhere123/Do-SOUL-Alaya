@@ -10,7 +10,7 @@ import { readLongMemEvalSemanticFreeze, type LongMemEvalSemanticFreeze } from ".
 import { LongMemEvalPreparedSchema, verifyLongMemEvalQuestionChain,
   verifyLongMemEvalQuestionPublication } from "../longmemeval-semantic/execute.js";
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact,
-  withSemanticChainDaemon, writeChainArtifact } from "../semantic-chain/contract.js";
+  withSemanticChainDaemon, writeChainArtifact } from "../recall-measurement/contract.js";
 import { SourceAccessDiagnosticConfigSchema, SourceAccessDiagnosticObservationSchema, SourceAccessDiagnosticRowSchema,
   type SourceAccessArtifactRef, type SourceAccessDiagnosticConfig, type SourceAccessDiagnosticRow, NOT_EXERCISED } from "./contract.js";
 

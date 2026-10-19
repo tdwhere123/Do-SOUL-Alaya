@@ -14,10 +14,10 @@ import { admitLazyFinal, admitLazyWindow, prepareLazyQualificationWindow, replay
   readLazyQualifiedExposureState, sealLazyQualificationFinal } from "../semantic-chain/lazy-qualification.js";
 import { lazyQualificationInputPaths, lazyQualificationRetainedInputPaths } from "../semantic-chain/lazy-qualification-inputs.js";
 import { createLongMemEvalSelectionContractFromAssignments } from "../selection/contract.js";
-import { LongMemEvalNativeSemanticConfigSchema, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "./contract.js";
-import { longMemEvalQuestionInputPaths, prepareLongMemEvalSemanticRun } from "./execute.js";
-import { freezeLongMemEvalSemanticRun } from "./freeze.js";
-import { admitLongMemEvalLazyConfig, writeLongMemEvalLazyConfig } from "./lazy-config.js";
+import { LongMemEvalNativeSemanticConfigSchema, readLongMemEvalSemanticFreeze, longMemEvalFreezePath } from "../longmemeval-semantic/contract.js";
+import { longMemEvalQuestionInputPaths, prepareLongMemEvalSemanticRun } from "../longmemeval-semantic/execute.js";
+import { freezeLongMemEvalSemanticRun } from "../longmemeval-semantic/freeze.js";
+import { admitLongMemEvalLazyConfig, writeLongMemEvalLazyConfig } from "./longmemeval-lazy-config.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const MemberSchema = z.object({

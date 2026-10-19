@@ -12,7 +12,7 @@ import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
-import { readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { readChainArtifact, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 
 const roots: string[] = [];
 afterAll(async () => {

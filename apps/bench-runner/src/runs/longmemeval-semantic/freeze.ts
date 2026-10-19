@@ -6,8 +6,8 @@ import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
-import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../recall-measurement/contract.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-cache/workset.js";
 import { LongMemEvalExperimentConfigSchema, LongMemEvalExperimentFreezeSchema, loadFrozenLongMemEvalDataset,
   longMemEvalFreezePath } from "./contract.js";
 import { NATIVE_SEMANTIC_ROUTE, freezeSourceCaches, assertSourceCaches } from "./native-arm.js";

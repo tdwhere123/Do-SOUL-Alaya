@@ -52,7 +52,7 @@ import { EXTRACTION_OPEN_SEMANTICS_GENERATION, prepareSourceSemanticRequestLine,
 import { parseSourceSemanticInteractivePreflight, preflightSourceSemanticInteractive } from "../../../runs/extraction/fill/source-semantic-interactive-preflight.js";
 import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/freeze.js";
 import { prepareLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/execute.js";
-import { writeLongMemEvalLazyConfig } from "../../../runs/longmemeval-semantic/lazy-config.js";
+import { writeLongMemEvalLazyConfig } from "../../../runs/semantic-chain/longmemeval-lazy-config.js";
 import { admitNativeLazyConfig } from "../../../runs/semantic-chain/bind-lazy.js";
 import { prepareLazyQualificationWindow, admitLazyWindow, sealLazyQualificationFinal,
   replayLazyQualifiedFirstExposure } from "../../../runs/semantic-chain/lazy-qualification.js";

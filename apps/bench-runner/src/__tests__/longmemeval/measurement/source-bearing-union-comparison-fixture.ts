@@ -1,6 +1,6 @@
 import { hashSourceRecordId } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, sourceSemanticLibraryQueryIdentity } from "@do-soul/alaya-core";
-import { chainIdentity } from "../../../runs/semantic-chain/contract.js";
+import { chainIdentity } from "../../../runs/recall-measurement/contract.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
 import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { sourceGoldUnitFromPublishedRoot } from "../../../runs/measurement/source-gold-join.js";
