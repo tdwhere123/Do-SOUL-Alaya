@@ -146,6 +146,8 @@ describe("complete-source census and publication", () => {
   });
 
   // This correctness E2E covers development and formal arms across multiple cold daemon sessions.
+  // Hosted macOS phase receipts reached formal replay at 60s with 56s of CPU
+  // work, so it needs the same bounded cold-start headroom as Windows.
   it("keeps original question haystacks isolated through source-only development and evaluator-only scoring", async (testContext) => {
     const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
       testContext.task.timeout, testContext.signal, undefined, process.platform === "win32" ? 45_000 : undefined);
@@ -243,7 +245,7 @@ describe("complete-source census and publication", () => {
     expect(formalMeasurement.result.rows.filter(row => row.prior_development_exposure).map(row => row.question_id)).toEqual(["mixed-roles"]);
     expect(formalMeasurement.result.rows.filter(row => row.cohort === "answerable")
       .every(row => row.attribution.layer === "query_unavailable")).toBe(true);
-  }, process.platform === "win32" ? 120_000 : 60_000);
+  }, ["win32", "darwin"].includes(process.platform) ? 120_000 : 60_000);
 
   it("admits every physical question path before any evaluator output and requires a separate chain CLI root", async () => {
     const f = await fixture(false, false, [question("first", [[{ role: "user", content: "First source." }]]),

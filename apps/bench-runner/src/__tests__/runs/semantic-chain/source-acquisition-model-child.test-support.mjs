@@ -1,4 +1,4 @@
-/** Synthetic model-child IPC only. Replaces the built child bytes under serialized fixture tests.
+/** Synthetic model-child IPC only, installed in a test-owned physical candidate.
  * It imports no model runtime, opens no operator cache and cannot fall back to inference. */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

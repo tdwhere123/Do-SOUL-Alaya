@@ -20,27 +20,37 @@ import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
 import { chainIdentity, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
 import { inspectSemanticChainSourceIndex } from "../../../runs/semantic-chain/source-index-binding.js";
-import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
 import { parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
 import { readSourceExperiment } from "../../../runs/semantic-chain/source-experiment.js";
 import { freezeRecoveryAllowance, reserveRecoveryHostEffect } from "../../../runs/semantic-chain/recovery-allowance.js";
-import { captureSourceAcquisitionLaunchBinding, compareSemanticChainSourceAcquisition, executeGuardedSourceAcquisition,
+import { compareSemanticChainSourceAcquisition, executeGuardedSourceAcquisition,
   type SourceAcquisitionExperimentInput } from "../../../runs/semantic-chain/source-acquisition-experiment.js";
+import { acquisitionCandidate } from "./acquisition-candidate.test-support.js";
 
 const roots: string[] = [];
 const childPath = fileURLToPath(new URL("../../../../../../packages/core/dist/embedding-recall/local-onnx-process/child.js", import.meta.url));
 const childBytes = readFileSync(childPath);
+let candidate: Awaited<ReturnType<typeof acquisitionCandidate>>;
 const QUESTION = "Which tools does Alice use?", BODY = "Alice uses Cedar tools.", CLOCK = "2026-09-21T09:00:00.000Z";
 const BUDGET = { schema_version: 1 as const, work_units: 2_000_000, memory_bytes: 64_000_000,
   page_budget: 1_000_000, finalization_reserve: 10000, min_envelope: 10 };
 const ALLOWANCE = { total_work_units: 100, total_memory_bytes: 100, read_work_units: 1, read_memory_bytes: 1,
   max_input_bytes_per_read: 32 * 1024 * 1024, max_read_admissions: 16, max_effects: 1 };
-beforeAll(() => { writeFileSync(childPath, readFileSync(new URL("./source-acquisition-model-child.test-support.mjs", import.meta.url))); });
+beforeAll(async () => {
+  candidate = await acquisitionCandidate();
+  expect(candidate.capture().candidate).toBe(candidate.root);
+  expect(readFileSync(childPath)).toEqual(childBytes);
+}, 120_000);
 afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await settleActiveBenchDaemonTasks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-afterAll(() => { writeFileSync(childPath, childBytes); expect(boundary.violations).toEqual([]); boundary.restore(); });
+afterAll(() => {
+  try {
+    expect(readFileSync(childPath)).toEqual(childBytes);
+    expect(boundary.violations).toEqual([]);
+  } finally { candidate?.close(); boundary.restore(); }
+}, 120_000);
 
 async function fixture(options: { unavailable?: boolean; delay_ms?: number; unsolicited_embedding_reply?: boolean } = {}) {
   const directory = canonicalPath(mkdtempSync(join(tmpdir(), "source-acquisition-experiment-"))); roots.push(directory);
@@ -82,8 +92,8 @@ async function fixture(options: { unavailable?: boolean; delay_ms?: number; unso
   writeFileSync(join(cache, "synthetic-profile.json"), JSON.stringify({ profile: selection.configuration.profile, profile_id: selection.profile_id, ...options }));
   const input: SourceAcquisitionExperimentInput = { contract: "source-acquisition-experiment-v1", root, original_query: QUESTION,
     host_admission: ALLOWANCE, guard_allocation: { source_inputs: 1, utf8_bytes: Buffer.byteLength(QUESTION) }, timeout_ms: 30_000,
-    launch: await captureSourceAcquisitionLaunchBinding(), config: { snapshot_path: snapshot, snapshot_sha256: report.snapshot_sha256,
-      implementation_revision: readCurrentExtractionAuthorityRevision(), interpretation_clock: CLOCK, workspace_id: "acquisition-fixture", run_id: "acquisition-run",
+    launch: candidate.capture(), config: { snapshot_path: snapshot, snapshot_sha256: report.snapshot_sha256,
+      implementation_revision: candidate.revision(), interpretation_clock: CLOCK, workspace_id: "acquisition-fixture", run_id: "acquisition-run",
       query_workset: parseSemanticProposalWorkset({ contract: "source-semantic-proposal-workset-v3", kind: "query", model: "authored",
         provider_url: "https://invalid.example", request_profile: "authored", items: [{ original_query: QUESTION }] }),
       query_cache_root: join(directory, "unused-query-cache"), correspondence_cache_root: join(directory, "unused-c-cache"),
@@ -100,8 +110,8 @@ function effects(root: string) {
 async function invoke(h: Awaited<ReturnType<typeof fixture>>, signal?: AbortSignal) {
   const path = join(h.directory, "caller-input.json"); writeFileSync(path, JSON.stringify(h.input));
   return await new Promise<Awaited<ReturnType<typeof compareSemanticChainSourceAcquisition>>>((resolve, reject) => {
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./source-acquisition-caller.test-support.mjs", import.meta.url)), path],
-      { env: { ...process.env, NODE_OPTIONS: "" }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+    const child = spawn(process.execPath, [candidate.caller, path],
+      { cwd: candidate.root, env: { ...process.env, NODE_OPTIONS: "" }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
     let stdout = "", stderr = "";
     child.stdout!.on("data", chunk => { stdout += chunk; }); child.stderr!.on("data", chunk => { stderr += chunk; });
     const cancel = () => child.send("cancel"); signal?.addEventListener("abort", cancel, { once: true });
