@@ -651,7 +651,7 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
             outcome: { status: "abstained" } });
       }, H_PROFILE));
     expect(await benchPhase("recover-reason-initial", () => runSemanticChainLauncher(["recover-reason-initial", "--root", recoveryRoot]))).toBe(0);
-    replayInitialReasonInChild(recoveryRoot);
+    await benchPhase("static.replay", async () => replayInitialReasonInChild(recoveryRoot));
     expect(await benchPhase("recover-prepare-q-review", () => runSemanticChainLauncher(["recover-prepare-q-review", "--root", recoveryRoot]))).toBe(0);
     if (!childQFilled) {
       await benchPhase("fill.proposal", () => fillProposal(join(recoveryRoot, "query-review-workset.json"), sharedQChild,
@@ -705,7 +705,8 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
     const exposure = readChainArtifact(join(recoveryRoot, "first-exposure.json"));
     exposures.push(chainIdentity(exposure));
     vi.stubGlobal("fetch", vi.fn(() => { throw new Error("settled physical request was reposted"); }));
-    expect(await runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot])).toBe(0);
+    expect(await benchPhase("recover-final-deliver.replay", () =>
+      runSemanticChainLauncher(["recover-final-deliver", "--root", recoveryRoot]))).toBe(0);
     expect(chainIdentity(readChainArtifact(join(recoveryRoot, "first-exposure.json")))).toBe(exposures[index]);
   }
   expect(exposures).toHaveLength(2);
@@ -713,7 +714,8 @@ it("reuses exact Q and H physical owners across isolated native source worlds", 
   expect(publishedB[0]).not.toBe(publishedB[1]);
   expect(qChildKeys[0]).toBe(qChildKeys[1]);
   expect(attempts).toEqual({ originalQ: 1, reviewQ: 1, newA: 2, sharedB: 1, revisedB: 1 });
-}, 120_000);
+// invariant: two complete recovery worlds retain the per-world Windows execution budget.
+}, process.platform === "win32" ? 240_000 : 120_000);
 
 it("publishes two current H occurrences from one retained physical preflight", async () => {
   const root = mkdtempSync(join(tmpdir(), "native-grouped-h-owner-")); roots.push(root);
