@@ -80,7 +80,8 @@ function parseTomlStringLiteral(rawValue) {
   if (!trimmed.startsWith("\"") || !trimmed.endsWith("\"")) {
     return null;
   }
-  return trimmed.slice(1, -1).replaceAll("\\\\", "\\").replaceAll("\\\"", "\"").replaceAll("\\n", "\n");
+  // Decode once: an escaped backslash must not reopen as a newline escape.
+  return trimmed.slice(1, -1).replace(/\\(\\|"|n)/gu, (_match, escaped) => escaped === "n" ? "\n" : escaped);
 }
 
 function resolveHomeDirectory(environment, homeDir) {
