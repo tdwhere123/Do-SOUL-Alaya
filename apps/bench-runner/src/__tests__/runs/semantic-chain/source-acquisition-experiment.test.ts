@@ -42,7 +42,7 @@ afterEach(async () => {
 });
 afterAll(() => { writeFileSync(childPath, childBytes); expect(boundary.violations).toEqual([]); boundary.restore(); });
 
-async function fixture(options: { unavailable?: boolean; delay_ms?: number; close_exit_code?: number } = {}) {
+async function fixture(options: { unavailable?: boolean; delay_ms?: number; unsolicited_embedding_reply?: boolean } = {}) {
   const directory = canonicalPath(mkdtempSync(join(tmpdir(), "source-acquisition-experiment-"))); roots.push(directory);
   const data = join(directory, "authored-source"), cache = join(directory, "synthetic-model-cache"), root = join(directory, "execution");
   mkdirSync(cache);
@@ -215,11 +215,27 @@ it("does not bypass existing root occupancy under another action name", async ()
 }, 60_000);
 
 it("retains the actual complete comparison when child shutdown reconciliation fails and reads it without readiness", async () => {
-  const h = await fixture({ close_exit_code: 1 });
+  const h = await fixture({ unsolicited_embedding_reply: true });
   const state = await invoke(h);
   expect(comparison(state).outcome).toBe("complete"); expect(state.lifetime.status).toBe("failed");
+  expect(state.lifetime).toMatchObject({ phase: "reconciliation" });
+  const guard = readChainArtifact(join(h.root, "source-experiment-guard.json")) as {
+    parent: { observed_application_replies: number; violations: unknown[]; children: { exited: boolean; exit_confirmed: boolean }[] };
+    child: { reports: { phase: string; local_responses: number }[] };
+  };
+  // Before any close dispatch, the guard has observed two real application
+  // responses to the one embedding request, not an authored termination receipt.
+  const phases = guard.child.reports.map(row => row.phase);
+  const extraReply = phases.findIndex((phase, index) => phase === "application_response" && phases[index + 1] === "application_response");
+  expect(extraReply).toBeGreaterThanOrEqual(0);
+  expect(guard.child.reports[extraReply + 1]!.local_responses).toBe(guard.child.reports[extraReply]!.local_responses + 1);
+  expect(guard.parent.observed_application_replies).toBe(guard.child.reports.at(-1)!.local_responses);
+  expect(guard.parent.violations).toEqual([]);
+  expect(guard.parent.children).toMatchObject([{ exited: true, exit_confirmed: true }]);
   rmSync(h.input.config.snapshot_path); rmSync(h.cache, { recursive: true });
-  expect((await invoke(h)).execution).toEqual(state.execution);
+  const historical = await invoke(h);
+  expect(historical.execution).toEqual(state.execution);
+  expect(historical.lifetime).toEqual(state.lifetime);
   expect(effects(h.root).effects).toHaveLength(1);
 }, 60_000);
 
