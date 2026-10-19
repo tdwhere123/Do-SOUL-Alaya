@@ -24,8 +24,10 @@ afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, 
 function git(root: string, args: string[]) {
   return execFileSync("git", args, { cwd: root, env: gitEnv, maxBuffer: 8 * 1024 * 1024 });
 }
-function fixture() {
-  const outer = realpathSync(mkdtempSync(join(tmpdir(), "proposal-guard-")));
+function fixture(templateEol?: "crlf") {
+  // Git expands Windows short-name temp paths in worktree metadata. Bind the
+  // same physical spelling before granting this fixture's filesystem access.
+  const outer = realpathSync.native(mkdtempSync(join(tmpdir(), "proposal-guard-")));
   roots.push(outer);
   const root = join(outer, "checkout"), app = join(root, "apps/bench-runner"), out = join(outer, "output");
   mkdirSync(app, { recursive: true }); mkdirSync(out);
@@ -39,7 +41,13 @@ function fixture() {
   writeFileSync(join(root, ".gitignore"), "apps/bench-runner/dist/\napps/bench-runner/node_modules\napps/bench-runner/bin/\n");
   writeFileSync(join(root, "source.txt"), "original\n");
   cpSync(join(repository, ".env.example"), join(root, ".env.example"));
-  git(root, ["init", "--quiet"]); git(root, ["add", "."]);
+  if (templateEol === "crlf") writeFileSync(join(root, ".env.example"),
+    readFileSync(join(root, ".env.example"), "utf8").replace(/\r?\n/gu, "\r\n"));
+  git(root, ["init", "--quiet"]);
+  // The copied public template can be CRLF on Windows; retain its canonical
+  // Git blob instead of depending on ambient config (which this fixture omits).
+  git(root, ["config", "core.autocrlf", "true"]);
+  git(root, ["add", "."]);
   git(root, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "authored fixture"]);
   const workset = join(out, "workset.json"), preflight = join(out, "preflight.json"), cache = join(out, "absent-cache");
   writeFileSync(workset, JSON.stringify({ contract: "source-semantic-proposal-workset-v4", kind: "query",
@@ -85,7 +93,10 @@ function oracle(root: string) {
 it("runs compiled prepare under the opted-in guard with genuine dirty revisions and no provider, native, worker or cache effects", () => {
   const f = fixture();
   const revisions = [];
-  for (const state of ["clean", "tracked", "untracked", "bytes", "mode", "deletion"]) {
+  // Windows chmod cannot represent the POSIX executable-bit transition.
+  const states = ["clean", "tracked", "untracked", "bytes",
+    ...(process.platform === "win32" ? [] : ["mode"]), "deletion"];
+  for (const state of states) {
     if (state === "tracked") writeFileSync(join(f.root, "source.txt"), "changed source\n");
     if (state === "untracked") writeFileSync(join(f.root, "new source.txt"), "raw\r\n");
     if (state === "bytes") writeFileSync(join(f.root, "new source.txt"), "different raw\r\n");
@@ -109,7 +120,7 @@ it("runs compiled prepare under the opted-in guard with genuine dirty revisions 
       cache_exists: existsSync(f.cache), credential_file_violations: evidence.credential_file_violations,
       operations: evidence.operations.map(({ stack: _stack, ...row }: { stack: string }) => row) }));
   }
-  expect(new Set(revisions).size).toBe(6);
+  expect(new Set(revisions).size).toBe(states.length);
 }, 60_000);
 
 it("prepares from a bound linked worktree without substituting its common checkout revision", () => {
@@ -130,6 +141,33 @@ const revisionProgram = (app: string) => `
   const { readCurrentExtractionAuthorityRevision } = await import(${JSON.stringify(
     pathToFileURL(join(app, "dist/runs/extraction/authority/inspection.js")).href)});
   console.log(JSON.stringify({ revision: readCurrentExtractionAuthorityRevision() }));`;
+
+it("retains the pinned public-template blob for a CRLF fixture checkout", () => {
+  const f = fixture("crlf");
+  expect(git(f.root, ["rev-parse", ":.env.example"]).toString().trim())
+    .toBe("8473b1cedbcd8483b87b6a5c9978ed804cbd4438");
+  const result = run(f, revisionProgram(f.app));
+  expect(result.error, result.stderr).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout).revision).toBe(oracle(f.root));
+  expect(receipt(result.stderr).credential_file_violations).toEqual([]);
+});
+
+it("inspects a checkout after Git disables sparse checkout and worktree config", () => {
+  const f = fixture();
+  git(f.root, ["config", "--local", "extensions.worktreeConfig", "true"]);
+  git(f.root, ["sparse-checkout", "disable"]);
+  git(f.root, ["config", "--local", "--unset-all", "extensions.worktreeConfig"]);
+  const result = run(f, revisionProgram(f.app));
+  expect(result.error, result.stderr).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout).revision).toBe(oracle(f.root));
+  const evidence = receipt(result.stderr);
+  expect(evidence.credential_file_violations).toEqual([]);
+  expect(evidence.operations).toHaveLength(3);
+  expect(evidence.operations.every((row: { operation: string }) =>
+    row.operation === "process.execFileSync.authority-git.allowed")).toBe(true);
+});
 
 it("inspects the loaded repository including its public template through both provider-free guards", () => {
   const outer = realpathSync(mkdtempSync(join(tmpdir(), "loaded-revision-guard-")));

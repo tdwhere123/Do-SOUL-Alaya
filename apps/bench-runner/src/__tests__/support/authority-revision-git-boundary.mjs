@@ -155,6 +155,12 @@ function inspectConfig(path, fileRole) {
         (key === "autocrlf" && /^(true|false|input)$/u.test(value)))) continue;
     // Checkout disables automatic collection; do not admit other GC settings or subsections.
     if (sectionHeader === "[gc]" && key === "auto" && value === "0") continue;
+    // `git sparse-checkout disable` leaves these explicit false values behind,
+    // even when checkout later unsets extensions.worktreeConfig. Enabled sparse
+    // modes remain unsupported, as do settings in unrelated subsections.
+    if (value === "false" && ((sectionHeader === "[core]" &&
+        ["sparsecheckout", "sparsecheckoutcone"].includes(key)) ||
+        (sectionHeader === "[index]" && key === "sparse"))) continue;
     if (section === "extensions" && key === "worktreeconfig" && value === "true") continue;
     if (section === "remote" && ["url", "fetch"].includes(key)) continue;
     if (section === "branch" && ["remote", "merge", "vscode-merge-base"].includes(key)) continue;

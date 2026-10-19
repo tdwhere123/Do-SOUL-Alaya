@@ -56,6 +56,13 @@ it("admits unchanged supported common and worktree config without executing Git"
 });
 
 for (const [file_role, name] of [["common_config", "config"], ["worktree_config", "config.worktree"]] as const) {
+  it(`admits disabled sparse-checkout residue in ${file_role}`, () => {
+    withRepository(({ root, prepare }) => {
+      fs.writeFileSync(join(root, ".git", name), `${admittedConfig}\n[core]\nsparseCheckout = false\nsparseCheckoutCone = false\n[index]\nsparse = false\n`);
+      assert.equal(prepare(), "identity");
+    });
+  });
+
   for (const reason of ["noncanonical_file", "nonregular_file", "unsupported_syntax", "entry_not_admitted"]) {
     it(`retains only fixed ${file_role} ${reason} details on policy refusal`, () => {
       withRepository(({ root, prepare }) => {
@@ -82,7 +89,13 @@ for (const [file_role, name] of [["common_config", "config"], ["worktree_config"
     ["hooks", `[core]\nhooksPath = ${secret}`],
     ["filter", `[filter "fixture"]\nclean = ${secret}`],
     ["textconv", `[diff "fixture"]\ntextconv = ${secret}`],
-    ["unsupported known value", "[gc]\nauto = 1"]
+    ["unsupported known value", "[gc]\nauto = 1"],
+    ["enabled sparse checkout", "[core]\nsparseCheckout = true"],
+    ["enabled sparse cone", "[core]\nsparseCheckoutCone = true"],
+    ["enabled sparse index", "[index]\nsparse = true"],
+    ["sparse boolean alias", "[core]\nsparseCheckout = 0"],
+    ["sparse core subsection", '[core "fixture"]\nsparseCheckout = false'],
+    ["sparse index subsection", '[index "fixture"]\nsparse = false']
   ]) {
     it(`keeps ${label} denied in ${file_role} without returning inspected content`, () => {
       withRepository(({ root, prepare }) => {
