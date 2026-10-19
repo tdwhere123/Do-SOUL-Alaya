@@ -582,7 +582,8 @@ it("returns resource exhaustion instead of a partly expired handle pair", async 
     expect(prepared.query_handle).toBeUndefined();
     expect(prepared.continuation_handle).toBeUndefined();
   });
-}, 120_000);
+// invariant: this wall-clock budget includes 512 audited SQLite publications on NTFS.
+}, process.platform === "win32" ? 240_000 : 120_000);
 
 it("keeps both handles from a fitting preparation usable through the worker", async () => {
   await withAccessLibrary(Array.from({ length: 17 }, (_, index) => ({

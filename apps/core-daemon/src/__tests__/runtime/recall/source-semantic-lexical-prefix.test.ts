@@ -503,4 +503,5 @@ it("measures both lexical first-page envelopes for five hundred authorized synth
     expect(lexical.candidate!.full_envelope_bytes).toBeLessThanOrEqual(outputLimit);
     expect(h.bind).not.toHaveBeenCalled(); expect(h.prepare).not.toHaveBeenCalled();
   } finally { await h.cleanup(); }
-}, 120_000);
+// invariant: fixture admission/indexing is outside the unchanged 30s acquisition deadline.
+}, process.platform === "win32" ? 240_000 : 120_000);
