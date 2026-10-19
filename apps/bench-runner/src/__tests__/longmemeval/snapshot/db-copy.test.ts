@@ -195,6 +195,7 @@ function sha256(bytes: Buffer): string {
 
 const PLANT_COMMITTED_DESTINATION_WAL = `
 import { createRequire } from "node:module";
+import { statSync, writeFileSync } from "node:fs";
 const require = createRequire(process.env.REQUIRE_FROM);
 const Database = require("better-sqlite3");
 const db = new Database(process.env.DEST);
@@ -202,6 +203,12 @@ db.pragma("journal_mode = WAL");
 db.pragma("wal_autocheckpoint = 0");
 db.pragma("synchronous = FULL");
 db.prepare("INSERT OR REPLACE INTO snapshot_probe (k) VALUES (?)").run(process.env.POISON);
+const committed = db.prepare("SELECT k FROM snapshot_probe WHERE k = ?").get(process.env.POISON);
+const walBytes = statSync(process.env.DEST + "-wal").size;
+if (committed?.k !== process.env.POISON || walBytes <= 0) {
+  throw new Error("destination WAL plant did not commit into an uncheckpointed WAL");
+}
+writeFileSync(process.env.RECEIPT, JSON.stringify({ row: committed.k, walBytes }));
 process.kill(process.pid, "SIGKILL");
 `;
 
@@ -314,20 +321,44 @@ function writeCheckpointedSqlite(path: string, value: string): void {
 }
 
 function plantCommittedDestinationWal(destPath: string, poison: string): void {
+  const receiptPath = `${destPath}.plant-receipt`;
+  rmSync(receiptPath, { force: true });
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", PLANT_COMMITTED_DESTINATION_WAL], {
     env: {
       ...process.env,
       DEST: destPath,
       POISON: poison,
+      RECEIPT: receiptPath,
       REQUIRE_FROM: import.meta.url
     },
     encoding: "utf8"
   });
-  if (child.signal !== "SIGKILL") {
-    throw new Error(`destination WAL plant exited ${child.status}: ${child.stderr}`);
+  // Node emulates SIGKILL on Windows with TerminateProcess, so the crash surfaces
+  // as exit status 1 without a signal. Only the committed-WAL receipt, which a
+  // startup or SQLite fault cannot reach, makes that termination the simulated crash.
+  const crashed = process.platform === "win32"
+    ? child.status === 1 && child.signal === null
+    : child.status === null && child.signal === "SIGKILL";
+  if (!crashed) {
+    throw new Error(`destination WAL plant was not killed after committing: status=${child.status} signal=${child.signal}: ${child.stderr}`);
   }
+  assertCommittedWalReceipt(receiptPath, poison);
+  rmSync(receiptPath, { force: true });
   if (!existsSync(`${destPath}-wal`) || statSync(`${destPath}-wal`).size <= 0) {
     throw new Error("destination WAL plant did not leave committed WAL bytes");
+  }
+}
+
+function assertCommittedWalReceipt(receiptPath: string, poison: string): void {
+  if (!existsSync(receiptPath)) {
+    throw new Error("destination WAL plant did not report a committed WAL");
+  }
+  const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as {
+    readonly row?: unknown;
+    readonly walBytes?: unknown;
+  };
+  if (receipt.row !== poison || typeof receipt.walBytes !== "number" || receipt.walBytes <= 0) {
+    throw new Error(`destination WAL plant reported an incomplete committed WAL: ${JSON.stringify(receipt)}`);
   }
 }
 

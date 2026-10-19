@@ -35,6 +35,11 @@ and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 
 ### Retained-boundary corrections
 
+Inspector startup identifies its actual entry module on Windows and through
+symlinks, rather than relying on a forward-slash filename suffix. Crash-WAL
+regressions retain committed-write evidence with platform-specific termination
+checks; Windows coverage is not skipped.
+
 Operator paths and local surfaces fail closed. `scripts/install.sh` and
 `scripts/uninstall.sh` share one path-admission guard; uninstall refuses
 `$HOME`, its ancestors, system paths and bare shared roots for each path it
