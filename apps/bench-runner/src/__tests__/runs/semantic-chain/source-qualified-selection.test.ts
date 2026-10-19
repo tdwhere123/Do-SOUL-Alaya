@@ -263,7 +263,10 @@ it("retains the completed native selection and raw cleanup cause when rollback f
       status: "complete", work: { logical_work: expect.any(Number), logical_memory_bytes: expect.any(Number) } }, failure: {
       phase: "cleanup", cause: { message: cleanup.message, cause: { message: "authored SQLite cleanup root cause" } },
       earlier: { phase: "selection", cause: { message: earlier.message, cause: { message: "authored worker root cause" } } } } } } });
+    // Windows cannot unlink SQLite while its owning worker still has it open.
+    await client.close();
     rmSync(h.input.config.snapshot_path);
+    expect(existsSync(h.input.config.snapshot_path)).toBe(false);
     expect(readSourceExperiment(h.root).execution).toEqual(retained.execution);
   } finally { rollback.mockRestore(); await client.close(); }
 }, 120_000);

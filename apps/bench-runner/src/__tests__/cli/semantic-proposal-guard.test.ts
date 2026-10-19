@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
-  rmSync, symlinkSync, writeFileSync } from "node:fs";
+  rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,8 +17,8 @@ const gitExecutable: string = createReadOnlyGitExecutionPolicy().prepare("git").
 const roots: string[] = [];
 const config = ["-c", "core.autocrlf=true", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
   "-c", "credential.helper=", "-c", "core.askPass="];
-const gitEnv = { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" };
+const gitEnv = { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+  GIT_CONFIG_SYSTEM: process.platform === "win32" ? "NUL" : "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" };
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 
 function git(root: string, args: string[]) {
@@ -232,6 +232,44 @@ it.each([
   const evidence = receipt(result.stderr);
   expect(evidence.operations).toHaveLength(1);
   expect(evidence.operations[0]).toMatchObject({ operation: "process.execFileSync.authority-context", blocked: true });
+});
+
+it.each(["repository_config", "repository_index", "public_template_stat"])(
+  "reports only the bounded %s refusal stage without leaking inspected content", stage => {
+    const f = fixture(), secret = "never-export-inspected-content";
+    if (stage === "repository_config") git(f.root, ["config", "credential.helper", secret]);
+    if (stage === "repository_index") writeFileSync(join(f.root, ".git/index"), secret);
+    if (stage === "public_template_stat") utimesSync(join(f.root, ".env.example"), 1, 1);
+    const result = run(f), evidence = receipt(result.stderr);
+    expect(result.status).not.toBe(0);
+    expect(evidence.operations).toHaveLength(1);
+    expect(evidence.operations[0]).toMatchObject({ operation: "process.execFileSync.authority-context",
+      blocked: true, refusal: { stage, category: "policy" } });
+    expect(result.stderr).not.toContain(secret);
+    expect(existsSync(f.preflight)).toBe(false);
+  }
+);
+
+it.each(["accessor", "proxy", "permission"])("retains a bounded denial receipt for an inspection %s error", kind => {
+  const f = fixture(), secret = "never-export-inspection-error";
+  const program = `import fs from 'node:fs'; import { syncBuiltinESMExports } from 'node:module';
+    const { readCurrentExtractionAuthorityRevision } = await import(${JSON.stringify(
+      pathToFileURL(join(f.app, "dist/runs/extraction/authority/inspection.js")).href)});
+    const kind = ${JSON.stringify(kind)};
+    let error;
+    if (kind === 'accessor') error = Object.defineProperty({}, 'code', {get() { throw error; }});
+    else if (kind === 'proxy') error = new Proxy({}, {get() { throw error; }, getOwnPropertyDescriptor() { throw error; }});
+    else error = Object.assign(new Error(${JSON.stringify(secret)}), {code:'ERR_ACCESS_DENIED',stack:${JSON.stringify(secret)}});
+    const original = fs.lstatSync; fs.lstatSync = () => { throw error; }; syncBuiltinESMExports();
+    try { readCurrentExtractionAuthorityRevision(); }
+    finally { fs.lstatSync = original; syncBuiltinESMExports(); }`;
+  const result = run(f, program), evidence = receipt(result.stderr);
+  expect(result.status).not.toBe(0);
+  expect(evidence.operations).toHaveLength(1);
+  expect(evidence.operations[0]).toMatchObject({ operation: "process.execFileSync.authority-context",
+    blocked: true, refusal: { stage: "repository_metadata", category: kind === "permission" ? "permission" : "inspection" } });
+  expect(result.stderr).not.toContain(secret);
+  expect(existsSync(f.preflight)).toBe(false);
 });
 
 it("admits checkout's disabled automatic garbage collection without broadening Git operations", () => {

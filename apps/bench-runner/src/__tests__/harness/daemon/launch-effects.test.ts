@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createBenchDaemonLaunchConfig, BENCH_DAEMON_MANAGED_ENV_KEYS } from "../../../harness/daemon/daemon-environment.js";
 import { createBenchDaemonConfigDirectoryLease } from "../../../harness/daemon/daemon-config-directory.js";
+import { samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -51,10 +52,20 @@ it("pins the physical config directory when its parent is reached through an ali
   await mkdir(join(physical, "config"), { recursive: true });
   await symlink(physical, alias, "junction");
   const launch = createBenchDaemonLaunchConfig({ ...defaults, configDirectoryRoot: join(alias, "config"), ambientEnv: {} });
-  expect(dirname(launch.configDir)).toBe(await realpath(join(physical, "config")));
+  // Unlink only the junction, never its target. Planning must have removed the
+  // authored alias dependency, not merely returned another spelling of it.
+  await unlink(alias);
+  await expect(readdir(alias)).rejects.toMatchObject({ code: "ENOENT" });
+  const aliasedLease = createBenchDaemonConfigDirectoryLease(join(alias, "config", "unresolved-alias"));
+  await expect(aliasedLease.prepare()).rejects.toMatchObject({ code: "ENOENT" });
+  await aliasedLease.cleanup();
+  // Windows async realpath and sync realpath can retain different 8.3 spellings.
+  expect(samePhysicalLocation(dirname(launch.configDir), await realpath(join(physical, "config")))).toBe(true);
   const lease = createBenchDaemonConfigDirectoryLease(launch.configDir);
   await lease.prepare();
-  expect(await readdir(join(alias, "config"))).toEqual([launch.configDir.slice(dirname(launch.configDir).length + 1)]);
+  const name = launch.configDir.slice(dirname(launch.configDir).length + 1);
+  expect(await readdir(join(physical, "config"))).toEqual([name]);
+  expect(samePhysicalLocation(launch.configDir, join(physical, "config", name))).toBe(true);
   await lease.cleanup();
   expect(await readdir(join(physical, "config"))).toEqual([]);
 });

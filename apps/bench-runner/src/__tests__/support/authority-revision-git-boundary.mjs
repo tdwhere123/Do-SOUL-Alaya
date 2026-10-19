@@ -1,50 +1,84 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { devNull } from "node:os";
+import { gitEmptyConfigDevice } from "./read-only-git-boundary.mjs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const configArgs = ["-c", "core.autocrlf=true", "-c", "core.fsmonitor=false",
   "-c", "core.untrackedCache=false", "-c", "credential.helper=", "-c", "core.askPass="];
-const fixedEnvironment = { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull,
-  GIT_CONFIG_SYSTEM: devNull, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" };
+const fixedEnvironment = { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: gitEmptyConfigDevice,
+  GIT_CONFIG_SYSTEM: gitEmptyConfigDevice, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" };
 const ambientKeys = new Set(["PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
   "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR", "LANG", "LC_CTYPE"]);
 const credentialPath = path => /(?:^|[/\\])(?:[^/\\]+\.env|\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(path);
-const refuse = () => { throw new Error("unsupported authority Git context"); };
+const policyRefusals = new WeakSet();
+const refuse = () => {
+  const error = new Error("unsupported authority Git context");
+  policyRefusals.add(error); throw error;
+};
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const refusalDiagnostics = new WeakMap();
+
+function isPermissionRefusal(error) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+    return descriptor !== undefined && Object.hasOwn(descriptor, "value") && descriptor.value === "ERR_ACCESS_DENIED";
+  } catch { return false; } // Nullish values and hostile proxy traps remain unknown inspection failures.
+}
+
+// Only authored categories leave this boundary; never serialize caught messages,
+// paths, environment values, config entries, or filesystem exception objects.
+export function authorityGitRefusalDiagnostic(error) {
+  return refusalDiagnostics.get(error) ?? { stage: "execution_context", category:
+    isPermissionRefusal(error) ? "permission" : "inspection" };
+}
+function inStage(stage, inspect) {
+  try { return inspect(); }
+  catch (error) {
+    if (refusalDiagnostics.has(error)) throw error;
+    const refusal = new Error("authority Git inspection refused");
+    refusalDiagnostics.set(refusal, { stage, category:
+      isPermissionRefusal(error) ? "permission" :
+        policyRefusals.has(error) ? "policy" : "inspection" });
+    throw refusal;
+  }
+}
 
 /** Opt-in command admission for the existing revision reader, not a revision
  * implementation. Unsupported repositories fail closed rather than broadening Git.
  * Like the surrounding JS guard, this assumes a non-hostile concurrent filesystem. */
 export function createAuthorityRevisionGitPolicy(checkout) {
-  if (!isAbsolute(checkout) || realpathSync(checkout) !== checkout || realpathSync(process.cwd()) !== checkout) refuse();
+  inStage("checkout_binding", () => {
+    if (!isAbsolute(checkout) || realpathSync(checkout) !== checkout || realpathSync(process.cwd()) !== checkout) refuse();
+  });
   let untracked = new Set();
   return {
     prepare(command, args, options) {
-      if (command !== "git" || !Array.isArray(args) || !same(args.slice(0, configArgs.length), configArgs) ||
-          options === null || typeof options !== "object" || options.cwd !== checkout ||
-          Object.keys(options).some(key => !["cwd", "env", "encoding", "stdio", "maxBuffer"].includes(key)) ||
-          !same(options.stdio, ["ignore", "pipe", "ignore"])) refuse();
-      const env = options.env;
-      if (!env || Object.entries(fixedEnvironment).some(([key, value]) => env[key] !== value) ||
-          Object.keys(env).some(key => !Object.hasOwn(fixedEnvironment, key) &&
-            (!ambientKeys.has(key) || env[key] !== process.env[key]))) refuse();
-      const tail = args.slice(configArgs.length);
-      let operation;
-      if (same(tail, ["rev-parse", "HEAD", "--show-toplevel"])) operation = "identity";
-      else if (same(tail, ["--no-pager", "diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--"])) operation = "diff";
-      else if (same(tail, ["--no-pager", "ls-files", "--others", "--exclude-standard", "-z"])) operation = "untracked";
-      else if (same(tail.slice(0, 3), ["hash-object", "--no-filters", "--"]) && tail.length > 3) {
-        operation = "hash";
-        for (const path of tail.slice(3)) {
-          if (!untracked.has(path)) refuse();
-          assertWorktreePath(checkout, path, false);
-        }
-      } else refuse();
-      const buffer = operation === "diff" || operation === "untracked";
-      if (options.encoding !== (buffer ? "buffer" : "utf8") ||
-          (buffer ? options.maxBuffer !== 64 * 1024 * 1024 : options.maxBuffer !== undefined)) refuse();
-      inspectRepository(checkout);
-      return operation;
+      return inStage("invocation", () => {
+        if (command !== "git" || !Array.isArray(args) || !same(args.slice(0, configArgs.length), configArgs) ||
+            options === null || typeof options !== "object" || options.cwd !== checkout ||
+            Object.keys(options).some(key => !["cwd", "env", "encoding", "stdio", "maxBuffer"].includes(key)) ||
+            !same(options.stdio, ["ignore", "pipe", "ignore"])) refuse();
+        const env = options.env;
+        if (!env || Object.entries(fixedEnvironment).some(([key, value]) => env[key] !== value) ||
+            Object.keys(env).some(key => !Object.hasOwn(fixedEnvironment, key) &&
+              (!ambientKeys.has(key) || env[key] !== process.env[key]))) refuse();
+        const tail = args.slice(configArgs.length);
+        let operation;
+        if (same(tail, ["rev-parse", "HEAD", "--show-toplevel"])) operation = "identity";
+        else if (same(tail, ["--no-pager", "diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--"])) operation = "diff";
+        else if (same(tail, ["--no-pager", "ls-files", "--others", "--exclude-standard", "-z"])) operation = "untracked";
+        else if (same(tail.slice(0, 3), ["hash-object", "--no-filters", "--"]) && tail.length > 3) {
+          operation = "hash";
+          for (const path of tail.slice(3)) {
+            if (!untracked.has(path)) refuse();
+            assertWorktreePath(checkout, path, false);
+          }
+        } else refuse();
+        const buffer = operation === "diff" || operation === "untracked";
+        if (options.encoding !== (buffer ? "buffer" : "utf8") ||
+            (buffer ? options.maxBuffer !== 64 * 1024 * 1024 : options.maxBuffer !== undefined)) refuse();
+        inStage("repository_metadata", () => inspectRepository(checkout));
+        return operation;
+      });
     },
     observe(operation, result) {
       if (operation === "untracked") {
@@ -75,8 +109,10 @@ function inspectRepository(checkout) {
   for (const directory of new Set([gitDir, common, join(common, "objects")])) {
     if (realpathSync(directory) !== directory || !lstatSync(directory).isDirectory()) refuse();
   }
-  inspectConfig(join(common, "config"));
-  if (existsSync(join(gitDir, "config.worktree"))) inspectConfig(join(gitDir, "config.worktree"));
+  inStage("repository_config", () => {
+    inspectConfig(join(common, "config"));
+    if (existsSync(join(gitDir, "config.worktree"))) inspectConfig(join(gitDir, "config.worktree"));
+  });
   for (const path of ["objects/info/alternates", "objects/info/http-alternates", "info/grafts", "shallow.lock"]) {
     if (existsSync(join(common, path))) refuse();
   }
@@ -91,7 +127,7 @@ function inspectRepository(checkout) {
   // Object fanout/pack/info entries cannot redirect reads outside bound metadata.
   inspectMetadataTree(join(common, "objects"));
   if (existsSync(join(common, "refs"))) inspectMetadataTree(join(common, "refs"));
-  inspectIndex(checkout, regular(join(gitDir, "index")));
+  inStage("repository_index", () => inspectIndex(checkout, regular(join(gitDir, "index"))));
 }
 
 function inspectConfig(path) {
@@ -167,10 +203,12 @@ function inspectIndex(checkout, index) {
       index.toString("hex", start + 40, start + 60) === "8473b1cedbcd8483b87b6a5c9978ed804cbd4438";
     assertRelativeWorktreePath(path, sourceTemplate);
     if (sourceTemplate) {
-      const stat = lstatSync(join(checkout, path), { bigint: true });
-      if (!stat.isFile() || stat.size !== BigInt(index.readUInt32BE(start + 36)) ||
-          stat.ctimeNs !== BigInt(index.readUInt32BE(start)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 4)) ||
-          stat.mtimeNs !== BigInt(index.readUInt32BE(start + 8)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 12))) refuse();
+      inStage("public_template_stat", () => {
+        const stat = lstatSync(join(checkout, path), { bigint: true });
+        if (!stat.isFile() || stat.size !== BigInt(index.readUInt32BE(start + 36)) ||
+            stat.ctimeNs !== BigInt(index.readUInt32BE(start)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 4)) ||
+            stat.mtimeNs !== BigInt(index.readUInt32BE(start + 8)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 12))) refuse();
+      });
     }
     // Deletions are real dirty state, not a reason to invent clean contents.
     if (existsSync(join(checkout, path))) assertWorktreePath(checkout, path, mode === 0o120000, sourceTemplate);

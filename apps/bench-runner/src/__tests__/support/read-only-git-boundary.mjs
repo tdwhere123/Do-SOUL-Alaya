@@ -1,9 +1,11 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { devNull } from "node:os";
 import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 const credentialKey = key => /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key);
 const injectedRuntimeKey = key => /^(?:GIT_|LD_|DYLD_|NODE_|BASH_ENV$|ENV$|SHELLOPTS$|CDPATH$)/iu.test(key);
+
+// Native Git for Windows accepts NUL, not Node's \\.\nul device spelling.
+export const gitEmptyConfigDevice = process.platform === "win32" ? "NUL" : "/dev/null";
 
 /** Shared test-only execution containment, independent of either caller's command
  * admission or model allocation. Only the caller owns its permitted Git queries. */
@@ -15,7 +17,7 @@ export function createReadOnlyGitExecutionPolicy() {
   const environment = Object.freeze({
     PATH: dirname(executable), LANG: "C", LC_ALL: "C",
     ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot } : {}),
-    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_SYSTEM: devNull,
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: gitEmptyConfigDevice, GIT_CONFIG_SYSTEM: gitEmptyConfigDevice,
     GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0"
   });
   return Object.freeze({

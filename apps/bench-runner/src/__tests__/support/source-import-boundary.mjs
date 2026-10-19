@@ -12,7 +12,7 @@ import { createRequire, registerHooks, syncBuiltinESMExports } from "node:module
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { installProviderFreeBoundary } from "./provider-free-boundary.ts";
 import { createReadOnlyGitExecutionPolicy } from "./read-only-git-boundary.mjs";
-import { createAuthorityRevisionGitPolicy } from "./authority-revision-git-boundary.mjs";
+import { authorityGitRefusalDiagnostic, createAuthorityRevisionGitPolicy } from "./authority-revision-git-boundary.mjs";
 
 // Install before application imports, in both the fixture process and its pinned
 // SQLite read worker. This is a JS effect guard, not an OS sandbox or filesystem jail.
@@ -92,7 +92,9 @@ replace(cp, "execFileSync", function(command, args, options) {
   try {
     operation = authorityGitPolicy.prepare(command, args, options);
     invocation = readOnlyGitPolicy.prepare(command, options);
-  } catch { return deny("process.execFileSync.authority-context"); }
+  } catch (error) {
+    return deny("process.execFileSync.authority-context", { refusal: authorityGitRefusalDiagnostic(error) });
+  }
   record("process.execFileSync.authority-git.allowed", { ...invocation.receipt, args: [...args] });
   const result = Reflect.apply(nativeExecFileSync, this, [invocation.executable, args, invocation.options]);
   try { authorityGitPolicy.observe(operation, result); }

@@ -280,13 +280,44 @@ describe("recall read worker deadline and native quarantine", () => {
 // Deadline advances are explicit; Worker imports, messages and actual exit events remain real.
 function scopeClock() {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  let now = performance.now();
+  // Integer-origin virtual time makes exact deadline arithmetic independent of
+  // the host's fractional performance.now() origin.
+  let now = 0;
   const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
   return { advance: async (ms: number) => { now += ms; await vi.advanceTimersByTimeAsync(ms); },
     restore: () => { clock.mockRestore(); vi.useRealTimers(); } };
 }
 
 describe("caller-linked native execution scopes", () => {
+  it("uses an integer virtual clock even when the host clock has a fractional origin", async () => {
+    const host = vi.spyOn(performance, "now").mockReturnValue(0.0000000000009);
+    const clock = scopeClock();
+    try {
+      expect(performance.now()).toBe(0);
+      await clock.advance(100);
+      expect(500 - performance.now()).toBe(400);
+    } finally { clock.restore(); host.mockRestore(); }
+  });
+
+  it("settles deadline assertions when an earlier assertion exits before the worker scope deadline", async () => {
+    const h = await harness(1, 60_000), clock = scopeClock(), release = deferred();
+    const assertions: Promise<unknown>[] = [];
+    let settled: PromiseSettledResult<unknown>[] = [];
+    const failed = async () => {
+      try {
+        const scoped = h.lifecycle.executionScope({ timeoutMs: 500 }, async () => await release.promise);
+        const rejected = expect(scoped).rejects.toThrow(/timed out/u);
+        assertions.push(rejected); void rejected.catch(() => undefined);
+        expect("authored early assertion").toBe("expected continuation");
+      } finally {
+        release.resolve(); settled = await Promise.allSettled(assertions);
+        clock.restore(); await h.cleanup();
+      }
+    };
+    await expect(failed()).rejects.toThrow(/authored early assertion/u);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.status).toBe("rejected");
+  });
   it("rejects a preaborted caller before invoking its callback or dispatching native work", async () => {
     const h = await harness(1, 60_000), controller = new AbortController(), reason = new Error("caller already left");
     controller.abort(reason);
@@ -437,18 +468,21 @@ describe("caller-linked native execution scopes", () => {
     const controller = new AbortController(), reason = new Error("only left caller cancelled");
     let leftSignal!: AbortSignal, rightSignal!: AbortSignal, rightRemaining!: () => number;
     let rightSettled = false;
+    const assertions: Promise<unknown>[] = [];
     try {
       const left = h.lifecycle.executionScope({ signal: controller.signal, timeoutMs: 100 }, async () => {
         leftSignal = h.lifecycle.preparationDeadline().signal;
         return await h.lifecycle.beforeSnapshotPreparation(async () => await leftRelease.promise);
       });
       const leftRejected = stop === "caller_abort" ? expect(left).rejects.toBe(reason) : expect(left).rejects.toThrow(/timed out after 100ms/u);
+      assertions.push(leftRejected); void leftRejected.catch(() => undefined);
       const right = h.lifecycle.executionScope({ timeoutMs: 500 }, async () => {
         const deadline = h.lifecycle.preparationDeadline();
         rightSignal = deadline.signal; rightRemaining = () => deadline.remainingMs();
         return await h.lifecycle.beforeSnapshotPreparation(async () => await rightRelease.promise);
       }).finally(() => { rightSettled = true; });
       const rightRejected = expect(right).rejects.toThrow(/timed out after 500ms/u);
+      assertions.push(rightRejected); void rightRejected.catch(() => undefined);
       expect(leftSignal).not.toBe(rightSignal);
       if (stop === "caller_abort") controller.abort(reason);
       await clock.advance(100); await leftRejected;
@@ -459,6 +493,12 @@ describe("caller-linked native execution scopes", () => {
       await clock.advance(399); expect(rightSettled).toBe(false);
       await clock.advance(1); await rightRejected;
       expect(h.unavailable).not.toHaveBeenCalled();
-    } finally { leftRelease.resolve(); rightRelease.resolve(); clock.restore(); await h.cleanup(); }
+    } finally {
+      leftRelease.resolve(); rightRelease.resolve();
+      // An earlier assertion may exit before either deadline; settle every
+      // already-created assertion before restoring clocks and retiring workers.
+      await Promise.allSettled(assertions);
+      clock.restore(); await h.cleanup();
+    }
   });
 });
