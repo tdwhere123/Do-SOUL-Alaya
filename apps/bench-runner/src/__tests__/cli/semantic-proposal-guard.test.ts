@@ -234,7 +234,25 @@ it.each([
   expect(evidence.operations[0]).toMatchObject({ operation: "process.execFileSync.authority-context", blocked: true });
 });
 
+it("admits checkout's disabled automatic garbage collection without broadening Git operations", () => {
+  const f = fixture(); git(f.root, ["config", "--local", "gc.auto", "0"]);
+  const expected = oracle(f.root), result = run(f);
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(readFileSync(f.preflight, "utf8")).execution_scope.implementation_revision).toBe(expected);
+  expect(receipt(result.stderr).operations).toEqual(Array(3).fill(expect.objectContaining({
+    operation: "process.execFileSync.authority-git.allowed"
+  })));
+  expect(existsSync(f.cache)).toBe(false);
+});
+
 it.each([
+  ["enabled automatic garbage collection", ["gc.auto", "1"]],
+  ["negative automatic garbage collection", ["gc.auto", "-1"]],
+  ["alternate zero spelling", ["gc.auto", "00"]],
+  ["automatic pack collection", ["gc.autoPackLimit", "0"]],
+  ["automatic collection detachment", ["gc.autoDetach", "false"]],
+  ["GC subsection", ["gc.fixture.auto", "0"]],
+  ["hooks path", ["core.hooksPath", "/forbidden"]],
   ["textconv", ["diff.fixture.textconv", "forbidden-helper"]],
   ["external diff", ["diff.external", "forbidden-helper"]],
   ["filter", ["filter.fixture.clean", "forbidden-helper"]],

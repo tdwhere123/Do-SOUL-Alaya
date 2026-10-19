@@ -58,14 +58,17 @@ const pinnedPaths = [guardPath, receiptPath,
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 
 export function captureAcquisitionLaunchBinding() {
-  assert.equal(realpathSync(candidate), candidate.replace(/\/$/u, ""));
+  // Native path semantics remove directory URL separators without changing a
+  // POSIX backslash basename. Keep named-versus-physical equality to reject aliases.
+  const root = resolve(candidate);
+  assert.equal(realpathSync(root), root);
   const modules = Object.fromEntries(pinnedPaths.map(relative => {
     const path = join(candidate, relative);
     assert.equal(realpathSync(path), path, "aliased acquisition module");
     assert(lstatSync(path).isFile(), "nonregular acquisition module");
     return [relative, digest(readFileSync(path))];
   }));
-  return { candidate: candidate.replace(/\/$/u, ""), executable: realpathSync(process.execPath), modules };
+  return { candidate: root, executable: realpathSync(process.execPath), modules };
 }
 export function assertAcquisitionLaunchBinding(binding) {
   assert.deepEqual(binding, captureAcquisitionLaunchBinding(), "acquisition candidate/module/executable pins changed");

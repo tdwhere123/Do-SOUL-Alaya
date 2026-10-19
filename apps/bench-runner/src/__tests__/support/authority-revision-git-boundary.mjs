@@ -95,12 +95,12 @@ function inspectRepository(checkout) {
 }
 
 function inspectConfig(path) {
-  let section = "";
+  let section = "", sectionHeader = "";
   for (const raw of regular(path).toString("utf8").split(/\r?\n/u)) {
     const line = raw.trim();
     if (!line || /^[#;]/u.test(line)) continue;
     const header = /^\[([a-z]+)(?: "[^"\\]*")?\]$/iu.exec(line);
-    if (header) { section = header[1].toLowerCase(); continue; }
+    if (header) { section = header[1].toLowerCase(); sectionHeader = line.toLowerCase(); continue; }
     const entry = /^([a-z][a-z0-9-]*)\s*=\s*(.*?)\s*$/iu.exec(line);
     if (!entry) refuse();
     const key = entry[1].toLowerCase(), value = entry[2].toLowerCase();
@@ -111,6 +111,8 @@ function inspectConfig(path) {
         (key === "bare" && value === "false") ||
         (["filemode", "logallrefupdates", "symlinks", "ignorecase", "precomposeunicode", "protectntfs", "protecthfs"].includes(key) && /^(true|false)$/u.test(value)) ||
         (key === "autocrlf" && /^(true|false|input)$/u.test(value)))) continue;
+    // Checkout disables automatic collection; do not admit other GC settings or subsections.
+    if (sectionHeader === "[gc]" && key === "auto" && value === "0") continue;
     if (section === "extensions" && key === "worktreeconfig" && value === "true") continue;
     if (section === "remote" && ["url", "fetch"].includes(key)) continue;
     if (section === "branch" && ["remote", "merge", "vscode-merge-base"].includes(key)) continue;

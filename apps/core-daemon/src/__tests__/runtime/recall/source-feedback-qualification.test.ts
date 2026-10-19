@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { inspect } from "node:util";
 import { canonicalJson, RuntimeGardenComputeConfigSchema, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
 import { fieldContractSha256, type SourceFeedbackCorrespondenceAction,
@@ -114,12 +115,16 @@ it("skips a higher-ranked unrelated H and qualifies each actual AP-42/AP-73 expo
           source_interpretation_descriptors: [{ source_interpretation_id: exposed.request.descriptor.interpretation_id,
             interpretation: exposed.request.descriptor.interpretation }] });
         lineKey = line.key; before = cacheBytes(root);
+        const expectedRequest = structuredClone({ original_query: ORIGINAL, admitted_query_semantics: q,
+          source_interpretation_descriptors: [{ source_interpretation_id: exposed.request.descriptor.interpretation_id,
+            interpretation: exposed.request.descriptor.interpretation }],
+          producer_id: core.SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
+          producer_version: core.SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION });
         requestBuilder.mockClear(); receiver.mockClear(); admission.mockClear(); reader.mockClear();
         const prepared = await collaborator.prepare(exposed);
         expect(reader).toHaveBeenCalledWith(workset(exposed), root, TOKENS, expect.anything());
-        expect(requestBuilder.mock.calls.some(([input]) => input.original_query === ORIGINAL
-          && input.source_interpretation_descriptors[0]?.source_interpretation_id === exposed.request.descriptor.interpretation_id
-          && input.source_interpretation_descriptors[0]?.interpretation === exposed.request.descriptor.interpretation)).toBe(true);
+        // Workset materialization captures a clone before validation; exact payload, not object identity, must survive.
+        expect(requestBuilder.mock.calls).toStrictEqual([[expectedRequest]]);
         expect(receiver.mock.calls.at(-1)?.[1]?.rawJson).toBe(response(line.request as SourceSemanticCorrespondenceRequest));
         expect(receiver.mock.calls.at(-1)?.[2]).toBeDefined(); // The actual decoder borrows this parent's ledger.
         expect(admission.mock.results.some(row => row.type === "return" && row.value.kind === "admitted")).toBe(true);
@@ -135,7 +140,15 @@ it("skips a higher-ranked unrelated H and qualifies each actual AP-42/AP-73 expo
       const trace = await executeSourceFeedback({ session: { ...session, action_budget: actionBudget,
         budget: { ...actionBudget, work_units: actionBudget.work_units * 6, memory_bytes: actionBudget.memory_bytes * 6 } },
         context: CONTEXT, port: client.sourceSemanticsPort!, correspondence: host, timeoutMs: 30_000 });
-      expect(trace.status).toBe("complete");
+      const terminal = trace.settlements.at(-1);
+      expect(trace.status, JSON.stringify({ ticket,
+        terminal_cause: inspect(trace.terminal_cause, { depth: 5, maxArrayLength: 8, maxStringLength: 4000 }).slice(0, 12_000),
+        last_action_id: terminal?.[0], last_settlement_status: terminal?.[1].status,
+        phase: terminal?.[1].status === "unknown" ? terminal[1].phase : undefined,
+        exposed_actions: trace.exposures.slice(-6).map(row => ({ action_id: row.action_id, kind: row.result.kind })),
+        preparation_count: trace.preparations?.length, qualification_status: trace.qualification?.status,
+        accounting: trace.accounting
+      }, null, 2)).toBe("complete");
       const last = trace.exposures.at(-1)?.result;
       expect(trace.qualification, JSON.stringify(last?.kind === "prepare_query" ? {
         candidates: last.candidates.map(row => ({ source: row.source_id, id: row.interpretation_id, full: row.interpretation !== undefined })),
