@@ -4,7 +4,8 @@ import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteFieldSourceRecordRepo, SqliteSourceIndexRepository, StorageDatabase } from "@do-soul/alaya-storage";
 import type { SourceIndexRootQualification, SourceIndexSnapshotFact }
   from "../../../../core-daemon/src/runtime/recall-read-worker/source-index-measurement.js";
-import { hashRegularFileNoFollow, withCachedSqliteSnapshot } from "../snapshot/bound-file.js";
+import type { BenchDaemonHandle } from "../../harness/daemon.js";
+import { readSemanticChainDaemonRestoration } from "./contract.js";
 type Constructor = typeof SqliteSourceIndexRepository;
 type Measurement = Constructor[Extract<keyof Constructor, symbol>];
 
@@ -17,25 +18,20 @@ export type FrozenSourceIndexQualifications = Readonly<{
   native_sql_work: "unknown";
 }>;
 
-/** Private, label-free capture. The existing sealed-file owner verifies the digest, excludes
- * uncheckpointed WAL and pins the opened inode. This opens no runtime and selects/builds no index.
- * The caller archives pages before evaluator labels enter; no source body enters the capture. */
+/** Private, label-free capture from the actual restored session, after canonical startup.
+ * The restore owner binds the original sealed input; index facts include the live DB's WAL
+ * in one read transaction. Capture neither migrates nor selects/builds an index, and no
+ * disposable path or source body enters the archived qualification content. */
 export function captureFrozenSourceIndexQualifications(input: Readonly<{
-  snapshotPath: string; snapshotSha256: string; workspaceId: string;
-  onPage: (page: FrozenSourceIndexQualificationPage) => void;
+  daemon: BenchDaemonHandle; onPage: (page: FrozenSourceIndexQualificationPage) => void;
 }>): FrozenSourceIndexQualifications {
-  if (!/^[a-f0-9]{64}$/.test(input.snapshotSha256) || hashRegularFileNoFollow(input.snapshotPath) !== input.snapshotSha256) {
-    throw new AlayaError("CONFLICT", "index qualification snapshot digest mismatch");
-  }
-  return withCachedSqliteSnapshot({ filePath: input.snapshotPath, expectedSha256: input.snapshotSha256,
-    operation: filename => {
-      const connection = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
-      try {
-        connection.pragma("query_only = ON");
-        return captureQualificationRows({ database: new StorageDatabase(filename, connection), workspaceId: input.workspaceId,
-          snapshotIdentity: `sha256:${input.snapshotSha256}`, onPage: input.onPage });
-      } finally { connection.close(); }
-    } });
+  const owned = readSemanticChainDaemonRestoration(input.daemon);
+  const connection = new BetterSqlite3(owned.databasePath, { readonly: true, fileMustExist: true });
+  try {
+    connection.pragma("query_only = ON");
+    return captureQualificationRows({ database: new StorageDatabase(owned.databasePath, connection), workspaceId: owned.workspaceId,
+      snapshotIdentity: `sha256:${owned.snapshotSha256}`, onPage: input.onPage });
+  } finally { connection.close(); }
 }
 
 function captureQualificationRows(input: Readonly<{ database: StorageDatabase; workspaceId: string; snapshotIdentity: string;
@@ -75,8 +71,8 @@ function captureQualificationRows(input: Readonly<{ database: StorageDatabase; w
   })();
 }
 
-/** Index metadata compatibility only. The capture/restore owner must ALSO bind the native
- * session to this sealed snapshot: equal generation/profile/epoch do not prove file identity.
+/** Index metadata compatibility only; capture uses the restore owner's session association.
+ * Equal generation/profile/epoch alone do not prove the original sealed input identity.
  * Preparation disabled/unwired and unbound/ready index state remain separate native facts. */
 export function frozenIndexMetadataMatchesNativeBinding(frozen: FrozenSourceIndexQualifications,
   native: SourceIndexSnapshotFact | null): boolean {

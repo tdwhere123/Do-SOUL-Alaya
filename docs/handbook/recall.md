@@ -607,9 +607,12 @@ same-object repetition is a traversal proxy, not proof of duplicate allocation
 or wasted work.
 Frozen source-index and window qualification is private measurement state: a
 symbol-keyed capability on the existing storage constructor, with no
-package-root export, that requires a caller-owned read transaction over a
-sealed snapshot copy and reuses the serving readers for index state,
-currentness and window validity. Pages are captured before evaluator labels
+package-root export, that requires a caller-owned read transaction and reuses
+the serving readers for index state, currentness and window validity. Bench
+capture reads the actual restored session after canonical startup migrations,
+including its WAL; the restoration owner binds that session to the original
+sealed input and rejects foreign or expired handles. The sealed input is never
+migrated, and a missing table is not treated as an empty index. Pages are captured before evaluator labels
 enter and carry no source body, and windows page under an explicit cursor. A
 missing capability leaves the diagnostics unavailable without changing recall
 ([`source-index-qualification`](../../packages/storage/src/repos/source-index/source-index-qualification.ts),
