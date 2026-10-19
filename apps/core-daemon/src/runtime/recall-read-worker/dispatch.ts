@@ -20,6 +20,8 @@ import { runSourceSemanticWorker } from "./source-semantic-reasoning.js";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { settleWorkerDelivery } from "./prepared-delivery.js";
 
+import type { SourceSemanticObserver } from "./source-semantic-observation.js";
+
 const boundedConstraintsReaders = new WeakMap<RecallReadWorkerRuntime, ReturnType<typeof createBoundedActiveConstraintsReader>>();
 
 type DispatchParsedOperation = Exclude<
@@ -34,7 +36,8 @@ type DispatchParsedOperation = Exclude<
 
 export async function runOperation(
   runtime: RecallReadWorkerRuntime,
-  request: RecallReadWorkerRequest
+  request: RecallReadWorkerRequest,
+  observer?: SourceSemanticObserver
 ): Promise<unknown> {
   if (!isRecallReadWorkerOperation(request.operation)) {
     throwUnknownRecallReadWorkerOperation(request.operation);
@@ -59,7 +62,7 @@ export async function runOperation(
   if (request.operation === "conditionalField.sourceSemantics") {
     // Source operation finalizers own result admission; do not deep-copy their admitted envelopes again.
     return runSourceSemanticWorker(runtime,
-      parsedPayload as WorkerOperationPayload<"conditionalField.sourceSemantics">);
+      parsedPayload as WorkerOperationPayload<"conditionalField.sourceSemantics">, observer);
   }
   if (request.operation === "conditionalField.recall") {
     return parseWorkerOperationResult(

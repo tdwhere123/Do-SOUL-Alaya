@@ -18,6 +18,8 @@ import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalizat
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
+import type { SourceSemanticObserver } from "./source-semantic-observation.js";
+
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
 
 /** The transaction's existing execution cache also owns the request-only capture. */
@@ -29,8 +31,8 @@ export interface SourceSemanticRequestExecution {
 }
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerResult {
-  const meter = new SourceSemanticReadBudget(payload.request.budget);
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload, observer?: SourceSemanticObserver): SourceSemanticWorkerResult {
+  const meter = new SourceSemanticReadBudget(payload.request.budget, observer);
   const run = (executionOf: SourceSemanticRequestExecution) => {
     if (payload.prepared_query !== undefined) {
       meter.preparation = capturePackSourceSemanticPreparationForRequest({
@@ -219,7 +221,10 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
     { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics, executionOf },
     request.source_preview_extents, undefined, accessHint);
-  if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
+  if (prior?.access_pool !== undefined) {
+    meter.retain(pool, "continued access pool");
+    meter.observer?.event("pool_reuse", meter.phase, () => ({ pool_id: pool.access.pool_id, discovery: "not_observed_this_request" }));
+  }
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;
   const access = preparationAccessReceipt(pool, sourceOffset, prior?.access_offset ?? 0, discovery.candidates.length, meter);

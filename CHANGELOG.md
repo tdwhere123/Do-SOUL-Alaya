@@ -33,6 +33,16 @@ invariant §25. Protocol is now `19.1.0`; gateway remains `2.0.0`.
 See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
 and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 
+### Private recall measurement
+
+Opt-in bench observations retain request-correlated worker events and logical
+costs without adding fields to public MCP responses or changing recall policy.
+The measurement owner captures library continuations in the same session and
+invokes ordinary `soul.recall` through its actual public entry. Both use one
+consumer-message visibility scorer. Frozen-output attribution keeps missing,
+partial and unavailable evidence explicit; diagnostic membership is not proof
+of visible text, and logical accounting is not a physical resource measurement.
+
 ### Retained-boundary corrections
 
 Operator paths and local surfaces fail closed. `scripts/install.sh` and

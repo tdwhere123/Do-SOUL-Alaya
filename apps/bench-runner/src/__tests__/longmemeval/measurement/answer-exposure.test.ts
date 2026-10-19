@@ -146,4 +146,29 @@ describe("published answer-turn exposure", () => {
     expect(summary.cost_availability.Field).toEqual({ known: 0, unknown: 5, not_run: 0 });
     expect(rows[0]!.costs.temperature).toBe("unknown");
   });
+
+  it("reports complete coverage beside any exposure and keeps the unobserved tail unknown", () => {
+    const complete = score(observed(28, 43));
+    expect(complete.metrics["answer_complete_coverage@5"]).toEqual({ status: "hit", reason: null });
+    expect(complete.metrics["answer_complete_coverage@10"]).toEqual({ status: "hit", reason: null });
+    const partial = score(observed(0, 16));
+    expect(partial.metrics["answer_complete_coverage@5"].status).toBe("miss");
+    expect(partial.metrics["answer_complete_coverage@10"].status).toBe("miss");
+    const paged = score(observed(0, 16, undefined, true, true));
+    expect(paged.metrics["answer_complete_coverage@5"].status).toBe("miss");
+    expect(paged.metrics["answer_complete_coverage@10"])
+      .toEqual({ status: "unknown", reason: "second_page_not_observed" });
+    expect(paged.delivery).toMatchObject({ observed_pages: 1, observed_roots: 5, continuation: "unobserved" });
+  });
+
+  it("conserves every selection row in the complete-coverage denominator and bounds", () => {
+    const rows = [score(observed(28, 43)), ...["invalid", "unknown", "refusal"].map(unavailableReason =>
+      measureLongMemEvalAcquisition({ cohort: "answerable", unavailableReason })),
+      measureLongMemEvalAcquisition({ cohort: "abstention" })];
+    const summary = summarizeLongMemEvalAcquisition(rows);
+    expect(summary.metrics["answer_complete_coverage@5"]).toEqual({ denominator: 5, hits: 1, misses: 0,
+      unknown: 4, lower_bound: 0.2, upper_bound: 1 });
+    expect(summary.metrics["answer_complete_coverage@10"]).toEqual({ denominator: 5, hits: 1, misses: 0,
+      unknown: 4, lower_bound: 0.2, upper_bound: 1 });
+  });
 });

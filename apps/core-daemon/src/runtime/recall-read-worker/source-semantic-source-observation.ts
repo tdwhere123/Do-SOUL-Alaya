@@ -28,7 +28,7 @@ type SourceTextRead = Generator<(() => void) | undefined, SourceTextResult | und
 /** One read state across metadata, the guaranteed first native extent, and census-promoted completion. */
 function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecordIdentity, policy: Policy,
   meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number, prefetch = false): SourceTextRead {
-  let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false, resourceLimited = false;
+  let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false, resourceLimited = false, settled = false;
   let extent: ReturnType<SqliteFieldSourceRecordRepo["findByIdBounded"]> | undefined;
   let releaseDeferred: (() => void) | undefined;
   let completionCost: SourceSemanticResourceBudget = { work_units: 0, memory_bytes: 0 };
@@ -39,11 +39,15 @@ function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecord
       extent = repo.findByIdBounded(record.workspace_id, record.identity, 1, 0,
         { workLimit: meter.work, nativeByteLimit: meter.bytes });
       meter.read(5 + (extent?.dependencyWork ?? 0), extent === null ? 0 : extent.nativeBytes + extent.metadataBytes);
+      meter.observer?.event("source_read", meter.phase, () => ({ purpose: "observation_metadata", record_id: record.identity,
+        source_id: record.source_id, start: 0, end: Buffer.byteLength(extent?.record?.source_body ?? ""),
+        native_bytes: extent === null ? 0 : extent!.nativeBytes + extent!.metadataBytes, resource_limited: extent?.resourceLimited ?? false }));
       bodyBytes = extent?.bodyBytes ?? null;
       if (extent?.resourceLimited) throw new SourceSemanticResourceExhausted("access source dependencies");
     } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; resourceLimited = true; }
     yield;
     if (resourceLimited || extent?.record?.source_body == null) {
+      settled = true;
       return { read_bytes: 0, body_bytes: bodyBytes, complete: false, signal: UNKNOWN, resourceLimited };
     }
     if (bodyBytes === 0) complete = true;
@@ -55,10 +59,16 @@ function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecord
           sourcePreviewByteExtent === undefined ? 4096 : sourcePreviewByteExtent - offset);
         if (chunkBytes > 0) {
           const quote = extentQuote(policy.sourceCost, characters, chunkBytes);
+          meter.observer?.event("source_read_attempt", meter.phase, () => ({ purpose: "observation", record_id: record.identity,
+            source_id: record.source_id, start: offset, requested_end: offset + chunkBytes }));
           meter.reserve(quote.work_units, quote.memory_bytes, "access source extent");
           const page = repo.findByIdBounded(record.workspace_id, record.identity, chunkBytes, offset,
             { workLimit: meter.work - quote.deferredWork, nativeByteLimit: meter.bytes - quote.deferredBytes });
           meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
+          meter.observer?.event("source_read", meter.phase, () => ({ purpose: "observation", record_id: record.identity,
+            source_id: record.source_id, start: offset, end: offset + Buffer.byteLength(page?.record?.source_body ?? ""),
+            requested_end: offset + chunkBytes, native_bytes: page === null ? 0 : page.nativeBytes + page.metadataBytes,
+            resource_limited: page?.resourceLimited ?? false, available: page?.record?.source_body != null && !page.invalidOffset }));
           if (page?.resourceLimited) throw new SourceSemanticResourceExhausted("access source dependencies");
           if (page !== null) {
             bodyBytes = page.bodyBytes;
@@ -93,8 +103,15 @@ function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecord
       meter.charge(0, 4 * characters, "access source assembly");
       if (offset > 0 || complete) signal = policy.source(chunks.join(""), meter);
     } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; resourceLimited = true; }
+    settled = true;
     return { read_bytes: offset, body_bytes: bodyBytes, complete, signal, resourceLimited };
-  } finally { releaseDeferred?.(); }
+  } finally {
+    releaseDeferred?.();
+    meter.observer?.event("observation_read_complete", meter.phase, () => ({ record_id: record.identity, source_id: record.source_id,
+      start: 0, end: offset, body_bytes: bodyBytes, complete, resource_limited: resourceLimited,
+      stop: !settled ? "interrupted" : resourceLimited ? "budget" : complete ? "complete"
+        : sourcePreviewByteExtent !== undefined && offset >= sourcePreviewByteExtent ? "preview_extent" : "unavailable" }));
+  }
 }
 
 function finishSourceText(read: SourceTextRead, step = read.next()): SourceTextResult {

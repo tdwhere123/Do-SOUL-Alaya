@@ -241,8 +241,8 @@ export class SourceSemanticUnionCompletion {
   private reserve(quote: (planning: SourceSemanticReadBudget) => CompletionPrice): CompletionPrice {
     const outstanding = this.child.outstandingAllowance();
     this.parent.reserve(outstanding.work_units, outstanding.memory_bytes, "observation and held native allowance before completion quote");
-    const planning = new SourceSemanticReadBudget({ work_units: this.parent.work - outstanding.work_units,
-      memory_bytes: this.parent.bytes - outstanding.memory_bytes });
+    const planning = this.parent.child({ work_units: this.parent.work - outstanding.work_units,
+      memory_bytes: this.parent.bytes - outstanding.memory_bytes }, "completion_planning");
     let measured: CompletionPrice | undefined;
     try {
       try {
@@ -269,8 +269,8 @@ export function reserveEmptyInterpretationCompletion(input: Completion): Prepare
   // Already executed census/navigation/header spend has first claim on the request allowance.
   const outstanding = child.outstandingAllowance();
   parent.reserve(outstanding.work_units, outstanding.memory_bytes, "empty interpretation prior observation");
-  const planning = new SourceSemanticReadBudget({ work_units: parent.work - outstanding.work_units,
-    memory_bytes: parent.bytes - outstanding.memory_bytes });
+  const planning = parent.child({ work_units: parent.work - outstanding.work_units,
+    memory_bytes: parent.bytes - outstanding.memory_bytes }, "empty_completion_planning");
   let initial: CompletionPrice | undefined;
   try {
     try {

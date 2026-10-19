@@ -53,6 +53,8 @@ export function prepareLibraryPackages(runtime: SourceSemanticReadRuntime, paylo
     if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
     incomplete = true;
   }
+  meter.observer?.event("package_candidates", meter.phase, () => ({ incomplete, packages: packages.map(row => ({
+    target: row.entry.target, access_position: row.access_position, proof_count: row.proofs.length, payload_support: row.payload_support })) }));
   return { packages, incomplete };
 }
 
@@ -194,11 +196,16 @@ function readSource(runtime: SourceSemanticReadRuntime, payload: SourceSemanticW
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget, entry: IndexEntry): { text: string; bytes: number;
     record: FieldSourceRecordRow } | undefined {
   if (entry.target.kind !== "source_evidence") return undefined;
+  meter.observer?.event("source_read_attempt", meter.phase, () => ({ purpose: "package_hydration", record_id: entry.target.kind === "source_evidence" ? entry.target.root_id : null,
+    start: 0, requested_end: DISPLAY_BYTES }));
   meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "library raw prefix");
   const repo = new SqliteFieldSourceRecordRepo(runtime.database, fieldContractSha256);
   const stored = repo.findByIdBounded(payload.workspace_id, entry.target.root_id, DISPLAY_BYTES, 0,
     { workLimit: meter.work, nativeByteLimit: meter.bytes });
   meter.read(5 + (stored?.dependencyWork ?? 0), stored === null ? 0 : stored.nativeBytes + stored.metadataBytes);
+  meter.observer?.event("source_read", meter.phase, () => ({ purpose: "package_hydration", record_id: entry.target.kind === "source_evidence" ? entry.target.root_id : null,
+    start: 0, end: Buffer.byteLength(stored?.record?.source_body ?? ""), body_bytes: stored?.bodyBytes ?? null,
+    native_bytes: stored === null ? 0 : stored.nativeBytes + stored.metadataBytes, resource_limited: stored?.resourceLimited ?? false }));
   if (stored?.resourceLimited) throw new SourceSemanticResourceExhausted("library source dependencies");
   const record = stored?.record;
   if (stored === null || record == null || record.source_body === null || record.record_id !== entry.target.root_id

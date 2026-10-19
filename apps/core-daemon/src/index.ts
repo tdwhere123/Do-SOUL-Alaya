@@ -38,6 +38,7 @@ import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
 import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
 import { bindSourceFeedbackExecutionPort } from "./runtime/recall/source-feedback-execution.js";
+import { bindSourceSemanticObservation } from "./runtime/recall/source-semantic-observation.js";
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
@@ -76,6 +77,8 @@ export interface AlayaDaemonRuntimeOptions {
   /** Defaults to eager; "omit" skips the probe without establishing readiness. */
   readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly sourceSemanticInterpretationClock?: string;
+  /** Private recall-measurement consumer only; off by default. No public tool schema change. */
+  readonly sourceSemanticObservations?: boolean;
   readonly relationProjectionAdmissionMode?: RelationProjectionAdmissionMode;
   readonly fieldProjectionAdmissionMode?: FieldProjectionAdmissionMode;
 }
@@ -110,6 +113,9 @@ export async function createAlayaDaemonRuntime(
     });
     const runtimeRecallReadWorkerClient = recallAndCore.recallWiring.recallReadWorkerClient;
     if (runtimeRecallReadWorkerClient !== null) {
+      if (options.sourceSemanticObservations === true) {
+        bindSourceSemanticObservation(runtime, runtimeRecallReadWorkerClient.observeSourceSemantics);
+      }
       if (runtimeRecallReadWorkerClient.sourceSemanticsPort !== undefined) {
         bindSourceFeedbackExecutionPort(runtime, runtimeRecallReadWorkerClient.sourceSemanticsPort);
       }

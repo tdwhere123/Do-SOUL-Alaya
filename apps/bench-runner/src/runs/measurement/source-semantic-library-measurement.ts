@@ -5,7 +5,7 @@ import {
   SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts,
   SoulInterpretationRecallDeliverySchema, SourceSemanticLibraryDiscoverySchema, SourceSemanticCoverageSchema, SourceSemanticQueryStatusSchema,
   canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
-  type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus, type SourceEvidenceTarget
+  sourceGoldRootIdentity, type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus, type SourceEvidenceTarget, type Continuation
 } from "@do-soul/alaya-protocol";
 import { deliveredSourceSemanticLibraryProof, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import {
@@ -103,18 +103,29 @@ export function deliveredSourceSemanticLibraryIntervals(measurement: SourceSeman
   if (admitted?.status !== "admitted" || recordInconsistency(measurement) !== undefined
     || canonicalJson(admitted.index) !== canonicalJson(measurement.delivered_index)
     || canonicalJson(admitted.qualifiers) !== canonicalJson(measurement.slot_qualifiers)) return null;
+  return deliveredSourceSemanticLibraryPageIntervals(admitted, recallResult);
+}
+
+/** Structural page admission does not certify source bytes; the archive owner must verify
+ * previews against sealed current sources before exposing these intervals to an evaluator. */
+export function deliveredSourceSemanticLibraryPageIntervals(admitted: ReturnType<typeof admitSourceSemanticLibraryResponse>,
+  recallResult: unknown, rankOffset = 0): readonly DeliveredSourceInterval[] | null {
+  if (admitted?.status !== "admitted" || !Number.isSafeInteger(rankOffset) || rankOffset < 0) return null;
   const parsed = SoulInterpretationResponseSchema.safeParse(recallResult);
-  if (!parsed.success || parsed.data.operation !== "recall" || parsed.data.results === undefined) return null;
+  if (!parsed.success || parsed.data.operation !== "recall" || parsed.data.results === undefined
+    || parsed.data.delivery_id !== admitted.exposure.delivery_id || canonicalJson(parsed.data.index) !== canonicalJson(admitted.index)
+    || canonicalJson(parsed.data.slot_qualifiers) !== canonicalJson(admitted.qualifiers)) return null;
   const intervals: DeliveredSourceInterval[] = [];
   for (const [offset, slot] of admitted.slots.entries()) {
     const target = slot.target, result = parsed.data.results[offset];
-    if (target.kind !== "source_evidence" || target.span?.retained_extent !== "body" || result === undefined) return null;
+    if (result === undefined) return null;
+    if (target.kind !== "source_evidence" || target.span?.retained_extent !== "body") continue;
     const span = target.span;
     const omitted = result.content_preview === "[payload omitted]" && !result.budget_state.within_budget;
     const empty = result.content_preview === "[empty source]" && span.content_start === span.content_end;
     const bytes = omitted || empty ? 0 : Buffer.byteLength(result.content_preview, "utf8");
     if (bytes > span.content_end - span.content_start) return null;
-    intervals.push({ rank: slot.rank, target, start: span.content_start, end: span.content_start + bytes });
+    intervals.push({ rank: rankOffset + slot.rank, target, start: span.content_start, end: span.content_start + bytes });
   }
   return intervals;
 }
@@ -147,6 +158,7 @@ type LibraryAdmissionInput = Pick<SourceSemanticLibraryMeasurementInput,
 
 interface LibraryRecall {
   readonly delivery_id: string;
+  readonly request_identity?: string;
   readonly index: InformationIndex;
   readonly order: SourceSemanticLibraryOrder | z.infer<typeof HistoricalSourceOnlyDeliverySchema>["order"];
   readonly slot_qualifiers: readonly SourceSemanticLibrarySlotQualifier[];
@@ -171,6 +183,31 @@ export function measureSourceSemanticLibraryResponse(
 export function admitSourceSemanticLibraryResponse(input: LibraryAdmissionInput) {
   return admitLibraryMeasurement(input, isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null,
     SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET);
+}
+
+/** Explicit two-page chain admission. A continuation receipt is never an initial measurement. */
+export function admitSourceSemanticLibraryContinuation(input: LibraryAdmissionInput & Readonly<{
+  previous: LibraryAdmissionInput; requestContinuation: Continuation; requestIdentity: string;
+}>) {
+  const previous = admitSourceSemanticLibraryResponse(input.previous);
+  const before = isRecord(input.previous.recallResult) ? parseLibraryRecall(input.previous.recallResult) : null;
+  const current = isRecord(input.recallResult) ? parseLibraryRecall(input.recallResult) : null;
+  if (previous?.status !== "admitted" || before === null || before === "invalid" || current === null || current === "invalid"
+    || before.request_identity !== input.requestIdentity || current.request_identity !== input.requestIdentity
+    || previous.index.continuation == null
+    || canonicalJson(input.requestContinuation) !== canonicalJson(previous.index.continuation)
+    || canonicalJson(input.requestBudget) !== canonicalJson(input.previous.requestBudget)
+    || current.delivery_id === before.delivery_id
+    || current.index.result_version !== previous.index.result_version) return invalid("missing_first_exposure");
+  const admitted = admitLibraryMeasurement(input, current, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, previous.exposure);
+  if (admitted?.status !== "admitted") return admitted;
+  if (canonicalJson(admitted.exposure.request_continuation) !== canonicalJson(input.requestContinuation)
+    || canonicalJson(admitted.identity) !== canonicalJson(previous.identity)
+    || admitted.slots.some(slot => previous.slots.some(first => slot.target.kind === "source_evidence"
+      && first.target.kind === "source_evidence" && sourceGoldRootIdentity(slot.target) === sourceGoldRootIdentity(first.target)))) {
+    return invalid("missing_first_exposure");
+  }
+  return admitted;
 }
 
 function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
@@ -277,7 +314,8 @@ function unavailableEvaluation(measurement: SourceSemanticLibraryMeasurement | n
 }
 
 function admitLibraryMeasurement(
-  input: LibraryAdmissionInput, recalled: LibraryRecall | "invalid" | null, pageBudget: number
+  input: LibraryAdmissionInput, recalled: LibraryRecall | "invalid" | null, pageBudget: number,
+  initialExposure?: FirstExposurePage
 ): {
   readonly status: "admitted";
   readonly budget: RequestBudget;
@@ -317,7 +355,9 @@ function admitLibraryMeasurement(
   if (search.results.length !== index.entries.length || search.total_count !== search.results.length
     || !librarySlotsMatchIndex(slots, index, recalled.slot_qualifiers)) return invalid("slot_qualifier_mismatch");
   const exposure = FirstExposurePageSchema.safeParse(input.firstExposurePage);
-  if (!exposure.success || exposure.data.request_continuation !== null || firstExposureMismatch(exposure.data, {
+  if (!exposure.success || (initialExposure === undefined ? exposure.data.request_continuation !== null
+    : exposure.data.request_continuation === null || canonicalJson(exposure.data.initial) !== canonicalJson(initialExposure.initial))
+    || exposure.data.page_purpose !== (index.page_purpose ?? "membership") || firstExposureMismatch(exposure.data, {
     query_id: index.query_id, snapshot_id: index.snapshot_id,
     interpretation_id: index.interpretation_id, as_of: index.as_of
   }, slots, search.delivery_id)) return invalid("missing_first_exposure");
@@ -337,7 +377,7 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
   if (worker.success) {
     if (worker.data.kind !== "recall") return null;
     return {
-      delivery_id: worker.data.delivery_id, index: worker.data.index, order: worker.data.order,
+      delivery_id: worker.data.delivery_id, request_identity: worker.data.request_identity, index: worker.data.index, order: worker.data.order,
       slot_qualifiers: worker.data.slot_qualifiers, total_count: worker.data.total_count,
       previews: worker.data.previews, proofs: worker.data.proofs, request_budget: worker.data.request_budget,
       discovery: worker.data.discovery, coverage: worker.data.coverage,
@@ -353,7 +393,7 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
       return looksLikeLibraryRecall(raw) ? "invalid" : null;
     }
     return {
-      delivery_id: mcp.data.delivery_id, index: mcp.data.index, order: mcp.data.order,
+      delivery_id: mcp.data.delivery_id, request_identity: mcp.data.request_identity, index: mcp.data.index, order: mcp.data.order,
       slot_qualifiers: mcp.data.slot_qualifiers, proofs: mcp.data.proofs, request_budget: mcp.data.request_budget, results: mcp.data.results, total_count: mcp.data.total_count,
       discovery: mcp.data.discovery, coverage: mcp.data.coverage,
       query_semantics_status: mcp.data.query_semantics_status

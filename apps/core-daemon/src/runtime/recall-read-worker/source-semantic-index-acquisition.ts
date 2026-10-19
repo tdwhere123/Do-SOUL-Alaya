@@ -32,6 +32,8 @@ export function acquireSourceSemanticIndex(input: Readonly<{
       // observation ledger and all receipts continue carrying only compact data.
       phase = value as SourceSemanticAcquisitionPhase; meter.acquisition = compact; return;
     }
+    meter.observer?.event("source_index_routes", meter.phase, () => ({ original: phase,
+      beyond_observed_prefix: "unknown_not_nomination_limit" }));
     capturePackSourceSemanticAcquisitionForRequest(phase, input.metadataMeter, finish);
     handedOff = true;
     return { phase, nominations: value as readonly SourceIndexTarget[], releaseCanonical: () => release?.() };

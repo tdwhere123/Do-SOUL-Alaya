@@ -79,7 +79,7 @@ export function observeSourceSemanticAccess(runtime: SourceSemanticReadRuntime, 
   let identity: PreparedSourceSemanticCanonicalSubtrees | undefined;
   const policy = createSourceSemanticAccessPolicy(original, query, policyName, meter, accessHint);
   // Keep output/lease and branch work available after bounded observation. These are portions of the same request ledger.
-  const observation = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
+  const observation = meter.child({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }, "observation");
   const unionCompletion = new SourceSemanticUnionCompletion(meter, observation, policy.orderCost);
   const retainedTuples = new Set<string>();
   const beforeRetain = (record: SourceRecordIdentity, tuple = semanticSourceTupleIdentity(record, observation)) => {
@@ -218,6 +218,9 @@ function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, worksp
     sourcePreviewExtents, { preparation, acquisition, observation: accounting });
   meter.retain(receipt, "access receipt identity", "borrow");
   const access = bindAccessPoolIdentity(runtime, workspace, authorized, receipt, meter, identity);
+  meter.observer?.event("access_order", meter.phase, () => ({ pool_id: access.pool_id,
+    sources: orderedSources.map((row, position) => ({ position, record_id: row.record_id, source_id: row.source_id,
+      read_bytes: row.read_bytes, body_bytes: row.body_bytes, complete: row.complete })), stopping_reasons: [...stops] }));
   const selectedSources = new Array<SourceRecordIdentity>(orderedSources.length);
   for (let index = 0; index < selectedSources.length; index++) selectedSources[index] = byId.get(orderedSources[index]!.record_id)!;
   const descriptors = new Array<SourceSemanticHandleDescriptor>(orderedInterpretations.length);
@@ -375,10 +378,14 @@ function observeInterpretation(runtime: SourceSemanticReadRuntime, workspace: st
     const lookup = SourceSemanticReadBudget.tupleLookupCost("discovered", 1);
     meter.charge(lookup.work_units, lookup.memory_bytes, "access discovered source lookup");
     byId.set(record.identity, record); records.push(record);
+    meter.observer?.event("union_admission", meter.phase, () => ({ route: "interpretation_verification", position: records.length - 1,
+      source_id: record.source_id, record_id: record.identity }));
   }
   if (sourcePreviewExtents === undefined && sources.get(record.identity)?.complete !== true) {
     meter.charge(checked.stored.content_bytes.length, 0, "access verified source extent");
     const bodyBytes = Buffer.byteLength(checked.stored.content_bytes);
+    meter.observer?.event("verification_reuse", meter.phase, () => ({ record_id: record.identity, source_id: record.source_id,
+      start: 0, end: bodyBytes, body_bytes: bodyBytes }));
     const source = { source_id: record.source_id, record_id: record.identity,
       read_bytes: bodyBytes, body_bytes: bodyBytes, complete: true, signal: policy.source(checked.stored.content_bytes, meter) };
     meter.retain(source, "access verified source observation");
@@ -431,6 +438,8 @@ function readInterpretationNavigation(runtime: SourceSemanticReadRuntime, worksp
         nativeLimit, nativeByteLimit, afterCursor: null
       });
       meter.read(page.nativeVisits, page.bytesRead); nativeRemaining -= page.nativeVisits;
+      meter.observer?.event("interpretation_navigation", meter.phase, () => ({ route, ids: page.rows.map(row => row.object_id),
+        unavailable: page.unavailable, resource_limited: page.resourceLimited, rank: "not_provided_by_native_cursor_route" }));
       unavailable ||= page.unavailable; resourceLimited ||= page.resourceLimited;
       for (const row of page.rows) {
         const header = { ...row, identity: row.object_id, query_hint: true as const };
@@ -452,6 +461,8 @@ function readInterpretationHeaderPage(runtime: SourceSemanticReadRuntime, worksp
     limit: Math.min(SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE, meter.work),
     afterCursor: after, nativeByteLimit: Math.min(Math.floor(meter.bytes / 8), 1_000_000) });
   meter.read(page.nativeVisits, page.bytesRead);
+  meter.observer?.event("interpretation_cursor", meter.phase, () => ({ after, committed_through: page.committedThrough,
+    ids: page.rows.map(row => row.object_id), truncated: page.truncated, resource_limited: page.resourceLimited }));
   const rawEmpty = after === null && page.rows.length === 0 && !page.truncated && !page.resourceLimited;
   const rows: InterpretationHeader[] = [];
   for (const row of page.rows) {
@@ -465,7 +476,7 @@ function readInterpretationHeaderPage(runtime: SourceSemanticReadRuntime, worksp
 
 export function accessDescriptorPage(runtime: SourceSemanticReadRuntime, workspace: string, asOf: string, authorized: readonly string[] | null,
   meter: SourceSemanticReadBudget, pool: SourceSemanticAccessPool, offset: number) {
-  const delivery = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
+  const delivery = meter.child({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }, "descriptor_delivery");
   const candidates: SourceSemanticHandleDescriptor[] = [];
   let outputBytes = 0;
   try {

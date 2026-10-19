@@ -152,7 +152,8 @@ export function assertChainSnapshot(config: SemanticChainConfig): void {
   assertSemanticChainSourceIndex(config);
 }
 
-type SemanticChainDaemonOptions = Readonly<{ signal?: AbortSignal; embeddingStartupProbe?: "omit" }>;
+type SemanticChainDaemonOptions = Readonly<{ signal?: AbortSignal; embeddingStartupProbe?: "omit";
+  sourceSemanticObservations?: boolean }>;
 export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
   body: (daemon: BenchDaemonHandle) => Promise<T>, options: SemanticChainDaemonOptions = {}): Promise<T> {
   const captured = { ...options };
@@ -175,6 +176,7 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
     signal?.throwIfAborted();
     const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
       sourceSemanticInterpretationClock: config.interpretation_clock,
+      ...(options.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: options.sourceSemanticObservations }),
       ...(config.source_index === undefined ? { embeddingMode: "disabled" as const,
         ...(embeddingStartupProbe === undefined ? {} : { embeddingStartupProbe }) } : {
         embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const, embeddingStartupProbe: "omit" as const,

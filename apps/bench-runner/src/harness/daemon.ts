@@ -101,6 +101,7 @@ interface BenchDaemonState {
   readonly recallWeightOverrides: BenchDaemonOptions["recallWeightOverrides"];
   readonly relationProjectionAdmissionMode: BenchDaemonOptions["relationProjectionAdmissionMode"];
   readonly sourceSemanticInterpretationClock: string | undefined;
+  readonly sourceSemanticObservations: boolean | undefined;
   readonly fieldProjectionAdmissionMode: BenchDaemonOptions["fieldProjectionAdmissionMode"];
   readonly dataDir: string;
   readonly savedEnv: Partial<Record<string, string | undefined>>;
@@ -169,6 +170,7 @@ async function createBenchDaemonState(
     relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode,
     sourceSemanticInterpretationClock: opts.sourceSemanticInterpretationClock,
+    sourceSemanticObservations: opts.sourceSemanticObservations,
     dataDir,
     savedEnv,
     managedEnvKeys,
@@ -206,6 +208,7 @@ async function bootBenchDaemon(
     relationProjectionAdmissionMode: state.relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode: state.fieldProjectionAdmissionMode,
     ...(state.sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock: state.sourceSemanticInterpretationClock }),
+    ...(state.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: state.sourceSemanticObservations }),
     configDirectory: state.configDirectory,
     managedEnvKeys: state.managedEnvKeys,
     createManagedWorkspaceRoot: state.workspaceManager.createManagedWorkspaceRoot
@@ -247,6 +250,7 @@ function buildBenchDaemonHandle(
 ): BenchDaemonHandle {
   return {
     runtime: resources.runtime,
+    ...(resources.observeSourceSemantics === undefined ? {} : { observeSourceSemantics: resources.observeSourceSemantics }),
     mcpClient: resources.mcpClient,
     get workspaceId() {
       return state.activeContext.workspaceId;

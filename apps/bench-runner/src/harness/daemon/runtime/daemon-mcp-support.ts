@@ -23,13 +23,31 @@ export function makeDispatchCli(
   return async (argv) => bridge.dispatch(argv);
 }
 
+export type BenchMcpToolCapture = Readonly<{
+  request: Readonly<{ name: string; arguments: Record<string, unknown> }>;
+  /** The received MCP envelope, including the original emitted text. */
+  response: unknown;
+}>;
+
 export async function callMcpTool<TOutput>(
   client: Client,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  capture?: (frame: BenchMcpToolCapture) => void
 ): Promise<TOutput> {
-  const result = await client.callTool({ name, arguments: args });
-  if (result.isError === true) {
+  const request = capture === undefined ? { name, arguments: args } : structuredClone({ name, arguments: args });
+  const capturedRequest = capture === undefined ? undefined : structuredClone(request);
+  const result = await client.callTool(request);
+  // Retain failed native responses too. A required archive write failure aborts the
+  // benchmark; independent copies keep capture code from changing admitted output.
+  if (capture !== undefined) capture({ request: capturedRequest!, response: structuredClone(result) });
+  return readBenchMcpToolOutput<TOutput>(name, result);
+}
+
+/** Runtime calls and frozen capture readers share the same MCP success/error admission. */
+export function readBenchMcpToolOutput<TOutput>(name: string, value: unknown): TOutput {
+  const result = value !== null && typeof value === "object" ? value as Record<string, unknown> : undefined;
+  if (result?.isError === true) {
     const contentArray = Array.isArray(result.content)
       ? (result.content as readonly unknown[])
       : [];
@@ -45,7 +63,7 @@ export async function callMcpTool<TOutput>(
       .join("\n");
     throw new Error(`MCP tool ${name} failed: ${errorText}`);
   }
-  const structured = result.structuredContent as
+  const structured = result?.structuredContent as
     | Readonly<{ ok: true; output: TOutput }>
     | undefined;
   if (structured?.ok !== true) {
