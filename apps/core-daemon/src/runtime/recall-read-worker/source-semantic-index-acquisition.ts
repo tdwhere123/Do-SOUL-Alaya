@@ -3,7 +3,7 @@ import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSe
   type SourceIndexQueryVector, type SourceIndexTarget, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { SourceIndexAcquisition, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
-import { quoteSemanticSourceObservation } from "./source-semantic-source-observation.js";
+import { quoteSemanticSourceObservation } from "./source-recall-source-text.js";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
 

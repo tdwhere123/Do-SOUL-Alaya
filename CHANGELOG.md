@@ -33,6 +33,15 @@ invariant §25. Protocol is now `19.1.0`; gateway remains `2.0.0`.
 See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
 and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 
+### Neutral source-recall ownership
+
+Source catalog/access progression and exact delivery admission now have private
+neutral owners; Core retains the existing ranking and selection policies. The
+library adapter retains Q/H/C admission, computation, materialization and leases.
+The extraction preserves current allocations, charges, auxiliary-header reads,
+exact encodings and frozen continuation membership. It does not change ordinary
+`soul.recall`, add a public contract, or calibrate resource budgets.
+
 ### Private recall measurement
 
 Private recall measurement is a bench adapter, not a public diagnostic surface:

@@ -20,7 +20,8 @@ import {
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteEvidenceCapsuleRepo, SqliteSourceHintReader } from "@do-soul/alaya-storage";
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
-import { SourceSemanticReadBudget, listEligibleSemanticSources, sourceSemanticReadStores } from "../../../runtime/field/source-semantic-read-stores.js";
+import { SourceSemanticReadBudget, sourceSemanticReadStores } from "../../../runtime/field/source-semantic-read-stores.js";
+import { listEligibleSemanticSources } from "../../../runtime/recall-read-worker/source-recall-catalog.js";
 import { runSourceSemanticLibraryRecall } from "../../../runtime/recall-read-worker/source-semantic-library-recall.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { createRecallReadWorkerClient, type RecallReadWorkerClient }
