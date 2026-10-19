@@ -2,7 +2,7 @@
  * It imports no model runtime, opens no operator cache and cannot fall back to inference. */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, appendFileSync } from "node:fs";
+import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 assert(globalThis[Symbol.for("alaya.source-embedding-offline-guard")], "guard must precede fixture child entry");
 process.on("disconnect", () => process.exit(0));
@@ -31,5 +31,10 @@ function handle(message) {
     vector: Array.from({ length: 384 }, (_, index) => index === 0 ? 1 : 0), token_count: 2, truncated: false
     })) });
   };
-  if (fixture.delay_ms) setTimeout(respond, fixture.delay_ms); else respond();
+  if (fixture.hold_embedding) {
+    const timer = setInterval(() => {
+      if (!existsSync(join(cacheDir, "release-embedding"))) return;
+      clearInterval(timer); respond();
+    }, 10);
+  } else if (fixture.delay_ms) setTimeout(respond, fixture.delay_ms); else respond();
 }

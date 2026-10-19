@@ -52,7 +52,7 @@ afterAll(() => {
   } finally { candidate?.close(); boundary.restore(); }
 }, 120_000);
 
-async function fixture(options: { unavailable?: boolean; delay_ms?: number; unsolicited_embedding_reply?: boolean } = {}) {
+async function fixture(options: { unavailable?: boolean; delay_ms?: number; hold_embedding?: boolean; unsolicited_embedding_reply?: boolean } = {}) {
   const directory = canonicalPath(mkdtempSync(join(tmpdir(), "source-acquisition-experiment-"))); roots.push(directory);
   const data = join(directory, "authored-source"), cache = join(directory, "synthetic-model-cache"), root = join(directory, "execution");
   mkdirSync(cache);
@@ -204,12 +204,26 @@ it("holds unresolved occupancy across action names and never starts acquisition 
   expect(effects(h.root).effects).toHaveLength(1);
 });
 
-it("excludes competing processes and future renamed effects without refund or replay", async () => {
-  const h = await fixture(); h.input.host_admission.max_effects = 64;
-  const settled = await Promise.allSettled([invoke(h), invoke(h)]);
-  expect(settled.filter(row => row.status === "rejected")).toEqual([]);
-  const results = settled.flatMap(row => row.status === "fulfilled" ? [row.value] : []);
-  expect(results.filter(state => state.execution !== undefined)).toHaveLength(1);
+it("excludes a competing process and renamed effects while the first effect remains active", async () => {
+  const h = await fixture({ hold_embedding: true }); h.input.host_admission.max_effects = 64;
+  const first = invoke(h);
+  // Observe real owned inference occupancy, not two OS launches whose zero-wait
+  // SQLite admission transactions may both fail closed before any effect starts.
+  let completed: Awaited<ReturnType<typeof invoke>>;
+  try {
+    const started = Date.now(), dispatch = join(h.cache, "synthetic-dispatch.jsonl");
+    while (!existsSync(dispatch) || !readFileSync(dispatch, "utf8").includes('"op":"embed_source"')) {
+      if (Date.now() - started > 15_000) throw new Error("owned embedding did not reach its hold");
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const competing = await invoke(h);
+    expect(competing, JSON.stringify(competing)).toMatchObject({ status: "unsettled_unknown" });
+    expect(competing.execution).toBeUndefined();
+  } finally {
+    writeFileSync(join(h.cache, "release-embedding"), "release\n");
+    completed = await first;
+  }
+  expect(comparison(completed).outcome).toBe("complete");
   expect(effects(h.root).effects).toHaveLength(1);
   expect(() => reserveRecoveryHostEffect(h.root, "renamed-daemon", "different", false)).toThrow("already has an effect reservation");
   expect(comparison(await invoke(h)).outcome).toBe("complete");

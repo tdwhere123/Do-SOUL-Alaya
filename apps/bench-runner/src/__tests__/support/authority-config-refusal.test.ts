@@ -4,13 +4,28 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "vitest";
-const { authorityGitRefusalDiagnostic, createAuthorityRevisionGitPolicy } = await import(/* @vite-ignore */
+const { authorityGitRefusalDiagnostic, createAuthorityRevisionGitPolicy, matchesGitIndexStat } = await import(/* @vite-ignore */
   new URL("./authority-revision-git-boundary.mjs", import.meta.url).href);
 const { gitEmptyConfigDevice } = await import(/* @vite-ignore */
   new URL("./read-only-git-boundary.mjs", import.meta.url).href);
 
 const secret = "never-export-config-https://private.invalid/secret";
 const admittedConfig = "[core]\nrepositoryformatversion = 0\nbare = false\n[gc]\nauto = 0\n";
+
+it("matches Git's platform-specific ctime without dropping exact size or timestamp checks", () => {
+  const index = Buffer.alloc(40);
+  index.writeUInt32BE(10, 0); index.writeUInt32BE(100, 4);
+  index.writeUInt32BE(20, 8); index.writeUInt32BE(200, 12); index.writeUInt32BE(30, 36);
+  const stat = { isFile: () => true, size: 30n, birthtimeNs: 10_000_000_100n,
+    ctimeNs: 40_000_000_400n, mtimeNs: 20_000_000_200n };
+  assert.equal(matchesGitIndexStat(stat, index, 0, "win32"), true);
+  assert.equal(matchesGitIndexStat(stat, index, 0, "linux"), false);
+  assert.equal(matchesGitIndexStat({ ...stat, ctimeNs: stat.birthtimeNs }, index, 0, "linux"), true);
+  for (const change of [{ size: 31n }, { birthtimeNs: stat.birthtimeNs + 1n },
+    { mtimeNs: stat.mtimeNs + 1n }, { isFile: () => false }]) {
+    assert.equal(matchesGitIndexStat({ ...stat, ...change }, index, 0, "win32"), false);
+  }
+});
 
 // Synthetic metadata exercises the actual admission owner without executing Git,
 // loading application code, accessing credentials, or inspecting the real checkout.

@@ -192,6 +192,15 @@ function assertWorktreePath(checkout, path, symlink, sourceTemplate = false) {
   if (!stat.isFile() || realpathSync(filename) !== filename) refuse();
 }
 
+export function matchesGitIndexStat(stat, index, start, platform = process.platform) {
+  // Git for Windows stores FILETIME creation time as st_ctim. Node exposes
+  // that as birthtimeNs, while its ctimeNs is the separate NTFS change time.
+  const ctime = platform === "win32" ? stat.birthtimeNs : stat.ctimeNs;
+  return stat.isFile() && stat.size === BigInt(index.readUInt32BE(start + 36)) &&
+    ctime === BigInt(index.readUInt32BE(start)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 4)) &&
+    stat.mtimeNs === BigInt(index.readUInt32BE(start + 8)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 12));
+}
+
 function inspectIndex(checkout, index) {
   // Git index v2/v3 are supported; sparse/split/v4 and gitlinks are deliberately
   // refused so diff cannot launch nested Git/submodule helpers.
@@ -217,9 +226,7 @@ function inspectIndex(checkout, index) {
     if (sourceTemplate) {
       inStage("public_template_stat", () => {
         const stat = lstatSync(join(checkout, path), { bigint: true });
-        if (!stat.isFile() || stat.size !== BigInt(index.readUInt32BE(start + 36)) ||
-            stat.ctimeNs !== BigInt(index.readUInt32BE(start)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 4)) ||
-            stat.mtimeNs !== BigInt(index.readUInt32BE(start + 8)) * 1_000_000_000n + BigInt(index.readUInt32BE(start + 12))) refuse();
+        if (!matchesGitIndexStat(stat, index, start)) refuse();
       });
     }
     // Deletions are real dirty state, not a reason to invent clean contents.
