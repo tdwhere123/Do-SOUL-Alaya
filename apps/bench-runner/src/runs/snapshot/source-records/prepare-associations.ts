@@ -16,7 +16,7 @@ import { parseSourceSemanticInteractivePreflight } from "../../extraction/fill/s
 import { parseRetainedBatchPreflight } from "../../extraction/fill/batch-preflight.js";
 import { sourceSemanticRequestWireDigest } from "../../extraction/fill/source-semantic-interactive-request.js";
 import { readBoundedCanonicalUtf8Artifact } from "../../extraction/cache-audit/bounded-artifact-reader.js";
-import { chainIdentity, writeChainArtifact, writeChainJson } from "../../semantic-chain/contract.js";
+import { chainIdentity, writeChainArtifact, writeChainJson } from "../../recall-measurement/contract.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION, sourceSemanticArtifactPreparations,
   parseExtractionOpenSemanticsGeneration, parseSourceSemanticRequestLine, prepareSourceSemanticRequestLine,
   type SourceRequestLine, type ExtractionOpenSemanticsGeneration } from "../../extraction/request-artifact.js";

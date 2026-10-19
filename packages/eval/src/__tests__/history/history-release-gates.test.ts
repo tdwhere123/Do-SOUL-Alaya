@@ -197,6 +197,8 @@ describe("history archive release-gate reporting", () => {
     );
     expect(report).toContain("1 live/cache-miss failure(s)");
     expect(report).toContain("2 cached raw JSON failure(s)");
+    expect(report).toContain("1 residual drop(s) with no recorded cause");
+    expect(report).not.toContain("batch failed");
   });
 
   it("flags LongMemEval-S embedding full reports below the release gate", () => {

@@ -18,18 +18,6 @@ import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.j
 import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema,
   type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
 
-import { SourceSemanticJointSelectionSchema, type ResearchJointReply } from "../recall-read-worker/source-semantic-joint-boundary.js";
-import type { SourceSemanticJointSelection } from "@do-soul/alaya-core/dist/recall/conditional-field/query/source-semantic-joint-witness.js";
-import type { ResearchSourceAcquisitionReply } from "../recall-read-worker/source-semantic-research-nominated-library.js";
-
-import { QualifiedSourceSelectionSchema, type QualifiedSourceSelection, type QualifiedSourceSelectionReply }
-  from "../recall-read-worker/source-semantic-qualified-selection-boundary.js";
-type SourceSemanticsReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply | QualifiedSourceSelectionReply;
-type LibraryReply = SourceSemanticWorkerResult | ResearchJointReply;
-function ordinarySourceResult(reply: LibraryReply): SourceSemanticWorkerResult {
-  if (reply.kind === "research_joint") throw new CoreError("CONFLICT", "ordinary source execution cannot accept a private joint reply");
-  return reply;
-}
 type PreparedQuery = NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>;
 export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string; supplemental_navigation?: string;
   signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
@@ -47,7 +35,7 @@ import {
   normalizeWorkerCount,
   resolveDefaultWorkerUrl
 } from "../recall-read-worker/client-config.js";
-import { CoreError, SourceIndexAcquisition, encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
+import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import { readRecallTierWindowOverIpc } from "../recall-read-worker/tier-window-client.js";
 import {
   createWorkerMemoryRepo,
@@ -66,21 +54,6 @@ export interface RecallReadWorkerClient {
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
   readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
   readonly sourceSemanticsPort?: SourceSemanticsExecutionPort;
-  /** Named consumer: compareResearchSourceAcquisitionControls. */
-  readonly researchAcquisition?: Readonly<{
-    withExecutionScope: SourceSemanticsExecutionPort["withExecutionScope"];
-    prepareQuery(input: SourceSemanticsPublicPayload):
-      Promise<NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>>;
-    dispatch(input: SourceSemanticsPublicPayload,
-      prepared: NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>,
-      control: "lexical" | "vector" | "dual"): Promise<ResearchSourceAcquisitionReply>;
-  }>;
-  /** Private guarded source experiment consumer; ordinary recall retains its preparation path. */
-  readonly researchLibrary?: Readonly<{ recall(input: SourceSemanticsPublicPayload,
-    selection?: SourceSemanticJointSelection): Promise<LibraryReply>;
-    compareQualified(input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection,
-      selection?: SourceSemanticJointSelection): Promise<QualifiedSourceSelectionReply>;
-  }>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -304,100 +277,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   public readonly sourceSemanticsPort: SourceSemanticsExecutionPort = {
     withExecutionScope: async (input, work) => await this.lifecycle.executionScope(input, work),
-    execute: async input => await this.withPreparedSourceExecution(input, async execute => ordinarySourceResult(await execute())),
-    withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input,
-      execute => work(async () => ordinarySourceResult(await execute())))
-  };
-
-  /** Named consumer: compareResearchSourceAcquisitionControls. Production execute never sets acquisition_control. */
-  public readonly researchAcquisition = {
-    withExecutionScope: this.sourceSemanticsPort.withExecutionScope,
-    prepareQuery: async (input: SourceSemanticsPublicPayload): Promise<PreparedQuery> => {
-      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
-      const request = captured.request;
-      if (request.kind !== "recall" || request.original_query === undefined || request.query_handle !== undefined
-        || request.continuation !== undefined || request.access_policy === "canonical-v1") {
-        throw new CoreError("VALIDATION", "research acquisition controls require one initial query-conditioned recall");
-      }
-      if (this.prepareSourceQuery === undefined) {
-        throw new CoreError("CONFLICT", "query preparation requires an embedding preparation binding");
-      }
-      if (this.lifecycle.snapshotHasBegun()) {
-        throw new CoreError("CONFLICT", "query preparation requires an unbegun snapshot scope");
-      }
-      const navigation = request.original_query;
-      const deadline = this.lifecycle.preparationDeadline();
-      const prepared = structuredClone(await this.lifecycle.beforeSnapshotPreparation(() => this.prepareSourceQuery!({
-        workspace_id: captured.workspace_id, navigation,
-        signal: deadline.signal, remainingMs: () => deadline.remainingMs()
-      })));
-      try { deadline.check(); return prepared; }
-      catch (error) {
-        if (typeof error === "object" && error !== null) {
-          Object.defineProperty(error, "researchPreparedQuery", { value: prepared, enumerable: false });
-        }
-        throw error;
-      }
-    },
-    dispatch: async (input: SourceSemanticsPublicPayload, prepared: PreparedQuery, control: "lexical" | "vector" | "dual") => {
-      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
-      const capturedPrepared = structuredClone(prepared);
-      SourceIndexAcquisition.assertControl({
-        control, vector: capturedPrepared.vector, receipt: capturedPrepared.receipt,
-        navigation: captured.request.kind === "recall" ? captured.request.original_query : undefined,
-        request: captured.request
-      });
-      if (this.lifecycle.pinnedWorker() === undefined) {
-        throw new CoreError("OBLIGATION_VIOLATION", "recall read snapshot is not isolated onto a worker");
-      }
-      this.lifecycle.preparationDeadline().check();
-      const reply = await this.lifecycle.request<SourceSemanticsReply>("conditionalField.sourceSemantics", {
-        ...captured, prepared_query: capturedPrepared, acquisition_control: control
-      });
-      if (reply.kind !== "research_acquisition") {
-        throw new CoreError("CONFLICT", "research acquisition requires its private reply");
-      }
-      return reply;
-    }
-  };
-
-  public readonly researchLibrary = {
-    compareQualified: async (input: SourceSemanticsPublicPayload, population: QualifiedSourceSelection,
-      selection?: SourceSemanticJointSelection): Promise<QualifiedSourceSelectionReply> => {
-      // Admission precedes every worker effect; this path intentionally never calls withPreparedSourceExecution.
-      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
-      const qualified = QualifiedSourceSelectionSchema.parse(structuredClone(population));
-      const joint = selection === undefined ? undefined : SourceSemanticJointSelectionSchema.parse(structuredClone(selection));
-      if (captured.request.kind !== "recall" || captured.request.original_query === undefined ||
-          captured.request.query_semantics === undefined || captured.request.query_handle !== undefined ||
-          captured.request.continuation !== undefined || captured.request.access_policy !== "query-conditioned-v1") {
-        throw new CoreError("VALIDATION", "qualified comparison requires direct Q-present recall");
-      }
-      if (this.lifecycle.pinnedWorker() === undefined || !this.lifecycle.snapshotHasBegun()) {
-        throw new CoreError("CONFLICT", "qualified comparison requires its caller-owned native read snapshot");
-      }
-      this.lifecycle.preparationDeadline().check();
-      const reply = await this.lifecycle.request<SourceSemanticsReply>("conditionalField.sourceSemantics", {
-        ...captured, qualified_control: qualified, ...(joint === undefined ? {} : { joint_control: joint })
-      });
-      if (reply.kind !== "research_qualified_selection") throw new CoreError("CONFLICT", "qualified comparison reply mismatch");
-      return reply;
-    },
-    recall: async (input: SourceSemanticsPublicPayload, selection?: SourceSemanticJointSelection): Promise<LibraryReply> => {
-      return await this.withPreparedSourceExecution(input, execute => execute(), selection);
-    }
+    execute: async input => await this.withPreparedSourceExecution(input, execute => execute()),
+    withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input, work)
   };
 
   private async withPreparedSourceExecution<T>(input: SourceSemanticsPublicPayload,
-    work: (execute: () => Promise<LibraryReply>) => Promise<T>, selection?: SourceSemanticJointSelection): Promise<T> {
+    work: (execute: () => Promise<SourceSemanticWorkerResult>) => Promise<T>): Promise<T> {
     return await this.lifecycle.withinDeadline("conditionalField.sourceSemantics", async () => {
       // Synchronous whole-input capture precedes binding, worker acquisition and caller beginDeferred.
       const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
-      const joint = selection === undefined ? undefined : SourceSemanticJointSelectionSchema.parse(structuredClone(selection));
       const request = captured.request;
-      if (joint !== undefined && (request.kind !== "recall" || request.continuation !== undefined)) {
-        throw new CoreError("VALIDATION", "private joint delivery requires initial library recall");
-      }
       const initial = request.kind === "prepare_query" ? request.source_handle === undefined &&
         request.continuation_handle === undefined && request.source_preview_extents === undefined
         : request.kind === "recall" && request.query_handle === undefined && request.continuation === undefined;
@@ -431,19 +320,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         const owner = handle === undefined ? undefined : this.deliveryOwner(handle);
         return await this.lifecycle.isolate(async () => {
           const worker = this.lifecycle.pinnedWorker()!;
-          const parsed = await this.lifecycle.request<SourceSemanticsReply>(
+          const native = await this.lifecycle.request<SourceSemanticWorkerResult>(
             "conditionalField.sourceSemantics", { ...captured,
-              ...(prepared === undefined ? {} : { prepared_query: prepared }),
-              ...(joint === undefined ? {} : { joint_control: joint }) });
-          if (parsed.kind === "research_qualified_selection") throw new CoreError("CONFLICT", "ordinary source execution cannot accept a qualified comparison");
-          if (parsed.kind === "research_acquisition") {
-            throw new CoreError("CONFLICT", "ordinary source execution cannot accept a private research reply");
-          }
-          if (parsed.kind === "research_joint" && joint === undefined) {
-            throw new CoreError("CONFLICT", "ordinary source execution cannot accept a private joint reply");
-          }
-          // A private wrapper does not own a second capability route. Register its native sibling here too.
-          const native = parsed.kind === "research_joint" ? parsed.result : parsed;
+              ...(prepared === undefined ? {} : { prepared_query: prepared }) });
           const issued = native.kind === "prepare_source" ? native.source_handle
             : native.kind === "prepare_query" ? native.query_handle : undefined;
           if (issued !== undefined) this.deliveryOwners.set(issued, worker);
@@ -453,7 +332,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
             if (native.index.continuation !== null) this.deliveryOwners.set(native.index.continuation.continuation_id, worker);
           }
           while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
-          return parsed;
+          return native;
         }, owner);
       });
     });

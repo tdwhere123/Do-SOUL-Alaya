@@ -202,6 +202,7 @@ export function createErrorReviewHandler(
         return { ...base, proposal };
       },
       findPendingSummaries: async () => [],
+      countPendingSummaries: async () => 0,
       acceptPendingMemoryUpdateWithEvents: async () => {
         throw new Error("acceptPendingMemoryUpdateWithEvents must not be reached on the error path");
       },
@@ -262,6 +263,7 @@ export function createReviewHandler(): McpMemoryToolHandler {
         proposed_changes: { content: "approved locally" }
       }),
       findPendingSummaries: async () => [],
+      countPendingSummaries: async () => 0,
       acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, memoryUpdate, options) => {
         expect(options?.reviewerIdentity).toBe("user:server-reviewer");
         expect(memoryUpdate.caused_by).toBe(`proposal_accept:${proposal.proposal_id}`);

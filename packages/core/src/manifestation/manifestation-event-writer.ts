@@ -1,5 +1,5 @@
 import {
-  BoundedJsonObjectSchema,
+  EventLogPayloadSchema,
   ManifestationBudgetEvaluatedPayloadSchema,
   ManifestationEscalationDecidedPayloadSchema,
   ManifestationLevel,
@@ -22,11 +22,6 @@ type DecisionEventItem = Readonly<{
   assigned_level: ManifestationDecision["assigned_level"];
   reason: string;
 }>;
-
-// Wide placeholders so a later real batch_index/batch_count stamp cannot
-// push a previously-accepted batch over the bounded JSON limit.
-const BATCH_FIT_PROBE_INDEX = 999_999;
-const BATCH_FIT_PROBE_COUNT = 1_000_000;
 
 export async function appendManifestationGovernanceEvents(
   input: AppendManifestationEventsInput
@@ -82,7 +77,7 @@ function createBoundedDecisionPayloads(input: AppendManifestationEventsInput) {
   const batchCount = batches.length;
   return Object.freeze(
     batches.map((items, batchIndex) =>
-      BoundedJsonObjectSchema.parse(
+      EventLogPayloadSchema.parse(
         createDecisionPayload(input, items, batchIndex, batchCount)
       )
     )
@@ -93,8 +88,10 @@ function fitsDecisionBatch(
   input: AppendManifestationEventsInput,
   decisions: readonly DecisionEventItem[]
 ): boolean {
-  return BoundedJsonObjectSchema.safeParse(
-    createDecisionPayload(input, decisions, BATCH_FIT_PROBE_INDEX, BATCH_FIT_PROBE_COUNT)
+  // At most one nonempty batch per decision: these stamps are at least as
+  // wide as the final values, without imposing a separate batch-count limit.
+  return EventLogPayloadSchema.safeParse(
+    createDecisionPayload(input, decisions, input.decisions.length - 1, input.decisions.length)
   ).success;
 }
 

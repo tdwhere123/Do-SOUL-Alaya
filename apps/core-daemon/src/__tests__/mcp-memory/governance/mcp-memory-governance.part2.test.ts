@@ -87,6 +87,7 @@ describe("mcp memory governance", () => {
           proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, resolutionEvents) => {
           const storedEvents = resolutionEvents.map((event) => {
             const entry = {
@@ -167,6 +168,7 @@ describe("mcp memory governance", () => {
           run_id: "run-agent"
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for workspace mismatch");
         }
@@ -213,6 +215,7 @@ describe("mcp memory governance", () => {
           run_id: "run-stored"
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for run mismatch");
         }
@@ -257,6 +260,7 @@ describe("mcp memory governance", () => {
           proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for unbound attached agent");
         }
@@ -303,6 +307,7 @@ describe("mcp memory governance", () => {
           proposed_changes: { evidence_refs: ["missing-evidence"] }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: acceptWrite,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("reject path not exercised");
@@ -365,6 +370,7 @@ describe("mcp memory governance", () => {
           run_id: "run2"
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("update should not run for a scope mismatch");
         }

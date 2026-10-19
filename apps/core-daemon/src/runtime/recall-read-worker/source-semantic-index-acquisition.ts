@@ -6,7 +6,6 @@ import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { quoteSemanticSourceObservation } from "./source-semantic-source-observation.js";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
-import type { ResearchLexicalPrefixCapture } from "./source-semantic-research-lexical-prefix.js";
 
 type Route = Readonly<{ navigation: string; vector: SourceIndexQueryVector }>;
 type Allowance = SourceSemanticAcquisitionPhase["allowance"];
@@ -20,7 +19,6 @@ export function acquireSourceSemanticIndex(input: Readonly<{
   runtime: SourceSemanticReadRuntime; workspace: string; navigation: string; authorized: readonly string[] | null;
   meter: SourceSemanticReadBudget; metadataMeter: SourceSemanticReadBudget; vector: SourceIndexQueryVector;
   supplemental?: Route; canonicalBytes: number; sourceCost: (length: number) => SourceSemanticResourceBudget;
-  control?: Parameters<SourceIndexAcquisition["nominate"]>[2]; lexicalCapture?: ResearchLexicalPrefixCapture;
 }>): { phase: SourceSemanticAcquisitionPhase; nominations: readonly SourceIndexTarget[]; releaseCanonical: () => void } {
   const { meter } = input;
   const quote = quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes));
@@ -45,10 +43,8 @@ export function acquireSourceSemanticIndex(input: Readonly<{
       max_vector_windows: Math.min(4096, budget.work_units) };
     const repository = new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256);
     const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
-    const original = input.lexicalCapture === undefined ? acquisition : new SourceIndexAcquisition(
-      input.lexicalCapture.repository(repository, input.runtime), fieldContractSha256);
     const run = (route: Route, remaining: Allowance): SourceSemanticAcquisitionPhase =>
-      acquireRoute(route === input ? original : acquisition, input.workspace, input.authorized, route, remaining, meter, input.control);
+      acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter);
     phase = run(input, allowance);
     const nominations = phase.result?.nominations.map(row => row.source) ?? [];
     const hint = input.supplemental;
@@ -87,8 +83,7 @@ export function acquireSourceSemanticIndex(input: Readonly<{
 }
 
 function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, authorized: readonly string[] | null,
-  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget,
-  control?: Parameters<SourceIndexAcquisition["nominate"]>[2]): SourceSemanticAcquisitionPhase {
+  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget): SourceSemanticAcquisitionPhase {
   let phase = { ...sourceSemanticAcquisitionNotRun("acquisition_envelope_allowance"), allowance, budget: meter.remaining() };
   if (allowance.max_attempts === 0 || allowance.max_roots === 0) return { ...phase, reason: "shared_nomination_allowance" };
   try {
@@ -108,7 +103,7 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
       vector: route.vector, allowance, budget }, scope => {
         try { authorizeSemanticScope(scope, authorized); return "admitted"; }
         catch { return "denied"; }
-      }, control);
+      });
     meter.absorbIndex(result.resources);
     const failed = result.resource_refusals.some(row => row.phase === "acquisition_failed_unknown_additional_cost");
     return { ...phase, status: failed ? "failed" : "executed", reason: failed ? "acquisition_failed" : null,

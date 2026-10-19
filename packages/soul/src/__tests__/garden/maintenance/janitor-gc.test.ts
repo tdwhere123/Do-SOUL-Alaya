@@ -23,7 +23,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       dormantDemotionPort,
       scheduler,
@@ -61,7 +61,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       dormantDemotionPort,
       scheduler,
@@ -99,7 +99,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort,
       scheduler: {
@@ -131,7 +131,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcDeferredReason: "temporal_assertion_provenance_required",
       tombstoneGcPort: legacyTombstoneGcPort,
@@ -167,7 +167,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort,
       strongRefProtectionPort,
@@ -203,7 +203,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort,
       scheduler: {
@@ -243,7 +243,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort,
       dispositionSweepPort,
@@ -280,7 +280,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort: {
         findTombstonedMemories: vi.fn(async () => []),
@@ -322,7 +322,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort: {
         findTombstonedMemories: vi.fn(async () => []),
@@ -374,7 +374,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort: {
         findTombstonedMemories: vi.fn(async () => []),
@@ -424,7 +424,7 @@ describe("Janitor GC task kinds", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       tombstoneGcPort: {
         findTombstonedMemories: vi.fn(async () => []),

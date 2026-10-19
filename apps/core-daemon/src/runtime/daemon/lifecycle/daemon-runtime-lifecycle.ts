@@ -218,6 +218,14 @@ function createShutdownHandler(
     state.shuttingDown = (async () => {
       try {
         await drainInFlightRequests(input);
+        if (input.lifecycleState.inFlight.count > 0) {
+          await closeHttpServers(input, state);
+          // Socket closure does not cancel handlers. Keep their dependencies alive
+          // until the request middleware's finally blocks release the tracker.
+          while (input.lifecycleState.inFlight.count > 0) {
+            await delay(REQUEST_DRAIN_POLL_MAX_MS, input.timerPort ?? defaultLifecycleTimerPort);
+          }
+        }
         const backgroundStop = await stopBackgroundServices(input, state);
         await closeRuntimeResources(input, state);
         await closeSqliteAfterBackgroundStop(input, backgroundStop);
@@ -470,8 +478,6 @@ async function closeRuntimeResources(
   input: CreateDaemonLifecycleControlsInput,
   state: LifecycleState
 ): Promise<void> {
-  const processPort = input.processPort ?? process;
-  const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
   closeRuntimeResourceStep(input, "security status shutdown failed", () => {
     input.securityStatusService.close();
   });
@@ -482,7 +488,17 @@ async function closeRuntimeResources(
     input.globalMemoryRecallInvalidationSubscription?.dispose();
   });
   clearLifecycleIntervals(input.intervalsToClear);
+  await closeHttpServers(input, state);
+  await closeEmbeddingProvider(input);
+  await closeRecallReadWorkerClient(input);
+}
 
+async function closeHttpServers(
+  input: CreateDaemonLifecycleControlsInput,
+  state: LifecycleState
+): Promise<void> {
+  const processPort = input.processPort ?? process;
+  const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
   if (state.unixServer !== null) {
     const unixCloseResult = await closeServer(state.unixServer, timerPort);
     finalizeServerClose(unixCloseResult, input.warnLogger, processPort);
@@ -494,9 +510,6 @@ async function closeRuntimeResources(
     finalizeServerClose(closeResult, input.warnLogger, processPort);
     state.server = null;
   }
-
-  await closeEmbeddingProvider(input);
-  await closeRecallReadWorkerClient(input);
 }
 
 function unregisterSignalShutdownHandlers(

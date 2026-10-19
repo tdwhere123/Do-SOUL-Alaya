@@ -137,8 +137,38 @@ async function runExtraction(
   runtime: ExtractorRuntime,
   input: ExtractInput
 ): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }> {
+  const message = await requestCompletion(runtime, input);
   try {
-    return await runExtractionAttempt(runtime, input);
+    const recovered = recoverAttemptJson(message);
+    input.validateRawJson?.(recovered.rawJson);
+    return {
+      rawJson: recovered.rawJson,
+      extractorMeta: {
+        recoveryKind: recovered.recoveryKind,
+        retryCount: message.executionMeta?.retryCount ?? 0,
+        retryClassification: message.executionMeta?.retryClassification ?? "success_first_try"
+      }
+    };
+  } catch (error) {
+    if (error instanceof SignalExtractorError) throw normalizeConsumerFailure(error);
+    // The consumer owns schema and request-bound admission, including its diagnostics.
+    throw error;
+  }
+}
+
+async function requestCompletion(
+  runtime: ExtractorRuntime,
+  input: ExtractInput
+): Promise<PiMonoAssistantMessage> {
+  try {
+    return await runtime.complete(runtime.model, buildPiMonoContext(input), {
+      apiKey: runtime.apiKey,
+      signal: input.abortSignal,
+      timeoutMs: input.timeoutMs,
+      maxRetries: DEFAULT_MAX_RETRIES,
+      temperature: 0,
+      onPayload: requestJsonPayload
+    });
   } catch (error) {
     if (error instanceof SignalExtractorError) throw normalizeConsumerFailure(error);
     if (input.abortSignal?.aborted === true) {
@@ -152,34 +182,6 @@ async function runExtraction(
       retryClassification: "failure_transport_port"
     });
   }
-}
-
-async function runExtractionAttempt(
-  runtime: ExtractorRuntime,
-  input: ExtractInput
-): Promise<{ readonly rawJson: string; readonly extractorMeta?: SignalExtractorMeta }> {
-  const message = await runtime.complete(
-    runtime.model,
-    buildPiMonoContext(input),
-    {
-      apiKey: runtime.apiKey,
-      signal: input.abortSignal,
-      timeoutMs: input.timeoutMs,
-      maxRetries: DEFAULT_MAX_RETRIES,
-      temperature: 0,
-      onPayload: requestJsonPayload
-    }
-  );
-  const recovered = recoverAttemptJson(message);
-  input.validateRawJson?.(recovered.rawJson);
-  return {
-    rawJson: recovered.rawJson,
-    extractorMeta: {
-      recoveryKind: recovered.recoveryKind,
-      retryCount: message.executionMeta?.retryCount ?? 0,
-      retryClassification: message.executionMeta?.retryClassification ?? "success_first_try"
-    }
-  };
 }
 
 function buildPiMonoContext(input: ExtractInput): PiMonoContext {

@@ -14,7 +14,7 @@ import { joinLongMemEvalAnswerSpans } from "../../../runs/longmemeval-semantic/a
 import { measureLongMemEvalAcquisition, summarizeLongMemEvalAcquisition } from "../../../runs/longmemeval-semantic/acquisition-measurement.js";
 import { measureSourceSemanticLibraryResponse } from "../../../runs/measurement/source-semantic-library-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
-import type { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
+import type { measureSemanticChain } from "../../../runs/recall-measurement/replay.js";
 import { assemble, sourceOnly, workerRecall, GOLD, DIGEST, REQUEST } from "./source-semantic-library-measurement-fixture.js";
 
 afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });

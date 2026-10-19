@@ -15,14 +15,14 @@ import type { WarnLogger } from "../../runtime/daemon/lifecycle/daemon-runtime-h
 
 type ExtensionRegistryDeps = ConstructorParameters<typeof ExtensionRegistryService>[0];
 type McpToolDiscoveryDeps = ConstructorParameters<typeof McpToolDiscoveryService>[0];
-type EventLogWriterPort = ExtensionRegistryDeps["eventLogWriter"] & McpToolDiscoveryDeps["eventLogWriter"];
-type RuntimeNotifierPort = NonNullable<ExtensionRegistryDeps["runtimeNotifier"]> &
-  NonNullable<McpToolDiscoveryDeps["runtimeNotifier"]>;
+type EventLogWriterPort = McpToolDiscoveryDeps["eventLogWriter"];
+type RuntimeNotifierPort = NonNullable<McpToolDiscoveryDeps["runtimeNotifier"]>;
 type ExtensionStorePort = ExtensionRegistryDeps["extensionStore"];
 type ExtensionRegistryToolSpecPort = ExtensionRegistryDeps["toolSpecService"];
 
 export async function bootstrapDaemonMcpTooling(input: {
   readonly eventLogRepo: EventLogWriterPort;
+  readonly eventPublisher: ExtensionRegistryDeps["eventPublisher"];
   readonly extensionDescriptorRepo: ExtensionStorePort;
   readonly now: () => string;
   readonly nowMs?: () => number;
@@ -35,8 +35,8 @@ export async function bootstrapDaemonMcpTooling(input: {
   const extensionRegistryService = new ExtensionRegistryService({
     extensionStore: input.extensionDescriptorRepo,
     toolSpecService: input.toolSpecService,
-    eventLogWriter: input.eventLogRepo,
-    runtimeNotifier: input.runtimeNotifier,
+    eventPublisher: input.eventPublisher,
+    now: input.now,
     defaultWorkspaceId: "system"
   });
   const daemonMcpRuntimeRegistry = createDaemonMcpRuntimeRegistry({

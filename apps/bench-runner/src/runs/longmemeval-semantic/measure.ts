@@ -2,14 +2,14 @@ import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } from "../../harness/daemon-task.js";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
-import { admitSemanticChainReplay, measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
+import { admitSemanticChainReplay, measureSemanticChain, semanticChainReplayInputPaths } from "../recall-measurement/replay.js";
 import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
 import { joinLongMemEvalAnswerSpans } from "./answer-spans.js";
 import { measureLongMemEvalAcquisition, summarizeLongMemEvalAcquisition, type LongMemEvalAcquisition } from "./acquisition-measurement.js";
-import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
-import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
+import { retainedSemanticChainCacheInputPaths } from "../recall-measurement/inputs.js";
+import { semanticProposalCacheInputPaths } from "../semantic-cache/attempt.js";
 import { sourceCacheInputPaths } from "../extraction/cache/source-cache-inputs.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "../recall-measurement/contract.js";
 import { SourceGoldUnitSchema } from "../measurement/source-gold-join.js";
 import type { LongMemEvalQuestion } from "../../datasets/longmemeval/ingestion/dataset.js";
 import { longMemEvalDatasetInputPaths } from "../../datasets/longmemeval/ingestion/fetch.js";
@@ -200,7 +200,7 @@ async function measureBoundLongMemEvalSemanticRun(root: string, replayPath: stri
     mechanism: frozen.mechanism, provider_calls: 0,
     route_scope: { arm: frozen.contract === "longmemeval-native-semantic-v3" ? "native_semantic" : "source_only_canonical",
       access_policy: frozen.contract === "longmemeval-native-semantic-v3" ? frozen.native_route.access_policy : "canonical-v1",
-      embedding_configuration: { mode: "disabled", owner: "semantic-chain/contract.ts:runBoundSemanticChainDaemon" },
+      embedding_configuration: { mode: "disabled", owner: "recall-measurement/contract.ts:runBoundSemanticChainDaemon" },
       normal_production_capability_baseline: false },
     acquisition: summarizeLongMemEvalAcquisition(selectedRows.map(row => row.acquisition)),
     inventory: { questions: rows.length, answerable: totalEligible, abstention: rows.length - totalEligible },

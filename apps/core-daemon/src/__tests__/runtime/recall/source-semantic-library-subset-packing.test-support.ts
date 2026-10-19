@@ -13,8 +13,9 @@ import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { SourceSemanticReadBudget, sourceSemanticReadStores } from "../../../runtime/field/source-semantic-read-stores.js";
 import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
-import { bindResearchSourceAccessPool, bindVerifiedResearchSourceRecords }
-  from "../../../runtime/recall-read-worker/source-semantic-research-pool.js";
+import { accessInputIdentity } from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
+import { bindAccessPoolIdentity, sourceSemanticAccessReceiptValue }
+  from "../../../runtime/recall-read-worker/source-semantic-access-receipts.js";
 import { deliverFrozenLibraryPage, prepareLibraryDelivery, type LibraryPageSelector }
   from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -116,13 +117,15 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
       if (current === null || stored === null) throw new Error("admitted exposure source expected");
       exposure_sources.push({ record: current, body: stored.content_bytes });
       const bytes = Buffer.byteLength(source.body);
-      return { source_id: source.id, record_id: proofRecord.identity, source_version: proofRecord.source_version,
-        content_digest: proofRecord.content_digest, read_bytes: bytes, body_bytes: bytes, complete: true,
+      return { source_id: source.id, record_id: proofRecord.identity, read_bytes: bytes, body_bytes: bytes, complete: true,
         signal: { source_text_score: 0, interpretation_reading_score: 0 } };
     });
-    const records = bindVerifiedResearchSourceRecords(runtime, WS, SCOPES, setupMeter, observations);
-    const pool = bindResearchSourceAccessPool(runtime, WS, SCOPES, setupMeter, fixture.original,
-      fixture.semantics, selectionExecutionBudget, records, observations, [], []);
+    const inputId = accessInputIdentity(fixture.original, fixture.semantics, selectionExecutionBudget, "query-conditioned-v1");
+    const receipt = sourceSemanticAccessReceiptValue(setupMeter, "query-conditioned-v1", inputId,
+      observations, [], false, false, []);
+    const pool = { sources: exposure_sources.map(source => source.record), descriptors: [],
+      access: bindAccessPoolIdentity(runtime, WS, SCOPES, receipt, setupMeter), sourcePages: 1, interpretationPages: 0 };
+    setupMeter.retain(pool.access, "fixture source pool identity");
     return { fixture, runtime, pool, exposure_sources, setup_work: work(setupMeter), close: async () => {
       database.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true });
     } };

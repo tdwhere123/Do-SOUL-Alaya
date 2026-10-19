@@ -195,6 +195,7 @@ describe("proposal review inspector cli parity", () => {
           proposed_changes: { content: "approved locally" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: updateSpy,
         updatePendingResolutionWithEvents: updateSpy
       },

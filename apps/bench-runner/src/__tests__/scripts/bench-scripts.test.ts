@@ -145,6 +145,87 @@ describe("bench maintenance scripts", () => {
     expect(absent.stderr).toContain(`selected extraction cache manifest is missing: ${path.join(missing, "manifest.json")}`);
   });
 
+  it("reuses only a matching completed-run checkpoint and blocks a changed request without spawning a bench", async () => {
+    const script = path.join(repoRoot, "scripts/run-full-bench-v0311.mjs");
+    const dataDir = path.join(tmpDir, "data");
+    const historyRoot = path.join(tmpDir, "history");
+    const logRoot = path.join(tmpDir, "logs");
+    const cacheRoot = path.join(tmpDir, "cache");
+    const spawnLog = path.join(tmpDir, "bench-spawns.log");
+    await mkdir(path.join(dataDir, "longmemeval"), { recursive: true });
+    await mkdir(cacheRoot);
+    await writeFile(
+      path.join(cacheRoot, "manifest.json"),
+      JSON.stringify({ extraction_model: "checkpoint-model" })
+    );
+    const preloadPath = path.join(tmpDir, "fake-bench-runner.cjs");
+    await writeFile(
+      preloadPath,
+      [
+        "\"use strict\";",
+        "const { appendFileSync, mkdirSync, writeFileSync } = require(\"node:fs\");",
+        "const path = require(\"node:path\");",
+        "if ((process.argv[1] ?? \"\").endsWith(\"alaya-bench-runner.mjs\")) {",
+        `  appendFileSync(${JSON.stringify(spawnLog)}, "spawn\\n");`,
+        "  const argv = process.argv.slice(2);",
+        "  const historyRoot = argv[argv.indexOf(\"--history-root\") + 1];",
+        "  const archive = path.join(historyRoot, \"public\", \"2099-01-01T000000Z-abcdef0-policy-chat\");",
+        "  mkdirSync(archive, { recursive: true });",
+        "  writeFileSync(path.join(archive, \"kpi.json\"), \"{}\\n\");",
+        "  process.exit(0);",
+        "}",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const env = {
+      ...cliScriptEnv(),
+      OFFICIAL_API_GARDEN_MODEL: "checkpoint-model",
+      NODE_OPTIONS: `--require=${preloadPath}`
+    };
+    const runArgs = [
+      script,
+      "--bench", "lme-s",
+      "--limit", "1",
+      "--data-dir", dataDir,
+      "--history-root", historyRoot,
+      "--log-root", logRoot,
+      "--extraction-cache-root", cacheRoot
+    ];
+
+    const completed = await execFileWithFileCapture(process.execPath, runArgs, { env });
+    expect(completed.stdout).toContain("lme-s: OK");
+    expect(await readFile(spawnLog, "utf8")).toBe("spawn\n");
+
+    const resumed = await execFileWithFileCapture(
+      process.execPath,
+      [...runArgs, "--resume"],
+      { env }
+    );
+    expect(resumed.stdout).toContain("SKIP (resume checkpoint matches");
+    expect(await readFile(spawnLog, "utf8")).toBe("spawn\n");
+
+    const changed = await execFileRejects(
+      process.execPath,
+      [
+        script,
+        "--bench", "lme-s",
+        "--limit", "2",
+        "--data-dir", dataDir,
+        "--history-root", historyRoot,
+        "--log-root", logRoot,
+        "--extraction-cache-root", cacheRoot,
+        "--resume"
+      ],
+      env
+    );
+    expect(changed.code).toBe(1);
+    expect(changed.stderr).toContain("checkpoint is not reusable");
+    expect(changed.stderr).toContain("limit recorded=1 requested=2");
+    expect(changed.stderr).toContain("No bench was started");
+    expect(await readFile(spawnLog, "utf8")).toBe("spawn\n");
+  });
+
   it("forwards the shared default history root through the daily wrapper without starting a bench", async () => {
     const markerPath = path.join(tmpDir, "forwarded.json");
     const intercept = path.join(tmpDir, "capture.cjs");

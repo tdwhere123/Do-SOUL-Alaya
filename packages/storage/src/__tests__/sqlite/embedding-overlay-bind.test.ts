@@ -10,8 +10,13 @@ import {
   initDatabase,
   writeEmbeddingOverlayBind
 } from "../../sqlite/index.js";
+import {
+  BOUNDED_EMBEDDING_INDEX_SQL,
+  readBoundedEmbeddingIds
+} from "../../repos/memory/reads/memory-embedding-bounded-read.js";
 
 const OBJECT_ID = "11111111-1111-4111-8111-111111111111";
+const BORROWED_OBJECT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 describe("sqlite embedding overlay bind", () => {
   const roots: string[] = [];
@@ -98,6 +103,45 @@ describe("sqlite embedding overlay bind", () => {
     );
     database.close();
   });
+
+  it("enumerates a borrowed overlay vector through the bounded identity index scan", async () => {
+    const root = await mkdtemp(join(tmpdir(), "alaya-overlay-bounded-ids-"));
+    roots.push(root);
+    const databasePath = join(root, "alaya.db");
+    const overlayPath = join(root, "overlay.sqlite");
+    initDatabase({ filename: databasePath }).close();
+    createOverlayTables(overlayPath);
+    const overlay = new BetterSqlite3(overlayPath);
+    overlay.prepare(`
+      INSERT INTO memory_embeddings (
+        object_id, workspace_id, content_hash, provider_kind, model_id,
+        schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(
+      BORROWED_OBJECT_ID, "workspace-1", "sha256:borrowed-overlay-vector", "local_onnx", "fixture-model",
+      1, 2, encodeVector(new Float32Array([9, 8])),
+      "2026-08-10T00:00:00.000Z", "2026-08-10T00:00:00.000Z"
+    );
+    overlay.close();
+    writeEmbeddingOverlayBind({
+      databaseFilename: databasePath,
+      overlayFilename: "overlay.sqlite",
+      overlaySha256: sha256File(overlayPath)
+    });
+    const database = initDatabase({ filename: databasePath });
+    database.connection.exec(BOUNDED_EMBEDDING_INDEX_SQL);
+    expect(count(database.connection, "SELECT COUNT(*) FROM main.memory_embeddings")).toBe(0);
+    const page = readBoundedEmbeddingIds(database, "workspace-1", {
+      providerKind: "local_onnx",
+      modelId: "fixture-model",
+      schemaVersion: 1,
+      maxRows: 16,
+      maxMetadataUtf8Bytes: 256
+    });
+    expect(page.objectIds).toEqual([BORROWED_OBJECT_ID]);
+    expect(page.truncated).toBe(false);
+    database.close();
+  }, 30_000);
 });
 
 function createOverlayTables(filename: string): void {

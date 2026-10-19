@@ -9,39 +9,28 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); expect(isolation.saf
 afterAll(() => { isolation.strict.restore(); isolation.safe.restore(); });
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { inspect } from "node:util";
 import { canonicalJson, RuntimeGardenComputeConfigSchema, sourceSemanticQueryIdentity, type SourceSemanticQuery } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
-import { fieldContractSha256, type SourceFeedbackCorrespondenceAction,
-  type SourceFeedbackCorrespondenceHost, type SourceFeedbackSessionInput } from "@do-soul/alaya-core";
-import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
-import * as soul from "@do-soul/alaya-soul";
-import * as core from "@do-soul/alaya-core";
-import * as proposals from "../../../../../bench-runner/src/runs/semantic-proposal/fill.js";
+import { fieldContractSha256, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION,
+  type SourceFeedbackCorrespondenceAction, type SourceFeedbackCorrespondenceHost, type SourceFeedbackCorrespondenceResult,
+  type SourceFeedbackSessionInput } from "@do-soul/alaya-core";
+import { buildSourceSemanticCorrespondenceRequest, proposeCorrespondenceSemantics } from "@do-soul/alaya-soul";
 import { executeSourceFeedback } from "../../../runtime/recall/source-feedback-execution.js";
 import type { SourceSemanticsExecutionPort } from "../../../runtime/recall/recall-read-worker-client.js";
+import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
 import { CHILD, CONTEXT, query, withFeedbackSource } from "./source-feedback.test-support.js";
-import { createSourceFeedbackCorrespondenceCache } from "../../../../../bench-runner/src/runs/semantic-chain/source-feedback-correspondence-cache.js";
-import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../../../../../bench-runner/src/runs/semantic-proposal/workset.js";
-import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../../../bench-runner/src/runs/semantic-proposal/fill.js";
-import { pinSemanticProposalAuthority } from "../../../../../bench-runner/src/runs/semantic-proposal/authority.js";
-import { semanticProposalShardPath } from "../../../../../bench-runner/src/runs/semantic-proposal/artifact.js";
-import { openSemanticProposalAttemptLedger } from "../../../../../bench-runner/src/runs/semantic-proposal/attempt.js";
-import { syntheticGeminiBody } from "../../../../../bench-runner/src/__tests__/runs/semantic-proposal/gemini-response-evidence.test-support.js";
 import { assessmentForTestPairs } from "../../../../../bench-runner/src/__tests__/support/semantic-correspondence-assessment.js";
 
 const ORIGINAL = "Which ticket does M7 use, and what clearance applies?";
-const PRODUCER = { model: "gemini-3.1-flash-lite", request_profile: "gemini-3.1-minimal-v1", provider_url: "http://127.0.0.1:9" };
-const TOKENS = 4096;
 const STRICT_BOOTSTRAP = new URL("../../../../../bench-runner/src/__tests__/support/strict-provider-free-cli-bootstrap.mjs", import.meta.url);
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function temporaryCache() {
-  const root = mkdtempSync(join(tmpdir(), "source-feedback-correspondence-")); roots.push(root); return root;
+function temporaryDirectory() {
+  const root = mkdtempSync(join(tmpdir(), "source-feedback-qualification-")); roots.push(root); return root;
 }
 function parentQuery(evidence = true): SourceSemanticQuery {
   const q = query(), use = q.alternatives[0]!;
@@ -55,110 +44,63 @@ function parentQuery(evidence = true): SourceSemanticQuery {
       context_obligations: [...use.context_obligations, { frame: "qApproval", kind: "asserted_at_source" }],
       ...(evidence ? { answer_frames: [], evidence_inputs: [{ frames: ["qUse"] }, { frames: ["qApproval"] }] } : {}) }] };
 }
-function workset(action: SourceFeedbackCorrespondenceAction): SemanticProposalWorkset {
+
+/** Authored test host only: existing SOUL decoding and Core/native admission, no cache writer or runtime binding. */
+function prepareFixtureCorrespondence(action: SourceFeedbackCorrespondenceAction): SourceFeedbackCorrespondenceResult {
   const { descriptor, original_query, query_semantics } = action.request;
-  return { ...PRODUCER, contract: "source-semantic-proposal-workset-v3", kind: "semantic_correspondence", items: [{
-    original_query, admitted_query_semantics: query_semantics,
-    source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }]
-  }] };
-}
-function response(request: SourceSemanticCorrespondenceRequest) {
+  if (descriptor.interpretation === undefined) throw new Error("authored fixture requires an exposed full interpretation");
+  const proposal = { original_query, admitted_query_semantics: query_semantics,
+    source_interpretation_descriptors: [{ source_interpretation_id: descriptor.interpretation_id, interpretation: descriptor.interpretation }],
+    producer_id: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID, producer_version: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION };
+  const meter = new SourceSemanticReadBudget(action.request.budget);
+  meter.retain(proposal, "fixture correspondence request");
+  const request = buildSourceSemanticCorrespondenceRequest(proposal);
   const predicate = request.catalog.query_endpoints.find(row => row.kind === "predicate" && row.frame === "qApproval")!;
   const frame = request.catalog.source_endpoints.find(row => row.kind === "frame" && row.frame === "fStatement")!;
-  return JSON.stringify({ contract: "source-semantic-correspondence-response-v4", outcome: { status: "interpreted", gaps: [] },
+  const rawJson = JSON.stringify({ contract: "source-semantic-correspondence-response-v4", outcome: { status: "interpreted", gaps: [] },
     semantic_correspondence: { contract: "source-semantic-correspondence-assessment-v1", source_interpretation_handle: "source1",
       assessments: assessmentForTestPairs(request.catalog, request.original_query, [{ query: predicate.handle, source: frame.handle,
         query_excerpt: "clearance", source_semantic_support: [{ kind: "lexical", mentions: ["mStatement"] }] }]) } });
+  const received = proposeCorrespondenceSemantics(proposal, { rawJson }, meter);
+  // The authored envelope is one injected receive, never a provider dispatch; the
+  // file-level strict provider-free boundary owns the no-network claim.
+  expect(received.provider_attempts).toBe(1);
+  if (received.semantic_correspondence === undefined) throw new Error("authored correspondence must pass the existing receiver");
+  return { action, status: "ready", semantic_correspondence: received.semantic_correspondence, new_dispatches: 0,
+    historical_production: { status: "unknown" }, work: { logical_work: meter.spentWork, logical_memory_bytes: meter.spentBytes,
+      native_work: meter.nativeWork, native_bytes: meter.nativeBytes, index_work: meter.indexWork, rss_bytes: process.memoryUsage.rss() } };
 }
-/** Isolated retained-raw fixture only. Production collaborator never receives this writer or extractor. */
-async function retainFixture(action: SourceFeedbackCorrespondenceAction, root: string, raw?: string, finish = "STOP", usageKnown = true) {
-  const set = workset(action), line = materializeSemanticProposalLines(set, TOKENS)[0]!;
-  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(set, root, TOKENS),
-    inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
-  const rawJson = raw ?? response(line.request as SourceSemanticCorrespondenceRequest);
-  const usage = usageKnown ? { inputTokens: 3, outputTokens: 5, totalTokens: 8 } : undefined;
-  await executeSemanticProposalFill({ workset: set, cacheRoot: root, authority,
-    config: { model: PRODUCER.model, providerUrl: PRODUCER.provider_url,
-      requestProfile: "gemini-3.1-minimal-v1", apiKey: null },
-    extractor: { extract: async () => ({ rawJson, ...(usage === undefined ? {} : { usage }), responseBody: syntheticGeminiBody(rawJson, finish, usage),
-      responseMetadata: { finishReason: finish, completionWitness: "finish_reason" as const, completionContractVersion: 1 as const } }) } });
-  return line;
-}
-function cache(root: string) {
-  return createSourceFeedbackCorrespondenceCache({ cache_root: root, producer: PRODUCER, max_output_tokens: TOKENS });
-}
-function cacheBytes(root: string): string {
-  const entries = (path: string): unknown => readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))
-    .map(row => [row.name, row.isDirectory() ? entries(join(path, row.name)) : readFileSync(join(path, row.name)).toString("base64")]);
-  return JSON.stringify(entries(root));
-}
+const fixtureHost: SourceFeedbackCorrespondenceHost = { policy_id: "authored-correspondence-fixture",
+  prepare: async action => prepareFixtureCorrespondence(action) };
 
-it("skips a higher-ranked unrelated H and qualifies each actual AP-42/AP-73 exposure through cache admission and native reason", async () => {
-  const keys: string[] = [], ids: string[] = [];
-  const requestBuilder = vi.spyOn(soul, "buildSourceSemanticCorrespondenceRequest");
-  const receiver = vi.spyOn(soul, "proposeCorrespondenceSemantics");
-  const admission = vi.spyOn(core, "admitSourceSemanticCorrespondence");
-  const reader = vi.spyOn(proposals, "readSemanticProposalResults");
+it("skips unrelated H and locally qualifies each actual ticket exposure without transferring seed bindings", async () => {
+  const ids: string[] = [];
   for (const ticket of ["AP-42", "AP-73"]) {
     const q = parentQuery();
     await withFeedbackSource(ticket, async ({ client, session, native }) => {
       expect(native.result?.binding_results?.some(row => row.kind === "evidence" && row.input === 0)).toBe(true);
-      const root = temporaryCache(), collaborator = cache(root);
-      let action!: SourceFeedbackCorrespondenceAction, lineKey = "", before = "";
-      const host: SourceFeedbackCorrespondenceHost = { policy_id: collaborator.policy_id, async prepare(exposed) {
+      let action!: SourceFeedbackCorrespondenceAction;
+      const host: SourceFeedbackCorrespondenceHost = { policy_id: fixtureHost.policy_id, async prepare(exposed) {
         action = exposed;
         expect(exposed.request.descriptor.source_id).toBe("z");
         expect(exposed.request.access_hint).toBe(ticket);
         expect(exposed.request.descriptor.interpretation?.mentions.some(row => row.text.includes(ticket))).toBe(true);
-        const line = await retainFixture(exposed, root, undefined, "STOP", ticket === "AP-42");
-        expect(line.request).toMatchObject({ original_query: ORIGINAL, admitted_query_semantics: q,
-          source_interpretation_descriptors: [{ source_interpretation_id: exposed.request.descriptor.interpretation_id,
-            interpretation: exposed.request.descriptor.interpretation }] });
-        lineKey = line.key; before = cacheBytes(root);
-        const expectedRequest = structuredClone({ original_query: ORIGINAL, admitted_query_semantics: q,
-          source_interpretation_descriptors: [{ source_interpretation_id: exposed.request.descriptor.interpretation_id,
-            interpretation: exposed.request.descriptor.interpretation }],
-          producer_id: core.SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_ID,
-          producer_version: core.SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION });
-        requestBuilder.mockClear(); receiver.mockClear(); admission.mockClear(); reader.mockClear();
-        const prepared = await collaborator.prepare(exposed);
-        expect(reader).toHaveBeenCalledWith(workset(exposed), root, TOKENS, expect.anything());
-        // Workset materialization captures a clone before validation; exact payload, not object identity, must survive.
-        expect(requestBuilder.mock.calls).toStrictEqual([[expectedRequest]]);
-        expect(receiver.mock.calls.at(-1)?.[1]?.rawJson).toBe(response(line.request as SourceSemanticCorrespondenceRequest));
-        expect(receiver.mock.calls.at(-1)?.[2]).toBeDefined(); // The actual decoder borrows this parent's ledger.
-        expect(admission.mock.results.some(row => row.type === "return" && row.value.kind === "admitted")).toBe(true);
-        return prepared;
+        return prepareFixtureCorrespondence(exposed);
       } };
-      // Finite fixture allowance pays host request/schema/cache buffers as well as every native action.
-      const actionBudget = { ...session.action_budget, work_units: 1_000_000, memory_bytes: 80_000_000 };
+      const child = { ...session.action_budget, work_units: 1_000_000, memory_bytes: 80_000_000 };
       const plain = await client.sourceSemanticsPort!.execute({ ...CONTEXT, request: { kind: "prepare_query",
-        original_query: ORIGINAL, query_semantics: q, budget: actionBudget } });
+        original_query: ORIGINAL, query_semantics: q, budget: child } });
       if (plain.kind !== "prepare_query") throw new Error("original native pool required");
       expect(plain.access?.source_candidates.map(row => row.source_id)).not.toContain("z");
       expect(plain.candidates.some(row => row.source_id === "b")).toBe(true);
-      const trace = await executeSourceFeedback({ session: { ...session, action_budget: actionBudget,
-        budget: { ...actionBudget, work_units: actionBudget.work_units * 6, memory_bytes: actionBudget.memory_bytes * 6 } },
+      const trace = await executeSourceFeedback({ session: { ...session, action_budget: child,
+        budget: { ...child, work_units: child.work_units * 6, memory_bytes: child.memory_bytes * 6 } },
         context: CONTEXT, port: client.sourceSemanticsPort!, correspondence: host, timeoutMs: 30_000 });
-      const terminal = trace.settlements.at(-1);
-      expect(trace.status, JSON.stringify({ ticket,
-        terminal_cause: inspect(trace.terminal_cause, { depth: 5, maxArrayLength: 8, maxStringLength: 4000 }).slice(0, 12_000),
-        last_action_id: terminal?.[0], last_settlement_status: terminal?.[1].status,
-        phase: terminal?.[1].status === "unknown" ? terminal[1].phase : undefined,
-        exposed_actions: trace.exposures.slice(-6).map(row => ({ action_id: row.action_id, kind: row.result.kind })),
-        preparation_count: trace.preparations?.length, qualification_status: trace.qualification?.status,
-        accounting: trace.accounting
-      }, null, 2)).toBe("complete");
-      const last = trace.exposures.at(-1)?.result;
-      expect(trace.qualification, JSON.stringify(last?.kind === "prepare_query" ? {
-        candidates: last.candidates.map(row => ({ source: row.source_id, id: row.interpretation_id, full: row.interpretation !== undefined })),
-        access: last.access, coverage: last.coverage, work: last.work } : last)).toMatchObject({ status: "local" });
+      expect(trace.status).toBe("complete");
+      expect(trace.qualification).toMatchObject({ status: "local" });
       expect(trace.exposures.map(row => row.result.kind)).toEqual(["prepare_source", "validate_source", "reason", "prepare_query", "reason"]);
       expect(trace.preparations).toHaveLength(1);
-      expect(trace.preparations?.[0]).toMatchObject({ status: "ready", cache_key: lineKey, new_dispatches: 0,
-        historical_production: ticket === "AP-42"
-          ? { status: "reported", usage: { inputTokens: 3, outputTokens: 5, totalTokens: 8 } } : { status: "unknown" } });
-      expect(cacheBytes(root)).toBe(before);
+      expect(trace.preparations?.[0]).toMatchObject({ status: "ready", new_dispatches: 0, historical_production: { status: "unknown" } });
       const discovery = trace.exposures[3]!, local = trace.exposures[4]!.result;
       if (discovery.result.kind !== "prepare_query" || local.kind !== "reason") throw new Error("discovery and local native reason required");
       expect(action.request.origin_action_id).toBe(discovery.action_id);
@@ -185,44 +127,25 @@ it("skips a higher-ranked unrelated H and qualifies each actual AP-42/AP-73 expo
       expect(hostWork.logical_memory_bytes).toBeGreaterThan(0);
       expect(trace.accounting.logical_work).toBe(trace.exposures.reduce((n, row) => n + row.result.work.logical_work!, 0) + hostWork.logical_work!);
       expect(trace.accounting.reserved_work).toBe(0);
-      const short = structuredClone(action);
-      Object.assign(short.request.budget, { work_units: hostWork.logical_work! - 1 });
-      const exhausted = await collaborator.prepare(short);
-      expect(exhausted).toMatchObject({ status: "unavailable", reason: "host_budget_exhausted", new_dispatches: 0 });
-      expect(exhausted.work!.logical_work).toBeLessThanOrEqual(short.request.budget.work_units);
-      expect(cacheBytes(root)).toBe(before);
-      keys.push(lineKey); ids.push(action.request.descriptor.interpretation_id);
+      ids.push(action.request.descriptor.interpretation_id);
     }, { original_query: ORIGINAL, query: q, provider_guard: STRICT_BOOTSTRAP,
       additional_sources: [{ id: "b", text: "M7 ticket clearance applies.", reading: "clearance" }] });
   }
-  expect(new Set(keys).size).toBe(2);
   expect(new Set(ids).size).toBe(2);
 }, 90_000);
 
-it("preserves unavailable cache states, unknown occupancy, cancellation and currentness without a fill fallback", async () => {
+it("preserves host unavailability, unknown occupancy, cancellation, expiry and source currentness", async () => {
   await withFeedbackSource("AP-42", async ({ client, session, filename }) => {
-    for (const mode of ["missing", "malformed", "incomplete", "wrong_digest", "unknown", "late_cancel", "expired", "stale"] as const) {
-      const root = temporaryCache(), collaborator = cache(root), controller = new AbortController();
-      const host: SourceFeedbackCorrespondenceHost = { policy_id: collaborator.policy_id, async prepare(action) {
-        if (mode === "unknown") {
-          const set = workset(action), authority = pinSemanticProposalAuthority({
-            preflight: prepareSemanticProposal(set, root, TOKENS), inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
-          openSemanticProposalAttemptLedger({ cacheRoot: root, authority, kind: "semantic_correspondence" })
-            .reserveAttemptOrdinal(materializeSemanticProposalLines(set, TOKENS)[0]!.key);
-        } else if (mode !== "missing") {
-          const line = await retainFixture(action, root, mode === "malformed" ? "{" : undefined,
-            mode === "incomplete" ? "MAX_TOKENS" : "STOP");
-          if (mode === "wrong_digest") {
-            const path = semanticProposalShardPath(root, line.key), shard = JSON.parse(readFileSync(path, "utf8"));
-            writeFileSync(path, JSON.stringify({ ...shard, raw_digest: "f".repeat(64) }));
-          }
-        }
-        const before = cacheBytes(root), result = await collaborator.prepare(action);
-        expect(cacheBytes(root)).toBe(before);
+    for (const mode of ["unavailable", "unknown", "late_cancel", "expired", "stale"] as const) {
+      const controller = new AbortController();
+      const host: SourceFeedbackCorrespondenceHost = { policy_id: fixtureHost.policy_id, async prepare(action) {
+        if (mode === "unavailable" || mode === "unknown") return { action, status: mode, reason: "fixture_host_unavailable",
+          new_dispatches: 0, historical_production: { status: "unknown" },
+          work: { logical_work: 1, logical_memory_bytes: 0, native_work: 0, native_bytes: 0, index_work: 0, rss_bytes: 1 } };
+        const result = prepareFixtureCorrespondence(action);
         if (mode === "late_cancel") controller.abort(new Error("caller revoked during correspondence preparation"));
         if (mode === "stale") {
-          // Boundary fault injection, not a replacement-admission implementation: another
-          // connection changes the discovered record after exposure and invalidates its query lease.
+          // Another connection invalidates the exposed descriptor's query lease.
           const db = new DatabaseSync(filename);
           try { db.prepare("UPDATE source_records SET source_version='replacement' WHERE source_id='z'").run(); }
           finally { db.close(); }
@@ -238,17 +161,17 @@ it("preserves unavailable cache states, unknown occupancy, cancellation and curr
         budget: { ...child, work_units: 6 * child.work_units, memory_bytes: 6 * child.memory_bytes } },
         context: CONTEXT, port: executionPort, correspondence: host, signal: controller.signal, timeoutMs: 30_000 });
       expect(trace.exposures.map(row => row.result.kind)).toEqual(["prepare_source", "validate_source", "reason", "prepare_query"]);
-      if (mode === "late_cancel") {
-        expect(trace).toMatchObject({ status: "unknown", terminal_cause: { kind: "caller_abort" },
+      if (mode === "late_cancel" || mode === "unknown") {
+        expect(trace).toMatchObject({ status: "unknown",
           accounting: { reserved_work: child.work_units, reserved_memory_bytes: child.memory_bytes } });
+        if (mode === "late_cancel") expect(trace.terminal_cause).toMatchObject({ kind: "caller_abort" });
       } else if (mode === "stale" || mode === "expired") {
         expect(trace.status).toBe("failed");
         expect(trace.qualification).toMatchObject({ status: "unavailable", reason: "reason_failed",
           terminal_cause: { kind: "execution_error", reason: { details: { admission: mode === "stale" ? "filtered" : "expired" } } } });
         expect(trace.accounting.reserved_work).toBe(0);
       } else {
-        const reason = { missing: "unattempted", malformed: "invalid", incomplete: "incomplete", wrong_digest: "cache_invalid", unknown: "unknown" }[mode];
-        expect(trace.qualification).toMatchObject({ status: "unavailable", reason });
+        expect(trace.qualification).toMatchObject({ status: "unavailable", reason: "fixture_host_unavailable" });
         expect(trace.preparations?.[0]?.new_dispatches).toBe(0);
         expect(trace.preparations?.[0]?.work?.logical_work).toBeGreaterThan(0);
       }
@@ -260,7 +183,7 @@ it.each(["missing", "off_page"] as const)("does not qualify an unrelated descrip
   const additional = Array.from({ length: mode === "off_page" ? 17 : 1 }, (_, index) => ({
     id: `b${index.toString().padStart(2, "0")}`, text: "M7 ticket clearance applies.", reading: "clearance" }));
   await withFeedbackSource("AP-42", async ({ client, session, ids }) => {
-    const prepare = vi.fn(cache(temporaryCache()).prepare);
+    const prepare = vi.fn(fixtureHost.prepare);
     const child = { ...session.action_budget, work_units: 1_000_000, memory_bytes: 80_000_000 };
     const trace = await executeSourceFeedback({ session: { ...session, action_budget: child,
       budget: { ...child, work_units: 6 * child.work_units, memory_bytes: 6 * child.memory_bytes } }, context: CONTEXT,
@@ -290,7 +213,7 @@ it("does not split a purely conjunctive Q into evidence branches to manufacture 
   await withFeedbackSource("AP-42", async ({ client, session, native }) => {
     expect(native.result?.outcome.status).toBe("interpreted");
     expect(native.result?.binding_results ?? []).toEqual([]);
-    const prepare = vi.fn(cache(temporaryCache()).prepare);
+    const prepare = vi.fn(fixtureHost.prepare);
     const trace = await executeSourceFeedback({ session, context: CONTEXT, port: client.sourceSemanticsPort!, timeoutMs: 30_000,
       correspondence: { policy_id: "conjunctive-policy", prepare } });
     expect(prepare).not.toHaveBeenCalled();
@@ -301,11 +224,10 @@ it("does not split a purely conjunctive Q into evidence branches to manufacture 
 }, 60_000);
 
 it("binds the real daemon constructor to its matching dist feedback entry and preserves missing/closed admission", async () => {
-  const directory = temporaryCache(), config = join(tmpdir(), `alaya-bench-config-${randomUUID()}`);
+  const directory = temporaryDirectory(), config = join(tmpdir(), `alaya-bench-config-${randomUUID()}`);
   roots.push(config); mkdirSync(config);
   const workspaceRoot = join(directory, "workspace"); mkdirSync(workspaceRoot);
-  // Persist the full disabled config through its existing owner so startup never
-  // needs credential-derived defaults, even for an unused embedding fallback.
+  // Persist disabled config through its owner; startup never needs credential-derived defaults.
   const databasePath = join(config, "alaya.db");
   writeFileSync(join(config, "alaya.toml"), `[storage]\ndb_path = ${JSON.stringify(databasePath)}\n`);
   const database = initDatabase({ filename: databasePath });
@@ -321,9 +243,7 @@ it("binds the real daemon constructor to its matching dist feedback entry and pr
     ALAYA_CONFLICT_LLM_PROVIDER_URL: "", ALAYA_CONFLICT_LLM_MODEL: "", ALAYA_ENABLE_E2E_EVENT_TRIGGERS: "false" })) {
     vi.stubEnv(key, value);
   }
-  // Daemon bootstrap reads local control-plane token knobs even when absent.
-  // Only their absence is supplied; every provider credential lookup and transport
-  // still reaches the strict guard.
+  // Supply only absence for daemon control-plane knobs; provider credential reads remain guarded.
   const guardedEnvironment = process.env;
   const fixtureKnobs = new Map<string, string | undefined>([["ALAYA_REQUEST_TOKEN", undefined],
     ["ALAYA_REQUEST_TOKEN_WORKSPACES", undefined], ["ALAYA_REVIEWER_TOKEN", undefined],
@@ -343,7 +263,6 @@ it("binds the real daemon constructor to its matching dist feedback entry and pr
     await expect(runtime.services.embeddingProviderWarmup).resolves.toBe("not_requested");
     await runtime.services.workspaceService.ensureLocalWorkspace({ workspaceId: CONTEXT.workspace_id,
       name: "Feedback admission", rootPath: workspaceRoot });
-    // Admission-only selected-input shape: no producer Q/H/C and no real-question seed is manufactured.
     const digest = `sha256:${"0".repeat(64)}`;
     const session: SourceFeedbackSessionInput = { request_id: "daemon-admission", parent_entitlement_id: "daemon-admission-allowance",
       workspace_id: CONTEXT.workspace_id, original_query: ORIGINAL, as_of: CONTEXT.as_of,
@@ -356,7 +275,7 @@ it("binds the real daemon constructor to its matching dist feedback entry and pr
     await expect(execution.executeSourceFeedbackForRuntime({ ...runtime }, input)).rejects.toMatchObject({
       code: "CONFLICT", message: "source feedback execution port is not bound" });
     const live = await execution.executeSourceFeedbackForRuntime(runtime, input);
-    expect(live.status).toBe("failed"); // The actual worker rejects the deliberately absent source.
+    expect(live.status).toBe("failed");
     expect(live.settlements).toHaveLength(1);
     expect(live.accounting.logical_work).toBeGreaterThan(0);
     expect(live.exposures).toEqual([]);

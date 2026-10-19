@@ -1,21 +1,16 @@
 import type {
-  EventLogEntry,
   SkillPackage,
   ToolProvider,
   ToolProviderToolSpec,
   ToolSpec
 } from "@do-soul/alaya-protocol";
+import type { EventPublisher } from "../runtime/event-publisher.js";
 import type { ToolSpecService } from "./tool-spec-service.js";
 
 export type ExtensionRegistryToolSpecPort = Pick<
   ToolSpecService,
-  "findById" | "register" | "update" | "delete"
+  "findByIdSync" | "registerSync" | "updateSync" | "deleteSync"
 >;
-
-export interface ToolSpecRollbackSnapshot {
-  readonly toolId: string;
-  readonly previous: Readonly<ToolSpec> | null;
-}
 
 export interface ProviderCacheSnapshot {
   readonly providerCacheById: ReadonlyMap<string, Readonly<ToolProvider>>;
@@ -24,22 +19,16 @@ export interface ProviderCacheSnapshot {
 }
 
 export interface ExtensionStorePort {
-  registerToolProvider(provider: ToolProvider): Promise<Readonly<ToolProvider>>;
-  deleteToolProvider(providerId: string): Promise<void>;
-  registerSkillPackage(pkg: SkillPackage): Promise<Readonly<SkillPackage>>;
-  findToolProviders(): Promise<readonly Readonly<ToolProvider>[]>;
-  findToolProviderById(providerId: string): Promise<Readonly<ToolProvider> | null>;
+  registerToolProviderSync(provider: ToolProvider): Readonly<ToolProvider>;
+  registerSkillPackageSync(pkg: SkillPackage): Readonly<SkillPackage>;
+  findToolProvidersSync(): readonly Readonly<ToolProvider>[];
+  findToolProviderByIdSync(providerId: string): Readonly<ToolProvider> | null;
 }
 
 export interface ExtensionRegistryDependencies {
   readonly extensionStore: ExtensionStorePort;
   readonly toolSpecService: ExtensionRegistryToolSpecPort;
-  readonly eventLogWriter: {
-    append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
-  };
-  readonly runtimeNotifier?: {
-    notifyEntry(entry: EventLogEntry): void | Promise<void>;
-  };
+  readonly eventPublisher: EventPublisher;
   readonly now?: () => string;
   readonly buildToolSpecForProviderTool?: (
     provider: Readonly<ToolProvider>,

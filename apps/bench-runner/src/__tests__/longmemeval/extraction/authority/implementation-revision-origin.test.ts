@@ -40,15 +40,14 @@ function git(root: string, args: readonly string[]): Buffer {
 
 function inspect(loadedRoot: string, callerCwd: string) {
   const modulePath = join(loadedRoot, "apps/bench-runner/dist/runs/extraction/authority/inspection.js");
-  const scopePath = join(loadedRoot, "apps/bench-runner/dist/runs/semantic-proposal/authority.js");
   return JSON.parse(execFileSync(process.execPath, [processFixture], { cwd: callerCwd, encoding: "utf8",
-    env: { ...process.env, IMPLEMENTATION_MODULE: modulePath, PROPOSAL_AUTHORITY_MODULE: scopePath,
-      PROPOSAL_OUTPUT_ROOT: join(loadedRoot, "absent-query-cache") } })) as {
-    revision: string; scopeRevision: string; outputRootAbsent: boolean; sourceWrongRejected: boolean;
+    env: { ...process.env, IMPLEMENTATION_MODULE: modulePath,
+      OUTPUT_ROOT: join(loadedRoot, "absent-cache") } })) as {
+    revision: string; outputRootAbsent: boolean; sourceWrongRejected: boolean;
   };
 }
 
-it("binds native source and query revisions to the loaded checkout across caller directories", () => {
+it("binds the authority revision to the loaded checkout across caller directories", () => {
   const loaded = checkout(), foreign = checkout(), nonGit = mkdtempSync(join(tmpdir(), "bench-nongit-caller-"));
   roots.push(nonGit);
   writeFileSync(join(foreign, "source.txt"), "different foreign commit\n");
@@ -62,7 +61,6 @@ it("binds native source and query revisions to the loaded checkout across caller
   }
   expect(baseline.revision.startsWith(`git-worktree-v1:${git(loaded, ["rev-parse", "HEAD"]).toString().trim()}:`))
     .toBe(true);
-  expect(baseline.scopeRevision).toBe(baseline.revision);
   expect(baseline.outputRootAbsent).toBe(true);
   expect(baseline.sourceWrongRejected).toBe(true);
   expect(inspect(foreign, loaded).revision).not.toBe(baseline.revision);
@@ -145,8 +143,7 @@ it("fails closed when the loaded module has no Git checkout, even from another G
   const result = spawnSync(process.execPath, [processFixture], { cwd: foreign, encoding: "utf8", env: {
     ...process.env,
     IMPLEMENTATION_MODULE: join(loaded, "apps/bench-runner/dist/runs/extraction/authority/inspection.js"),
-    PROPOSAL_AUTHORITY_MODULE: join(loaded, "apps/bench-runner/dist/runs/semantic-proposal/authority.js"),
-    PROPOSAL_OUTPUT_ROOT: join(loaded, "absent-query-cache")
+    OUTPUT_ROOT: join(loaded, "absent-cache")
   } });
   expect(result.status).not.toBe(0);
   expect(result.stderr).toMatch(/cannot establish the loaded bench-runner Git checkout/u);

@@ -144,6 +144,52 @@ describe("inspector routes", () => {
   });
 
 
+  it("admits the editable manifestation budget projection and rejects the GET read model", async () => {
+    const budget = {
+      workspace_id: "ws1",
+      stance_bias_cap: 10,
+      dialogue_nudge_cap: 3,
+      lens_entry_cap: 1,
+      escalation_policy: {
+        nudge_min_pressure: 0.4,
+        nudge_min_confidence: 0.5,
+        lens_min_pressure: 0.7,
+        lens_min_confidence: 0.7,
+        lens_requires_task_coupling: true,
+        lens_requires_governance_ceiling: true
+      },
+      updated_at: "2026-05-18T00:00:00.000Z"
+    };
+    const proxiedBodies: unknown[] = [];
+    const app = createInspectorApp({
+      token: "token",
+      workspaceId: "ws1",
+      daemonUrl: "http://daemon.local",
+      fetchImpl: async (_input, init) => {
+        proxiedBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ success: true, data: budget });
+      }
+    });
+
+    const accepted = await authenticatedRequest(app, "/api/config/ws1/manifestation-budget", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(budget)
+    });
+    expect(accepted.status).toBe(200);
+    expect(proxiedBodies).toEqual([budget]);
+
+    const rejected = await authenticatedRequest(app, "/api/config/ws1/manifestation-budget", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...budget, source: "stored" })
+    });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({ error: "invalid_request" });
+    expect(proxiedBodies).toHaveLength(1);
+  });
+
+
   it("loads embedding-supplement config from the daemon runtime config endpoint", async () => {
     const app = createInspectorApp({
       token: "token",

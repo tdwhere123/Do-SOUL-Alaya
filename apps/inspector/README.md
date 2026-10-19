@@ -26,6 +26,23 @@ the token in `sessionStorage`, and sends it on subsequent requests as
 `http://127.0.0.1:5173` in `src/runtime/app.ts`; the inspector itself
 defaults to port `5174` (see CLI launcher for collision logic).
 
+## Configuration
+
+The config page reads daemon runtime parameters. Embedding and Garden
+provider/secret forms are intentionally read-only: the Inspector PATCH
+routes deny process-level runtime config writes and never edit provider
+secrets. Configure those values through the supported CLI path
+(`alaya install --non-interactive '<answers-json>'` or
+`alaya install --keychain`). The strategy flags are displayed as stored
+values only; no runtime consumer enforces them, so changing them does not
+change agent policy.
+
+Inspector proposal review uses the daemon's reviewer binding. When both
+`ALAYA_REVIEWER_TOKEN` and `ALAYA_REVIEWER_IDENTITY` are configured,
+`alaya inspect` forwards the pair to this child, review requests carry it,
+and a request-supplied identity cannot override it. Without that pair,
+Inspector review is refused.
+
 ## Dev
 
 ```bash

@@ -22,6 +22,10 @@ interface ExtensionDescriptorRow {
 }
 
 export interface ExtensionDescriptorRepo {
+  registerToolProviderSync(provider: ToolProvider): Readonly<ToolProvider>;
+  registerSkillPackageSync(pkg: SkillPackage): Readonly<SkillPackage>;
+  findToolProvidersSync(): readonly Readonly<ToolProvider>[];
+  findToolProviderByIdSync(providerId: string): Readonly<ToolProvider> | null;
   registerToolProvider(provider: ToolProvider): Promise<Readonly<ToolProvider>>;
   deleteToolProvider(providerId: string): Promise<void>;
   registerSkillPackage(pkg: SkillPackage): Promise<Readonly<SkillPackage>>;
@@ -76,8 +80,12 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
   }
 
   public async registerToolProvider(provider: ToolProvider): Promise<Readonly<ToolProvider>> {
+    return this.registerToolProviderSync(provider);
+  }
+
+  public registerToolProviderSync(provider: ToolProvider): Readonly<ToolProvider> {
     const parsedProvider = parseToolProvider(provider);
-    await this.upsertDescriptor(
+    this.upsertDescriptor(
       parsedProvider.provider_id,
       TOOL_PROVIDER_DESCRIPTOR_TYPE,
       parsedProvider.name,
@@ -86,7 +94,7 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
       parsedProvider
     );
 
-    const persistedProvider = await this.findDescriptorById(
+    const persistedProvider = this.findDescriptorById(
       TOOL_PROVIDER_DESCRIPTOR_TYPE,
       parsedProvider.provider_id
     );
@@ -115,8 +123,12 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
   }
 
   public async registerSkillPackage(pkg: SkillPackage): Promise<Readonly<SkillPackage>> {
+    return this.registerSkillPackageSync(pkg);
+  }
+
+  public registerSkillPackageSync(pkg: SkillPackage): Readonly<SkillPackage> {
     const parsedPackage = parseSkillPackage(pkg);
-    await this.upsertDescriptor(
+    this.upsertDescriptor(
       parsedPackage.skill_id,
       SKILL_PACKAGE_DESCRIPTOR_TYPE,
       parsedPackage.name,
@@ -125,7 +137,7 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
       parsedPackage
     );
 
-    const persistedPackage = await this.findDescriptorById(
+    const persistedPackage = this.findDescriptorById(
       SKILL_PACKAGE_DESCRIPTOR_TYPE,
       parsedPackage.skill_id
     );
@@ -140,6 +152,10 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
   }
 
   public async findToolProviders(): Promise<readonly Readonly<ToolProvider>[]> {
+    return this.findToolProvidersSync();
+  }
+
+  public findToolProvidersSync(): readonly Readonly<ToolProvider>[] {
     try {
       const rows = parseRows(this.listToolProvidersStatement.all(
         TOOL_PROVIDER_DESCRIPTOR_TYPE
@@ -158,10 +174,14 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
   public async findToolProviderById(
     providerId: string
   ): Promise<Readonly<ToolProvider> | null> {
+    return this.findToolProviderByIdSync(providerId);
+  }
+
+  public findToolProviderByIdSync(providerId: string): Readonly<ToolProvider> | null {
     const parsedProviderId = parseNonEmptyString(providerId, "provider id");
 
     try {
-      const row = await this.findDescriptorById(
+      const row = this.findDescriptorById(
         TOOL_PROVIDER_DESCRIPTOR_TYPE,
         parsedProviderId
       );
@@ -180,14 +200,14 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
     }
   }
 
-  private async upsertDescriptor(
+  private upsertDescriptor(
     descriptorId: string,
     descriptorType: string,
     name: string,
     source: string,
     registeredAt: string,
     metadata: Record<string, unknown>
-  ): Promise<void> {
+  ): void {
     try {
       const result = this.upsertDescriptorStatement.run(
         descriptorId,
@@ -207,10 +227,10 @@ export class SqliteExtensionDescriptorRepo implements ExtensionDescriptorRepo {
     }
   }
 
-  private async findDescriptorById(
+  private findDescriptorById(
     descriptorType: string,
     descriptorId: string
-  ): Promise<ExtensionDescriptorRow | null> {
+  ): ExtensionDescriptorRow | null {
     try {
       const row = this.findDescriptorByIdStatement.get(
         descriptorType,

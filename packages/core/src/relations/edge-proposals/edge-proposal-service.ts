@@ -119,14 +119,22 @@ export class EdgeProposalService {
       edgeType: params.edgeType
     });
     if (duplicate !== null) {
-      return duplicate;
+      // A pending duplicate whose recorded trigger/confidence clears the
+      // auto-accept floor is an interrupted create->accept: the first call
+      // either never reached the review write or failed its owed-path mint and
+      // compensated the row back to pending. Re-running the same policy over the
+      // durable row finishes it instead of returning a pending duplicate that no
+      // later call would retry. The recorded trigger_source/confidence decide,
+      // never the re-proposed params, so an explicit/agent-asserted proposal
+      // cannot be laundered into an auto-accept.
+      return await this.maybeAutoAcceptEdgeProposal(duplicate);
     }
     const createInput = this.buildEdgeProposalCreateInput(params, ids);
     const created = await this.dependencies.eventPublisher.appendManyWithMutation(
       [buildProposalCreatedEvent(createInput)],
       () => this.dependencies.proposalRepo.create(createInput)
     );
-    return this.maybeAutoAcceptEdgeProposal(created, createInput.trigger_source, createInput.confidence);
+    return await this.maybeAutoAcceptEdgeProposal(created);
   }
 
   private parseEdgeProposalObjectIds(params: EdgeProposalCreateParams): DistinctMemoryIds {
@@ -173,15 +181,13 @@ export class EdgeProposalService {
   }
 
   private async maybeAutoAcceptEdgeProposal(
-    created: Readonly<EdgeProposal>,
-    triggerSource: EdgeProposalTriggerSourceValue,
-    confidence: number
+    proposal: Readonly<EdgeProposal>
   ): Promise<Readonly<EdgeProposal>> {
-    if (!this.shouldAutoAccept(triggerSource, confidence)) {
-      return created;
+    if (!this.shouldAutoAccept(proposal.trigger_source, proposal.confidence)) {
+      return proposal;
     }
     return this.reviewer.acceptProposal(
-      created,
+      proposal,
       AUTO_ACCEPT_REVIEWER_IDENTITY,
       AUTO_ACCEPT_REVIEW_REASON,
       this.now(),

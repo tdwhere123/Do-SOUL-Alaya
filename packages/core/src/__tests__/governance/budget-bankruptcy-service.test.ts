@@ -138,7 +138,7 @@ describe("BudgetBankruptcyService", () => {
     expect([...stateStore.keys()]).toEqual(["run-1", "run-3"]);
   });
 
-  it("expires stale process-local stateStore entries instead of retaining every run forever", async () => {
+  it("recovers the committed mode after process-local state expires", async () => {
     let now = "2026-03-26T00:00:00.000Z";
     const dependencies = createDependencies();
     const service = new BudgetBankruptcyService({
@@ -151,12 +151,8 @@ describe("BudgetBankruptcyService", () => {
     now = "2026-03-26T00:00:00.002Z";
     const snapshot = await service.getSnapshot("run-stale", now);
 
-    expect(snapshot.bankruptcy_kind).toBe(BankruptcyKind.NONE);
-    expect(
-      (service as unknown as { readonly stateStore: Map<string, unknown> }).stateStore.has(
-        "run-stale"
-      )
-    ).toBe(false);
+    expect(snapshot.current_mode).toBe(RuntimeMode.LEAN);
+    expect(snapshot.pending_proposal?.resolution_state).toBe(ProposalResolutionState.AUTO_APPLIED);
   });
 
   it("resolves a pending bankruptcy with an accepted option and keeps the chosen mode sticky in snapshots", async () => {
@@ -370,7 +366,7 @@ describe("BudgetBankruptcyService", () => {
     });
   });
 
-  it("returns the default snapshot when no bankruptcy is active and clears run state on teardown", async () => {
+  it("returns the default snapshot for an unknown run and recovers committed state after cache teardown", async () => {
     const dependencies = createDependencies();
     const service = new BudgetBankruptcyService(asBudgetDeps(dependencies));
 
@@ -387,10 +383,9 @@ describe("BudgetBankruptcyService", () => {
 
     expect(await service.getSnapshot("run-1", "2026-03-26T00:00:00.000Z")).toMatchObject({
       run_id: "run-1",
-      current_mode: RuntimeMode.FULL,
-      bankruptcy_kind: BankruptcyKind.NONE,
-      active_dossier: null,
-      pending_proposal: null
+      current_mode: RuntimeMode.LEAN,
+      bankruptcy_kind: BankruptcyKind.SOFT,
+      pending_proposal: { resolution_state: ProposalResolutionState.AUTO_APPLIED }
     });
   });
 });

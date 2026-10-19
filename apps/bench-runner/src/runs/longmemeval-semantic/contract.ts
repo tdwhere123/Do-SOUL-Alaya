@@ -4,8 +4,8 @@ import { z } from "zod";
 import { loadDatasetWindowWithIdentity } from "../../datasets/longmemeval/ingestion/fetch.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
-import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../semantic-chain/contract.js";
-import { SemanticProposalWorksetSchema } from "../semantic-proposal/workset.js";
+import { SemanticChainConfigSchema, chainIdentity, readChainArtifact } from "../recall-measurement/contract.js";
+import { SemanticProposalWorksetSchema } from "../semantic-cache/workset.js";
 import { NATIVE_SEMANTIC_ROUTE, NativeSemanticRouteSchema, SourceCacheFreezeSchema } from "./native-arm.js";
 import { SourcePublicationAssociationRowSchema } from "../snapshot/source-records/publish.js";
 

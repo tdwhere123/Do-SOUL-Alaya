@@ -8,7 +8,7 @@ Current recall algorithm is the sole current conditional-field route in
 `docs/handbook/recall.md`. Do not treat a historical release section
 below as the live ranking recipe.
 
-## Unreleased — protocol 19.0.0, engine gateway 2.0.0
+## Unreleased — protocol 19.1.0, engine gateway 2.0.0
 
 This section is **not a release tag**. App packages remain `0.3.11`
 until a matching `## vX.Y.Z` section is opened. Do not tag `Unreleased`.
@@ -17,13 +17,78 @@ heading (currently `## v0.3.11` below). Protocol and engine gateway package
 versions can move independently of the app semver.
 `@do-soul/alaya-engine-gateway` is `2.0.0`; app packages remain `0.3.11`.
 
-Protocol 19.0.0 and engine gateway 2.0.0 declare the Source acquisition,
+Protocol 19.1.0 adds the conflict-edge deletion audit type and expands the
+EventLog payload envelope to an independent 8,388,608 serialized-character
+budget. This is a **minor**, additive protocol change under handbook invariant
+§25, not a release; app/root packages and engine gateway versions are unchanged.
+The public-schema fixture now also covers streaming bodies, governance
+resolutions, trust records, and EventLog envelopes. No text or reason field is
+narrowed and audit is never truncated. Aggregate overflow is a typed storage
+validation refusal; unbounded arrays cannot be promised to fit a finite budget.
+See [Protocol compatibility](packages/protocol/README.md#eventlog-compatibility).
+
+Protocol 19.0.0 and engine gateway 2.0.0 declared the Source acquisition,
 phase-accounting, and SourceDisclosure compact-wire **major** under handbook
-invariant §25. Package versions stay `19.0.0` / `2.0.0`; this is not a release.
+invariant §25. Protocol is now `19.1.0`; gateway remains `2.0.0`.
 See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
 and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
-These uncommitted changes are unreviewed. A 300000-unit preparation regression is
-currently failing. Do not treat this section as acceptance or readiness.
+
+### Retained-boundary corrections
+
+Inspector startup identifies its actual entry module on Windows and through
+symlinks, rather than relying on a forward-slash filename suffix. Crash-WAL
+regressions retain committed-write evidence with platform-specific termination
+checks; Windows coverage is not skipped.
+
+Operator paths and local surfaces fail closed. `scripts/install.sh` and
+`scripts/uninstall.sh` share one path-admission guard; uninstall refuses
+`$HOME`, its ancestors, system paths and bare shared roots for each path it
+may delete, and removes a contained symlink rather than following it. The
+Inspector config page makes embedding, Garden provider/secret, and
+agent-strategy affordances read-only; provider and secret changes use
+`alaya install`, and `alaya inspect` forwards the configured reviewer
+token/identity for bound proposal review. The daemon workspace engine-binding
+probe reports that connection testing is unavailable and credentials were not
+checked instead of returning a synthetic successful binding. Daemon shutdown
+uses the HTTP close callback, drains tracked handlers before stopping
+background services and closing SQLite, and aborts teardown on a close error
+or timeout rather than treating the transport as closed.
+
+History and benchmark boundaries no longer compare unlike evidence.
+`latest-passing*.json` cannot advance for the public LongMemEval Oracle or M
+splits because neither has an applicable release gate; their archives and
+`latest-run*.json` pointers remain readable. `alaya-eval diff` selects the
+newest earlier run in the same split, policy, report and embedding cohort,
+refusing an incompatible baseline instead of comparing slug-adjacent runs.
+`run-full-bench-v0311.mjs --resume` reuses a checkpoint only when it records
+the same requested run identity and its archive still contains `kpi.json`; a
+missing, legacy, or mismatched checkpoint exits 1 and starts no replacement
+bench.
+
+Durable transitions keep their audit and recovery ordering. A committed
+budget-bankruptcy resolution and its proposal decision share one transaction
+and are terminal; recovery repairs a stale pending projection without a
+second event. Slot election composes claim lifecycle CAS transitions, the
+winner-changed audit, and an expected-winner slot CAS in one transaction.
+Conflict-edge deletion and orphan repair append
+`soul.conflict_matrix_edge.deleted` and delete the batch in the same
+transaction. Post-commit notification failure does not roll back a committed
+mutation: lease/override caches invalidate instead of restoring a precommit
+snapshot, and the failure is recorded as a propagation diagnostic.
+Pending-proposal pages report `total_count` from the matching filter, not the
+page length; `since` remains a created-at lower bound, not a backward cursor.
+Extension registration commits descriptor audit, descriptor and tool-spec
+changes atomically instead of compensating asynchronous writes. Janitor hot
+demotion rolls back both updates and audit when a selected candidate changed.
+
+Private daemon research acquisition, joint-delivery and qualified-selection
+channels, and bench `semantic-chain` / `semantic-proposal` producer orchestration
+have been removed. Native measurement now belongs to `runs/recall-measurement/`;
+shared read-only request/cache identity belongs to `runs/semantic-cache/`.
+The public source index and native Q/H/C contracts remain intact. Nominated-window
+hydration remains explicitly retained but dormant, not a new production route.
+This removal does not change ordinary recall ranking, budgets or algorithms;
+historical research artifacts remain available separately from executable code.
 
 Current access receipts use `source-semantic-access-v2` with required typed compact
 `phases`: version-2 tuple `[2, preparation, acquisition, observation|null]`.

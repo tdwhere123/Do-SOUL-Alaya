@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BoundedJsonObjectSchema, ManifestationLevel, PathGovernanceClass, RuntimeGovernanceEventType, serializePathAnchorRef, type ActivationCandidate } from "@do-soul/alaya-protocol";
+import { BOUNDED_JSON_OBJECT_MAX_CHARS, EventLogPayloadSchema, ManifestationLevel, PathGovernanceClass, RuntimeGovernanceEventType, serializePathAnchorRef, type ActivationCandidate } from "@do-soul/alaya-protocol";
 
 import { NOW, createBudgetConfig, createCandidate, createDependencies, createService, createTaskSurface } from "./manifestation-resolver.test-support.js";
 
@@ -130,11 +130,11 @@ describe("ManifestationResolver", () => {
     );
   });
 
-  it("writes large decision sets as bounded event batches", async () => {
+  it("keeps a decision set above the generic JSON budget in one EventLog payload", async () => {
     const deps = createDependencies({ config: null });
     deps.eventLogWriter.appendAtomically.mockImplementation(async (entries) =>
       entries.map((entry) => {
-        BoundedJsonObjectSchema.parse(entry.payload_json);
+        EventLogPayloadSchema.parse(entry.payload_json);
         return {
           event_id: `event-${Math.random()}`,
           created_at: NOW,
@@ -160,7 +160,8 @@ describe("ManifestationResolver", () => {
         (entry) =>
           entry.event_type === RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED
       );
-    expect(decisionEvents.length).toBeGreaterThan(1);
+    expect(decisionEvents).toHaveLength(1);
+    expect(JSON.stringify(decisionEvents[0]?.payload_json).length).toBeGreaterThan(BOUNDED_JSON_OBJECT_MAX_CHARS);
     const foldedCandidateIds = decisionEvents.flatMap((entry) =>
       (entry.payload_json as { decisions: readonly { candidate_id: string }[] }).decisions.map(
         (decision) => decision.candidate_id

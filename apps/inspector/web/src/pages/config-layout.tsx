@@ -13,7 +13,14 @@ const RESTART_COMMAND = "alaya stop && alaya start";
 
 export const CONFIG_SECTIONS: ReadonlyArray<SectionMeta> = [
   { key: "soul", title: "Soul Runtime", titleKey: "config:section.soul", icon: <Cpu className="h-6 w-6" /> },
-  { key: "strategy", title: "Strategy & Guardrails", titleKey: "config:section.strategy", icon: <ShieldCheck className="h-6 w-6" /> },
+  {
+    key: "strategy",
+    title: "Strategy & Guardrails",
+    titleKey: "config:section.strategy",
+    icon: <ShieldCheck className="h-6 w-6" />,
+    readOnly: true,
+    noticeKey: "config:strategy.storedOnly"
+  },
   { key: "environment", title: "Environment", titleKey: "config:section.environment", icon: <Globe className="h-6 w-6" /> }
 ];
 
@@ -40,7 +47,7 @@ export function ConfigPageShell(props: {
         {props.state.restartPending ? <RestartPendingBanner onDismiss={props.state.dismissRestart} t={t} /> : null}
         <ConfigHeader t={t} />
         <GenericConfigSections workspaceId={props.workspaceId} state={props.state} />
-        <SpecializedConfigPanels workspaceId={props.workspaceId} onRequiresRestart={props.state.handleRestartRequired} t={t} />
+        <SpecializedConfigPanels workspaceId={props.workspaceId} t={t} />
         <DiagnosticPanel dirtyCount={props.state.dirtySections.size} workspaceId={props.workspaceId} t={t} />
       </div>
     </div>
@@ -103,16 +110,15 @@ function GenericConfigSections(props: {
 
 function SpecializedConfigPanels(props: {
   readonly workspaceId: string;
-  readonly onRequiresRestart: () => void;
   readonly t: Translate;
 }) {
   return (
     <>
       <ConfigFormPanel icon={<KeyRound className="h-6 w-6" />} title={props.t("config:panel.embeddingSupplement")}>
-        <EmbeddingSupplementForm onRequiresRestart={props.onRequiresRestart} workspaceId={props.workspaceId} />
+        <EmbeddingSupplementForm workspaceId={props.workspaceId} />
       </ConfigFormPanel>
       <ConfigFormPanel icon={<KeyRound className="h-6 w-6" />} title={props.t("config:panel.gardenCompute")}>
-        <GardenComputeForm onRequiresRestart={props.onRequiresRestart} workspaceId={props.workspaceId} />
+        <GardenComputeForm workspaceId={props.workspaceId} />
       </ConfigFormPanel>
       <ConfigFormPanel icon={<SlidersHorizontal className="h-6 w-6" />} title={props.t("config:panel.manifestationBudget")}>
         <ManifestationBudgetForm workspaceId={props.workspaceId} />

@@ -7,13 +7,18 @@ import { parseMemoryProposalOperation, parseProposalId, parseProposalReviewerAss
 import { parseProposedPathRelation } from "../path-relations.js";
 import type { PendingProposalSummaryRow, ProposalReviewerAssignmentRow, ProposalRow } from "../mappers/rows.js";
 import type { ProposalStatements } from "../statements/sqlite-proposal-statements.js";
-import { SQLITE_VARIABLE_CHUNK_SIZE, type FindPendingSummariesOptions, type PendingProposalSummary, type ProposalListPageOptions, type ProposalReviewerAssignment, type ProposalReviewerAssignmentInput, type ScopedProposal } from "../types.js";
+import { SQLITE_VARIABLE_CHUNK_SIZE, type CountPendingSummariesOptions, type FindPendingSummariesOptions, type PendingProposalSummary, type ProposalListPageOptions, type ProposalReviewerAssignment, type ProposalReviewerAssignmentInput, type ScopedProposal } from "../types.js";
 import { parseRows } from "../../shared/parse-row.js";
 import { ProposalRowParser } from "../mappers/mappers.js";
 import { PendingProposalSummaryRowParser } from "../mappers/mappers.js";
 
 interface PendingSummariesQuery {
   readonly sql: string;
+  readonly params: readonly (string | number)[];
+}
+
+interface PendingSummariesFilter {
+  readonly whereSql: string;
   readonly params: readonly (string | number)[];
 }
 
@@ -201,6 +206,33 @@ export class ProposalReadQueries {
     }
   }
 
+  // Total count of the pending proposals that match the SAME filter
+  // findPendingSummaries applies, without its LIMIT. Callers that return a page
+  // plus total_count report the truthful queue size instead of the page length.
+  // `since` keeps its meaning in both reads: a created_at lower bound, not a
+  // backward-pagination cursor, so a later page request never re-counts earlier
+  // rows or silently reports the retained window as the whole queue.
+  public async countPendingSummaries(
+    workspaceId: string,
+    options: CountPendingSummariesOptions = {}
+  ): Promise<number> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+    const filter = buildPendingSummariesFilter(parsedWorkspaceId, options.since ?? null);
+
+    try {
+      const row = this.activeConnection()
+        .prepare(`SELECT COUNT(*) AS total FROM proposals p WHERE ${filter.whereSql}`)
+        .get(...filter.params) as { readonly total: number } | undefined;
+      return row === undefined ? 0 : Number(row.total);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count pending proposal summaries for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
   public async findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null> {
     const parsedRunId = parseNonEmptyString(runId, "run_id");
 
@@ -281,20 +313,29 @@ export class ProposalReadQueries {
   }
 }
 
+// The one definition of "which pending proposals match", shared by the page
+// projection and the matching total so the two reads cannot drift.
+function buildPendingSummariesFilter(workspaceId: string, since: string | null): PendingSummariesFilter {
+  const params: (string | number)[] = [workspaceId];
+  let whereSql = "p.workspace_id = ? AND p.resolution_state = 'pending'";
+  if (since !== null) {
+    whereSql += " AND p.created_at > ?";
+    params.push(since);
+  }
+  return { whereSql, params };
+}
+
 function buildPendingSummariesQuery(
   workspaceId: string,
   referenceTime: string,
   options: FindPendingSummariesOptions
 ): PendingSummariesQuery {
-  const params: (string | number)[] = [referenceTime, workspaceId];
-  const since = options.since ?? null;
+  const filter = buildPendingSummariesFilter(workspaceId, options.since ?? null);
   const limit = options.limit ?? null;
+  // The overdue CASE parameter precedes the WHERE parameters in SQL order.
+  const params: (string | number)[] = [referenceTime, ...filter.params];
   let sql = `${PENDING_SUMMARIES_SELECT_SQL}
-      WHERE p.workspace_id = ? AND p.resolution_state = 'pending'`;
-  if (since !== null) {
-    sql += " AND p.created_at > ?";
-    params.push(since);
-  }
+      WHERE ${filter.whereSql}`;
   sql += " ORDER BY p.created_at DESC, p.proposal_id DESC";
   if (limit !== null) {
     sql += " LIMIT ?";

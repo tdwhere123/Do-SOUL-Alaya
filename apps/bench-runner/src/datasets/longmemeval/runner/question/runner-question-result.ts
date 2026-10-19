@@ -15,8 +15,7 @@ import {
   type LongMemEvalRecallCycleResult,
   type LongMemEvalSidecarEntry
 } from "../runner-helpers.js";
-import type { QaQuestionVerdict } from "../../../../runs/qa/qa-harness.js";
-import type { QaChatFn } from "../../../../runs/qa/qa-chat.js";
+import { QaChatError, type QaChatFn } from "../../../../runs/qa/qa-chat.js";
 import type { LongMemEvalQuestionSeedState } from "./runner-question-seeding.js";
 import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
@@ -29,6 +28,15 @@ import {
 } from "../../ingestion/source-time.js";
 import { buildGoldObjectIdentities } from
   "../../../../diagnostics/gold-object-identities.js";
+
+// Runtime-only partial failure: the independent Recall observation is complete,
+// but QA has no verdict. Collection must retain both the result and the failure.
+export class LongMemEvalQuestionQaError extends QaChatError {
+  constructor(readonly recallResult: LongMemEvalWorkerResult, error: QaChatError) {
+    super(error.message, { cause: error });
+    this.name = "LongMemEvalQuestionQaError";
+  }
+}
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;
@@ -52,25 +60,30 @@ export async function buildLongMemEvalQuestionResult(input: {
     sidecar: input.seedState.sidecar,
     recallResult: input.recallCycle.scoredRecallResult
   });
-  const scored = await scoreQuestion(input);
+  const scored = scoreQuestionRecall(input);
   const kpi = await collectQuestionKpi(input);
-  return assembleWorkerResult(input, scored, kpi);
+  const result = assembleWorkerResult(input, scored, kpi);
+  try {
+    const qaVerdict = await scoreLongMemEvalQaIfRequested({
+      question: input.question,
+      qaChat: input.qaChat,
+      qaJudgeChat: input.qaJudgeChat,
+      isAbstention: scored.isAbstention,
+      results: input.recallCycle.scoredRecallResult.results,
+      goldMemoryIds: input.goldMemoryIds,
+      goldObjectIdentities: buildGoldObjectIdentities(input),
+      sidecar: input.seedState.sidecar
+    });
+    return qaVerdict === undefined ? result : { ...result, qaVerdict };
+  } catch (error) {
+    if (!(error instanceof QaChatError)) throw error;
+    throw new LongMemEvalQuestionQaError(result, error);
+  }
 }
 
-async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionResult>[0]) {
+function scoreQuestionRecall(input: Parameters<typeof buildLongMemEvalQuestionResult>[0]) {
   const recallResult = input.recallCycle.scoredRecallResult;
   const isAbstention = isAbstentionQuestionId(input.question.question_id);
-  const goldObjectIdentities = buildGoldObjectIdentities(input);
-  const qaVerdict = await scoreLongMemEvalQaIfRequested({
-    question: input.question,
-    qaChat: input.qaChat,
-    qaJudgeChat: input.qaJudgeChat,
-    isAbstention,
-    results: recallResult.results,
-    goldMemoryIds: input.goldMemoryIds,
-    goldObjectIdentities,
-    sidecar: input.seedState.sidecar
-  });
   const hits = resolveLongMemEvalHitVerdict({
     isAbstention,
     results: recallResult.results,
@@ -79,7 +92,7 @@ async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionRe
     recallResult,
     embeddingMode: input.embeddingMode
   });
-  return { isAbstention, qaVerdict, hits, diagnostics: buildDiagnostics(input, isAbstention, hits) };
+  return { isAbstention, hits, diagnostics: buildDiagnostics(input, isAbstention, hits) };
 }
 
 function buildDiagnostics(
@@ -154,7 +167,6 @@ async function collectQuestionKpi(input: Parameters<typeof buildLongMemEvalQuest
 function assembleWorkerResult(
   input: Parameters<typeof buildLongMemEvalQuestionResult>[0],
   scored: {
-    readonly qaVerdict?: QaQuestionVerdict;
     readonly hits: ReturnType<typeof resolveLongMemEvalHitVerdict>;
     readonly diagnostics: LongMemEvalQuestionDiagnostic;
   },
@@ -179,7 +191,6 @@ function assembleWorkerResult(
     tokenMetrics: kpi.tokenMetrics,
     recallTokenEconomy: kpi.recallTokenEconomy,
     edgeProposalKpiRows: kpi.edgeProposalKpiRows,
-    ...(scored.qaVerdict === undefined ? {} : { qaVerdict: scored.qaVerdict }),
     ...snapshotQuestionField(input)
   };
 }

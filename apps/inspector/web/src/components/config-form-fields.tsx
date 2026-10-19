@@ -1,17 +1,5 @@
-import { Eye, EyeOff } from "lucide-react";
 import { clsx } from "clsx";
 import { useI18n } from "../i18n/locale";
-
-type Translate = ReturnType<typeof useI18n>["t"];
-
-export type SecretRefMode = "env" | "file" | "paste";
-
-export interface ParsedSecretRef {
-  readonly mode: SecretRefMode;
-  readonly value: string;
-}
-
-const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
 
 export function FieldRow(props: {
   readonly label: string;
@@ -23,6 +11,45 @@ export function FieldRow(props: {
         {props.label}
       </label>
       <div>{props.children}</div>
+    </div>
+  );
+}
+
+export function ReadOnlyFieldRow(props: {
+  readonly label: string;
+  readonly value: unknown;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2">
+      <span className="text-xs font-mono text-ink-700/60 uppercase tracking-widest">
+        {props.label}
+      </span>
+      <span className="text-sm text-ink-700 font-mono text-right break-all">
+        {displayValue(props.value)}
+      </span>
+    </div>
+  );
+}
+
+export function RuntimeConfigReadOnlyNotice() {
+  const { t } = useI18n();
+  return (
+    <div
+      role="note"
+      className="space-y-2 rounded border border-beige-300 bg-beige-200/50 px-4 py-3 text-xs text-ink-700"
+    >
+      <p className="font-bold uppercase tracking-widest">
+        {t("config:runtimeConfig.readOnly.heading")}
+      </p>
+      <p className="text-ink-700/80">{t("config:runtimeConfig.readOnly.body")}</p>
+      <div className="flex flex-wrap gap-2">
+        <code className="rounded bg-beige-100 px-2 py-1 text-[10px]">
+          alaya install --non-interactive '&lt;answers-json&gt;'
+        </code>
+        <code className="rounded bg-beige-100 px-2 py-1 text-[10px]">
+          alaya install --keychain
+        </code>
+      </div>
     </div>
   );
 }
@@ -53,159 +80,22 @@ export function ToggleSwitch(props: {
   );
 }
 
-export function SecretRefField(props: {
-  readonly mode: SecretRefMode;
-  readonly value: string;
-  readonly revealFile: boolean;
-  readonly validationError: string | null;
-  readonly onModeChange: (mode: SecretRefMode) => void;
-  readonly onRevealFileChange: (value: boolean | ((current: boolean) => boolean)) => void;
-  readonly onValidationErrorChange: (value: string | null) => void;
-  readonly onValueChange: (value: string) => void;
-}) {
-  const { t } = useI18n();
-  const visibleValue =
-    props.mode === "file" && !props.revealFile && props.value ? maskFilePath(props.value) : props.value;
-  return (
-    <div className="flex flex-col items-end gap-2">
-      <SecretModeChips mode={props.mode} onModeChange={props.onModeChange} />
-      <div className="flex items-center gap-2">
-        <SecretRevealButton {...props} t={t} />
-        <input
-          type={props.mode === "paste" ? "password" : "text"}
-          value={visibleValue}
-          onChange={(event) => props.onValueChange(event.target.value)}
-          placeholder={secretPlaceholder(props.mode, t)}
-          className={clsx(
-            "bg-transparent border-b outline-none text-sm font-mono text-right py-1 min-w-[260px]",
-            props.validationError
-              ? "border-morandi-pink text-morandi-pink"
-              : "border-beige-300 focus:border-ink-600 text-ink-700"
-          )}
-          onFocus={() => props.mode === "file" && props.onRevealFileChange(true)}
-          onBlur={() => handleSecretBlur(props)}
-        />
-      </div>
-      {props.validationError ? (
-        <span className="text-[10px] text-morandi-pink">
-          {translateSecretValidationError(props.validationError, t)}
-        </span>
-      ) : null}
-      {props.mode === "paste" ? (
-        <span className="max-w-[260px] text-right text-[10px] text-ink-700/40">
-          {t("config:secret.pasteHelper")}
-        </span>
-      ) : null}
-    </div>
-  );
+export function formatSecretRef(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === "") return "";
+  if (raw.startsWith("file:")) {
+    return `file:${maskFilePath(raw.slice("file:".length))}`;
+  }
+  return raw;
 }
 
-function SecretModeChips(props: {
-  readonly mode: SecretRefMode;
-  readonly onModeChange: (mode: SecretRefMode) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1 text-[10px] uppercase tracking-widest">
-      {(["env", "file", "paste"] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => props.onModeChange(mode)}
-          className={clsx(
-            "px-2 py-0.5 rounded border transition-colors",
-            props.mode === mode
-              ? "bg-ink-600 text-beige-50 border-ink-600"
-              : "bg-transparent text-ink-700/60 border-beige-300 hover:border-ink-600/40"
-          )}
-        >
-          {mode}:
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function SecretRevealButton(props: {
-  readonly mode: SecretRefMode;
-  readonly value: string;
-  readonly revealFile: boolean;
-  readonly onRevealFileChange: (value: boolean | ((current: boolean) => boolean)) => void;
-  readonly t: Translate;
-}) {
-  if (props.mode !== "file" || !props.value) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => props.onRevealFileChange((current) => !current)}
-      className="text-ink-700/40 hover:text-ink-700"
-      aria-label={props.revealFile ? props.t("config:secret.path.hide") : props.t("config:secret.path.show")}
-    >
-      {props.revealFile ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-    </button>
-  );
-}
-
-function handleSecretBlur(props: {
-  readonly mode: SecretRefMode;
-  readonly value: string;
-  readonly onRevealFileChange: (value: boolean | ((current: boolean) => boolean)) => void;
-  readonly onValidationErrorChange: (value: string | null) => void;
-}) {
-  props.onValidationErrorChange(validateSecretValue(props.mode, props.value));
-  if (props.mode === "file") props.onRevealFileChange(false);
-}
-
-export function parseSecretRef(raw: string | null): ParsedSecretRef {
-  if (!raw) return { mode: "env", value: "" };
-  if (raw.startsWith("env:")) return { mode: "env", value: raw.slice(4) };
-  if (raw.startsWith("file:")) return { mode: "file", value: raw.slice(5) };
-  return { mode: "env", value: "" };
-}
-
-export function buildSecretRef(mode: Exclude<SecretRefMode, "paste">, value: string): string | null {
-  if (value === "") return null;
-  return `${mode}:${value}`;
-}
-
-export function buildSecretPatch(mode: SecretRefMode, value: string): {
-  readonly secret_ref?: string | null;
-  readonly secret_ref_mode?: SecretRefMode;
-  readonly secret_value?: string | null;
-} {
-  if (value === "") return { secret_ref: null };
-  if (mode === "paste") return { secret_ref_mode: "paste", secret_value: value };
-  return { secret_ref_mode: mode, secret_value: value };
-}
-
-export function validateSecretValue(mode: SecretRefMode, value: string): string | null {
-  if (value === "") return null;
-  if (mode === "env" && !ENV_NAME_RE.test(value)) return "env name must be UPPER_SNAKE_CASE";
-  if (mode === "file" && !value.startsWith("/")) return "file path must be absolute (start with /)";
-  if (mode === "paste" && value.trim().length === 0) return "pasted key is required";
-  return null;
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function maskFilePath(path: string): string {
   const segs = path.split("/").filter(Boolean);
   if (segs.length <= 2) return path;
   return `…/${segs[segs.length - 1]}`;
-}
-
-function secretPlaceholder(mode: SecretRefMode, t: Translate): string {
-  if (mode === "env") return t("config:secret.placeholder.env");
-  if (mode === "file") return t("config:secret.placeholder.file");
-  return t("config:secret.placeholder.paste");
-}
-
-function translateSecretValidationError(error: string, t: Translate): string {
-  switch (error) {
-    case "env name must be UPPER_SNAKE_CASE":
-      return t("config:secret.validation.envName");
-    case "file path must be absolute (start with /)":
-      return t("config:secret.validation.filePath");
-    case "pasted key is required":
-      return t("config:secret.validation.pastedKey");
-    default:
-      return error;
-  }
 }

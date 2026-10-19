@@ -166,6 +166,22 @@ function pushLatencyDelta(
   thresholds: ThresholdConfig,
   downgradeFail: (verdict: Verdict) => Verdict
 ): void {
+  // An exact percentile and a worst-shard upper bound are different
+  // measurements. Keep both values visible but do not derive a growth delta
+  // from their numeric difference.
+  if (current.kpi.latency_source !== previous.kpi.latency_source) {
+    deltas.push({
+      key: "latency_ms_p95",
+      current: current.kpi.latency_ms_p95,
+      previous: previous.kpi.latency_ms_p95,
+      delta: null,
+      verdict: downgradeFail("warn"),
+      growth_ratio: null,
+      comparison_status: "unavailable",
+      direction: "growth_bad"
+    });
+    return;
+  }
   const latencyVerdict = classifyLatencyGrowth(
     current.kpi.latency_ms_p95,
     previous.kpi.latency_ms_p95,

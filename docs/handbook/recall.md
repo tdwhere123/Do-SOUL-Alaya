@@ -1543,9 +1543,10 @@ leased `reason` then uses that H, the unchanged original text and Q, and newly
 admitted local C. Preparation binds its originating action/exposure and hint,
 exact descriptor, policy and parent entitlement. An ID-only/mismatched descriptor,
 missing lease, unusable cache or insufficient allowance is not ready-empty.
-The daemon and bench collaborator reuse SOUL request construction and the existing
-semantic-proposal key, read, decode and Core admission owners; no provider request,
-fill fallback, cache write or new worker operation is introduced. Each subsequent
+The private host contract reuses SOUL request construction and Core admission;
+its former bench cache collaborator has been removed. Native regression fixtures
+supply explicit correspondence through that contract; no production host binding,
+provider request, fill fallback, cache write or new worker operation is introduced. Each subsequent
 native reason obtains its own local snapshot and current-lease checks, not a joint
 snapshot. The actual discovery exposure retains its completeness. The result is
 independent local qualification only; seed assignments never transfer across H,
@@ -1575,34 +1576,17 @@ Constructor and entry must use matching compiled module identity. Missing bindin
 fails closed and a closed client retains its existing execution-scope refusal.
 This entry does not construct a seed or make ordinary Recall a feedback loop.
 
-A separate private worker adapter, `researchLibrary.recall`, can apply the fixed
-`private-two-h-chronology-v1` rule after native library execution in one snapshot.
-Core owns the rule; explicit selected coordinates must bind an actually executed
-Bridge/Review local closure and an independently qualified Approval closure. Typed
-key kind, issuer, project, exact normalization and value must agree; source-located
-explicit-offset event times must establish strict precedence. Missing, ambiguous,
-unsupported or non-assertive premises do not become a witnessed result. The
-assessment remains unreviewed and its world claim unknown; it does not change the
-feedback session's `not_lowered` result or add a public joint-proof field.
-The adapter tests delivery through the existing package, fit and encoder owners,
-then recomputes a budgeted Bridge-premise withdrawal with independent Approval
-preserved. This is a private causal diagnostic, not a durable source retraction.
-All private computation and transport consume the native request's remaining
-ledger; the reported private work includes that native prefix and must not be
-added to it again. Funded diagnostic failures preserve the native sibling; if even
-its minimal failure envelope cannot be funded, the private call fails closed with
-separate known native and diagnostic work. Native continuation identity and worker
-affinity remain ordinary; private fitting issues no hidden continuation leases.
-Only delivered, non-routable private pages and bounded dependencies escape; no
-joint cache or persistent graph is introduced. Ordinary MCP/default recall does
-not enable this adapter. The guarded acquisition experiment can instead consume
-an admitted fixed population through `researchLibrary.compareQualified` with explicit
-joint selection. This exclusive branch reuses current H verification, Q/C admission
-and actually executed locals without discovery or query preparation. Its default
-page, joint delivery, withdrawal and actual final outer transport share one ledger
-and snapshot; every nominee remains explicit and private fitting issues no leases.
-Ordinary qualified comparison retains its two counterfactual policies. Authored
-external-entry controls establish this wiring, not natural semantic fidelity.
+Private research acquisition, fixed-pool replay, nominated-library comparisons,
+joint delivery and qualified-selection adapters have been removed. Native Q/H/C
+contracts remain frozen. In particular,
+`packages/core/src/recall/conditional-field/query/source-semantic-joint-witness.ts`
+has no current retained caller; C0 retains it until the W9 contract decision.
+Its exact knip entry records a retained frozen contract, not public reachability.
+
+The bounded `source-semantic-library-nominated-windows.ts` hydration utility is
+explicitly retained with direct SQLite regression coverage. Its former feeder was
+research-only and has been removed; ordinary library recall does not invoke it.
+This retention adds no runtime wiring or source-index-to-recall behavior.
 
 `soul.interpretation` `recall` is the opt-in library path shared by native callers
 and the benchmark. Original query and authorized scope enter once. After snapshot,
@@ -1832,31 +1816,13 @@ delivery contract and resource policy. Its order declaration derives from Core's
 native order, and measurement requires the delivered order to match that
 freeze. Native measurement uses `longmemeval-native-semantic-measurement-v3`;
 historical artifacts retain their original declarations. Existing publication and
-generic semantic-chain owners perform preparation, snapshot reopen, discovery,
-correspondence receive, public recall and initial exposure.
-The opt-in Bench task consumer API in
-[`semantic-chain/consumer`](../../apps/bench-runner/src/runs/semantic-chain/consumer/input.ts)
-admits one retained native replay before preparing the exact original question,
-question clock and complete public recall envelope. Archive-only source bodies,
-gold and evaluator reviews are not consumer inputs. An independently selected
-question-only control withholds the envelope explicitly. Its fixed generic
-instruction permits supported partial or unresolved answers and preserves source
-qualifications; it carries no task-specific answer oracle.
-`pinSemanticChainConsumerAuthority` binds the current implementation, native
-replay and request identities, quote and a separate execution root. The existing
-provider-request owner also supplies the effective deadline retained in preparation,
-authority and the run report: the output-token-derived timeout with a 900,000 ms
-interactive floor. Callers cannot replace this derived deadline in retained scope.
-The existing write lease, attempt ledger and provider-request pipeline own execution: at most
-one attempt per selected arm, with retained native HTTP/raw evidence and no
-automatic retry. `executeSemanticChainConsumer` in recovery mode only settles
-retained evidence. A reserved attempt without raw remains unknown, and completed
-reinvocation cannot dispatch again. A `complete_response` establishes physical
-completion and answer-schema validity only. The answer's `task_completion` is a
-fallible consumer claim; fidelity remains unassessed. This API neither publishes
-memory nor establishes cross-task utility or benchmark acceptance.
-`prepareOrdinaryRecallConsumer` also admits a selected, trusted local
-`ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
+generic `recall-measurement` owners perform preparation, snapshot reopen, discovery,
+public recall and initial exposure. The read-only `semantic-cache` owner shares
+exact retained request identities and native Q/C cache admission. It has no
+research fill, paid task-consumer execution or recovery orchestration entry.
+The retained ordinary public-capture reader
+([`recall-measurement/ordinary`](../../apps/bench-runner/src/runs/recall-measurement/ordinary/ordinary-recall.ts))
+admits a selected, trusted local `ordinary-recall-local-capture-v1` archive. It binds the prepared operator,
 episode and call reservations, physical MCP request/reply transcript, trusted
 handler context, source snapshot, first-exposure receipts and closed process.
 The current Protocol 17.0.0 reader accepts producer packages 14.1.0, 15.0.0,
@@ -1864,9 +1830,9 @@ The current Protocol 17.0.0 reader accepts producer packages 14.1.0, 15.0.0,
 semantic-library capacity and query-schema changes leave this public source-only contract
 unchanged. Producer provenance
 remains immutable and separate from the current
-verification and consumer execution revisions. Arbitrary ancestor commits and
+verification revision. Arbitrary ancestor commits and
 caller-authored replacement envelopes do not establish this compatibility.
-The consumer receives the original question and ordered public envelopes,
+The reader retains the original question and ordered public envelopes,
 including a successful prefix followed by a terminal public error. Complete
 source delivery, partial delivery, failed exposure and an unclosed/unknown
 observation remain distinct. Authority requires a closed capture and successful
@@ -1880,71 +1846,17 @@ An unreturned public call may retain zero or one trusted handler context while
 the outer observation principal remains unset. Inspection validates retained
 contexts without inventing a public envelope or populating that summary.
 Private snapshot reads verify emitted bytes and disclosures without supplying
-hidden source material to the model. The existing consumer provider binding,
-quote, separate output root, ledger and raw recovery own all subsequent effects.
-Historical semantic-library consumer preparations retain their original shape.
-An opt-in offline lazy-qualification stage records one native `prepare_query`
-observation before any public recall and freezes the first ten distinct current
-raw source records in access order, or fewer when the pool is smaller. It keeps
-the complete source census and emits only selected, owned cache misses for the
-existing extraction authority; failed, pending, unknown, unsupported, invalid and
-incompletely observed states are not misses. An open or resource-limited first
-observation retains its fixed prefix and residual without replacing a source.
-For retained native sources, the request inventory assigns each exact source
-occurrence to its H key. Identical text with different role or attribution can
-require distinct keys; multiple exact occurrences can share one key. Ready empty
-sources retain their deterministic key, while unsupported sources have none.
-Recovery reuses the source-record timestamp contract and preserves event and
-recorded time strings, including minute precision, through the frozen window
-and final publication. Unknown event time remains null. Final H child classification uses the same role,
-attribution and generation proposal reconstruction as cache admission.
-Finalization publishes the full census to a distinct sealed
-SQLite snapshot. Newly admitted interpretations may bind only the frozen
-source/version window; compatible associations that predate it remain available
-outside the window. It re-prepares the query and correspondence workset under
-the final revision, then permits one retained first public exposure through the
-existing native selector and proof path. The delivered five may include raw
-sources outside the qualification window, and some interpreted window members
-may remain undelivered; neither changes the frozen extraction scope. Both native
-pool receipts, selected attempt counts, producer usage and separate host work
-are retained. Attempt counts come from durable reservations; newly received raw
-bytes, pre-window pending work and unresolved usage are separate. A copied ledger
-lineage without unique call provenance remains unknown. A durable native replay
-can complete an interrupted stage wrapper under the frozen identity; a reserved
-native row with no durable outcome cannot be re-exposed. This stage does not
-alter ordinary recall defaults or scoring.
-The current plan
-requires an explicit Protocol access policy in the frozen configuration and forwards it unchanged during preparation
-and replay. The native arm pins `query-conditioned-v1`; the source-only arm pins
-`canonical-v1`. Historical source-only artifacts keep their explicit offline
-readmission owner; the current chain reader does not fall back to an older plan.
-For an offline single-question LongMemEval native freeze, the lazy binder admits
-the original complete source census, initial question publication and settled query,
-and the full retained Step source preflight before constructing the existing lazy
-config. Its isolated evaluator joins gold only for an admitted durable first
-exposure and writes outside producer and cache roots. A sealed final stage with no
-durable first exposure remains one selected answerable unknown, distinguishing an
-unreserved exposure from an unresolved native or stage reservation, with no recall or
-gold join. A verified positive source hit survives partial answer-session mapping;
-only a negative requires complete mapping. Unselected development questions remain
-in the inventory but are not scored, and this bridge does not authorize a formal arm.
-For fixed development20 and reused-readiness50 lazy populations, Bench freezes the
-ordered metadata membership, existing selection contract, explicit prior exposure,
-per-member native config identity, resource references and physically separate
-producer/evaluator roots before running a named member. It does not load the dataset
-or grant extraction at population freeze. Each member advances through the existing
-single-question native stages; no population command fills a provider cache. A
-durable cutoff captures stage, first-exposure and Q/H/C attempt references before
-isolated scoring. The population result keeps every frozen answerable member in
-H/M/U, including an early failure or unknown effect, while abstention remains
-separate. Only a readmitted durable first exposure uses the existing lazy gold
-join and metric. Native reservations and raw usage are projected per physical root
-and reserved ordinal, so a copied continuation or shared cache attempt is counted
-once in the observed scope. Missing scopes or usage keep the population total
-unknown, and this development result does not authorize a formal arm.
+hidden source material to a model. Paid consumer execution, lazy qualification,
+population orchestration and research recovery have been removed; historical
+artifacts retain their original bytes and declarations.
+The retained measurement plan requires an explicit Protocol access policy in its
+frozen configuration and forwards it unchanged during preparation and replay.
+The native arm pins `query-conditioned-v1`; the source-only arm pins `canonical-v1`.
+Historical source-only artifacts keep their explicit offline readmission owner;
+the current measurement reader does not fall back to an older plan.
 Each query gets its own bounded native
-candidate opportunity; one combined proposal workset uses the existing authority
-and attempt ledger for global spend. Preparation retains the native access receipt
+candidate opportunity. Retained cache worksets identify existing Q/C inputs;
+they do not authorize new production or spend. Preparation retains the native access receipt
 and stops once all observed interpretation descriptors have been received. A source
 trace continuation alone is not another correspondence opportunity or an open
 census: the receipt's offsets and omitted counts preserve the undisplayed rows.
@@ -2101,16 +2013,12 @@ disposition without minting an empty source interpretation or a memory object. T
 remain provider-free. Authored/native regressions establish engineering
 behavior, not real-model extraction quality or benchmark utility.
 
-Proposal workset v3 freezes the normalized provider endpoint. Preflight/authority
-v5, cache v3 and proposal raw-attempt v1 bind the resolved transport and exact
-HTTP request, including schema guidance and thinking settings. Fill checks the
-actual config before reserving an attempt. Source-extraction raw-attempt v2 is
-unchanged. Historical proposal bytes are retained, never relabeled or reused as
-current evidence. Reissuing a receipt resumes the stable execution lineage in
-the same cache; timestamps and companion keys do not renew request opportunities.
-Existing ledger census and ceiling mismatches fail closed. A different attempt
-cannot settle an unresolved reservation; legacy lineages require explicit settled
-continuation before using the same cache. This repair does not grant new budget.
+Retained proposal workset v3 freezes the normalized provider endpoint. Cache v3
+and proposal raw-attempt v1 bind the resolved transport and exact HTTP request,
+including schema guidance and thinking settings. Read-only cache admission retains
+these identities; research preflight, fill and revision execution have been removed.
+Source-extraction raw-attempt v2 is unchanged. Historical proposal bytes are
+retained, never relabeled or reused as current evidence.
 
 Provider-request and interactive source recovery derive HTTP retry eligibility
 from the retained status through the engine gateway policy: 429 and 5xx may use
@@ -2122,26 +2030,22 @@ it does not repair history or grant another attempt. Missing raw remains unknown
 aborted and completed parse/schema failures remain terminal, and existing bounded
 retry treatment of timeout, network and response-body transport failures is unchanged.
 
-Native chat query revision worksets may name a `retained_parent` on each revised
-item when only the original system guidance changed. The bench parent resolver requires
-the same canonical request, response schema, model, profile, route and output
-cap to reproduce that parent's retained key and exact wire digest. Native
-shard, raw-response and reservation readers then verify its complete settled
-physical response. The reference is lookup context, not evidence of success;
-it remains in the child workset and in the evaluator input exclusion inventory.
-The isolated child uses current guidance and its own request identity. Without
-an explicit reference, revision preparation retains same-generation lookup.
-Gemini's projected schema does not establish full-schema equality from wire
-identity and therefore does not support this explicit historical reference.
-Historical output is revision context, never relabeled current producer output.
+Retained native-chat query revision worksets may name a `retained_parent` on
+revised items. The read-only parent resolver requires the same canonical request,
+response schema, model, profile, route and output cap to reproduce the retained
+key and exact wire digest. Native shard, raw-response and reservation readers
+verify its complete settled physical response. The reference is lookup context,
+not evidence of success or permission to dispatch. Gemini's projected schema
+does not establish full-schema equality from wire identity and therefore does not
+support this explicit historical reference. Historical output is never relabeled
+current producer output.
 
-Proposal publication verifies retained bytes and their exact reserved ordinal/key
-before writing a shard. Offline preparation and chain readers also require raw,
-reservation, and successful-admission closure; parsing a shard alone never makes
-it executable. Shared attempt-ledger v5 retains an additive `settled_attempts`
+Offline cache and measurement readers require retained raw bytes, exact reserved
+ordinal/key, reservation and successful-admission closure; parsing a shard alone
+never makes it executable. Shared attempt-ledger v5 retains an additive `settled_attempts`
 history on settlement. Historical records without that field keep their identity;
 aggregate counts cannot supply missing settled ownership. Existing unresolved
-reservations can still recover through explicit fill. Reads never settle them:
+reservations retain their unresolved state. Reads never settle them:
 no raw is `unknown`, retained but unsettled output is `pending`, and neither is
 unattempted or a terminal failure. Completed incomplete output, rejected output,
 transport failure, abstention, and interpreted output remain distinct. Missing

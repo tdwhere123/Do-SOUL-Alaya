@@ -2,7 +2,9 @@ import type { KpiPayload, QualityMetrics, Verdict } from "../contracts/kpi-schem
 import { measurementContractAllowsEligibility } from "../contracts/kpi-measurement-contract.js";
 import { longMemEvalSelectionContractAllowsEligibility } from
   "../contracts/longmemeval-selection-contract.js";
+import { readEmbeddingLatencyClaim } from "../metrics/embedding-latency-claim.js";
 import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
+import { canAdvanceSharedLatestPassingPointer } from "./shared-latest-passing-pointer.js";
 import { rollupWorstVerdict } from "./thresholds.js";
 import {
   verifiedLongMemEvalEvidenceMatches,
@@ -52,6 +54,11 @@ export function releaseHardGateAllowsLatestPassing(
   current: KpiPayload,
   evidence?: VerifiedLongMemEvalEvidenceContext
 ): boolean {
+  // A split with verified evidence but no applicable release gate must not
+  // displace the shared bench-root latest-passing evidence.
+  if (!canAdvanceSharedLatestPassingPointer(current)) {
+    return false;
+  }
   if (isLongMemEvalMeasurementSurface(current) &&
       !verifiedLongMemEvalEvidenceMatches(current, evidence)) {
     return false;
@@ -314,11 +321,15 @@ function pushRecallLatencyGate(
   current: KpiPayload,
   embeddingEnabled: boolean
 ): void {
+  // Match the report's latency prerequisite: an explicit sub-one inference
+  // mean marks a warm-query-cache-only run, whose p95 is not gate-claimable.
+  const claimable = !embeddingEnabled ||
+    readEmbeddingLatencyClaim(current).status !== "warm_cache_only";
   gates.push(
     maxGate(
       embeddingEnabled ? "recall_p95_embedding_on" : "recall_p95_embedding_off",
       embeddingEnabled ? "recall p95 embedding-on" : "recall p95 embedding-off",
-      current.kpi.latency_ms_p95,
+      claimable ? current.kpi.latency_ms_p95 : null,
       embeddingEnabled ? 1100 : 200,
       "ms"
     )
@@ -433,8 +444,8 @@ function usesV0311LatestPassingPolicy(current: KpiPayload): boolean {
 function readBudgetDroppedShare(
   metrics: QualityMetrics | undefined
 ): number | null {
-  if (metrics === undefined) return null;
-  return metrics.budget_drop_distribution.max_entries?.share ?? 0;
+  // An absent distribution is unmeasured, not a measured zero drop rate.
+  return metrics?.budget_drop_distribution.max_entries?.share ?? null;
 }
 
 function budgetDropGateLabel(metrics: QualityMetrics | undefined): string {

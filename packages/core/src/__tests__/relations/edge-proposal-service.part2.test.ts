@@ -407,5 +407,62 @@ it("clamps MCP explicit proposal confidence to the agent self-report ceiling", a
       const stored = repo.findById(first.proposal_id);
       expect(stored?.status).toBe(EdgeProposalStatus.AUTO_ACCEPTED);
     });
+
+    // invariant: a pending row whose recorded trigger/confidence clears the
+    // floor is an interrupted create->accept (the accepting call crashed before
+    // the review write, or a transient mint failure compensated the review row
+    // back to pending). Re-proposing the same tuple finishes it through the same
+    // policy + reviewer owners; returning the pending row would strand the
+    // obligation because no later call retries a duplicate.
+    it("finishes an interrupted auto-accept when the same tuple is proposed again", async () => {
+      const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
+      pathCandidatePort.submitCandidate.mockImplementationOnce(async () => "failed");
+      const params = {
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls" as const,
+        workspaceId: "workspace-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK,
+        confidence: 0.9
+      };
+
+      await expect(service.proposeEdge(params)).rejects.toMatchObject({ code: "OBLIGATION_VIOLATION" });
+      expect(repo.findById("edge_prop_proposal-1")?.status).toBe(EdgeProposalStatus.PENDING);
+
+      const resumed = await service.proposeEdge(params);
+
+      expect(resumed).toMatchObject({
+        proposal_id: "edge_prop_proposal-1",
+        status: EdgeProposalStatus.AUTO_ACCEPTED
+      });
+      // The retry finished the recorded row instead of creating a second one.
+      expect(repo.findById("edge_prop_proposal-2")).toBeNull();
+      expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(2);
+      expect(service.listPending("workspace-1").proposals).toEqual([]);
+    });
+
+    // invariant: the retry policy reads the DURABLE row, never the re-proposed
+    // params, so a below-floor pending proposal cannot be promoted to an
+    // auto-accept by re-proposing the same tuple at a higher confidence.
+    it("keeps a below-floor pending duplicate pending when re-proposed above the floor", async () => {
+      const { service, repo, pathCandidatePort } = createAutoAcceptHarness();
+      const params = {
+        sourceMemoryId: "memory-a",
+        targetMemoryId: "memory-b",
+        edgeType: "recalls" as const,
+        workspaceId: "workspace-1",
+        triggerSource: EdgeProposalTriggerSource.RECALL_CROSS_LINK
+      };
+
+      const first = await service.proposeEdge({ ...params, confidence: 0.5 });
+      expect(first.status).toBe(EdgeProposalStatus.PENDING);
+
+      const retried = await service.proposeEdge({ ...params, confidence: 0.95 });
+
+      expect(retried.proposal_id).toBe(first.proposal_id);
+      expect(retried.status).toBe(EdgeProposalStatus.PENDING);
+      expect(repo.findById(first.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
+      expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
+    });
   });
 });

@@ -164,9 +164,21 @@ function assertNoDuplicateQuestions(payloads: readonly KpiPayload[]): void {
   }
 }
 
+const PROVIDER_RATE_FIELDS = [
+  "provider_returned_rate",
+  "provider_pending_rate",
+  "provider_failed_rate",
+  "provider_not_requested_rate",
+  "query_embedding_unusable_rate"
+] as const satisfies readonly (keyof KpiPayload["kpi"])[];
+type ProviderRateField = (typeof PROVIDER_RATE_FIELDS)[number];
+type ProviderRateTotals = Record<ProviderRateField, number>;
+
 interface MergeShardAggregate {
   readonly perScenario: PerScenarioRow[];
   readonly shardTokenEconomies: BenchTokenMetrics[];
+  providerRateFields: readonly ProviderRateField[];
+  providerRateTotals: ProviderRateTotals;
   tierHot: number;
   tierWarm: number;
   tierCold: number;
@@ -181,22 +193,30 @@ interface MergeShardAggregate {
   totalHitAt5: number;
   totalHitAt10: number;
   answerableTotal: number;
-  providerReturnedTotal: number;
-  providerPendingTotal: number;
-  providerFailedTotal: number;
-  providerNotRequestedTotal: number;
-  providerUnusableTotal: number;
   returnedSubsetRAt5: number | undefined;
-  hasProviderRates: boolean;
   evaluatedTotal: number;
   latencyP50Max: number;
   latencyP95Max: number;
 }
 
-function createMergeShardAggregate(): MergeShardAggregate {
+function createMergeShardAggregate(
+  payloads: readonly KpiPayload[]
+): MergeShardAggregate {
   return {
     perScenario: [],
     shardTokenEconomies: [],
+    // These KPI fields are optional in the persisted contract. A field is
+    // reportable only when every shard declares it; an absent field is
+    // unavailable, not a measured zero. The evaluated denominator stays whole.
+    providerRateFields: PROVIDER_RATE_FIELDS.filter((field) =>
+      payloads.every((payload) => payload.kpi[field] !== undefined)),
+    providerRateTotals: {
+      provider_returned_rate: 0,
+      provider_pending_rate: 0,
+      provider_failed_rate: 0,
+      provider_not_requested_rate: 0,
+      query_embedding_unusable_rate: 0
+    },
     tierHot: 0,
     tierWarm: 0,
     tierCold: 0,
@@ -211,13 +231,7 @@ function createMergeShardAggregate(): MergeShardAggregate {
     totalHitAt5: 0,
     totalHitAt10: 0,
     answerableTotal: 0,
-    providerReturnedTotal: 0,
-    providerPendingTotal: 0,
-    providerFailedTotal: 0,
-    providerNotRequestedTotal: 0,
-    providerUnusableTotal: 0,
     returnedSubsetRAt5: undefined,
-    hasProviderRates: false,
     evaluatedTotal: 0,
     latencyP50Max: 0,
     latencyP95Max: 0
@@ -228,7 +242,7 @@ function aggregateMergeShards(
   payloads: readonly KpiPayload[],
   questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
 ): MergeShardAggregate {
-  const aggregate = createMergeShardAggregate();
+  const aggregate = createMergeShardAggregate(payloads);
   for (const shard of payloads) {
     addShardTotals(aggregate, shard);
     addShardProviderTotals(aggregate, shard);
@@ -311,34 +325,11 @@ function addShardProviderTotals(
   aggregate: MergeShardAggregate,
   shard: KpiPayload
 ): void {
-  if (!hasProviderRateFields(shard)) return;
-  aggregate.hasProviderRates = true;
-  const returned = Math.round(
-    (shard.kpi.provider_returned_rate ?? 0) * shard.evaluated_count
-  );
-  aggregate.providerReturnedTotal += returned;
-  aggregate.providerPendingTotal += Math.round(
-    (shard.kpi.provider_pending_rate ?? 0) * shard.evaluated_count
-  );
-  aggregate.providerFailedTotal += Math.round(
-    (shard.kpi.provider_failed_rate ?? 0) * shard.evaluated_count
-  );
-  aggregate.providerNotRequestedTotal += Math.round(
-    (shard.kpi.provider_not_requested_rate ?? 0) * shard.evaluated_count
-  );
-  aggregate.providerUnusableTotal += Math.round(
-    (shard.kpi.query_embedding_unusable_rate ?? 0) * shard.evaluated_count
-  );
-}
-
-function hasProviderRateFields(shard: KpiPayload): boolean {
-  return (
-    shard.kpi.provider_returned_rate !== undefined ||
-    shard.kpi.provider_pending_rate !== undefined ||
-    shard.kpi.provider_failed_rate !== undefined ||
-    shard.kpi.provider_not_requested_rate !== undefined ||
-    shard.kpi.query_embedding_unusable_rate !== undefined
-  );
+  for (const field of aggregate.providerRateFields) {
+    // createMergeShardAggregate selects only fields present on every shard.
+    const rate = shard.kpi[field]!;
+    aggregate.providerRateTotals[field] += Math.round(rate * shard.evaluated_count);
+  }
 }
 
 function buildMergedPayload(
@@ -457,20 +448,16 @@ function providerKpiFields(
           r_at_5_with_embedding_returned: aggregate.returnedSubsetRAt5
         }
       : {}),
-    ...(aggregate.hasProviderRates
-      ? {
-          provider_returned_rate: ratio(aggregate.providerReturnedTotal, aggregate.evaluatedTotal),
-          provider_pending_rate: ratio(aggregate.providerPendingTotal, aggregate.evaluatedTotal),
-          provider_failed_rate: ratio(aggregate.providerFailedTotal, aggregate.evaluatedTotal),
-          provider_not_requested_rate: ratio(
-            aggregate.providerNotRequestedTotal,
-            aggregate.evaluatedTotal
-          ),
-          query_embedding_unusable_rate: ratio(
-            aggregate.providerUnusableTotal,
-            aggregate.evaluatedTotal
-          )
-        }
-      : {})
+    ...availableProviderRates(aggregate)
   };
+}
+
+function availableProviderRates(
+  aggregate: MergeShardAggregate
+): Partial<Record<ProviderRateField, number>> {
+  const rates: Partial<Record<ProviderRateField, number>> = {};
+  for (const field of aggregate.providerRateFields) {
+    rates[field] = ratio(aggregate.providerRateTotals[field], aggregate.evaluatedTotal);
+  }
+  return rates;
 }

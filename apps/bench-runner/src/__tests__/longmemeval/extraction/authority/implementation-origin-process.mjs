@@ -3,9 +3,7 @@ import { pathToFileURL } from "node:url";
 
 const inspection = await import(pathToFileURL(process.env.IMPLEMENTATION_MODULE).href);
 const receipts = await import(new URL("./receipt.js", pathToFileURL(process.env.IMPLEMENTATION_MODULE)));
-const authority = await import(pathToFileURL(process.env.PROPOSAL_AUTHORITY_MODULE).href);
 const revision = inspection.readCurrentExtractionAuthorityRevision();
-const scope = authority.inspectSemanticProposalExecutionScope(process.env.PROPOSAL_OUTPUT_ROOT);
 const observation = {
   revision, commandDigest: "e".repeat(64), selectionDigest: "f".repeat(64), keyDigest: "b".repeat(64),
   dataset: { variant: "longmemeval_s", revisionSha256: "a".repeat(64), windowOffset: 0, windowLimit: 1,
@@ -30,7 +28,6 @@ try { receipts.assertExtractionAuthorityReceipt(wrongReceipt, observation); }
 catch { sourceWrongRejected = true; }
 process.stdout.write(JSON.stringify({
   revision,
-  scopeRevision: scope.implementation_revision,
-  outputRootAbsent: !existsSync(process.env.PROPOSAL_OUTPUT_ROOT),
+  outputRootAbsent: !existsSync(process.env.OUTPUT_ROOT),
   sourceWrongRejected
 }));

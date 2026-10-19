@@ -10,7 +10,7 @@ import {
   type SessionOverride
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher, type RuntimeNotifier } from "../../runtime/event-publisher.js";
+import { bindEventPublisher, EventPublisherPropagationError, type RuntimeNotifier } from "../../runtime/event-publisher.js";
 import { isExpired } from "../../shared/time.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import { VersionedBoundedCache } from "../../runtime/versioned-bounded-cache.js";
@@ -147,6 +147,12 @@ export class SessionOverrideService {
         derived_from: override.derived_from,
         occurred_at: occurredAt
       })
+    }).catch((error: unknown) => {
+      if (error instanceof EventPublisherPropagationError) {
+        // The append committed. Bump the epoch so precommit loads cannot restore stale cache entries.
+        this.cache.invalidate();
+      }
+      throw error;
     });
   }
 

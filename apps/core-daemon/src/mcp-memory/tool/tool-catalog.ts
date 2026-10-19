@@ -79,8 +79,7 @@ const loopSuffixByName: Readonly<Record<AlayaMemoryToolName, string>> = Object.f
     "Close the delivery loop by marking used/skipped/not_applicable so trust state stays explicit.",
   "soul.resolve":
     "Apply a resolution against a staged warning surfaced by soul.recall; the audit event is the durable record of the decision.",
-  "soul.interpretation":
-    "Host operations are provider-free. propose publishes unreviewed evidence without creating memory or relations. invalidate archives one exact source interpretation under an explicit caller-supplied error basis, preserving its history and source; it does not require a replacement. prepare_query may use an access_hint for one bounded navigation while preserving the original task. reason retains source interpretation and correspondence and requires accepts_unreviewed_conditional_results. recall provides opt-in library discovery and first-exposure delivery. Missing semantic inputs remain unavailable; no operation calls a provider. soul.report_context_usage is not an interpretation delivery loop.",
+  "soul.interpretation": "",
   "garden.list_pending_tasks": "",
   "garden.claim_task": "",
   "garden.complete_task": ""

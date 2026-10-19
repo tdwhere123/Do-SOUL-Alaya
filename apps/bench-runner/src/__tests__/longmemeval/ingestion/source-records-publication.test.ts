@@ -29,13 +29,11 @@ import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun } from "../
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
 import * as experimentContract from "../../../runs/longmemeval-semantic/contract.js";
 import { runLongMemEvalSemanticLauncher } from "../../../runs/longmemeval-semantic/launch.js";
-import { runSemanticChainLauncher } from "../../../runs/semantic-chain/launch.js";
-import * as semanticReplay from "../../../runs/semantic-chain/replay.js";
-import { measureSemanticChain } from "../../../runs/semantic-chain/replay.js";
-import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
-import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { chainIdentity, SemanticChainPlanSchema, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
-import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
+import { runRecallMeasurementLauncher } from "../../../runs/recall-measurement/launch.js";
+import * as semanticReplay from "../../../runs/recall-measurement/replay.js";
+import { measureSemanticChain } from "../../../runs/recall-measurement/replay.js";
+import { seedRetainedSemanticCache } from "../../runs/semantic-cache/retained-cache.test-support.js";
+import { chainIdentity, SemanticChainPlanSchema, readChainArtifact, writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 
 const roots = new Set<string>();
 const CLOCK = "2026-09-13T00:00:00.000Z";
@@ -187,19 +185,11 @@ describe("complete-source census and publication", () => {
     if (published.status !== "prepared") throw new Error("question publication required");
     unlinkSync(published.publication_path);
     expect((await prepareLongMemEvalSemanticRun(root)).result).toEqual(blocked.result);
-    const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(frozen.query_workset, queryCache, 4096),
-      inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
-    const filled = await executeSemanticProposalFill({ workset: frozen.query_workset, cacheRoot: queryCache, authority,
-      config: { providerUrl: "http://127.0.0.1:9", model: frozen.config.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-      extractor: { extract: async () => {
-        const rawJson = interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
-          kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
-        }] }], gaps: [] });
-        const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
-        return { rawJson, responseBody: syntheticGeminiBody(rawJson, "STOP", usage),
-          responseMetadata: { finishReason: "STOP" }, usage };
-      } } });
-    expect(filled.newly_admitted).toBe(2);
+    const retained = seedRetainedSemanticCache(frozen.query_workset, queryCache, 4096, () =>
+      interpretedQueryRaw({ contract: SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT, alternatives: [{ conditions: [{
+        kind: "statement", key: "record", predicate: "record", arguments: [{ role: "theme", target: { kind: "free", key: "theme", return: true }, excerpt: "What" }]
+      }] }], gaps: [] }));
+    expect(retained.admittedCount).toBe(2);
     const prepared = await benchPhase("new-q.prepare", () => prepareLongMemEvalSemanticRun(root));
     expect(prepared.result.rows).toEqual(frozen.selected.map(({ question_id }) => ({ question_id, status: "prepared",
       chain_root: expect.any(String), publication_path: expect.any(String), publication_identity: expect.any(String) })));
@@ -337,9 +327,9 @@ describe("complete-source census and publication", () => {
     expect(() => measureSemanticChain(first.chain_root, first.replay_path, gold, first.chain_root))
       .toThrow(/separate from producer and input roots/u);
     const base = ["measure", "--root", first.chain_root, "--replay", first.replay_path, "--gold", goldPath];
-    expect(await runSemanticChainLauncher(base)).toBe(2);
-    expect(await runSemanticChainLauncher([...base, "--evaluator-root", f.root])).toBe(2);
-    expect(await runSemanticChainLauncher([...base, "--evaluator-root", join(f.root, "chain-evaluator")])).toBe(0);
+    expect(await runRecallMeasurementLauncher(base)).toBe(2);
+    expect(await runRecallMeasurementLauncher([...base, "--evaluator-root", f.root])).toBe(2);
+    expect(await runRecallMeasurementLauncher([...base, "--evaluator-root", join(f.root, "chain-evaluator")])).toBe(0);
     expect(readdirSync(first.chain_root).some(name => name.startsWith("measurement-"))).toBe(false);
   }, 60000);
 

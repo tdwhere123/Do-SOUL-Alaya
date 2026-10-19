@@ -166,6 +166,7 @@ describe("alaya review", () => {
           proposed_changes: { content: "approved update" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("reject path not exercised in this test");
         },

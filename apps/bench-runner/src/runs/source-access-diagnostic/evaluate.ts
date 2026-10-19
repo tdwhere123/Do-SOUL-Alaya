@@ -9,11 +9,11 @@ import { sourceGoldUnitFromPublishedRoot, sourceTargetJoinsGold } from "../measu
 import { readLongMemEvalSemanticFreeze, loadFrozenLongMemEvalDataset } from "../longmemeval-semantic/contract.js";
 import { LongMemEvalPreparedSchema, verifyLongMemEvalQuestionChain,
   verifyLongMemEvalQuestionPublication } from "../longmemeval-semantic/execute.js";
-import { chainIdentity, readChainArtifact, writeChainArtifact } from "../semantic-chain/contract.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "../recall-measurement/contract.js";
 import { SourceAccessDiagnosticObservationSchema, SourceAccessDiagnosticEvaluationSchema,
   type SourceAccessArtifactRef, type SourceAccessDiagnosticObservation,
   type SourceAccessDiagnosticRow, type SourceAccessDiagnosticEvaluation,
-  NOT_EXERCISED } from "./contract.js";
+  NOT_EXERCISED, UnverifiedProviderCallEvidenceError, assertNoProviderCalls } from "./contract.js";
 
 const PageSchema = z.object({ response: SoulInterpretationPrepareQueryResponseSchema,
   wall_ms: z.number().nonnegative() }).strict();
@@ -67,6 +67,10 @@ export async function evaluateSourceAccessDiagnostic(observationPath: string, ou
   let runEvidenceError: string | null = null;
   try { assertRunEvidence(observationRoot, observation); }
   catch (error) { runEvidenceError = error instanceof Error ? error.message : String(error); }
+  // The envelope's literal zero is admissible only when every attempted call
+  // has settled result evidence that proves a zero external-attempt execution.
+  // Unresolved, missing or malformed attempt evidence refuses publication.
+  assertAttemptedCallsProvedZero(observationRoot, observation);
   const dataset = await loadFrozenLongMemEvalDataset(frozen.config);
   const rows: SourceAccessDiagnosticEvaluation["rows"][number][] = [];
   for (const row of observation.rows) {
@@ -289,13 +293,51 @@ function readOrderedCandidates(observationPath: string, row: SourceAccessDiagnos
 }
 
 function readBoundArtifact(root: string, ref: SourceAccessArtifactRef): unknown {
-  const absolute = resolve(root, ref.path);
-  if (!isContainedPath(root, absolute)) throw new AlayaError("CONFLICT", "diagnostic artifact escaped its observation root");
-  const value = readChainArtifact(absolute);
-  if (value === undefined || chainIdentity(value) !== ref.identity) {
+  const value = retainedArtifact(root, ref);
+  if (value === undefined) {
     throw new AlayaError("CONFLICT", "diagnostic artifact identity or file is missing");
   }
   return value;
+}
+
+function retainedArtifact(root: string, ref: SourceAccessArtifactRef): unknown | undefined {
+  const absolute = resolve(root, ref.path);
+  if (!isContainedPath(root, absolute)) return undefined;
+  const value = readChainArtifact(absolute);
+  return value === undefined || chainIdentity(value) !== ref.identity ? undefined : value;
+}
+
+function assertAttemptedCallsProvedZero(root: string, observation: SourceAccessDiagnosticObservation): void {
+  for (const row of observation.rows) {
+    if (row.attempt_evidence.length !== row.attempted_pages
+      || row.settled_pages !== row.attempted_pages
+      || row.unresolved_attempts > row.attempted_pages) {
+      throw new UnverifiedProviderCallEvidenceError(
+        "diagnostic attempted call manifest has unsettled native evidence"
+      );
+    }
+    for (const evidence of row.attempt_evidence) {
+      if (evidence.result === null) {
+        throw new UnverifiedProviderCallEvidenceError(
+          "diagnostic attempted call has no settled provider-call receipt"
+        );
+      }
+      const retained = retainedArtifact(root, evidence.result);
+      if (retained === undefined) {
+        throw new UnverifiedProviderCallEvidenceError(
+          "diagnostic attempted call receipt is missing or changed"
+        );
+      }
+      const result = ResultSchema.safeParse(retained);
+      if (!result.success) {
+        throw new UnverifiedProviderCallEvidenceError(
+          "diagnostic attempted call receipt is malformed"
+        );
+      }
+      assertNoProviderCalls(result.data.provider_attempts);
+      assertNoProviderCalls(sourceSemanticExecutionExternalAttempts(result.data.execution));
+    }
+  }
 }
 
 function assertRunEvidence(root: string, observation: SourceAccessDiagnosticObservation): void {

@@ -27,6 +27,7 @@ export interface ConflictMatrixRepo {
     targetClaimId: string
   ): Promise<readonly Readonly<ConflictMatrixEdge>[]>;
   delete(objectId: string): Promise<void>;
+  deleteSync(objectId: string): void;
 }
 
 const CONFLICT_MATRIX_EDGE_SELECT_COLUMNS = `
@@ -250,6 +251,10 @@ export class SqliteConflictMatrixRepo implements ConflictMatrixRepo {
   }
 
   public async delete(objectId: string): Promise<void> {
+    this.deleteSync(objectId);
+  }
+
+  public deleteSync(objectId: string): void {
     const parsedObjectId = parseObjectId(objectId);
 
     try {

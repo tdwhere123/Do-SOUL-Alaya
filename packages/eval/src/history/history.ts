@@ -263,6 +263,25 @@ export async function readEntryForDiff(
   }
 }
 
+export interface HistoryEntryQuery {
+  readonly split?: BenchSplit;
+  readonly policyShape?: BenchPolicyShape;
+  readonly simulateReport?: BenchSimulateReportMode;
+  readonly embeddingProvider?: string;
+}
+
+function matchesHistoryQuery(entry: KpiPayload, query: HistoryEntryQuery): boolean {
+  return (
+    (query.split === undefined || entry.split === query.split) &&
+    (query.policyShape === undefined ||
+      (entry.policy_shape ?? "stress") === query.policyShape) &&
+    (query.simulateReport === undefined ||
+      (entry.simulate_report ?? "none") === query.simulateReport) &&
+    (query.embeddingProvider === undefined ||
+      entry.embedding_provider === query.embeddingProvider)
+  );
+}
+
 /**
  * @anchor read-latest-split-aware — diff must be apple-to-apple
  *
@@ -281,13 +300,7 @@ export async function readEntryForDiff(
 export async function readLatest(
   layout: HistoryLayout,
   benchName: BenchName,
-  opts: {
-    split?: BenchSplit;
-    policyShape?: BenchPolicyShape;
-    simulateReport?: BenchSimulateReportMode;
-    embeddingProvider?: string;
-    pointerKind?: HistoryPointerKind;
-  } = {}
+  opts: HistoryEntryQuery & { pointerKind?: HistoryPointerKind } = {}
 ): Promise<KpiPayload | null> {
   const pointerKind = opts.pointerKind ?? "run";
   if (
@@ -302,13 +315,7 @@ export async function readLatest(
       const entry = await readEntryForDiff(layout, benchName, slug);
       if (
         entry !== null &&
-        (opts.split === undefined || entry.split === opts.split) &&
-        (opts.policyShape === undefined ||
-          (entry.policy_shape ?? "stress") === opts.policyShape) &&
-        (opts.simulateReport === undefined ||
-          (entry.simulate_report ?? "none") === opts.simulateReport) &&
-        (opts.embeddingProvider === undefined ||
-          entry.embedding_provider === opts.embeddingProvider) &&
+        matchesHistoryQuery(entry, opts) &&
         (pointerKind === "run" ||
           (await entryIsPassing(layout, benchName, slug, entry)))
       ) {
@@ -466,6 +473,30 @@ export async function readPrevious(
   const previousSlug = slugs[currentIndex - 1];
   if (previousSlug === undefined) return null;
   return await readEntryForDiff(layout, benchName, previousSlug);
+}
+
+/**
+ * @anchor read-comparable-previous — slug adjacency is not comparability.
+ * A public root can interleave Oracle, S, and M archives, so the previous
+ * diff baseline is the newest entry before `currentSlug` that matches the
+ * same split and runtime cohort. Reuses the readLatest cohort filters so the
+ * selection definition stays in one place.
+ */
+export async function readComparablePrevious(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  currentSlug: string,
+  query: HistoryEntryQuery
+): Promise<KpiPayload | null> {
+  const slugs = await listEntries(layout, benchName);
+  const currentIndex = slugs.indexOf(currentSlug);
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const slug = slugs[index];
+    if (slug === undefined) continue;
+    const entry = await readEntryForDiff(layout, benchName, slug);
+    if (entry !== null && matchesHistoryQuery(entry, query)) return entry;
+  }
+  return null;
 }
 
 function isNotFound(error: unknown): boolean {

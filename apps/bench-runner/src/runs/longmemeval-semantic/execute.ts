@@ -3,11 +3,11 @@ import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { z } from "zod";
 import { AlayaError, SourceSemanticAccessPolicySchema } from "@do-soul/alaya-protocol";
-import { prepareSemanticChain } from "../semantic-chain/prepare.js";
-import { replaySemanticChain } from "../semantic-chain/replay.js";
-import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../semantic-chain/contract.js";
-import { SemanticProposalWorksetSchema, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-proposal/workset.js";
-import { readSemanticChainProposalResults } from "../semantic-chain/inputs.js";
+import { prepareSemanticChain } from "../recall-measurement/prepare.js";
+import { replaySemanticChain } from "../recall-measurement/replay.js";
+import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, writeChainArtifact, writeChainJson } from "../recall-measurement/contract.js";
+import { SemanticProposalWorksetSchema, parseSemanticProposalWorkset, semanticProposalWorksetContract } from "../semantic-cache/workset.js";
+import { readSemanticChainProposalResults } from "../recall-measurement/inputs.js";
 import { publishSourceSemanticSnapshot } from "../snapshot/source-records/publish.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { isExtractionRequestProfile } from "../extraction/request-profile.js";
@@ -27,7 +27,7 @@ export const LongMemEvalPublicationSchema = QuestionPublicationSchema.extend({ p
     ctx.addIssue({ code: "custom", path: ["sources"], message: "source-only publication cannot contain a published interpretation" });
   }
 });
-/** This frozen arm never executes a published interpretation; generic semantic-chain replay may do so. */
+/** This frozen arm never executes a published interpretation; native measurement replay may do so. */
 export const LongMemEvalSourceOnlyResponseSchema = z.object({ proofs: z.array(z.never()).optional() }).passthrough();
 export const LongMemEvalSourceOnlyReplaySchema = z.object({ rows: z.array(z.object({
   response: LongMemEvalSourceOnlyResponseSchema.nullish()

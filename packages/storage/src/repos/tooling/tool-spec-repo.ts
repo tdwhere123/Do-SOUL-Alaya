@@ -6,6 +6,10 @@ import { parseRows, readRecord, type RowParser } from "../shared/parse-row.js";
 import { toSqliteBoolean } from "../shared/sqlite-utils.js";
 
 export interface ToolSpecRepo {
+  insertSync(spec: ToolSpec): Readonly<ToolSpec>;
+  updateSync(spec: ToolSpec): Readonly<ToolSpec>;
+  findByIdSync(toolId: string): Readonly<ToolSpec> | null;
+  deleteSync(toolId: string): void;
   insert(spec: ToolSpec): Promise<Readonly<ToolSpec>>;
   update(spec: ToolSpec): Promise<Readonly<ToolSpec>>;
   findById(toolId: string): Promise<Readonly<ToolSpec> | null>;
@@ -104,6 +108,10 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
   }
 
   public async insert(spec: ToolSpec): Promise<Readonly<ToolSpec>> {
+    return this.insertSync(spec);
+  }
+
+  public insertSync(spec: ToolSpec): Readonly<ToolSpec> {
     const parsedSpec = parseToolSpec(spec);
 
     try {
@@ -125,7 +133,7 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
       throw new StorageError("QUERY_FAILED", `Failed to insert tool spec ${parsedSpec.tool_id}.`, error);
     }
 
-    const inserted = await this.findById(parsedSpec.tool_id);
+    const inserted = this.findByIdSync(parsedSpec.tool_id);
 
     if (inserted === null) {
       throw new StorageError("NOT_FOUND", `Tool spec ${parsedSpec.tool_id} was not found after insert.`);
@@ -135,8 +143,12 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
   }
 
   public async update(spec: ToolSpec): Promise<Readonly<ToolSpec>> {
+    return this.updateSync(spec);
+  }
+
+  public updateSync(spec: ToolSpec): Readonly<ToolSpec> {
     const parsedSpec = parseToolSpec(spec);
-    const existing = await this.findById(parsedSpec.tool_id);
+    const existing = this.findByIdSync(parsedSpec.tool_id);
 
     if (existing === null) {
       throw new StorageError("NOT_FOUND", `Tool spec ${parsedSpec.tool_id} was not found.`);
@@ -162,7 +174,7 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
         throw new StorageError("NOT_FOUND", `Tool spec ${parsedSpec.tool_id} was not found.`);
       }
 
-      const updated = await this.findById(parsedSpec.tool_id);
+      const updated = this.findByIdSync(parsedSpec.tool_id);
 
       if (updated === null) {
         throw new StorageError("NOT_FOUND", `Tool spec ${parsedSpec.tool_id} was not found after update.`);
@@ -179,6 +191,10 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
   }
 
   public async findById(toolId: string): Promise<Readonly<ToolSpec> | null> {
+    return this.findByIdSync(toolId);
+  }
+
+  public findByIdSync(toolId: string): Readonly<ToolSpec> | null {
     try {
       const row = this.findByIdStatement.get(toolId) as ToolSpecRow | undefined;
       return row === undefined ? null : parseToolSpecRow(row);
@@ -204,6 +220,10 @@ export class SqliteToolSpecRepo implements ToolSpecRepo {
   }
 
   public async delete(toolId: string): Promise<void> {
+    this.deleteSync(toolId);
+  }
+
+  public deleteSync(toolId: string): void {
     try {
       this.deleteStatement.run(toolId);
     } catch (error) {

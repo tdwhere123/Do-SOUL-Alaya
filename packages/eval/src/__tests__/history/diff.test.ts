@@ -171,6 +171,27 @@ describe("diffKpis", () => {
     expect(result.worst_verdict).not.toBe("fail");
   });
 
+  it("keeps latency unavailable across exact and worst-shard precision", () => {
+    const previous = buildPayload({
+      latency_source: "worst_shard_bound",
+      latency_ms_p95: 200
+    });
+    const current = buildPayload({ latency_source: "exact", latency_ms_p95: 100 });
+    const latency = diffKpis(current, previous).deltas.find(
+      (delta) => delta.key === "latency_ms_p95"
+    );
+
+    expect(latency).toMatchObject({
+      current: 100,
+      previous: 200,
+      delta: null,
+      growth_ratio: null,
+      comparison_status: "unavailable",
+      verdict: "warn",
+      direction: "growth_bad"
+    });
+  });
+
   // @anchor sample-too-small-symmetric: current-undersampled case
   it("downgrades fail to warn when CURRENT run is below min sample size", () => {
     // Previous is a healthy 500-q baseline at R@5=80%; current is a

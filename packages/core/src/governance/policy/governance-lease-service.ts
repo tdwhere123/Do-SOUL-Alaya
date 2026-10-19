@@ -16,7 +16,12 @@ import {
   type PiercingCondition
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
-import { bindEventPublisher, type EventPublisher } from "../../runtime/event-publisher.js";
+import {
+  bindEventPublisher,
+  EventPublisherPropagationError,
+  type EventPublisher,
+  type EventPublisherInput
+} from "../../runtime/event-publisher.js";
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
 import { addDuration, isExpired, readNow } from "../../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../../shared/validators.js";
@@ -96,12 +101,7 @@ export class GovernanceLeaseService {
     });
 
     this.clearExpiredAt(occurredAt);
-    await bindEventPublisher({
-      eventPublisher: this.dependencies.eventPublisher,
-      eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier,
-      purpose: "GovernanceLeaseService"
-    }).publish({
+    await this.publishLeaseEvent({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
       entity_type: "governance_lease",
       entity_id: lease.runtime_id,
@@ -131,12 +131,7 @@ export class GovernanceLeaseService {
     }
 
     const occurredAt = readNow(this.dependencies.now);
-    await bindEventPublisher({
-      eventPublisher: this.dependencies.eventPublisher,
-      eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier,
-      purpose: "GovernanceLeaseService"
-    }).publish({
+    await this.publishLeaseEvent({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
       entity_type: "governance_lease",
       entity_id: active.lease.runtime_id,
@@ -170,12 +165,7 @@ export class GovernanceLeaseService {
     }
 
     const occurredAt = readNow(this.dependencies.now);
-    await bindEventPublisher({
-      eventPublisher: this.dependencies.eventPublisher,
-      eventLogRepo: this.dependencies.eventLogRepo,
-      runtimeNotifier: this.dependencies.runtimeNotifier,
-      purpose: "GovernanceLeaseService"
-    }).publish({
+    await this.publishLeaseEvent({
       event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
       entity_type: "governance_lease",
       entity_id: active.runtime_id,
@@ -209,6 +199,23 @@ export class GovernanceLeaseService {
 
   public clearExpired(): void {
     this.clearExpiredAt(readNow(this.dependencies.now));
+  }
+
+  private async publishLeaseEvent(eventInput: EventPublisherInput): Promise<void> {
+    try {
+      await bindEventPublisher({
+        eventPublisher: this.dependencies.eventPublisher,
+        eventLogRepo: this.dependencies.eventLogRepo,
+        runtimeNotifier: this.dependencies.runtimeNotifier,
+        purpose: "GovernanceLeaseService"
+      }).publish(eventInput);
+    } catch (error) {
+      if (error instanceof EventPublisherPropagationError) {
+        // The append committed. Bump the epoch so precommit loads cannot restore stale cache entries.
+        this.cache.invalidate();
+      }
+      throw error;
+    }
   }
 
   private clearExpiredAt(referenceTime: string): void {

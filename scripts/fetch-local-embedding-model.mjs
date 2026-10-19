@@ -13,9 +13,12 @@
 // Mirror: set HF_ENDPOINT (e.g. https://hf-mirror.com) when huggingface.co is
 // unreachable; the script downloads each file directly over HTTP, so it does
 // not depend on Transformers.js honoring HF_ENDPOINT.
+// If an older version was interrupted while writing a final file, use --force
+// to replace that unverified file. Interrupted .tmp files are never cache hits.
 
+import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, createWriteStream } from "node:fs";
-import { rm } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
@@ -79,20 +82,22 @@ async function downloadFile(modelId, relPath, destPath, force) {
   const url = `${endpointBase()}/${modelId}/resolve/main/${relPath}`;
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const temporaryPath = `${destPath}.${randomUUID()}.tmp`;
     try {
       const response = await fetch(url, { redirect: "follow" });
       if (!response.ok || response.body === null) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }
-      await streamPipeline(Readable.fromWeb(response.body), createWriteStream(destPath));
-      const size = existingSize(destPath);
+      await streamPipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath, { flags: "wx" }));
+      const size = existingSize(temporaryPath);
       if (size <= 0) {
         throw new Error("downloaded file is empty");
       }
+      await rename(temporaryPath, destPath);
       return { skipped: false, size };
     } catch (error) {
       lastError = error;
-      await rm(destPath, { force: true });
+      await rm(temporaryPath, { force: true });
       if (attempt < MAX_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
       }

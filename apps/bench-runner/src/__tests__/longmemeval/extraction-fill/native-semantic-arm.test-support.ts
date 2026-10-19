@@ -5,7 +5,6 @@ import { FirstExposurePageSchema } from "../../../runs/measurement/first-exposur
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { expect } from "vitest";
-import type { BenchDaemonHandle } from "../../../harness/daemon.js";
 import { SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
   SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
@@ -17,16 +16,13 @@ import { freezeLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic
 import { LongMemEvalExperimentFreezeSchema, LongMemEvalNativeSemanticConfigSchema } from "../../../runs/longmemeval-semantic/contract.js";
 import { prepareLongMemEvalSemanticRun, replayLongMemEvalSemanticRun, LongMemEvalPublicationSchema } from "../../../runs/longmemeval-semantic/execute.js";
 import { measureLongMemEvalSemanticRun } from "../../../runs/longmemeval-semantic/measure.js";
-import { SemanticChainPlanSchema, readChainArtifact, withSemanticChainDaemon, type SemanticChainConfig } from "../../../runs/semantic-chain/contract.js";
-import { prepareSemanticChain } from "../../../runs/semantic-chain/prepare.js";
-import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
-import { executeSemanticProposalFill, prepareSemanticProposal } from "../../../runs/semantic-proposal/fill.js";
-import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { SemanticChainPlanSchema, readChainArtifact } from "../../../runs/recall-measurement/contract.js";
+import { semanticProposalShardPath } from "../../../runs/semantic-cache/artifact.js";
+import { seedRetainedSemanticCache } from "../../runs/semantic-cache/retained-cache.test-support.js";
+import { materializeSemanticProposalLines, type SemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";
 import { interpretedQueryRaw } from "../query-producer-fixture.js";
-import { syntheticGeminiBody } from "../../runs/semantic-proposal/gemini-response-evidence.test-support.js";
 
-/** Authored engineering outputs enter the existing raw/authority/receive owners; no model fidelity claim. */
+/** Authored retained Q/C evidence exercises native measurement, not model fidelity. */
 export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot: string, cacheRoots: string[]) {
   const root = join(cacheRoots[0]!, "native-experiment"), queryCache = join(root, "query-cache"), correspondenceCache = join(root, "correspondence-cache");
   const model = "gemini-2.5-flash-lite", profile = "gemini-2.5-nonthinking-v1";
@@ -173,71 +169,6 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
   finally { writeFileSync(manifest, bytes); }
 }
 
-export async function assertPerQueryOpportunity(config: SemanticChainConfig, root: string) {
-  // This separate control owns a new full workset, not renewed capacity in the earlier control's grant.
-  config = { ...config, query_cache_root: join(root, "query-cache") };
-  await fillAuthored(config.query_workset, config.query_cache_root, authoredQuery);
-  // Selection controls change only host-side caps/order. Their snapshot, query cache,
-  // clock, authorization, and native discovery budgets remain identical; no control
-  // carries a query/continuation handle into another control's fresh discovery.
-  await withSemanticChainDaemon(config, join(root, "opportunity-discovery"), async daemon => {
-    const forward = await prepareSemanticChain(config, join(root, "forward-opportunities"), daemon);
-    const reverse = await prepareSemanticChain({ ...config,
-      query_workset: { ...config.query_workset, items: [...config.query_workset.items].reverse() }
-    }, join(root, "reverse-opportunities"), daemon);
-    for (const query of forward.queries) {
-      if (query.status !== "ready") throw new Error(query.reason);
-      expect(query.selected_source_interpretation_ids).toHaveLength(config.correspondence_pair_cap);
-      const reversed = reverse.queries.find((row) => row.query_key === query.query_key)!;
-      if (reversed.status !== "ready") throw new Error(reversed.reason);
-      expect(reversed.descriptors.map(row => row.interpretation_id)).toEqual(query.descriptors.map(row => row.interpretation_id));
-      expect(reversed.selected_source_interpretation_ids).toEqual(query.selected_source_interpretation_ids);
-      expect(reversed.correspondence_opportunities).toEqual(query.correspondence_opportunities);
-    }
-    expect(forward.correspondence_workset?.items).toHaveLength(2 * config.correspondence_pair_cap);
-    const zero = await prepareSemanticChain({ ...config, correspondence_pair_cap: 0 }, join(root, "zero-opportunities"), daemon);
-    expect(zero.correspondence_workset).toBeNull();
-    for (const query of zero.queries) {
-      const original = forward.queries.find(row => row.query_key === query.query_key)!;
-      if (query.status !== "ready" || original.status !== "ready") throw new Error("zero-cap discovery must remain ready");
-      expect(query.descriptors.map(row => row.interpretation_id)).toEqual(original.descriptors.map(row => row.interpretation_id));
-    }
-    expect(zero.queries.every((query) => query.status === "ready" && query.correspondence_opportunities.every((row) => row.decision === "zero_budget"))).toBe(true);
-    await assertSettledScopedOpportunities(config, root, daemon);
-  });
-}
-
-async function assertSettledScopedOpportunities(config: SemanticChainConfig, root: string, daemon: BenchDaemonHandle) {
-  const scoped = { ...config, correspondence_pair_cap: 2,
-    query_workset: { ...config.query_workset, items: config.query_workset.items.slice(0, 1) },
-    correspondence_demand: { kind: "query_branches" as const, maximum_demands_per_interpretation: 1 },
-    correspondence_cap: 2 };
-  const full = await prepareSemanticChain(scoped, join(root, "scoped-opportunities"), daemon);
-  expect(full.correspondence_workset?.items).toHaveLength(2);
-  const retained = { ...full.correspondence_workset!, items: full.correspondence_workset!.items.slice(1) };
-  const retainedLine = materializeSemanticProposalLines(retained, config.max_output_tokens)[0]!;
-  const request = retainedLine.request as SourceSemanticCorrespondenceRequest;
-  const sourceId = request.source_interpretation_descriptors[0]!.source_interpretation_id;
-  const settled = await prepareSemanticChain({ ...scoped, correspondence_pair_cap: 1, correspondence_cap: 1 },
-    join(root, "settled-scoped-opportunities"), daemon, undefined, retained);
-  const fullQuery = full.queries[0]!, selected = settled.queries[0]!;
-  if (selected.status !== "ready" || fullQuery.status !== "ready") throw new Error("settled scoped query must remain ready");
-  expect(selected.descriptors.map(row => row.interpretation_id)).toEqual(fullQuery.descriptors.map(row => row.interpretation_id));
-  expect(selected.selected_source_interpretation_ids).toEqual([sourceId]);
-  expect(selected.correspondence_opportunities.filter(row => row.decision === "selected")
-    .map(row => row.source_interpretation_id)).toEqual([sourceId]);
-  expect(selected.correspondence_demand_opportunities?.filter(row => row.decision === "selected"))
-    .toEqual([{ source_interpretation_id: sourceId, generation_policy: request.generation_policy, decision: "selected" }]);
-  const empty = await prepareSemanticChain({ ...scoped, correspondence_cap: 0 },
-    join(root, "empty-scoped-opportunities"), daemon, undefined, null);
-  expect(empty.correspondence_workset).toBeNull();
-  const emptyQuery = empty.queries[0]!;
-  if (emptyQuery.status !== "ready") throw new Error("zero-cap query must remain ready");
-  expect(emptyQuery.descriptors.map(row => row.interpretation_id)).toEqual(fullQuery.descriptors.map(row => row.interpretation_id));
-  expect(emptyQuery.selected_source_interpretation_ids).toEqual([]);
-  expect(emptyQuery.correspondence_demand_opportunities?.every(row => row.decision === "zero_budget")).toBe(true);
-}
-
 function authoredQuery(userPrompt: string) {
   const original = (JSON.parse(userPrompt) as { original_query: string }).original_query;
   const predicate = original === "What was repaired?" ? "repair" : "complete";
@@ -262,14 +193,6 @@ function authoredCorrespondence(userPrompt: string) {
 }
 
 async function fillAuthored(workset: SemanticProposalWorkset, cacheRoot: string, raw: (userPrompt: string) => string) {
-  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, cacheRoot, 4096),
-    inputUsdPerMillion: 1, outputUsdPerMillion: 2 });
-  const result = await executeSemanticProposalFill({ workset, cacheRoot, authority,
-    config: { providerUrl: "http://127.0.0.1:9", model: workset.model, requestProfile: "gemini-2.5-nonthinking-v1", apiKey: "fixture" },
-    extractor: { extract: async ({ userPrompt }) => {
-      const rawJson = raw(userPrompt), usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
-      return { rawJson, responseMetadata: { finishReason: "STOP" }, usage,
-        responseBody: syntheticGeminiBody(rawJson, "STOP", usage) };
-    } } });
-  expect(result.terminal_failures).toBe(0);
+  const retained = seedRetainedSemanticCache(workset, cacheRoot, 4096, raw);
+  expect(retained.admittedCount).toBe(retained.lines.length);
 }

@@ -40,7 +40,22 @@ info() { printf '   %s\n' "$*"; }
 ok()   { printf '\033[32m+\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!\033[0m %s\n' "$*" >&2; }
 
+# install.sh owns path admission and returns before installer variables/effects.
+# shellcheck source=install.sh
+. "$SCRIPT_DIR/install.sh"
+
 bold "Do-SOUL Alaya uninstaller"
+
+# Admit configured paths, then delete those same paths. Canonicalize only for
+# admission: rm of a resolved symlink target would recurse into unrelated data.
+reject_recursive_delete_target 'ALAYA_HOME' "$ALAYA_HOME" >/dev/null
+reject_unsafe_path 'ALAYA_BIN_DIR' "$ALAYA_BIN_DIR" >/dev/null
+if [ "$REMOVE_BAK" -eq 1 ]; then
+  reject_recursive_delete_target 'ALAYA_HOME.bak' "${ALAYA_HOME}.bak" >/dev/null
+fi
+if [ "$PURGE" -eq 1 ]; then
+  reject_recursive_delete_target 'ALAYA_CONFIG_DIR' "$ALAYA_CONFIG_DIR" >/dev/null
+fi
 
 # --- detach attached agent profiles, one explicit target at a time --------
 # `alaya detach` requires a target (the CLI rejects bare invocations).

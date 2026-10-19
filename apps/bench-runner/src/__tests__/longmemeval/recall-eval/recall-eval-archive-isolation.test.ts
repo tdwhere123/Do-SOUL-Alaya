@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   entrySlug,
+  readLatest,
   writeEntry,
   type HistoryLayout
 } from "@do-soul/alaya-eval";
@@ -126,14 +127,13 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
   });
 
   it("never selects a recall-eval archive as a full-run baseline, even when it is the newest passing entry", async () => {
-    // An OLDER full-run baseline (passing).
-    const fullRun = buildPublicPayload({ commit: "f".repeat(7), rAt5: 0.8, recallEval: false });
+    // Use an eligible S run; Oracle/M cannot seed the shared passing chain.
+    const fullRun = buildPublicPayload({ commit: "f".repeat(7), rAt5: 0.95, recallEval: false });
     const fullRunSlug = entrySlug(new Date("2026-05-20T10:00:00.000Z"), "f".repeat(7), "policy-stress");
     await writeEntry(layout, "public", fullRunSlug, fullRun, "# report\n", null);
 
-    // A NEWER recall-eval archive in the SAME bucket (also passing). Without
-    // the marker filter, readLatest(passing) would return THIS one.
-    const recallEval = buildPublicPayload({ commit: "e".repeat(7), rAt5: 0.5, recallEval: true });
+    // The newer archive must genuinely pass so this exercises the marker filter.
+    const recallEval = buildPublicPayload({ commit: "e".repeat(7), rAt5: 0.9, recallEval: true });
     const recallEvalSlug = entrySlug(
       new Date("2026-05-21T10:00:00.000Z"),
       "e".repeat(7),
@@ -141,8 +141,18 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
     );
     await writeEntry(layout, "public", recallEvalSlug, recallEval, "# report\n", null);
 
+    const newestPassing = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "stress",
+      simulateReport: "none",
+      embeddingProvider: "none",
+      pointerKind: "passing"
+    });
+    expect(newestPassing).not.toBeNull();
+    expect(isRecallEvalArchive(newestPassing!)).toBe(true);
+
     const baseline = await selectFullRunBaseline(layout, "public", {
-      split: "longmemeval-oracle",
+      split: "longmemeval-s",
       policyShape: "stress",
       simulateReport: "none",
       embeddingProvider: "none"
@@ -151,17 +161,17 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
     expect(baseline).not.toBeNull();
     expect(isRecallEvalArchive(baseline!)).toBe(false);
     expect(baseline!.alaya_commit).toBe("f".repeat(7));
-    expect(baseline!.kpi.r_at_5).toBe(0.8);
+    expect(baseline!.kpi.r_at_5).toBe(0.95);
   });
 
   it("rejects an otherwise passing full-run baseline without verified evidence", async () => {
     layout = { historyRoot };
-    const fullRun = buildPublicPayload({ commit: "f".repeat(7), rAt5: 0.8, recallEval: false });
+    const fullRun = buildPublicPayload({ commit: "f".repeat(7), rAt5: 0.95, recallEval: false });
     const slug = entrySlug(new Date("2026-05-20T10:00:00.000Z"), "f".repeat(7), "policy-stress");
     await writeEntry(layout, "public", slug, fullRun, "# report\n", null);
 
     await expect(selectFullRunBaseline(layout, "public", {
-      split: "longmemeval-oracle",
+      split: "longmemeval-s",
       policyShape: "stress",
       simulateReport: "none",
       embeddingProvider: "none"
@@ -169,7 +179,7 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
   });
 
   it("returns null when the only passing entry in the bucket is a recall-eval archive", async () => {
-    const recallEval = buildPublicPayload({ commit: "e".repeat(7), rAt5: 0.5, recallEval: true });
+    const recallEval = buildPublicPayload({ commit: "e".repeat(7), rAt5: 0.9, recallEval: true });
     const recallEvalSlug = entrySlug(
       new Date("2026-05-21T10:00:00.000Z"),
       "e".repeat(7),
@@ -177,8 +187,18 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
     );
     await writeEntry(layout, "public", recallEvalSlug, recallEval, "# report\n", null);
 
+    const newestPassing = await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "stress",
+      simulateReport: "none",
+      embeddingProvider: "none",
+      pointerKind: "passing"
+    });
+    expect(newestPassing).not.toBeNull();
+    expect(isRecallEvalArchive(newestPassing!)).toBe(true);
+
     const baseline = await selectFullRunBaseline(layout, "public", {
-      split: "longmemeval-oracle",
+      split: "longmemeval-s",
       policyShape: "stress",
       simulateReport: "none",
       embeddingProvider: "none"

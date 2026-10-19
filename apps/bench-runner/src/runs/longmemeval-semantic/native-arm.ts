@@ -10,7 +10,7 @@ import { AlayaError,
 import { cacheFilePath } from "../compile-seed/cache/cache-shard.js";
 import { listRetainedSourceSemanticKeys } from "../snapshot/source-records/publish.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
-import { chainIdentity } from "../semantic-chain/contract.js";
+import { chainIdentity } from "../recall-measurement/contract.js";
 
 /** Bench pins the public owner, never selects candidates or supplies a proof policy. */
 export const NATIVE_SEMANTIC_ROUTE = {

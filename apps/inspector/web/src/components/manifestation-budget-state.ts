@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { ManifestationBudgetConfig } from "@do-soul/alaya-protocol";
+import {
+  ManifestationBudgetConfigSchema,
+  type ManifestationBudgetConfig
+} from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
 import { useToasts } from "./toast";
 
+interface ManifestationBudgetReadModel extends ManifestationBudgetConfig {
+  readonly source?: "default" | "stored";
+}
+
 interface ManifestationBudgetConfigEnvelope {
   readonly success?: boolean;
-  readonly data?: ManifestationBudgetConfig;
+  readonly data?: ManifestationBudgetReadModel;
 }
 
 interface PatchResult {
   readonly success?: boolean;
   readonly requires_daemon_restart?: boolean;
-  readonly data?: ManifestationBudgetConfig;
+  readonly data?: ManifestationBudgetReadModel;
 }
 
 type ShowToast = ReturnType<typeof useToasts>["showToast"];
@@ -127,10 +134,10 @@ async function loadManifestationBudget(
   onLoaded: (config: ManifestationBudgetConfig) => void
 ) {
   try {
-    const envelope = await apiFetch<ManifestationBudgetConfig | ManifestationBudgetConfigEnvelope>(
+    const envelope = await apiFetch<ManifestationBudgetReadModel | ManifestationBudgetConfigEnvelope>(
       `/config/${workspaceId}/manifestation-budget`
     );
-    onLoaded(unwrapManifestationBudgetConfig(envelope));
+    onLoaded(projectEditableManifestationBudget(unwrapManifestationBudgetConfig(envelope)));
   } catch (err) {
     if (!isCancelled() && (err as ApiError).status !== 401) {
       showToast({
@@ -149,7 +156,15 @@ async function patchManifestationBudget(
     method: "PATCH",
     body: current
   });
-  return result.data ?? current;
+  return projectEditableManifestationBudget(result.data ?? current);
+}
+
+function projectEditableManifestationBudget(
+  readModel: ManifestationBudgetReadModel
+): ManifestationBudgetConfig {
+  // GET adds `source` (default/stored); PATCH is the strict config contract.
+  const { source: _source, ...config } = readModel;
+  return ManifestationBudgetConfigSchema.parse(config);
 }
 
 function patchRoot(
@@ -178,14 +193,16 @@ function isDirty(
   return JSON.stringify(initial) !== JSON.stringify(current);
 }
 
-function unwrapManifestationBudgetConfig(value: unknown): ManifestationBudgetConfig {
+function unwrapManifestationBudgetConfig(
+  value: ManifestationBudgetReadModel | ManifestationBudgetConfigEnvelope
+): ManifestationBudgetReadModel {
   if (
     typeof value === "object" &&
     value !== null &&
     "data" in value &&
     typeof (value as ManifestationBudgetConfigEnvelope).data === "object"
   ) {
-    return (value as ManifestationBudgetConfigEnvelope).data as ManifestationBudgetConfig;
+    return (value as ManifestationBudgetConfigEnvelope).data as ManifestationBudgetReadModel;
   }
-  return value as ManifestationBudgetConfig;
+  return value as ManifestationBudgetReadModel;
 }

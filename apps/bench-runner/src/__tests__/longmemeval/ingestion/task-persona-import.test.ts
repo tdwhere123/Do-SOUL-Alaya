@@ -31,7 +31,7 @@ import { admitRetainedNativeSourceSnapshot } from "../../../runs/snapshot/source
 import { censusNativeSourceRecords, type SourceCensusRecord } from "../../../runs/snapshot/source-records/census.js";
 import { nativeSourceRequestInventory } from "../../../runs/extraction/fill/source-request-workset.js";
 import { EXTRACTION_OPEN_SEMANTICS_GENERATION } from "../../../runs/extraction/request-artifact.js";
-import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-proposal/workset.js";
+import { materializeSemanticProposalLines, parseSemanticProposalWorkset } from "../../../runs/semantic-cache/workset.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from "../../../runs/selection/question-runtime-identity.js";
 import { createTestLongMemEvalDatasetAuthority } from "./test-dataset-authority.js";

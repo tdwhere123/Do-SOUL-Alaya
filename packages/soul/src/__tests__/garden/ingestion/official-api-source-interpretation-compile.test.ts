@@ -1,6 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.js");
+  const { installStrictProviderFreeBoundary } = await import("../../../../../../apps/bench-runner/src/__tests__/support/strict-provider-free-boundary.js");
+  return { safe: installProviderFreeBoundary(), strict: installStrictProviderFreeBoundary() };
+});
+afterAll(() => {
+  isolation.strict.restore();
+  isolation.safe.restore();
+  expect(isolation.safe.violations).toEqual([]);
+  expect(isolation.strict.forbidden).toEqual([]);
+});
 import { SOURCE_INTERPRETATION_CONTRACT } from "@do-soul/alaya-protocol";
+import { createPiMonoExtractor, type SignalExtractor } from "../../../garden/extraction/pi-mono-extractor.js";
 import { OfficialApiGardenProvider } from "../../../garden/ingestion/compute-provider.js";
+import { parseOfficialApiExtractionRequest } from "../../../garden/ingestion/official-api/extraction-request.js";
+import { classifyOfficialApiExtractionResult } from "../../../garden/ingestion/official-api/source-interpretation-receive.js";
 import { createContext, createExtractor } from "./compute-provider-fixtures.js";
 
 function interpretationEnvelope(assertionId: number, predicate: string, args: readonly {
@@ -45,6 +60,47 @@ describe("official API ordinary extraction compile", () => {
     await expect(malformed.extractSourceInterpretations(turn, context)).rejects.toThrow();
   });
 
+  it.each([
+    { rawJson: '{"signals":[]}', reason: "malformed_response" },
+    { rawJson: interpretationEnvelope(9, "uses", []), reason: "source_assertion_mismatch" },
+    { rawJson: interpretationEnvelope(1, "invented", []), reason: "candidate_rejected" }
+  ])("keeps $reason admission failures invalid rather than network failures", async ({ rawJson, reason }) => {
+    const turn = "Alice uses tools.";
+    const complete = vi.fn(async () => ({ content: [{ type: "text", text: rawJson }] }));
+    const delegate = createPiMonoExtractor({ apiKey: "sk-test", model: "model", complete });
+    const extractor: SignalExtractor = { extract: (input) => delegate.extract({
+      ...input,
+      validateRawJson: (value) => {
+        classifyOfficialApiExtractionResult(value, parseOfficialApiExtractionRequest(JSON.parse(input.userPrompt)), input.sourceCorpus);
+        input.validateRawJson?.(value);
+      }
+    }) };
+    const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", extractor, diagnosticDir: null });
+
+    await expect(provider.compile(turn, {
+      ...createContext(), turn_messages: [{ role: "user", content: turn, message_id: "user-1" }]
+    })).rejects.toMatchObject({
+      name: "GardenProviderError", kind: "invalid_response",
+      cause: { name: "OfficialApiInterpretationAdmissionError",
+        receive: { status: "partial", rejections: [expect.objectContaining({ reason })] } }
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a genuine completion-port failure classified as network failure", async () => {
+    const failure = new Error("connection failed");
+    const complete = vi.fn(async () => { throw failure; });
+    const provider = new OfficialApiGardenProvider({ apiKey: "sk-test", diagnosticDir: null,
+      extractor: createPiMonoExtractor({ apiKey: "sk-test", model: "model", complete }) });
+
+    await expect(provider.compile("Alice uses tools.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError", kind: "network",
+      cause: { name: "SignalExtractorError", kind: "transport_failure", cause: failure,
+        retryClassification: "failure_transport_port" }
+    });
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
   it("emits a source interpretation signal without kind or confidence routing fields", async () => {
     const turn = "Alice uses tools.";
     const provider = new OfficialApiGardenProvider({
@@ -80,7 +136,8 @@ describe("official API ordinary extraction compile", () => {
     const turn = "Alice uses tools.";
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      extractor: createExtractor('{"interpretations":[]}'),
+      extractor: createPiMonoExtractor({ apiKey: "sk-test", model: "model",
+        complete: async () => ({ content: [{ type: "text", text: '{"interpretations":[]}' }] }) }),
       generateSignalId: () => "signal-empty"
     });
     await expect(provider.compile(turn, {

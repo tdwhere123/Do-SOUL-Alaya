@@ -168,6 +168,42 @@ describe("proposal-repo reviewer_identity", () => {
     expect(limited).toHaveLength(2);
   });
 
+  // A page's length is not a queue size: the MCP list / Inspector queue report
+  // total_count from the same filter with the LIMIT removed, so a truncated
+  // page still tells the operator how many pending proposals match.
+  it("countPendingSummaries reports the matching pending total beyond the page limit", async () => {
+    const { repo } = createRepo();
+    for (let index = 0; index < 3; index += 1) {
+      const proposalId = `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb${index}`;
+      await repo.create({
+        proposal: createProposal({ runtime_id: proposalId, proposal_id: proposalId }),
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        target_object_kind: "memory_entry",
+        proposed_change_summary: `change ${index}`,
+        created_at: `2026-04-30T0${index}:00:00.000Z`
+      });
+    }
+    await repo.create({
+      proposal: createProposal({
+        runtime_id: "cccccccc-cccc-4ccc-8ccc-ccccccccccc0",
+        proposal_id: "cccccccc-cccc-4ccc-8ccc-ccccccccccc0"
+      }),
+      workspace_id: "workspace-2",
+      run_id: "run-1",
+      target_object_kind: "memory_entry",
+      proposed_change_summary: "other workspace",
+      created_at: "2026-04-30T04:00:00.000Z"
+    });
+
+    const page = await repo.findPendingSummaries("workspace-1", { limit: 2 });
+    expect(page).toHaveLength(2);
+    await expect(repo.countPendingSummaries("workspace-1")).resolves.toBe(3);
+    await expect(
+      repo.countPendingSummaries("workspace-1", { since: "2026-04-30T00:30:00.000Z" })
+    ).resolves.toBe(2);
+  });
+
   // The previous default of 'memory_entry' on every create() mislabeled
   // synthesis-derived and bankruptcy-derived proposals in the Inspector
   // queue. The repo now persists the explicit target_object_kind, and

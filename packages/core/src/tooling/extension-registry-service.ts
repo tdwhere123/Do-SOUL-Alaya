@@ -1,5 +1,4 @@
 import type { SkillPackage, ToolProvider, ToolSpec } from "@do-soul/alaya-protocol";
-import { reportAsyncSideEffectFailure } from "../runtime/async-side-effect-auditor.js";
 import { CoreError } from "../shared/errors.js";
 import { resolveSystemWorkspaceId } from "../shared/actors.js";
 import {
@@ -10,40 +9,23 @@ import {
   buildDefaultToolSpec,
   createProviderCacheSnapshot,
   listRemovedToolIds,
-  mergeProviderIntoCacheSnapshot,
   normalizeProvider,
-  parseToolSpec,
-  providerOwnsTool,
-  toError
+  providerOwnsTool
 } from "./extension-registry-service-helpers.js";
 import type {
   ExtensionRegistryDependencies,
-  ProviderCacheSnapshot,
-  ToolSpecRollbackSnapshot
+  ProviderCacheSnapshot
 } from "./extension-registry-service-types.js";
-import {
-  createDescriptorRegisteredEventEntry,
-  createDescriptorRegistrationCompensationFailedEventEntry,
-  createDescriptorRegistrationRevertedEventEntry,
-  type DescriptorEventInput
-} from "./extension-registry/events.js";
+import { createDescriptorRegisteredEventEntry } from "./extension-registry/events.js";
 export type {
   ExtensionRegistryDependencies,
   ExtensionRegistryToolSpecPort,
   ExtensionStorePort,
-  ProviderCacheSnapshot,
-  ToolSpecRollbackSnapshot
+  ProviderCacheSnapshot
 } from "./extension-registry-service-types.js";
-
-interface ProviderRegistrationState {
-  storedProvider: Readonly<ToolProvider> | null;
-  previousProvider: Readonly<ToolProvider> | null;
-  readonly touchedToolSpecs: ToolSpecRollbackSnapshot[];
-}
 
 export class ExtensionRegistryService {
   private providerCacheSnapshot: Readonly<ProviderCacheSnapshot> | null = null;
-  private providerCacheLoadPromise: Promise<Readonly<ProviderCacheSnapshot>> | null = null;
   private readonly systemWorkspaceId: string;
 
   public constructor(private readonly deps: ExtensionRegistryDependencies) {
@@ -52,413 +34,99 @@ export class ExtensionRegistryService {
 
   public async registerProvider(provider: ToolProvider): Promise<Readonly<ToolProvider>> {
     const parsedProvider = parseExtensionToolProvider(provider);
-    const state: ProviderRegistrationState = {
-      storedProvider: null,
-      previousProvider: null,
-      touchedToolSpecs: []
-    };
-    return await this.publishDescriptorRegisteredWithMutation(
-      {
-        descriptor_type: "tool_provider",
-        descriptor_id: parsedProvider.provider_id,
-        name: parsedProvider.name,
-        source: parsedProvider.source
-      },
-      async () => await this.applyProviderRegistration(parsedProvider, state),
-      async () => {
-        if (state.storedProvider === null) return;
-        await this.rollbackProviderRegistration(
-          parsedProvider.provider_id,
-          state.previousProvider,
-          state.touchedToolSpecs
-        );
-      }
+    const entry = createDescriptorRegisteredEventEntry({
+      descriptor_type: "tool_provider",
+      descriptor_id: parsedProvider.provider_id,
+      name: parsedProvider.name,
+      source: parsedProvider.source
+    }, this.systemWorkspaceId, this.deps.now);
+    // No await separates invalidation from the synchronous transaction. Listeners
+    // can only refill from committed storage, even if propagation later fails.
+    this.providerCacheSnapshot = null;
+    return await this.deps.eventPublisher.appendManyWithMutation([entry], () =>
+      this.applyProviderRegistration(parsedProvider)
     );
   }
 
-  private async applyProviderRegistration(
-    provider: Readonly<ToolProvider>,
-    state: ProviderRegistrationState
-  ): Promise<Readonly<ToolProvider>> {
-    state.previousProvider = await this.findStoredProvider(provider.provider_id);
-    const storedProvider = normalizeProvider(
-      await this.deps.extensionStore.registerToolProvider(provider)
-    );
-    state.storedProvider = storedProvider;
-    await this.syncRegisteredToolSpecs(storedProvider, state);
-    await this.removeRetiredToolSpecs(storedProvider, state);
-    await this.cacheProvider(storedProvider);
-    return storedProvider;
-  }
-
-  private async syncRegisteredToolSpecs(
-    provider: Readonly<ToolProvider>,
-    state: ProviderRegistrationState
-  ): Promise<void> {
-    for (const tool of provider.tool_specs) {
-      const existing = await this.findToolSpec(tool.tool_id);
-      this.assertToolOwnershipAvailable(provider, state.previousProvider, tool.tool_id, existing);
-      const resolvedSpec = parseToolSpec(
-        this.deps.buildToolSpecForProviderTool?.(provider, tool, existing) ??
-          buildDefaultToolSpec(provider, tool, existing)
-      );
+  private applyProviderRegistration(provider: Readonly<ToolProvider>): Readonly<ToolProvider> {
+    const owners = createProviderCacheSnapshot(this.deps.extensionStore.findToolProvidersSync());
+    const previousProvider = this.deps.extensionStore.findToolProviderByIdSync(provider.provider_id);
+    const storedProvider = normalizeProvider(this.deps.extensionStore.registerToolProviderSync(provider));
+    for (const tool of storedProvider.tool_specs) {
+      const existing = this.findToolSpec(tool.tool_id);
+      this.assertToolOwnershipAvailable(storedProvider, previousProvider, owners, tool.tool_id, existing);
+      const spec = this.deps.buildToolSpecForProviderTool?.(storedProvider, tool, existing) ??
+        buildDefaultToolSpec(storedProvider, tool, existing);
       if (existing === null) {
-        await this.deps.toolSpecService.register(resolvedSpec);
+        this.deps.toolSpecService.registerSync(spec);
       } else {
-        await this.deps.toolSpecService.update(resolvedSpec);
+        this.deps.toolSpecService.updateSync(spec);
       }
-      state.touchedToolSpecs.push({ toolId: tool.tool_id, previous: existing });
     }
-  }
-
-  private async removeRetiredToolSpecs(
-    provider: Readonly<ToolProvider>,
-    state: ProviderRegistrationState
-  ): Promise<void> {
-    for (const toolId of listRemovedToolIds(state.previousProvider, provider)) {
-      const existing = await this.findToolSpec(toolId);
-      if (existing === null) continue;
-      state.touchedToolSpecs.push({ toolId, previous: existing });
-      await this.deleteToolSpec(toolId);
+    for (const toolId of listRemovedToolIds(previousProvider, storedProvider)) {
+      this.deps.toolSpecService.deleteSync(toolId);
     }
+    return storedProvider;
   }
 
   public async registerSkillPackage(pkg: SkillPackage): Promise<Readonly<SkillPackage>> {
     const parsedPackage = parseExtensionSkillPackage(pkg);
-    return await this.publishDescriptorRegisteredWithMutation(
-      {
+    return await this.deps.eventPublisher.appendManyWithMutation([
+      createDescriptorRegisteredEventEntry({
         descriptor_type: "skill_package",
         descriptor_id: parsedPackage.skill_id,
         name: parsedPackage.name,
         source: parsedPackage.source
-      },
-      async () => await this.deps.extensionStore.registerSkillPackage(parsedPackage)
-    );
+      }, this.systemWorkspaceId, this.deps.now)
+    ], () => this.deps.extensionStore.registerSkillPackageSync(parsedPackage));
   }
 
   public async listProviders(): Promise<readonly Readonly<ToolProvider>[]> {
-    return (await this.ensureProviderCache()).providerList;
+    return this.ensureProviderCache().providerList;
   }
 
   public async findProviderForTool(toolId: string): Promise<Readonly<ToolProvider> | null> {
-    const cachedProvider = this.providerCacheSnapshot?.providerCacheByToolId.get(toolId);
-    if (cachedProvider !== undefined) {
-      return cachedProvider;
-    }
-
-    return (await this.ensureProviderCache()).providerCacheByToolId.get(toolId) ?? null;
+    return this.ensureProviderCache().providerCacheByToolId.get(toolId) ?? null;
   }
 
-  private async findToolSpec(toolId: string): Promise<Readonly<ToolSpec> | null> {
+  private findToolSpec(toolId: string): Readonly<ToolSpec> | null {
     try {
-      return parseToolSpec(await this.deps.toolSpecService.findById(toolId));
+      return this.deps.toolSpecService.findByIdSync(toolId);
     } catch (error) {
-      if (error instanceof CoreError && error.code === "NOT_FOUND") {
-        return null;
-      }
+      if (error instanceof CoreError && error.code === "NOT_FOUND") return null;
       throw error;
     }
-  }
-
-  private async findStoredProvider(providerId: string): Promise<Readonly<ToolProvider> | null> {
-    const storedProvider = await this.deps.extensionStore.findToolProviderById(providerId);
-
-    return storedProvider === null ? null : normalizeProvider(storedProvider);
   }
 
   private assertToolOwnershipAvailable(
     provider: Readonly<ToolProvider>,
     previousProvider: Readonly<ToolProvider> | null,
+    owners: Readonly<ProviderCacheSnapshot>,
     toolId: string,
     existingToolSpec: Readonly<ToolSpec> | null
   ): void {
-    const cachedOwner = this.providerCacheSnapshot?.providerCacheByToolId.get(toolId);
-    if (cachedOwner !== undefined && cachedOwner.provider_id !== provider.provider_id) {
+    const owner = owners.providerCacheByToolId.get(toolId);
+    if (owner !== undefined && owner.provider_id !== provider.provider_id) {
       throw new CoreError(
         "CONFLICT",
-        `Tool ${toolId} is already owned by provider ${cachedOwner.provider_id}; provider ${provider.provider_id} cannot claim it.`
+        `Tool ${toolId} is already owned by provider ${owner.provider_id}; provider ${provider.provider_id} cannot claim it.`
       );
     }
-
-    if (providerOwnsTool(previousProvider, toolId)) {
+    if (providerOwnsTool(previousProvider, toolId) || existingToolSpec === null || provider.source === "builtin") {
       return;
     }
-
-    if (existingToolSpec === null || provider.source === "builtin") {
-      return;
-    }
-
     throw new CoreError(
       "CONFLICT",
       `Tool ${toolId} already has a registered tool spec; provider ${provider.provider_id} cannot claim it without matching descriptor ownership.`
     );
   }
 
-  private async rollbackProviderRegistration(
-    providerId: string,
-    previousProvider: Readonly<ToolProvider> | null,
-    touchedToolSpecs: readonly ToolSpecRollbackSnapshot[]
-  ): Promise<void> {
-    await this.rollbackToolSpecs(touchedToolSpecs);
-
-    if (previousProvider !== null) {
-      await this.deps.extensionStore.registerToolProvider(previousProvider);
-      return;
-    }
-
-    await this.deps.extensionStore.deleteToolProvider(providerId);
-  }
-
-  private async rollbackToolSpecs(
-    touchedToolSpecs: readonly ToolSpecRollbackSnapshot[]
-  ): Promise<void> {
-    for (const snapshot of [...touchedToolSpecs].reverse()) {
-      if (snapshot.previous === null) {
-        await this.deleteToolSpec(snapshot.toolId);
-        continue;
-      }
-
-      await this.deps.toolSpecService.update(snapshot.previous);
-    }
-  }
-
-  private async deleteToolSpec(toolId: string): Promise<void> {
-    await this.deps.toolSpecService.delete(toolId);
-  }
-
-  private async publishDescriptorRegisteredWithMutation<T>(
-    input: DescriptorEventInput,
-    mutate: () => Promise<T>,
-    rollbackMutation?: () => Promise<void>
-  ): Promise<T> {
-    const entry = await this.deps.eventLogWriter.append(
-      createDescriptorRegisteredEventEntry(input, this.systemWorkspaceId, this.deps.now)
-    );
-
-    let result: T;
-    try {
-      result = await mutate();
-    } catch (error) {
-      return await this.handleDescriptorMutationFailure(input, entry.event_id, error, rollbackMutation);
-    }
-
-    await this.deps.runtimeNotifier?.notifyEntry(entry);
-    return result;
-  }
-
-  private async handleDescriptorMutationFailure(
-    input: DescriptorEventInput,
-    originalEventId: string,
-    mutationError: unknown,
-    rollbackMutation?: () => Promise<void>
-  ): Promise<never> {
-    if (rollbackMutation !== undefined) {
-      await this.rollbackDescriptorMutation(input, originalEventId, mutationError, rollbackMutation);
-    }
-    await this.deps.eventLogWriter.append(
-      createDescriptorRegistrationRevertedEventEntry(
-        input,
-        originalEventId,
-        this.systemWorkspaceId,
-        this.deps.now
-      )
-    );
-    throw mutationError;
-  }
-
-  private async rollbackDescriptorMutation(
-    input: DescriptorEventInput,
-    originalEventId: string,
-    mutationError: unknown,
-    rollbackMutation: () => Promise<void>
-  ): Promise<void> {
-    try {
-      await rollbackMutation();
-    } catch (rollbackError) {
-      await this.reportDescriptorRollbackFailure(input, originalEventId, mutationError, rollbackError);
-    }
-  }
-
-  private async reportDescriptorRollbackFailure(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-    },
-    originalEventId: string,
-    mutationError: unknown,
-    rollbackError: unknown
-  ): Promise<never> {
-    try {
-      await this.deps.eventLogWriter.append(
-        createDescriptorRegistrationCompensationFailedEventEntry(
-          input,
-          originalEventId,
-          this.systemWorkspaceId,
-          this.deps.now
-        )
+  private ensureProviderCache(): Readonly<ProviderCacheSnapshot> {
+    if (this.providerCacheSnapshot === null) {
+      this.providerCacheSnapshot = createProviderCacheSnapshot(
+        this.deps.extensionStore.findToolProvidersSync().map(normalizeProvider)
       );
-    } catch (compensationError) {
-      throw this.createDescriptorRollbackError(input, mutationError, rollbackError, compensationError);
     }
-    throw this.createDescriptorRollbackError(input, mutationError, rollbackError);
-  }
-
-  private createDescriptorRollbackError(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-    },
-    mutationError: unknown,
-    rollbackError: unknown,
-    compensationError?: unknown
-  ): CoreError {
-    return new CoreError(
-      "CONFLICT",
-      `Failed to roll back ${input.descriptor_type} ${input.descriptor_id} after mutation failure.`,
-      {
-        cause: new AggregateError(
-          compensationError === undefined
-            ? [toError(rollbackError)]
-            : [toError(rollbackError), toError(compensationError)],
-          compensationError === undefined
-            ? "Rollback failed after mutation failure."
-            : "Rollback failed after mutation failure and failure compensation could not be recorded.",
-          { cause: toError(mutationError) }
-        )
-      }
-    );
-  }
-
-  private async ensureProviderCache(): Promise<Readonly<ProviderCacheSnapshot>> {
-    while (this.providerCacheSnapshot === null) {
-      if (this.providerCacheLoadPromise === null) {
-        this.providerCacheLoadPromise = this.loadProviderCache();
-      }
-
-      const loadPromise = this.providerCacheLoadPromise;
-      if (loadPromise === null) {
-        continue;
-      }
-      let pendingSnapshot: Readonly<ProviderCacheSnapshot>;
-      try {
-        pendingSnapshot = await loadPromise;
-      } catch (error) {
-        if (this.providerCacheLoadPromise === loadPromise) {
-          this.providerCacheLoadPromise = null;
-        }
-        throw error;
-      }
-
-      if (this.providerCacheSnapshot !== null) {
-        return this.providerCacheSnapshot;
-      }
-
-      if (this.providerCacheLoadPromise === loadPromise) {
-        this.publishProviderCache(pendingSnapshot);
-        this.providerCacheLoadPromise = null;
-        return pendingSnapshot;
-      }
-    }
-
-    const snapshot = this.providerCacheSnapshot;
-    if (snapshot === null) {
-      throw new CoreError("CONFLICT", "Provider cache did not resolve.");
-    }
-
-    return snapshot;
-  }
-
-  private async loadProviderCache(): Promise<Readonly<ProviderCacheSnapshot>> {
-    const providers = (await this.deps.extensionStore.findToolProviders()).map(
-      (provider) => normalizeProvider(provider)
-    );
-
-    return createProviderCacheSnapshot(providers);
-  }
-
-  private async cacheProvider(provider: Readonly<ToolProvider>): Promise<void> {
-    const normalizedProvider = normalizeProvider(provider);
-    if (this.providerCacheSnapshot !== null) {
-      this.publishProviderCache(
-        mergeProviderIntoCacheSnapshot(this.providerCacheSnapshot, normalizedProvider)
-      );
-      return;
-    }
-
-    await this.mergeProviderIntoPendingCache(normalizedProvider);
-  }
-
-  private async mergeProviderIntoPendingCache(
-    provider: Readonly<ToolProvider>
-  ): Promise<void> {
-    const existingLoadPromise = this.providerCacheLoadPromise;
-    const baselinePromise = existingLoadPromise ?? this.loadProviderCache();
-    const mergedPromise = this.createProviderCacheMerge(baselinePromise, provider);
-    this.providerCacheLoadPromise = mergedPromise;
-
-    if (existingLoadPromise !== null) {
-      this.observePendingProviderCacheMerge(mergedPromise);
-      return;
-    }
-
-    try {
-      await mergedPromise;
-    } finally {
-      if (this.providerCacheLoadPromise === mergedPromise) {
-        this.providerCacheLoadPromise = null;
-      }
-    }
-  }
-
-  private createProviderCacheMerge(
-    baselinePromise: Promise<Readonly<ProviderCacheSnapshot>>,
-    provider: Readonly<ToolProvider>
-  ): Promise<Readonly<ProviderCacheSnapshot>> {
-    return baselinePromise
-      .then((baselineSnapshot) => {
-        const mergedSnapshot = mergeProviderIntoCacheSnapshot(
-          this.providerCacheSnapshot ?? baselineSnapshot,
-          provider
-        );
-        this.publishProviderCache(mergedSnapshot);
-        return mergedSnapshot;
-      })
-      .catch(async (error) => await this.degradeProviderCacheMerge(provider, error));
-  }
-
-  private async degradeProviderCacheMerge(
-    provider: Readonly<ToolProvider>,
-    error: unknown
-  ): Promise<Readonly<ProviderCacheSnapshot>> {
-    await reportAsyncSideEffectFailure({
-      source: "ExtensionRegistryService",
-      operation: "provider_cache_merge",
-      subjectType: "extension_descriptor",
-      subjectId: provider.provider_id,
-      workspaceId: this.systemWorkspaceId,
-      runId: null,
-      causedBy: "system",
-      warningCode: "ALAYA_EXTENSION_CACHE_MERGE_DEGRADED",
-      warningMessage: "[ExtensionRegistryService] provider cache merge failed; degrading to last-good",
-      eventLogRepo: this.deps.eventLogWriter,
-      runtimeNotifier: this.deps.runtimeNotifier,
-      now: this.deps.now
-    }, error);
-    return this.providerCacheSnapshot ?? createProviderCacheSnapshot([]);
-  }
-
-  private observePendingProviderCacheMerge(
-    mergedPromise: Promise<Readonly<ProviderCacheSnapshot>>
-  ): void {
-    void mergedPromise.then((snapshot) => {
-      if (this.providerCacheLoadPromise === mergedPromise) {
-        this.providerCacheLoadPromise = null;
-      }
-      if (this.providerCacheSnapshot === null) this.publishProviderCache(snapshot);
-    }).catch(() => undefined);
-  }
-
-  private publishProviderCache(snapshot: Readonly<ProviderCacheSnapshot>): void {
-    this.providerCacheSnapshot = snapshot;
+    return this.providerCacheSnapshot;
   }
 }
