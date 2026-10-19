@@ -304,10 +304,9 @@ function makeWorkset() {
   const original = { text: TEXT, preview_sha256: createHash("sha256").update(TEXT).digest("hex"),
     span: { content_start: 0, content_end: Buffer.byteLength(TEXT), retained_extent: "body",
       content_complete: true, original_complete: false },
-    source_disclosure: { material_kind: "original_body", source_binding: "checked_record",
-      evaluated_as_of: "2024-06-01T00:00:00.000Z", source_time: { kind: "known", at: "2024-05-01T12:00:00.000Z" },
-      validity: { kind: "unknown", reason: "not_recorded" }, temporal_state: "unknown",
-      proof_use: { kind: "source_only", qualification: "not_current_proof" } } };
+    source_disclosure: [1, "original_body", "checked_record", null, "2024-06-01T00:00:00.000Z",
+      { kind: "known", at: "2024-05-01T12:00:00.000Z" }, { kind: "unknown", reason: "not_recorded" }, "unknown",
+      { kind: "source_only", qualification: "not_current_proof" }] };
   return parsePageSupportComparisonWorkset({ contract: PAGE_SUPPORT_COMPARISON_WORKSET_CONTRACT,
     model: MODEL, provider_url: STEP_OPENAPI_QUOTE_BASIS.selected_provider_url, request_profile: PROFILE,
     items: [{ question: "Who left the lab and when?", query_as_of: { status: "unknown" }, arm_a: [original], arm_b: [original] }] });

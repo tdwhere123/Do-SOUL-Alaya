@@ -1,19 +1,21 @@
 import {
-  interpretationNodeIdentity, sourceSemanticStructuralEdges, sourceSemanticSlotNodeId, SourceSemanticResourceLedger,
+  sourceSemanticStructuralEdges, sourceSemanticSlotNodeId, SourceSemanticResourceLedger,
   type InterpretationNodeCoordinate, type SourceEvidenceTarget, type SourceSemanticCorrespondence,
   type SourceSemanticConsumedLeaf, type SourceSemanticInterpretation, type SourceSemanticQuery,
   type SourceSemanticDerivedNode
 } from "@do-soul/alaya-protocol";
+import { CoreError } from "../../shared/errors.js";
 import { groundSourceSemanticInstances, type SourceSemanticInstance } from "./source-semantic-instances.js";
 import { populateSourceSemanticFiniteFacts } from "./source-semantic-finite-facts.js";
-import { CoreError } from "../../shared/errors.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import type { ObserverReaders, RelationObserverRow, SourceObserverRow } from "../conditional-field/observers/observe.js";
 import type { SourceSemanticBranchPlan } from "./source-semantic-branch-plan.js";
+import {
+  appendPremiseEdge, recordPremiseNode, sourceSemanticRelationKey,
+  type PremiseRowSink
+} from "./source-semantic-premise-rows.js";
 
-export function sourceSemanticRelationKey(...parts: readonly (string | number)[]): string {
-  return JSON.stringify(["source-semantic-relations-v6", ...parts]);
-}
+export { sourceSemanticRelationKey };
 /** Slots stay on the chosen predicate frame; a shared query key searches every aligned frame. */
 export function correspondencePredicateKey(alternative: number, queryFrame: string, groupFrame?: string): string {
   return groupFrame === undefined
@@ -73,7 +75,7 @@ export function compileSourceSemanticPremises(input: Input): SourceSemanticPremi
     instances: builder.instances, derivedNodes: builder.derivedNodes };
 }
 
-export class PremiseBuilder {
+export class PremiseBuilder implements PremiseRowSink {
   readonly nodes = new Map<string, SourceObserverRow>();
   readonly coordinates = new Map<string, InterpretationNodeCoordinate>();
   readonly rows: RelationObserverRow[] = [];
@@ -85,44 +87,13 @@ export class PremiseBuilder {
   readonly derivedNodes: SourceSemanticDerivedNode[] = [];
   readonly aliases = new Map<string, string>();
   constructor(readonly input: Input) {}
-  node(id: string): void {
-    this.input.meter.charge(1, 1024, "premise node");
-    const coordinate = { packet_id: this.input.interpretation_id, hypothesis_id: this.input.context_id, node_id: id };
-    const objectId = interpretationNodeIdentity(coordinate);
-    this.coordinates.set(id, coordinate);
-    this.nodes.set(objectId, { object_id: objectId, sourceRevision: this.input.interpretation_id,
-      target: this.input.source_target, interpretation_node: coordinate, lifecycle_state: "active",
-      scope_class: this.input.scope, ...this.input.sourceValidity });
-  }
+  get branches(): readonly SourceSemanticBranchPlan[] | undefined { return this.input.branches; }
+  node(id: string): void { recordPremiseNode(this, id); }
   edge(from: string, to: string, predicate: string, leaf?: SourceSemanticConsumedLeaf): void {
-    const source = this.coordinates.get(from), target = this.coordinates.get(to);
-    if (source === undefined || target === undefined) throw new CoreError("OBLIGATION_VIOLATION", "premise endpoint is absent");
-    this.input.meter.charge(1, 2048 + 4 * predicate.length, "premise edge");
-    const row: RelationObserverRow = {
-      assertionId: `${this.input.context_id}/${String(this.rows.length).padStart(6, "0")}`,
-      sourceObjectId: interpretationNodeIdentity(source), targetObjectId: interpretationNodeIdentity(target),
-      resultObjectId: interpretationNodeIdentity(target), predicate,
-      validity: { kind: "interpretation", packet_id: this.input.interpretation_id, hypothesis_id: this.input.context_id },
-      interpretation_source: source, interpretation_target: target, source_revision: this.input.interpretation_id
-    };
-    if (leaf !== undefined) this.origins.set(row.assertionId, this.provenance(leaf));
-    const key = JSON.stringify([row.sourceObjectId, predicate]), bucket = this.adjacency.get(key) ?? [];
-    this.positions.set(row.assertionId, bucket.length);
-    bucket.push(row); this.adjacency.set(key, bucket); this.rows.push(row);
+    appendPremiseEdge(this, from, to, predicate, leaf);
   }
   self(id: string, parts: readonly (string | number)[], leaf?: SourceSemanticConsumedLeaf): void {
     this.edge(id, id, sourceSemanticRelationKey(...parts), leaf);
-  }
-  private provenance(leaf: SourceSemanticConsumedLeaf): SourceSemanticConsumedLeaf {
-    const result = { ...leaf };
-    for (const [field, derived] of [["occurrence", "derived_node"], ["parent", "derived_parent"], ["target", "derived_target"]] as const) {
-      const value = result[field];
-      if (value === undefined || !value.startsWith("@")) continue;
-      result[derived] = value;
-      const template = this.aliases.get(value);
-      if (template === undefined) delete result[field]; else result[field] = template;
-    }
-    return result;
   }
 }
 
@@ -175,9 +146,9 @@ export function populateBindings(builder: PremiseBuilder, sourceInterpretation: 
   }
 }
 
-function populateCorrespondence(builder: PremiseBuilder, semantic_correspondence: SourceSemanticCorrespondence): void {
+export function populateCorrespondence(builder: PremiseRowSink, semantic_correspondence: SourceSemanticCorrespondence): void {
   const groups = (alternative: number, queryFrame: string, sourceFrame: string): readonly (string | undefined)[] => {
-    const relevant = builder.input.branches?.filter(branch => branch.alternative === alternative
+    const relevant = builder.branches?.filter(branch => branch.alternative === alternative
       && branch.view.frames.some(frame => frame.id === queryFrame));
     return relevant === undefined ? [undefined] : [...new Set(relevant.flatMap(branch =>
       branch.groupQueryFrame !== queryFrame || branch.groupFrame === undefined ? [undefined]

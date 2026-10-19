@@ -48,8 +48,11 @@ import {
 } from "./daemon-embedding-provider-readiness.js";
 import { resolveEmbeddingWarmupHoldReason } from "./embedding-warmup-hold.js";
 
+export type EmbeddingStartupProbe = "eager" | "omit";
+
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
+  readonly embeddingStartupProbe?: EmbeddingStartupProbe;
   readonly configEnv: ReadonlyMap<string, string>;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
   readonly eventPublisher?: EmbeddingRecallServiceDependencies["eventPublisher"];
@@ -76,6 +79,14 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
+    // Source/query preparation uses the same provider, independently of memory backfill storage.
+    bindSourceEmbedding: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
+      providerState.embeddingProvider?.bindSourceEmbedding?.(structuredClone(options)) ??
+        Promise.resolve({ status: "unsupported" as const, reason: providerState.embeddingProvider === null
+          ? "embedding_provider_unavailable" : "provider_source_evidence_pending" }),
+    // Source-index producer binds only a cached local runtime. Missing/API providers stay unbound.
+    bindLocalSourceIndex: (options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]) =>
+      bindLocalSourceIndex(providerState.embeddingProvider, options),
     getProviderDimensions: () => providerState.readiness.dimensions,
     getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status),
     closeProvider: () => closeEmbeddingProvider(providerState.embeddingProvider)
@@ -132,7 +143,8 @@ function createEmbeddingRuntimeServices(
   const providerWarmup = createProviderWarmup(
     providerState.embeddingProvider,
     input.warn,
-    providerState.readiness
+    providerState.readiness,
+    input.embeddingStartupProbe
   );
   const embeddingStatusService = createEmbeddingStatusService({
     embeddingEnabled: config.embeddingSupplementEnabled,
@@ -277,9 +289,11 @@ function applyEmbeddingPolicyDecorator(
 function createProviderWarmup(
   embeddingProvider: EmbeddingProviderPort | null,
   warn: (message: string, meta: Record<string, unknown>) => void,
-  readiness: EmbeddingProviderReadiness
+  readiness: EmbeddingProviderReadiness,
+  startupProbe: EmbeddingStartupProbe = "eager"
 ): Promise<"not_requested" | "ready" | "failed"> {
-  if (embeddingProvider === null) {
+  // Omission skips only this effect; validated provider use still owns readiness.
+  if (embeddingProvider === null || startupProbe === "omit") {
     return Promise.resolve("not_requested");
   }
   return embeddingProvider
@@ -326,7 +340,7 @@ function resolveEmbeddingProvider(input: {
   readonly localSchemaVersion: number | null;
   readonly providerOverride?: EmbeddingProviderPort | null;
 }): EmbeddingProviderPort | null {
-  if (!input.storageAvailable || !input.optInEnabled || input.providerKind === "off") {
+  if ((!input.storageAvailable && input.providerKind !== "local_onnx") || !input.optInEnabled || input.providerKind === "off") {
     return null;
   }
   if (input.providerOverride !== undefined) {
@@ -365,4 +379,21 @@ function resolveEmbeddingProvider(input: {
 async function closeEmbeddingProvider(provider: EmbeddingProviderPort | null): Promise<void> {
   if (provider?.close === undefined) return;
   await provider.close();
+}
+
+function bindLocalSourceIndex(
+  provider: EmbeddingProviderPort | null,
+  options: Parameters<NonNullable<EmbeddingProviderPort["bindSourceEmbedding"]>>[0]
+) {
+  const captured = structuredClone(options);
+  if (provider === null || !provider.isAvailable) {
+    return Promise.resolve({ status: "unsupported" as const, reason: "embedding_provider_unavailable" });
+  }
+  if (provider.providerKind !== "local_onnx") {
+    return Promise.resolve({ status: "unsupported" as const, reason: "source_index_local_runtime_required" });
+  }
+  if (typeof provider.bindSourceEmbedding !== "function") {
+    return Promise.resolve({ status: "unsupported" as const, reason: "provider_source_evidence_pending" });
+  }
+  return provider.bindSourceEmbedding(captured);
 }

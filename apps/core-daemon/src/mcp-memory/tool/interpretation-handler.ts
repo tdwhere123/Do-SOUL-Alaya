@@ -1,4 +1,4 @@
-import { SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
+import { sourceDisclosure, sourceSemanticExecution, SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticInterpretation, type SoulInterpretationRequest,
   type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
   type AuthorizedScopesAdmission, type SourceRecordIdentity, type SourceInterpretationInvalidation,
@@ -47,9 +47,16 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
     if (request.operation === "invalidate") return invalidate(input, request, context);
     if (request.operation === "reason" && request.source_interpretation_id === undefined &&
         request.semantic_correspondence === undefined) {
-      return SoulInterpretationResponseSchema.parse({ operation: "reason",
-        outcome: { status: "preparation_required", missing: request.semantic_correspondence === undefined ? request.query_semantics === undefined && request.query_handle === undefined ? "query_semantics_and_correspondence" : "semantic_correspondence" : "query_semantics" },
-        coverage: IDLE, work: ZERO_WORK, provider_attempts: 0 });
+      const result = { kind: "reason" as const, execution: sourceSemanticExecution(),
+        result: { contract: "source-interpretation-reasoning-v5" as const, semantic_status: "unreviewed" as const,
+          conclusion_scope: "conditional_on_interpretation" as const, world_claim: "unknown" as const,
+          outcome: { status: "preparation_required" as const,
+            missing: request.query_semantics === undefined && request.query_handle === undefined
+              ? "query_semantics_and_correspondence" as const : "semantic_correspondence" as const }, consumed_leaves: [] },
+        source_disclosure: projectSourceDisclosure({ material_kind: "interpretation",
+          evaluated_as_of: input.interpretationClock ?? input.now() }), coverage: IDLE, work: ZERO_WORK };
+      return mcpFromWorker(finalizeSourceSemanticReason(result, request.output_byte_limit,
+        value => JSON.stringify(mcpFromWorker(value))));
     }
     const { operation, authorized_scopes, ...rest } = request;
     try {
@@ -62,16 +69,16 @@ export function createSourceSemanticInterpretationHandler(input: Dependencies):
       if (request.operation === "prepare_source" && error instanceof CoreError) {
         const work = measuredFailure(error);
         if (error.subCode === "RETRYABLE_BACKPRESSURE") {
-          return SoulInterpretationResponseSchema.parse({ operation: request.operation,
-            outcome: { status: "resource_exhausted" }, coverage: IDLE, work, provider_attempts: 0 });
+          return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: request.operation,
+            outcome: { status: "resource_exhausted" }, coverage: IDLE, work });
         }
         if (error.code === "NOT_FOUND" || admissionOf(error) === "no_eligible_source") {
-          return SoulInterpretationResponseSchema.parse({ operation: request.operation,
-            outcome: { status: "no_eligible_source", provider_attempts: 0 }, coverage: { ...IDLE, discovery: "complete" }, work, provider_attempts: 0 });
+          return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: request.operation,
+            outcome: { status: "no_eligible_source", provider_attempts: 0 }, coverage: { ...IDLE, discovery: "complete" }, work });
         }
         if (admissionOf(error) === "unavailable") {
-          return SoulInterpretationResponseSchema.parse({ operation: request.operation,
-            outcome: { status: "unavailable", reason: unavailableReason(error) }, coverage: { ...IDLE, discovery: "open" }, work, provider_attempts: 0 });
+          return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: request.operation,
+            outcome: { status: "unavailable", reason: unavailableReason(error) }, coverage: { ...IDLE, discovery: "open" }, work });
         }
       }
       throw error;
@@ -101,8 +108,8 @@ async function invalidate(input: Dependencies, request: Extract<SoulInterpretati
       error_basis: request.error_basis,
       provenance: { reporter_id: request.reporter_id, principal: context.agentTarget, preparation_handle: request.source_handle },
       authorized_scopes: authorizedScopes } });
-    return SoulInterpretationResponseSchema.parse({ operation: "invalidate", invalidation: committed.invalidation,
-      coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, provider_attempts: 0,
+    return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "invalidate", invalidation: committed.invalidation,
+      coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" },
       work: { ...preparedWork, native_work: preparedWork.native_work + committed.resource_usage.native_work,
         native_bytes: preparedWork.native_bytes + committed.resource_usage.native_bytes,
         logical_work: usedWork + committed.resource_usage.work_units,
@@ -110,8 +117,8 @@ async function invalidate(input: Dependencies, request: Extract<SoulInterpretati
   } catch (error) {
     if (!(error instanceof SourceSemanticResourceExhausted || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE")) throw error;
     const failed: SourceSemanticWorkerWork = error instanceof CoreError ? measuredFailure(error) : ZERO_WORK;
-    return SoulInterpretationResponseSchema.parse({ operation: "invalidate", outcome: { status: "resource_exhausted" },
-      coverage: IDLE, provider_attempts: 0, work: {
+    return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "invalidate", outcome: { status: "resource_exhausted" },
+      coverage: IDLE, work: {
         native_work: preparedWork.native_work + failed.native_work, native_bytes: preparedWork.native_bytes + failed.native_bytes,
         logical_work: (preparedWork.logical_work ?? preparedWork.native_work) + (failed.logical_work ?? failed.native_work),
         logical_memory_bytes: preparedWork.logical_memory_bytes + failed.logical_memory_bytes,
@@ -138,13 +145,13 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       const cost = sourceReferencePreparationCost(prepared.catalog.assertions.map((row) => ({ assertion_id: row.assertion_id, text: row.segments.map((part) => part.text).join("") })));
       meter.charge(cost.work_units, cost.memory_bytes, "disposition validation");
       const outcome = verifySourceSemanticDisposition(request.disposition, prepared.catalog, fieldContractSha256);
-      return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome, semantic_status: "unreviewed",
+      return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "propose", outcome, semantic_status: "unreviewed",
         source_disclosure: projectSourceDisclosure({ material_kind: "interpretation",
-          evaluated_as_of: prepared.source_disclosure.evaluated_as_of,
+          evaluated_as_of: sourceDisclosure(prepared.source_disclosure).evaluated_as_of,
           source: checkedSourceFromDisclosure(prepared.source_disclosure) }),
         source_binding: { source_id: prepared.source_id, source_version: prepared.source_version, content_digest: prepared.content_digest,
           attribution_context: prepared.attribution_context },
-        coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes }, provider_attempts: 0 });
+        coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" }, work: { ...prepared.work, logical_work: preparedWork.logical_work + meter.spentWork, logical_memory_bytes: prepared.work.logical_memory_bytes + meter.spentBytes } });
     }
     const usedWork = prepared.work.logical_work ?? prepared.work.native_work;
     const remaining = { ...budget, work_units: budget.work_units - usedWork,
@@ -159,7 +166,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       attribution_context: prepared.attribution_context,
       provenance: { producer_id: request.producer_id, principal: context.agentTarget, preparation_handle: request.source_handle },
       draft, producer_version: request.producer_version, contract_version: request.contract_version });
-    return SoulInterpretationResponseSchema.parse({ operation: "propose",
+    return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "propose",
       outcome: { status: "interpreted", gaps: published.bound.interpretation.gaps }, published: published.bound,
       source_disclosure: projectSourceDisclosure({ material_kind: "interpretation", evaluated_as_of: input.interpretationClock ?? input.now(),
         ...(published.source_record === undefined ? { source: checkedSourceFromDisclosure(prepared.source_disclosure) }
@@ -167,7 +174,7 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       evidence_object_id: published.evidence.object_id, coverage: { ...IDLE, discovery: "complete", source_interpretation: "open" },
       work: { ...prepared.work, native_work: prepared.work.native_work + (published.resource_usage?.native_work ?? 0),
         native_bytes: prepared.work.native_bytes + (published.resource_usage?.native_bytes ?? 0), logical_work: usedWork + (published.resource_usage?.work_units ?? 0),
-        logical_memory_bytes: prepared.work.logical_memory_bytes + (published.resource_usage?.memory_bytes ?? 0) }, provider_attempts: 0 });
+        logical_memory_bytes: prepared.work.logical_memory_bytes + (published.resource_usage?.memory_bytes ?? 0) } });
   } catch (error) {
     const secondary = error instanceof CoreError ? measuredFailure(error) : { ...ZERO_WORK,
       logical_work: dispositionMeter?.spentWork ?? 0, logical_memory_bytes: dispositionMeter?.spentBytes ?? 0 };
@@ -177,26 +184,27 @@ async function propose(input: Dependencies, request: Extract<SoulInterpretationR
       logical_memory_bytes: preparedWork.logical_memory_bytes + secondary.logical_memory_bytes,
       rss_bytes: Math.max(preparedWork.rss_bytes, secondary.rss_bytes) };
     if (error instanceof SourceSemanticResourceExhausted || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE") {
-      return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome: { status: "resource_exhausted" },
-        coverage: IDLE, work, provider_attempts: 0 });
+      return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "propose", outcome: { status: "resource_exhausted" },
+        coverage: IDLE, work });
     }
     if (error instanceof CoreError && admissionOf(error) === "unavailable") {
-      return SoulInterpretationResponseSchema.parse({ operation: "propose",
-        outcome: { status: "unavailable", reason: unavailableReason(error) }, coverage: { ...IDLE, discovery: "open" }, work, provider_attempts: 0 });
+      return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "propose",
+        outcome: { status: "unavailable", reason: unavailableReason(error) }, coverage: { ...IDLE, discovery: "open" }, work });
     }
     if (error instanceof CoreError && error.code === "VALIDATION") {
       const admission = admissionOf(error);
       const reason = admission === "expired" ? "expired_handle"
         : admission === "filtered" || admission === "no_eligible_source" ? "source_not_current" : "malformed_interpretation";
-      return SoulInterpretationResponseSchema.parse({ operation: "propose", outcome: { status: "invalid", reason },
-        coverage: IDLE, work, provider_attempts: 0 });
+      return SoulInterpretationResponseSchema.parse({ execution: sourceSemanticExecution(), operation: "propose", outcome: { status: "invalid", reason },
+        coverage: IDLE, work });
     }
     throw error;
   }
 }
 
-function checkedSourceFromDisclosure(disclosure: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
+function checkedSourceFromDisclosure(wire: Extract<SourceSemanticWorkerResult, { kind: "validate_source" }>["source_disclosure"]):
   Parameters<typeof projectSourceDisclosure>[0]["source"] {
+  const disclosure = sourceDisclosure(wire);
   if (disclosure.source_binding === "unbound") return undefined;
   const sourceTime = disclosure.source_time;
   const event_time = sourceTime?.kind === "known" ? { event_time: sourceTime.at }
@@ -212,20 +220,27 @@ function checkedSourceFromDisclosure(disclosure: Extract<SourceSemanticWorkerRes
 async function executeWorker(input: Dependencies, context: McpMemoryToolCallContext, request: SourceSemanticWorkerRequest,
   authorized_scopes: AuthorizedScopesAdmission): Promise<SourceSemanticWorkerResult> {
   if (input.sourceSemanticsPort === undefined) throw new ToolUnavailableError("soul.interpretation worker is not wired into this daemon");
-  const now = input.now();
-  const asOf = input.interpretationClock ?? now;
-  return input.sourceSemanticsPort.execute({ workspace_id: context.workspaceId, as_of: asOf,
-    lifetime_now: now,
-    authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
-    expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request });
+  return input.sourceSemanticsPort.execute(buildSourceSemanticWorkerPayload(input, context, request, authorized_scopes));
 }
-function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
+
+/** Pure private payload construction shared by the handler and guarded acquisition consumer. */
+export function buildSourceSemanticWorkerPayload(input: Pick<Dependencies, "now" | "interpretationClock">,
+  context: Pick<McpMemoryToolCallContext, "workspaceId" | "agentTarget" | "sessionId" | "runId">,
+  request: SourceSemanticWorkerRequest, authorized_scopes: AuthorizedScopesAdmission) {
+  const now = input.now();
+  return { workspace_id: context.workspaceId, as_of: input.interpretationClock ?? now, lifetime_now: now,
+    authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),
+    expires_at: new Date(Date.parse(now) + 600_000).toISOString(), request };
+}
+/** Private bench feedback projection also consumes this conversion, never another worker call. */
+export function mcpFromWorker(result: SourceSemanticWorkerResult): SoulInterpretationResponse {
   if (result.kind === "validate_source") throw new CoreError("OBLIGATION_VIOLATION", "internal preparation cannot escape as an MCP response");
   if (result.kind === "recall") {
     return encodeSourceSemanticLibraryResponse(result);
   }
+  if (result.execution === undefined) throw new CoreError("VALIDATION", "Source worker v2 requires actual execution accounting");
   const { kind, ...rest } = result;
-  return SoulInterpretationResponseSchema.parse({ operation: kind, ...rest, provider_attempts: 0 });
+  return SoulInterpretationResponseSchema.parse({ operation: kind, ...rest });
 }
 
 function measuredFailure(error: CoreError): SourceSemanticWorkerWork {

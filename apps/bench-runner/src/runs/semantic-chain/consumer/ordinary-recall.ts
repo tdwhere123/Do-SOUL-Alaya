@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SoulMemorySearchResponseSchema, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, decodeHistoricalSourceDisclosure, encodeSourceDisclosure, SoulMemorySearchResponseSchema, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { chainIdentity } from "../contract.js";
 import { canonicalPath, isContainedPath } from "../../fs/opened-contained-path.js";
 import { boundedArtifactEntryExists, decodeCanonicalUtf8Artifact, readBoundedStableRegularFile } from
@@ -171,7 +171,7 @@ function readCalls(archive: CaptureArchive, config: OrdinaryRecallArchiveConfig,
     const firstExposure = exposureValue === undefined ? null : FirstExposurePageSchema.parse(exposureValue);
     // Diagnostic absence is retained in the identity, never substituted for a public response.
     const diagnostics = archive.json(`execution/${stem}-execution-receipts.json`, true);
-    const decoded = decodeEnvelope(envelope, reply?.message.error);
+    const decoded = decodeEnvelope(envelope, reply?.message.error, config.protocol_package_version);
     verifyNativeDiagnostics(diagnostics, config, decoded.output);
     if (envelope !== null && Buffer.byteLength(JSON.stringify(envelope)) > config.bounds.public_envelope_observation_bytes) {
       conflict("public envelope exceeds the selected consumer observation bound");
@@ -220,7 +220,8 @@ function verifyWireCall(wire: readonly OrdinaryRecallWireRecord[], sent: Ordinar
   return reply;
 }
 
-function decodeEnvelope(envelope: OrdinaryRecallEnvelope | null, transportError: unknown) {
+function decodeEnvelope(envelope: OrdinaryRecallEnvelope | null, transportError: unknown,
+  protocolVersion: OrdinaryRecallArchiveConfig["protocol_package_version"]) {
   if (envelope === null) return { responseState: transportError === undefined ? "unknown" as const : "transport_error" as const,
     output: null, transportError: transportError ?? null };
   const text = envelope.content.filter(block => block.type === "text");
@@ -229,8 +230,18 @@ function decodeEnvelope(envelope: OrdinaryRecallEnvelope | null, transportError:
     .passthrough().parse(JSON.parse(text[0]!.text as string));
   if (envelope.structuredContent !== undefined) same(envelope.structuredContent, payload, "public payload representations differ");
   if (envelope.isError === true || !payload.ok) return { responseState: "public_error" as const, output: null, transportError: null };
-  const output = SoulMemorySearchResponseSchema.parse(payload.output);
-  same(output, payload.output, "public output cannot be normalized during historical admission");
+  // Only the saved Protocol 14–18 archive reader may expand the old object
+  // format. Raw envelopes/transcripts remain untouched. Remove with those captures.
+  const major = Number(protocolVersion.split(".")[0]);
+  let current = payload.output;
+  if (major >= 14 && major <= 18) {
+    const old = z.object({ results: z.array(z.record(z.string(), z.unknown())) }).passthrough().parse(current);
+    current = { ...old, results: old.results.map(row => ({ ...row,
+      ...(row.source_disclosure === undefined ? {} : { source_disclosure: encodeSourceDisclosure(
+        decodeHistoricalSourceDisclosure(row.source_disclosure, major as 14 | 15 | 16 | 17 | 18)) }) })) };
+  }
+  const output = SoulMemorySearchResponseSchema.parse(current);
+  same(output, current, "public output cannot be normalized during historical admission");
   return { responseState: "success" as const, output, transportError: null };
 }
 

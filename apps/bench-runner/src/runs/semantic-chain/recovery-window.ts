@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
+import { normalizeRequestTimeoutMs } from "../../../../core-daemon/dist/runtime/recall-read-worker/client-config.js";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SourceRecordIdentitySchema, SourceSemanticAccessReceiptSchema,
-  SourceSemanticCorrespondencePreparationOptionsSchema } from "@do-soul/alaya-protocol";
+import { AlayaError, canonicalJson, SourceRecordIdentitySchema, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema,
+  SourceSemanticCorrespondencePreparationOptionsSchema, RequestBudgetSchema } from "@do-soul/alaya-protocol";
 import { censusNativeSourceRecords } from "../snapshot/source-records/census.js";
 import { readVerifiedNativeSourceSnapshot } from "../snapshot/source-records/native.js";
 import { publishSourceSemanticSnapshot, readNativeSourcePublicationReport } from "../snapshot/source-records/publish.js";
@@ -38,6 +39,12 @@ const RecoveryChainConfigSchema = z.object(recoveryChainFields).strict().superRe
     context.addIssue({ code: "custom", path: issue.path, message: issue.message });
   }
 });
+/** Fresh feedback windows freeze the inclusive operation separately from nested Core action budgets. */
+export const RecoveryFeedbackPolicySchema = z.object({
+  execution_version: z.literal("source-feedback-experiment-v1"),
+  budget: RequestBudgetSchema, action_budget: RequestBudgetSchema,
+  timeout_ms: z.number().int().positive().max(600_000)
+}).strict();
 const RecoveryFreezeInputSchema = z.object({
   native_snapshot_path: z.string().min(1), population: z.string().min(1),
   source_model: z.string().min(1), source_request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
@@ -46,9 +53,18 @@ const RecoveryFreezeInputSchema = z.object({
   initial_h_physical_owners: z.array(PhysicalSourceOwnerSchema).max(10).optional(),
   producer_commit: z.string().regex(/^[a-f0-9]{40}$/u),
   allowance: RecoveryAllowanceSchema,
+  feedback: RecoveryFeedbackPolicySchema.optional(),
   open_semantics: z.unknown().transform(parseExtractionOpenSemanticsGeneration).optional(),
   chain: RecoveryChainConfigSchema
 }).strict();
+function captureRecoveryFreezeInput(value: unknown): z.infer<typeof RecoveryFreezeInputSchema> {
+  const { feedback, ...input } = RecoveryFreezeInputSchema.parse(structuredClone(value));
+  if (feedback !== undefined && feedback.timeout_ms > normalizeRequestTimeoutMs(undefined)) {
+    throw new AlayaError("VALIDATION", "frozen feedback timeout exceeds the existing worker execution-scope limit");
+  }
+  // canonicalJson preserves explicit undefined; absence must retain the old window identity bytes.
+  return feedback === undefined ? input : { ...input, feedback };
+}
 const SourceRecordFields = SourceRecordIdentitySchema.unwrap().shape;
 const WindowSourceSchema = z.object({ rank: z.number().int().min(1).max(10),
   source_id: z.string(), source_version: z.string(), record_id: z.string().min(1),
@@ -57,12 +73,14 @@ const WindowSourceSchema = z.object({ rank: z.number().int().min(1).max(10),
   read_bytes: z.number().int().nonnegative(), complete: z.boolean(),
   initial_key: Digest.nullable(), initial_cache_status: z.enum(["hit", "missing", "invalid", "unsupported"])
 }).strict();
-const RecoveryWindowSchema = z.object({ contract: z.literal("source-semantic-recovery-window-v1"),
+// Historic v1/v1-access windows are unsupported; remove this cutover boundary after archive retirement.
+const RecoveryWindowFields = {
   input_identity: Digest, native_snapshot_path: z.string(), native_manifest_identity: Digest,
   source_census_identity: Digest, raw_publication_identity: Digest,
   raw_snapshot_path: z.string(), raw_snapshot_sha256: Digest,
   initial_chain_root: z.string(), initial_plan_identity: Digest,
   query_key: Digest, query_state_identity: Digest, initial_access: SourceSemanticAccessReceiptSchema,
+  initial_query_execution: SourceSemanticExecutionSchema,
   initial_discovery_work: z.unknown(), initial_host_elapsed_ms: z.number().nonnegative(),
   source_cache_root: z.string(), population: z.string(), source_model: z.string(),
   query_review_cache_root: z.string(),
@@ -72,12 +90,17 @@ const RecoveryWindowSchema = z.object({ contract: z.literal("source-semantic-rec
   allowance_identity: Digest,
   window: z.array(WindowSourceSchema).max(10), selected_missing_keys: z.array(Digest).max(10),
   window_open: z.boolean()
-}).strict();
+};
+const RecoveryWindowSchema = z.discriminatedUnion("contract", [
+  z.object({ contract: z.literal("source-semantic-recovery-window-v2"), ...RecoveryWindowFields }).strict(),
+  z.object({ contract: z.literal("source-semantic-recovery-feedback-window-v1"), ...RecoveryWindowFields,
+    feedback: RecoveryFeedbackPolicySchema }).strict()
+]);
 export type RecoveryWindow = z.infer<typeof RecoveryWindowSchema>;
 
 /** Reserve the original Q host preparation before its physical provider stage is allocated. */
 export function declareRecoveryInitialQueryPreparation(value: unknown, rootInput: string): void {
-  const input = RecoveryFreezeInputSchema.parse(value);
+  const input = captureRecoveryFreezeInput(value);
   if (input.chain.discovery_page_cap !== 1 || input.chain.query_workset.items.length !== 1) {
     throw new AlayaError("VALIDATION", "recovery requires one original query and one native discovery page");
   }
@@ -102,7 +125,7 @@ export function reserveRecoveryEffect(path: string, identity: string, completed:
   writeChainArtifact(path, { identity });
 }
 
-type FreezeInput = z.infer<typeof RecoveryFreezeInputSchema>;
+type FreezeInput = ReturnType<typeof captureRecoveryFreezeInput>;
 
 function admitPhysicalSourceOwner(owner: z.infer<typeof PhysicalSourceOwnerSchema>,
   line: SourceRequestLine, model: string, requestProfile: string): void {
@@ -131,7 +154,8 @@ function admitPreviouslyFrozenWindow(root: string, input: FreezeInput, inputIden
       window.source_census_identity !== census.dataset_sha256 || window.raw_snapshot_path !== rawPath ||
       window.raw_snapshot_sha256 !== report.db_sha256 || window.raw_publication_identity !== chainIdentity(report) ||
       window.initial_plan_identity !== chainIdentity(retainedPlan) ||
-      canonicalJson(retainedPlan.config) !== canonicalJson(rawConfig)) {
+      canonicalJson(retainedPlan.config) !== canonicalJson(rawConfig) ||
+      canonicalJson("feedback" in window ? window.feedback : undefined) !== canonicalJson(input.feedback)) {
     throw new AlayaError("CONFLICT", "frozen recovery window differs from original source or query authority");
   }
   return window;
@@ -197,7 +221,7 @@ function projectInitialWindow(input: FreezeInput, census: ReturnType<typeof cens
 
 /** The raw publication and one native page are separate, durable actions before H funding. */
 export async function freezeNativeRecoveryWindow(value: unknown, rootInput: string): Promise<RecoveryWindow> {
-  const input = RecoveryFreezeInputSchema.parse(value);
+  const input = captureRecoveryFreezeInput(value);
   if (input.chain.discovery_page_cap !== 1 || input.chain.query_workset.items.length !== 1) {
     throw new AlayaError("VALIDATION", "recovery requires one original query and one native discovery page");
   }
@@ -261,13 +285,15 @@ export async function freezeNativeRecoveryWindow(value: unknown, rootInput: stri
   reserveRecoveryHostEffect(root, "initial-H-preparation", chainIdentity(initialHStage),
     readChainArtifact(initialHStagePath) !== undefined);
   writeChainArtifact(initialHStagePath, initialHStage);
-  const result = RecoveryWindowSchema.parse({ contract: "source-semantic-recovery-window-v1",
+  const result = RecoveryWindowSchema.parse({
+    ...(input.feedback === undefined ? { contract: "source-semantic-recovery-window-v2" }
+      : { contract: "source-semantic-recovery-feedback-window-v1", feedback: input.feedback }),
     input_identity: inputIdentity, native_snapshot_path: resolve(input.native_snapshot_path),
     native_manifest_identity: nativeSnapshot.manifest.identity, source_census_identity: census.dataset_sha256,
     raw_publication_identity: chainIdentity(report), raw_snapshot_path: rawPath,
     raw_snapshot_sha256: report.db_sha256, initial_chain_root: planRoot,
     initial_plan_identity: chainIdentity(plan), query_key: query.query_key,
-    query_state_identity: plan.input_identity, initial_access: first.access,
+    query_state_identity: plan.input_identity, initial_access: first.access, initial_query_execution: first.execution,
     initial_discovery_work: first.work, initial_host_elapsed_ms: query.initial_discovery_elapsed_ms,
     source_cache_root: resolve(input.source_cache_root), population: input.population,
     query_review_cache_root: resolve(input.query_review_cache_root ?? join(root, "query-review-cache")),

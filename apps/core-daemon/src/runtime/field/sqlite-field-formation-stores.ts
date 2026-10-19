@@ -5,7 +5,7 @@ import type {
   FactorIncidence,
   SourceRecordIdentity
 } from "@do-soul/alaya-protocol";
-import type { FieldFormationStores } from "@do-soul/alaya-core";
+import { CoreError, type FieldAtomicOutcome, type FieldFormationStores } from "@do-soul/alaya-core";
 import {
   factorFromRow,
   incidenceFromRow,
@@ -28,6 +28,7 @@ export function createSqliteFieldFormationStores(input: Readonly<{
   const { repos } = input;
   return {
     runAtomic: (work) => input.database.connection.transaction(work)(),
+    runAtomicWithOutcome: (work) => runSqliteAtomicWithOutcome(input.database, work),
     getRecord: (workspaceId, recordId) => {
       const row = repos.records.findById(workspaceId, recordId);
       return row === null ? null : sourceRecordFromRow(row);
@@ -86,6 +87,32 @@ export function createSqliteFieldFormationStores(input: Readonly<{
     listRecordEvidenceBindings: (workspaceId) =>
       Object.freeze(repos.records.listEvidenceBindings(workspaceId))
   };
+}
+
+function runSqliteAtomicWithOutcome<T>(database: StorageDatabase, work: () => T): FieldAtomicOutcome<T> {
+  const connection = database.connection;
+  if (connection.inTransaction) {
+    return { status: "not_committed", cause: new CoreError("CONFLICT", "source replacement requires a top-level transaction") };
+  }
+  let entered = false;
+  let callbackFailed = false;
+  let callbackFailure: unknown;
+  try {
+    const result = connection.transaction(() => {
+      entered = true;
+      try { return work(); }
+      catch (cause) { callbackFailed = true; callbackFailure = cause; throw cause; }
+    }).immediate();
+    return { status: "committed", result, projection: "ready" };
+  } catch (cause) {
+    // better-sqlite3 rethrows the callback error only after rollback (or SQLite
+    // auto-rollback). A rollback error replaces it. A COMMIT error is unknown:
+    // do not infer this invocation's result from the source subsequently read.
+    if (!connection.inTransaction && (!entered || (callbackFailed && cause === callbackFailure))) {
+      return { status: "not_committed", cause };
+    }
+    return { status: "unknown", cause };
+  }
 }
 
 function recordToRow(

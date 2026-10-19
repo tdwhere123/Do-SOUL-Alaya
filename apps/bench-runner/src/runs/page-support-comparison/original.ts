@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  AlayaError, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceDeliveredSpanSchema, SourceDisclosureSchema,
+  AlayaError, sourceDisclosure, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceDeliveredSpanSchema, SourceDisclosureSchema,
   type SourceDeliveredSpan, type SourceDisclosure
 } from "@do-soul/alaya-protocol";
 
@@ -55,7 +55,7 @@ export function assertPageSupportOriginal(original: PageSupportOriginal): void {
   if (digest !== original.preview_sha256) {
     throw new AlayaError("VALIDATION", "page-support preview hash does not bind text");
   }
-  const disclosure = original.source_disclosure;
+  const disclosure = sourceDisclosure(original.source_disclosure);
   if (disclosure.material_kind !== "original_body" || disclosure.source_binding !== "checked_record" ||
       disclosure.proof_use.kind !== "source_only" ||
       disclosure.proof_use.qualification !== "not_current_proof") {

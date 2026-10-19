@@ -4,45 +4,8 @@ const isolation = await vi.hoisted(async () => {
   // Reuse the CLI test's preimport provider guard before loading native execution.
   const guard = "../../../../../core-daemon/src/__tests__/support/provider-free-cli.mjs";
   await import(guard);
-  const [{ default: http }, { default: https }, { default: net }, { default: tls },
-    { default: http2 }, { default: dgram }, { default: fs }, { default: fsp }, { syncBuiltinESMExports }] =
-    await Promise.all([import("node:http"), import("node:https"), import("node:net"), import("node:tls"),
-      import("node:http2"), import("node:dgram"), import("node:fs"), import("node:fs/promises"), import("node:module")]);
-  const restores: (() => void)[] = [], forbidden: string[] = [];
-  function block(owner: object, key: string) {
-    const descriptor = Object.getOwnPropertyDescriptor(owner, key)!;
-    Object.defineProperty(owner, key, { ...descriptor, value: () => {
-      forbidden.push(key); throw new Error(`Provider-free recovery test forbids ${key}`);
-    } });
-    restores.push(() => Object.defineProperty(owner, key, descriptor));
-  }
-  for (const owner of [http, https]) for (const key of ["request", "get"]) block(owner, key);
-  for (const key of ["connect", "createConnection"]) block(net, key);
-  block(net.Socket.prototype, "connect"); block(tls, "connect"); block(http2, "connect");
-  block(dgram, "createSocket"); block(globalThis, "fetch");
-  const environment = process.env;
-  process.env = new Proxy(environment, { get(target, key) {
-    if (typeof key === "string" && /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/iu.test(key)) {
-      forbidden.push("credential environment"); throw new Error("Credential environment access forbidden");
-    }
-    return Reflect.get(target, key);
-  } });
-  restores.push(() => { process.env = environment; });
-  for (const owner of [fs, fsp]) for (const key of ["readFile", "readFileSync", "open", "openSync", "createReadStream"]) {
-    const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-    if (descriptor?.value === undefined) continue;
-    Object.defineProperty(owner, key, { ...descriptor, value: new Proxy(descriptor.value, {
-      apply(target, receiver, args) {
-        if (/(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(String(args[0]))) {
-          forbidden.push("credential file"); throw new Error("Credential file access forbidden");
-        }
-        return Reflect.apply(target, receiver, args);
-      }
-    }) });
-    restores.push(() => Object.defineProperty(owner, key, descriptor));
-  }
-  syncBuiltinESMExports();
-  return { forbidden, restore: () => { for (const restore of restores.reverse()) restore(); syncBuiltinESMExports(); } };
+  const { installStrictProviderFreeBoundary } = await import("../../support/strict-provider-free-boundary.js");
+  return installStrictProviderFreeBoundary();
 });
 
 // Publication wiring is outside this helper contract; retain real request/cache/revision execution.
@@ -57,7 +20,8 @@ import { join } from "node:path";
 import {
   SOURCE_SEMANTIC_K_VERSION, SOURCE_SEMANTIC_NORMALIZER_VERSION, UNKNOWN_UTTERANCE_ATTRIBUTION,
   SourceSemanticInterpretationSchema, SourceSemanticReasoningResultSchema,
-  sourceSemanticInterpretationIdentity, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity
+  sourceSemanticInterpretationIdentity, sourceSemanticCorrespondenceIdentity, sourceSemanticQueryIdentity,
+  sourceSemanticReasonControl, sourceSemanticUndeliveredConclusion
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256, SOURCE_SEMANTIC_QUERY_CORE_PRODUCER_ID } from "@do-soul/alaya-core";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT, type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
@@ -249,4 +213,18 @@ it("fails closed when preparation attention cannot identify one of two C parents
   const workset = buildRecoveryCorrespondenceWorkset(query, selected, GENERATION, OPTIONS)!;
   expect(() => applyAffectedRecoveryCorrespondencePolicy({ ...policyInput(workset), reasonResults: [reason(selected)] }))
     .toThrow(/one exact retained parent/u);
+});
+
+it("does not treat a computed undelivered conclusion as correspondence attention", () => {
+  const { query, selected } = fixture();
+  const workset = buildRecoveryCorrespondenceWorkset(query, selected, GENERATION, OPTIONS)!;
+  const computed = reason(selected, `sha256:${"c".repeat(64)}`);
+  const receipt = sourceSemanticUndeliveredConclusion(computed.response.result);
+  const roundtrip = JSON.parse(JSON.stringify(receipt)) as typeof receipt;
+  const control = sourceSemanticReasonControl(roundtrip);
+  expect(control.conditional_computation_id).toBe(computed.response.result.conditional_computation_id);
+  expect(control.semantic_correspondence_id).toBe(`sha256:${"c".repeat(64)}`);
+  expect(control.attention).toBeUndefined();
+  expect(applyAffectedRecoveryCorrespondencePolicy({ ...policyInput(workset),
+    reasonResults: [{ ...computed, response: roundtrip as { result?: unknown } }] }).workset).toBe(workset);
 });

@@ -14,6 +14,9 @@ import { readProviderRawAttempt, bindProviderRawAttempt, verifyProviderRawReserv
   type ProviderRawAttempt } from "../extraction/fill/provider-raw-attempt.js";
 import { baseReportedUsage } from "../extraction/authority/step-quote.js";
 import { dirname } from "node:path";
+import { captureQueryRevisionObserverView, type QueryRevisionObserverView } from "./query-revision-observer-view.js";
+import { captureCorrespondenceGenerationContext, type CorrespondenceGenerationContext } from "./correspondence-generation-context.js";
+import { correspondenceModelViewInputPaths } from "./correspondence-model-view.js";
 import { settledAttemptUsageDigest } from "../extraction/authority/attempt-ledger/outcome.js";
 
 export function semanticProposalLookup(
@@ -30,25 +33,30 @@ export function semanticProposalLookup(
 
 /** Physical inputs of the proposal reader, retained independently of their semantic admission. */
 export function semanticProposalCacheInputPaths(
-  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number
+  workset: SemanticProposalWorkset, cacheRoot: string, maxOutputTokens: number, noFollowDirectories = false,
+  queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext
 ): readonly string[] {
+  const view = queryRevisionObserverView === undefined ? undefined : captureQueryRevisionObserverView(queryRevisionObserverView);
+  const context = correspondenceGenerationContext === undefined ? undefined : captureCorrespondenceGenerationContext(correspondenceGenerationContext);
+  if (view !== undefined || context !== undefined) materializeSemanticProposalLines(workset, maxOutputTokens, undefined, view, context);
   const paths = [cacheRoot];
   for (const item of workset.items) {
+    paths.push(...correspondenceModelViewInputPaths(item));
     // A malformed sibling request must not erase independently readable cache paths.
     let line: SemanticProposalLine;
-    try { line = materializeSemanticProposalLines({ ...workset, items: [item] }, maxOutputTokens)[0]!; }
-    catch { continue; }
+    try { line = materializeSemanticProposalLines({ ...workset, items: [item] }, maxOutputTokens, undefined, view, context)[0]!; }
+    catch (error) { if (view !== undefined || context !== undefined) throw error; continue; }
     const shard = semanticProposalShardPath(cacheRoot, line.key);
     paths.push(dirname(shard), shard, ledgerPath(cacheRoot,
       semanticProposalLookup(workset, line, maxOutputTokens).attempt_lineage_digest!),
-      ...providerRawAttemptInputPaths(cacheRoot, line.key));
+      ...providerRawAttemptInputPaths(cacheRoot, line.key, noFollowDirectories));
     if (line.request.revision !== undefined && workset.revision_parent_cache_root !== undefined) {
       const parent = resolveSemanticProposalRevisionParent(workset, item, maxOutputTokens);
       const parentRoot = workset.revision_parent_cache_root;
       const parentShard = semanticProposalShardPath(parentRoot, parent.key);
       paths.push(parentRoot, dirname(parentShard), parentShard,
         ledgerPath(parentRoot, semanticProposalLookup(workset, parent, maxOutputTokens).attempt_lineage_digest!),
-        ...providerRawAttemptInputPaths(parentRoot, parent.key));
+        ...providerRawAttemptInputPaths(parentRoot, parent.key, noFollowDirectories));
     }
   }
   return paths;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
-import type { SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, type SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
 import { assertBuiltWorker } from "./recall-read-worker-client-fixture.js";
 import { WS, RUN } from "../../../../../../packages/core/src/__tests__/recall/conditional-field/vertical/source-slice.js";
@@ -383,7 +383,7 @@ async function consumePairTrace(
       initial ??= response;
       for (const row of response.results) {
         if (row.target.kind === "source_evidence") {
-          expect(row.source_disclosure).toMatchObject({ evaluated_as_of: response.index?.as_of });
+          expect(sourceDisclosure(row.source_disclosure!)).toMatchObject({ evaluated_as_of: response.index?.as_of });
         }
       }
       return response;

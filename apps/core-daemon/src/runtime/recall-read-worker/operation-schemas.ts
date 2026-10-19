@@ -4,7 +4,7 @@ import {
   SourceInterpretationReasoningRequestSchema,
   SourceInterpretationReasoningResultSchema,
   SourceSemanticWorkerRequestSchema,
-  SourceSemanticWorkerResultSchema,
+  SourceSemanticWorkerResultSchema, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema,
   EvidenceCapsuleSchema,
   MemoryDimensionSchema,
   MemoryEntrySchema,
@@ -22,6 +22,10 @@ import {
   ConditionalFieldRecallWorkerPayloadSchema,
   type RecallReadWorkerOperation
 } from "./protocol.js";
+
+import { SourceSemanticJointSelectionSchema, ResearchJointReplySchema } from "./source-semantic-joint-boundary.js";
+import { ResearchSourceAcquisitionReplySchema } from "./source-semantic-research-nominated-library.js";
+import { QualifiedSourceSelectionSchema, QualifiedSourceSelectionReplySchema } from "./source-semantic-qualified-selection-boundary.js";
 
 const EmptyObjectSchema = z.object({}).strict();
 const KeywordSearchSchema = z.object({
@@ -84,6 +88,24 @@ type BoundedPayloadFitsRequest = BoundedRequestPayload extends BoundedActiveCons
 const boundedPayloadFitsRequest: BoundedPayloadFitsRequest = true;
 void boundedPayloadFitsRequest;
 
+/** Public callers cannot supply a vector, selected profile or generation. */
+export const SourceSemanticsPublicPayloadSchema = z.object({
+  workspace_id: z.string().min(1), as_of: z.string().datetime(), lifetime_now: z.string().datetime().optional(),
+  authorized_scopes: AuthorizedScopesAdmissionSchema, principal: z.string().min(1).max(256).optional(),
+  expires_at: z.string().datetime().optional(), request: SourceSemanticWorkerRequestSchema
+}).strict();
+export type SourceSemanticsPublicPayload = z.infer<typeof SourceSemanticsPublicPayloadSchema>;
+const PreparedRouteSchema = z.object({
+  receipt: SourceSemanticQueryPreparationSchema.refine(value => value.supplemental === undefined,
+    "private route preparation cannot nest supplemental routes"),
+  vector: z.union([
+    z.object({ status: z.literal("unavailable"), reason: z.string().min(1).max(256) }).strict(),
+    z.object({ status: z.literal("available"), profile: SourceIndexProfileSchema, profile_id: z.string(),
+      input_digest: z.string(), embedding: z.custom<Float32Array>(value => value instanceof Float32Array) }).strict()
+  ])
+}).strict();
+const PreparedQuerySchema = PreparedRouteSchema.extend({ supplemental: PreparedRouteSchema.optional() }).strict();
+
 const PAYLOAD_SCHEMAS = {
   ready: EmptyObjectSchema,
   close: EmptyObjectSchema,
@@ -94,13 +116,11 @@ const PAYLOAD_SCHEMAS = {
   "conditionalField.interpretation": z.object({ workspace_id: z.string().min(1),
     as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
     request: SourceInterpretationReasoningRequestSchema }).strict(),
-  "conditionalField.sourceSemantics": z.object({
-    workspace_id: z.string().min(1), as_of: z.string().datetime(),
-    lifetime_now: z.string().datetime().optional(),
-    authorized_scopes: AuthorizedScopesAdmissionSchema,
-    principal: z.string().min(1).max(256).optional(),
-    expires_at: z.string().datetime().optional(),
-    request: SourceSemanticWorkerRequestSchema
+  "conditionalField.sourceSemantics": SourceSemanticsPublicPayloadSchema.extend({
+    prepared_query: PreparedQuerySchema.optional(),
+    acquisition_control: z.enum(["lexical", "vector", "dual"]).optional(),
+    joint_control: SourceSemanticJointSelectionSchema.optional(),
+    qualified_control: QualifiedSourceSelectionSchema.optional()
   }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
@@ -272,7 +292,7 @@ const RESULT_SCHEMAS = {
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
   "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
-  "conditionalField.sourceSemantics": SourceSemanticWorkerResultSchema,
+  "conditionalField.sourceSemantics": z.union([SourceSemanticWorkerResultSchema, ResearchSourceAcquisitionReplySchema, ResearchJointReplySchema, QualifiedSourceSelectionReplySchema]),
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

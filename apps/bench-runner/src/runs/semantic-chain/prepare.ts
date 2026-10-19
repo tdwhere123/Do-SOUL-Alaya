@@ -7,10 +7,12 @@ import { admitSourceSemanticQuery, sourceSemanticQueryStatus } from "@do-soul/al
 import type { SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { callMcpTool } from "../../harness/daemon/runtime/daemon-mcp-support.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
+import { assertSemanticChainSourceObservation, SemanticChainSourceObservationError } from "./source-index-observation.js";
 import { readSemanticChainProposalResults, semanticChainPreparationIdentity, semanticChainQueryAvailability,
   verifySemanticChainQueries } from "./inputs.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, semanticProposalWorksetContract,
   type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
+import { assertCorrespondenceModelViewSelection } from "../semantic-proposal/correspondence-model-view.js";
 import { withSnapshotPublishLock } from "../snapshot/freeze/publish-lock.js";
 import { SemanticChainConfigSchema, SemanticChainPlanSchema, SEMANTIC_CHAIN_PLAN_CONTRACT, chainIdentity, readChainArtifact, writeChainArtifact,
   writeChainJson, assertChainSnapshot, withSemanticChainDaemon, type SemanticChainConfig, type SemanticChainPlan } from "./contract.js";
@@ -23,11 +25,12 @@ export async function prepareSemanticChain(value: unknown, root: string,
   const scope = currentBenchScope();
   const operation = async (): Promise<SemanticChainPlan> => {
     refuseBenchWorkAfterCancel();
-    const config = SemanticChainConfigSchema.parse(value);
+    const config = SemanticChainConfigSchema.parse(structuredClone(value));
     assertChainSnapshot(config);
     if (settledSelection === "observed_subset" && settledCorrespondenceWorkset === undefined) {
       throw new AlayaError("CONFLICT", "observed C subset requires an explicit settled input");
     }
+    assertCorrespondenceModelViewSelection([], config.correspondence_model_view, config);
     const results = readSemanticChainProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
     const settledInput = settledSelection === "observed_subset" ? { selection: settledSelection,
       full_workset_identity: settledCorrespondenceWorkset === null ? null :
@@ -64,7 +67,8 @@ export async function prepareSemanticChain(value: unknown, root: string,
           catch (error) {
             refuseBenchWorkAfterCancel();
             if (!(error instanceof AlayaError && error.code === "UNAVAILABLE")) throw error;
-            queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}` });
+            queries.push({ ...base, status: "blocked", reason: `discovery_unavailable: ${error.message}`,
+              ...(error instanceof SemanticChainSourceObservationError ? { discovery_failure: error.failure } : {}) });
             continue;
           }
           if (querySemantics === undefined) {
@@ -84,6 +88,7 @@ export async function prepareSemanticChain(value: unknown, root: string,
               decision: descriptor.interpretation === undefined ? "missing_interpretation" : config.correspondence_pair_cap === 0
                 ? "zero_budget" : selected.includes(descriptor) ? "selected" : "not_selected" })) });
           for (const demand of demands.selected) items.push({ original_query: row.line.original_query, admitted_query_semantics: querySemantics,
+            ...(config.correspondence_model_view === undefined ? {} : { selected_model_view: config.correspondence_model_view }),
             ...(config.correspondence_demand === undefined ? {} : { generation_policy: demand.generation_policy }),
             source_interpretation_descriptors: [{ source_interpretation_id: demand.descriptor.interpretation_id, interpretation: demand.descriptor.interpretation }] });
         }
@@ -111,6 +116,8 @@ export async function prepareSemanticChain(value: unknown, root: string,
         const selectedTasks = workset === null ? [] : validateSettledCorrespondenceWorkset(workset, queries, config, cGeneration);
         reconcileSettledDemandSelection(queries, config, selectedTasks);
       }
+      if (workset !== null && config.correspondence_model_view !== undefined) materializeSemanticProposalLines(workset,
+        config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens);
       const plan = SemanticChainPlanSchema.parse({ contract: SEMANTIC_CHAIN_PLAN_CONTRACT, input_identity: inputIdentity,
         config, queries, correspondence_workset: workset,
         ...(settledInput === undefined ? {} : { settled_input: settledInput }) });
@@ -166,6 +173,7 @@ function validateSettledCorrespondenceWorkset(workset: SemanticProposalWorkset, 
       workset.provider_url !== generation.provider_url || workset.items.length > (config.correspondence_cap ?? config.correspondence_pair_cap)) {
     throw new AlayaError("CONFLICT", "settled C workset changed final native query or producer setting");
   }
+  assertCorrespondenceModelViewSelection(workset.items, config.correspondence_model_view, config);
   const query = queries[0], seen = new Set<string>(), interpretations = new Set<string>();
   const selectedTasks: { source_interpretation_id: string; generation_policy: NonNullable<SourceSemanticCorrespondenceRequest["generation_policy"]> }[] = [];
   const policies = sourceSemanticCorrespondenceGenerationPolicies(query.query_semantics, config.correspondence_demand).map(canonicalJson);
@@ -252,6 +260,7 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     if (JSON.stringify(response.query_semantics_status) !== JSON.stringify(expectedStatus)) {
       throw new AlayaError("CONFLICT", "native discovery changed query semantic availability");
     }
+    assertSemanticChainSourceObservation(config, response);
     const access = response.access;
     if (access === undefined && response.outcome?.status === "resource_exhausted") {
       throw new AlayaError("UNAVAILABLE", "native discovery resource exhausted");
@@ -264,7 +273,7 @@ export async function discoverSemanticChainQuery(daemon: BenchDaemonHandle, conf
     }
     poolId = access.pool_id;
     queryHandle = response.query_handle;
-    trace.push({ coverage: response.coverage, work: response.work, access, query_semantics_status: response.query_semantics_status,
+    trace.push({ coverage: response.coverage, work: response.work, execution: response.execution, access, query_semantics_status: response.query_semantics_status,
       continuation_handle: response.continuation_handle ?? null,
       candidate_ids: response.candidates.map((candidate) => candidate.interpretation_id) });
     pages++;

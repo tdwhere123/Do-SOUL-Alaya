@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { canonicalJson } from "../recall/selection/capture/canonical-json.js";
 import { SourceSemanticGenerationTaskSummarySchema, sourceSemanticGenerationTaskSummary } from "./source-semantic-generation-task.js";
-import { SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
+import { SourceSemanticReasonDeliverySchema, refineSourceSemanticReasonDelivery } from "./source-semantic-reason-delivery.js";
+import { SourceSemanticExecutionSchema, SourceSemanticAccessHintSchema, refineSourceSemanticAccessHint, SourceSemanticAccessPolicySchema, SourceSemanticAccessReceiptSchema, SourceSemanticPreviewExtentsSchema } from "./source-semantic-access.js";
 import { SourceRecordIdentitySchema } from "../recall/field-contract/source-span.js";
 import { assertFieldIdentity, hashSourceRecordId, type FieldContractSha256 } from "../recall/field-contract/canonical-identity.js";
-import { SourceDisclosureSchema, type SourceDisclosure } from "../recall/source-disclosure.js";
+import { SourceDisclosureSchema, sourceDisclosure, type SourceDisclosure } from "../recall/source-disclosure.js";
 import { UtteranceAttributionSchema } from "../conversation/utterance-attribution.js";
 import { BoundedIdSchema, BoundedLabelSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { SourceReferenceCatalogSchema, SOURCE_REFERENCE_MAX_ASSERTIONS } from "../evidence/source-reference.js";
@@ -16,7 +17,7 @@ import { SourceSemanticCorrespondenceSchema } from "../recall/conditional-field/
 import { SourceSemanticEvaluationContextSchema } from "../recall/conditional-field/interpretation-context.js";
 import { ContinuationSchema, InformationIndexSchema, SOURCE_SEMANTIC_PROOF_OBJECT_KIND,
   indexEntryCacheKey, indexEntryObjectKind, type IndexEntry } from "../recall/conditional-field/index-view.js";
-import { type SourceEvidenceTarget } from "../recall/conditional-field/product-identity.js";
+import { sourceGoldRootIdentity } from "../recall/conditional-field/product-identity.js";
 import {
   SourceSemanticAssertionLocationSchema, SourceSemanticInterpretationSchema, SourceSemanticOutcomeSchema, SourceSemanticReasoningResultSchema,
   type SourceSemanticBindingResult, type SourceSemanticReasoningResult
@@ -28,7 +29,7 @@ export const SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX = 5 as const;
 export const SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE = 16 as const;
 export const SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION = "source-semantic-library-v6" as const;
-export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 7 as const;
+export const SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION = 8 as const;
 export const SOURCE_SEMANTIC_LIBRARY_OCCUPANCY = "source_gold_root_identity" as const;
 export const SOURCE_SEMANTIC_LIBRARY_TIE_POLICY = "canonical_identity" as const;
 
@@ -103,7 +104,10 @@ export const SourceSemanticHandleDescriptorSchema = z.object({
 }).readonly();
 
 export const SourceSemanticWorkerWorkSchema = z.object({
+  // Known instrumented read work; index work includes additional logical operations and is separate.
   native_work: z.number().int().nonnegative(),
+  native_accounting: z.enum(["complete", "partial"]).optional(),
+  index_work: z.number().int().nonnegative().optional(),
   logical_work: z.number().int().nonnegative().optional(),
   native_bytes: z.number().int().nonnegative(),
   logical_memory_bytes: z.number().int().nonnegative(),
@@ -225,14 +229,6 @@ export function projectSourceSemanticQuerySupport(query: SourceSemanticQuery,
   };
 }
 
-/** Gold-join occupancy key. Omits evidence_object_id, hypothesis, binding, and interpretation node. */
-export function sourceGoldRootIdentity(target: SourceEvidenceTarget): string {
-  return canonicalJson({
-    workspace_id: target.workspace_id, root_kind: target.root_kind, root_id: target.root_id,
-    source_version: target.source_version, content_digest: target.content_digest
-  });
-}
-
 export const SourceSemanticLibrarySlotQualifierSchema = z.object({
   index: NonNegativeIntSchema,
   evidence_kind: z.enum(["semantic_proof", "source_evidence"]),
@@ -258,7 +254,9 @@ export const SourceSemanticLibrarySlotQualifierSchema = z.object({
 
 const CoverageWork = {
   coverage: SourceSemanticCoverageSchema,
-  work: SourceSemanticWorkerWorkSchema
+  work: SourceSemanticWorkerWorkSchema,
+  // Internal phase functions parse before the orchestration owner attaches actual execution evidence.
+  execution: SourceSemanticExecutionSchema.optional()
 };
 
 /** Complete conditions for one branch; an isolated source interpretation, query semantics, semantic correspondence, and conditional computation. */
@@ -373,7 +371,7 @@ export function refineSourceSemanticLibraryDelivery(value: LibraryDeliveryConsis
       // Any independent proof at this explicit slot governs disclosure; array order is not occupancy.
       const expected = value.slot_qualifiers.some(row => row.index === position && row.evidence_kind === "semantic_proof")
         ? "conditional_support" : "source_only";
-      if (disclosure === undefined || disclosure.proof_use.kind !== expected) {
+      if (disclosure === undefined || sourceDisclosure(disclosure).proof_use.kind !== expected) {
         context.addIssue({ code: "custom", path: ["source_disclosures", indexEntryCacheKey(entry)],
           message: "each delivered source requires the matching proof qualification" });
       }
@@ -496,14 +494,10 @@ export const SourceSemanticWorkerResultSchema = z.discriminatedUnion("kind", [
   }).strict().readonly(),
   z.object({
     kind: z.literal("reason"),
-    result: SourceSemanticReasoningResultSchema,
-    interpretation: SourceSemanticInterpretationSchema.optional(),
-    query: SourceSemanticQuerySchema.optional(),
-    semantic_correspondence: SourceSemanticCorrespondenceSchema.optional(),
-    context: SourceSemanticEvaluationContextSchema.optional(),
+    ...SourceSemanticReasonDeliverySchema.shape,
     source_disclosure: SourceDisclosureSchema,
     ...CoverageWork
-  }).strict().readonly(),
+  }).strict().superRefine(refineSourceSemanticReasonDelivery).readonly(),
   z.object({
     kind: z.literal("recall"),
     ...SourceSemanticLibraryDeliverySchema.shape,

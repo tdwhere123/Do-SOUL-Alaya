@@ -40,6 +40,9 @@ jobs:
       SHARD_COVERAGE: "1"
     steps: &shard-steps
       - uses: actions/checkout@v7
+        with:
+          # Tests inspect Git config and reject includes; no later step needs Git auth.
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
         with:
@@ -54,13 +57,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Typecheck also consumes the daemon's compiled Node entries from bench-runner.
+      - name: Build
+        run: pnpm build
+
       # The command checks the whole workspace; repeat it once per OS, not per shard.
       - name: Typecheck
         if: ${{ matrix.group == 'libraries' }}
         run: pnpm run --if-present typecheck
-
-      - name: Build
-        run: pnpm build
 
       - name: Test
         id: vitest

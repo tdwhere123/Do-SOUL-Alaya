@@ -66,7 +66,7 @@ export const RECALL_READ_WORKER_OPERATIONS = [
 
 export type RecallReadWorkerOperation = (typeof RECALL_READ_WORKER_OPERATIONS)[number];
 
-export const RECALL_READ_WORKER_PROTOCOL_VERSION = 1 as const;
+export const RECALL_READ_WORKER_PROTOCOL_VERSION = 3 as const;
 
 const RECALL_READ_WORKER_OPERATION_SET: ReadonlySet<string> = new Set(
   RECALL_READ_WORKER_OPERATIONS

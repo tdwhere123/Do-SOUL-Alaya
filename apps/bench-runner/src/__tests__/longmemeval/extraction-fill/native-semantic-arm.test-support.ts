@@ -7,7 +7,7 @@ import { dirname } from "node:path";
 import { expect } from "vitest";
 import type { BenchDaemonHandle } from "../../../harness/daemon.js";
 import { SoulInterpretationResponseSchema, SOURCE_SEMANTIC_QUERY_MEANING_CONTRACT,
-  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT } from "@do-soul/alaya-protocol";
+  SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_CONTRACT, sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { SOURCE_SEMANTIC_CORRESPONDENCE_ASSESSMENT_RESPONSE_CONTRACT,
   type SourceSemanticCorrespondenceRequest } from "@do-soul/alaya-soul";
 import { censusCompleteSourceRecords } from "../../../runs/snapshot/source-records/census.js";
@@ -120,7 +120,7 @@ export async function assertNativeLongMemEvalArm(dataDir: string, pinnedMetaRoot
       expect(page.initial?.slots.some(slot => slot.target.kind === "source_evidence")).toBe(true);
     } else expect(response.proofs?.length).toBeGreaterThan(0);
     expect(native.rows[0]!.first_exposure).not.toBeNull();
-    expect(response.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(response.execution).query_preparation.external_api_attempts).toBe(0);
     expect(response.discovery?.access?.policy).toBe("query-conditioned-v1");
   }
   const measured = await measureLongMemEvalSemanticRun(root, replay.path, join(cacheRoots[0]!, "..", "native-evaluator"));

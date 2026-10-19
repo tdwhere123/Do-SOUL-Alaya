@@ -137,6 +137,11 @@ describe("LocalOnnxEmbeddingClient IPC isolation", () => {
     );
   });
 
+  it.each(["__non_finite__", "__overflow__", "__wrong_dimensions__"])("rejects invalid legacy child vector components: %s", async (probe) => {
+    const client = openClient();
+    await expect(client.embedTexts([probe], { timeoutMs: 5_000 })).rejects.toThrow(/finite|float32|dimensions/);
+  });
+
   it("fail-closes when the child returns an empty row", async () => {
     const client = openClient();
     await expect(client.embedTexts(["__empty_row__"], { timeoutMs: 5_000 })).rejects.toThrow(

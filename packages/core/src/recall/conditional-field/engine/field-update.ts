@@ -26,6 +26,7 @@ import { localLeafIds, traceDerivationForest } from "./derivation-provenance.js"
 import { repairSupportAfterRuleRevision } from "./dependency-equations.js";
 import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import {
+  type FieldRetentionIndex,
   indexFieldRetention,
   indexObservationOffsets,
   lookupIndexedObservation,
@@ -35,6 +36,8 @@ import {
 import { RetainedRowDraft, RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 import { collectIdentities, observationIsGuaranteed, productStateFromObservation, seedFromObservation } from "./path-composition-seed.js";
 import { mergeTransitions, transitionKey } from "./path-composition.js";
+import { facetIdentityEntryBytes, withFacetIdentity, type FacetIdentityIndex } from "./path-composition-facet.js";
+import { appendEndpointState, endpointIndexEntryBytes, indexedIdentityWork } from "./state-endpoint-index.js";
 import { tryCompleteHyperedge } from "./path-hyperedge.js";
 import type { RoutingDiscovery } from "./path-routing.js";
 import type {
@@ -136,25 +139,8 @@ export function absorbObservations(
   const derivations: Derivation[] = [];
   const discoveries: RoutingDiscovery[] = [];
   let remainingExploration = state.remaining_exploration;
-  let remainingMemory = state.remaining_memory_bytes;
-  let memoryExhausted = state.memory_exhausted;
   const remainingWork: RemainingWork[] = [...state.remaining_work];
-  const quota = {
-    remaining: remainingMemory,
-    exhausted: memoryExhausted,
-    remainingWork,
-    retained: index.payloads,
-    observationOffsets: index.observations,
-    measurementIds: index.measurements,
-    derivationRows: index.derivations,
-    transitionRoots: state.transition_derivations,
-    facetIds: index.facets,
-    discoveryIds: index.discoveries,
-    unresolvedSeeds: state.unresolved_seed_count ?? 0,
-    // Observation ids are namespaced by their immutable action region id.
-    seedPage: state.residuals.some((region) => region.kind === "seed" && region.region_id === consumption.page.cursor.region_id),
-    withdrawn: new Set(state.withdrawn_leaves ?? [])
-  };
+  const quota = newMemoryQuota(state, index, consumption, remainingWork);
   const effectSeedIds = new Set(
     (consumption.effects ?? []).flatMap((effect) => effect.seed === undefined ? [] : [effect.observation_id])
   );
@@ -182,8 +168,8 @@ export function absorbObservations(
     remainingWork,
     quota
   );
-  remainingMemory = quota.remaining;
-  memoryExhausted = quota.exhausted;
+  const remainingMemory = quota.remaining;
+  const memoryExhausted = quota.exhausted;
   const workUnits = consumption.work?.work_units ?? 0;
   if (workUnits > remainingExploration) remainingWork.push({ kind: "state_create", units: workUnits - remainingExploration });
   remainingExploration = Math.max(0, remainingExploration - workUnits);
@@ -207,10 +193,8 @@ export function absorbObservations(
     : mergeResiduals(state.residuals, consumption.page);
   return {
     ...rest,
-    retained_index: transitionDelta.reset ? undefined : { ...index, rows, payloads: quota.retained,
-      observations: quota.observationOffsets, measurements: quota.measurementIds, derivations: quota.derivationRows,
-      facets: quota.facetIds, discoveries: quota.discoveryIds, seeds: seedDelta.offsets, guaranteedSeeds: guaranteedDelta.offsets,
-      transitions: transitionDelta.keys, ruleRevisions: transitionDelta.revisions },
+    retained_index: transitionDelta.reset ? undefined : retentionAfterAbsorb(index, rows, quota, seedDelta.offsets,
+      guaranteedDelta.offsets, transitionDelta),
     binding_delta: { reset: transitionDelta.reset || seedDelta.reset || guaranteedDelta.reset,
       possible: { seeds: seedDelta.additions, transitions: transitionDelta.additions },
       guaranteed: { seeds: guaranteedDelta.additions, transitions: transitionDelta.additions.filter((row) => row.applicable) } },
@@ -237,6 +221,45 @@ export function absorbObservations(
     last_observer_status: memoryExhausted ? "interrupted" : consumption.page.outcome.status,
     resume_cursors: consumption.resume_cursors ?? state.resume_cursors
   };
+}
+
+function newMemoryQuota(
+  state: FieldEngineState,
+  index: FieldRetentionIndex,
+  consumption: ObserverConsumption,
+  remainingWork: RemainingWork[]
+): MemoryQuota {
+  return {
+    remaining: state.remaining_memory_bytes,
+    exhausted: state.memory_exhausted,
+    remainingWork,
+    retained: index.payloads,
+    observationOffsets: index.observations,
+    measurementIds: index.measurements,
+    derivationRows: index.derivations,
+    transitionRoots: state.transition_derivations,
+    facetIds: index.facets,
+    facetsByIdentity: index.facetsByIdentity,
+    discoveryIds: index.discoveries,
+    unresolvedSeeds: state.unresolved_seed_count ?? 0,
+    // Observation ids are namespaced by their immutable action region id.
+    seedPage: state.residuals.some((region) => region.kind === "seed" && region.region_id === consumption.page.cursor.region_id),
+    withdrawn: new Set(state.withdrawn_leaves ?? [])
+  };
+}
+
+function retentionAfterAbsorb(
+  index: FieldRetentionIndex,
+  rows: FieldRetentionIndex["rows"],
+  quota: MemoryQuota,
+  seeds: FieldRetentionIndex["seeds"],
+  guaranteedSeeds: FieldRetentionIndex["guaranteedSeeds"],
+  transitionDelta: ReturnType<typeof newTransitionAdditions>
+): FieldRetentionIndex {
+  return { ...index, rows, payloads: quota.retained,
+    observations: quota.observationOffsets, measurements: quota.measurementIds, derivations: quota.derivationRows,
+    facets: quota.facetIds, facetsByIdentity: quota.facetsByIdentity, discoveries: quota.discoveryIds,
+    seeds, guaranteedSeeds, transitions: transitionDelta.keys, ruleRevisions: transitionDelta.revisions };
 }
 
 export function defaultOpenResiduals(): readonly CoverageRegion[] {
@@ -273,6 +296,7 @@ type MemoryQuota = {
   derivationRows: PersistentStringMap<Derivation>;
   transitionRoots: PersistentStringMap<string>;
   facetIds: PersistentStringMap<true>;
+  facetsByIdentity: FacetIdentityIndex;
   discoveryIds: PersistentStringMap<true>;
   withdrawn: ReadonlySet<string>;
 };
@@ -368,8 +392,11 @@ function absorbEffects(
       if (transition.applicable) guaranteedTransitions.push(transition);
       rememberTransitionDerivation(effect, transition, derivations, quota);
     }
-    if (effect.facet !== undefined && !quota.facetIds.has(effect.facet.path_id) && retainPayload(effect.facet, quota)) {
+    if (effect.facet !== undefined && !quota.facetIds.has(effect.facet.path_id) && retainFacet(effect.facet, quota)) {
       facets.push(effect.facet); quota.facetIds = quota.facetIds.with(effect.facet.path_id, true);
+      // Insert work is paid before this effect is committed. Recording it as
+      // unpaid join debt here rejects transitions that already fit.
+      indexRetainedFacet(effect.facet, quota);
     }
     if (effect.discovery !== undefined && !quota.discoveryIds.has(effect.discovery.assertion_id) && retainPayload(effect.discovery, quota)) {
       discoveries.push(effect.discovery);
@@ -442,6 +469,10 @@ function chargeIdentities(state: BindableState): BindableState {
   if (state.identity_index !== undefined && state.identity_spool.length === 0) return state;
   let charged = state.identity_index ?? new PersistentStringMap<ProductStateKey>();
   let ordered = state.ordered_identities ?? new PersistentStringMap<ProductStateKey>();
+  let positions = state.identity_positions ?? new PersistentStringMap<number>();
+  let endpoints = state.state_endpoint_index ?? (indexedIdentityWork(state) === 2
+    ? { rows: RetainedSequence.empty<ProductStateKey>(), endpoints: new PersistentStringMap<RetainedSequence<ProductStateKey>>() }
+    : undefined);
   let subjects = state.resume_subjects;
   let memory = state.remaining_memory_bytes;
   let exploration = state.remaining_exploration;
@@ -451,14 +482,17 @@ function chargeIdentities(state: BindableState): BindableState {
   let keptIdentities = state.identity_index === undefined ? RetainedSequence.empty<ProductStateKey>() : RetainedSequence.from(state.seen_identities);
   let processed = 0;
   for (const identity of incoming) {
-    if (exploration < 1) { remainingWork.push({ kind: "state_create", units: 1 }); break; }
+    const units = endpoints === undefined ? 1 : 2;
+    if (exploration < units) { remainingWork.push({ kind: "state_create", units }); break; }
     const nodeId = productStateNodeId(identity);
     if (charged.has(nodeId)) {
       processed += 1;
       continue;
     }
-    const cost = payloadBytes(identity);
-    exploration -= 1;
+    // Retain the identity, position and endpoint entry atomically.
+    const cost = payloadBytes(identity) + 32 + nodeId.length
+      + (endpoints === undefined ? 0 : endpointIndexEntryBytes(endpoints, identity));
+    exploration -= units;
     if (memory < cost) {
       exhausted = true;
       remainingWork.push({ kind: "state_create", units: 1 });
@@ -468,7 +502,9 @@ function chargeIdentities(state: BindableState): BindableState {
     charged = charged.with(nodeId, identity);
     ordered = ordered.with(productIndexOrderKey(identity), identity);
     subjects = subjects.with(productEndpointId(identity), true);
+    positions = positions.with(nodeId, keptIdentities.length);
     keptIdentities = keptIdentities.append(identity);
+    if (endpoints !== undefined) endpoints = appendEndpointState(endpoints, identity, keptIdentities);
     processed += 1;
   }
   const pending = incoming.slice(processed);
@@ -482,6 +518,8 @@ function chargeIdentities(state: BindableState): BindableState {
     identity_spool: exhausted ? [] : pending,
     identity_index: charged,
     ordered_identities: ordered,
+    identity_positions: positions,
+    state_endpoint_index: endpoints === undefined ? undefined : { ...endpoints, rows: keptIdentities },
     resume_subjects: subjects,
     ...(exhausted ? { seeds: [], guaranteed_seeds: [], transitions: [], guaranteed_transitions: [], facets: [], derivations: [] } : {}),
     seen_identities: keptIdentities,
@@ -501,6 +539,23 @@ function retainPayload(value: unknown, quota: MemoryQuota): boolean {
   quota.remaining -= cost;
   quota.retained = quota.retained.with(serialized, true);
   return true;
+}
+
+/** A facet and its identity-index entry are retained and charged together, or neither is. */
+function retainFacet(facet: FacetVector, quota: MemoryQuota): boolean {
+  const serialized = JSON.stringify(facet);
+  const payload = quota.retained.has(serialized) ? 0 : Buffer.byteLength(serialized, "utf8");
+  if (quota.remaining < payload + facetIdentityEntryBytes(quota.facetsByIdentity, facet)) {
+    quota.exhausted = true;
+    quota.remainingWork.push({ kind: "state_create", units: 1 });
+    return false;
+  }
+  return retainPayload(facet, quota);
+}
+
+function indexRetainedFacet(facet: FacetVector, quota: MemoryQuota): void {
+  quota.remaining -= facetIdentityEntryBytes(quota.facetsByIdentity, facet);
+  quota.facetsByIdentity = withFacetIdentity(quota.facetsByIdentity, facet);
 }
 
 function payloadBytes(value: unknown): number {

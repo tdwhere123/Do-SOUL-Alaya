@@ -1,3 +1,4 @@
+import { sourceSemanticGenerationTaskSummary } from "@do-soul/alaya-protocol";
 import {
   parseSourceSemanticRequest, sourceSemanticResponseJsonSchema, type SourceSemanticRequest
 } from "./source-semantic-request.js";
@@ -7,6 +8,13 @@ export function sourceSemanticGenerationInput(requestValue: SourceSemanticReques
   const request = parseSourceSemanticRequest(requestValue);
   const source = request.source_request;
   if (source.generation_view_contract === undefined) return JSON.stringify(request);
+  const exhaustive = source.generation_task?.responsibility.kind === "all_supplied_meaning";
+  let revision: Omit<NonNullable<typeof source.revision>, "parent_request_json"> | undefined = source.revision;
+  if (exhaustive && source.revision !== undefined) {
+    // Retained host ancestry includes task cues; model feedback needs no serialized host request.
+    const { parent_request_json: _hostParent, ...feedback } = source.revision;
+    revision = feedback;
+  }
   return JSON.stringify({
     contract: source.generation_view_contract,
     response_schema: sourceSemanticResponseJsonSchema(request),
@@ -17,9 +25,10 @@ export function sourceSemanticGenerationInput(requestValue: SourceSemanticReques
       ...(source.attribution_context.status === "captured" ? { assertion_locations: source.assertion_locations } : {}),
       source_assertions: source.source_assertions,
       ...(source.generation_task === undefined ? {} : {
-        generation_task: source.generation_task, original_source: source.original_source
+        generation_task: exhaustive ? sourceSemanticGenerationTaskSummary(source.generation_task) : source.generation_task,
+        original_source: source.original_source
       }),
-      ...(source.revision === undefined ? {} : { revision: source.revision })
+      ...(revision === undefined ? {} : { revision })
     },
     ...(request.profile === undefined ? {} : { profile: request.profile })
   });

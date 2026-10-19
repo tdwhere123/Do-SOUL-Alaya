@@ -7,24 +7,20 @@ export type AuditedSourceAdmission = Readonly<{
   admit(request: SourceAdmissionRequest, context: Readonly<{ workspaceId: string }>): Promise<SourceAdmissionResult>;
 }>;
 
-/** Mandatory source import: unlike optional evidence formation, errors escape. */
-export function createAuditedSourceAdmission(input: Parameters<typeof createSourceAdmissionPort>[0] & Readonly<{
+export type AuditedSourceWriterInput = Parameters<typeof createSourceAdmissionPort>[0] & Readonly<{
   eventLogRepo: Parameters<typeof appendSourceRecordAdmitted>[0];
   runtimeNotifier: { notifyEntry(entry: EventLogEntry): void | Promise<void> };
-}>): AuditedSourceAdmission {
+}>;
+
+/** Mandatory source import: unlike optional evidence formation, errors escape. */
+export function createAuditedSourceAdmission(input: AuditedSourceWriterInput): AuditedSourceAdmission {
   const admission = createSourceAdmissionPort(input);
   return {
     async admit(request, context) {
-      if (context.workspaceId.length === 0 || request.workspace_id !== context.workspaceId) {
-        throw new CoreError("OBLIGATION_VIOLATION", "source admission workspace differs from caller context");
-      }
-      const result = input.stores.runAtomic(() => {
-        const admitted = admission.admit(request);
-        if (input.stores.getStoredRecord(context.workspaceId, admitted.record.identity) === null) {
-          throw new CoreError("OBLIGATION_VIOLATION", "retired source record cannot be admitted");
-        }
-        return admitted;
-      });
+      const captured = structuredClone(request);
+      const workspaceId = context.workspaceId;
+      assertSourceAdmissionWorkspace(captured, workspaceId);
+      const result = input.stores.runAtomic(() => admitRetainedSource(input, admission, captured, workspaceId));
       // Receipt-first contract: an audit failure leaves the committed identity.
       // A retry reuses that receipt and retries audit; callers must not publish
       // readiness until this promise succeeds. Audit is at least once.
@@ -32,4 +28,24 @@ export function createAuditedSourceAdmission(input: Parameters<typeof createSour
       return result;
     }
   };
+}
+
+export function assertSourceAdmissionWorkspace(request: SourceAdmissionRequest, workspaceId: string): void {
+  if (workspaceId.length === 0 || request.workspace_id !== workspaceId) {
+    throw new CoreError("OBLIGATION_VIOLATION", "source admission workspace differs from caller context");
+  }
+}
+
+/** Must run inside the caller's storage transaction, including span formation. */
+export function admitRetainedSource(
+  input: AuditedSourceWriterInput,
+  admission: ReturnType<typeof createSourceAdmissionPort>,
+  request: SourceAdmissionRequest,
+  workspaceId: string
+): SourceAdmissionResult {
+  const admitted = admission.admit(request);
+  if (input.stores.getStoredRecord(workspaceId, admitted.record.identity) === null) {
+    throw new CoreError("OBLIGATION_VIOLATION", "retired source record cannot be admitted");
+  }
+  return admitted;
 }

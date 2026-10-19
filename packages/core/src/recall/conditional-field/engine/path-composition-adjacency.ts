@@ -23,7 +23,6 @@ import {
 import { PathEffectCursor, type PathComputation } from "./path-effect-cursor.js";
 import type { RetainedRows } from "./retained-sequence.js";
 import {
-  alignOutgoingBinding,
   type BindingContextStore,
   type BoundSourceFacts
 } from "./binding-environment.js";
@@ -32,13 +31,14 @@ import {
   relationMatches,
   relationPhysicalCandidates,
   admitRelationRow,
-  retargetRelationProduct,
   type AdjacencyRow,
   type AdmittedRelationStrength,
   type NamedKindOverlay
 } from "./path-matching.js";
 import {
+  pairDemandRegistered,
   routingDiscoveryEffect,
+  type RegisteredDemands,
   type RoutingDiscovery
 } from "./path-routing.js";
 import {
@@ -46,9 +46,11 @@ import {
   compileProgramAutomaton,
   type ProgramAutomaton
 } from "./program-automaton.js";
+import { advanceProducts, relationTransition } from "./local-advance.js";
 import { runtimeProgram } from "./path-composition-seed.js";
-import { composedFacetPathId, extendFacets, PathFacetLookup } from "./path-composition-facet.js";
+import { composedFacetPathId, extendFacets, PathFacetLookup, type FacetIdentityIndex } from "./path-composition-facet.js";
 import { claimEvidenceDemandForState } from "../index/claim-obligation.js";
+import type { StateEndpointIndex } from "./state-endpoint-index.js";
 
 export type { HyperedgePremise, HyperedgeCompletion, AdjacencyRow, NamedKindOverlay };
 export { tryCompleteHyperedge };
@@ -114,8 +116,14 @@ export type AdjacencyEffectsInput = Readonly<{
     readonly overlay: NamedKindOverlay;
     readonly sourceFacts?: ReadonlyMap<string, BoundSourceFacts>;
     readonly facets?: RetainedRows<FacetVector>;
+    /** Identity index of exactly `facets`; absent callers build one per generator. */
+    readonly facetIndex?: FacetIdentityIndex;
     readonly discoveries?: RetainedRows<RoutingDiscovery>;
     readonly physicalKinds?: readonly string[];
+    /** Registry snapshot at cursor creation; registered demands are not emitted again, undefined suppresses nothing. */
+    readonly registeredDemands?: RegisteredDemands;
+    /** Exact completed row-delta population; its state and routing demands are already registered. */
+    readonly settledStateEndpoints?: StateEndpointIndex;
     readonly compiledAutomaton?: ProgramAutomaton;
     /** Branch frontier. Absent callers keep writing the shared automaton. */
     readonly sequenceReachOwner?: object;
@@ -133,6 +141,13 @@ export function createAdjacencyEffectCursor(rows: Iterable<AdjacencyRow>, input:
   return new PathEffectCursor(() => adjacencyEffectSteps(rows, { ...input, bindingContexts }), initialBytes, bindingContexts);
 }
 
+function claimDemandRegistered(
+  registered: RegisteredDemands | undefined,
+  claim: Readonly<{ subject: string; predicate: string }>
+): boolean {
+  return pairDemandRegistered(registered, claim.subject, claim.predicate) && registered?.sources.has(claim.subject) === true;
+}
+
 function joinRowTableBytes(rows: readonly AdjacencyRow[] | undefined): number {
   if (rows === undefined) return 0;
   // Pointer table only; row bodies stay on the retained population.
@@ -147,7 +162,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       yield { kind: "work" };
       const claim = claimEvidenceDemandForState(input.liveStates.at(index)!, input.interpretation.view,
         input.bindingContexts);
-      if (claim !== undefined) yield { kind: "effect", effect: {
+      if (claim !== undefined && !claimDemandRegistered(input.registeredDemands, claim)) yield { kind: "effect", effect: {
         observation_id: `claim-demand:${claim.subject}:${claim.predicate}`,
         relation_demand: claim, source_fact_demand: claim.subject
       } };
@@ -167,7 +182,9 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
   // New states keep the live-state suffix against the full population.
   // A row delta joins every state in range with joinRows only.
   const joinedRows = input.joinRows ?? rows;
-  for (let index = input.liveStateOffset ?? 0; index < input.liveStates.length; index += 1) {
+  const indexed = input.settledStateEndpoints;
+  for (let index = indexed === undefined ? input.liveStateOffset ?? 0 : input.liveStates.length;
+    index < input.liveStates.length; index += 1) {
     yield { kind: "work", retained_bytes: 64 };
     const from = input.liveStates.at(index)!;
     const endpoint = productEndpointId(from), bucket = statesByEndpoint.get(endpoint);
@@ -176,12 +193,13 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
       for (const predicate of relationPhysicalCandidates(advance.relation.relation_kind)) {
         yield { kind: "work" };
         if (!physicalKinds.has(predicate) || !relationMatches(advance.relation.relation_kind, predicate)) continue;
+        if (pairDemandRegistered(input.registeredDemands, endpoint, predicate)) continue;
         yield { kind: "effect", effect: { observation_id: `demand:${endpoint}:${predicate}`,
           relation_demand: { subject: endpoint, predicate } } };
       }
     }
     const claim = claimEvidenceDemandForState(from, input.interpretation.view, input.bindingContexts);
-    if (claim !== undefined) yield { kind: "effect", effect: {
+    if (claim !== undefined && !claimDemandRegistered(input.registeredDemands, claim)) yield { kind: "effect", effect: {
       observation_id: `claim-demand:${claim.subject}:${claim.predicate}`,
       relation_demand: claim,
       source_fact_demand: claim.subject
@@ -205,6 +223,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
         observedStates: input.liveStates,
         physicalKinds: input.physicalKinds, physicalKindSet: physicalKinds, compiledPremises,
         coldPrograms,
+        registeredDemands: input.registeredDemands,
         // The compiled automaton stays shared. A branch writes only its own frontier.
         reachOwner: input.sequenceReachOwner ?? input.compiledAutomaton ?? input.interpretation,
         ...(input.joinRows === undefined ? {} : { joinRows: input.joinRows })
@@ -212,12 +231,13 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     }
   }
   yield { kind: "work", retained_bytes: 128 };
-  const facetLookup = new PathFacetLookup(input.facets ?? []);
+  const facetLookup = new PathFacetLookup(input.facets ?? [], input.facetIndex);
   for (const row of joinedRows) {
     if (row.validity === undefined) continue;
     if (inactiveResolution(row.resolutionKind)) continue;
     yield { kind: "work" };
-    for (const from of statesByEndpoint.get(row.sourceObjectId) ?? []) {
+    if (indexed !== undefined) yield { kind: "work" };
+    for (const from of (indexed?.endpoints ?? statesByEndpoint).get(row.sourceObjectId) ?? []) {
       yield { kind: "work" };
       yield* effectsForLiveRow(automaton, row, from, {
         query_id: input.interpretation.query_id,
@@ -230,7 +250,7 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     }
   }
   const origins = new Set<string>();
-  for (const state of input.liveStates) {
+  if (indexed === undefined) for (const state of input.liveStates) {
     yield { kind: "work", retained_bytes: 64 };
     origins.add(productEndpointId(state));
   }
@@ -238,10 +258,11 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     yield { kind: "work", retained_bytes: 64 };
     origins.add(discovery.subject_id);
   }
-  if ((input.physicalKinds?.length ?? 0) > 0) for (const origin of origins) {
+  if (indexed === undefined && (input.physicalKinds?.length ?? 0) > 0) for (const origin of origins) {
     for (const [predicate, routing] of Object.entries(input.overlay)) {
       yield { kind: "work" };
       if (!routing.applicable || routing.role !== "routing_only") continue;
+      if (pairDemandRegistered(input.registeredDemands, origin, predicate)) continue;
       yield { kind: "effect", effect: { observation_id: `routing-demand:${origin}:${predicate}`,
         relation_demand: { subject: origin, predicate } } };
     }
@@ -252,10 +273,13 @@ function* adjacencyEffectSteps(rows: Iterable<AdjacencyRow>, input: AdjacencyEff
     for (const row of joinedRows) {
       yield { kind: "work", retained_bytes: 128 };
       if (row.validity === undefined || inactiveResolution(row.resolutionKind)
-        || !origins.has(row.sourceObjectId) || emitted.has(row.assertionId)) continue;
+        || !(origins.has(row.sourceObjectId) || indexed?.endpoints.has(row.sourceObjectId))
+        || emitted.has(row.assertionId)) continue;
       for (const effect of routingDiscoveryEffect(row, input.overlay)) {
         emitted.add(row.assertionId);
-        if (!origins.has(effect.discovery.subject_id)) { origins.add(effect.discovery.subject_id); grew = true; }
+        if (!origins.has(effect.discovery.subject_id) && !indexed?.endpoints.has(effect.discovery.subject_id)) {
+          origins.add(effect.discovery.subject_id); grew = true;
+        }
         yield { kind: "effect", effect };
       }
     }
@@ -314,20 +338,13 @@ function* effectsForAdvance(
   const { binding: unifiedBinding, targetRevision, revisionId, strength } = admitted;
   for (const programState of advance.to) {
     yield { kind: "work" };
-    const binding = alignOutgoingBinding(
-      unifiedBinding,
-      row.targetObjectId,
-      automaton,
-      programState,
-      input.bindingContexts
-    );
-    if (binding === undefined) continue;
-    const to = retargetRelationProduct(from, row.targetObjectId, targetRevision, {
-      program_state: programState,
-      binding_context: binding
-    }, input.sourceFacts);
+    const [product] = advanceProducts(automaton, { to: [programState] }, row, from, {
+      binding: unifiedBinding,
+      targetRevision
+    }, { bindingContexts: input.bindingContexts, sourceFacts: input.sourceFacts });
+    if (product === undefined) continue;
     yield* compiledEffects({ ...row, source_revision: revisionId },
-      from, to, strength, "true", input.facetLookup);
+      from, product.to, strength, "true", input.facetLookup);
   }
 }
 
@@ -339,21 +356,8 @@ function* compiledEffects(
   decision: "true" | "unresolved",
   facetLookup: PathFacetLookup
 ): PathComputation<void> {
-  if (row.validity === undefined) return;
-  const transition: Transition = {
-    schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
-    from,
-    to,
-    relation_kind: row.predicate,
-    instance_id: strength.instance_id,
-    revision_id: strength.revision_id,
-    transfer_id: strength.transfer_id,
-    transfer_version: strength.transfer_version,
-    strength_milligrades: strength.milligrades,
-    validity: row.validity,
-    applicable: true,
-    cap_contract_id: strength.cap_contract_id
-  };
+  const transition = relationTransition(row, from, to, strength);
+  if (transition === undefined) return;
   const vectors = yield* extendFacets(facetLookup, from, to, `${from.program_state}:${to.program_state}:${row.predicate}`, strength.milligrades);
   const derivation = leafDerivation({
     derivation_id: `leaf:${row.assertionId}:${from.program_state}:${to.program_state}`,

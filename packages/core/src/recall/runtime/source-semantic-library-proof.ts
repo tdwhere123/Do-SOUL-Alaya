@@ -55,10 +55,10 @@ function verifyDeliveredProof(index: InformationIndex, entry: IndexEntry, proof:
     proof.source_record, fieldContractSha256);
   if (index.as_of === undefined) return undefined;
   const executed = executeSourceSemanticInterpretation({
-    request: { contract: SOURCE_SEMANTIC_REASONING_CONTRACT, accepts_unreviewed_conditional_results: true,
+    computation: { contract: SOURCE_SEMANTIC_REASONING_CONTRACT, accepts_unreviewed_conditional_results: true,
       source_interpretation_id: proof.source_interpretation_id!, query_semantics_id: proof.query_semantics_id!,
       semantic_correspondence_id: proof.semantic_correspondence_id!, original_query: proof.original_query,
-      budget: { ...verificationBudget, ...meter.remaining() }, output_byte_limit: 1_000_000 },
+      budget: { ...verificationBudget, ...meter.remaining() } },
     source_interpretation: proof.interpretation, query_semantics: proof.query, semantic_correspondence: proof.semantic_correspondence,
     workspaceId: sourceRecord.workspace_id, scope: trustedSourceRecord.scope_class,
     authorizedScopes: null, asOf: index.as_of, sourceValidity: sourceRecord, source_target: proof.source_target

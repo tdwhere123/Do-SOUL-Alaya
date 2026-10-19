@@ -85,6 +85,23 @@ it("imports a freeze chain without snapshot fields and admits omitted full-catal
   expect(existsSync(join(root, "initial-Q-preparation.json"))).toBe(true);
 });
 
+it("keeps an explicitly undefined feedback option out of the old frozen identity material", () => {
+  const { root, value } = freezeInput();
+  value.allowance.total_work_units = 100; value.allowance.total_memory_bytes = 100;
+  value.allowance.max_read_admissions = 4;
+  declareRecoveryInitialQueryPreparation(value, root);
+  expect(() => declareRecoveryInitialQueryPreparation({ ...value, feedback: undefined }, root)).not.toThrow();
+});
+
+it("admits a fresh explicit bounded feedback policy without adding it to ordinary chain configuration", () => {
+  const { root, value } = freezeInput();
+  const feedback = { execution_version: "source-feedback-experiment-v1", budget: value.chain.budget,
+    action_budget: value.chain.budget, timeout_ms: 1 };
+  declareRecoveryInitialQueryPreparation({ ...value, feedback }, root);
+  const invalid = freezeInput();
+  expect(() => declareRecoveryInitialQueryPreparation({ ...invalid.value, feedback: { ...feedback, timeout_ms: 0 } }, invalid.root)).toThrow();
+});
+
 it("reuses protocol pairing for scoped demand+cap and rejects unpaired fields or snapshot on chain", () => {
   const paired = freezeInput({
     correspondence_demand: { kind: "query_branches", maximum_demands_per_interpretation: 2 },

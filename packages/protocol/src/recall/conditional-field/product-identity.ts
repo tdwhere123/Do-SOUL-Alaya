@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AlayaError } from "../../shared/alaya-error.js";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../../shared/schema-primitives.js";
 import { compareCodeUnits } from "../field-contract/canonical-identity.js";
+import { canonicalJson } from "../selection/capture/canonical-json.js";
 import { InterpretationNodeCoordinateSchema, interpretationNodeIdentity, type InterpretationNodeCoordinate } from "./interpretation-coordinate.js";
 import {
   CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -239,6 +240,14 @@ export function sourceEvidenceRootKey(target: SourceEvidenceTarget): string {
     source_version: target.source_version,
     content_digest: target.content_digest,
     evidence_object_id: target.evidence_object_id
+  });
+}
+
+/** Gold-join occupancy key. Omits evidence_object_id, hypothesis, binding, and interpretation node. */
+export function sourceGoldRootIdentity(target: SourceEvidenceTarget): string {
+  return canonicalJson({
+    workspace_id: target.workspace_id, root_kind: target.root_kind, root_id: target.root_id,
+    source_version: target.source_version, content_digest: target.content_digest
   });
 }
 

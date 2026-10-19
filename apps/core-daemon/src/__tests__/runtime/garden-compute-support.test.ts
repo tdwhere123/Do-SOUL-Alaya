@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ComputeProviderPriority,
   type RuntimeGardenComputeConfig
@@ -17,20 +17,9 @@ import {
 } from "../../runtime/garden-wiring/garden-compute-support.js";
 import { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
 
-const originalConflictProviderUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL;
-const originalConflictApiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY;
-const originalConflictModel = process.env.ALAYA_CONFLICT_LLM_MODEL;
-const originalConflictTimeout = process.env.ALAYA_CONFLICT_LLM_TIMEOUT_MS;
-const originalMissingGardenKey = process.env.ALAYA_MISSING_GARDEN_KEY;
-
-afterEach(() => {
-  restoreEnv("ALAYA_CONFLICT_LLM_PROVIDER_URL", originalConflictProviderUrl);
-  restoreEnv("ALAYA_CONFLICT_LLM_API_KEY", originalConflictApiKey);
-  restoreEnv("ALAYA_CONFLICT_LLM_MODEL", originalConflictModel);
-  restoreEnv("ALAYA_CONFLICT_LLM_TIMEOUT_MS", originalConflictTimeout);
-  restoreEnv("ALAYA_MISSING_GARDEN_KEY", originalMissingGardenKey);
-  vi.restoreAllMocks();
-});
+const environment = process.env;
+beforeEach(() => { process.env = {}; });
+afterEach(() => { process.env = environment; vi.restoreAllMocks(); });
 
 describe("createConflictDetectionLlmPort", () => {
   it("unrefs the conflict request timeout so classification does not pin shutdown", async () => {
@@ -56,12 +45,48 @@ describe("createConflictDetectionLlmPort", () => {
     expect(unref).toHaveBeenCalled();
   });
 
-  it("skips conflict LLM when the model env var is missing or blank", () => {
-    configureConflictLlmEnv();
-    process.env.ALAYA_CONFLICT_LLM_MODEL = "   ";
-    expect(createConflictDetectionLlmPort()).toBeNull();
+  it.each(["ALAYA_CONFLICT_LLM_PROVIDER_URL", "ALAYA_CONFLICT_LLM_MODEL"])(
+    "skips missing or blank %s without reading credentials", key => {
+      configureConflictLlmEnv();
+      const forbiddenRead = vi.fn(() => { throw new Error("unused conflict credential lookup"); });
+      for (const credential of ["ALAYA_CONFLICT_LLM_SECRET_REF", "ALAYA_CONFLICT_LLM_API_KEY"]) {
+        Object.defineProperty(process.env, credential, { get: forbiddenRead, configurable: true });
+      }
+      for (const value of [undefined, "   "]) {
+        restoreEnv(key, value);
+        expect(createConflictDetectionLlmPort()).toBeNull();
+      }
+      expect(forbiddenRead).not.toHaveBeenCalled();
+    }
+  );
 
-    delete process.env.ALAYA_CONFLICT_LLM_MODEL;
+  it.each(["secret_ref", "raw_key"] as const)("retains configured %s credential selection and timeout", async mode => {
+    configureConflictLlmEnv();
+    if (mode === "secret_ref") {
+      process.env.ALAYA_CONFLICT_LLM_SECRET_REF = "env:CONFLICT_FIXTURE_VALUE";
+      process.env.CONFLICT_FIXTURE_VALUE = "fixture-reference-value";
+      Object.defineProperty(process.env, "ALAYA_CONFLICT_LLM_API_KEY", {
+        get: () => { throw new Error("raw key must not override selected secret reference"); }
+      });
+    } else {
+      process.env.ALAYA_CONFLICT_LLM_SECRET_REF = "   ";
+    }
+    const timeout = vi.spyOn(globalThis, "setTimeout");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "none" } }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const port = createConflictDetectionLlmPort();
+    expect(port).not.toBeNull();
+    await expect(port?.classifyPair(createPairInput())).resolves.toBe("none");
+    expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization"))
+      .toBe(`Bearer ${mode === "secret_ref" ? "fixture-reference-value" : "sk-conflict-test"}`);
+    expect(timeout.mock.calls.some(([, milliseconds]) => milliseconds === 50)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("does not fall back to a raw key when the selected secret reference cannot resolve", () => {
+    configureConflictLlmEnv();
+    process.env.ALAYA_CONFLICT_LLM_SECRET_REF = "env:ABSENT_CONFLICT_FIXTURE_VALUE";
     expect(createConflictDetectionLlmPort()).toBeNull();
   });
 

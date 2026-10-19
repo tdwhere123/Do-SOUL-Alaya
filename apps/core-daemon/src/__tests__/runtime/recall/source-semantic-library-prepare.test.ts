@@ -228,7 +228,7 @@ async function proposeDraft(handler: Handler, context: Context, sourceHandle: st
     budget: BUDGET, authorized_scopes: SCOPES
   }, context);
   if (output.operation !== "propose" || output.published === undefined) {
-    throw new Error(`propose failed: ${JSON.stringify(output.outcome)}`);
+    throw new Error(`propose failed: ${JSON.stringify(output)}`);
   }
   return output.published;
 }

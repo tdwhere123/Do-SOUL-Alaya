@@ -142,9 +142,11 @@ describe("mcp memory tool handler wiring", () => {
         object_kind: "evidence_capsule",
         gist: "distilled fact gist",
         excerpt: "retained excerpt material the agent should see when opening a pointer",
-        text_disclosures: { gist: { material_kind: "retained_gist", source_binding: "unbound",
-          validity: { kind: "unknown", reason: "unbound" } },
-          excerpt: { material_kind: "retained_excerpt", proof_use: { kind: "source_only", qualification: "not_current_proof" } } }
+        text_disclosures: {
+          gist: [1, "retained_gist", "unbound", null, expect.any(String), { kind: "unknown", reason: "unbound" },
+            { kind: "unknown", reason: "unbound" }, "unknown", { kind: "source_only", qualification: "not_current_proof" }],
+          excerpt: [1, "retained_excerpt", "unbound", null, expect.any(String), { kind: "unknown", reason: "unbound" },
+            { kind: "unknown", reason: "unbound" }, "unknown", { kind: "source_only", qualification: "not_current_proof" }] }
       }
     });
   });

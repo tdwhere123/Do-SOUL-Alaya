@@ -57,8 +57,9 @@ export async function runOperation(
       parsedPayload as WorkerOperationPayload<"conditionalField.interpretation">));
   }
   if (request.operation === "conditionalField.sourceSemantics") {
-    return parseWorkerOperationResult(request.operation, runSourceSemanticWorker(runtime,
-      parsedPayload as WorkerOperationPayload<"conditionalField.sourceSemantics">));
+    // Source operation finalizers own result admission; do not deep-copy their admitted envelopes again.
+    return runSourceSemanticWorker(runtime,
+      parsedPayload as WorkerOperationPayload<"conditionalField.sourceSemantics">);
   }
   if (request.operation === "conditionalField.recall") {
     return parseWorkerOperationResult(

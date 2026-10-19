@@ -76,10 +76,9 @@ export function readEmbeddingRuntimeConfig(
     embedding_supplement_enabled: posture.embeddingSupplementEnabled,
     local_onnx_availability: posture.localOnnxAvailability
   });
-  const secretRef = readConfigEnvValue(configEnv, EMBEDDING_KEYS.openaiSecretRef);
   return {
     embeddingApiKey: posture.providerKind === "openai"
-      ? resolveOpenAiEmbeddingApiKey(secretRef, posture)
+      ? resolveOpenAiEmbeddingApiKey(readConfigEnvValue(configEnv, EMBEDDING_KEYS.openaiSecretRef), posture)
       : null,
     configuredEmbeddingModel: readNonEmptyEnv(
       readConfigEnvValue(configEnv, EMBEDDING_KEYS.openaiModel)

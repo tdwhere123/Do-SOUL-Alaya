@@ -156,3 +156,15 @@ describe("indexed current source records", () => {
     expect(records.findCurrent("workspace-1", "src-1")).toEqual(record);
   });
 });
+
+it("reuses a bounded current-source query without caching its rows", () => {
+  const { database, records } = fixture();
+  const original = records.insert(hashedRecord("workspace-1", "original", "source"));
+  const prepare = vi.spyOn(database.connection, "prepare");
+  expect(records.findCurrentBounded("workspace-1", "source", 8)?.record?.record_id).toBe(original.record_id);
+  expect(records.findCurrentBounded("workspace-2", "source")).toBeNull();
+  const current = records.insert({ ...hashedRecord("workspace-1", "replacement", "source"), recorded_at: "2026-09-22T00:00Z" });
+  expect(records.findCurrentBounded("workspace-1", "source", 11)?.record)
+    .toMatchObject({ record_id: current.record_id, source_body: "replacement" });
+  expect(prepare.mock.calls.filter(([sql]) => sql.includes("source_records.source_id = ?"))).toHaveLength(1);
+});

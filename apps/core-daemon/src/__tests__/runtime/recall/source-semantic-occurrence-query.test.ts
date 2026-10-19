@@ -132,7 +132,7 @@ it("consumes proposition role references after source publication and SQLite reo
           original_query: ORIGINAL, query_semantics: query, semantic_correspondence: alignment,
           source_interpretation_id: published.bound.interpretation_id, budget: BUDGET, output_byte_limit: 1_000_000 }
       });
-      if (result.kind !== "reason") throw new Error("reason result required");
+      if (result.kind !== "reason" || result.result === undefined) throw new Error("full reason result required");
       expect(result.result.outcome.status).toBe("interpreted");
       expect(result.result.binding_results).toHaveLength(1);
       expect(result.result.binding_results![0]).toMatchObject({ kind: "answer", query_complete: true,

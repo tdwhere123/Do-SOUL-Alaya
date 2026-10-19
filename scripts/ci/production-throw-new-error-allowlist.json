@@ -1131,10 +1131,6 @@
     "max": 4,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
-  "apps/bench-runner/src/runs/provenance/embedding/local-onnx.ts": {
-    "max": 5,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
   "apps/bench-runner/src/runs/provenance/evidence-manifest.ts": {
     "max": 5,
     "reason": "remaining production throw new Error; convert to AlayaError family"
@@ -1238,6 +1234,10 @@
   "apps/bench-runner/src/runs/selection/question-manifest.ts": {
     "max": 17,
     "reason": "remaining production throw new Error; convert to AlayaError family"
+  },
+  "apps/bench-runner/src/runs/semantic-chain/source-acquisition-runtime-channel.mjs": {
+    "max": 2,
+    "reason": "Built-ins-only acquisition IPC bootstrap is loaded before guard establishment and application admission; importing the application error framework here would cross that boundary."
   },
   "apps/bench-runner/src/runs/snapshot/bound-file.ts": {
     "max": 19,
@@ -1697,10 +1697,6 @@
   },
   "apps/core-daemon/src/runtime/recall-read-worker/prepared-delivery.ts": {
     "max": 2,
-    "reason": "remaining production throw new Error; convert to AlayaError family"
-  },
-  "apps/core-daemon/src/runtime/recall-read-worker/snapshot-session.ts": {
-    "max": 1,
     "reason": "remaining production throw new Error; convert to AlayaError family"
   },
   "apps/core-daemon/src/runtime/recall-read-worker/tier-window-client.ts": {

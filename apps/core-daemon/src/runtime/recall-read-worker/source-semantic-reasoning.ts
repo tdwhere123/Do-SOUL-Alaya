@@ -1,38 +1,90 @@
 import {
   SourceSemanticWorkerResultSchema, SourceSemanticResourceExhausted, SourceReferenceCapacityExceeded,
-  buildSourceReferenceCatalog, canonicalJson,
-  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticQuery, type SourceSemanticWorkerResult
+  buildSourceReferenceCatalog, canonicalJson, sourceSemanticExecution,
+  capturePackSourceSemanticPreparationForRequest,
+  sourceReferencePreparationCost, type SourceSemanticCoverage, type SourceSemanticExecution,
+  type SourceSemanticCompactPreparation, type SourceSemanticQueryPreparation, type SourceSemanticQuery, type SourceSemanticWorkerResult
 } from "@do-soul/alaya-protocol";
 import { CoreError, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus, authorizeSemanticScope, authorizedScopesFromAdmission,
-  fieldContractSha256, reasonSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
+  fieldContractSha256, executeSourceSemanticInterpretation, projectSourceDisclosure } from "@do-soul/alaya-core";
 import { indexSourceSemanticUnits } from "@do-soul/alaya-soul";
 import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
 import type { WorkerOperationPayload } from "./operation-schemas.js";
 import { sourceSemanticReadStores, currentSemanticSource, SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import { issueSemanticLease, issueSemanticLeaseGroup, queryPreparationLease, readSemanticLease, semanticLeaseExpiry, sourceSemanticLifetimeNow,
-  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase, type SourceSemanticLease } from "./source-semantic-leases.js";
+  sourceSemanticQueryInputIdentity, sourceSemanticRevision, type QueryPreparationLeaseBase } from "./source-semantic-leases.js";
 import { runSourceSemanticLibraryRecall } from "./source-semantic-library-recall.js";
+import type { ResearchJointReply } from "./source-semantic-joint-boundary.js";
+import type { ResearchSourceAcquisitionReply } from "./source-semantic-research-nominated-library.js";
+import type { QualifiedSourceSelectionReply } from "./source-semantic-qualified-selection-boundary.js";
+import { compareResearchQualifiedSourceSelection } from "./source-semantic-qualified-selection.js";
 import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalization.js";
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
+type SourceSemanticWorkerReply = SourceSemanticWorkerResult | ResearchSourceAcquisitionReply | ResearchJointReply | QualifiedSourceSelectionReply;
+
+/** The transaction's existing execution cache also owns the request-only capture. */
+export interface SourceSemanticRequestExecution {
+  (): SourceSemanticExecution;
+  (capture: SourceSemanticQueryPreparation, compact: SourceSemanticCompactPreparation): void;
+  (expected: SourceSemanticCompactPreparation): SourceSemanticQueryPreparation | undefined;
+  (action: "retire_prepare"): void;
+}
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerResult {
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime,
+  payload: Payload & { acquisition_control?: undefined; joint_control?: undefined; qualified_control?: undefined }): SourceSemanticWorkerResult;
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply;
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerReply {
   const meter = new SourceSemanticReadBudget(payload.request.budget);
-  const run = () => {
+  const run = (executionOf: SourceSemanticRequestExecution,
+    finalizeNativeRecall: (result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => Extract<SourceSemanticWorkerResult, { kind: "recall" }>) => {
+    if (payload.qualified_control !== undefined) return compareResearchQualifiedSourceSelection(runtime, payload, meter, finalizeNativeRecall);
+    if (payload.prepared_query !== undefined) {
+      meter.preparation = capturePackSourceSemanticPreparationForRequest({
+        ...payload.prepared_query.receipt, ...(payload.prepared_query.supplemental === undefined ? {} : {
+          supplemental: [payload.prepared_query.supplemental.receipt] }) }, meter, executionOf);
+      // Keep inference evidence even if charging the received buffers refuses observation.
+      executionOf();
+      // postMessage clones each distinct backing buffer, even for views; acquisition later
+      // captures each measured vector separately. Neither failed nor supplemental work is free.
+      meter.charge(1, 80, "worker query vector buffer references");
+      const buffers = new Set<ArrayBufferLike>();
+      for (const route of [payload.prepared_query, payload.prepared_query.supplemental]) {
+        if (route?.vector.status === "available" && !buffers.has(route.vector.embedding.buffer)) {
+          meter.charge(1, 32 + route.vector.embedding.buffer.byteLength, "worker received query vector");
+          buffers.add(route.vector.embedding.buffer);
+        }
+      }
+    }
+    // Capture failure evidence before exploration can exhaust its allowance. Reuse requires unchanged phase owners.
+    executionOf();
     const scopes = authorizedScopesFromAdmission(payload.authorized_scopes).authorized_scopes;
     if (scopes === undefined) throw new CoreError("VALIDATION", "source semantics requires explicit scope admission");
     const authorized = scopes === null ? null : [...scopes].sort();
     if (payload.request.kind === "prepare_source" || payload.request.kind === "validate_source") return prepareSource(runtime, payload, authorized, meter);
-    if (payload.request.kind === "prepare_query") return prepareQuery(runtime, payload, authorized, meter);
-    if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter);
-    const result = reasonSemantics(runtime, payload, authorized, meter);
+    if (payload.request.kind === "prepare_query") return prepareQuery(runtime, payload, authorized, meter, executionOf);
+    if (payload.request.kind === "recall") return runSourceSemanticLibraryRecall(runtime, payload, authorized, meter, finalizeNativeRecall);
+    return reasonSemantics(runtime, payload, authorized, meter);
+  };
+  return withSourceSemanticTransaction(runtime, payload, meter, executionOf => {
+    // One authority captures actual native phases/work for both routes. The
+    // controlled recall calls it before diagnostics can affect process RSS.
+    function finalizeNative(body: Extract<SourceSemanticWorkerResult, { kind: "recall" }>): Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
+    function finalizeNative(body: SourceSemanticWorkerResult): SourceSemanticWorkerResult;
+    function finalizeNative(body: SourceSemanticWorkerResult): SourceSemanticWorkerResult {
+      const execution = executionOf();
+      return Object.freeze({ ...body, execution, work: Object.freeze(workOf(meter)) });
+    }
+    const reply = run(executionOf, finalizeNative);
+    // The native sibling is already finalized; never resample after diagnostics.
+    if (reply.kind === "research_acquisition" || reply.kind === "research_joint" || reply.kind === "research_qualified_selection") return Object.freeze(reply);
+    const result = finalizeNative(reply);
     return result.kind === "reason" && payload.request.kind === "reason"
       ? finalizeSourceSemanticReason(result, payload.request.output_byte_limit) : result;
-  };
-  return withSourceSemanticTransaction(runtime, payload, meter, run);
+  });
 }
 
 /** Bench-only source nomination; preserve the ordinary prepare-query lease and budget path. */
@@ -48,37 +100,86 @@ export function runResearchNominatedSourcePreparation(runtime: SourceSemanticRea
     throw new CoreError("VALIDATION", "research source nomination requires raw prepare-query access");
   }
   const meter = new SourceSemanticReadBudget(request.budget);
-  const run = () => {
+  const run = (executionOf: SourceSemanticRequestExecution) => {
+    executionOf();
     if (request.continuation_handle === undefined) meter.read(1 + preferredSourceIds.length,
       preferredSourceIds.reduce((bytes, id) => bytes + Buffer.byteLength(id, "utf8"), 0),
       "research source index query output");
     const scopes = authorizedScopesFromAdmission(payload.authorized_scopes).authorized_scopes;
     if (scopes === undefined) throw new CoreError("VALIDATION", "source semantics requires explicit scope admission");
     const authorized = scopes === null ? null : [...scopes].sort();
-    return prepareQuery(runtime, payload, authorized, meter, preferredSourceIds);
+    return prepareQuery(runtime, payload, authorized, meter, executionOf, preferredSourceIds);
   };
   return withSourceSemanticTransaction(runtime, payload, meter, run);
 }
 
 function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
-  meter: SourceSemanticReadBudget, run: () => SourceSemanticWorkerResult): SourceSemanticWorkerResult {
-  try { return runtime.database.connection.inTransaction ? run() : runtime.database.connection.transaction(run)(); }
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerResult): SourceSemanticWorkerResult;
+function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerReply): SourceSemanticWorkerReply;
+function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, payload: Payload,
+  meter: SourceSemanticReadBudget, run: (executionOf: SourceSemanticRequestExecution) => SourceSemanticWorkerReply): SourceSemanticWorkerReply {
+  let execution: SourceSemanticExecution | undefined;
+  let preparation: typeof meter.preparation | SourceSemanticQueryPreparation, acquisition: typeof meter.acquisition;
+  function executionOf(): SourceSemanticExecution;
+  function executionOf(capture: SourceSemanticQueryPreparation, compact: SourceSemanticCompactPreparation): void;
+  function executionOf(expected: SourceSemanticCompactPreparation): SourceSemanticQueryPreparation | undefined;
+  function executionOf(action: "retire_prepare"): void;
+  function executionOf(value?: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation | "retire_prepare",
+    compact?: SourceSemanticCompactPreparation): SourceSemanticExecution | SourceSemanticQueryPreparation | undefined {
+    if (compact !== undefined) {
+      preparation = value as SourceSemanticQueryPreparation; meter.preparation = compact;
+      execution = undefined; return;
+    }
+    if (value === "retire_prepare") { preparation = meter.preparation; return; }
+    if (value !== undefined) {
+      return execution !== undefined && execution !== "native_reasoning_only" && execution[1] === value &&
+        meter.preparation === value && preparation !== undefined && !Array.isArray(preparation)
+        ? preparation as SourceSemanticQueryPreparation : undefined;
+    }
+    if (execution === undefined || (execution === "native_reasoning_only"
+      ? preparation !== meter.preparation : execution[1] !== meter.preparation) || acquisition !== meter.acquisition) {
+      if (execution !== undefined && (execution === "native_reasoning_only" || execution[1] !== meter.preparation)) {
+        preparation = meter.preparation;
+      }
+      execution = sourceSemanticExecution(meter.preparation, meter.acquisition, meter);
+      if (execution === "native_reasoning_only" || preparation === undefined) preparation = meter.preparation;
+      acquisition = meter.acquisition;
+    }
+    return execution;
+  }
+  const execute = () => run(executionOf);
+  try { return runtime.database.connection.inTransaction ? execute() : runtime.database.connection.transaction(execute)(); }
   catch (error) {
-    if (payload.request.kind === "prepare_query" && (error instanceof SourceSemanticResourceExhausted
+    // Failed capture/packing cannot be reported as native-only or successful absence of phase evidence.
+    if (error instanceof SourceSemanticResourceExhausted && error.phase.startsWith("source phase")) {
+      throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
+    }
+    if (!(error instanceof SourceReferenceCapacityExceeded || error instanceof SourceSemanticResourceExhausted || error instanceof CoreError)) throw error;
+    // Failure handling cannot reconstruct metered execution; a later observation can leave <33 work or <24 bytes.
+    const current = execution !== undefined && (execution === "native_reasoning_only"
+      ? preparation === meter.preparation : execution[1] === meter.preparation) && acquisition === meter.acquisition
+      ? execution : undefined;
+    if (current !== undefined && payload.request.kind === "prepare_query" && (error instanceof SourceSemanticResourceExhausted
       || error instanceof CoreError && error.subCode === "RETRYABLE_BACKPRESSURE")) {
       const request = payload.request;
       return SourceSemanticWorkerResultSchema.parse({ kind: "prepare_query",
+        execution: current,
         query_semantics_status: sourceSemanticQueryStatus(admitSourceSemanticQuery(request.query_semantics, request.original_query),
           request.query_semantics_unavailable),
         outcome: { status: "resource_exhausted" }, candidates: [], truncated: true,
         coverage: IDLE, work: workOf(meter) });
     }
+    const work = workOf(meter);
+    // Qualified forks are counterfactual cumulative receipts, never an additive physical total.
+    const physical = payload.qualified_control === undefined ? {} : { physical_total: "unknown" as const };
     if (error instanceof SourceReferenceCapacityExceeded) throw new CoreError("VALIDATION", error.message,
-      { details: { admission: "unsupported_source", capacity: error.reason, work: workOf(meter) } });
-    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work: workOf(meter) } });
-    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work: workOf(meter) } });
+      { details: { admission: "unsupported_source", capacity: error.reason, work, ...physical,
+        ...(current === undefined ? {} : { execution: current }) } });
+    if (error instanceof SourceSemanticResourceExhausted) throw new CoreError("CONFLICT", error.message, { subCode: "RETRYABLE_BACKPRESSURE", details: { work, ...physical, ...(current === undefined ? {} : { execution: current }) } });
+    if (error instanceof CoreError) throw new CoreError(error.code, error.message, { subCode: error.subCode, details: { ...error.details, work, ...physical, ...(current === undefined ? {} : { execution: current }) } });
     throw error;
-  }
+  } finally { executionOf("retire_prepare"); }
 }
 
 function leaseBase(runtime: SourceSemanticReadRuntime, payload: Payload, authorized: readonly string[] | null) {
@@ -105,7 +206,7 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
     throw new CoreError("VALIDATION", "preparation source is no longer current", { details: { admission: "filtered" } });
   }
   const units = stored.content_bytes.length === 0 ? [] : indexSourceSemanticUnits(stored.content_bytes);
-  const assertions = units.map((unit) => ({ assertion_id: unit.assertion_id, text: unit.text, source_role: unit.source_role }));
+  const assertions = units.map((unit) => ({ assertion_id: unit.assertion_id, text: unit.text }));
   const cost = sourceReferencePreparationCost(assertions);
   meter.charge(cost.work_units, cost.memory_bytes, "source references");
   const catalog = buildSourceReferenceCatalog(fieldContractSha256(stored.content_bytes), assertions, fieldContractSha256);
@@ -127,7 +228,8 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
 }
 
 function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, authorized: readonly string[] | null,
-  meter: SourceSemanticReadBudget, preferredSourceIds?: readonly string[]): SourceSemanticWorkerResult {
+  meter: SourceSemanticReadBudget, executionOf: SourceSemanticRequestExecution,
+  preferredSourceIds?: readonly string[]): SourceSemanticWorkerResult {
   const request = payload.request;
   if (request.kind !== "prepare_query") throw new CoreError("VALIDATION", "query preparation kind mismatch");
   const source = request.source_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.source_handle, authorized, "source");
@@ -167,7 +269,7 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
     query_semantics_status: queryStatus, query_semantics: query };
   const pool = prior?.access_pool ?? observeSourceSemanticAccess(runtime, payload, authorized, meter,
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
-    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics },
+    { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics, executionOf },
     request.source_preview_extents, preferredSourceIds, accessHint);
   if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
@@ -181,6 +283,9 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   const base = queryPreparationLease(queryLeaseContext, pool, discovery.offset, nextSourceOffset, discovery.truncated || open);
   const needsContinuation = (discovery.truncated || sourceTraceRemaining)
     && (discovery.offset > (prior?.access_offset ?? 0) || nextSourceOffset > sourceOffset);
+  // Phase ownership is settled before lease publication can fail. Failure handling may reuse,
+  // but must never allocate or reconstruct, this already-charged execution evidence.
+  executionOf();
   const [query_handle, continuation_handle] = issueSemanticLeaseGroup(runtime, [
     { lease: { ...base, kind: "query" } },
     ...(needsContinuation ? [{ lease: { ...base, kind: "page" as const } }] : [])
@@ -268,11 +373,12 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
       work: workOf(meter)
     });
   }
-  const result = reasonSourceSemanticInterpretation({
-    request: {
+  const { result } = executeSourceSemanticInterpretation({
+    // Only the final envelope owner applies the caller's physical UTF-8 delivery cap.
+    computation: {
       contract: "source-interpretation-reasoning-v5", accepts_unreviewed_conditional_results: true,
       source_interpretation_id: admission.interpretation_id, query_semantics_id: admission.query_id, semantic_correspondence_id: admission.semantic_correspondence_id,
-      original_query: original, budget: { ...request.budget, ...meter.remaining() }, output_byte_limit: request.output_byte_limit
+      original_query: original, budget: { ...request.budget, ...meter.remaining() }
     },
     source_interpretation: checked.bound, query_semantics: querySemantics, semantic_correspondence: correspondence, original_query: original, workspaceId: payload.workspace_id,
     scope: checked.stored.record.scope_class!, authorizedScopes: authorized,

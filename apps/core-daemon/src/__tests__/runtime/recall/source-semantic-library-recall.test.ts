@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import * as Core from "@do-soul/alaya-core";
 import {
-  buildSourceReferenceCatalog, canonicalProductIdentityOfEntry, SOURCE_SEMANTIC_K_VERSION,
+  sourceDisclosure, buildSourceReferenceCatalog, canonicalProductIdentityOfEntry, SOURCE_SEMANTIC_K_VERSION,
   sourceSemanticInterpretationIdentity,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_PUBLISHED_CONTRACT, sourceReferenceResolver,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
@@ -238,20 +238,20 @@ it("discloses the original interval through reopened worker and public delivery 
       return { worker, publicResult };
     };
     const before = await read("2026-09-16T23:59:59Z");
-    expect(before.publicResult.results?.[0]?.source_disclosure).toMatchObject({
+    expect(sourceDisclosure(before.publicResult.results![0]!.source_disclosure!)).toMatchObject({
       material_kind: "original_body", validity: { kind: "bounded", from, to_exclusive: to },
       temporal_state: "before_start", proof_use: { kind: "source_only", qualification: "not_current_proof" }
     });
     expect(before.worker.proofs ?? []).toHaveLength(0);
     const inside = await read("2026-09-18T00:00:00.0000002Z");
-    expect(inside.publicResult.results?.[0]?.source_disclosure).toMatchObject({
+    expect(sourceDisclosure(inside.publicResult.results![0]!.source_disclosure!)).toMatchObject({
       temporal_state: "within_interval", evaluated_as_of: "2026-09-18T00:00:00.0000002Z",
       proof_use: { kind: "conditional_support", qualification: "not_world_claim" }
     });
     expect(inside.worker.proofs?.length).toBeGreaterThan(0);
     const ended = await read(to);
     expect(ended.publicResult.results?.[0]?.content_preview).toContain(SOURCE);
-    expect(ended.publicResult.results?.[0]?.source_disclosure).toMatchObject({
+    expect(sourceDisclosure(ended.publicResult.results![0]!.source_disclosure!)).toMatchObject({
       validity: { kind: "bounded", from, to_exclusive: to }, temporal_state: "at_or_after_end",
       proof_use: { kind: "source_only", qualification: "not_current_proof" }
     });
@@ -268,17 +268,19 @@ it("delivers checked source observation time from SQLite and keeps missing or un
     if (publicResult.operation !== "recall") throw new Error("public recall expected");
     const known = publicResult.results?.find(row => row.content_preview.includes(ASSERTION));
     const absent = publicResult.results?.find(row => row.content_preview.includes(FAILED_SOURCE));
-    expect(known?.source_disclosure).toMatchObject({ source_binding: "checked_record",
+    expect(sourceDisclosure(known!.source_disclosure!)).toMatchObject({ source_binding: "checked_record",
       source_time: { kind: "known", at: observed }, proof_use: { kind: "source_only" } });
-    expect(absent?.source_disclosure).toMatchObject({ source_binding: "checked_record",
+    expect(sourceDisclosure(absent!.source_disclosure!)).toMatchObject({ source_binding: "checked_record",
       source_time: { kind: "unknown", reason: "not_recorded" }, proof_use: { kind: "source_only" } });
-    expect(known?.source_disclosure?.source_time).not.toEqual({ kind: "known", at: CLOCK });
-    expect(Object.values(worker.source_disclosures).map(row => row.source_time)).toContainEqual({ kind: "known", at: observed });
+    expect(sourceDisclosure(known!.source_disclosure!).source_time).not.toEqual({ kind: "known", at: CLOCK });
+    expect(Object.values(worker.source_disclosures).map(row => sourceDisclosure(row).source_time)).toContainEqual({ kind: "known", at: observed });
     const withoutCheckedMetadata = Core.encodeSourceSemanticLibraryResults(worker.index,
       new Map(Object.entries(worker.previews ?? {})));
     expect(withoutCheckedMetadata).toHaveLength(publicResult.results?.length ?? 0);
-    expect(withoutCheckedMetadata.every(row => row.source_disclosure?.source_time?.kind === "unknown"
-      && row.source_disclosure.source_time.reason === "unbound")).toBe(true);
+    expect(withoutCheckedMetadata.every(row => {
+      const time = sourceDisclosure(row.source_disclosure!).source_time;
+      return time?.kind === "unknown" && time.reason === "unbound";
+    })).toBe(true);
   }, 1, 0, false, { valid_from: null, valid_to: null }, observed);
 }, 60000);
 

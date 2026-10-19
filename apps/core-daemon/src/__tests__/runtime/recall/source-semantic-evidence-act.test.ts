@@ -123,7 +123,7 @@ it.each(CASES)("retrieves the shipped $act example after source receive, publica
             semantic_correspondence: correspond(original, query, published.bound.interpretation, published.bound.interpretation_id),
             source_interpretation_id: published.bound.interpretation_id, budget: BUDGET, output_byte_limit: 1_000_000 }
         });
-        if (result.kind !== "reason") throw new Error("reason result required");
+        if (result.kind !== "reason" || result.result === undefined) throw new Error("full reason result required");
         expect(result.result.outcome.status).toBe("interpreted");
         expect(result.result.world_claim).toBe("unknown");
         expect(result.interpretation?.asserted_at_scope).toEqual([]);

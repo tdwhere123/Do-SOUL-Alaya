@@ -1,7 +1,9 @@
 import { expect, it } from "vitest";
 import {
-  canonicalJson, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, SoulInterpretationResponseSchema,
-  sourceIndexEntry, indexEntryCacheKey, sourceSemanticQueryIdentity,
+  encodeSourceDisclosure, sourceDisclosure, canonicalJson, SourceSemanticResourceExhausted, SourceSemanticResourceLedger, SoulInterpretationResponseSchema,
+  sourceIndexEntry, indexEntryCacheKey, sourceSemanticQueryIdentity, packSourceSemanticAcquisition,
+  packSourceSemanticQueryPreparation, sourceSemanticAcquisitionNotRun, sourceSemanticAccessPhases,
+  sourceSemanticExecution, unavailableSourceQueryPreparation,
   SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, type SourceSemanticWorkerWork
 } from "@do-soul/alaya-protocol";
@@ -17,6 +19,14 @@ import type { Delivery, Preparation } from "./field-obligation-rediscovery.test-
 const frozen = frozenCell(CELLS[0]);
 const queryId = sourceSemanticQueryIdentity(QUERY, fieldContractSha256);
 const work: SourceSemanticWorkerWork = { native_work: 0, native_bytes: 0, logical_work: 1, logical_memory_bytes: 64, rss_bytes: 0 };
+const execution = sourceSemanticExecution();
+const accessPreparation = unavailableSourceQueryPreparation("controlled_or_scoped_access", "not_requested");
+const accessAcquisition = sourceSemanticAcquisitionNotRun("controlled_or_scoped_access");
+const accessPhases = {
+  phases: [2, packSourceSemanticQueryPreparation(accessPreparation),
+    packSourceSemanticAcquisition(accessAcquisition), null] as const
+};
+const accessExecution = sourceSemanticExecution(accessPreparation, accessAcquisition);
 const coverage: Preparation["coverage"] = { discovery: "complete", source_interpretation: "unexercised",
   query_semantics: "complete", semantic_correspondence: "unexercised", conditional_computation: "unexercised", payload: "complete" };
 
@@ -43,7 +53,7 @@ function failedDelivery(arm: Slot["arm"] = "F", error = budgetError()): NativeRe
   const reserved = allowance(slot.point), budget = accessBudget(slot);
   const prepare: Preparation = { operation: "prepare_query", query_semantics_id: queryId,
     query_semantics_status: { status: "admitted", query_semantics_id: queryId }, query_handle: "prepared-query",
-    candidates: [], truncated: false, coverage, work, provider_attempts: 0 };
+    candidates: [], truncated: false, coverage, work, execution };
   return { slot, status: "native_failure", stop: "public_delivery_failed", setup: null, setup_elapsed_ms: null,
     native_started: true, manifest: null, publication_receipts: [], common: { ready: true },
     policy: { selected_hint: null, decision: null, initial_bindings: "not_exercised" }, access: { prepare },
@@ -62,9 +72,9 @@ function capturedDelivery(source: FrozenCell["sources"][number], budget: ReturnT
     source_version: source.source_version, content_digest: source.content_digest, evidence_object_id: null,
     association_milligrades: 0, hypothesis_id: "source-only", output_binding: "source-evidence", role: "requested",
     claim: "unknown", explanation_ids: [] });
-  const disclosure = { material_kind: "original_body", source_binding: "checked_record", evaluated_as_of: CLOCK,
+  const disclosure = encodeSourceDisclosure({ material_kind: "original_body", source_binding: "checked_record", evaluated_as_of: CLOCK,
     validity: { kind: "unknown", reason: "not_recorded" }, temporal_state: "unknown",
-    proof_use: { kind: "source_only", qualification: "not_current_proof" } };
+    proof_use: { kind: "source_only", qualification: "not_current_proof" } });
   const queryStatus = { status: "admitted" as const, query_semantics_id: queryId };
   const requestIdentity = sourceSemanticLibraryRequestIdentity({ workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES.scopes,
     original_query: ORIGINAL_QUERY, query_semantics: QUERY, query_semantics_status: queryStatus, source_id: sourceId,
@@ -86,7 +96,7 @@ function capturedDelivery(source: FrozenCell["sources"][number], budget: ReturnT
     results: [{ object_kind: "source_evidence", target: entry.target, relevance_score: 0, content_preview: source.text,
       source_disclosure: disclosure, evidence_pointers: [], selection_reason: "source access", source_channels: ["source"],
       score_factors: { activation: 0, relevance: 0 }, budget_state: { token_estimate: 1, max_entries: 5, max_total_tokens: 100_000,
-        remaining_entries: 4, remaining_tokens: 99_999, within_budget: true } }], coverage, work, provider_attempts: 0 });
+        remaining_entries: 4, remaining_tokens: 99_999, within_budget: true } }], coverage, work, execution });
   if (delivery.operation !== "recall") throw new Error("authored capture must be a public recall response");
   return delivery;
 }
@@ -138,7 +148,7 @@ function withCommon(report: NativeReport, instance: string = report.slot.arm): N
   const descriptor = { source_id: initial.source_id, source_version: initial.source_version, content_digest: initial.content_digest,
     interpretation_id: initial.interpretation_id, interpretation: initial.interpretation, producer_id: "access-test-author",
     producer_version: "p0", contract_version: "source-interpretation-v4", source_disclosure: disclosure };
-  const access: NonNullable<Preparation["access"]> = { contract: "source-semantic-access-v1", policy: "query-conditioned-v1",
+  const access: NonNullable<Preparation["access"]> = { contract: "source-semantic-access-v2", ...accessPhases, policy: "query-conditioned-v1",
     input_id: `sha256:${"1".repeat(64)}`, pool_id: `sha256:${"2".repeat(64)}`, observed_source_count: 1, observed_interpretation_count: 1,
     source_candidates: [{ source_id: initial.source_id, record_id: initial.record_id, read_bytes: Buffer.byteLength(initial.text),
       body_bytes: Buffer.byteLength(initial.text), complete: true, signal: { source_text_score: 0, interpretation_reading_score: 0 } }],
@@ -149,10 +159,10 @@ function withCommon(report: NativeReport, instance: string = report.slot.arm): N
   report.common = { ready: true, initial_H: descriptor,
     source: { operation: "prepare_source", source_handle: `source-${instance}`, source_id: initial.source_id,
       source_version: initial.source_version, content_digest: initial.content_digest, catalog: initial.catalog,
-      attribution_context: initial.attribution_context, source_disclosure: disclosure, coverage, work, provider_attempts: 0 },
+      attribution_context: initial.attribution_context, source_disclosure: disclosure, coverage, work, execution },
     prepare: { operation: "prepare_query", query_handle: `query-${instance}`, query_semantics_id: queryId,
       query_semantics_status: { status: "admitted", query_semantics_id: queryId }, candidates: [descriptor], access,
-      truncated: false, coverage, work, provider_attempts: 0 },
+      truncated: false, coverage, work, execution: accessExecution },
     delivery: { ...delivery, index: { ...delivery.index!, snapshot_id: `sha256:${fieldContractSha256(instance)}` } } };
   const requests: [string, Invocation["request"]][] = [
     ["common-source", { operation: "prepare_source", source_id: initial.source_id, authorized_scopes: SCOPES, budget: COMMON_BUDGET }],
@@ -284,8 +294,8 @@ const stableChanges: [string, (report: NativeReport) => void][] = [
     report.common.delivery = { ...value, index: { ...value.index!, query_id: sourceSemanticLibraryQueryIdentity("Another query") } }; }],
   ["disclosure", report => { const value = report.common.delivery!, at = new Date(Date.parse(CLOCK) + 1_000).toISOString();
     report.common.delivery = { ...value, source_disclosures: Object.fromEntries(Object.entries(value.source_disclosures!).map(([id, row]) =>
-      [id, { ...row, evaluated_as_of: at }])), results: value.results!.map(row => ({ ...row,
-        source_disclosure: { ...row.source_disclosure!, evaluated_as_of: at } })) }; }],
+      [id, encodeSourceDisclosure({ ...sourceDisclosure(row), evaluated_as_of: at })])), results: value.results!.map(row => ({ ...row,
+        source_disclosure: encodeSourceDisclosure({ ...sourceDisclosure(row.source_disclosure!), evaluated_as_of: at }) })) }; }],
   ["coverage", report => { report.common.delivery = { ...report.common.delivery!, coverage: { ...coverage, discovery: "open" } }; }],
   ["logical work", report => { report.common.delivery = { ...report.common.delivery!, work: { ...work, logical_work: 2 } }; }],
   ["logical memory", report => { report.common.delivery = { ...report.common.delivery!, work: { ...work, logical_memory_bytes: 65 } }; }],
@@ -351,4 +361,19 @@ it("retains all four arms as unknown when their common captures genuinely diverg
   expect(result.slots.map(row => row.id)).toEqual(reports.map(report => report.slot.id));
   expect(result.comparison.map(row => [row.control, row.outcome, row.post_fork_native_delta_F_minus_control]))
     .toEqual([["A", "unknown", null], ["B", "unknown", null], ["M", "unknown", null]]);
+});
+
+it("rejects a historic access v1 prepare receipt on the public interpretation consumer", () => {
+  const report = withCommon(failedDelivery());
+  const prepare = report.common.prepare!;
+  const historic = { ...prepare.access!, contract: "source-semantic-access-v1" as const };
+  delete (historic as { phases?: unknown }).phases;
+  expect(SoulInterpretationResponseSchema.safeParse({ ...prepare, access: historic as never }).success).toBe(false);
+  const { phases: _phases, ...withoutPhases } = prepare.access!;
+  expect(SoulInterpretationResponseSchema.safeParse({ ...prepare, access: {
+    ...withoutPhases, ...sourceSemanticAccessPhases(prepare.access!)
+  } as never }).success).toBe(false);
+  const { execution: _execution, ...withoutExecution } = prepare;
+  expect(SoulInterpretationResponseSchema.safeParse(withoutExecution).success).toBe(false);
+  expect(SoulInterpretationResponseSchema.safeParse(prepare).success).toBe(true);
 });

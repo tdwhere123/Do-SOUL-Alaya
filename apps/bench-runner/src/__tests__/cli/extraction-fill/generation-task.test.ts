@@ -60,7 +60,18 @@ import { sourceSemanticInteractiveWireSha256 } from "../../../runs/extraction/fi
 import { inspectExtractionAuthority } from "../../../runs/extraction/authority/inspection.js";
 import { loadExtractionAuthority } from "../../../runs/extraction/fill/execution/receipt-bound-authority.js";
 import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-quote.js";
+import * as soul from "@do-soul/alaya-soul";
 import { parseSourceSemanticRequest } from "@do-soul/alaya-soul";
+import { openReadOnlyDatabase } from "@do-soul/alaya-storage";
+import { createExtractionSampleScope } from "../../../runs/extraction/authority/sample-scope.js";
+import { createExtractionAuthorityReceipt, writeExtractionAuthorityReceipt } from "../../../runs/extraction/authority/receipt.js";
+import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
+import { runExtractionFill } from "../../../runs/extraction/extraction-fill.js";
+import { inspectCachedSourceSemantic } from "../../../runs/extraction/cache/source-semantic-artifact.js";
+import { prepareSourceSemanticRequestWire } from "../../../runs/extraction/fill/source-semantic-interactive-request.js";
+import { prepareSourcePublicationAssociations } from "../../../runs/snapshot/source-records/prepare-associations.js";
+import { publishSourceSemanticSnapshot } from "../../../runs/snapshot/source-records/publish.js";
+import { tableCompletedResponse } from "../../longmemeval/extraction-fill/source-semantic-table-response.test-support.js";
 import { buildExtractionFillQuestion, registerExtractionFillHooks, setExtractionCredentialFixture } from "../../longmemeval/extraction-fill/fixture.js";
 
 const TASK = { contract: "source-semantic-generation-task-v1" as const,
@@ -68,7 +79,7 @@ const TASK = { contract: "source-semantic-generation-task-v1" as const,
   responsibility: { kind: "original_query_task" as const, other_meaning: "unassessed" as const } };
 let roots: { cacheRoot: string; dataDir: string; pinnedMetaRoot: string };
 const writeDataset = registerExtractionFillHooks(value => { roots = value; }, "longmemeval_s");
-afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); });
+afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function scenario() {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "step-3.5-flash-2603");
@@ -138,6 +149,104 @@ it("passes the same task through native authority and receipt-bound execution in
   expect(stderr.mock.calls.at(-1)?.[0]).not.toContain("receipt inspected without provider execution");
   expect(await runAuthorizeExtractionCommand(authorityArgs)).toBe(2);
 });
+
+async function exhaustivePreparation() {
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "step-3.5-flash-2603");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "step-3.5-2603-low-json-schema-v1");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", STEP_PLAN_QUOTE_BASIS.selected_provider_url);
+  await writeDataset([buildExtractionFillQuestion("exhaustive", "I completed alpha.", "I completed decoy.")]);
+  const generationTask = { ...TASK, responsibility: { kind: "all_supplied_meaning" as const } };
+  const openSemantics = { ...EXTRACTION_OPEN_SEMANTICS_GENERATION, generation_task: generationTask,
+    generation_view_contract: soul.SOURCE_SEMANTIC_GENERATION_VIEW_CONTRACT };
+  const options = { ...roots, variant: "longmemeval_s" as const, offset: 0, limit: 1,
+    sourcePacking: "complete-source" as const, openSemantics };
+  const inspection = await inspectExtractionAuthority({ ...options, action: "sample", revision: readCurrentExtractionAuthorityRevision() });
+  const preflight = await preflightSourceSemanticInteractive({ ...options, preflightKeys: inspection.missingKeys });
+  const receipt = createExtractionAuthorityReceipt({ action: "sample", inspection, observation: inspection.observation,
+    sampleScope: createExtractionSampleScope(inspection.missingKeys, inspection), sourcePreflight: preflight,
+    maxConcurrency: 1, outputTokenCap: { field: "max_tokens", value: preflight.max_output_tokens }, diskFloorBytes: 0,
+    priceEstimate: { inputUsdPerMillion: preflight.quote_basis.input_usd_equivalent_per_million,
+      outputUsdPerMillion: preflight.quote_basis.output_usd_equivalent_per_million,
+      maximumInputTokensPerAttempt: preflight.maximum_input_tokens_per_attempt } });
+  const authorityReceiptPath = join(roots.cacheRoot, "exhaustive-authority.json");
+  writeExtractionAuthorityReceipt(authorityReceiptPath, receipt);
+  return { options: { ...options, authorityReceiptPath, concurrency: 1 }, preflight, generationTask };
+}
+
+it("refuses old exhaustive view authority at receipt-bound execution even with unchanged host requests", async () => {
+  const nativeInput = soul.sourceSemanticGenerationInput, nativePresentation = soul.sourceSemanticGenerationPresentation;
+  const oldInput = (host: soul.SourceSemanticRequest) => {
+    const projected = JSON.parse(nativeInput(host));
+    projected.source_request.generation_task = host.source_request.generation_task;
+    return JSON.stringify(projected);
+  };
+  const inputSpy = vi.spyOn(soul, "sourceSemanticGenerationInput").mockImplementation(oldInput);
+  const presentationSpy = vi.spyOn(soul, "sourceSemanticGenerationPresentation").mockImplementation(json => {
+    const presentation = nativePresentation(json);
+    return presentation === undefined ? undefined : { ...presentation,
+      modelInputJson: oldInput(soul.parseSourceSemanticRequest(JSON.parse(json))) };
+  });
+  const fixture = await exhaustivePreparation();
+  await expect(loadExtractionAuthority(fixture.options, roots.cacheRoot)).resolves.toHaveProperty("receipt");
+  inputSpy.mockRestore(); presentationSpy.mockRestore();
+  const { authorityReceiptPath: _authority, ...preflightOptions } = fixture.options;
+  const current = await preflightSourceSemanticInteractive(preflightOptions);
+  expect(current.ready_requests.map(line => line.userPrompt)).toEqual(fixture.preflight.ready_requests.map(line => line.userPrompt));
+  expect(current.ready_requests.map(line => line.requestSha256)).toEqual(fixture.preflight.ready_requests.map(line => line.requestSha256));
+  expect(current.selected_keys).not.toEqual(fixture.preflight.selected_keys);
+  expect(current.planned_requests.map(line => line.request_digest)).not.toEqual(fixture.preflight.planned_requests.map(line => line.request_digest));
+  await expect(loadExtractionAuthority(fixture.options, roots.cacheRoot)).rejects.toThrow(/changed|differ|outside|mismatch|identity/u);
+});
+
+it("retains the complete exhaustive host task through serialized native receive, cache reopen and SQLite publication", async () => {
+  const fixture = await exhaustivePreparation();
+  setExtractionCredentialFixture();
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+    const body = JSON.parse(String(init?.body)), view = JSON.parse(body.messages[1].content);
+    expect(view.source_request.generation_task).toEqual({ contract: "source-semantic-generation-task-v1",
+      context: "complete_original_source", responsibility: { kind: "all_supplied_meaning" } });
+    const line = fixture.preflight.ready_requests.find(line =>
+      JSON.parse(line.userPrompt).source_request.original_source === view.source_request.original_source)!;
+    expect(line).toBeDefined();
+    expect(String(init?.body)).toBe(prepareSourceSemanticRequestWire({ ...fixture.preflight.config,
+      openSemantics: fixture.options.openSemantics }, line, fixture.preflight.max_output_tokens).body);
+    const host = parseSourceSemanticRequest(JSON.parse(line.userPrompt));
+    expect(host.source_request.generation_task).toEqual(fixture.generationTask);
+    expect(view.source_request.source_assertions).toEqual(host.source_request.source_assertions);
+    expect(view.source_request.attribution_context).toEqual(host.source_request.attribution_context);
+    expect(view.response_schema).toEqual(soul.sourceSemanticResponseJsonSchema(host));
+    const assertion = view.source_request.source_assertions.find((unit: { text: string }) => unit.text.includes("completed"));
+    const raw = tableCompletedResponse(assertion.assertion_id, assertion.text.includes("alpha") ? "alpha" : "decoy");
+    return Response.json({ choices: [{ message: { content: JSON.stringify(raw) }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 } });
+  });
+  vi.stubGlobal("fetch", fetch);
+  expect((await runExtractionFill(fixture.options)).newlyExtracted).toBe(fixture.preflight.selected_requests);
+  for (const line of fixture.preflight.ready_requests) {
+    const cached = inspectCachedSourceSemantic(roots.cacheRoot, line.key, fixture.preflight.config.model, fixture.preflight.config.requestProfile);
+    expect(cached.status).toBe("hit"); if (cached.status !== "hit") throw new Error("native exhaustive cache required");
+    expect(cached.admitted.draft?.generation_task).toEqual(fixture.generationTask);
+    expect(cached.admitted.interpretation?.generation_task).toEqual(fixture.generationTask);
+  }
+  const retainedPreparationPath = join(roots.cacheRoot, "exhaustive-preflight.json");
+  writeFileSync(retainedPreparationPath, JSON.stringify(fixture.preflight));
+  const population = { name: "longmemeval_s", dataDir: roots.dataDir, pinnedMetaRoot: roots.pinnedMetaRoot,
+    model: fixture.preflight.config.model, requestProfile: fixture.preflight.config.requestProfile,
+    openSemantics: fixture.options.openSemantics };
+  const associations = await prepareSourcePublicationAssociations(population,
+    [{ cacheRoot: roots.cacheRoot, retainedPreparationPath }], join(roots.cacheRoot, "associations.json"));
+  const snapshotPath = join(roots.cacheRoot, "published.sqlite");
+  const published = await publishSourceSemanticSnapshot({ snapshotPath, dataDirRoot: join(roots.cacheRoot, "publish-daemon"),
+    recordedAt: "2026-09-25T00:00:00.000Z", workspaceId: "exhaustive", runId: "exhaustive", producerCommit: "0".repeat(40),
+    populations: [{ ...population, cacheRoots: [roots.cacheRoot], publicationAssociations: associations.publicationAssociations }] });
+  expect(published.published_count).toBe(fixture.preflight.selected_requests);
+  const db = openReadOnlyDatabase(snapshotPath);
+  try {
+    const rows = db.connection.prepare("SELECT gist FROM evidence_capsules").all() as { gist: string }[];
+    expect(rows.filter(row => row.gist.includes(JSON.stringify(fixture.generationTask)))).toHaveLength(published.published_count);
+  } finally { db.close(); }
+  expect(fetch).toHaveBeenCalledTimes(fixture.preflight.selected_requests);
+}, 60_000);
 
 it("rejects malformed task files, absent open semantics, packet mode and incompatible packing", async () => {
   const { taskPath } = await scenario();

@@ -1,4 +1,4 @@
-import { MemoryDimension, MILLIGRADE_TOP, ScopeClass, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId, type BoundedActiveConstraintsResult, type InformationIndex } from "@do-soul/alaya-protocol";
+import { qualifySourceDisclosure, MemoryDimension, MILLIGRADE_TOP, ScopeClass, indexEntryCacheKey, indexEntryObjectKind, indexMemoryObjectId, type BoundedActiveConstraintsResult, type InformationIndex } from "@do-soul/alaya-protocol";
 import type { ConditionalFieldRecallResult } from "./recall-service-runner.js";
 import type { RecallSourceMetadata } from "./recall-service-results.js";
 import { previewTokenEstimate } from "./recall-service-helpers.js";
@@ -47,11 +47,11 @@ export function encodeRecallResult(
       relevance_score: score,
       content_preview: excerpts[offset] ?? PAYLOAD_OMITTED_PREVIEW,
       ...(entry.target.kind !== "source_evidence" ? {} : { source_disclosure: kind === "semantic_proof"
-        ? { ...(metadata?.source_disclosure ?? projectSourceDisclosure({
+        ? qualifySourceDisclosure(metadata?.source_disclosure ?? projectSourceDisclosure({
           material_kind: entry.target.root_kind === "source_record" ? "original_body"
             : entry.target.span?.retained_extent === "gist" ? "retained_gist" : "retained_excerpt",
           evaluated_as_of: sourceClock(encodedIndex)
-        })), proof_use: { kind: "conditional_support" as const, qualification: "not_world_claim" as const } }
+        }), "conditional_support")
         : metadata?.source_disclosure ?? projectSourceDisclosure({
           material_kind: entry.target.root_kind === "source_record" ? "original_body"
             : entry.target.span?.retained_extent === "gist" ? "retained_gist" : "retained_excerpt",

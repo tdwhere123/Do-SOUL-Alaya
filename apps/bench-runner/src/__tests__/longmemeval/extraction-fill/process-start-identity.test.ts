@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  nonCredentialChildEnv,
-  readProcessStartIdentity
-} from "../../../runs/extraction/fill/manifest/writer-lock.js";
+import { nonCredentialChildEnv } from
+  "../../../runs/extraction/fill/manifest/non-credential-child-env.js";
+import { readProcessStartIdentity } from
+  "../../../runs/extraction/fill/manifest/process-start-identity.js";
 import {
   interpretWindowsProcessStartOutput,
   windowsCreationDateToTicks,

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
-  SoulInterpretationRequestSchema, sourceReferenceResolver,
+  sourceSemanticExecutionPhases, SoulInterpretationRequestSchema, sourceReferenceResolver,
   UNKNOWN_UTTERANCE_ATTRIBUTION,
   type SourceReferenceCatalog, type SourceSemanticQuery
 } from "@do-soul/alaya-protocol";
@@ -112,13 +112,13 @@ it("runs prepare_source through the worker on MCP and the same handler", async (
     expect(direct.output).toMatchObject({
       operation: "prepare_source",
       source_id: "artifact-1",
-      provider_attempts: 0
+      execution: "native_reasoning_only"
     });
     expect("source_handle" in direct.output).toBe(true);
     expect((mcp.structuredContent as { output: unknown }).output).toMatchObject({
       operation: "prepare_source",
       source_id: "artifact-1",
-      provider_attempts: 0
+      execution: "native_reasoning_only"
     });
   } finally {
     await client.close();
@@ -313,7 +313,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     const prepared = await callInterpretation(handler, { toolName: "soul.interpretation", arguments: prepareArgs, context });
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) throw new Error("prepare_source must succeed");
-    expect(prepared.output.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(prepared.output.execution).query_preparation.external_api_attempts).toBe(0);
     if (prepared.output.operation !== "prepare_source" || prepared.output.source_handle === undefined ||
         prepared.output.catalog === undefined) {
       throw new Error("prepare_source must return a handle and catalog");
@@ -329,7 +329,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
     const proposed = await callInterpretation(handler, { toolName: "soul.interpretation", arguments: proposeArgs, context });
     expect(proposed.ok).toBe(true);
     if (!proposed.ok) throw new Error("propose must succeed");
-    expect(proposed.output.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(proposed.output.execution).query_preparation.external_api_attempts).toBe(0);
     if (proposed.output.operation !== "propose" || proposed.output.published === undefined) {
       throw new Error("propose must publish the source interpretation");
     }
@@ -362,7 +362,7 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       expect(preparedQuery.ok).toBe(true);
       if (!preparedQuery.ok) throw new Error("prepare_query must succeed");
       // This is the host-operation protocol field, not an independent network observation.
-      expect(preparedQuery.output.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(preparedQuery.output.execution).query_preparation.external_api_attempts).toBe(0);
       if (preparedQuery.output.operation !== "prepare_query" || preparedQuery.output.query_handle === undefined) {
         throw new Error("prepare_query must return a handle");
       }
@@ -408,10 +408,10 @@ it("runs the offline native chain through MCP/handler after SQLite reopen", asyn
       );
       expect(direct.ok).toBe(true);
       if (!direct.ok) throw new Error("reason must succeed");
-      expect(direct.output.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(direct.output.execution).query_preparation.external_api_attempts).toBe(0);
       const mcpOutput = (mcp.structuredContent as { output: typeof direct.output }).output;
       expect(mcpOutput.operation).toBe(direct.output.operation);
-      expect(mcpOutput.provider_attempts).toBe(0);
+      expect(sourceSemanticExecutionPhases(mcpOutput.execution).query_preparation.external_api_attempts).toBe(0);
       if (direct.output.operation !== "reason" || mcpOutput.operation !== "reason") {
         throw new Error("reason must return a result");
       }
@@ -725,7 +725,7 @@ it("publishes a legal ablated source interpretation, rebinds semantic correspond
     expect(remaining.output.result.outcome.status).toBe("interpreted");
     expect(remaining.output.result.consumed_leaves.some((row) => row.leaf_kind === "source_interpretation_binding" && row.slot_id === "agent")).toBe(true);
     expect(remaining.output.result.source_interpretation_id).toBe(secondInterpretationId);
-    expect(remaining.output.provider_attempts).toBe(0);
+    expect(sourceSemanticExecutionPhases(remaining.output.execution).query_preparation.external_api_attempts).toBe(0);
   } finally {
     try { publishDb.close(); } catch { /* closed */ }
     try { await client.close(); } catch { /* closed */ }

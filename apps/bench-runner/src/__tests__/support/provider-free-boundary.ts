@@ -29,7 +29,8 @@ export function installProviderFreeBoundary() {
       Object.defineProperty(owner, key, { ...descriptor, value: new Proxy(descriptor.value, {
         apply(target, receiver, args) {
           const filename = String(args[0]);
-          const nativeFixture = /[/\\]alaya-bench-config-[a-f0-9-]+[/\\]\.env$/u.test(filename);
+          // Native fixture configuration uses an atomic .env.<uuid>.tmp sibling before rename.
+          const nativeFixture = /[/\\]alaya-bench-config-[a-f0-9-]+[/\\]\.env(?:\.[a-f0-9-]+\.tmp)?$/u.test(filename);
           if (!nativeFixture && /(?:^|[/\\])(?:[^/\\]+\.env|\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(filename)) {
             deny("credential file");
           }

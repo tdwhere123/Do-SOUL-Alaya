@@ -497,6 +497,7 @@ it("keeps a bounded open window and withholds a negative answer from an unvisite
   vi.stubGlobal("fetch", guardedFetch);
   const row = question("budgeted", 12, "budgeted-session-11");
   row.haystack_sessions[0]![0]!.content = "I completed alpha. ".repeat(5000);
+  row.haystack_sessions[11]![0]!.content = "Office remainder: the side door stays locked.";
   await writeDataset([row]);
   const prepared = await preparedQuestion("budgeted", 0, 1, undefined,
     { ...BUDGET, work_units: 50_000, memory_bytes: 2_000_000,
@@ -506,10 +507,22 @@ it("keeps a bounded open window and withholds a negative answer from an unvisite
   const window = await prepareLazyQualificationWindow(bound.config, lazyRoot);
   expect(window.window.length).toBeLessThanOrEqual(10);
   expect(window.window_open).toBe(true);
+  expect(window.window.some(row => row.session_id === "budgeted-session-11")).toBe(false);
   const final = await sealLazyQualificationFinal(lazyRoot);
-  const report = JSON.parse(readFileSync(final.publication_report_path, "utf8"));
+  const report = JSON.parse(readFileSync(final.publication_report_path, "utf8")) as {
+    census_count: number; admitted_count: number;
+    sources: { session_id: string; record_id?: string }[];
+  };
   expect(report).toMatchObject({ census_count: 12, admitted_count: 12 });
-  await replayLazyQualifiedFirstExposure(lazyRoot);
+  const goldRoot = report.sources.find(source => source.session_id === "budgeted-session-11")?.record_id;
+  expect(goldRoot).toEqual(expect.any(String));
+  const first = await replayLazyQualifiedFirstExposure(lazyRoot);
+  const delivered = first.result.rows.flatMap(row =>
+    row.status === "replayed" && row.response?.operation === "recall"
+      ? (row.response.index?.entries ?? []).flatMap(entry =>
+        entry.target.kind === "source_evidence" ? [entry.target.root_id] : [])
+      : []);
+  expect(delivered).not.toContain(goldRoot);
   const measured = await measureLongMemEvalLazyFirstExposure({ ...prepared.input, lazyRoot,
     evaluatorRoot: join(dirname(cacheRoot), "evaluator-budgeted") });
   expect(measured.result.primary).toMatchObject({ eligible: 1, hits: 0, misses: 0, unknown: 1 });

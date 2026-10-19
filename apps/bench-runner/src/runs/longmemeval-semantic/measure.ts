@@ -2,7 +2,10 @@ import { AlayaError } from "@do-soul/alaya-protocol";
 import { join } from "node:path";
 import { currentBenchScope, refuseBenchWorkAfterCancel, trackBenchOperation } from "../../harness/daemon-task.js";
 import { admitEvaluatorOutputRoot } from "../measurement/evaluator-output.js";
-import { measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
+import { admitSemanticChainReplay, measureSemanticChain, semanticChainReplayInputPaths } from "../semantic-chain/replay.js";
+import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
+import { joinLongMemEvalAnswerSpans } from "./answer-spans.js";
+import { measureLongMemEvalAcquisition, summarizeLongMemEvalAcquisition, type LongMemEvalAcquisition } from "./acquisition-measurement.js";
 import { retainedSemanticChainCacheInputPaths } from "../semantic-chain/inputs.js";
 import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
 import { sourceCacheInputPaths } from "../extraction/cache/source-cache-inputs.js";
@@ -16,13 +19,14 @@ import { LongMemEvalExperimentReplaySchema, LongMemEvalSourceOnlyReplaySchema, l
   type QuestionPublicationSchema } from "./execute.js";
 import type { z } from "zod";
 import { assertLongMemEvalSemanticRows, loadFrozenLongMemEvalDataset, readLongMemEvalSemanticFreeze,
-  longMemEvalFreezePath } from "./contract.js";
+  longMemEvalFreezePath, type LongMemEvalSemanticFreeze } from "./contract.js";
 
 type LongMemEvalOutcome = Readonly<{
   index: number; question_id: string; cohort: "answerable" | "abstention"; selected: boolean;
   outcome: "hit" | "miss" | "unknown" | "uncalibrated" | "not_selected_development";
   measurement_path: string | null; reason: string | null; mechanism: "not_exercised" | "proof_exercised";
   attribution: { layer: string; native: unknown };
+  acquisition: LongMemEvalAcquisition;
 }>;
 
 /** Original answer-session membership joins only admitted source records in the verified publication. */
@@ -71,6 +75,71 @@ export function measureLongMemEvalSemanticRun(root: string, replayPath: string, 
   return scope === undefined ? measure() : trackBenchOperation(scope, measure);
 }
 
+async function measureSelectedLongMemEvalQuestion(input: Readonly<{
+  root: string; outputRoot: string; frozen: LongMemEvalSemanticFreeze;
+  selected: LongMemEvalSemanticFreeze["selected"][number]; question: LongMemEvalQuestion;
+  replayed: z.infer<typeof LongMemEvalExperimentReplaySchema>["rows"][number];
+}>): Promise<LongMemEvalOutcome> {
+  const { root, outputRoot, frozen, selected, question, replayed } = input;
+  const { config } = frozen;
+  let outcome: "hit" | "miss" | "unknown" = "unknown";
+  let measurementPath: string | null = null;
+  let mechanism: LongMemEvalOutcome["mechanism"] = "not_exercised";
+  let reason: string | null = replayed.status === "unavailable" ? replayed.reason : null;
+  let attribution: LongMemEvalOutcome["attribution"] = { layer: "preparation_unavailable", native: null };
+  let acquisition = measureLongMemEvalAcquisition({ cohort: selected.cohort,
+    unavailableReason: reason ?? "preparation_unavailable" });
+  if (replayed.status === "replayed") {
+    try {
+      const { directory, publicationPath } = longMemEvalQuestionInputPaths(root, selected.index);
+      if (replayed.publication_path !== publicationPath) throw new AlayaError("CONFLICT", "question publication path changed");
+      const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(replayed.publication_path));
+      if (chainIdentity(publication) !== replayed.publication_identity) throw new AlayaError("CONFLICT", "replayed question publication changed");
+      verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, replayed.chain_root);
+      const gold = joinLongMemEvalGold(question, publication, selected.source_manifest.length);
+      if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(readChainArtifact(replayed.replay_path));
+      // Keep the existing snapshot/request/reservation owner authoritative for the exact emitted bytes.
+      const admittedReplay = admitSemanticChainReplay(replayed.chain_root, replayed.replay_path);
+      const measured = measureSemanticChain(replayed.chain_root, replayed.replay_path,
+        [{ query_key: selected.query_key, source_units: gold.sourceUnits }], outputRoot);
+      measurementPath = measured.path;
+      const measuredRow = measured.result.rows[0];
+      if (frozen.contract === "longmemeval-native-semantic-v3" && measuredRow?.status === "replayed"
+        && chainIdentity(measuredRow.diagnostics?.order ?? null) !== chainIdentity(frozen.native_route.order)) {
+        throw new AlayaError("CONFLICT", "native response order differs from experiment freeze");
+      }
+      attribution = { layer: measuredRow?.diagnostics?.query_semantics_status?.status === "unavailable" ? "query_unavailable"
+        : measuredRow?.status === "blocked" ? "query_unavailable"
+        : measuredRow?.status === "native_unavailable" ? "native_unavailable"
+          : frozen.contract === "longmemeval-native-semantic-v3" ? "native_semantic_recall" : "source_only_canonical_order",
+        native: frozen.contract === "longmemeval-semantic-development-v3" ? measuredRow?.diagnostics ?? null
+          : { diagnostics: measuredRow?.diagnostics ?? null, mechanism: measuredRow?.mechanism ?? null,
+          evaluator_usage: measuredRow?.evaluator_usage ?? null, publication: {
+            published_count: publication.published_count, sources: publication.sources } } };
+      const census = await censusCompleteSourceRecords({ population: "longmemeval_s", dataDir: config.data_dir,
+        pinnedMetaRoot: config.pinned_meta_root, questionWindow: { offset: selected.index, limit: 1 } });
+      refuseBenchWorkAfterCancel();
+      if (census.dataset_sha256 !== config.dataset_sha256) throw new AlayaError("CONFLICT", "answer-span census dataset changed");
+      acquisition = measureLongMemEvalAcquisition({ cohort: selected.cohort, sourceGold: gold,
+        answerGold: joinLongMemEvalAnswerSpans(question, publication, census.records), native: measuredRow,
+        replay: admittedReplay.replay.rows.find(row => row.query_key === selected.query_key) });
+      mechanism = measuredRow?.mechanism.status === "proof_exercised" ? "proof_exercised" : "not_exercised";
+      // Source-only rejects proof slots; keep its source score under the shared native residuals.
+      outcome = longMemEvalMetricOutcome(measuredRow?.source_bearing_union?.any_at_5, gold.complete);
+      if (outcome === "unknown") reason = gold.complete ? measuredRow?.reason ?? "native_measurement_unavailable" : "source_or_gold_mapping_incomplete";
+      if (!gold.complete) attribution.layer = "source_or_gold_mapping_incomplete";
+    } catch (error) {
+      refuseBenchWorkAfterCancel();
+      reason = error instanceof Error ? error.message : String(error);
+      attribution = { layer: "measurement_unavailable", native: null };
+      acquisition = measureLongMemEvalAcquisition({ cohort: selected.cohort, unavailableReason: reason });
+    }
+  }
+  return { index: selected.index, question_id: selected.question_id, cohort: selected.cohort, selected: true,
+    outcome: selected.cohort === "abstention" ? "uncalibrated" : outcome,
+    measurement_path: measurementPath, reason, attribution, mechanism, acquisition };
+}
+
 async function measureBoundLongMemEvalSemanticRun(root: string, replayPath: string, evaluatorRoot: string) {
   refuseBenchWorkAfterCancel();
   const frozen = readLongMemEvalSemanticFreeze(root);
@@ -107,57 +176,13 @@ async function measureBoundLongMemEvalSemanticRun(root: string, replayPath: stri
     if (question.question_id !== selected.question_id || classifyLongMemEvalDatasetCohort(question) !== selected.cohort) {
       throw new AlayaError("CONFLICT", "frozen question or cohort changed");
     }
-    const replayed = replay.rows.find((row) => row.question_id === selected.question_id)!;
-    let outcome: "hit" | "miss" | "unknown" = "unknown";
-    let measurementPath: string | null = null;
-    let mechanism: LongMemEvalOutcome["mechanism"] = "not_exercised";
-    let reason: string | null = replayed.status === "unavailable" ? replayed.reason : null;
-    let attribution: LongMemEvalOutcome["attribution"] = { layer: "preparation_unavailable", native: null };
-    if (replayed.status === "replayed") {
-      try {
-        const { directory, publicationPath } = longMemEvalQuestionInputPaths(root, selected.index);
-        if (replayed.publication_path !== publicationPath) throw new AlayaError("CONFLICT", "question publication path changed");
-        const publication = verifyLongMemEvalQuestionPublication(frozen, selected, directory, readChainArtifact(replayed.publication_path));
-        if (chainIdentity(publication) !== replayed.publication_identity) throw new AlayaError("CONFLICT", "replayed question publication changed");
-        verifyLongMemEvalQuestionChain(frozen, selected, directory, publication, replayed.chain_root);
-        const gold = joinLongMemEvalGold(question, publication, selected.source_manifest.length);
-        if (frozen.contract === "longmemeval-semantic-development-v3") LongMemEvalSourceOnlyReplaySchema.parse(readChainArtifact(replayed.replay_path));
-        const measured = measureSemanticChain(replayed.chain_root, replayed.replay_path,
-          [{ query_key: selected.query_key, source_units: gold.sourceUnits }], outputRoot);
-        measurementPath = measured.path;
-        const measuredRow = measured.result.rows[0];
-        if (frozen.contract === "longmemeval-native-semantic-v3" && measuredRow?.status === "replayed"
-          && chainIdentity(measuredRow.diagnostics?.order ?? null) !== chainIdentity(frozen.native_route.order)) {
-          throw new AlayaError("CONFLICT", "native response order differs from experiment freeze");
-        }
-        attribution = { layer: measuredRow?.diagnostics?.query_semantics_status?.status === "unavailable" ? "query_unavailable"
-          : measuredRow?.status === "blocked" ? "query_unavailable"
-          : measuredRow?.status === "native_unavailable" ? "native_unavailable"
-            : frozen.contract === "longmemeval-native-semantic-v3" ? "native_semantic_recall" : "source_only_canonical_order",
-          native: frozen.contract === "longmemeval-semantic-development-v3" ? measuredRow?.diagnostics ?? null
-            : { diagnostics: measuredRow?.diagnostics ?? null, mechanism: measuredRow?.mechanism ?? null,
-            evaluator_usage: measuredRow?.evaluator_usage ?? null, publication: {
-              published_count: publication.published_count, sources: publication.sources } } };
-        mechanism = measuredRow?.mechanism.status === "proof_exercised" ? "proof_exercised" : "not_exercised";
-        // Source-only replay rejects proof slots above, so the shared union admission
-        // preserves its source metric while retaining the same native residuals.
-        const metric = measuredRow?.source_bearing_union?.any_at_5;
-        const complete = gold.complete;
-        outcome = longMemEvalMetricOutcome(metric, complete);
-        if (outcome === "unknown") reason = complete ? measuredRow?.reason ?? "native_measurement_unavailable" : "source_or_gold_mapping_incomplete";
-        if (!complete) attribution.layer = "source_or_gold_mapping_incomplete";
-      } catch (error) {
-        reason = error instanceof Error ? error.message : String(error);
-        attribution = { layer: "measurement_unavailable", native: null };
-      }
-    }
-    selectedRows.push({ index: selected.index, question_id: selected.question_id, cohort: selected.cohort, selected: true,
-      outcome: selected.cohort === "abstention" ? "uncalibrated" as const : outcome,
-      measurement_path: measurementPath, reason, attribution, mechanism });
+    selectedRows.push(await measureSelectedLongMemEvalQuestion({ root, outputRoot, frozen, selected, question,
+      replayed: replay.rows.find(row => row.question_id === selected.question_id)! }));
   }
   const rows = frozen.inventory.map((entry) => ({ ...(selectedRows.find((row) => row.question_id === entry.question_id)
     ?? { ...entry, selected: false, outcome: "not_selected_development" as const,
-      measurement_path: null, reason: null, attribution: { layer: "not_selected", native: null }, mechanism: "not_exercised" as const }),
+      measurement_path: null, reason: null, attribution: { layer: "not_selected", native: null }, mechanism: "not_exercised" as const,
+      acquisition: null }),
     prior_development_exposure: frozen.config.previously_exposed_question_ids?.includes(entry.question_id) ?? false,
     abstention_calibration: entry.cohort === "abstention" ? "uncalibrated" : "not_applicable" }));
   const primary = summarizeLongMemEvalOutcomes(selectedRows);
@@ -173,6 +198,11 @@ async function measureBoundLongMemEvalSemanticRun(root: string, replayPath: stri
     replay_identity: chainIdentity(replay), dataset_sha256: frozen.config.dataset_sha256,
     exposure: frozen.exposure, metric: frozen.metric, order_policy: frozen.order_policy,
     mechanism: frozen.mechanism, provider_calls: 0,
+    route_scope: { arm: frozen.contract === "longmemeval-native-semantic-v3" ? "native_semantic" : "source_only_canonical",
+      access_policy: frozen.contract === "longmemeval-native-semantic-v3" ? frozen.native_route.access_policy : "canonical-v1",
+      embedding_configuration: { mode: "disabled", owner: "semantic-chain/contract.ts:runBoundSemanticChainDaemon" },
+      normal_production_capability_baseline: false },
+    acquisition: summarizeLongMemEvalAcquisition(selectedRows.map(row => row.acquisition)),
     inventory: { questions: rows.length, answerable: totalEligible, abstention: rows.length - totalEligible },
     primary: { ...primary,
       strict_over_90_required_hits: primary.eligible === 0 ? null : Math.floor(0.9 * primary.eligible) + 1, target_decision: decision },

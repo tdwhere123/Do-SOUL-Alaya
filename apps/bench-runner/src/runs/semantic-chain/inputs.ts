@@ -12,10 +12,17 @@ import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { ProviderRawAttemptIdentityError } from "../extraction/fill/provider-raw-attempt.js";
 import { ExtractionAttemptLimitError } from "../extraction/authority/attempt-ledger.js";
 import { join } from "node:path";
+import { assertCorrespondenceModelViewSelection, correspondenceModelViewInputPaths }
+  from "../semantic-proposal/correspondence-model-view.js";
 
 /** Retained plans expose readable cache inputs without admitting the plan or its execution state. */
 export function semanticChainCacheInputPaths(value: unknown): readonly string[] {
-  const paths: string[] = [];
+  const paths: string[] = [...correspondenceModelViewInputPaths({
+    selected_model_view: retainedArtifactField(value, "config", "correspondence_model_view") })];
+  for (const key of ["cache_root", "preparation_path"] as const) {
+    const path = retainedArtifactPathField(value, "config", "source_index", key);
+    if (path !== undefined) paths.push(path);
+  }
   const tokens = retainedArtifactField(value, "config", "max_output_tokens");
   const generationCap = retainedArtifactField(value, "config", "correspondence_generation", "max_output_tokens");
   const correspondenceTokens = typeof generationCap === "number" ? generationCap : tokens;
@@ -100,6 +107,9 @@ export function semanticChainQueryAvailability(row: ReturnType<typeof readSemant
 /** All consumers of a prepared plan bind the same current query-semantics cache state and denominator. */
 export function verifySemanticChainQueries(plan: SemanticChainPlan): void {
   const config = plan.config;
+  assertCorrespondenceModelViewSelection(plan.correspondence_workset?.items ?? [], config.correspondence_model_view, config);
+  if (config.correspondence_model_view !== undefined && plan.correspondence_workset !== null) materializeSemanticProposalLines(plan.correspondence_workset,
+    config.correspondence_generation?.max_output_tokens ?? config.max_output_tokens);
   const queries = readSemanticChainProposalResults(config.query_workset, config.query_cache_root, config.max_output_tokens);
   const expected = queries.map((row) => row.line.key).sort();
   const recorded = plan.queries.map((row) => row.query_key).sort();

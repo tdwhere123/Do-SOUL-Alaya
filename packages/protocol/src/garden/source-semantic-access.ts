@@ -2,6 +2,19 @@ import { z } from "zod";
 import { BoundedIdSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 
+import { SourceSemanticAccessPhasesSchema } from "./source-semantic-phase-wire.js";
+export { SourceSemanticQueryPreparationSchema, SourceSemanticAcquisitionSchema, SourceSemanticAcquisitionPhaseSchema,
+  sourceSemanticAcquisitionNotRun, unavailableSourceQueryPreparation } from "./source-semantic-phase-semantics.js";
+export type { SourceSemanticQueryPreparation, SourceSemanticAcquisitionPhase } from "./source-semantic-phase-semantics.js";
+export { SourceSemanticExecutionSchema } from "./source-semantic-phase-wire.js";
+export type { SourceSemanticExecution } from "./source-semantic-phase-wire.js";
+export { sourceSemanticExecution, sourceSemanticExecutionPhases, isNativeReasoningOnlyExecution,
+  sourceSemanticAccessPhases, sourceSemanticExecutionExternalAttempts,
+  captureSourceSemanticQueryPreparation, captureSourceSemanticAcquisition,
+  packSourceSemanticQueryPreparation, packSourceSemanticAcquisition,
+  sourceSemanticPreparationReason, sourceSemanticAcquisitionResources } from "./source-semantic-phase-codec.js";
+export type { SourceSemanticCompactPreparation, SourceSemanticCompactAcquisition, SourceSemanticAccessPhases } from "./source-semantic-phase-wire.js";
+
 export const SourceSemanticAccessPolicySchema = z.enum(["query-conditioned-v1", "canonical-v1"]);
 /** Task-local navigation text; it cannot supply query semantics or durable source meaning. */
 export const SourceSemanticAccessHintSchema = z.string().min(1).max(1024)
@@ -39,7 +52,12 @@ export const SourceSemanticAccessSignalSchema = z.object({
 
 /** Access scores are local lexical observations, never assertion or proof grades. Array order is the frozen access order. */
 export const SourceSemanticAccessReceiptSchema = z.object({
-  contract: z.literal("source-semantic-access-v1"),
+  // Invariant §25: v2 required phase/provenance fields are a protocol major. Historic v1 is rejected,
+  // never upgraded with missing-field defaults. Retained readers may remove that rejection at archive retirement.
+  contract: z.literal("source-semantic-access-v2", {
+    error: "Historic Source access v1 is unsupported by live/retained v2 execution; explicitly recreate the preparation"
+  }),
+  phases: SourceSemanticAccessPhasesSchema,
   policy: SourceSemanticAccessPolicySchema,
   input_id: Sha256DigestSchema,
   pool_id: Sha256DigestSchema,

@@ -19,7 +19,7 @@ import {
 import type { ExtractionCacheWriteLease } from
   "../../fill/manifest/fill-root-guard.js";
 import { readProcessStartIdentity } from
-  "../../fill/manifest/writer-lock.js";
+  "../../fill/manifest/process-start-identity.js";
 import {
   artifactFilename,
   artifactPrefix,

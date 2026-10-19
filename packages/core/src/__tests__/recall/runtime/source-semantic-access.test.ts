@@ -13,13 +13,15 @@ it("gives omitted optional access inputs the same identity as explicitly undefin
   expect(sourceSemanticAccessInputIdentity(hinted)).not.toBe(sourceSemanticAccessInputIdentity({ ...hinted, access_hint: "harbor" }));
 });
 
-it("uses a metered task hint only for navigation while keeping original-query source scores and ordering", () => {
+it("navigates original text before a metered hint while keeping original-query source scores and ordering", () => {
   const budget = { work_units: 100_000, memory_bytes: 1_000_000 };
   const meter = new SourceSemanticResourceLedger(budget);
   const original = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter);
   const hinted = createSourceSemanticAccessPolicy("orchid", undefined, "query-conditioned-v1", meter, "Harbor irrigation");
   const navigationMeter = new SourceSemanticResourceLedger(budget);
-  expect(hinted.navigationQuery(navigationMeter)).toBe("Harbor irrigation");
+  expect(hinted.navigationQuery(navigationMeter)).toBe("orchid");
+  expect(hinted.navigationQuery(navigationMeter, "hint")).toBe("Harbor irrigation");
+  expect(original.navigationQuery(navigationMeter, "hint")).toBeNull();
   expect(navigationMeter.spentWork).toBeGreaterThan(0);
   expect(navigationMeter.spentBytes).toBeGreaterThan(0);
   expect(() => hinted.navigationQuery(new SourceSemanticResourceLedger({ work_units: 0, memory_bytes: 1000 })))

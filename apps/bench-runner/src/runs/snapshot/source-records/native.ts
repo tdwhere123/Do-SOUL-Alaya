@@ -13,6 +13,7 @@ import { snapshotPublishLockPath, withSnapshotPublishLock } from "../freeze/publ
 import { atomicWriteJson, BENCH_DAEMON_DB_FILENAME } from "../materialize.js";
 import { canonicalPath, canonicalPathsOverlap } from "../../fs/opened-contained-path.js";
 import { boundedArtifactEntryExists, readBoundedStableRegularFile } from "../../extraction/cache-audit/bounded-artifact-reader.js";
+import { inspectSourceRecordsArtifact, type SourceRecordsMessage } from "./contract.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 // This is a source-population capacity; the connected qualification window has its own cap of ten.
@@ -239,6 +240,24 @@ export function readVerifiedNativeSourceSnapshot(snapshotPathInput: string) {
   }
   if (manifest.contract === "native-source-records-snapshot-v2") retainedSidecars(snapshotPath);
   return { manifest, records: verified };
+}
+
+/** Qualified persona consumers need real DB membership, not a self-hashed predecessor sidecar.
+ * Reuse the native inventory's current-record, identity and original-body validation. */
+export function readVerifiedRetainedSourceRecordsArtifact(snapshotPath: string, workspaceId: string) {
+  const messages: SourceRecordsMessage[] = [];
+  const artifact = inspectSourceRecordsArtifact(snapshotPath, message => {
+    if (messages.length >= NATIVE_SOURCE_POPULATION_MAX) throw new AlayaError("CONFLICT", "retained source population exceeds its bound");
+    messages.push(message);
+  });
+  const inventory = readNativeInventory(snapshotPath, workspaceId, NATIVE_SOURCE_POPULATION_MAX);
+  const members = new Map(inventory.map(row => [row.record.identity, row.record]));
+  if (members.size !== messages.length || new Set(messages.map(row => row.record.identity)).size !== messages.length ||
+      messages.some(row => !members.has(row.record.identity) || canonicalJson(members.get(row.record.identity)) !== canonicalJson(row.record)) ||
+      hashRegularFileNoFollow(snapshotPath) !== artifact.manifest.db_sha256) {
+    throw new AlayaError("CONFLICT", "retained source sidecar differs from its actual DB membership");
+  }
+  return { ...artifact, messages };
 }
 
 /** One bounded inventory owns membership, currentness, original bytes and record validation. */

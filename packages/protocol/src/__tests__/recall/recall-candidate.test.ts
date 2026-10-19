@@ -173,9 +173,8 @@ describe("Recall candidate protocol schema", () => {
     const source = RecallCandidateSchema.parse({
       object_kind: "source_evidence",
       target,
-      source_disclosure: { material_kind: "original_body", source_binding: "checked_record",
-        evaluated_as_of: "2026-09-25T00:00:00Z", validity: { kind: "unknown", reason: "not_recorded" },
-        temporal_state: "unknown", proof_use: { kind: "source_only", qualification: "not_current_proof" } },
+      source_disclosure: [1, "original_body", "checked_record", null, "2026-09-25T00:00:00Z", null,
+        { kind: "unknown", reason: "not_recorded" }, "unknown", { kind: "source_only", qualification: "not_current_proof" }],
       activation_score: 0.5,
       relevance_score: 0.5,
       content_preview: "quoted excerpt",

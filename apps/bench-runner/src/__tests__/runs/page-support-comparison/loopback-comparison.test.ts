@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { canonicalJson, type SourceDisclosure } from "@do-soul/alaya-protocol";
+import { encodeSourceDisclosure, sourceDisclosure, canonicalJson, type SourceDisclosure, type SourceDisclosureSemantic } from "@do-soul/alaya-protocol";
 import {
   inspectProviderChatCompletionResponse,
   MAX_RETAINED_PROVIDER_HTTP_RESPONSE_BYTES
@@ -110,10 +110,10 @@ it("captures native first-page originals anonymously and keeps query_as_of unkno
   expect(line.userPrompt).not.toContain("evaluator_gold_private_label");
   expect(line.userPrompt).not.toContain("parent-only-map-6cb6f249");
   expect(line.userPrompt).not.toMatch(/qid|gold|proposed|default|treatment|selection_reason/u);
-  expect(prompt.arm_a[0]?.source_disclosure.proof_use).toEqual({
+  expect(sourceDisclosure(prompt.arm_a[0]!.source_disclosure).proof_use).toEqual({
     kind: "source_only", qualification: "not_current_proof"
   });
-  expect(prompt.arm_a[0]?.source_disclosure.evaluated_as_of).toBe("2024-06-01T00:00:00.000Z");
+  expect(sourceDisclosure(prompt.arm_a[0]!.source_disclosure).evaluated_as_of).toBe("2024-06-01T00:00:00.000Z");
   expect(PAGE_SUPPORT_COMPARISON_SYSTEM_PROMPT).toMatch(/evaluated_as_of is a runtime evaluation/u);
   expect(PAGE_SUPPORT_COMPARISON_SYSTEM_PROMPT).toMatch(/future intention/u);
   expect(PAGE_SUPPORT_COMPARISON_SYSTEM_PROMPT).not.toMatch(/Lee left|watch list/u);
@@ -747,7 +747,7 @@ function workset(providerUrl: string, questions: readonly string[] = [QUESTIONS[
   });
 }
 
-function original(text: string, source_time: SourceDisclosure["source_time"], content_start = 0) {
+function original(text: string, source_time: SourceDisclosureSemantic["source_time"], content_start = 0) {
   const bytes = Buffer.byteLength(text, "utf8");
   return {
     text,
@@ -763,8 +763,8 @@ function original(text: string, source_time: SourceDisclosure["source_time"], co
   };
 }
 
-function disclosure(source_time: SourceDisclosure["source_time"]): SourceDisclosure {
-  return {
+function disclosure(source_time: SourceDisclosureSemantic["source_time"]): SourceDisclosure {
+  return encodeSourceDisclosure({
     material_kind: "original_body",
     source_binding: "checked_record",
     evaluated_as_of: "2024-06-01T00:00:00.000Z",
@@ -772,7 +772,7 @@ function disclosure(source_time: SourceDisclosure["source_time"]): SourceDisclos
     validity: { kind: "unknown", reason: "not_recorded" },
     temporal_state: "unknown",
     proof_use: { kind: "source_only", qualification: "not_current_proof" }
-  };
+  });
 }
 
 function sha(text: string): string {

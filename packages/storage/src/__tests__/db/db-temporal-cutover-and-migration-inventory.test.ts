@@ -135,6 +135,14 @@ describe("SQLite migration inventory guardrail", () => {
     expect(unallowlistedGaps).toEqual([]);
   });
 
+  it("pins migration 022 as the source-index trigram rebuild", () => {
+    const files = readMigrationInventory().files.filter((file) => file.version === 22);
+    expect(files.map((file) => file.name)).toEqual(["022-source-index-trigram.sql"]);
+    const sql = stripSqlComments(files[0]!.sql);
+    expect(sql).toContain("source_index_fts_trigram");
+    expect(sql).toContain("VALUES('rebuild')");
+  });
+
   it("keeps comment-only migrations rare and explicitly marked", () => {
     const commentOnlyFiles = readMigrationInventory().files
       .filter((file) => stripSqlComments(file.sql).trim().length === 0)

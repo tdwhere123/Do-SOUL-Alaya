@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { AlayaError, canonicalJson, SourceRecordIdentitySchema,
-  SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema } from "@do-soul/alaya-protocol";
+  SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts, SourceSemanticAccessReceiptSchema, SourceSemanticWorkerWorkSchema,
+  type SourceSemanticExecution } from "@do-soul/alaya-protocol";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { censusCompleteSourceRecords } from "../snapshot/source-records/census.js";
 import { prepareSourcePublicationAssociations } from "../snapshot/source-records/prepare-associations.js";
@@ -37,7 +38,8 @@ const WindowRow = SourceTuple.extend({
   attempt_history_complete: z.boolean()
 }).strict();
 const WindowSchema = z.object({
-  contract: z.literal("source-semantic-lazy-qualification-window-v2"), provider_calls: z.literal(0),
+  contract: z.literal("source-semantic-lazy-qualification-window-v3"),
+  provider_calls: z.number().int().nonnegative().nullable(), query_executions: z.array(SourceSemanticExecutionSchema),
   config: LazyQualificationConfigSchema, query_key: Digest, query_state_identity: Digest,
   starting_snapshot_sha256: Digest, starting_publication_identity: Digest,
   source_inventory_identity: Digest, dataset_sha256: Digest,
@@ -48,10 +50,11 @@ const WindowSchema = z.object({
 }).strict();
 export type LazyQualificationWindow = z.infer<typeof WindowSchema>;
 const FinalSchema = z.object({
-  contract: z.literal("source-semantic-lazy-qualification-final-v2"), window_identity: Digest,
+  contract: z.literal("source-semantic-lazy-qualification-final-v3"), window_identity: Digest,
   final_snapshot_path: z.string(), final_snapshot_sha256: Digest, publication_report_path: z.string(),
   publication_report_identity: Digest,
-  final_chain_root: z.string(), final_chain_identity: Digest, provider_calls: z.literal(0),
+  final_chain_root: z.string(), final_chain_identity: Digest,
+  provider_calls: z.number().int().nonnegative().nullable(), query_executions: z.array(SourceSemanticExecutionSchema),
   selected_source_count: z.number().int().nonnegative(), selected_new_associations: z.number().int().nonnegative(),
   warm_outside_associations: z.number().int().nonnegative(),
   source_producer: z.object({ new_authorized_attempts: z.number().int().nonnegative().nullable(),
@@ -66,9 +69,22 @@ const FinalSchema = z.object({
 }).strict();
 const ExposureReservationSchema = z.object({ final_identity: Digest, replay_identity: Digest,
   replay_path: z.string() }).strict();
-const ExposureSchema = ExposureReservationSchema.extend({ contract: z.literal("source-semantic-lazy-first-exposure-v2"),
+const ExposureSchema = ExposureReservationSchema.extend({ contract: z.literal("source-semantic-lazy-first-exposure-v3"),
   replay_digest: Digest, selected_delivered: z.number().int().nonnegative(),
   selected_undelivered: z.number().int().nonnegative(), outside_delivered: z.number().int().nonnegative() }).strict();
+
+/** Host external embedding attempts only; source generation keeps its separate producer ledger.
+ * Historic v2/v1-access windows are rejected. Removal gate: retire their retained artifacts.
+ */
+function embeddingAttempts(executions: readonly SourceSemanticExecution[]): number | null {
+  let total = 0;
+  for (const execution of executions) {
+    const attempts = sourceSemanticExecutionExternalAttempts(execution);
+    if (attempts === null) return null;
+    total += attempts;
+  }
+  return total;
+}
 
 function sourceInventory(rows: readonly z.infer<typeof SourceTuple>[]): string {
   return chainIdentity(rows.map(({ source_id, source_version, content_digest, corpus_digest, record_id }) =>
@@ -291,7 +307,9 @@ export async function prepareLazyQualificationWindow(value: unknown, root: strin
   });
   const selectedMissingKeys = [...new Set(window.filter(row => row.state === "cache_miss" && row.key !== null)
     .map(row => row.key!))].sort();
-  const result = WindowSchema.parse({ contract: "source-semantic-lazy-qualification-window-v2", provider_calls: 0,
+  const queryExecutions = initialQuery.discovery_trace.map(page => page.execution);
+  const result = WindowSchema.parse({ contract: "source-semantic-lazy-qualification-window-v3",
+    provider_calls: embeddingAttempts(queryExecutions), query_executions: queryExecutions,
     config, query_key: query.row.line.key, query_state_identity: query.identity,
     starting_snapshot_sha256: publication.db_sha256,
     starting_publication_identity: chainIdentity(publication),
@@ -346,10 +364,14 @@ export async function sealLazyQualificationFinal(root: string) {
   const reprepareStarted = performance.now();
   const plan = await prepareSemanticChain(finalChain, chainRoot);
   const reprepareHostElapsedMs = performance.now() - reprepareStarted;
-  const result = FinalSchema.parse({ contract: "source-semantic-lazy-qualification-final-v2", window_identity: chainIdentity(window),
+  const finalQuery = plan.queries[0];
+  const queryExecutions = [...window.query_executions,
+    ...(finalQuery === undefined || finalQuery.status === "blocked" ? [] : finalQuery.discovery_trace.map(page => page.execution))];
+  const result = FinalSchema.parse({ contract: "source-semantic-lazy-qualification-final-v3", window_identity: chainIdentity(window),
     final_snapshot_path: snapshotPath, final_snapshot_sha256: report.db_sha256, publication_report_path: reportPath,
     publication_report_identity: chainIdentity(report),
-    final_chain_root: chainRoot, final_chain_identity: chainIdentity(plan), provider_calls: 0,
+    final_chain_root: chainRoot, final_chain_identity: chainIdentity(plan),
+    provider_calls: embeddingAttempts(queryExecutions), query_executions: queryExecutions,
     selected_source_count: window.window.length, selected_new_associations: associations.filter(row =>
       finalAssociationPolicy(window, row) === "selected_new").length,
     warm_outside_associations: associations.filter(row => finalAssociationPolicy(window, row) === "outside_warm").length,
@@ -427,7 +449,7 @@ export async function replayLazyQualifiedFirstExposure(root: string) {
       await replaySemanticChain(final.final_chain_root, "retained", frozen.replay_identity);
     }
     const replay = admitFrozenExposure(window, final, frozen);
-    writeChainArtifact(path, ExposureSchema.parse({ ...frozen, contract: "source-semantic-lazy-first-exposure-v2",
+    writeChainArtifact(path, ExposureSchema.parse({ ...frozen, contract: "source-semantic-lazy-first-exposure-v3",
       replay_digest: chainIdentity(replay.result), ...replay.delivery }));
     return replay;
   });

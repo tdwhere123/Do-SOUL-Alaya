@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
 import { canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
-  WorkspaceKind, WorkspaceState, type SoulInterpretationResponse, type SourceSemanticWorkerRequest,
+  SourceSemanticResourceExhausted, WorkspaceKind, WorkspaceState, type SoulInterpretationResponse, type SourceSemanticWorkerRequest,
   type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   selectSourceSemanticLibraryPage, sourceGoldRootIdentity, sourceSemanticLibraryQueryIdentity,
@@ -14,13 +14,14 @@ import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-
 import { SourceSemanticReadBudget, sourceSemanticReadStores } from "../../../runtime/field/source-semantic-read-stores.js";
 import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { bindResearchSourceAccessPool, bindVerifiedResearchSourceRecords }
-  from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
+  from "../../../runtime/recall-read-worker/source-semantic-research-pool.js";
 import { deliverFrozenLibraryPage, prepareLibraryDelivery, type LibraryPageSelector }
   from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { CLOCK } from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.js";
 import { compatibleTaskSupport, physicalRoot, selectionExecutionBudget, type SelectionTaskFixture }
   from "../../../../../../packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.js";
+import { createLibraryExposureMeter, type ExposureSource } from "./source-semantic-library-exposure.test-support.js";
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
@@ -28,15 +29,61 @@ type PublicRecall = Extract<SoulInterpretationResponse, { operation: "recall" }>
 const WS = "ws", SCOPES = ["project"], ROOMY_BYTES = 1_000_000;
 export const roomyDeliveryBytes = ROOMY_BYTES;
 
-/** Observe the actual reservation object after its normal resource charge. */
+type Work = ReturnType<typeof work>;
+type SelectionRegion = "baseline" | "final_envelope" | "same_root_post_pass";
+
+/** Observe existing debit boundaries, never the selector's function identity. */
 class ReservationMeter extends SourceSemanticReadBudget {
   public encoded: PublicRecall | undefined;
+  readonly reservations = new Map<string, PublicRecall>();
+  readonly phases: Record<string, { logical_work: number; logical_bytes: number }> = {};
+  readonly regions: { region: SelectionRegion; logical_work: number; logical_bytes: number }[] = [];
+  readonly rejections: { phase: string; work: number; bytes: number; remaining_work: number; remaining_bytes: number }[] = [];
+  private region: SelectionRegion | undefined;
+  private before = { logical_work: 0, logical_bytes: 0 };
+  private trailingAccess = { logical_work: 0, logical_bytes: 0 };
+
+  override reserve(work: number, bytes: number, phase = "preparation"): void {
+    try { super.reserve(work, bytes, phase); }
+    catch (error) {
+      if (error instanceof SourceSemanticResourceExhausted) this.rejections.push({ phase, work, bytes,
+        remaining_work: this.work, remaining_bytes: this.bytes });
+      throw error;
+    }
+  }
+  override charge(units: number, bytes: number, phase = "preparation"): void {
+    const boundary = phase === "library page root census" ? "baseline"
+      : phase === "final proof candidates" ? "final_envelope" : undefined;
+    if (boundary !== undefined) this.finish();
+    if (phase === "library pair source identity" && this.region !== "same_root_post_pass") {
+      this.finish(); this.begin("same_root_post_pass");
+    }
+    super.charge(units, bytes, phase);
+    const total = this.phases[phase] ??= { logical_work: 0, logical_bytes: 0 };
+    total.logical_work += units; total.logical_bytes += bytes;
+    if (phase === "access trace selection" || phase === "access trace delivery") {
+      this.trailingAccess.logical_work += units; this.trailingAccess.logical_bytes += bytes;
+    } else this.trailingAccess = { logical_work: 0, logical_bytes: 0 };
+    if (boundary !== undefined) this.begin(boundary);
+  }
+  private begin(region: SelectionRegion): void {
+    this.region = region; this.before = { logical_work: this.spentWork, logical_bytes: this.spentBytes };
+  }
+  finish(emptyPlan = false): void {
+    if (this.region === undefined) return;
+    // An empty plan projects one access receipt outside the last selector call.
+    const tail = emptyPlan ? this.trailingAccess : { logical_work: 0, logical_bytes: 0 };
+    this.regions.push({ region: this.region, logical_work: this.spentWork - this.before.logical_work - tail.logical_work,
+      logical_bytes: this.spentBytes - this.before.logical_bytes - tail.logical_bytes });
+    this.region = undefined;
+  }
   override retain(value: unknown, phase?: string): void {
     super.retain(value, phase);
     if (phase === "candidate delivery encoding" || phase === "candidate partial delivery encoding") {
       const encoded = value as SoulInterpretationResponse;
       if (encoded.operation !== "recall") throw new Error("library recall reservation expected");
       this.encoded = encoded;
+      if (encoded.delivery_id !== undefined) this.reservations.set(encoded.delivery_id, encoded);
     }
   }
 }
@@ -58,6 +105,7 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
       source_version: "1", content_bytes: source.body, evidence_object_id: null, recorded_at: CLOCK,
       event_time: null, valid_from: null, valid_to: null, speaker: null, scope_class: "project", spans: [] }, { workspaceId: WS });
     const runtime = createRecallReadWorkerRuntime(database), setupMeter = new SourceSemanticReadBudget(selectionExecutionBudget);
+    const exposure_sources: ExposureSource[] = [];
     const observations = fixture.sources.map(source => {
       const stores = sourceSemanticReadStores(database, WS, source.id, setupMeter, SCOPES);
       const current = stores.getCurrentRecord(WS, source.id), proofRecord = source.package.proofs[0]!.source_record;
@@ -65,6 +113,8 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
       expect(current?.content_digest).toBe(proofRecord.content_digest);
       const stored = stores.getStoredRecord(WS, proofRecord.identity);
       expect(stored?.content_bytes).toBe(source.body);
+      if (current === null || stored === null) throw new Error("admitted exposure source expected");
+      exposure_sources.push({ record: current, body: stored.content_bytes });
       const bytes = Buffer.byteLength(source.body);
       return { source_id: source.id, record_id: proofRecord.identity, source_version: proofRecord.source_version,
         content_digest: proofRecord.content_digest, read_bytes: bytes, body_bytes: bytes, complete: true,
@@ -73,7 +123,7 @@ export async function nativeSubsetContext(fixture: SelectionTaskFixture) {
     const records = bindVerifiedResearchSourceRecords(runtime, WS, SCOPES, setupMeter, observations);
     const pool = bindResearchSourceAccessPool(runtime, WS, SCOPES, setupMeter, fixture.original,
       fixture.semantics, selectionExecutionBudget, records, observations, [], []);
-    return { fixture, runtime, pool, setup_work: work(setupMeter), close: async () => {
+    return { fixture, runtime, pool, exposure_sources, setup_work: work(setupMeter), close: async () => {
       database.close(); closeCachedDatabase(filename); await rm(directory, { recursive: true, force: true });
     } };
   } catch (error) {
@@ -143,27 +193,42 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
     reserved = seen.get(reservationKey(selected));
     return selected;
   };
-  const plan = prepareLibraryDelivery(base, candidates, request, meter, "field", select);
+  // Forced-subset probes deliberately remain custom selectors. Ordinary measurements
+  // must pass the exact selector object so production's same-root post-pass runs.
+  const plan = prepareLibraryDelivery(base, candidates, request, meter, "field", desired === undefined ? selector : select);
+  meter.finish(plan.pages.every(page => page.length === 0));
+  const selector_work = meter.regions.reduce((sum, row) => ({ logical_work: sum.logical_work + row.logical_work,
+    logical_bytes: sum.logical_bytes + row.logical_bytes }), { logical_work: 0, logical_bytes: 0 });
   const preparation_work = work(meter), deliveryMeter = new SourceSemanticReadBudget(selectionExecutionBudget);
   const payload = { workspace_id: WS, as_of: CLOCK,
     authorized_scopes: { mode: "named" as const, scopes: SCOPES }, request };
-  const native = deliverFrozenLibraryPage(context.runtime, payload, deliveryMeter, request, plan, 0);
+  // Pair policies against the same empty process-local lease inventory. Reuse
+  // this runtime for their continuation pages, not leases left by an earlier arm.
+  const delivery_runtime = createRecallReadWorkerRuntime(context.runtime.database);
+  const native = deliverFrozenLibraryPage(delivery_runtime, payload, deliveryMeter, request, plan, 0);
   const encoded = encodeSourceSemanticLibraryResponse(native);
   if (encoded.operation !== "recall" || encoded.results === undefined) throw new Error("public membership page expected");
-  const delivered = deliveredPackages(context.fixture, encoded);
-  return { plan, request, native, encoded, reserved, probe, delivered,
+  reserved ??= meter.reservations.get(native.delivery_id);
+  const delivered = fixtureTaskSupportPackages(context.fixture, encoded);
+  const exposure_meter = createLibraryExposureMeter();
+  const exposure = exposure_meter.observe(native, encoded, context.exposure_sources);
+  return { plan, request, native, encoded, reserved, probe, delivered, delivery_runtime,
+    exposure, exposure_meter, exposure_pages: [exposure],
     selected_roots: delivered.map(physicalRoot), selected_sources: sourceNames(context.fixture, delivered),
     desired_sources: desired === undefined ? null : sourceNames(context.fixture, desired),
     reserved_bytes: reserved === undefined ? null : bytes(reserved),
     probe_bytes: probe === undefined ? null : bytes(probe.encoded),
-    encoded_bytes: bytes(encoded), preparation_work, delivery_work: work(deliveryMeter),
+    encoded_bytes: bytes(encoded), preparation_work, delivery_work: work(deliveryMeter), selector_work,
+    selector_regions: meter.regions, preparation_phases: meter.phases, budget_rejections: meter.rejections,
     support: compatibleTaskSupport(context.fixture, delivered),
     qualifiers: native.slot_qualifiers.map(row => row.support),
     limit, actual_subset: desired === undefined || membership(delivered) === membership(desired) };
 }
 
 export type NativeMeasurement = ReturnType<typeof measureNativeSubset>;
-function deliveredPackages(fixture: SelectionTaskFixture, encoded: PublicRecall) {
+// Authored task-support controls need fixture metadata. This root-only reconstruction
+// is not an authority for delivered spans or proofs; exposure reads native/public output.
+function fixtureTaskSupportPackages(fixture: SelectionTaskFixture, encoded: PublicRecall) {
   return (encoded.results ?? []).map(result => {
     if (result.target?.kind !== "source_evidence") throw new Error("source evidence target expected");
     const identity = sourceGoldRootIdentity(result.target);
@@ -206,7 +271,11 @@ export function measurementSummary(measurement: NativeMeasurement) {
   const { selected_roots, selected_sources, desired_sources, reserved_bytes, probe_bytes, encoded_bytes,
     preparation_work, delivery_work, support, qualifiers, limit, actual_subset, probe, native } = measurement;
   return { selected_roots, selected_sources, desired_sources, reserved_bytes, probe_bytes, encoded_bytes,
-    preparation_work, delivery_work, support, qualifiers, limit, actual_subset, probe_fits: probe?.fits ?? null,
+    preparation_work, delivery_work, support, support_basis: "authored_fixture_statements_and_alternative_completeness" as const,
+    qualifiers, limit, actual_subset, probe_fits: probe?.fits ?? null,
+    first_page_exposure: measurement.exposure, exposure_pages: [...measurement.exposure_pages],
+    planned_pages: measurement.plan.pages.length, exposure_pages_observed: measurement.exposure_pages.length,
+    reserved_plan_fully_observed: measurement.exposure_pages.length === measurement.plan.pages.length,
     coverage: native.coverage, discovery: native.discovery, continuation: native.index.continuation };
 }
 
@@ -218,12 +287,25 @@ export async function persistArtifact(caseName: string, name: string, value: unk
   await writeFile(join(directory, name), JSON.stringify(value), { encoding: "utf8", flag: "wx" });
 }
 
-export function deliverAllPages(context: NativeSubsetContext, measurement: NativeMeasurement): readonly Recall[] {
+export function deliverAllPages(context: NativeSubsetContext, measurement: NativeMeasurement,
+  observe?: (page: Recall, cost: Work) => void): readonly Recall[] {
+  // The first public call already happened in measureNativeSubset: reuse it and
+  // its actual cost instead of issuing and charging page 1 a second time.
   let offset = 0;
-  return measurement.plan.pages.map(page => {
-    const result = deliverFrozenLibraryPage(context.runtime, { workspace_id: WS, as_of: CLOCK,
+  return measurement.plan.pages.map((page, index) => {
+    if (index === 0) {
+      observe?.(measurement.native, measurement.delivery_work);
+      offset += page.length;
+      return measurement.native;
+    }
+    const meter = new SourceSemanticReadBudget(selectionExecutionBudget);
+    const result = deliverFrozenLibraryPage(measurement.delivery_runtime, { workspace_id: WS, as_of: CLOCK,
       authorized_scopes: { mode: "named", scopes: SCOPES }, request: measurement.request },
-    new SourceSemanticReadBudget(selectionExecutionBudget), measurement.request, measurement.plan, offset);
+    meter, measurement.request, measurement.plan, offset);
+    const encoded = encodeSourceSemanticLibraryResponse(result);
+    if (encoded.operation !== "recall") throw new Error("public recall exposure page expected");
+    measurement.exposure_pages[index] ??= measurement.exposure_meter.observe(result, encoded, context.exposure_sources);
+    observe?.(result, work(meter));
     offset += page.length;
     return result;
   });

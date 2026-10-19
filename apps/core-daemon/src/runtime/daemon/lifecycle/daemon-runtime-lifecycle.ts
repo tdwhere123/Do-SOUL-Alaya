@@ -1,5 +1,6 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../app.js";
 import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
 import { closeServer, finalizeServerClose, type CloseableHttpServer } from "./daemon-server-close.js";
@@ -61,6 +62,9 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   closeEmbeddingProvider?: () => Promise<void>;
+  sourceIndexProducer?: Readonly<{ start(): void; stop(): Promise<void>;
+    runPass?(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining):
+      Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt> }>;
   database: Readonly<{ close(): void }>;
   temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
@@ -90,6 +94,7 @@ const BACKGROUND_STOP_TIMEOUT_MS = 30_000;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
+  runSourceIndexPass(remaining?: import("../../source-index/source-index-producer.js").SourceIndexProducerPassRemaining): Promise<import("../../source-index/source-index-producer.js").SourceIndexProducerPassReceipt>;
   runGardenBackgroundPass(): Promise<void>;
   runGardenBulkEnrichPass(workspaceId: string): Promise<void>;
   runGardenEmbeddingBackfillPass(
@@ -116,6 +121,15 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
 
   return Object.freeze({
     startBackgroundServices,
+    runSourceIndexPass: async (remaining) => {
+      if (state.backgroundStarted || state.shuttingDown !== null || input.sourceIndexProducer?.runPass === undefined) {
+        throw new AlayaError(
+          "UNAVAILABLE",
+          "Source-only preparation requires an idle, unscheduled daemon producer"
+        );
+      }
+      return await input.sourceIndexProducer.runPass(remaining);
+    },
     runGardenBackgroundPass: async () => {
       await awaitStartupBackgroundPassInFlight(state);
       try {
@@ -162,6 +176,7 @@ function createBackgroundServiceStarter(
 
     input.gardenBacklogTelemetryService.start();
     input.gardenRuntime.backgroundManager.start();
+    input.sourceIndexProducer?.start();
     state.backgroundStarted = true;
     const startupPass = input.gardenRuntime.runBackgroundPass().catch((error) => {
       input.warnLogger.warn("garden startup background pass failed", {
@@ -400,6 +415,16 @@ async function stopBackgroundServices(
       error: error instanceof Error ? error.message : String(error)
     });
     stopResult = "failed";
+  }
+  if (input.sourceIndexProducer !== undefined) {
+    try {
+      await input.sourceIndexProducer.stop();
+    } catch (error) {
+      input.warnLogger.warn("source index producer shutdown failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      stopResult = "failed";
+    }
   }
   await awaitStartupBackgroundPassInFlight(state);
   if (state.startupBackgroundPassFailure !== null) {

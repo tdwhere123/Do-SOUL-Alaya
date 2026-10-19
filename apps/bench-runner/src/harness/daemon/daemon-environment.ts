@@ -9,7 +9,9 @@ import {
   type ResolveSecretError
 } from "@do-soul/alaya";
 import { parseSourceRefRobust, resolveCoreConfigEnvironmentKeys } from "@do-soul/alaya-core";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import type {
+  BenchDaemonOptions,
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
 } from "./daemon-types.js";
@@ -30,6 +32,16 @@ const DEFAULT_BENCH_REVIEWER_IDENTITY = "user:bench-runner";
 
 export const BENCH_DAEMON_MANAGED_ENV_KEYS = [
   "DATA_DIR",
+  "ALAYA_SQLITE_WRITE_QUEUE",
+  "ALAYA_GARDEN_PROVIDER_KIND",
+  "ALAYA_OFFICIAL_GARDEN_SECRET_REF",
+  "ALAYA_GARDEN_OPENAI_SECRET_REF",
+  "ALAYA_CONFLICT_LLM_API_KEY",
+  "ALAYA_CONFLICT_LLM_SECRET_REF",
+  "ALAYA_EDGE_PRODUCER_LLM_ENABLED",
+  "ALAYA_EDGE_CLASSIFY_HOST_WORKER",
+  "ALAYA_CONFLICT_DETECTION_ENABLED",
+  "ALAYA_INGEST_RECONCILIATION_ENABLED",
   "OPENAI_API_KEY",
   "OPENAI_EMBEDDING_MODEL",
   "OPENAI_EMBEDDING_PROVIDER_URL",
@@ -79,9 +91,16 @@ export interface BenchDaemonLaunchConfig {
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly environment: BenchDaemonEnvironment;
   readonly reviewerCredentials: BenchReviewerCredentials;
+  readonly embeddingStartupProbe?: BenchDaemonOptions["embeddingStartupProbe"];
+  readonly sqliteWriteQueue?: BenchDaemonOptions["sqliteWriteQueue"];
+  readonly gardenCompute?: BenchDaemonOptions["gardenCompute"];
 }
 
 export function createBenchDaemonLaunchConfig(input: {
+  readonly configDirectoryRoot?: string;
+  readonly sqliteWriteQueue?: BenchDaemonOptions["sqliteWriteQueue"];
+  readonly gardenCompute?: BenchDaemonOptions["gardenCompute"];
+  readonly embeddingStartupProbe?: BenchDaemonOptions["embeddingStartupProbe"];
   readonly dataDir: string;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
@@ -90,6 +109,7 @@ export function createBenchDaemonLaunchConfig(input: {
   readonly reviewerToken?: string;
   readonly tokenFactory?: () => string;
 }): BenchDaemonLaunchConfig {
+  assertBenchDaemonLaunchEffects(input);
   const ambientEnv = input.ambientEnv ?? process.env;
   validateSavedTreatmentEnvironment(ambientEnv);
   const reviewerCredentials = resolveBenchReviewerCredentials({
@@ -101,7 +121,7 @@ export function createBenchDaemonLaunchConfig(input: {
   if (input.embeddingMode === "env" && input.embeddingProviderKind === "openai") {
     requireBenchOpenAiSecretRef(openAiSecretRef);
   }
-  const configDir = planBenchDaemonConfigDirectory();
+  const configDir = planBenchDaemonConfigDirectory(input.configDirectoryRoot);
   const environment = buildBenchDaemonEnvironment({
     ...input,
     configDir,
@@ -111,6 +131,9 @@ export function createBenchDaemonLaunchConfig(input: {
   });
   assertBenchEmbeddingModeMatchesEffective(input.embeddingMode, environment);
   return Object.freeze({
+    ...(input.embeddingStartupProbe === undefined ? {} : { embeddingStartupProbe: input.embeddingStartupProbe }),
+    ...(input.sqliteWriteQueue === undefined ? {} : { sqliteWriteQueue: input.sqliteWriteQueue }),
+    ...(input.gardenCompute === undefined ? {} : { gardenCompute: input.gardenCompute }),
     dataDir: input.dataDir,
     configDir,
     embeddingMode: input.embeddingMode,
@@ -118,6 +141,15 @@ export function createBenchDaemonLaunchConfig(input: {
     environment,
     reviewerCredentials
   });
+}
+
+export function assertBenchDaemonLaunchEffects(input: Pick<BenchDaemonOptions,
+  "sqliteWriteQueue" | "gardenCompute" | "embeddingStartupProbe">): void {
+  if (input.sqliteWriteQueue !== undefined && input.sqliteWriteQueue !== "disabled" ||
+      input.gardenCompute !== undefined && input.gardenCompute !== "disabled" ||
+      input.embeddingStartupProbe !== undefined && !["eager", "omit"].includes(input.embeddingStartupProbe)) {
+    throw new AlayaError("VALIDATION", "unsupported bench launch effect option");
+  }
 }
 
 export function resolveBenchReviewerCredentials(input: {
@@ -152,6 +184,8 @@ function firstNonEmpty(...values: readonly (string | undefined)[]): string {
 }
 
 function buildBenchDaemonEnvironment(input: {
+  readonly sqliteWriteQueue?: BenchDaemonOptions["sqliteWriteQueue"];
+  readonly gardenCompute?: BenchDaemonOptions["gardenCompute"];
   readonly dataDir: string;
   readonly configDir: string;
   readonly embeddingMode: BenchEmbeddingMode;
@@ -163,6 +197,14 @@ function buildBenchDaemonEnvironment(input: {
   const environment: Record<string, string | undefined> = { ...input.ambientEnv };
   setEnvironmentValue(environment, "DATA_DIR", input.dataDir);
   applyEmbeddingEnvironment(environment, input);
+  if (input.sqliteWriteQueue === "disabled") environment.ALAYA_SQLITE_WRITE_QUEUE = "0";
+  if (input.gardenCompute === "disabled") {
+    environment.ALAYA_GARDEN_PROVIDER_KIND = "local_heuristics";
+    for (const key of ["ALAYA_OFFICIAL_GARDEN_SECRET_REF", "ALAYA_GARDEN_OPENAI_SECRET_REF",
+      "ALAYA_CONFLICT_LLM_API_KEY", "ALAYA_CONFLICT_LLM_SECRET_REF"]) delete environment[key];
+    for (const key of ["ALAYA_EDGE_PRODUCER_LLM_ENABLED", "ALAYA_EDGE_CLASSIFY_HOST_WORKER",
+      "ALAYA_CONFLICT_DETECTION_ENABLED", "ALAYA_INGEST_RECONCILIATION_ENABLED"]) environment[key] = "false";
+  }
   setEnvironmentValue(environment, "ALAYA_CONFIG_DIR", input.configDir);
   setEnvironmentValue(environment, "CODEX_HOME", join(input.dataDir, "codex-home"));
   setEnvironmentValue(environment, "HOME", join(input.dataDir, "home"));

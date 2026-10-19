@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { PersistentStringMap } from "@do-soul/alaya-graph-algorithms";
 import {
   ASSOCIATION_DOMAIN_ID,
   CONDITIONAL_FIELD_SCHEMA_VERSION,
@@ -9,7 +10,7 @@ import {
 import { evaluateFacetPredicate } from "./facet-predicates.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 import type { PathComputation } from "./path-effect-cursor.js";
-import type { RetainedRows } from "./retained-sequence.js";
+import { RetainedSequence, type RetainedRows } from "./retained-sequence.js";
 
 export function facetPathId(state: ProductStateKey): string {
   return createHash("sha256").update(productStateNodeId(state)).digest("hex");
@@ -21,8 +22,7 @@ export function composedFacetPathId(state: ProductStateKey, route: string): stri
 }
 
 export function facetBelongsToOutput(pathId: string, state: ProductStateKey): boolean {
-  const identity = facetPathId(state);
-  return pathId === identity || pathId.startsWith(`${identity}:`);
+  return facetIdentityOf(pathId) === facetPathId(state);
 }
 
 export function retainSamePathVectors(
@@ -51,26 +51,53 @@ export function facetModeAccepts(
   return evaluateFacetPredicate(mode, retainSamePathVectors(vectors), threshold);
 }
 
+/** Facets grouped by the state identity their path_id starts with, in retained order. */
+export type FacetIdentityIndex = PersistentStringMap<RetainedSequence<FacetVector>>;
+
+const NO_FACETS = RetainedSequence.empty<FacetVector>();
+
+/** A path_id is the state identity alone or the identity, a colon and a route digest. */
+export function facetIdentityOf(pathId: string): string {
+  const cut = pathId.indexOf(":");
+  return cut < 0 ? pathId : pathId.slice(0, cut);
+}
+
+export function facetIdentityEntryBytes(index: FacetIdentityIndex, vector: FacetVector): number {
+  const identity = facetIdentityOf(vector.path_id);
+  return index.has(identity) ? 16 : 96 + 2 * identity.length + 16;
+}
+
+export function withFacetIdentity(index: FacetIdentityIndex, vector: FacetVector): FacetIdentityIndex {
+  const identity = facetIdentityOf(vector.path_id);
+  return index.with(identity, (index.get(identity) ?? NO_FACETS).append(vector));
+}
+
+export function indexFacetsByIdentity(facets: Iterable<FacetVector>): FacetIdentityIndex {
+  let index: FacetIdentityIndex = new PersistentStringMap();
+  for (const vector of facets) index = withFacetIdentity(index, vector);
+  return index;
+}
+
 /** One generator owns the lookup for its immutable facet input version. */
 export class PathFacetLookup {
-  private readonly byIdentity = new Map<string, readonly FacetVector[]>();
-  public constructor(private readonly facets: RetainedRows<FacetVector>) {}
+  private index: FacetIdentityIndex | undefined;
+  public constructor(private readonly facets: RetainedRows<FacetVector>, supplied?: FacetIdentityIndex) {
+    this.index = supplied;
+  }
 
-  public *forState(state: ProductStateKey): PathComputation<readonly FacetVector[]> {
-    const identity = facetPathId(state), cached = this.byIdentity.get(identity);
-    if (cached !== undefined) { yield { kind: "work" }; return cached; }
-    yield { kind: "work", retained_bytes: 96 + 2 * identity.length };
-    const matching: FacetVector[] = [];
-    for (let index = 0; index < this.facets.length; index += 1) {
-      yield { kind: "work" };
-      const vector = this.facets.at(index)!;
-      if (!facetBelongsToOutput(vector.path_id, state)) continue;
-      yield { kind: "work", retained_bytes: 16 };
-      matching.push(vector);
+  public *forState(state: ProductStateKey): PathComputation<RetainedRows<FacetVector>> {
+    yield { kind: "work" };
+    if (this.index === undefined) {
+      // A caller without a state-owned index pays for one build per generator.
+      let built: FacetIdentityIndex = new PersistentStringMap();
+      for (let position = 0; position < this.facets.length; position += 1) {
+        const vector = this.facets.at(position)!;
+        yield { kind: "work", retained_bytes: facetIdentityEntryBytes(built, vector) };
+        built = withFacetIdentity(built, vector);
+      }
+      this.index = built;
     }
-    // Partial buckets remain generator scratch until their scan is complete.
-    this.byIdentity.set(identity, matching);
-    return matching;
+    return this.index.get(facetPathId(state)) ?? NO_FACETS;
   }
 }
 

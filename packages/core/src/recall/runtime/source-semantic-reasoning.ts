@@ -11,11 +11,11 @@ import { compileConditionalFieldQuery } from "../conditional-field/query/compile
 import { defaultView } from "../conditional-field/query/query-admission.js";
 import { admitSourceSemanticCorrespondence } from "../conditional-field/query/source-semantic-correspondence-admission.js";
 import { compileSourceSemanticExecution, type SourceSemanticExecutionPlan, type SourceSemanticGroupPhase } from "../conditional-field/query/compile-source-semantic-finite.js";
-import { withdrawDerivationLeaves, type FieldEngineState } from "../conditional-field/engine/field-engine.js";
+import { type FieldEngineState } from "../conditional-field/engine/field-engine.js";
 import { observeField } from "./conditional-field-observe.js";
 import { compileSourceSemanticPremises, sourceSemanticReaders } from "./source-semantic-premises.js";
 import { planSourceSemanticBranches } from "./source-semantic-branch-plan.js";
-import { traceSourceSemanticWithdrawals, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
+import { traceSourceSemanticWithdrawals, withdrawSourceSemanticState, type SourceSemanticWithdrawalTrace } from "./source-semantic-withdrawal.js";
 import { projectSourceSemanticState, type SourceSemanticResultBody as ResultBody } from "./source-semantic-projection.js";
 import { sourceSemanticProofDependencies } from "./source-semantic-delivery.js";
 import { unexecutedGroupAttention } from "./source-semantic-attention.js";
@@ -37,7 +37,15 @@ export type ReasonSourceSemanticInterpretationInput = Readonly<{
   source_target?: SourceEvidenceTarget;
   /** Offline causal diagnostics only; never enabled by normal recall. */
   withdrawal_trial_limit?: number;
+  /** Native private delivery diagnostic: one selected leaf, paid by this execution's remaining ledger. */
+  shared_withdrawal?: Readonly<{ occurrence: string; leaf_kind: "source_interpretation_presence" }>;
 }>;
+type SourceSemanticComputationRequest = Omit<SourceSemanticReasoningRequest, "output_byte_limit">;
+const SourceSemanticComputationRequestSchema = SourceSemanticReasoningRequestSchema.unwrap().omit({ output_byte_limit: true }).readonly();
+type ExecuteSourceSemanticInterpretationInput = Omit<ReasonSourceSemanticInterpretationInput, "request"> & Readonly<
+  | { request?: SourceSemanticReasoningRequest; computation?: never }
+  | { request?: never; computation: SourceSemanticComputationRequest }
+>;
 type Prepared = Readonly<{
   body: ResultBody; index: InformationIndex | null; withdrawal_trace?: SourceSemanticWithdrawalTrace;
   finalizeOptional?: OptionalAttentionCompute;
@@ -62,9 +70,16 @@ export function reasonSourceSemanticInterpretation(input: ReasonSourceSemanticIn
   return executeSourceSemanticInterpretation(input).result;
 }
 
-/** Same one-source-interpretation and one-semantic-correspondence owner as reason, plus the accepting index that library delivery must reuse. */
-export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticInterpretationInput): SourceSemanticInterpretationExecution {
-  const request = input.request === undefined ? undefined : SourceSemanticReasoningRequestSchema.parse(input.request);
+/** Reuse one computation and accepting index. Explicit requests retain their delivery limits;
+ * computation-only inputs leave delivery to the complete-envelope owner. */
+export function executeSourceSemanticInterpretation(input: ExecuteSourceSemanticInterpretationInput): SourceSemanticInterpretationExecution {
+  const { request: requestInput, computation: computationInput } = input;
+  if (requestInput !== undefined && computationInput !== undefined) {
+    throw new CoreError("VALIDATION", "interpretation execution requires either a delivery request or computation input");
+  }
+  const deliveryRequest = requestInput === undefined ? undefined : SourceSemanticReasoningRequestSchema.parse(requestInput);
+  const request = computationInput === undefined ? deliveryRequest : SourceSemanticComputationRequestSchema.parse(computationInput);
+  const outputLimit = computationInput === undefined ? deliveryRequest?.output_byte_limit ?? 1_000_000 : undefined;
   const budget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET, meter = new SourceSemanticResourceLedger(budget);
   const original = request?.original_query ?? input.original_query;
   let body: ResultBody = { outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
@@ -83,7 +98,8 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
       meter.retain(input.source_interpretation, "source interpretation admission");
       meter.retain(input.query_semantics, "query semantics admission");
       meter.retain(input.semantic_correspondence, "semantic correspondence admission");
-      const prepared = reasonPrepared(input, original, request, meter);
+      const prepared = reasonPrepared(input.shared_withdrawal === undefined ? input : { ...input, withdrawal_trial_limit: 1 },
+        original, request, meter, outputLimit);
       body = prepared.body; index = prepared.index;
       withdrawalTrace = prepared.withdrawal_trace;
       if ((body.binding_results?.length ?? 0) > 0) sourceDependencies = sourceSemanticProofDependencies(body, meter);
@@ -99,7 +115,7 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
     // dependency traversal must not become valid-empty source support via ?? [].
     if ((body.binding_results?.length ?? 0) > 0 && sourceDependencies === undefined) index = null;
   }
-  const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, request?.output_byte_limit);
+  const result = finish({ ...body, resource_usage: { work_units: meter.spentWork, memory_bytes: meter.spentBytes } }, outputLimit);
   return { result, index: result.outcome.status === "truncated"
     || result.outcome.status === "resource_exhausted" && result.binding_results === undefined ? null : index,
     ...(result.binding_results === undefined || sourceDependencies === undefined ? {} : { source_dependencies: sourceDependencies }),
@@ -107,7 +123,7 @@ export function executeSourceSemanticInterpretation(input: ReasonSourceSemanticI
 }
 
 function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original: string,
-  request: SourceSemanticReasoningRequest | undefined, meter: SourceSemanticResourceLedger): Prepared {
+  request: SourceSemanticComputationRequest | undefined, meter: SourceSemanticResourceLedger, outputLimit: number | undefined): Prepared {
   const published = SourceSemanticPublishedInterpretationSchema.safeParse(input.source_interpretation);
   const parsed = published.success ? { success: true as const, data: published.data.interpretation }
     : SourceSemanticInterpretationSchema.safeParse(input.source_interpretation);
@@ -146,7 +162,7 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   const phases = execution.groupPhases ?? [];
   if (phases.length > 1) {
     return observeCorrespondenceGroups({
-      input, request, meter, original, admission, population, execution, phases, seeds, snapshot, remaining, qualified, sourceTarget
+      input, request, meter, original, admission, population, execution, phases, seeds, snapshot, remaining, qualified, sourceTarget, outputLimit
     });
   }
   const program = execution.program;
@@ -169,11 +185,15 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
   if (input.withdrawal_trial_limit === undefined) return { ...baseline, finalizeOptional };
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
-    baseline: finish(baseline.body), limit: input.withdrawal_trial_limit, project: (withdrawn, _leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(actualBudget);
+    baseline: finish(baseline.body), limit: input.withdrawal_trial_limit,
+    meter: input.shared_withdrawal === undefined ? undefined : meter,
+    select: input.shared_withdrawal === undefined ? undefined : leaf => leaf.leaf_kind === input.shared_withdrawal!.leaf_kind
+      && leaf.occurrence === input.shared_withdrawal!.occurrence,
+    project: (withdrawn, _leafId) => {
+      const trialMeter = input.shared_withdrawal === undefined ? new SourceSemanticResourceLedger(actualBudget) : meter;
       let trial: ResultBody;
       try {
-        trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
+        if (input.shared_withdrawal === undefined) trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
         const projected = projectSourceSemanticState({ ...projection, state: withdrawn, meter: trialMeter });
         trial = projected.body;
         if ((trial.binding_results?.length ?? 0) > 0) sourceSemanticProofDependencies(trial, trialMeter);
@@ -185,14 +205,14 @@ function reasonPrepared(input: ReasonSourceSemanticInterpretationInput, original
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
         trial = { ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [] };
       }
-      return finish({ ...trial, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
+      return finish({ ...trial, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, outputLimit);
     } });
   return { ...baseline, finalizeOptional, withdrawal_trace };
 }
 
 function observeCorrespondenceGroups(input: Readonly<{
-  input: ReasonSourceSemanticInterpretationInput; request: SourceSemanticReasoningRequest | undefined;
-  meter: SourceSemanticResourceLedger; original: string;
+  input: ReasonSourceSemanticInterpretationInput; request: SourceSemanticComputationRequest | undefined;
+  meter: SourceSemanticResourceLedger; original: string; outputLimit: number | undefined;
   admission: Extract<ReturnType<typeof admitSourceSemanticCorrespondence>, { kind: "admitted" }>;
   population: ReturnType<typeof compileSourceSemanticPremises>;
   execution: SourceSemanticExecutionPlan; phases: readonly SourceSemanticGroupPhase[];
@@ -255,12 +275,17 @@ function observeCorrespondenceGroups(input: Readonly<{
   const actualBudget = request?.budget ?? SOURCE_SEMANTIC_REASONING_BUDGET;
   const withdrawal_trace = traceSourceSemanticWithdrawals({ state: runs[0]!.state, origins: population.origins,
     prefix_resource_usage: { work_units: prefixWork, memory_bytes: prefixBytes },
-    baseline: finish(baseline.body), limit: input.input.withdrawal_trial_limit, project: (_withdrawn, leafId) => {
-      const trialMeter = new SourceSemanticResourceLedger(actualBudget);
+    baseline: finish(baseline.body), limit: input.input.withdrawal_trial_limit,
+    meter: input.input.shared_withdrawal === undefined ? undefined : meter,
+    select: input.input.shared_withdrawal === undefined ? undefined : leaf => leaf.leaf_kind === input.input.shared_withdrawal!.leaf_kind
+      && leaf.occurrence === input.input.shared_withdrawal!.occurrence,
+    project: (withdrawn, leafId) => {
+      const trialMeter = input.input.shared_withdrawal === undefined ? new SourceSemanticResourceLedger(actualBudget) : meter;
       try {
-        trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
+        if (input.input.shared_withdrawal === undefined) trialMeter.charge(prefixWork, prefixBytes, "same compiled prefix");
         const trials = runs.map((run, index) => {
-          const state = leafId === undefined ? run.state : withdrawDerivationLeaves(run.state, leafId);
+          const state = leafId === undefined ? run.state : index === 0 ? withdrawn
+            : withdrawSourceSemanticState(run.state, leafId, input.input.shared_withdrawal === undefined ? undefined : meter);
           const result = projectSourceSemanticState({
             state, meter: trialMeter, remaining: run.remaining, query: run.query, snapshot, admission, population,
             execution: run.execution, sourceTarget, qualified
@@ -276,11 +301,11 @@ function observeCorrespondenceGroups(input: Readonly<{
           groupedOptionalAttention(admission, trials.flatMap((row) => row.acceptedBranchIndices === undefined
             ? [] : [{ state: row.state, execution: row.execution, acceptedBranchIndices: row.acceptedBranchIndices }]),
             unprojected, incomplete));
-        return finish({ ...merged, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
+        return finish({ ...merged, resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, input.outputLimit);
       } catch (error) {
         if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
         return finish({ ...qualified, outcome: { status: "resource_exhausted" }, consumed_leaves: [],
-          resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, request?.output_byte_limit);
+          resource_usage: { work_units: trialMeter.spentWork, memory_bytes: trialMeter.spentBytes } }, input.outputLimit);
       }
     } });
   return { ...baseline, withdrawal_trace };
@@ -371,18 +396,13 @@ function exhaustedBody(body: ResultBody): ResultBody {
 }
 
 function invalid(reason: string): ResultBody { return { outcome: { status: "invalid", reason }, consumed_leaves: [] }; }
-function finish(result: ResultBody, outputLimit = 1_000_000): SourceSemanticReasoningResult {
-  const parsed = SourceSemanticReasoningResultSchema.safeParse({ contract: "source-interpretation-reasoning-v5",
+function finish(result: ResultBody, outputLimit?: number): SourceSemanticReasoningResult {
+  // Schema overflow is invalid output, not measured computation exhaustion.
+  const checked = SourceSemanticReasoningResultSchema.parse({ contract: "source-interpretation-reasoning-v5",
     semantic_status: "unreviewed", conclusion_scope: "conditional_on_interpretation", world_claim: "unknown", ...result });
-  if (!parsed.success) {
-    if (parsed.error.issues.some(issue => issue.code !== "too_big")) throw parsed.error;
-    return finish({ outcome: { status: "resource_exhausted" }, consumed_leaves: [],
-      conditional_computation_id: result.conditional_computation_id, source_interpretation_id: result.source_interpretation_id,
-      query_semantics_id: result.query_semantics_id, semantic_correspondence_id: result.semantic_correspondence_id,
-      source_target: result.source_target, query_gaps: result.query_gaps, resource_usage: result.resource_usage }, outputLimit);
-  }
-  const checked = parsed.data;
-  if (Buffer.byteLength(JSON.stringify(checked)) <= outputLimit) return checked;
+  if (outputLimit === undefined || Buffer.byteLength(JSON.stringify(checked)) <= outputLimit) return checked;
+  // Direct v5 requests retain their bounded-result delivery contract. Native
+  // computation-only consumers instead finalize their complete evidence envelope.
   if (checked.attention !== undefined) {
     const { attention, ...required } = checked;
     if (attention !== undefined && Buffer.byteLength(JSON.stringify(required)) <= outputLimit) return required;

@@ -213,34 +213,40 @@ function receiveQuerySemantics(
 
 export function proposeCorrespondenceSemantics(
   input: SourceSemanticCorrespondenceProposalInput,
-  injected?: Readonly<{ rawJson: string }>
+  injected?: Readonly<{ rawJson: string }>,
+  executionMeter?: SourceSemanticResourceLedger
 ): SourceSemanticCorrespondenceProposalResult {
   const request = buildSourceSemanticCorrespondenceRequest(input);
   const system_prompt = sourceSemanticCorrespondenceSystemPrompt(request);
   if (injected === undefined) {
     return { outcome: { status: "unexercised" }, provider_attempts: 0, request, system_prompt };
   }
-  return { ...receiveCorrespondenceSemantics(injected.rawJson, request), system_prompt };
+  return { ...receiveCorrespondenceSemantics(injected.rawJson, request, executionMeter), system_prompt };
 }
 
 export function receiveCorrespondenceSemantics(
-  rawJson: string, requestValue: SourceSemanticCorrespondenceRequest
+  rawJson: string, requestValue: SourceSemanticCorrespondenceRequest, executionMeter?: SourceSemanticResourceLedger
 ): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
+  // A private host may lend its already-reserved ledger without changing request/cache identity or limits.
+  executionMeter?.retain(requestValue, "correspondence receiver request capture");
   const request = parseSourceSemanticCorrespondenceRequest(requestValue);
+  executionMeter?.retain(request, "correspondence receiver rebuilt request");
   const attempt = bindAttempt(rawJson, request);
   const bounded = boundRawJson(rawJson, request.resource_limits.output_byte_limit, attempt);
   if (bounded !== undefined) return bounded;
   const parsed = parseResponseJson(rawJson, attempt);
   if (parsed.status !== "ok") return parsed.result;
+  executionMeter?.retain(parsed.value, "correspondence response JSON decode");
   if (request.contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_REQUEST_CONTRACT) {
     try {
-      const meter = new SourceSemanticResourceLedger({
+      const meter = executionMeter ?? new SourceSemanticResourceLedger({
         work_units: request.resource_limits.work_units ?? 200000,
         memory_bytes: request.resource_limits.memory_bytes ?? 20000000
       });
       const envelope = materializeSourceSemanticCorrespondenceFlatDraft(parsed.value, request, meter);
-      return finishCorrespondenceEnvelope(envelope, request, attempt, envelope.semantic_correspondence, true, meter);
+      return finishCorrespondenceEnvelope(envelope, request, attempt, envelope.semantic_correspondence, true, meter, executionMeter !== undefined);
     } catch (error) {
+      if (executionMeter !== undefined && error instanceof SourceSemanticResourceExhausted) throw error;
       return { ...attempt, outcome: error instanceof SourceSemanticResourceExhausted
         ? { status: "resource_exhausted" } : invalidProposalOutcome(error) };
     }
@@ -252,24 +258,25 @@ export function receiveCorrespondenceSemantics(
     if (contract !== SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT) {
       return { ...attempt, outcome: { status: "invalid", reason: "malformed_response" } };
     }
-    return receiveCorrespondenceGeneration(parsed.value, request, attempt, true);
+    return receiveCorrespondenceGeneration(parsed.value, request, attempt, true, executionMeter);
   }
   if (contract === SOURCE_SEMANTIC_CORRESPONDENCE_SCOPED_GENERATION_RESPONSE_CONTRACT) {
     return { ...attempt, outcome: { status: "invalid", reason: "malformed_response" } };
   }
   if (contract === SOURCE_SEMANTIC_CORRESPONDENCE_GENERATION_RESPONSE_CONTRACT) {
-    return receiveCorrespondenceGeneration(parsed.value, request, attempt, false);
+    return receiveCorrespondenceGeneration(parsed.value, request, attempt, false, executionMeter);
   }
   const envelope = CorrespondenceAssessmentResponseSchema.safeParse(parsed.value);
   if (!envelope.success) {
     return { ...attempt, outcome: invalidSchemaOutcome(envelope.error) };
   }
-  return finishCorrespondenceEnvelope(envelope.data, request, attempt, envelope.data.semantic_correspondence, false);
+  return finishCorrespondenceEnvelope(envelope.data, request, attempt, envelope.data.semantic_correspondence, false,
+    executionMeter, executionMeter !== undefined);
 }
 
 function receiveCorrespondenceGeneration(
   value: unknown, request: SourceSemanticCorrespondenceRequest, attempt: Attempt<SourceSemanticCorrespondenceRequest>,
-  scoped: boolean
+  scoped: boolean, executionMeter?: SourceSemanticResourceLedger
 ): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
   const envelope = (scoped ? CorrespondenceScopedGenerationResponseSchema : CorrespondenceGenerationResponseSchema)
     .safeParse(value);
@@ -293,7 +300,7 @@ function receiveCorrespondenceGeneration(
       return { ...attempt, outcome: invalidProposalOutcome(error) };
     }
   }
-  return finishCorrespondenceEnvelope(envelope.data, request, attempt, body, scoped);
+  return finishCorrespondenceEnvelope(envelope.data, request, attempt, body, scoped, executionMeter, executionMeter !== undefined);
 }
 
 function finishCorrespondenceEnvelope(
@@ -302,7 +309,7 @@ function finishCorrespondenceEnvelope(
   attempt: Attempt<SourceSemanticCorrespondenceRequest>,
   body: unknown,
   scoped: boolean,
-  meter?: SourceSemanticResourceLedger
+  meter?: SourceSemanticResourceLedger, propagateExhaustion = false
 ): Omit<SourceSemanticCorrespondenceProposalResult, "system_prompt"> {
   const violation = sourceSemanticProducerEnvelopeViolation("correspondence", envelope.outcome.status, body !== undefined);
   if (violation !== undefined) return { ...attempt, outcome: { status: "invalid", reason: violation } };
@@ -331,6 +338,8 @@ function finishCorrespondenceEnvelope(
     return { ...attempt, outcome: { status: "interpreted", gaps: [] }, semantic_correspondence, assessment,
       ...(coverage === undefined ? {} : { coverage }) };
   } catch (error) {
+    // A borrowed parent ledger belongs to the caller. Exhaustion is not a changed cached semantic outcome.
+    if (propagateExhaustion && error instanceof SourceSemanticResourceExhausted) throw error;
     return { ...attempt, outcome: error instanceof SourceSemanticResourceExhausted
       ? { status: "resource_exhausted" } : invalidProposalOutcome(error) };
   }

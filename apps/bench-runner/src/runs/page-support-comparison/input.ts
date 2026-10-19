@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  isStepSemanticRequestProfile, type StepSemanticRequestProfile, AlayaError, canonicalJson
+  SourceDisclosureSchema, isStepSemanticRequestProfile, type StepSemanticRequestProfile, AlayaError, canonicalJson
 } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { isNativeGeminiRequestProfile, type NativeGeminiRequestProfile } from "../extraction/request-profile.js";
@@ -46,6 +46,7 @@ export const PAGE_SUPPORT_COMPARISON_SYSTEM_PROMPT = [
   "Unknown or incomplete originals may still be useful partial evidence.",
   "",
   "Use only the question, exact original text, and supplied source disclosures.",
+  SourceDisclosureSchema.description!,
   "query_as_of is unknown; do not invent a question clock from runtime time,",
   "evaluated_as_of, or source_time. evaluated_as_of is a runtime evaluation",
   "clock, not the query clock. source_time is observation time and does not",

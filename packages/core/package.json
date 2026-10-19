@@ -27,7 +27,8 @@
   "dependencies": {
     "@do-soul/alaya-cjk-segmentation": "workspace:*",
     "@do-soul/alaya-graph-algorithms": "workspace:*",
-    "@do-soul/alaya-protocol": "workspace:*"
+    "@do-soul/alaya-protocol": "workspace:*",
+    "@huggingface/transformers": "4.3.1"
   },
   "devDependencies": {
     "@do-soul/alaya-soul": "workspace:*",

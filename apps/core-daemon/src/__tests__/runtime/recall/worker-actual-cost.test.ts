@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  MemoryDimension,
+  sourceDisclosure, MemoryDimension,
   indexEntryCacheKey,
   sourceIndexEntry,
   type InformationIndex,
@@ -315,7 +315,7 @@ describe("native worker actual cost", () => {
     const sourceRow = encoded.find((row) => row.object_kind === "source_evidence");
     expect(sourceRow).toBeDefined();
     expect(sourceRow?.object_id).toBeUndefined();
-    expect(sourceRow?.source_disclosure?.evaluated_as_of).toBe(NOW);
+    expect(sourceDisclosure(sourceRow!.source_disclosure!).evaluated_as_of).toBe(NOW);
   });
 });
 

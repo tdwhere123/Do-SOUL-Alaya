@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
+import { sourceDisclosure } from "@do-soul/alaya-protocol";
 import {
   proofForLibraryEntry, projectSourceSemanticQuerySupport, selectSourceSemanticLibraryPage, sourceGoldRootIdentity
 } from "@do-soul/alaya-core";
@@ -74,7 +75,7 @@ function publicRows(recall: Recall) {
       within_budget: row.budget_state.within_budget, max_total_tokens: row.budget_state.max_total_tokens,
       root_id: entry.target.kind === "source_evidence" ? entry.target.root_id : null,
       root: entry.target.kind === "source_evidence" ? sourceGoldRootIdentity(entry.target) : null,
-      proof_use: row.source_disclosure?.proof_use, source_disclosure: row.source_disclosure
+      proof_use: row.source_disclosure === undefined ? undefined : sourceDisclosure(row.source_disclosure).proof_use, source_disclosure: row.source_disclosure
     };
   });
 }

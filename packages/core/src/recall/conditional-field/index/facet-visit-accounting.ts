@@ -4,7 +4,7 @@ import {
   type FieldValue,
   type SeedActivation
 } from "@do-soul/alaya-protocol";
-import { composedFacetPathId, facetBelongsToOutput, facetPathId } from "../engine/path-composition-facet.js";
+import { composedFacetPathId, facetBelongsToOutput, facetIdentityOf, facetPathId } from "../engine/path-composition-facet.js";
 import { productStateNodeId } from "../reference/bind-max-min.js";
 
 export type FacetVisitIndex = Readonly<{
@@ -40,11 +40,6 @@ function emptyIndex(total: number): FacetVisitIndex {
     total,
     complete: total === 0
   };
-}
-
-function pathIdentity(pathId: string): string {
-  const split = pathId.indexOf(":");
-  return split === -1 ? pathId : pathId.slice(0, split);
 }
 
 function cachedIndex(
@@ -107,7 +102,7 @@ export function prepareFacetVisitIndex(
         cache_misses: 1
       };
     }
-    push(maps.facets_by_identity, pathIdentity(vector.path_id), vector);
+    push(maps.facets_by_identity, facetIdentityOf(vector.path_id), vector);
     if (!known) visits += 1;
     built += 1;
   }

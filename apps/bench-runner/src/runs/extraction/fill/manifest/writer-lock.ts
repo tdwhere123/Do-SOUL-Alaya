@@ -4,12 +4,10 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
   renameSync,
   writeFileSync
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { ExtractionCacheInvariantError } from "../../cache/cache-invariant-error.js";
 import { readBoundedCanonicalUtf8Artifact } from
@@ -22,7 +20,7 @@ import {
   DIRECTORY_OPEN_FLAG,
   NO_FOLLOW_OPEN_FLAG
 } from "../../../fs/open-flags.js";
-import { readWindowsProcessStartIdentity } from "./windows-process-start.js";
+import { readProcessStartIdentity } from "./process-start-identity.js";
 import {
   assertBoundDirectoryIdentity,
   assertDirectoryIdentity,
@@ -393,95 +391,6 @@ function readLegacyWriterPid(value: unknown): number | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-const NON_CREDENTIAL_ENV_KEYS = [
-  "PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
-  "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR",
-  "LANG", "LC_ALL", "LC_CTYPE"
-] as const;
-
-/** Child processes may locate system tools. They do not inherit credential-like environment keys. */
-export function nonCredentialChildEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of NON_CREDENTIAL_ENV_KEYS) {
-    const value = process.env[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
-}
-
-export function readProcessStartIdentity(pid: number): string {
-  if (pid === process.pid) {
-    selfProcessStartIdentity ??= readPlatformProcessStartIdentity(pid);
-    return selfProcessStartIdentity;
-  }
-  return readPlatformProcessStartIdentity(pid);
-}
-
-let selfProcessStartIdentity: string | undefined;
-
-function readPlatformProcessStartIdentity(pid: number): string {
-  if (process.platform === "linux") return readLinuxProcessStartIdentity(pid);
-  if (process.platform === "win32") {
-    return readWindowsProcessStartIdentity(pid, nonCredentialChildEnv());
-  }
-  return readPosixProcessStartIdentity(pid);
-}
-
-function readLinuxProcessStartIdentity(pid: number): string {
-  const bytes = readFileSync(`/proc/${pid}/stat`);
-  if (bytes.byteLength > MAX_EXTRACTION_FILL_OWNER_BYTES) {
-    throw new ExtractionCacheInvariantError("writer process identity exceeds its size limit");
-  }
-  const stat = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  const closing = stat.lastIndexOf(")");
-  const startTime = stat.slice(closing + 2).trim().split(/\s+/u)[19];
-  if (closing < 0 || startTime === undefined || !/^\d+$/u.test(startTime)) {
-    throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
-  }
-  return startTime;
-}
-
-function readPosixProcessStartIdentity(pid: number): string {
-  if (!Number.isSafeInteger(pid) || pid <= 0) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT" }
-    );
-  }
-  let output: string;
-  try {
-    output = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
-      encoding: "utf8",
-      timeout: 2_000,
-      env: nonCredentialChildEnv(),
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
-  } catch (cause) {
-    if (typeof cause === "object" && cause !== null && "status" in cause &&
-        (cause as { status?: number }).status === 1) {
-      throw Object.assign(
-        new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-        { code: "ENOENT", cause }
-      );
-    }
-    throw new ExtractionCacheInvariantError(
-      `writer process start identity is unavailable: ${String(cause)}`,
-      { cause }
-    );
-  }
-  if (output.length === 0 || output.length > MAX_EXTRACTION_FILL_OWNER_BYTES) {
-    throw Object.assign(
-      new ExtractionCacheInvariantError("writer process start identity is unavailable"),
-      { code: "ENOENT" }
-    );
-  }
-  const parsed = Date.parse(output);
-  if (!Number.isFinite(parsed)) {
-    throw new ExtractionCacheInvariantError("writer process start identity is unavailable");
-  }
-  return String(parsed);
 }
 
 function hasErrorCode(cause: unknown, code: string): boolean {

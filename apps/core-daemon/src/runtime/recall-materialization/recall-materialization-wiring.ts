@@ -1,4 +1,5 @@
 import {
+  SourceIndexAcquisition,
   DeferredObligationService,
   RelationAssertionService,
   ResolutionService,
@@ -8,11 +9,14 @@ import {
   type ManifestationResolverEventLogWriterPort
 } from "@do-soul/alaya-core";
 import {
+  SqliteSourceIndexRepository,
   SqliteFieldCausalUsageRepo,
   SqliteTemporalPathProjectionReader
 } from "@do-soul/alaya-storage";
+import { hashContentDigest, sourceIndexGenerationCanServeQueries, unavailableSourceQueryPreparation } from "@do-soul/alaya-protocol";
 import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
+import { createSourceIndexProducer } from "../source-index/source-index-producer.js";
 import { SqliteHandoffGapAdapter } from "../../handoff/gap-adapter.js";
 import { createRecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
 import { createSqliteConnectionReadSnapshot } from "../recall/sqlite-read-snapshot.js";
@@ -48,9 +52,25 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
   const bindTemporalPathReads = pathReadBind === "temporal";
   const directPathReadPorts = createDirectRecallPathReadPorts(input, bindTemporalPathReads);
   const allowDirectSqliteRecallReads = input.database.filename === ":memory:";
+  // Bound lazily because the existing read-client construction precedes the shared embedding runtime.
+  // This callback observes the selected Source configuration; it never selects a window/backfill policy.
+  let sharedEmbeddingRuntime: ReturnType<typeof createEmbeddingRuntimeWithWarmupObserver> | undefined;
   const recallReadWorkerClient = createRecallReadWorkerClient({
     databaseFilename: input.database.filename,
     pathReadBind,
+    prepareSourceQuery: async preparation => {
+      let state;
+      try { state = new SqliteSourceIndexRepository(input.database, fieldContractSha256).state(preparation.workspace_id); }
+      catch { return unavailablePreparedSourceQuery(preparation, "source_selection_unavailable"); }
+      if (!("selection" in state) || state.active_generation_id === null ||
+          !sourceIndexGenerationCanServeQueries(state.status)) {
+        return unavailablePreparedSourceQuery(preparation, `source_index_${state.status}`);
+      }
+      return await SourceIndexAcquisition.prepareQuery({ ...preparation,
+        selection: state.selection,
+        bind: options => sharedEmbeddingRuntime?.bindSourceEmbedding(options) ??
+          Promise.resolve({ status: "unsupported", reason: "embedding_runtime_unavailable" }) });
+    },
     ...(bindTemporalPathReads
       ? { prepareTemporalProjection: directPathReadPorts.ensureTemporalProjection }
       : {}),
@@ -63,10 +83,17 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
   void recallReadWorkerReady.catch(() => undefined);
 
   try {
+    sharedEmbeddingRuntime = createEmbeddingRuntimeWithWarmupObserver(input);
+    const sourceIndexProducer = createSourceIndexProducer({
+      database: input.database,
+      bindSourceEmbedding: (options) => sharedEmbeddingRuntime!.bindLocalSourceIndex(options),
+      warn: input.warn
+    });
     const recallReadRuntime = createRecallReadRuntime(
       input,
       recallReadWorkerClient,
-      directPathReadPorts
+      directPathReadPorts,
+      sharedEmbeddingRuntime
     );
     const materializationRuntime = await createRecallMaterializationRuntime(
       input,
@@ -78,15 +105,29 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
       globalMemoryRuntime,
       recallReadRuntime,
       materializationRuntime,
-      recallReadWorkerClient
+      recallReadWorkerClient,
+      sourceIndexProducer
     );
   } catch (error) {
+    try { await sharedEmbeddingRuntime?.closeProvider(); }
+    catch (closeError) { input.warn("embedding startup cleanup failed", { error: String(closeError) }); }
     return await closeRecallReadWorkerAfterStartupFailure({
       recallReadWorkerClient,
       warn: input.warn,
       error
     });
   }
+}
+
+function unavailablePreparedSourceQuery(
+  input: Readonly<{ navigation: string; supplemental_navigation?: string }>, reason: string
+) {
+  const route = (navigation: string) => ({ vector: { status: "unavailable" as const, reason },
+    receipt: { ...unavailableSourceQueryPreparation(reason),
+      navigation_digest: hashContentDigest(navigation, fieldContractSha256) } });
+  const original = route(input.navigation);
+  return input.supplemental_navigation === undefined || input.supplemental_navigation === input.navigation
+    ? original : { ...original, supplemental: route(input.supplemental_navigation) };
 }
 
 function createGlobalMemoryRuntime(input: CreateRecallMaterializationWiringInput) {
@@ -132,9 +173,9 @@ function recallReadSnapshotOrThrow(
 function createRecallReadRuntime(
   input: CreateRecallMaterializationWiringInput,
   recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
-  directPathReadPorts: ReturnType<typeof createDirectRecallPathReadPorts>
+  directPathReadPorts: ReturnType<typeof createDirectRecallPathReadPorts>,
+  embeddingRuntime: ReturnType<typeof createEmbeddingRuntimeWithWarmupObserver>
 ) {
-  const embeddingRuntime = createEmbeddingRuntimeWithWarmupObserver(input);
   const recallSearchRuntime = createRecallSearchRuntime(
     input,
     recallReadWorkerClient,
@@ -211,7 +252,8 @@ function buildRecallMaterializationWiringResult(
   globalMemoryRuntime: ReturnType<typeof createGlobalMemoryRuntime>,
   recallReadRuntime: ReturnType<typeof createRecallReadRuntime>,
   materializationRuntime: Awaited<ReturnType<typeof createRecallMaterializationRuntime>>,
-  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
+  sourceIndexProducer: ReturnType<typeof createSourceIndexProducer>
 ) {
   return {
     globalMemoryService: globalMemoryRuntime.globalMemoryService,
@@ -248,13 +290,15 @@ function buildRecallMaterializationWiringResult(
     materializationRouter: materializationRuntime.materializationRuntime.materializationRouter,
     signalService: materializationRuntime.materializationRuntime.signalService,
     edgeClassifyQueueRepoHolder: materializationRuntime.edgeRuntime.edgeClassifyQueueRepoHolder,
-    recallReadWorkerClient
+    recallReadWorkerClient,
+    sourceIndexProducer
   };
 }
 
 function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializationWiringInput) {
   const embeddingRuntime = createDaemonEmbeddingRuntime({
     database: input.database,
+    embeddingStartupProbe: input.embeddingStartupProbe,
     configEnv: input.configEnv,
     eventLogRepo: input.eventLogRepo,
     eventPublisher: input.eventPublisher,

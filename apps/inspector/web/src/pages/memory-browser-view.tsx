@@ -1,5 +1,5 @@
 import { RefreshCcw, X } from "lucide-react";
-import type { SourceDisclosure } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, type SourceDisclosure } from "@do-soul/alaya-protocol";
 import { useI18n } from "../i18n/locale";
 import {
   DIMENSION_OPTIONS,
@@ -362,8 +362,9 @@ function PointerDetails(props: { readonly t: Translate; readonly pointer: Eviden
   );
 }
 
-function PointerText({ label, value, disclosure, t }: { readonly label: string; readonly value: string;
+function PointerText({ label, value, disclosure: wire, t }: { readonly label: string; readonly value: string;
   readonly disclosure?: SourceDisclosure; readonly t: Translate }) {
+  const disclosure = wire === undefined ? undefined : sourceDisclosure(wire);
   return (
     <div>
       <div className="text-[10px] uppercase tracking-widest text-ink-500">{label}</div>

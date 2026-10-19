@@ -1,3 +1,10 @@
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import("../../support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { try { expect(isolation.violations).toEqual([]); } finally { isolation.restore(); } });
+
 import { fetchLoopbackProvider } from "../../support/loopback-provider-fetch.js";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -5,8 +12,6 @@ import type { AddressInfo } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
-import { encodeSourceSemanticQueryCarrier } from "@do-soul/alaya-protocol";
 import { admitSourceSemanticQuery, SOURCE_SEMANTIC_QUERY_SOUL_PRODUCER_ID } from "@do-soul/alaya-core";
 import * as semanticProposals from "@do-soul/alaya-soul";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
@@ -24,10 +29,10 @@ import { STEP_PLAN_QUOTE_BASIS } from "../../../runs/extraction/authority/step-q
 import type { CompileSeedExtractionConfig } from "../../../runs/compile-seed/compile-seed-types.js";
 import { proposalRecoveryCases } from "./proposal-recovery.test-support.js";
 import { syntheticGeminiBody } from "./gemini-response-evidence.test-support.js";
+import { MIRA_QUERY, meaningBody, nestedMeaningBody } from "./query-response.test-support.js";
 
 const MODEL = "gemini-3.1-flash-lite";
 const PROFILE = "gemini-3.1-minimal-v1" as const;
-const MIRA_QUERY = "Who sent the sample to Mira?";
 const roots: string[] = [];
 
 proposalRecoveryCases({ workset: () => queryWorkset(MIRA_QUERY), body: () => meaningBody("sample"), config });
@@ -75,38 +80,6 @@ function extractor(raws: string[], extra: { finish?: string | null; usage?: bool
       };
     }
   };
-}
-
-function meaningBody(themeExcerpt: string): string {
-  return JSON.stringify({
-    contract: "source-semantic-query-response-v8",
-    outcome: { status: "interpreted" },
-    query: encodeSourceSemanticQueryCarrier({
-      contract: "source-semantic-query-meaning-v5",
-      alternatives: [{ conditions: [{
-        kind: "statement", key: "send", predicate: "send",
-        arguments: [
-          { role: "sender", target: { kind: "free", key: "sender", return: true }, excerpt: "Who" },
-          { role: "theme", target: { kind: "named", key: "sample", excerpt: themeExcerpt }, excerpt: themeExcerpt },
-          { role: "recipient", target: { kind: "named", key: "mira", excerpt: "Mira" }, excerpt: "Mira" }
-        ]
-      }] }],
-      gaps: []
-    })
-  });
-}
-
-function nestedMeaningBody(): string {
-  return JSON.stringify({ contract: "source-semantic-query-response-v9", outcome: { status: "interpreted" }, query: {
-    contract: "source-semantic-query-meaning-v5",
-    entities: [{ kind: "free", key: "sender", excerpt: "Who", return: true },
-      { kind: "named", key: "sample", excerpt: "sample" }, { kind: "named", key: "mira", excerpt: "Mira" }],
-    alternatives: [{ conditions: [{ kind: "statement", key: "send", predicate: "send", arguments: [
-      { role: "sender", target: { kind: "reference", key: "sender" }, excerpt: "Who" },
-      { role: "theme", target: { kind: "reference", key: "sample" }, excerpt: "sample" },
-      { role: "recipient", target: { kind: "reference", key: "mira" }, excerpt: "Mira" }
-    ] }] }], gaps: []
-  } });
 }
 
 it("commits a complete STOP query after settling the reserved attempt", async () => {

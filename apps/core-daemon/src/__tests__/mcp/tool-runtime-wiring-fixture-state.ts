@@ -66,6 +66,9 @@ const hoisted = vi.hoisted(() => {
     },
     close: vi.fn(),
     isClosed: vi.fn(() => false),
+    // StorageDatabase starts at 0 on open and increments only after a closed reopen.
+    getConnectionVersion: () => 0,
+    reopenIfClosed: vi.fn(),
     optimize: vi.fn()
   };
 

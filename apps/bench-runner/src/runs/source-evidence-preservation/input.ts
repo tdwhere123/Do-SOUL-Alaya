@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  isStepSemanticRequestProfile, type StepSemanticRequestProfile, AlayaError, canonicalJson,
+  SourceDisclosureSchema, isStepSemanticRequestProfile, type StepSemanticRequestProfile, AlayaError, canonicalJson,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
 } from "@do-soul/alaya-protocol";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
@@ -47,6 +47,7 @@ export const SOURCE_EVIDENCE_PRESERVATION_SYSTEM_PROMPT = [
   "say so explicitly with cannot_assess or loss.",
   "",
   "Use only the original question, exact previews, and supplied source disclosures.",
+  SourceDisclosureSchema.description!,
   "A null or unknown metadata field is unknown. Source observation time does not",
   "itself establish an event's occurrence time, and storage time must not fill a",
   "missing observation. The question's as-of clock is unknown; do not invent it.",

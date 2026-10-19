@@ -26,6 +26,7 @@ type Bootstrap = Readonly<{
 
 type RecallCoreStartupInput = Readonly<{
   readonly bootstrap: Bootstrap;
+  readonly embeddingStartupProbe?: CreateRecallMaterializationWiringInput["embeddingStartupProbe"];
   readonly repositories: Repositories;
   readonly foundation: Foundation;
   readonly registerRecallReadWorker: (client: RecallReadWorkerClient | null) => void;
@@ -60,6 +61,7 @@ function buildRecallRuntimeInput(input: RecallCoreStartupInput) {
       database: bootstrap.database
     }),
     relationProjectionAdmissionMode: input.relationProjectionAdmissionMode,
+    embeddingStartupProbe: input.embeddingStartupProbe,
     configEnv: bootstrap.configEnv,
     rawConfigService: foundation.rawConfigService,
     eventLogRepo: repositories.eventLogRepo,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { EventPublisher, RecallService, snapshotIdFromPin, type ConditionalFieldExecutionReceipt } from "@do-soul/alaya-core";
-import { MemoryDimension, SNAPSHOT_PIN_NATIVE_WORK, SoulMemorySearchRequestSchema, sourceEvidenceRootTarget, type ContextDeliveryRecord } from "@do-soul/alaya-protocol";
+import { sourceDisclosure, MemoryDimension, SNAPSHOT_PIN_NATIVE_WORK, SoulMemorySearchRequestSchema, sourceEvidenceRootTarget, type ContextDeliveryRecord } from "@do-soul/alaya-protocol";
 import { closeCachedDatabase, SqliteEventLogRepo, SqliteTrustStateRepo, SqliteFieldSourceRecordRepo, SqliteIndexedRecallProjection } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { createRecallHandler } from "../../../mcp-memory/recall/recall-usage-handlers.js";
@@ -132,7 +132,7 @@ it("expands the remaining bytes of a final source clipped by the real public res
     expect(deliveredEnd).toBe(Buffer.byteLength(result.content_preview));
     expect(deliveredEnd).toBeGreaterThan(0);
     expect(deliveredEnd).toBeLessThan(Buffer.byteLength(body));
-    expect(result.source_disclosure).toMatchObject({ material_kind: "original_body", source_binding: "checked_record" });
+    expect(sourceDisclosure(result.source_disclosure!)).toMatchObject({ material_kind: "original_body", source_binding: "checked_record" });
     expect(first.index?.continuation).not.toBeNull();
     const tail = await fixture.handler({ ...fixture.request, continuation: first.index!.continuation!,
       payload_continuation: { schema_version: 1, purpose: "payload_expansion", target: sourceEvidenceRootTarget(result.target),
