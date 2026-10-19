@@ -34,6 +34,7 @@ import {
   type AcceptedSynthesisCreateInput,
   type CreateProposalWithEventsIfAbsentResult,
   type CreateProposalWithEventsOptions,
+  type CountPendingSummariesOptions,
   type FindPendingSummariesOptions,
   type PendingProposalDedupeKey,
   type PendingProposalSummary,
@@ -142,6 +143,13 @@ export class SqliteProposalRepo implements ProposalRepo {
     options: FindPendingSummariesOptions = {}
   ): Promise<readonly Readonly<PendingProposalSummary>[]> {
     return await this.readQueries.findPendingSummaries(workspaceId, options);
+  }
+
+  public async countPendingSummaries(
+    workspaceId: string,
+    options: CountPendingSummariesOptions = {}
+  ): Promise<number> {
+    return await this.readQueries.countPendingSummaries(workspaceId, options);
   }
 
   public async findPendingByRunId(runId: string): Promise<Readonly<Proposal> | null> {

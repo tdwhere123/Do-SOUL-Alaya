@@ -32,17 +32,17 @@ function createDependencies(seedSpecs: readonly ToolSpec[] = []): {
   const specs = new Map(seedSpecs.map((spec) => [spec.tool_id, { ...spec }]));
 
   const repo: ToolSpecServiceRepoPort = {
-    insert: vi.fn(async (spec) => {
+    insertSync: vi.fn((spec) => {
       const inserted = { ...spec };
       specs.set(spec.tool_id, inserted);
       return inserted;
     }),
-    update: vi.fn(async (spec) => {
+    updateSync: vi.fn((spec) => {
       const updated = { ...spec };
       specs.set(spec.tool_id, updated);
       return updated;
     }),
-    findById: vi.fn(async (toolId) => specs.get(toolId) ?? null),
+    findByIdSync: vi.fn((toolId) => specs.get(toolId) ?? null),
     list: vi.fn(async () =>
       [...specs.values()].sort((left, right) => left.tool_id.localeCompare(right.tool_id))
     )
@@ -64,7 +64,7 @@ describe("ToolSpecService", () => {
 
     const registered = await service.register(spec);
 
-    expect(repo.insert).toHaveBeenCalledWith(spec);
+    expect(repo.insertSync).toHaveBeenCalledWith(spec);
     expect(registered).toEqual(spec);
     expect(Object.isFrozen(registered)).toBe(true);
   });
@@ -85,7 +85,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.insertSync).not.toHaveBeenCalled();
   });
 
   it("rejects register when requires_confirmation is true for a read-only tool", async () => {
@@ -102,7 +102,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.insertSync).not.toHaveBeenCalled();
   });
 
   it("rejects register when a destructive tool is categorized as read", async () => {
@@ -119,7 +119,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.insertSync).not.toHaveBeenCalled();
   });
 
   it("rejects register when a destructive tool is marked fast-path eligible", async () => {
@@ -139,7 +139,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.insert).not.toHaveBeenCalled();
+    expect(repo.insertSync).not.toHaveBeenCalled();
   });
 
   it("updates a valid tool spec through the repo and returns a frozen record", async () => {
@@ -153,12 +153,12 @@ describe("ToolSpecService", () => {
       })
     );
 
-    expect(repo.update).toHaveBeenCalledWith(
+    expect(repo.updateSync).toHaveBeenCalledWith(
       createToolSpec({
         description: "Read a file after update."
       })
     );
-    expect(repo.findById).not.toHaveBeenCalled();
+    expect(repo.findByIdSync).not.toHaveBeenCalled();
     expect(updated.description).toBe("Read a file after update.");
     expect(Object.isFrozen(updated)).toBe(true);
   });
@@ -180,7 +180,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.updateSync).not.toHaveBeenCalled();
   });
 
   it("rejects update when requires_confirmation is true for a read-only tool", async () => {
@@ -198,7 +198,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.updateSync).not.toHaveBeenCalled();
   });
 
   it("rejects update when a destructive tool is categorized as read", async () => {
@@ -216,7 +216,7 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.updateSync).not.toHaveBeenCalled();
   });
 
   it("rejects update when a destructive tool is marked fast-path eligible", async () => {
@@ -237,20 +237,20 @@ describe("ToolSpecService", () => {
       code: "VALIDATION"
     });
 
-    expect(repo.update).not.toHaveBeenCalled();
+    expect(repo.updateSync).not.toHaveBeenCalled();
   });
 
   it("propagates repo-owned NOT_FOUND on update without a separate existence pre-read", async () => {
     const { dependencies, repo } = createDependencies();
-    vi.mocked(repo.update).mockRejectedValueOnce(new CoreError("NOT_FOUND", "Tool spec not found"));
+    vi.mocked(repo.updateSync).mockImplementationOnce(() => { throw new CoreError("NOT_FOUND", "Tool spec not found"); });
     const service = new ToolSpecService(dependencies);
 
     await expect(service.update(createToolSpec())).rejects.toMatchObject({
       code: "NOT_FOUND"
     });
 
-    expect(repo.update).toHaveBeenCalledWith(createToolSpec());
-    expect(repo.findById).not.toHaveBeenCalled();
+    expect(repo.updateSync).toHaveBeenCalledWith(createToolSpec());
+    expect(repo.findByIdSync).not.toHaveBeenCalled();
   });
 
   it("findById throws NOT_FOUND for a missing tool spec", async () => {

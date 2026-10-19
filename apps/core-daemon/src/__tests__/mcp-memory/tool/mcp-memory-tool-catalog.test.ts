@@ -35,7 +35,19 @@ describe("mcp memory tool catalog", () => {
     expect(byName.get("soul.interpretation")?.annotations.readOnlyHint).toBe(false);
     expect(byName.get("soul.interpretation")?.annotations.destructiveHint).toBe(true);
     expect(byName.get("soul.interpretation")?.annotations.idempotentHint).toBe(true);
-    expect(byName.get("soul.interpretation")?.description).toContain("provider-free");
+    expect(byName.get("soul.interpretation")?.description).toContain("host-owned interpretation operations");
+    expect(byName.get("soul.interpretation")?.description).toContain(
+      "may prepare an embedding through the configured runtime"
+    );
+    expect(byName.get("soul.interpretation")?.description).toContain(
+      "language drafts and semantic generation occur outside this tool"
+    );
+    expect(byName.get("soul.interpretation")?.description).toContain(
+      "local inference and external embedding attempts are reported separately"
+    );
+    expect(byName.get("soul.interpretation")?.description).not.toMatch(
+      /provider-free|no operation calls a provider/iu
+    );
     expect(byName.get("soul.interpretation")?.description).toContain(
       "soul.report_context_usage is not an interpretation delivery loop"
     );

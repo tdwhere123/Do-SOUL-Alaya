@@ -1,7 +1,5 @@
 import {
   ExtensionDescriptorRegisteredPayloadSchema,
-  ExtensionDescriptorRegistrationCompensationFailedPayloadSchema,
-  ExtensionDescriptorRegistrationRevertedPayloadSchema,
   RuntimeGovernanceEventType,
   type EventLogEntry,
   type SkillPackage,
@@ -36,47 +34,6 @@ export function createDescriptorRegisteredEventEntry(
   );
 
   return createEntry(input, systemWorkspaceId, RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTERED, payload);
-}
-
-export function createDescriptorRegistrationRevertedEventEntry(
-  input: Pick<DescriptorEventInput, "descriptor_type" | "descriptor_id">,
-  originalEventId: string,
-  systemWorkspaceId: string,
-  now?: () => string
-): EventEntry {
-  const payload = deepFreeze(
-    ExtensionDescriptorRegistrationRevertedPayloadSchema.parse({
-      descriptor_type: input.descriptor_type,
-      descriptor_id: input.descriptor_id,
-      original_event_id: originalEventId,
-      reverted_at: readNow(now)
-    })
-  );
-
-  return createEntry(input, systemWorkspaceId, RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_REVERTED, payload);
-}
-
-export function createDescriptorRegistrationCompensationFailedEventEntry(
-  input: Pick<DescriptorEventInput, "descriptor_type" | "descriptor_id">,
-  originalEventId: string,
-  systemWorkspaceId: string,
-  now?: () => string
-): EventEntry {
-  const payload = deepFreeze(
-    ExtensionDescriptorRegistrationCompensationFailedPayloadSchema.parse({
-      descriptor_type: input.descriptor_type,
-      descriptor_id: input.descriptor_id,
-      original_event_id: originalEventId,
-      failed_at: readNow(now)
-    })
-  );
-
-  return createEntry(
-    input,
-    systemWorkspaceId,
-    RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_COMPENSATION_FAILED,
-    payload
-  );
 }
 
 function createEntry(

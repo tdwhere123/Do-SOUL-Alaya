@@ -283,7 +283,7 @@ export function answerSystemFor(questionType: string, isAbstention: boolean): st
     return ANSWER_SYSTEM_PREFERENCE;
   }
   if (questionType === "temporal-reasoning") {
-    return process.env.ALAYA_BENCH_QA_TEMPORAL_ENUM !== undefined
+    return envEnabled("ALAYA_BENCH_QA_TEMPORAL_ENUM")
       ? ANSWER_SYSTEM_TEMPORAL_ENUM
       : ANSWER_SYSTEM_TEMPORAL;
   }

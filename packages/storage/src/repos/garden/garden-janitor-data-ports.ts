@@ -46,19 +46,23 @@ export function createTieringPort(
     demoteToWarm: (workspaceId, memoryEntryIds) => {
       const uniqueIds = Array.from(new Set(memoryEntryIds.filter((entryId) => entryId.length > 0)));
       if (uniqueIds.length === 0) {
-        return;
+        return [];
       }
 
       const placeholders = uniqueIds.map(() => "?").join(", ");
-      context.database.connection
+      const rows = context.database.connection
         .prepare(
           `UPDATE memory_entries
            SET storage_tier = '${BOUNDARY_COLD_TIER}', updated_at = ?
            WHERE workspace_id = ?
              AND object_id IN (${placeholders})
-             AND lifecycle_state = '${ACTIVE_STATE}'`
+             AND lifecycle_state = '${ACTIVE_STATE}'
+             AND storage_tier = 'hot'
+           RETURNING object_id`
         )
-        .run(context.now(), workspaceId, ...uniqueIds);
+        .all(context.now(), workspaceId, ...uniqueIds) as readonly { readonly object_id: string }[];
+      const applied = new Set(rows.map((row) => row.object_id));
+      return uniqueIds.filter((entryId) => applied.has(entryId));
     }
   };
 }

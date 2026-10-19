@@ -125,6 +125,7 @@ describe("mcp memory governance", () => {
         findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
         findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: async (proposalId, updatedAt, resolutionEvents, _memoryUpdate, options) => {
           order.push("repo:acceptPendingMemoryUpdateWithEvents");
           const existing = proposals.get(proposalId);
@@ -293,6 +294,7 @@ describe("mcp memory governance", () => {
           proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, resolutionEvents) => {
           if (storedProposal.resolution_state !== ProposalResolutionState.PENDING) {
             throw Object.assign(new Error(`Proposal is already ${storedProposal.resolution_state}.`), {
@@ -414,6 +416,7 @@ describe("mcp memory governance", () => {
         findById: async () => null,
         findScopedById: async () => null,
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("updatePendingResolutionWithEvents must not be called");
         }

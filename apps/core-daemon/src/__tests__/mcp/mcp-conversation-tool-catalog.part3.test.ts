@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CoreError,
+  EventPublisher,
   ExtensionRegistryService,
   McpToolDiscoveryService,
   ToolSpecService
@@ -119,8 +120,11 @@ describe("daemon conversation tool catalog", () => {
     const extensionRegistry = new ExtensionRegistryService({
       extensionStore: new SqliteExtensionDescriptorRepo(database),
       toolSpecService,
-      eventLogWriter: eventLogRepo,
-      runtimeNotifier,
+      eventPublisher: new EventPublisher({
+        eventLogRepo,
+        runtimeNotifier,
+        runHotStateService: { apply: () => undefined }
+      }),
       defaultWorkspaceId: "system"
     });
     const server: McpServerInfo = {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BudgetBankruptcyServiceProposalPort, EventPublisherInput } from "@do-soul/alaya-core";
 import {
+  AlayaError,
   ControlPlaneObjectKind,
   ProposalResolutionState,
   ProposalSchema,
@@ -11,7 +12,8 @@ import {
 import type { ProposalRepo } from "@do-soul/alaya-storage";
 
 interface CreateBudgetProposalPortParams {
-  readonly proposalRepo: Pick<ProposalRepo, "createProposalWithEvents" | "updateResolution" | "findById" | "findPendingByRunId">;
+  readonly proposalRepo: Pick<ProposalRepo,
+    "createProposalWithEvents" | "updatePendingResolution" | "updatePendingResolutionWithEvents" | "findById" | "findPendingByRunId">;
   readonly now: () => string;
   readonly generateProposalId?: () => string;
 }
@@ -65,7 +67,23 @@ export function createBudgetProposalPort(
         readonly resolution_state: Proposal["resolution_state"];
         readonly last_updated_at: string;
       }
-    ) => await params.proposalRepo.updateResolution(proposalId, patch.resolution_state, patch.last_updated_at),
+    ) => {
+      try {
+        return await params.proposalRepo.updatePendingResolution(proposalId, patch.resolution_state, patch.last_updated_at);
+      } catch (error) {
+        if (!(error instanceof AlayaError) || error.code !== "CONFLICT") throw error;
+        // Another recovery may have applied the same durable decision already.
+        const existing = await params.proposalRepo.findById(proposalId);
+        if (existing?.resolution_state === patch.resolution_state && existing.last_updated_at === patch.last_updated_at) {
+          return existing;
+        }
+        throw error;
+      }
+    },
+    updateWithEvents: async (proposalId, patch, events) =>
+      await params.proposalRepo.updatePendingResolutionWithEvents(
+        proposalId, patch.resolution_state, patch.last_updated_at, events
+      ),
     findById: async (proposalId: string) => await params.proposalRepo.findById(proposalId),
     findPendingByRunId: async (runId: string) => await params.proposalRepo.findPendingByRunId(runId)
   };

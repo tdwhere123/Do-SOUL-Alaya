@@ -5,7 +5,7 @@ import { runAlayaMcpStdioServer } from "../../mcp/server/mcp-server.js";
 import { createMcpMemoryToolDispatcher } from "../../mcp-memory/tool/tool-handler-dispatch.js";
 import type { McpMemoryToolOperations, GardenTaskOperations } from "../../mcp-memory/tool/tool-handler-operations.js";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
-import type { AlayaMemoryToolName } from "../../mcp-memory/tool/tool-catalog.js";
+import { listAlayaMemoryTools, type AlayaMemoryToolName } from "../../mcp-memory/tool/tool-catalog.js";
 
 class PipeClientTransport {
   public onclose?: () => void;
@@ -100,6 +100,23 @@ describe("Alaya MCP stdio pipe", () => {
       const names = listed.tools.map((tool) => tool.name);
       expect(names).toContain("soul.recall");
       expect(names).toContain("soul.list_pending_proposals");
+      for (const published of listed.tools) {
+        const definition = listAlayaMemoryTools().find(tool => tool.name === published.name)!;
+        expect(published.inputSchema).toEqual({ ...definition.inputSchema, type: "object" });
+      }
+      const interpretation = listed.tools.find(tool => tool.name === "soul.interpretation")!;
+      const update = listed.tools.find(tool => tool.name === "soul.propose_memory_update")!;
+      expect(interpretation.inputSchema.oneOf).toEqual(expect.any(Array));
+      expect(update.inputSchema.anyOf).toEqual(expect.any(Array));
+      expect(interpretation.description).toContain("external embedding attempts are reported separately");
+      expect(interpretation.description).not.toMatch(/provider-free|no operation calls a provider/iu);
+      expect(listed.tools.find(tool => tool.name === "soul.recall")?.description)
+        .toContain("ordinary recall does not enqueue Garden work or call a missing embedding provider");
+
+      const invalid = await client.callTool({
+        name: "soul.interpretation", arguments: { operation: "not-an-operation" }
+      });
+      expect(invalid.isError).toBe(true);
 
       const called = await client.callTool({
         name: "soul.list_pending_proposals",

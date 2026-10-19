@@ -3,9 +3,15 @@ import process from "node:process";
 import { stat } from "node:fs/promises";
 import { ZodError } from "zod";
 import { diffKpis } from "../history/diff.js";
-import { listEntries, readEntry, readPrevious, resolveDefaultBenchHistoryRoot, type HistoryLayout } from "../history/history.js";
+import {
+  listEntries,
+  readComparablePrevious,
+  readEntry,
+  resolveDefaultBenchHistoryRoot,
+  type HistoryLayout
+} from "../history/history.js";
 import { renderReport } from "../reports/report.js";
-import { BenchName } from "../contracts/kpi-schema.js";
+import { BenchName, type KpiPayload } from "../contracts/kpi-schema.js";
 
 const DEFAULT_HISTORY_ROOT = resolveDefaultBenchHistoryRoot();
 const SUPPORTED_BENCH_NAMES = BenchName.options.join(" | ");
@@ -20,12 +26,16 @@ Usage:
   alaya-eval diff <bench-name> [--history-root <path>]
   alaya-eval list <bench-name> [--history-root <path>]
 
+diff compares the newest run with the newest earlier run in the same
+split, policy, report, and embedding cohort.
+
 bench-name = ${SUPPORTED_BENCH_NAMES}
 
 To RUN a benchmark, use the harness in apps/bench-runner
 (e.g. \`pnpm --dir apps/bench-runner exec alaya-bench-runner …\`).
 
-Exit code 1 if a regression hits the ✗ threshold; 0 otherwise.
+Exit code 1 if a regression hits the ✗ threshold; 2 when no comparable
+baseline is available; 0 otherwise.
 `;
 
 export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
@@ -140,7 +150,20 @@ async function runDiffCommand(
       process.stderr.write(`alaya-eval diff: latest entry '${currentSlug}' unreadable\n`);
       return 2;
     }
-    const previous = await readPrevious(layout, benchName, currentSlug);
+    const previous = await readComparablePrevious(layout, benchName, currentSlug, {
+      split: current.split,
+      policyShape: current.policy_shape,
+      simulateReport: current.simulate_report,
+      embeddingProvider: current.embedding_provider
+    });
+    if (previous === null && slugs.length > 1) {
+      process.stderr.write(
+        `alaya-eval diff: no comparable previous entry under ` +
+          `${path.join(layout.historyRoot, benchName)} for ${describeCohort(current)}; ` +
+          "refusing to diff against an incompatible baseline\n"
+      );
+      return 2;
+    }
     const diffResult = diffKpis(current, previous);
     process.stdout.write(renderReport(current, previous, diffResult));
     process.stdout.write("\n");
@@ -180,6 +203,14 @@ async function runListCommand(
   } catch (error) {
     return reportReadError("list", error);
   }
+}
+
+function describeCohort(payload: KpiPayload): string {
+  return (
+    `split=${payload.split} policy_shape=${payload.policy_shape} ` +
+    `simulate_report=${payload.simulate_report} ` +
+    `embedding_provider=${payload.embedding_provider}`
+  );
 }
 
 function reportReadError(command: string, error: unknown): number {

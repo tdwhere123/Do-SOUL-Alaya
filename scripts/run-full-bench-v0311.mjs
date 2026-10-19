@@ -33,7 +33,7 @@
 //                                                                # (default: apps/bench-runner/data)
 //   node scripts/run-full-bench-v0311.mjs --history-root <path>  # override archive root
 //   node scripts/run-full-bench-v0311.mjs --dry-run              # print commands only
-//   node scripts/run-full-bench-v0311.mjs --resume               # skip benches already done
+//   node scripts/run-full-bench-v0311.mjs --resume               # reuse matching completed benches
 //   node scripts/run-full-bench-v0311.mjs --help
 //
 // Detached operator launch:
@@ -41,14 +41,21 @@
 //     > /tmp/v0311-full.log 2>&1 < /dev/null &
 //   disown
 //
-// Resume semantics: --resume uses a per-step sentinel under <log-root>/<id>.done.
+// Resume semantics: --resume reuses a step only when its checkpoint under
+// <log-root>/<id>.done records the same requested run identity (dataset dir,
+// history root, extraction cache, limit, policy shape, code revision) and the
+// recorded archive still contains kpi.json. A missing, legacy, mismatched, or
+// unverifiable checkpoint blocks the run instead of skipping it or starting a
+// replacement bench; remove the checkpoint or rerun without --resume to run it
+// explicitly.
 // Per-question intra-step resume (skip already-completed questions inside a
 // single bench) is NOT implemented; if a 500Q LongMemEval run crashes midway
 // the entire step re-runs. See unknowns in the worker return for follow-up.
 //
 // Exit codes:
 //   0  every requested bench produced a fresh archive with kpi.json
-//   1  one bench exited non-zero, or archive verification failed
+//   1  one bench exited non-zero, archive verification failed, or a resume
+//      checkpoint could not be revalidated
 //   2  bad CLI argument
 
 import { spawn } from "node:child_process";
@@ -66,6 +73,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatDuration, parseArgs, selectSteps } from "./run-full-bench-v0311-cli.mjs";
 import { resolveDefaultBenchHistoryRoot } from "../packages/eval/dist/index.js";
 import { resolveEffectiveExtractionCacheRoot } from "../apps/bench-runner/dist/runs/compile-seed/compile-seed-config.js";
+import { resolveBenchCommitSha7 } from "../apps/bench-runner/dist/shared/version.js";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
@@ -78,6 +86,7 @@ const BENCH_RUNNER = path.join(
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 const BENCH_ENV_SOURCE_COMMAND =
   `export ${GARDEN_MODEL_ENV}=<model> (or source your bench environment file)`;
+const CHECKPOINT_VERSION = 1;
 
 // Detached launches must bind the same model as the selected cache before
 // spawning a bench; credentials or another cache cannot repair that identity.
@@ -165,7 +174,11 @@ Flags:
   --extraction-cache-root <path>  Cache root (explicit, then environment, then local default)
   --log-root <path>        Log root (default: <repo>/var/bench-logs/v0.3.11)
   --dry-run                Print commands without executing
-  --resume                 Skip benches whose sentinel marker already exists
+  --resume                 Reuse only completed steps whose checkpoint matches
+                           the requested dataset, history root, extraction
+                           cache, limit, policy, and code revision, and whose
+                           archive still has kpi.json; otherwise block without
+                           starting a bench
   --help                   Show this help
 
 Exit codes:
@@ -205,6 +218,92 @@ function findNewArchive(root, beforeSet) {
 
 function sentinelPath(logRoot, stepId) {
   return path.join(logRoot, `${stepId}.done`);
+}
+
+function requestedRunIdentity(step, ctx) {
+  return {
+    step_id: step.id,
+    data_dir: ctx.dataDir,
+    history_root: ctx.historyRoot,
+    extraction_cache_root: ctx.extractionCacheRoot,
+    archive_root: path.join(ctx.historyRoot, step.archiveRoot),
+    limit: ctx.limit ?? null,
+    policy_shape: ctx.policyShape,
+    revision: resolveBenchCommitSha7()
+  };
+}
+
+// One verification path for both a fresh step and a resumed checkpoint: the
+// archive directory must exist and contain the kpi.json written on completion.
+function archiveContainsKpi(archivePath) {
+  return (
+    typeof archivePath === "string" &&
+    archivePath.length > 0 &&
+    existsSync(archivePath) &&
+    existsSync(path.join(archivePath, "kpi.json"))
+  );
+}
+
+function readCheckpoint(sentinel) {
+  let checkpoint;
+  try {
+    checkpoint = JSON.parse(readFileSync(sentinel, "utf8"));
+  } catch (err) {
+    return {
+      reusable: false,
+      reason: `checkpoint is not readable JSON (${err.message})`
+    };
+  }
+  if (checkpoint?.checkpoint_version !== CHECKPOINT_VERSION) {
+    return {
+      reusable: false,
+      reason:
+        `checkpoint version ${JSON.stringify(checkpoint?.checkpoint_version ?? null)} ` +
+        `is not supported (expected ${CHECKPOINT_VERSION})`
+    };
+  }
+  if (
+    checkpoint.request === null ||
+    typeof checkpoint.request !== "object" ||
+    Array.isArray(checkpoint.request)
+  ) {
+    return { reusable: false, reason: "checkpoint has no requested-run identity" };
+  }
+  return { reusable: true, checkpoint };
+}
+
+function describeIdentityMismatch(expected, recorded) {
+  for (const key of Object.keys(expected)) {
+    if (recorded[key] !== expected[key]) {
+      return `${key} recorded=${JSON.stringify(recorded[key])} ` +
+        `requested=${JSON.stringify(expected[key])}`;
+    }
+  }
+  return null;
+}
+
+function resolveCheckpointReuse(step, ctx, sentinel) {
+  const read = readCheckpoint(sentinel);
+  if (!read.reusable) return read;
+  const mismatch = describeIdentityMismatch(
+    requestedRunIdentity(step, ctx),
+    read.checkpoint.request
+  );
+  if (mismatch !== null) {
+    return {
+      reusable: false,
+      reason: `requested run differs from checkpoint: ${mismatch}`
+    };
+  }
+  if (!archiveContainsKpi(read.checkpoint.archive_path)) {
+    return {
+      reusable: false,
+      reason:
+        `recorded archive is missing or has no kpi.json: ` +
+        `${read.checkpoint.archive_path ?? "(none)"}`
+    };
+  }
+  return { reusable: true, checkpoint: read.checkpoint };
 }
 
 function buildContext(args) {
@@ -291,16 +390,15 @@ async function runStep(step, ctx, args) {
 
   const durationMs = Date.now() - started;
   const archivePath = findNewArchive(archiveDir, beforeSlugs);
-  const kpiPath = archivePath ? path.join(archivePath, "kpi.json") : null;
-  const archiveOk =
-    archivePath !== null && kpiPath !== null && existsSync(kpiPath);
+  const archiveOk = archiveContainsKpi(archivePath);
 
   if (code === 0 && archiveOk) {
     writeFileSync(
       sentinelPath(args.logRoot, step.id),
       JSON.stringify(
         {
-          step_id: step.id,
+          checkpoint_version: CHECKPOINT_VERSION,
+          request: requestedRunIdentity(step, ctx),
           completed_at: new Date().toISOString(),
           archive_path: archivePath,
           log_path: logPath,
@@ -381,19 +479,41 @@ async function executeSteps(args, ctx, steps) {
   for (const step of steps) {
     const sentinel = sentinelPath(args.logRoot, step.id);
     if (args.resume && existsSync(sentinel)) {
-      process.stdout.write(
-        `\n=== ${step.label} ===\nSKIP (resume sentinel present: ${sentinel})\n`
+      const reuse = resolveCheckpointReuse(step, ctx, sentinel);
+      if (reuse.reusable) {
+        process.stdout.write(
+          `\n=== ${step.label} ===\n` +
+            `SKIP (resume checkpoint matches: ${sentinel})\n`
+        );
+        results.push({
+          step,
+          skipped: true,
+          ok: true,
+          code: 0,
+          durationMs: 0,
+          archivePath: reuse.checkpoint.archive_path,
+          logPath: reuse.checkpoint.log_path ?? null
+        });
+        continue;
+      }
+      process.stderr.write(
+        `step ${step.id} checkpoint is not reusable: ${reuse.reason}\n` +
+          `No bench was started. Remove ${sentinel} or rerun without ` +
+          `--resume to run this step again.\n`
       );
-      results.push({
+      const blocked = {
         step,
-        skipped: true,
-        ok: true,
-        code: 0,
+        skipped: false,
+        blocked: true,
+        ok: false,
+        code: 1,
         durationMs: 0,
         archivePath: null,
         logPath: null
-      });
-      continue;
+      };
+      results.push(blocked);
+      firstFailure = { step, outcome: blocked };
+      break;
     }
 
     let outcome;
@@ -445,6 +565,8 @@ function printSummary(args, results, totalMs) {
       process.stdout.write(
         `  ${r.step.id}: SKIP (resume)\n`
       );
+    } else if (r.blocked) {
+      process.stdout.write(`  ${r.step.id}: BLOCKED (resume checkpoint)\n`);
     } else if (args.dryRun) {
       process.stdout.write(`  ${r.step.id}: DRY-RUN\n`);
     } else {

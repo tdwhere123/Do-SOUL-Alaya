@@ -84,8 +84,12 @@ export function bindEmbeddingOverlay(
   ensureOverlayViews(connection);
 }
 
+export function isEmbeddingOverlayAttached(connection: EmbeddingOverlayBindConnection): boolean {
+  return attachedOverlayPath(connection) !== null;
+}
+
 export function detachEmbeddingOverlay(connection: EmbeddingOverlayBindConnection): void {
-  if (!isOverlayAttached(connection)) return;
+  if (!isEmbeddingOverlayAttached(connection)) return;
   connection.exec(`
     DROP VIEW IF EXISTS memory_embeddings;
     DROP VIEW IF EXISTS evidence_recall_embeddings;
@@ -127,10 +131,6 @@ export function bindEmbeddingOverlayIfPresent(
   bindEmbeddingOverlay(connection, overlayPath);
 }
 
-function isOverlayAttached(connection: EmbeddingOverlayBindConnection): boolean {
-  return attachedOverlayPath(connection) !== null;
-}
-
 function attachedOverlayPath(connection: EmbeddingOverlayBindConnection): string | null {
   const rows = connection.prepare("SELECT name, file FROM pragma_database_list").all() as
     ReadonlyArray<Readonly<{ name: string; file?: string }>>;
@@ -146,6 +146,8 @@ function canonicalPath(filePath: string): string {
 }
 
 function ensureOverlayViews(connection: EmbeddingOverlayBindConnection): void {
+  // Same-name TEMP views project borrowed sidecar rows into unqualified reads.
+  // Indexed DDL and INDEXED BY stay on main; a view cannot own those indexes.
   connection.exec(`
     CREATE TEMP VIEW IF NOT EXISTS memory_embeddings AS
     SELECT

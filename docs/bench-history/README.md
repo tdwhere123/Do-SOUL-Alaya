@@ -70,6 +70,14 @@ dataset, baseline, or cache, and do not start model calls to repair it.
 Extraction/fill is a separate explicit workflow with its existing authority and
 budget requirements. Credentials alone do not make missing cache data valid.
 
+`node scripts/run-full-bench-v0311.mjs --resume` reuses a completed step only
+when its `<log-root>/<id>.done` checkpoint records the same requested run
+identity (dataset, archive/history root, extraction cache, limit, policy shape,
+and code revision) and the archive still contains `kpi.json`. A missing, legacy,
+mismatched, or unverifiable checkpoint blocks the run with exit status 1 and
+starts no replacement bench; remove it or rerun without `--resume` to run the
+step explicitly.
+
 ## Metrics and comparisons
 
 - `sample_size` identifies the dataset population; `evaluated_count` records the
@@ -90,12 +98,20 @@ budget requirements. Credentials alone do not make missing cache data valid.
 Compare matching dataset/selection and runtime cohorts. Regression bands live in
 [thresholds.ts](../../packages/eval/src/gates/thresholds.ts); passing eligibility
 uses the executable release gates and archive contracts, not the storage path.
+`alaya-eval diff` selects the newest earlier entry that matches the current
+split, policy shape, simulate-report mode, and embedding provider; when other
+entries exist but none matches, it exits 2 instead of diffing an incompatible
+baseline.
 
 `latest-run*.json` identifies the newest archived run, including failures.
 `latest-passing*.json` advances only for eligible passing evidence with no
-findings. `latest-baseline*.json` is a legacy passing alias. Keep embedding
-cohorts and distinct benchmark surfaces in their own pointer chains. Historical
-retired surfaces remain readable without reintroducing their runners.
+findings. The public LongMemEval Oracle and M splits (`longmemeval-oracle`,
+`longmemeval-m`) keep archives and `latest-run*.json` pointers but cannot advance
+a shared `latest-passing*.json` chain because they have no applicable release
+gate; maintained-content CI enforces that refusal. `latest-baseline*.json` is a
+legacy passing alias. Keep embedding cohorts and distinct benchmark surfaces in
+their own pointer chains. Historical retired surfaces remain readable without
+reintroducing their runners.
 
 CI verifies archive, pointer, checksum, and failure behavior with deterministic
 temporary fixtures. It does not require a contributor's local history or model

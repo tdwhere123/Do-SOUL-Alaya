@@ -17,6 +17,7 @@ import { runSourceAccessDiagnosticLauncher } from "../../../runs/source-access-d
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact, withSemanticChainDaemon,
   writeChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import { SourceAccessDiagnosticEvaluationSchema, SourceAccessDiagnosticObservationSchema,
+  UnverifiedProviderCallEvidenceError, assertNoProviderCalls,
   type SourceAccessDiagnosticObservation } from "../../../runs/source-access-diagnostic/contract.js";
 
 const roots = new Set<string>();
@@ -153,6 +154,7 @@ describe("source access diagnostic", () => {
     try {
       const observed = await observeSourceAccessDiagnostic(f.config, join(f.root, "observed"));
       expect(observed.result.status).toBe("complete");
+      expect(observed.result.provider_calls).toBe(0);
       expect(observed.result.rows).toHaveLength(2);
       for (const row of observed.result.rows) {
         expect(row.status).toBe("observed");
@@ -174,6 +176,7 @@ describe("source access diagnostic", () => {
         }
       }
       const evaluated = await evaluateSourceAccessDiagnostic(observed.path, join(f.root, "evaluated"));
+      expect(evaluated.result.provider_calls).toBe(0);
       expect(evaluated.result.rows).toHaveLength(2);
       expect(evaluated.result.rows.every((row) => row.status === "measured" && row.first_gold_source_rank !== null)).toBe(true);
       const frozen = readLongMemEvalSemanticFreeze(f.config.source_run_root);
@@ -204,13 +207,39 @@ describe("source access diagnostic", () => {
     } finally { globalThis.fetch = originalFetch; }
   }, 120000);
 
+  it("admits only an authority-backed zero provider-call receipt", () => {
+    expect(() => assertNoProviderCalls(0)).not.toThrow();
+    expect(() => assertNoProviderCalls(null)).toThrow(UnverifiedProviderCallEvidenceError);
+    expect(() => assertNoProviderCalls(1)).toThrow(UnverifiedProviderCallEvidenceError);
+  });
+
+  it("rejects a nullable admitted receipt instead of evaluating it as zero provider calls", async () => {
+    const f = await fixture();
+    const observed = await observeSourceAccessDiagnostic(f.config, join(f.root, "provider-call-observed"));
+    const alteredRoot = join(f.root, "nullable-provider-receipt");
+    await cp(join(f.root, "provider-call-observed"), alteredRoot, { recursive: true });
+    const altered = readChainArtifact(join(alteredRoot, "observation.json")) as SourceAccessDiagnosticObservation;
+    const resultRef = altered.rows[0]!.attempt_evidence[0]!.result!;
+    const result = readChainArtifact(join(alteredRoot, resultRef.path)) as { provider_attempts: number | null };
+    result.provider_attempts = null;
+    await replaceAuthoredArtifact(join(alteredRoot, resultRef.path), result);
+    resultRef.identity = chainIdentity(result);
+    await replaceAuthoredArtifact(join(alteredRoot, "observation.json"), altered);
+    await expect(evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"),
+      join(f.root, "nullable-provider-evaluated"))).rejects.toThrow(/zero diagnostic provider calls/u);
+    expect(observed.result.provider_calls).toBe(0);
+  }, 120000);
+
   it("retains a partial source pool and marks unobserved gold ranks unknown", async () => {
     const f = await fixture();
     const config = { ...f.config, limits: { ...f.config.limits, max_pages_per_observation: 1 } };
     const observed = await observeSourceAccessDiagnostic(config, join(f.root, "partial"));
     expect(observed.result.rows).toHaveLength(2);
     expect(observed.result.rows.every((row) => row.status === "partial" && row.page_paths.length === 1)).toBe(true);
+    expect(observed.result.rows.every((row) => row.attempted_pages === row.settled_pages)).toBe(true);
+    expect(observed.result.provider_calls).toBe(0);
     const evaluated = await evaluateSourceAccessDiagnostic(observed.path, join(f.root, "partial-evaluation"));
+    expect(evaluated.result.provider_calls).toBe(0);
     expect(evaluated.result.rows.every((row) => row.status === "measured")).toBe(true);
     expect(evaluated.result.rows.every((row) => row.observation_status === "partial"
       && row.attempted_pages === 1)).toBe(true);
@@ -275,9 +304,8 @@ describe("source access diagnostic", () => {
     const missingRoot = join(f.root, "missing-receipt");
     await cp(join(f.root, "bound-observed"), missingRoot, { recursive: true });
     await rm(join(missingRoot, canonical.attempt_evidence[0]!.result!.path));
-    const missing = await evaluateSourceAccessDiagnostic(join(missingRoot, "observation.json"), join(f.root, "missing-result"));
-    expect(missing.result.rows[1]).toMatchObject({ status: "unknown", pool_at_5: "unknown" });
-    expect(missing.result.observation_identity).toBe(originalIdentity);
+    await expect(evaluateSourceAccessDiagnostic(join(missingRoot, "observation.json"),
+      join(f.root, "missing-result"))).rejects.toThrow(/receipt is missing/u);
 
     const missingStartRoot = join(f.root, "missing-start");
     await cp(join(f.root, "bound-observed"), missingStartRoot, { recursive: true });
@@ -464,10 +492,15 @@ describe("source access diagnostic", () => {
       discovery_complete: false, pool_at_5: "unknown" });
   }, 120000);
 
-  it("keeps a witnessed hit when an explicitly recorded later attempt is unresolved", async () => {
+  it("refuses evaluation when an attempted call has no settled result receipt", async () => {
     const f = await fixture(true);
     const observed = await observeSourceAccessDiagnostic({ ...f.config,
       limits: { ...f.config.limits, max_pages_per_observation: 1 } }, join(f.root, "prefix-observed"));
+    // A truncated but fully settled partial pool remains evaluable with proven zero calls.
+    const partial = await evaluateSourceAccessDiagnostic(observed.path, join(f.root, "prefix-evaluated"));
+    expect(partial.result.rows[0]).toMatchObject({ status: "measured", observation_status: "partial",
+      attempted_pages: 1, pool_at_5: "hit" });
+    expect(partial.result.provider_calls).toBe(0);
     const alteredRoot = join(f.root, "unresolved-prefix");
     await cp(join(f.root, "prefix-observed"), alteredRoot, { recursive: true });
     const altered = readChainArtifact(join(alteredRoot, "observation.json")) as SourceAccessDiagnosticObservation;
@@ -480,16 +513,15 @@ describe("source access diagnostic", () => {
       result: null, page: null });
     row.attempt_paths.push(startedPath);
     row.attempted_pages++;
-    row.unresolved_attempts++;
+    row.settled_pages++;
     row.reason = "native_access: interrupted";
     altered.attempted_pages++;
-    altered.unresolved_attempts++;
+    altered.settled_pages++;
     altered.status = "stopped";
     altered.stop_reason = "native_access: interrupted";
     await replaceAuthoredArtifact(join(alteredRoot, "observation.json"), altered);
-    const evaluated = await evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"), join(f.root, "unresolved-result"));
-    expect(evaluated.result.rows[0]).toMatchObject({ status: "measured", observation_status: "partial",
-      attempted_pages: 2, rank_censored: true, pool_at_5: "hit" });
+    await expect(evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"),
+      join(f.root, "unresolved-result"))).rejects.toThrow(/no settled provider-call receipt/u);
   }, 120000);
 
   it("keeps a witnessed gold hit when native discovery is truncated", async () => {
@@ -582,7 +614,9 @@ describe("source access diagnostic", () => {
     expect(observed.result.status).toBe("stopped");
     expect(observed.result.stop_reason).toBe("page_limit");
     expect(observed.result.rows.map((row) => row.status)).toEqual(["partial", "unattempted"]);
+    expect(observed.result.provider_calls).toBe(0);
     const evaluated = await evaluateSourceAccessDiagnostic(observed.path, join(f.root, "stopped-evaluation"));
+    expect(evaluated.result.provider_calls).toBe(0);
     expect(evaluated.result.rows[1]?.status).toBe("unattempted");
     expect(evaluated.result.rows[1]?.attempted_pages).toBe(0);
     expect(evaluated.result.summary.filter((row) => row.policy === "canonical-v1")
@@ -618,7 +652,9 @@ describe("source access diagnostic", () => {
     expect(observed.result.stop_reason).toBe("logical_work_limit");
     expect(observed.result.rows.map((row) => row.status)).toEqual(["unattempted", "unattempted"]);
     expect(observed.result.attempted_pages).toBe(0);
+    expect(observed.result.provider_calls).toBe(0);
     const evaluated = await evaluateSourceAccessDiagnostic(observed.path, join(f.root, "work-evaluated"));
+    expect(evaluated.result.provider_calls).toBe(0);
     expect(evaluated.result.rows.map((row) => row.status)).toEqual(["unattempted", "unattempted"]);
     expect(evaluated.result.summary.every((row) => row.denominator === 1 && row.unknown === 1
       && row.unattempted === 1 && row.unknown_before_attempt === 0 && row.unknown_after_attempt === 0)).toBe(true);
@@ -652,7 +688,7 @@ describe("source access diagnostic", () => {
     expect(await runSourceAccessDiagnosticLauncher(["observe", "--config", "missing"])).toBe(2);
   }, 120000);
 
-  it("rejects a historic access v1 page and missing execution as unknown without adding provider dispatch", async () => {
+  it("keeps a historic access v1 page unknown and refuses a malformed attempt receipt", async () => {
     const f = await fixture(false, 1, 1, 1);
     const observed = await observeSourceAccessDiagnostic(f.config, join(f.root, "v2-observed"));
     expect(observed.result.rows.every((row) => row.status === "observed")).toBe(true);
@@ -682,11 +718,17 @@ describe("source access diagnostic", () => {
         }
         await rebindRetainedResponse(alteredRoot, altered, 0, 0, response);
         await replaceAuthoredArtifact(join(alteredRoot, "observation.json"), altered);
-        const evaluated = await evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"),
-          join(f.root, `rejected-${kind}-evaluated`));
+        const evaluationPath = join(f.root, `rejected-${kind}-evaluated`);
+        if (kind === "missing-execution") {
+          await expect(evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"), evaluationPath))
+            .rejects.toThrow(/receipt is malformed/u);
+          continue;
+        }
+        const evaluated = await evaluateSourceAccessDiagnostic(join(alteredRoot, "observation.json"), evaluationPath);
         expect(evaluated.result.rows[0]).toMatchObject({ status: "unknown", discovery_complete: null,
           pool_at_5: "unknown", first_gold_source_rank: null });
         expect(evaluated.result.summary.every((item) => item.denominator === 1)).toBe(true);
+        expect(evaluated.result.provider_calls).toBe(0);
       }
       expect(fetchCalls).toBe(0);
     } finally { globalThis.fetch = originalFetch; }

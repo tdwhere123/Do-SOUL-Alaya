@@ -215,14 +215,22 @@ async function listPendingProposals(
   readonly proposals: readonly Readonly<SoulPendingProposalSummary>[];
   readonly total_count: number;
 }>> {
-  const summaries = await input.deps.proposalRepo.findPendingSummaries(context.workspaceId, {
-    since: request.since ?? null,
-    limit: request.limit ?? 50,
-    now: input.now()
-  });
+  const since = request.since ?? null;
+  // The page is bounded; total_count is not. Both reads share the repo's
+  // workspace/pending/since filter, so a truncated queue still reports its real
+  // size. `since` filters by created_at and is NOT backward pagination: the
+  // response exposes no continuation, so callers cannot walk past `limit`.
+  const [summaries, totalCount] = await Promise.all([
+    input.deps.proposalRepo.findPendingSummaries(context.workspaceId, {
+      since,
+      limit: request.limit ?? 50,
+      now: input.now()
+    }),
+    input.deps.proposalRepo.countPendingSummaries(context.workspaceId, { since })
+  ]);
   return {
     proposals: summaries,
-    total_count: summaries.length
+    total_count: totalCount
   };
 }
 

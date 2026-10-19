@@ -194,22 +194,9 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
     }
 
     const payload = (await response.json()) as {
-      readonly data?: ReadonlyArray<{
-        readonly embedding?: readonly number[];
-        readonly index?: number;
-      }>;
+      readonly data?: unknown;
     };
-    const data = [...(payload.data ?? [])].sort(
-      (left, right) => (left.index ?? 0) - (right.index ?? 0)
-    );
-
-    if (data.length !== texts.length) {
-      throw new Error(`Embedding request returned ${data.length} vectors for ${texts.length} inputs.`);
-    }
-
-    return Object.freeze(
-      data.map((entry, index) => parseEmbeddingVector(entry.embedding, index))
-    );
+    return parseEmbeddingResponse(payload.data, texts.length);
   }
 
   // invariant: each attempt gets a FRESH AbortController + backstop, so a single
@@ -343,6 +330,58 @@ async function sleepEmbeddingRetry(delayMs: number): Promise<void> {
     const timeout = setTimeout(resolve, delayMs);
     timeout.unref?.();
   });
+}
+
+interface OpenAIEmbeddingResponseEntry {
+  readonly embedding?: readonly number[];
+  readonly index?: number;
+}
+
+// invariant: a response vector belongs to the input at its declared `index`,
+// never to its position in `data`. A missing `index` is compatible only for a
+// single-input request, where the vector's input identity is unambiguous; a
+// batch must not guess identities from response order.
+function parseEmbeddingResponse(
+  data: unknown,
+  inputCount: number
+): readonly Float32Array[] {
+  if (!Array.isArray(data) || data.length !== inputCount) {
+    const receivedCount = Array.isArray(data) ? data.length : 0;
+    throw new AlayaError("INTERNAL",
+      `Embedding request returned ${receivedCount} vectors for ${inputCount} inputs.`
+    );
+  }
+  const vectors: Array<Float32Array | undefined> = new Array(inputCount).fill(undefined);
+  data.forEach((entry, responsePosition) => {
+    const responseEntry = entry as OpenAIEmbeddingResponseEntry;
+    const index = responseEntry.index;
+    if (index === undefined) {
+      if (inputCount !== 1) {
+        throw new AlayaError("INTERNAL",
+          `Embedding response entry ${responsePosition} did not include an index for ${inputCount} inputs.`
+        );
+      }
+      vectors[0] = parseEmbeddingVector(responseEntry.embedding, 0);
+      return;
+    }
+    if (!Number.isInteger(index) || index < 0 || index >= inputCount) {
+      throw new AlayaError("INTERNAL",
+        `Embedding response entry ${responsePosition} had an invalid index ${String(index)} for ${inputCount} inputs.`
+      );
+    }
+    if (vectors[index] !== undefined) {
+      throw new AlayaError("INTERNAL", `Embedding response had duplicate index ${index}.`);
+    }
+    vectors[index] = parseEmbeddingVector(responseEntry.embedding, index);
+  });
+  return Object.freeze(
+    vectors.map((vector, index) => {
+      if (vector === undefined) {
+        throw new AlayaError("INTERNAL", `Embedding response was missing index ${index} for ${inputCount} inputs.`);
+      }
+      return vector;
+    })
+  );
 }
 
 function parseEmbeddingVector(embedding: unknown, index: number): Float32Array {

@@ -68,9 +68,9 @@ export const CANONICAL_ENTITIES_MAX = 3;
 export const BOUNDED_JSON_OBJECT_MAX_CHARS = 16384;
 export const PREFERENCE_FACT_MAX_CHARS = 1_200;
 
-export const BoundedJsonObjectSchema = z
-  .record(z.string(), z.unknown())
-  .superRefine((value, ctx) => {
+/** Shared serialization check; each boundary owns its aggregate budget. */
+export function boundedJsonObjectSchema(maxChars: number) {
+  return z.record(z.string(), z.unknown()).superRefine((value, ctx) => {
     let serialized: string;
     try {
       serialized = JSON.stringify(value);
@@ -81,11 +81,13 @@ export const BoundedJsonObjectSchema = z
       });
       return;
     }
-    if (serialized.length > BOUNDED_JSON_OBJECT_MAX_CHARS) {
+    if (serialized.length > maxChars) {
       ctx.addIssue({
         code: "custom",
-        message: `JSON object must serialize to at most ${BOUNDED_JSON_OBJECT_MAX_CHARS} characters.`
+        message: `JSON object must serialize to at most ${maxChars} characters.`
       });
     }
-  })
-  .readonly();
+  }).readonly();
+}
+
+export const BoundedJsonObjectSchema = boundedJsonObjectSchema(BOUNDED_JSON_OBJECT_MAX_CHARS);

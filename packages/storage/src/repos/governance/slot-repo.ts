@@ -20,7 +20,8 @@ export interface SlotRepo {
     objectId: string,
     winnerClaimId: string | null,
     incumbentSince: string | null,
-    updatedAt: string
+    updatedAt: string,
+    expectedWinnerClaimId: string | null
   ): Readonly<Slot>;
 }
 
@@ -120,7 +121,7 @@ export class SqliteSlotRepo implements SlotRepo {
     this.updateWinnerStatement = db.connection.prepare(`
       UPDATE slots
       SET winner_claim_id = ?, incumbent_since = ?, updated_at = ?
-      WHERE object_id = ?
+      WHERE object_id = ? AND winner_claim_id IS ?
     `);
   }
 
@@ -218,10 +219,12 @@ export class SqliteSlotRepo implements SlotRepo {
     objectId: string,
     winnerClaimId: string | null,
     incumbentSince: string | null,
-    updatedAt: string
+    updatedAt: string,
+    expectedWinnerClaimId: string | null
   ): Readonly<Slot> {
     const parsedObjectId = parseNonEmptyString(objectId, "slot object id");
     const parsedWinnerClaimId = parseNullableString(winnerClaimId, "winner claim id");
+    const parsedExpectedWinnerClaimId = parseNullableString(expectedWinnerClaimId, "expected winner claim id");
     const parsedIncumbentSince = incumbentSince === null ? null : parseTimestamp(incumbentSince);
     const parsedUpdatedAt = parseTimestamp(updatedAt);
 
@@ -230,11 +233,15 @@ export class SqliteSlotRepo implements SlotRepo {
         parsedWinnerClaimId,
         parsedIncumbentSince,
         parsedUpdatedAt,
-        parsedObjectId
+        parsedObjectId,
+        parsedExpectedWinnerClaimId
       );
 
       if (result.changes === 0) {
-        throw new StorageError("NOT_FOUND", `Slot ${parsedObjectId} was not found.`);
+        if (this.loadById(parsedObjectId) === null) {
+          throw new StorageError("NOT_FOUND", `Slot ${parsedObjectId} was not found.`);
+        }
+        throw new StorageError("CONFLICT", `Slot ${parsedObjectId} winner changed during election.`);
       }
 
       const updated = this.loadById(parsedObjectId);

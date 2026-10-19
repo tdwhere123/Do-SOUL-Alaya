@@ -1,4 +1,5 @@
 import type { KpiPayload } from "../contracts/kpi-schema.js";
+import { readEmbeddingLatencyClaim } from "../metrics/embedding-latency-claim.js";
 import { wilsonInterval } from "../metrics/wilson-ci.js";
 
 export function renderAbsoluteKpis(lines: string[], current: KpiPayload): void {
@@ -285,7 +286,7 @@ function pushDroppedSignalsWarning(
         `(${drops.parseDropped} dropped by the parser as malformed / over the 64-signal cap, ` +
         `${drops.compileOverflowDropped} dropped by compile() as oversized, ` +
         `${drops.materializationDrop} failed materialization, ` +
-        `${drops.batchResidual} dropped when a seed-materialization batch failed); ` +
+        `${drops.batchResidual} residual drop(s) with no recorded cause); ` +
         `a dropped answer-bearing signal inflates the miss rate.`
     );
   }
@@ -305,24 +306,24 @@ export function describeEmbeddingLatencyHonesty(current: KpiPayload): string | n
   if (current.embedding_provider === "none" || current.embedding_provider === undefined) {
     return null;
   }
-  const inferenceMean = current.kpi.recall_token_economy?.embedding_inference_calls.mean;
-  if (inferenceMean === undefined) {
+  const claim = readEmbeddingLatencyClaim(current);
+  if (claim.status === "absent") {
     return "Latency measurement: query encode expected inside timed recall when bi-encoder is on";
   }
-  if (inferenceMean < 1) {
+  if (claim.status === "warm_cache_only") {
     return (
       "⚠ Latency is warm-query-cache-only (embedding_inference_calls.mean " +
-      `${inferenceMean.toFixed(3)} < 1); gate p95 is not claimable on this run`
+      `${claim.mean.toFixed(3)} < 1); gate p95 is not claimable on this run`
     );
   }
   return (
     "Latency includes in-timer query encode " +
-    `(embedding_inference_calls.mean=${inferenceMean.toFixed(3)})`
+    `(embedding_inference_calls.mean=${claim.mean.toFixed(3)})`
   );
 }
 
 // candidate_absent is governance declining a signal as durable truth, not a loss;
-// only parser/compile/materialization/unattributed-batch drops truly lose a signal.
+// only parser/compile/materialization/unattributed-residual drops truly lose a signal.
 export function attributeSeedDrops(
   extractionPath: NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>
 ): SeedDropAttribution {

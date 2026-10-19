@@ -117,6 +117,35 @@ describe("history archive", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it.each(["longmemeval-oracle", "longmemeval-m"] as const)(
+    "keeps the shared public latest-passing pointer when a passing %s archive is written",
+    async (split) => {
+      const passingSlug = "2026-05-14T080000Z-0aaaaaa";
+      const probeSlug = "2026-05-15T080000Z-0bbbbbb";
+      const passing = buildFullLongMemEvalPayload("public", "0aaaaaa", 0.95);
+      const probe = KpiPayloadSchema.parse({
+        ...buildFullLongMemEvalPayload("public", "0bbbbbb", 0.95),
+        split
+      });
+
+      await writeEntry(layout, "public", passingSlug, passing, "report", null);
+      await writeEntry(layout, "public", probeSlug, probe, "report", null);
+
+      expect(collectReleaseHardGates(probe)).toEqual([]);
+      expect((await readLatest(layout, "public"))?.alaya_commit).toBe("0bbbbbb");
+      expect((await readLatest(layout, "public", { pointerKind: "passing" }))?.alaya_commit)
+        .toBe("0aaaaaa");
+      expect(
+        JSON.parse(await readFile(path.join(root, "public", "latest-run.json"), "utf8")).slug
+      ).toBe(probeSlug);
+      expect(
+        JSON.parse(
+          await readFile(path.join(root, "public", "latest-passing.json"), "utf8")
+        ).slug
+      ).toBe(passingSlug);
+    }
+  );
+
   it.each([
     ["public-multiturn" as const, "longmemeval_multiturn_500_embedding_off_r_at_5"],
     ["public-crossquestion" as const, "longmemeval_crossquestion_500_embedding_off_r_at_5"]

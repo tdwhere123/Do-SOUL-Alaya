@@ -167,7 +167,7 @@ async function launchInspector(
     launchCode,
     workspaceId: workspaceResolution.workspaceId,
     inspectorEntryPath: deps.inspectorEntryPath ?? defaultInspectorEntryPath(),
-    env: buildInspectorEnv(daemon.url, daemonRequestAuth)
+    env: buildInspectorEnv(daemon.url, daemonRequestAuth, ctx.env)
   });
   await waitForInspectorReady(child, ctx);
   return { ok: true, launch: { url, child, startedDaemon: daemon.startedDaemon } };
@@ -360,10 +360,22 @@ function buildInspectorUrl(port: number, workspaceId: string): string {
   return `http://127.0.0.1:${port}/?workspaceId=${encodeURIComponent(workspaceId)}`;
 }
 
-function buildInspectorEnv(daemonUrl: string, daemonRequestAuth?: DaemonRequestAuth): NodeJS.ProcessEnv {
+function buildInspectorEnv(
+  daemonUrl: string,
+  daemonRequestAuth: DaemonRequestAuth | undefined,
+  cliEnv: NodeJS.ProcessEnv
+): NodeJS.ProcessEnv {
   const inspectorEnv: NodeJS.ProcessEnv = { ALAYA_DAEMON_URL: daemonUrl };
   if (daemonRequestAuth?.requestToken !== undefined) {
     inspectorEnv.ALAYA_REQUEST_TOKEN = daemonRequestAuth.requestToken;
+  }
+  const reviewerToken = normalizeOptionalToken(cliEnv.ALAYA_REVIEWER_TOKEN);
+  const reviewerIdentity = normalizeOptionalToken(cliEnv.ALAYA_REVIEWER_IDENTITY);
+  if (reviewerToken !== undefined) {
+    inspectorEnv.ALAYA_REVIEWER_TOKEN = reviewerToken;
+  }
+  if (reviewerIdentity !== undefined) {
+    inspectorEnv.ALAYA_REVIEWER_IDENTITY = reviewerIdentity;
   }
   return inspectorEnv;
 }

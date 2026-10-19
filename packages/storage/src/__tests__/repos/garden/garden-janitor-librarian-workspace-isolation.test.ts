@@ -72,7 +72,7 @@ describe("garden janitor and librarian SQL workspace isolation", () => {
       lastHitAt: "2026-01-01T00:00:00.000Z"
     });
 
-    await ports.tieringPort.demoteToWarm("workspace-2", ["memory-cross-ws"]);
+    expect(ports.tieringPort.demoteToWarm("workspace-2", ["memory-cross-ws"])).toEqual([]);
 
     const row = database.connection
       .prepare("SELECT storage_tier FROM memory_entries WHERE object_id = ? LIMIT 1")

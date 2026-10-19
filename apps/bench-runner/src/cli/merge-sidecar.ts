@@ -107,7 +107,7 @@ function collectMergedDiagnosticsSummary(
       sidecar.query_embedding_cache === undefined ? [] : [sidecar.query_embedding_cache]
     )),
     missTaxonomySummary: aggregateMissTaxonomySummary(diagnostics, questions),
-    questionFailures: aggregateQuestionFailures(diagnostics, questions.length)
+    questionFailures: aggregateQuestionFailures(diagnostics, questions)
   };
 }
 
@@ -187,18 +187,19 @@ export interface MergedLongMemEvalDiagnosticsPayload {
 
 function aggregateQuestionFailures(
   diagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
-  completedCount: number
+  questions: readonly LongMemEvalQuestionDiagnostic[]
 ): LongMemEvalDiagnosticsSidecar["question_failures"] | null {
   const failedIds = diagnostics.flatMap((sidecar) =>
     sidecar?.question_failures?.failed_question_ids ?? []
   );
   if (failedIds.length === 0) return null;
-  if (new Set(failedIds).size !== failedIds.length) {
+  const failedIdSet = new Set(failedIds);
+  if (failedIdSet.size !== failedIds.length) {
     throw new Error("merge refused: duplicate failed question ID across shards");
   }
   return {
     failed_count: failedIds.length,
-    completed_count: completedCount,
+    completed_count: questions.filter((question) => !failedIdSet.has(question.question_id)).length,
     failed_question_ids: failedIds
   };
 }

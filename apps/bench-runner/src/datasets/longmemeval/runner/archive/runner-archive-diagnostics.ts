@@ -114,6 +114,7 @@ function buildDiagnosticsPayload(
   input: Parameters<typeof buildDiagnosticsSidecar>[0],
   currentEvidence: ReturnType<typeof buildCurrentEvidence>
 ): LongMemEvalDiagnosticsSidecar {
+  const failedIds = new Set(input.failedQuestionIds);
   return {
     schema_version: 1,
     bench_name: "public",
@@ -142,7 +143,9 @@ function buildDiagnosticsPayload(
       : {
           question_failures: {
             failed_count: input.questionFailures,
-            completed_count: input.collectedLength,
+            completed_count: input.collectedLength - input.aggregate.questionDiagnostics.filter(
+              (question) => failedIds.has(question.question_id)
+            ).length,
             failed_question_ids: input.failedQuestionIds
           }
         }),

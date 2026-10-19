@@ -120,6 +120,7 @@ function createHarness(options: {
       findById: async (proposalId) => proposals.get(proposalId)?.proposal ?? null,
       findScopedById: async (proposalId) => proposals.get(proposalId) ?? null,
       findPendingSummaries: async () => [],
+      countPendingSummaries: async () => 0,
       acceptPendingSynthesisCreateWithEvents: async (proposalId, updatedAt, resolutionEvents, synthesisCreate) => {
         order.push("repo:acceptPendingSynthesisCreateWithEvents");
         const existing = proposals.get(proposalId);

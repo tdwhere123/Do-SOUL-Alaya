@@ -1,441 +1,124 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EventLogEntry, ToolProvider, ToolSpec } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../shared/errors.js";
-import { ExtensionRegistryService } from "../../tooling/extension-registry-service.js";
-import { validTimestamp, createProvider, createExternalToolSpec, createRegistryHarness, createDeferred } from "./extension-registry-service-test-fixtures.js";
+import { createExternalToolSpec, createProvider, createRegistryHarness } from "./extension-registry-service-test-fixtures.js";
 
-describe("ExtensionRegistryService", () => {
-it("reuses the same frozen sorted provider list until the cache changes", async () => {
-    const laterProvider = createProvider({
-      provider_id: "provider.mcp.filesystem.later",
-      registered_at: "2026-04-20T10:00:01.000Z",
-      tool_specs: [
-        {
-          tool_id: "mcp__filesystem__later_read_file",
-          name: "filesystem.later_read_file",
-          description: "Read file through the later filesystem MCP provider."
-        }
-      ]
-    });
-    const earlierProvider = createProvider({
-      provider_id: "provider.mcp.filesystem.earlier",
-      registered_at: "2026-04-20T09:59:59.000Z",
-      tool_specs: [
-        {
-          tool_id: "mcp__filesystem__earlier_read_file",
-          name: "filesystem.earlier_read_file",
-          description: "Read file through the earlier filesystem MCP provider."
-        }
-      ]
-    });
+const oldTool = { tool_id: "filesystem.retired", name: "Retired tool", description: "Old tool" };
+const newTool = { tool_id: "filesystem.added", name: "Added tool", description: "New tool" };
 
-    const service = new ExtensionRegistryService({
-      extensionStore: {
-        registerToolProvider: vi.fn(async (value: ToolProvider) => value),
-        deleteToolProvider: vi.fn(async () => undefined),
-        registerSkillPackage: vi.fn(),
-        findToolProviders: vi.fn(async () => [laterProvider]),
-        findToolProviderById: vi.fn(async () => null)
-      },
-      toolSpecService: {
-        findById: vi.fn(async () => {
-          throw new CoreError("NOT_FOUND", "Tool spec missing");
-        }),
-        register: vi.fn(async (spec: ToolSpec) => spec),
-        update: vi.fn(async (spec: ToolSpec) => spec),
-        delete: vi.fn(async () => undefined)
-      },
-      eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-          ...entry,
-          event_id: "event-1",
-          created_at: validTimestamp,
-          revision: 0
-        }))
-      },
-      now: () => validTimestamp,
-      buildToolSpecForProviderTool: (registeredProvider, tool) =>
-        createExternalToolSpec(registeredProvider, tool.tool_id)
+function replacementProviders() {
+  const original = createProvider();
+  const initial = createProvider({ tool_specs: [...original.tool_specs, oldTool] });
+  const updated = createProvider({
+    name: "Updated Filesystem Provider",
+    tool_specs: [{ ...original.tool_specs[0]!, description: "Updated read description" }, newTool]
+  });
+  return { initial, updated };
+}
+
+describe("ExtensionRegistryService atomic SQLite registration", () => {
+  it("commits descriptor, spec updates, additions and removals together before notification", async () => {
+    const { initial, updated } = replacementProviders();
+    const f = createRegistryHarness({
+      initialProviders: [initial],
+      initialToolSpecs: initial.tool_specs.map(tool => createExternalToolSpec(initial, tool.tool_id))
+    });
+    const first = await f.service.listProviders();
+    let observed: unknown;
+    f.notifyEntry.mockImplementationOnce(async () => {
+      observed = {
+        inTransaction: f.database.connection.inTransaction,
+        providers: await f.service.listProviders(),
+        specs: await f.toolSpecRepo.list(),
+        eventCount: (await f.eventLogRepo.queryByType("extension.descriptor_registered")).events.length
+      };
     });
 
-    const firstList = await service.listProviders();
-    const secondList = await service.listProviders();
+    await f.service.registerProvider(updated);
 
-    expect(firstList).toEqual([laterProvider]);
-    expect(Object.isFrozen(firstList)).toBe(true);
-    expect(secondList).toBe(firstList);
-
-    await service.registerProvider(earlierProvider);
-
-    const refreshedList = await service.listProviders();
-
-    expect(refreshedList).toEqual([earlierProvider, laterProvider]);
-    expect(refreshedList).not.toBe(firstList);
+    expect(observed).toEqual({
+      inTransaction: false,
+      providers: [updated],
+      specs: updated.tool_specs.map(tool => createExternalToolSpec(updated, tool.tool_id))
+        .sort((a, b) => a.tool_id.localeCompare(b.tool_id)),
+      eventCount: 1
+    });
+    expect(f.extensionStore.findToolProviderByIdSync(initial.provider_id)).toEqual(updated);
+    expect(await f.service.listProviders()).not.toBe(first);
+    await expect(f.service.findProviderForTool(oldTool.tool_id)).resolves.toBeNull();
+    // Re-expansion can reclaim a removed id without a competing tool-spec row.
+    await f.service.registerProvider(initial);
+    expect(f.toolSpecRepo.findByIdSync(oldTool.tool_id)).toEqual(createExternalToolSpec(initial, oldTool.tool_id));
   });
 
-it("resolves provider-by-tool from the in-process registry cache after registration", async () => {
-    const provider = createProvider();
+  it("rolls back the event, descriptor and earlier spec mutations when a later SQLite deletion fails", async () => {
+    const { initial, updated } = replacementProviders();
+    const specs = initial.tool_specs.map(tool => createExternalToolSpec(initial, tool.tool_id));
+    const f = createRegistryHarness({ initialProviders: [initial], initialToolSpecs: specs });
+    await f.service.listProviders();
+    f.database.connection.exec(`
+      CREATE TEMP TRIGGER refuse_retirement BEFORE DELETE ON tool_specs
+      WHEN OLD.tool_id = 'filesystem.retired'
+      BEGIN SELECT RAISE(ABORT, 'retirement refused'); END;
+    `);
 
-    const service = new ExtensionRegistryService({
-      extensionStore: {
-        registerToolProvider: vi.fn(async (value: ToolProvider) => value),
-        deleteToolProvider: vi.fn(async () => undefined),
-        registerSkillPackage: vi.fn(),
-        findToolProviders: vi.fn(async () => []),
-        findToolProviderById: vi.fn(async () => null)
-      },
-      toolSpecService: {
-        findById: vi.fn(async () => {
-          throw new CoreError("NOT_FOUND", "Tool spec missing");
-        }),
-        register: vi.fn(async (spec: ToolSpec) => spec),
-        update: vi.fn(async (spec: ToolSpec) => spec),
-        delete: vi.fn(async () => undefined)
-      },
-      eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-          ...entry,
-          event_id: "event-1",
-          created_at: validTimestamp,
-          revision: 0
-        }))
-      },
-      now: () => validTimestamp,
-      buildToolSpecForProviderTool: (registeredProvider, tool) =>
-        createExternalToolSpec(registeredProvider, tool.tool_id)
-    });
+    await expect(f.service.registerProvider(updated)).rejects.toThrow("Failed to delete tool spec");
 
-    const storedProvider = await service.registerProvider(provider);
+    expect(f.extensionStore.findToolProviderByIdSync(initial.provider_id)).toEqual(initial);
+    expect(await f.toolSpecRepo.list()).toEqual([...specs].sort((a, b) => a.tool_id.localeCompare(b.tool_id)));
+    expect(f.toolSpecRepo.findByIdSync(newTool.tool_id)).toBeNull();
+    await expect(f.service.listProviders()).resolves.toEqual([initial]);
+    expect(f.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log").get()).toEqual({ n: 0 });
+    expect(f.notifyEntry).not.toHaveBeenCalled();
 
-    await expect(service.findProviderForTool("mcp__filesystem__read_file")).resolves.toBe(
-      storedProvider
-    );
+    f.database.connection.exec("DROP TRIGGER refuse_retirement");
+    await f.service.registerProvider(updated);
+    expect((await f.eventLogRepo.queryByType("extension.descriptor_registered")).events).toHaveLength(1);
   });
 
-it("rejects provider registrations that try to claim a tool id already owned by another provider", async () => {
-    const sharedToolId = "mcp__filesystem__shared_read_file";
-    const laterProvider = createProvider({
-      provider_id: "provider.mcp.later",
-      name: "Later Filesystem Provider",
-      registered_at: "2026-04-20T10:00:01.000Z",
-      tool_specs: [
-        {
-          tool_id: sharedToolId,
-          name: "filesystem.shared_read_file",
-          description: "Later filesystem provider tool."
-        }
-      ]
-    });
-    const earlierProvider = createProvider({
-      provider_id: "provider.mcp.earlier",
-      name: "Earlier Filesystem Provider",
-      registered_at: "2026-04-20T10:00:00.000Z",
-      tool_specs: [
-        {
-          tool_id: sharedToolId,
-          name: "filesystem.shared_read_file",
-          description: "Earlier filesystem provider tool."
-        }
-      ]
-    });
-    const harness = createRegistryHarness({
-      initialProviders: [laterProvider],
-      initialToolSpecs: [createExternalToolSpec(laterProvider, sharedToolId)]
-    });
-
-    await harness.service.listProviders();
-    await expect(harness.service.registerProvider(earlierProvider)).rejects.toMatchObject({
-      code: "CONFLICT"
-    });
-
-    await expect(harness.service.listProviders()).resolves.toEqual([laterProvider]);
-    await expect(harness.service.findProviderForTool(sharedToolId)).resolves.toMatchObject({
-      provider_id: laterProvider.provider_id
-    });
+  it("leaves no new descriptor, specs or event when a later spec insertion fails", async () => {
+    const f = createRegistryHarness();
+    const provider = createProvider({ tool_specs: [...createProvider().tool_specs, newTool] });
+    f.database.connection.exec(`
+      CREATE TEMP TRIGGER refuse_addition BEFORE INSERT ON tool_specs
+      WHEN NEW.tool_id = 'filesystem.added'
+      BEGIN SELECT RAISE(ABORT, 'addition refused'); END;
+    `);
+    await expect(f.service.registerProvider(provider)).rejects.toThrow("Failed to insert tool spec");
+    expect(f.extensionStore.findToolProvidersSync()).toEqual([]);
+    expect(await f.toolSpecRepo.list()).toEqual([]);
+    expect(f.database.connection.prepare("SELECT COUNT(*) AS n FROM event_log").get()).toEqual({ n: 0 });
+    expect(f.notifyEntry).not.toHaveBeenCalled();
   });
 
-it("rejects duplicate tool ownership even before the provider cache has been loaded", async () => {
-    const sharedToolId = "mcp__filesystem__shared_read_file";
-    const existingProvider = createProvider({
-      provider_id: "provider.mcp.existing",
-      name: "Existing Filesystem Provider",
-      tool_specs: [
-        {
-          tool_id: sharedToolId,
-          name: "filesystem.shared_read_file",
-          description: "Existing filesystem provider tool."
-        }
-      ]
+  it("keeps committed registration and refreshes a warm cache when notification fails", async () => {
+    const { initial, updated } = replacementProviders();
+    const f = createRegistryHarness({
+      initialProviders: [initial],
+      initialToolSpecs: initial.tool_specs.map(tool => createExternalToolSpec(initial, tool.tool_id))
     });
-    const conflictingProvider = createProvider({
-      provider_id: "provider.mcp.conflicting",
-      name: "Conflicting Filesystem Provider",
-      registered_at: "2026-04-20T10:00:01.000Z",
-      tool_specs: [
-        {
-          tool_id: sharedToolId,
-          name: "filesystem.shared_read_file",
-          description: "Conflicting filesystem provider tool."
-        }
-      ]
-    });
-    const harness = createRegistryHarness({
-      initialProviders: [existingProvider],
-      initialToolSpecs: [createExternalToolSpec(existingProvider, sharedToolId)]
+    await f.service.listProviders();
+    vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    let observed: unknown;
+    f.notifyEntry.mockImplementationOnce(async () => {
+      observed = {
+        inTransaction: f.database.connection.inTransaction,
+        providers: await f.service.listProviders()
+      };
+      throw new Error("listener offline");
     });
 
-    await expect(harness.service.registerProvider(conflictingProvider)).rejects.toMatchObject({
-      code: "CONFLICT"
-    });
-    expect(harness.providerStore.get(conflictingProvider.provider_id)).toBeUndefined();
-    await expect(harness.service.findProviderForTool(sharedToolId)).resolves.toMatchObject({
-      provider_id: existingProvider.provider_id
-    });
-  });
+    await expect(f.service.registerProvider(updated)).resolves.toEqual(updated);
 
-it("rejects duplicate tool ownership while a stale provider cache load is still in flight", async () => {
-    const sharedToolId = "mcp__filesystem__shared_read_file";
-    const existingProvider = createProvider({
-      provider_id: "provider.mcp.existing",
-      name: "Existing Filesystem Provider",
-      tool_specs: [
-        {
-          tool_id: sharedToolId,
-          name: "filesystem.shared_read_file",
-          description: "Existing filesystem provider tool."
-        }
-      ]
-    });
-    const conflictingProvider = createProvider({
-      provider_id: "provider.mcp.conflicting",
-      name: "Conflicting Filesystem Provider",
-      registered_at: "2026-04-20T10:00:01.000Z",
-      tool_specs: [
-        {
-          tool_id: sharedToolId,
-          name: "filesystem.shared_read_file",
-          description: "Conflicting filesystem provider tool."
-        }
-      ]
-    });
-    const staleLoad = createDeferred<readonly ToolProvider[]>();
-    const providerStore = new Map<string, ToolProvider>([
-      [existingProvider.provider_id, existingProvider]
-    ]);
-    const service = new ExtensionRegistryService({
-      extensionStore: {
-        registerToolProvider: vi.fn(async (provider: ToolProvider) => {
-          providerStore.set(provider.provider_id, provider);
-          return provider;
-        }),
-        deleteToolProvider: vi.fn(async (providerId: string) => {
-          providerStore.delete(providerId);
-        }),
-        registerSkillPackage: vi.fn(),
-        findToolProviders: vi.fn(async () => await staleLoad.promise),
-        findToolProviderById: vi.fn(
-          async (providerId: string) => providerStore.get(providerId) ?? null
-        )
-      },
-      toolSpecService: {
-        findById: vi.fn(async (toolId: string) => {
-          if (toolId === sharedToolId) {
-            return createExternalToolSpec(existingProvider, sharedToolId);
-          }
-          throw new CoreError("NOT_FOUND", "Tool spec missing");
-        }),
-        register: vi.fn(async (spec: ToolSpec) => spec),
-        update: vi.fn(async (spec: ToolSpec) => spec),
-        delete: vi.fn(async () => undefined)
-      },
-      eventLogWriter: {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-          ...entry,
-          event_id: "event-1",
-          created_at: validTimestamp,
-          revision: 0
-        }))
-      },
-      runtimeNotifier: { notifyEntry: vi.fn(async () => undefined) },
-      now: () => validTimestamp,
-      buildToolSpecForProviderTool: (registeredProvider, tool) =>
-        createExternalToolSpec(registeredProvider, tool.tool_id)
-    });
-
-    const pendingList = service.listProviders();
-    await Promise.resolve();
-
-    await expect(service.registerProvider(conflictingProvider)).rejects.toMatchObject({
-      code: "CONFLICT"
-    });
-    expect(providerStore.get(conflictingProvider.provider_id)).toBeUndefined();
-
-    staleLoad.resolve([existingProvider]);
-
-    await expect(pendingList).resolves.toEqual([existingProvider]);
-    await expect(service.findProviderForTool(sharedToolId)).resolves.toMatchObject({
-      provider_id: existingProvider.provider_id
-    });
-  });
-
-it("appends a compensation event when provider persistence fails after EventLog append", async () => {
-    const provider = createProvider();
-    const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-      ...entry,
-      event_id: "event-rollback-provider",
-      created_at: validTimestamp,
-          revision: 0
-    }));
-    const notifyEntry = vi.fn(async () => undefined);
-
-    const service = new ExtensionRegistryService({
-      extensionStore: {
-        registerToolProvider: vi.fn(async () => {
-          throw new Error("provider upsert failed");
-        }),
-        deleteToolProvider: vi.fn(async () => undefined),
-        registerSkillPackage: vi.fn(),
-        findToolProviders: vi.fn(async () => []),
-        findToolProviderById: vi.fn(async () => null)
-      },
-      toolSpecService: {
-        findById: vi.fn(),
-        register: vi.fn(),
-        update: vi.fn(),
-        delete: vi.fn(async () => undefined)
-      },
-      eventLogWriter: { append },
-      runtimeNotifier: { notifyEntry },
-      now: () => validTimestamp
-    });
-
-    await expect(service.registerProvider(provider)).rejects.toThrow("provider upsert failed");
-    expect(append).toHaveBeenCalledTimes(2);
-    expect(append.mock.calls[1]?.[0]).toMatchObject({
-      event_type: "extension.descriptor_registration_reverted",
-      entity_type: "extension_descriptor",
-      entity_id: provider.provider_id,
-      payload_json: {
-        descriptor_type: "tool_provider",
-        descriptor_id: provider.provider_id,
-        original_event_id: "event-rollback-provider",
-        reverted_at: validTimestamp
-      }
-    });
-    expect(notifyEntry).not.toHaveBeenCalled();
-  });
-
-it("removes a newly persisted provider when the first tool-spec write fails", async () => {
-    const provider = createProvider();
-    const harness = createRegistryHarness({
-      failRegisterAt: 1
-    });
-
-    await expect(harness.service.registerProvider(provider)).rejects.toThrow(
-      "register failed for mcp__filesystem__read_file"
-    );
-
-    expect([...harness.providerStore.values()]).toEqual([]);
-    expect([...harness.toolSpecStore.values()]).toEqual([]);
-    expect(harness.deleteToolProvider).toHaveBeenCalledWith(provider.provider_id);
-    expect(harness.deleteToolSpec).not.toHaveBeenCalled();
-    expect(harness.appendedEvents[1]).toMatchObject({
-      event_type: "extension.descriptor_registration_reverted",
-      entity_id: provider.provider_id,
-      payload_json: {
-        descriptor_type: "tool_provider",
-        descriptor_id: provider.provider_id,
-        original_event_id: "event-1",
-        reverted_at: validTimestamp
-      }
-    });
-    expect(harness.notifyEntry).not.toHaveBeenCalled();
-  });
-
-it("appends a compensation failure event when provider rollback throws", async () => {
-    const provider = createProvider();
-    const harness = createRegistryHarness({
-      failRegisterAt: 1,
-      failDeleteToolProvider: true
-    });
-
-    await expect(harness.service.registerProvider(provider)).rejects.toMatchObject({
-      message:
-        "Failed to roll back tool_provider provider.mcp.filesystem after mutation failure.",
-      cause: expect.objectContaining({
-        message: "Rollback failed after mutation failure.",
-        cause: expect.objectContaining({
-          message: "register failed for mcp__filesystem__read_file"
-        }),
-        errors: [expect.objectContaining({ message: "delete provider failed for provider.mcp.filesystem" })]
-      })
-    });
-
-    expect(harness.deleteToolProvider).toHaveBeenCalledWith(provider.provider_id);
-    expect(harness.appendedEvents[1]).toMatchObject({
-      event_type: "extension.descriptor_registration_compensation_failed",
-      entity_id: provider.provider_id,
-      payload_json: {
-        descriptor_type: "tool_provider",
-        descriptor_id: provider.provider_id,
-        original_event_id: "event-1",
-        failed_at: validTimestamp
-      }
-    });
-    expect(harness.notifyEntry).not.toHaveBeenCalled();
-  });
-
-it("restores the previous provider and touched tool specs when a later tool-spec write fails", async () => {
-    const initialProvider = createProvider({
-      name: "Filesystem MCP Provider (Initial)"
-    });
-    const updatedProvider = createProvider({
-      name: "Filesystem MCP Provider (Updated)",
-      tool_specs: [
-        {
-          tool_id: "mcp__filesystem__read_file",
-          name: "filesystem.read_file",
-          description: "Read file through filesystem MCP (updated)."
-        },
-        {
-          tool_id: "mcp__filesystem__write_file",
-          name: "filesystem.write_file",
-          description: "Write file through filesystem MCP."
-        }
-      ]
-    });
-    const initialReadSpec = createExternalToolSpec(
-      initialProvider,
-      "mcp__filesystem__read_file"
-    );
-    const harness = createRegistryHarness({
-      initialProviders: [initialProvider],
-      initialToolSpecs: [initialReadSpec],
-      failRegisterAt: 1
-    });
-
-    await expect(harness.service.registerProvider(updatedProvider)).rejects.toThrow(
-      "register failed for mcp__filesystem__write_file"
-    );
-
-    expect([...harness.providerStore.values()]).toEqual([initialProvider]);
-    expect([...harness.toolSpecStore.values()]).toEqual([initialReadSpec]);
-    expect(harness.registerToolProvider).toHaveBeenNthCalledWith(1, updatedProvider);
-    expect(harness.registerToolProvider).toHaveBeenNthCalledWith(2, initialProvider);
-    expect(harness.updateToolSpec).toHaveBeenCalledWith(
-      createExternalToolSpec(updatedProvider, "mcp__filesystem__read_file")
-    );
-    expect(harness.deleteToolSpec).not.toHaveBeenCalledWith("mcp__filesystem__read_file");
-    expect(harness.appendedEvents[1]).toMatchObject({
-      event_type: "extension.descriptor_registration_reverted",
-      entity_id: updatedProvider.provider_id,
-      payload_json: {
-        descriptor_type: "tool_provider",
-        descriptor_id: updatedProvider.provider_id,
-        original_event_id: "event-1",
-        reverted_at: validTimestamp
-      }
-    });
-    expect(harness.notifyEntry).not.toHaveBeenCalled();
+    expect(observed).toEqual({ inTransaction: false, providers: [updated] });
+    expect(f.extensionStore.findToolProviderByIdSync(updated.provider_id)).toEqual(updated);
+    expect(f.toolSpecRepo.findByIdSync(oldTool.tool_id)).toBeNull();
+    expect(f.toolSpecRepo.findByIdSync(newTool.tool_id)).not.toBeNull();
+    await expect(f.service.listProviders()).resolves.toEqual([updated]);
+    await expect(f.service.findProviderForTool(oldTool.tool_id)).resolves.toBeNull();
+    const { events } = await f.eventLogRepo.queryByType("extension.descriptor_registered");
+    expect(events).toHaveLength(1);
+    const { events: diagnostics } = await f.eventLogRepo.queryByType("runtime.side_effect_failed");
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.payload_json).toMatchObject({ committed_event_id: events[0]!.event_id });
+    expect((await f.eventLogRepo.queryByType("extension.descriptor_registration_reverted")).events).toEqual([]);
   });
 });

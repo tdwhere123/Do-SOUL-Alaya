@@ -94,7 +94,7 @@ describe("Janitor", () => {
       cleanupPort,
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn()
+        demoteToWarm: vi.fn(() => [])
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       eventLogRepo: {
@@ -143,7 +143,7 @@ describe("Janitor", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn()
+        demoteToWarm: vi.fn(() => [])
       },
       scheduler: { reportCompletion: vi.fn(async () => undefined) },
       eventLogRepo,
@@ -213,7 +213,7 @@ describe("Janitor", () => {
       },
       tieringPort: {
         findHotDemotionCandidates: vi.fn(async () => []),
-        demoteToWarm: vi.fn(async () => undefined)
+        demoteToWarm: vi.fn(() => [])
       },
       scheduler,
       eventLogRepo: createPassthroughEventLogPort(),
@@ -241,15 +241,14 @@ describe("Janitor", () => {
     );
   });
 
-  // Hot-index demotion commits one SOUL_MEMORY_TIER_CHANGED audit row
-  // per demoted entry inside the same SQLite transaction as the
-  // storage_tier UPDATE.
   it("emits SOUL_MEMORY_TIER_CHANGED for each demoted entry alongside the demote", async () => {
+    const order: string[] = [];
     const appendManyWithMutation = vi.fn(
       async <T>(
         entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
         mutate: (rows: readonly EventLogEntry[]) => T
       ): Promise<T> => {
+        order.push("append");
         const persisted: EventLogEntry[] = entries.map((entry, idx) => ({
           ...entry,
           event_id: `evt-${idx}`,
@@ -269,7 +268,10 @@ describe("Janitor", () => {
         { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 },
         { memory_entry_id: "memory-2", last_access_at: null, activation_score: 0.2 }
       ]),
-      demoteToWarm: vi.fn(() => undefined)
+      demoteToWarm: vi.fn((_workspaceId: string, memoryEntryIds: readonly string[]) => {
+        order.push("demote");
+        return memoryEntryIds;
+      })
     };
     const cleanupPort = {
       findExpiredObjects: vi.fn(async () => []),
@@ -299,7 +301,61 @@ describe("Janitor", () => {
       expect(payload.to_tier).toBe("cold");
       expect(payload.reason).toBe("hot_index_demotion");
     }
+    expect(order).toEqual(["append", "demote"]);
     expect(tieringPort.demoteToWarm).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-2"]);
+  });
+
+  it("fails the hot index demotion batch when a selected id is not applied", async () => {
+    const appendManyWithMutation = vi.fn(
+      async <T>(
+        entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (rows: readonly EventLogEntry[]) => T
+      ): Promise<T> => {
+        const persisted: EventLogEntry[] = entries.map((entry, idx) => ({
+          ...entry,
+          event_id: `evt-${idx}`,
+          created_at: "2026-03-27T00:00:00.000Z",
+          revision: idx
+        }));
+        return mutate(persisted);
+      }
+    );
+    const tieringPort = {
+      findHotDemotionCandidates: vi.fn(async () => [
+        { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 },
+        { memory_entry_id: "memory-retired", last_access_at: null, activation_score: 0.1 }
+      ]),
+      demoteToWarm: vi.fn(() => ["memory-1"])
+    };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(() => undefined)
+      },
+      tieringPort,
+      scheduler: { reportCompletion: vi.fn(async () => undefined) },
+      eventLogRepo: {
+        append: vi.fn(),
+        appendManyWithMutation: appendManyWithMutation as AuditorEventLogPort["appendManyWithMutation"]
+      },
+      now: () => "2026-03-27T00:00:00.000Z"
+    });
+
+    const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
+
+    expect(tieringPort.demoteToWarm).toHaveBeenCalledWith("workspace-1", ["memory-1", "memory-retired"]);
+    expect(result.success).toBe(false);
+    expect(result.objects_affected).toEqual([]);
+    expect(result.error_message).toBe(
+      "hot index demotion applied a different id set than selected in workspace-1"
+    );
+    const emittedEntries = (appendManyWithMutation.mock.calls[0] ?? [[]])[0] as readonly {
+      readonly payload_json: { readonly object_id: string };
+    }[];
+    expect(emittedEntries.map((entry) => entry.payload_json.object_id)).toEqual([
+      "memory-1",
+      "memory-retired"
+    ]);
   });
 
   it("does not demote anything when hot index demotion finds no candidates", async () => {
@@ -338,7 +394,7 @@ describe("Janitor", () => {
   });
 
   it("fails hot index demotion when EventLog is not wired", async () => {
-    const { janitor, scheduler } = createJanitor({
+    const { janitor, scheduler, tieringPort } = createJanitor({
       hotCandidates: [
         { memory_entry_id: "memory-1", last_access_at: null, activation_score: 0.1 }
       ],
@@ -349,6 +405,7 @@ describe("Janitor", () => {
 
     expect(result.success).toBe(false);
     expect(result.error_message).toContain("eventLogRepo");
+    expect(tieringPort.demoteToWarm).not.toHaveBeenCalled();
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
@@ -469,7 +526,7 @@ function createJanitor(options: {
   };
   const tieringPort = {
     findHotDemotionCandidates: vi.fn(async () => options.hotCandidates ?? []),
-    demoteToWarm: vi.fn(async () => undefined)
+    demoteToWarm: vi.fn((_workspaceId: string, memoryEntryIds: readonly string[]) => memoryEntryIds)
   };
   const scheduler = {
     reportCompletion: options.reportCompletion ?? vi.fn(async () => undefined)

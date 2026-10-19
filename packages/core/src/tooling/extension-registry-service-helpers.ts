@@ -1,6 +1,5 @@
-import { ToolSpecSchema, type ToolProvider, type ToolProviderToolSpec, type ToolSpec } from "@do-soul/alaya-protocol";
+import type { ToolProvider, ToolProviderToolSpec, ToolSpec } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { deepFreeze } from "@do-soul/alaya-protocol";
 import { parseExtensionToolProvider } from "./extension-descriptor-parsers.js";
 import type { ProviderCacheSnapshot } from "./extension-registry-service-types.js";
 
@@ -8,14 +7,6 @@ export function normalizeProvider(
   provider: Readonly<ToolProvider>
 ): Readonly<ToolProvider> {
   return Object.isFrozen(provider) ? provider : parseExtensionToolProvider(provider);
-}
-
-export function parseToolSpec(value: ToolSpec): Readonly<ToolSpec> {
-  try {
-    return deepFreeze(ToolSpecSchema.parse(value));
-  } catch (error) {
-    throw new CoreError("VALIDATION", "Invalid tool spec payload", { cause: error });
-  }
 }
 
 export function buildDefaultToolSpec(
@@ -79,20 +70,6 @@ export function createProviderCacheSnapshot(
   });
 }
 
-export function mergeProviderIntoCacheSnapshot(
-  currentSnapshot: Readonly<ProviderCacheSnapshot>,
-  normalizedProvider: Readonly<ToolProvider>
-): Readonly<ProviderCacheSnapshot> {
-  const nextProviders = [
-    ...currentSnapshot.providerList.filter(
-      (provider) => provider.provider_id !== normalizedProvider.provider_id
-    ),
-    normalizedProvider
-  ];
-
-  return createProviderCacheSnapshot(nextProviders);
-}
-
 export function providerOwnsTool(
   provider: Readonly<ToolProvider> | null,
   toolId: string
@@ -112,10 +89,6 @@ export function listRemovedToolIds(
   return previousProvider.tool_specs
     .map((tool) => tool.tool_id)
     .filter((toolId) => !nextToolIds.has(toolId));
-}
-
-export function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
 }
 
 function freezeProviderList(

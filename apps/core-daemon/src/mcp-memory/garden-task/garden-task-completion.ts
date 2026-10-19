@@ -29,10 +29,10 @@ import {
   GardenTaskUnavailableError,
   GardenTaskValidationError,
   isUnknownRecord,
-  normalizeCandidateSignalGraphRefs,
   readEdgeClassifyPayloadPair
 } from "./garden-task-handler-support.js";
 import type { GardenTaskHandlerDependencies, GardenTaskToolCallContext } from "./garden-task-handlers.js";
+import { normalizeCandidateSignalGraphRefs } from "../tool/tool-handler-support.js";
 
 const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
 

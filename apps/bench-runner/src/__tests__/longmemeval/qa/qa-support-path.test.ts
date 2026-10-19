@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { answerSystemFor, type QaDeliveredCandidate } from "../../../runs/qa/qa-harness.js";
+import { answerSystemFor, buildQaDeliverySettings, type QaDeliveredCandidate } from "../../../runs/qa/qa-harness.js";
 import { buildQaSupportPack } from "../../../runs/qa/qa-support-pack.js";
 import { parseFilterSelection, selectRelevantMemories } from "../../../runs/qa/qa-llm-filter.js";
 
@@ -12,6 +12,18 @@ afterEach(() => {
 });
 
 describe("answerSystemFor v2 prompt routing", () => {
+  it.each([undefined, "", "0", "false", "off"])("keeps temporal enumeration disabled consistently for %s", (value) => {
+    vi.stubEnv("ALAYA_BENCH_QA_TEMPORAL_ENUM", value);
+    expect(buildQaDeliverySettings().temporal_enum_enabled).toBe(false);
+    expect(answerSystemFor("temporal-reasoning", false)).not.toContain("MANY dated memories");
+  });
+
+  it.each(["1", "true", "on"])("enables temporal enumeration consistently for %s", (value) => {
+    vi.stubEnv("ALAYA_BENCH_QA_TEMPORAL_ENUM", value);
+    expect(buildQaDeliverySettings().temporal_enum_enabled).toBe(true);
+    expect(answerSystemFor("temporal-reasoning", false)).toContain("MANY dated memories");
+  });
+
   it("routes knowledge-update to the latest-value prompt only when v2 prompts are on", () => {
     expect(answerSystemFor("knowledge-update", false)).not.toMatch(/most recent applicable/iu);
     vi.stubEnv("ALAYA_BENCH_QA_V2_PROMPTS", "1");

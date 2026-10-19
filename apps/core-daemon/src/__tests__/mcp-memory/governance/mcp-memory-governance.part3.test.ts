@@ -49,7 +49,7 @@ function createMemoryApplyPort() {
 }
 
 describe("mcp memory governance — soul.list_pending_proposals", () => {
-  it("forwards since/limit through to the proposalRepo summary projection", async () => {
+  it("forwards since/limit to the page read and reports the matching total from the count read", async () => {
     const findPendingSummaries = vi.fn(async () => [
       {
         proposal_id: "prop-1",
@@ -64,6 +64,7 @@ describe("mcp memory governance — soul.list_pending_proposals", () => {
         is_overdue: false
       }
     ]);
+    const countPendingSummaries = vi.fn(async () => 3);
     const workflow = createMcpMemoryProposalWorkflow({
       now: () => "2026-04-30T00:00:00.000Z",
       generateObjectId: () => "00000000-0000-4000-8000-000000000001",
@@ -83,6 +84,9 @@ describe("mcp memory governance — soul.list_pending_proposals", () => {
         findById: async () => null,
         findScopedById: async () => null,
         findPendingSummaries,
+        // Deliberately larger than the returned page: total_count must come from
+        // the matching count, not the page length.
+        countPendingSummaries,
         updatePendingResolutionWithEvents: async () => {
           throw new Error("updatePendingResolutionWithEvents must not be called");
         }
@@ -97,12 +101,15 @@ describe("mcp memory governance — soul.list_pending_proposals", () => {
       { workspaceId: "ws1", runId: null, agentTarget: "cli", sessionId: "session-1" }
     );
 
-    expect(result.total_count).toBe(1);
+    expect(result.total_count).toBe(3);
     expect(result.proposals).toHaveLength(1);
     expect(findPendingSummaries).toHaveBeenCalledWith("ws1", {
       since: "2026-04-30T00:00:00.000Z",
       limit: 10,
       now: "2026-04-30T00:00:00.000Z"
+    });
+    expect(countPendingSummaries).toHaveBeenCalledWith("ws1", {
+      since: "2026-04-30T00:00:00.000Z"
     });
   });
 
@@ -133,6 +140,7 @@ describe("mcp memory governance — soul.list_pending_proposals", () => {
           proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, _memoryUpdate, options) => {
           captureReviewerIdentity = options?.reviewerIdentity;
           for (const event of events) {
@@ -204,6 +212,7 @@ describe("mcp memory governance — soul.list_pending_proposals", () => {
           proposed_changes: { content: "corrected" }
         }),
         findPendingSummaries: async () => [],
+        countPendingSummaries: async () => 0,
         acceptPendingMemoryUpdateWithEvents: async (_proposalId, updatedAt, events, _memoryUpdate, options) => {
           updateCalls += 1;
           captureReviewerIdentity = options?.reviewerIdentity;

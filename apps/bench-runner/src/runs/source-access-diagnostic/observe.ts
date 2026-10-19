@@ -12,7 +12,8 @@ import { LongMemEvalPreparedSchema, verifyLongMemEvalQuestionChain,
 import { SemanticChainPlanSchema, chainIdentity, readChainArtifact,
   withSemanticChainDaemon, writeChainArtifact } from "../recall-measurement/contract.js";
 import { SourceAccessDiagnosticConfigSchema, SourceAccessDiagnosticObservationSchema, SourceAccessDiagnosticRowSchema,
-  type SourceAccessArtifactRef, type SourceAccessDiagnosticConfig, type SourceAccessDiagnosticRow, NOT_EXERCISED } from "./contract.js";
+  type SourceAccessArtifactRef, type SourceAccessDiagnosticConfig, type SourceAccessDiagnosticRow, NOT_EXERCISED,
+  assertNoProviderCalls } from "./contract.js";
 
 type Prepared = ReturnType<typeof LongMemEvalPreparedSchema.parse>;
 type NativePage = Readonly<{ response: ReturnType<typeof SoulInterpretationPrepareQueryResponseSchema.parse>;
@@ -96,6 +97,9 @@ export async function observeSourceAccessDiagnostic(value: unknown, outputRoot: 
       }
       rows.push(await observeOne(config, root, selected, plan, policy, position * config.policies.length + policyPosition, meter));
     }
+  }
+  if (meter.attempts !== meter.settled) {
+    throw new AlayaError("CONFLICT", "diagnostic attempted calls lack settled provider-call evidence");
   }
   const diskBeforeSummary = sampleDisk(root, meter);
   if (diskBeforeSummary + meter.summaryReserveBytes > config.limits.max_disk_bytes && meter.stop === null) {
@@ -251,10 +255,12 @@ async function observeOne(config: SourceAccessDiagnosticConfig, root: string,
             authorized_scopes: plan.config.authorized_scopes,
             ...(continuation === undefined ? {} : { continuation_handle: continuation }) })));
         const page: NativePage = { response, wall_ms: performance.now() - pageStarted };
+        const providerAttempts = sourceSemanticExecutionExternalAttempts(response.execution);
+        assertNoProviderCalls(providerAttempts);
         const resultPath = `${attemptBase}.result.json`;
         const resultRef = writeMeasuredArtifact(root, resultPath, { question_id: selected.question_id, policy,
           page_number: pageNumber, work: response.work, execution: response.execution,
-          provider_attempts: sourceSemanticExecutionExternalAttempts(response.execution),
+          provider_attempts: providerAttempts,
           response_identity: chainIdentity(JSON.parse(JSON.stringify(response))), wall_ms: page.wall_ms },
         meter, config.limits.max_output_bytes);
         attemptEvidence[pageNumber]!.result = resultRef;
@@ -308,7 +314,8 @@ async function observeOne(config: SourceAccessDiagnosticConfig, root: string,
     });
   } catch (error) {
     sampleDisk(root, meter);
-    if (pendingAttempt) { unresolvedAttempts++; meter.unresolved++; }
+    // A started native call without a settled receipt cannot support literal zero.
+    if (pendingAttempt) throw error;
     status = attemptedPages === 0 ? "failed" : "partial";
     reason = `native_access: ${reasonOf(error)}`;
     meter.stop = reason;

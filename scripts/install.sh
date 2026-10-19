@@ -10,7 +10,7 @@
 # Pipe shortcut (env vars MUST come after the pipe so `bash` sees them,
 # not `curl`; the downloaded script still verifies the release tarball):
 #   curl -fsSL https://raw.githubusercontent.com/tdwhere123/Do-SOUL-Alaya/main/scripts/install.sh | ALAYA_VERSION=v0.3.11 bash
-#   curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/usr/local/bin bash
+#   curl -fsSL ... | ALAYA_HOME=/opt/alaya ALAYA_BIN_DIR=/opt/alaya/bin bash
 #
 # Environment overrides:
 #   ALAYA_VERSION   GitHub release tag (e.g. v0.3.11). When unset, this script
@@ -42,27 +42,12 @@
 #   node "$ALAYA_HOME/scripts/fetch-local-embedding-model.mjs"
 # Inspector SPA is compiled by `pnpm build` unless ALAYA_BUILD_INSPECTOR_WEB=0
 # and apps/inspector/web/dist/index.html already exists.
-set -euo pipefail
-
-REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
-ALAYA_HOME="${ALAYA_HOME:-${HOME}/.local/share/do-soul-alaya}"
-ALAYA_BIN_DIR="${ALAYA_BIN_DIR:-${HOME}/.local/bin}"
-TMP_DIR="$(mktemp -d -t alaya-install-XXXXXX)"
-STAGING_DIR="${ALAYA_HOME}.staging-$$"
-trap 'rm -rf "$TMP_DIR" "$STAGING_DIR"' EXIT
-
-bold() { printf '\033[1m%s\033[0m\n' "$*"; }
-info() { printf '   %s\n' "$*"; }
-ok()   { printf '\033[32m+\033[0m %s\n' "$*"; }
-warn() { printf '\033[33m!\033[0m %s\n' "$*" >&2; }
+#
+# Path admission is sourced by uninstall.sh. curl|bash stdin leaves
+# BASH_SOURCE empty and must still run the installer body below.
 err()  { printf '\033[31mx\033[0m %s\n' "$*" >&2; exit 1; }
 
-bold "Do-SOUL Alaya installer"
-
-# --- path safety ----------------------------------------------------------
-# Reject targets that, if mv'd to .bak, would clobber unrelated user state.
-# This guard runs against ALAYA_HOME (where the install body lives) AND
-# against ALAYA_BIN_DIR (where the alaya symlink lives).
+# Reject targets that, if mv'd to .bak or rm'd, would clobber unrelated state.
 reject_unsafe_path() {
   local label="$1" raw="$2"
   local abs
@@ -80,13 +65,45 @@ reject_unsafe_path() {
   esac
   printf '%s' "$abs"
 }
-abs_alaya_home="$(reject_unsafe_path 'ALAYA_HOME' "$ALAYA_HOME")"
-abs_home="$(readlink -f "$HOME" 2>/dev/null || echo "$HOME")"
-[ "$abs_alaya_home" = "$abs_home" ] \
-  && err "ALAYA_HOME cannot be \$HOME (would clobber on upgrade)."
-case "$abs_home" in
-  "$abs_alaya_home"/*) err "\$HOME is inside ALAYA_HOME (${abs_alaya_home}); refusing." ;;
-esac
+
+# Recursive-delete targets cannot be $HOME or an ancestor of $HOME.
+reject_recursive_delete_target() {
+  local label="$1" raw="$2"
+  local abs abs_home
+  abs="$(reject_unsafe_path "$label" "$raw")"
+  abs_home="$(readlink -f "$HOME" 2>/dev/null || echo "$HOME")"
+  [ "$abs" = "$abs_home" ] \
+    && err "${label} cannot be \$HOME (would clobber user state)."
+  case "$abs_home" in
+    "$abs"/*) err "\$HOME is inside ${label} (${abs}); refusing." ;;
+  esac
+  printf '%s' "$abs"
+}
+
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
+
+set -euo pipefail
+
+REPO="${ALAYA_REPO:-tdwhere123/Do-SOUL-Alaya}"
+ALAYA_HOME="${ALAYA_HOME:-${HOME}/.local/share/do-soul-alaya}"
+ALAYA_BIN_DIR="${ALAYA_BIN_DIR:-${HOME}/.local/bin}"
+TMP_DIR="$(mktemp -d -t alaya-install-XXXXXX)"
+STAGING_DIR="${ALAYA_HOME}.staging-$$"
+trap 'rm -rf "$TMP_DIR" "$STAGING_DIR"' EXIT
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+info() { printf '   %s\n' "$*"; }
+ok()   { printf '\033[32m+\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m!\033[0m %s\n' "$*" >&2; }
+
+bold "Do-SOUL Alaya installer"
+
+# --- path safety ----------------------------------------------------------
+# This guard runs against ALAYA_HOME (where the install body lives) AND
+# against ALAYA_BIN_DIR (where the alaya symlink lives).
+abs_alaya_home="$(reject_recursive_delete_target 'ALAYA_HOME' "$ALAYA_HOME")"
 abs_bin_dir="$(reject_unsafe_path 'ALAYA_BIN_DIR' "$ALAYA_BIN_DIR")"
 case "$abs_bin_dir" in
   /etc|/etc/*) err "ALAYA_BIN_DIR cannot be under /etc. Refusing." ;;

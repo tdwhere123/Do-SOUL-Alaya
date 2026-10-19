@@ -43,7 +43,7 @@ try {
   result.source.selected_path = source?.selectedPath ?? null;
 
   if (source === null) {
-    result.warnings.push("no readable archive JSON source found; emitting neutral metrics");
+    throw new Error("no readable archive JSON source found");
   } else {
     const archive = JSON.parse(readFileSync(source.selectedPath, "utf8"));
     result.source.archive_kind = detectArchiveKind(archive, source.selectedPath);
@@ -66,7 +66,8 @@ try {
     }
   }
 } catch (error) {
-  result.warnings.push(`failed to read archive: ${errorMessage(error)}`);
+  console.error(`failed to read archive: ${errorMessage(error)}`);
+  process.exit(1);
 }
 
 console.log(JSON.stringify(result, null, 2));

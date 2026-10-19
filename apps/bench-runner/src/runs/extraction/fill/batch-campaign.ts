@@ -52,6 +52,36 @@ export function isRetryableCampaignStopReason(reason: string | undefined): boole
   return reason !== undefined && RETRYABLE_STOP_REASONS.has(reason as BatchCampaignStopReason);
 }
 
+export type BatchCampaignFailureCategory =
+  | "campaign_artifact_access_failed"
+  | "campaign_artifact_invalid_json"
+  | "campaign_artifact_schema_invalid"
+  | BatchCampaignStopReason;
+
+const ARTIFACT_ACCESS_ERRNOS = new Set([
+  "EACCES", "EISDIR", "ELOOP", "ENAMETOOLONG", "ENOENT", "ENOTDIR", "EPERM"
+]);
+
+/** Bounded label for a failed campaign. It never carries a provider message,
+ * request content, or credential; artifacts are named by failure kind only. */
+export function classifyBatchCampaignFailure(cause: unknown): BatchCampaignFailureCategory {
+  if (cause instanceof SyntaxError) return "campaign_artifact_invalid_json";
+  if (cause instanceof z.ZodError) return "campaign_artifact_schema_invalid";
+  if (hasArtifactAccessErrno(cause)) return "campaign_artifact_access_failed";
+  return classifyCampaignStopReason(cause);
+}
+
+function hasArtifactAccessErrno(cause: unknown): boolean {
+  let current: unknown = cause;
+  // The bounded artifact reader nests its opener code under wrapped causes.
+  for (let depth = 0; depth < 4; depth += 1) {
+    const code = (current as { readonly code?: unknown } | null | undefined)?.code;
+    if (typeof code === "string" && ARTIFACT_ACCESS_ERRNOS.has(code)) return true;
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return false;
+}
+
 /** Scheduling only. The fill owner retains all request, admission and spend authority. */
 export async function runBatchCampaign(manifestPath: string, options: {
   readonly signal?: AbortSignal;

@@ -39,7 +39,7 @@ describe("attributeSeedDrops", () => {
     expect(drops.trulyLost).toBe(18);
   });
 
-  it("attributes materialization errors and an unattributed batch residual to the lost count", () => {
+  it("attributes materialization errors and an unattributed residual to the lost count", () => {
     const drops = attributeSeedDrops(
       makeSeedExtractionPath({
         signals_dropped: 10,

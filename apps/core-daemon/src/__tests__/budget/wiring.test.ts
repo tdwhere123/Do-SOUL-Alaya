@@ -58,7 +58,7 @@ describe("budget wiring", () => {
         });
         return { proposal: input.proposal, events: [] };
       },
-      updateResolution: async (
+      updatePendingResolution: async (
         proposalId: string,
         resolutionState: Proposal["resolution_state"],
         lastUpdatedAt: string

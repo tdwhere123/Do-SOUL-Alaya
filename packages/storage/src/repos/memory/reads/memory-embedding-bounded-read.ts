@@ -1,4 +1,8 @@
 import type { StorageDatabase } from "../../../sqlite/db.js";
+import {
+  EMBEDDING_OVERLAY_ALIAS,
+  isEmbeddingOverlayAttached
+} from "../../../sqlite/embedding-overlay-bind.js";
 import { DynamicPreparedStatementCache } from "../../../sqlite/dynamic-prepared-statement-cache.js";
 import { withSqliteBusyRetry } from "../../../sqlite/open-readonly.js";
 import { StorageError } from "../../../shared/errors.js";
@@ -16,6 +20,10 @@ import { parseMemoryEmbeddingRow, parseModelId, parseObjectId, parseProviderKind
 import type { MemoryEmbeddingRecord } from "../memory-embedding-repo.js";
 
 const statementCaches = new WeakMap<StorageDatabase, DynamicPreparedStatementCache>();
+const overlayAttachment = new WeakMap<StorageDatabase, {
+  readonly connection: StorageDatabase["connection"];
+  readonly attached: boolean;
+}>();
 
 function statementsFor(db: StorageDatabase): DynamicPreparedStatementCache {
   const existing = statementCaches.get(db);
@@ -23,6 +31,15 @@ function statementsFor(db: StorageDatabase): DynamicPreparedStatementCache {
   const created = new DynamicPreparedStatementCache(db, () => db.reopenIfClosed());
   statementCaches.set(db, created);
   return created;
+}
+
+function overlayAttachedFor(db: StorageDatabase): boolean {
+  const connection = db.connection;
+  const cached = overlayAttachment.get(db);
+  if (cached !== undefined && cached.connection === connection) return cached.attached;
+  const attached = isEmbeddingOverlayAttached(connection);
+  overlayAttachment.set(db, { connection, attached });
+  return attached;
 }
 
 export interface BoundedEmbeddingProfile {
@@ -56,9 +73,9 @@ export type UniqueEmbeddingProfileLookup =
   | Readonly<{ status: "unique"; profile: EmbeddingProfileIdentity; rowVisits: number; metadataUtf8Bytes: number }>
   | Readonly<{ status: "missing" | "unavailable"; profile?: undefined; rowVisits: number; metadataUtf8Bytes: number }>;
 
-export const BOUNDED_EMBEDDING_INDEX_SQL = `CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recall_profile_identity
+export const BOUNDED_EMBEDDING_INDEX_SQL = `CREATE INDEX IF NOT EXISTS main.idx_memory_embeddings_recall_profile_identity
   ON memory_embeddings(workspace_id, provider_kind, model_id, schema_version, vector_valid, object_id);
-  CREATE INDEX IF NOT EXISTS idx_memory_embeddings_recall_profile_seek
+  CREATE INDEX IF NOT EXISTS main.idx_memory_embeddings_recall_profile_seek
   ON memory_embeddings(workspace_id, vector_valid, model_id, provider_kind, schema_version, object_id)`;
 
 function validateProfile(workspaceId: string, profile: BoundedEmbeddingProfile): void {
@@ -150,6 +167,28 @@ function readNullableIdentityField(record: Record<string, unknown>, field: strin
   return value;
 }
 
+function boundedEmbeddingIdSql(overlayAttached: boolean): string {
+  // INDEXED BY cannot address the same-name TEMP overlay view; main owns the identity index.
+  const mainScan = `SELECT e.object_id AS object_id FROM main.memory_embeddings e INDEXED BY idx_memory_embeddings_recall_profile_identity
+    WHERE e.workspace_id = $workspace AND e.provider_kind = $provider AND e.model_id = $model AND e.schema_version = $schema AND e.vector_valid = 1
+      AND e.object_id > $after
+    ORDER BY e.object_id ASC LIMIT $limit`;
+  const overlayScan = `SELECT e.object_id AS object_id FROM ${EMBEDDING_OVERLAY_ALIAS}.memory_embeddings e
+    WHERE e.workspace_id = $workspace AND e.provider_kind = $provider AND e.model_id = $model AND e.schema_version = $schema AND e.vector_valid = 1
+      AND e.object_id > $after
+      AND NOT EXISTS (SELECT 1 FROM main.memory_embeddings AS durable WHERE durable.object_id = e.object_id)
+    ORDER BY e.object_id ASC LIMIT $limit`;
+  const scan = overlayAttached
+    ? `SELECT object_id FROM (${mainScan}) UNION ALL SELECT object_id FROM (${overlayScan}) ORDER BY object_id ASC LIMIT $limit`
+    : mainScan;
+  return `WITH candidates AS MATERIALIZED (
+    ${scan}
+  ) SELECT
+    CASE WHEN octet_length(object_id) <= $metadata THEN object_id ELSE NULL END AS object_id,
+    CASE WHEN octet_length(object_id) <= $metadata THEN octet_length(object_id) ELSE 0 END AS metadata_bytes
+    FROM candidates ORDER BY candidates.object_id`;
+}
+
 export function readBoundedEmbeddingIds(
   db: StorageDatabase,
   workspaceId: string,
@@ -163,17 +202,17 @@ export function readBoundedEmbeddingIds(
   validateProfile(workspaceId, profile);
   if (profile.maxRows === 0) return Object.freeze({ objectIds: Object.freeze([]), rowVisits: 0, metadataUtf8Bytes: 0, filteredRows: 0, truncated: true, committedThrough: afterObjectId });
   // The indexed canonical prefix owns the native visit cap; downstream source admission owns lifecycle and tier.
+  const overlayAttached = overlayAttachedFor(db);
   const rows = withSqliteBusyRetry(() => parseRows(
-    statementsFor(db).prepare(`WITH candidates AS MATERIALIZED (
-    SELECT e.object_id AS object_id FROM memory_embeddings e INDEXED BY idx_memory_embeddings_recall_profile_identity
-    WHERE e.workspace_id = ? AND e.provider_kind = ? AND e.model_id = ? AND e.schema_version = ? AND e.vector_valid = 1
-      AND e.object_id > ?
-    ORDER BY e.object_id ASC LIMIT ?
-  ) SELECT
-    CASE WHEN octet_length(object_id) <= ? THEN object_id ELSE NULL END AS object_id,
-    CASE WHEN octet_length(object_id) <= ? THEN octet_length(object_id) ELSE 0 END AS metadata_bytes
-    FROM candidates ORDER BY candidates.object_id`).all(workspaceId, profile.providerKind, profile.modelId,
-    profile.schemaVersion, afterObjectId ?? "", profile.maxRows, profile.maxMetadataUtf8Bytes, profile.maxMetadataUtf8Bytes),
+    statementsFor(db).prepare(boundedEmbeddingIdSql(overlayAttached)).all({
+      workspace: workspaceId,
+      provider: profile.providerKind,
+      model: profile.modelId,
+      schema: profile.schemaVersion,
+      after: afterObjectId ?? "",
+      limit: profile.maxRows,
+      metadata: profile.maxMetadataUtf8Bytes
+    }),
     BoundedEmbeddingIdRowParser,
     "bounded embedding id row"
   ));

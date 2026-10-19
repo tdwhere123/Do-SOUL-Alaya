@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -10,6 +10,8 @@ import * as SchemaPrimitives from "../../shared/schema-primitives.js";
 import * as BudgetEvents from "../../events/budget.js";
 import * as ComputeRecallGardenEvents from "../../events/compute-recall-garden.js";
 import * as EventLogOrphanEvents from "../../events/event-log-orphan.js";
+import * as EventLog from "../../events/event-log.js";
+import * as GovernanceResolutionEvents from "../../events/governance-resolution.js";
 import * as FieldGenerationEvents from "../../events/field-generation.js";
 import * as FileApprovalEvents from "../../events/file-approval.js";
 import * as GardenEvents from "../../events/garden.js";
@@ -28,6 +30,7 @@ import * as SurfaceEvents from "../../events/surface.js";
 import * as ToolWorkerEvents from "../../events/tool-worker.js";
 import * as WorkerRuntimeEvents from "../../events/worker-runtime.js";
 import * as WorkspaceRunEvents from "../../events/workspace-run.js";
+import * as TrustState from "../../governance/trust-state.js";
 import * as McpTypes from "../../surfaces/mcp-types.js";
 import * as BudgetSnapshot from "../../lifecycle/budget-snapshot.js";
 import * as EdgeProposal from "../../relations/edge-proposal.js";
@@ -85,6 +88,8 @@ const eventSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/events/budget.ts", exports: BudgetEvents },
   { module: "packages/protocol/src/events/compute-recall-garden.ts", exports: ComputeRecallGardenEvents },
   { module: "packages/protocol/src/events/event-log-orphan.ts", exports: EventLogOrphanEvents },
+  { module: "packages/protocol/src/events/event-log.ts", exports: EventLog },
+  { module: "packages/protocol/src/events/governance-resolution.ts", exports: GovernanceResolutionEvents },
   { module: "packages/protocol/src/events/field-generation.ts", exports: FieldGenerationEvents },
   { module: "packages/protocol/src/events/file-approval.ts", exports: FileApprovalEvents },
   { module: "packages/protocol/src/events/garden.ts", exports: GardenEvents },
@@ -102,7 +107,9 @@ const eventSchemaModules: readonly SchemaModule[] = [
   { module: "packages/protocol/src/events/surface.ts", exports: SurfaceEvents },
   { module: "packages/protocol/src/events/tool-worker.ts", exports: ToolWorkerEvents },
   { module: "packages/protocol/src/events/worker-runtime.ts", exports: WorkerRuntimeEvents },
-  { module: "packages/protocol/src/events/workspace-run.ts", exports: WorkspaceRunEvents }
+  { module: "packages/protocol/src/events/workspace-run.ts", exports: WorkspaceRunEvents },
+  // Trust records are persisted EventLog bodies despite living outside events/.
+  { module: "packages/protocol/src/governance/trust-state.ts", exports: TrustState }
 ];
 
 const wrapperTypeNames = new Set([
@@ -141,6 +148,33 @@ describe("semver-surface", () => {
     expect(computeSurfaceSource()).toMatchSnapshot();
   });
 
+  it("includes every event module in the public contract collection", () => {
+    const eventModulePaths = eventSchemaModules.map(({ module }) => module)
+      .filter((module) => module.startsWith("packages/protocol/src/events/"));
+    const eventFiles = readdirSync(new URL("../../events/", import.meta.url))
+      .filter((name) => name.endsWith(".ts"))
+      .map((name) => `packages/protocol/src/events/${name}`);
+    expect(eventModulePaths.sort()).toEqual(eventFiles.sort());
+  });
+
+  it("covers exported event schemas regardless of suffix but not functions or registries", () => {
+    const names = collectEventSchemas(eventSchemaModules).map(({ schema }) => schema);
+    expect(names).toEqual(expect.arrayContaining([
+      "EventLogEntrySchema",
+      "EventLogPayloadSchema",
+      "MessageDeltaEventSchema",
+      "MessageCompletedEventSchema",
+      "GovernanceResolutionPayloadSchema",
+      "ContextDeliveryRecordSchema",
+      "UsageProofRecordSchema",
+      "SoulConflictMatrixEdgeDeletedPayloadSchema"
+    ]));
+    expect(names).not.toContain("createWorkerRuntimeEventObjectSchema");
+    expect(names).not.toContain("RESOLUTION_KIND_TO_EVENT_TYPE");
+    expect(names).not.toContain("EVENT_LOG_PAYLOAD_MAX_CHARS");
+    expect(names).not.toContain("WorkerEventPayloadBaseSchema");
+  });
+
   // A surface change with no package.json version bump must FAIL. The sidecar
   // pins {version, surfaceHash}; regenerating the snapshot alone no longer
   // smuggles a breaking surface change through CI.
@@ -171,7 +205,7 @@ function computeMcpSurface(): ReturnType<typeof collectMcpSurface> {
 function computeSurfaceSource(): string {
   return formatSnapshotLines({
     mcp: computeMcpSurface(),
-    eventPayloadKeys: collectPayloadSchemaKeys(eventSchemaModules),
+    eventSchemas: collectEventSchemas(eventSchemaModules),
     runtimeConfigKeys: collectRuntimeConfigKeys()
   }).join("\n");
 }
@@ -220,14 +254,17 @@ function collectMcpRootSchemas(): readonly Readonly<{ readonly name: string; rea
   );
 }
 
-function collectPayloadSchemaKeys(
+function collectEventSchemas(
   modules: readonly SchemaModule[]
 ): readonly Readonly<{ readonly module: string; readonly schema: string } & SchemaDescriptor>[] {
   return Object.freeze(
     modules
       .flatMap(({ module, exports }) =>
         Object.entries(exports)
-          .filter(([name, value]) => name.endsWith("PayloadSchema") && isZodSchema(value))
+          // Event bodies also use EventSchema and RecordSchema. Public enums,
+          // envelopes and union schemas carry the contract too; functions and
+          // constant registries are not schemas and must not enter the fixture.
+          .filter(([name, value]) => name.endsWith("Schema") && isZodSchema(value))
           // isZodSchema narrows in the filter predicate but the guard does not flow
           // through tuple destructuring into the mapped element type.
           .map(([schema, value]) => Object.freeze({ module, schema, ...describeSchema(value as z.ZodTypeAny) }))
@@ -476,7 +513,7 @@ function compareByModuleThenSchema(
 
 function formatSnapshotLines(surface: Readonly<{
   readonly mcp: ReturnType<typeof collectMcpSurface>;
-  readonly eventPayloadKeys: ReturnType<typeof collectPayloadSchemaKeys>;
+  readonly eventSchemas: ReturnType<typeof collectEventSchemas>;
   readonly runtimeConfigKeys: ReturnType<typeof collectRuntimeConfigKeys>;
 }>): readonly string[] {
   return Object.freeze([
@@ -486,8 +523,8 @@ function formatSnapshotLines(surface: Readonly<{
     ...surface.mcp.reachableSchemas.map((entry) =>
       formatSchemaSnapshotLine(shortModule(entry.module), entry.schema, entry)
     ),
-    "[eventPayloadKeys]",
-    ...surface.eventPayloadKeys.map((entry) =>
+    "[eventSchemas]",
+    ...surface.eventSchemas.map((entry) =>
       formatSchemaSnapshotLine(shortModule(entry.module), entry.schema, entry)
     ),
     "[runtimeConfigKeys]",

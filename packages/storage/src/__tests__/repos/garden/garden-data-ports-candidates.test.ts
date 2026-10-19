@@ -158,7 +158,7 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
     });
     expect(found.map((entry) => entry.memory_entry_id)).toEqual(["memory-demote"]);
 
-    await ports.tieringPort.demoteToWarm("workspace-1", ["memory-demote"]);
+    expect(ports.tieringPort.demoteToWarm("workspace-1", ["memory-demote"])).toEqual(["memory-demote"]);
     const row = database.connection
       .prepare("SELECT storage_tier FROM memory_entries WHERE object_id = ? LIMIT 1")
       .get("memory-demote") as { readonly storage_tier: string } | undefined;
@@ -169,6 +169,56 @@ describe("garden background data ports bootstrapping and candidate scans", () =>
       minActivationScore: 0.3
     });
     expect(none).toEqual([]);
+  });
+
+  it("hot demotion returns only ids that actually left the hot tier", async () => {
+    const { database, ports } = await createFixture();
+    seedMemoryEntry(database, {
+      objectId: "memory-hot",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      activationScore: 0.1,
+      lastHitAt: "2026-01-01T00:00:00.000Z"
+    });
+    seedMemoryEntry(database, {
+      objectId: "memory-already-cold",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      activationScore: 0.1,
+      lastHitAt: "2026-01-01T00:00:00.000Z",
+      storageTier: "cold"
+    });
+    seedMemoryEntry(database, {
+      objectId: "memory-retired",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      activationScore: 0.1,
+      lastHitAt: "2026-01-01T00:00:00.000Z",
+      lifecycleState: "archived"
+    });
+
+    expect(
+      ports.tieringPort.demoteToWarm("workspace-1", [
+        "memory-hot",
+        "memory-already-cold",
+        "memory-retired"
+      ])
+    ).toEqual(["memory-hot"]);
+
+    const tiers = database.connection
+      .prepare(
+        "SELECT object_id, storage_tier, lifecycle_state FROM memory_entries WHERE object_id IN (?, ?, ?) ORDER BY object_id"
+      )
+      .all("memory-already-cold", "memory-hot", "memory-retired") as readonly {
+        readonly object_id: string;
+        readonly storage_tier: string;
+        readonly lifecycle_state: string;
+      }[];
+    expect(tiers).toEqual([
+      { object_id: "memory-already-cold", storage_tier: "cold", lifecycle_state: "active" },
+      { object_id: "memory-hot", storage_tier: "cold", lifecycle_state: "active" },
+      { object_id: "memory-retired", storage_tier: "hot", lifecycle_state: "archived" }
+    ]);
   });
 
   it("finds Librarian merge, neighbor, compression, and synthesis candidates", async () => {

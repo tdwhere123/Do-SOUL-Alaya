@@ -3,6 +3,11 @@ import { access, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { execFileSync, spawnSync } from "node:child_process";
+// Node 24 executes erasable TypeScript, so CI reads the runtime eligibility
+// rule directly instead of keeping a second copy of the surface list.
+import {
+  canAdvanceSharedLatestPassingPointer
+} from "../../packages/eval/src/gates/shared-latest-passing-pointer.ts";
 
 const BENCH_ROOTS = new Set([
   "self",
@@ -171,6 +176,16 @@ async function checkLatestPassingPointer({
 }) {
   if (await exists(path.join(archiveRoot, "findings.md"))) {
     add(`${pointerLabel}: latest-passing must not point to an archive with findings.md`);
+  }
+
+  if (!canAdvanceSharedLatestPassingPointer({
+    bench_name: benchName,
+    split: kpi.split
+  })) {
+    add(
+      `${pointerLabel}: ${benchName}/${kpi.split} cannot own the shared ` +
+      "latest-passing pointer (no applicable release gate)"
+    );
   }
 
   if (TIER1_ROOTS.has(benchName) && !isReleaseGradeTier1(benchName, kpi)) {

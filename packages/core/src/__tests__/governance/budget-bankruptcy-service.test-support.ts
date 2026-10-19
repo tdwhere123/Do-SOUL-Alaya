@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { BankruptcyAction, BankruptcyTriggerKind, ProposalResolutionState, RuntimeMode, type EventLogEntry, type Proposal } from "@do-soul/alaya-protocol";
 import type { TestMock } from "../shared/mock-types.js";
+import type { BudgetBankruptcyServiceProposalPort } from "../../governance/bankruptcy/budget-bankruptcy-service-types.js";
 
 export type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -41,7 +42,11 @@ export function createDependencies(overrides: Partial<{
     proposalService: { ...proposalPort, createWithEvents: async (
       params: Parameters<typeof proposalPort.create>[0], events: readonly EventLogDraft[]
     ) => ({ proposal: await proposalPort.create(params),
-      events: await Promise.all(events.map(event => eventLogRepo.append(event))) }) },
+      events: await Promise.all(events.map(event => eventLogRepo.append(event))) }),
+      updateWithEvents: async (
+        proposalId: string, patch: Parameters<typeof proposalPort.update>[1], events: readonly EventLogDraft[]
+      ) => ({ proposal: await proposalPort.update(proposalId, patch),
+        events: await Promise.all(events.map(event => eventLogRepo.append(event))) }) },
     proposalPort,
     runtimeNotifier:
       overrides.runtimeNotifier ??
@@ -57,11 +62,21 @@ export function createEventLogRepo(overrides: Partial<{
   append: EventLogAppendMock;
   queryByEntity: EventLogQueryByEntityMock;
 }> = {}) {
+  const events: EventLogEntry[] = [];
+  const queryByEntity = overrides.queryByEntity ?? vi.fn(async (entityType: string, entityId: string) =>
+    events.filter(event => event.entity_type === entityType && event.entity_id === entityId));
   return {
     append:
       overrides.append ??
-      vi.fn(async (entry: EventLogDraft) => createEventLogEntry(entry)),
-    queryByEntity: overrides.queryByEntity ?? vi.fn(async () => [])
+      vi.fn(async (entry: EventLogDraft) => {
+        const stored = createEventLogEntry(entry);
+        events.push(stored);
+        return stored;
+      }),
+    queryByEntity,
+    queryByEntityAll: queryByEntity,
+    queryByRunAndEventType: vi.fn(async (runId: string, eventType: string) =>
+      events.filter(event => event.run_id === runId && event.event_type === eventType))
   };
 }
 
@@ -76,11 +91,12 @@ export function createEventLogEntry(entry: EventLogDraft): EventLogEntry {
 
 export function createProposalPort(overrides: Partial<{
   create: TestMock;
-  update: TestMock;
+  update: TestMock<BudgetBankruptcyServiceProposalPort["update"]>;
   findById: TestMock;
   findPendingByRunId: TestMock;
 }> = {}) {
   const proposals = new Map<string, Proposal>();
+  let proposalCount = 0;
 
   const create =
     overrides.create ??
@@ -92,9 +108,10 @@ export function createProposalPort(overrides: Partial<{
       recommendedOptionId: string | null;
       expiresAt: string | null;
     }) => {
+      const proposalId = `proposal-runtime-${++proposalCount}`;
       const proposal = createStoredProposal({
-        runtime_id: "proposal-runtime-1",
-        proposal_id: "proposal-runtime-1",
+        runtime_id: proposalId,
+        proposal_id: proposalId,
         dossier_ref: params.dossierRef,
         recommended_option_id: params.recommendedOptionId,
         proposal_options: params.options,

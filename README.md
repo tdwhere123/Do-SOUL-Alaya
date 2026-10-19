@@ -74,7 +74,12 @@ Snapshots land separately in `<config-dir>/backups/`. Restore by
 stopping the daemon and copying that backup over the live database,
 then `mv "$ALAYA_HOME.bak" "$ALAYA_HOME"` if you also need the previous
 binary. `scripts/uninstall.sh` keeps `.bak` unless `--remove-bak` is
-passed.
+passed. Install and uninstall share one path-admission guard. Before
+detaching or deleting anything, uninstall rejects an `ALAYA_HOME`,
+`${ALAYA_HOME}.bak` (when `--remove-bak` is used), or `ALAYA_CONFIG_DIR`
+(when `--purge` is used) that is `$HOME`, an ancestor of `$HOME`, a system
+path, or a bare shared root, and rejects a system `ALAYA_BIN_DIR`. It
+unlinks a contained `ALAYA_HOME` symlink instead of following it.
 
 `better-sqlite3` 13 loads bundled native prebuilds for Linux glibc/musl,
 macOS, and Windows on x64 or arm64. Its install path has no automatic

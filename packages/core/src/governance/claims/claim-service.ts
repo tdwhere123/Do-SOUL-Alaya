@@ -12,6 +12,7 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import type { EventPublisherInput } from "../../runtime/event-publisher.js";
 import { parseObjectId } from "../../shared/validators.js";
+import { isPromiseLike } from "../../shared/promise-utils.js";
 import {
   collectAdditionalEvents,
   createClaimCreatedEventInput,
@@ -27,7 +28,8 @@ import {
 import type {
   ClaimFormInput,
   ClaimLifecycleTransitionOptions,
-  ClaimServiceDependencies
+  ClaimServiceDependencies,
+  PreparedClaimLifecycleTransition
 } from "./claim-service-types.js";
 import type { EffectDecisionReceipt } from "@do-soul/alaya-protocol";
 
@@ -119,6 +121,27 @@ export class ClaimService {
       : updated;
   }
 
+  /**
+   * Compose a lifecycle CAS with other audited mutations on the same connection.
+   * Preparation has no effects; the caller owns the transaction and propagation.
+   * Slot election must be explicitly skipped, as with transitionLifecycle.
+   */
+  public async prepareLifecycleTransition(
+    objectId: string,
+    newState: ClaimLifecycleStateType,
+    reason: string,
+    causedBy: TransitionCausedByType,
+    options: { readonly skipSlotElection: true }
+  ): Promise<PreparedClaimLifecycleTransition> {
+    if (options.skipSlotElection !== true) {
+      throw new CoreError("CONFLICT", "Prepared claim transitions require caller-owned slot election");
+    }
+    const transition = this.parseLifecycleTransition(objectId, newState, reason, causedBy);
+    const existing = await this.requireExistingClaim(transition.objectId);
+    this.assertAtomicLifecycleAvailable();
+    return this.prepareExistingLifecycleTransition(existing, transition.newState, transition.reason, transition.causedBy);
+  }
+
   public findById(objectId: string): Promise<Readonly<ClaimForm> | null> {
     return this.dependencies.claimFormRepo.findById(objectId);
   }
@@ -170,26 +193,36 @@ export class ClaimService {
     deferredNotificationEvents?: EventLogEntry[],
     auditComposition: LifecycleAuditComposition = {}
   ): Promise<Readonly<ClaimForm>> {
-    const occurredAt = this.now();
-    const eventInput = createLifecycleChangedEventInput(
-      existing,
-      newState,
-      reason,
-      causedBy,
-      occurredAt
-    );
-    const additionalEventInputs = auditComposition.additionalEventInputs ?? [];
     this.assertAtomicLifecycleAvailable(deferredNotificationEvents);
-    return await this.applyAtomicLifecycleTransition(
-      existing,
-      newState,
-      occurredAt,
-      eventInput,
-      additionalEventInputs,
-      auditComposition.additionalEventsSink,
-      auditComposition.effectDecisionReceipt,
-      this.requireStatusUpdateSync()
-    );
+    const prepared = this.prepareExistingLifecycleTransition(existing, newState, reason, causedBy);
+    return await this.applyAtomicLifecycleTransition(prepared, auditComposition);
+  }
+
+  private prepareExistingLifecycleTransition(
+    existing: Readonly<ClaimForm>,
+    newState: ClaimLifecycleStateType,
+    reason: string,
+    causedBy: TransitionCausedByType
+  ): PreparedClaimLifecycleTransition {
+    ensureAllowedLifecycleTransition(existing.claim_status, newState);
+    const occurredAt = this.now();
+    const syncStatusUpdate = this.requireStatusUpdateSync();
+    return {
+      eventInput: createLifecycleChangedEventInput(existing, newState, reason, causedBy, occurredAt),
+      apply: () => {
+        const updated = syncStatusUpdate.call(
+          this.dependencies.claimFormRepo,
+          existing.object_id,
+          newState,
+          occurredAt,
+          existing.claim_status
+        );
+        if (isPromiseLike(updated)) {
+          throw new CoreError("CONFLICT", "Prepared claim status CAS must be synchronous");
+        }
+        return updated;
+      }
+    };
   }
 
   private async emitContestedEvent(
@@ -386,29 +419,18 @@ export class ClaimService {
   }
 
   private async applyAtomicLifecycleTransition(
-    existing: Readonly<ClaimForm>,
-    newState: ClaimLifecycleStateType,
-    occurredAt: string,
-    eventInput: EventPublisherInput,
-    additionalEventInputs: readonly EventPublisherInput[],
-    additionalEventsSink: EventLogEntry[] | undefined,
-    effectDecisionReceipt: ClaimLifecycleTransitionOptions["effectDecisionReceipt"],
-    syncStatusUpdate: NonNullable<ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"]>
+    prepared: PreparedClaimLifecycleTransition,
+    auditComposition: LifecycleAuditComposition
   ): Promise<Readonly<ClaimForm>> {
+    const additionalEventInputs = auditComposition.additionalEventInputs ?? [];
     return await this.requireEventPublisher().appendManyWithMutation(
-      [eventInput, ...additionalEventInputs],
+      [prepared.eventInput, ...additionalEventInputs],
       (persistedEntries) => {
-        collectAdditionalEvents(persistedEntries, additionalEventInputs.length, additionalEventsSink);
-        if (effectDecisionReceipt !== undefined) {
-          this.requireEffectDecisionStore().insert(effectDecisionReceipt);
+        collectAdditionalEvents(persistedEntries, additionalEventInputs.length, auditComposition.additionalEventsSink);
+        if (auditComposition.effectDecisionReceipt !== undefined) {
+          this.requireEffectDecisionStore().insert(auditComposition.effectDecisionReceipt);
         }
-        return syncStatusUpdate.call(
-          this.dependencies.claimFormRepo,
-          existing.object_id,
-          newState,
-          occurredAt,
-          existing.claim_status
-        );
+        return prepared.apply();
       }
     );
   }

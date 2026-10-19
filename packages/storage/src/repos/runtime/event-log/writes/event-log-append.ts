@@ -48,5 +48,6 @@ export function appendInCurrentTransaction(
 }
 
 export function wrapAppendError(error: unknown): never {
+  if (error instanceof StorageError) throw error;
   throw new StorageError("QUERY_FAILED", "Failed to append event log entry.", error);
 }

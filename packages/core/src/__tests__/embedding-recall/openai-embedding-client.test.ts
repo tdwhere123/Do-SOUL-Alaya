@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { OpenAIEmbeddingClient } from "../../embedding-recall/embedding-recall-service.js";
 
@@ -7,6 +9,44 @@ vi.mock("node:dns/promises", () => ({
     return options?.all === true ? [answer] : answer;
   })
 }));
+
+async function withLoopbackEmbeddingResponse<T>(
+  data: unknown,
+  run: (baseUrl: string) => Promise<T>
+): Promise<T> {
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Consume the provider request before replying.
+    }
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ data }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    return await run(`http://127.0.0.1:${port}/v1`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error === undefined) {
+          resolve();
+        } else {
+          reject(error);
+        }
+      });
+    });
+  }
+}
+
+function createLoopbackClient(baseUrl: string): OpenAIEmbeddingClient {
+  return new OpenAIEmbeddingClient({
+    apiKey: "sk-test-secret",
+    baseUrl,
+    allowPrivateProviderUrl: true,
+    maxAttempts: 1
+  });
+}
 
 describe("OpenAIEmbeddingClient", () => {
   it("reports provider host and transport cause without including the secret", async () => {
@@ -189,6 +229,76 @@ describe("OpenAIEmbeddingClient", () => {
 
     await expect(client.embedTexts(["smoke"], { timeoutMs: 1000 }))
       .rejects.toThrow(/non-finite element/);
+  });
+
+  // invariant: response vectors belong to their declared input index, not to
+  // their position in `data`; a valid shuffled response must retain identity.
+  it("associates shuffled response vectors with their declared input indexes", async () => {
+    await withLoopbackEmbeddingResponse(
+      [
+        { index: 2, embedding: [0.3, 0.7] },
+        { index: 0, embedding: [0.1, 0.9] },
+        { index: 1, embedding: [0.2, 0.8] }
+      ],
+      async (baseUrl) => {
+        const embeddings = await createLoopbackClient(baseUrl).embedTexts(
+          ["zero", "one", "two"],
+          { timeoutMs: 1000 }
+        );
+
+        expect(embeddings.map((vector) => [...vector])).toEqual([
+          [expect.closeTo(0.1), expect.closeTo(0.9)],
+          [expect.closeTo(0.2), expect.closeTo(0.8)],
+          [expect.closeTo(0.3), expect.closeTo(0.7)]
+        ]);
+      }
+    );
+  });
+
+  it.each([
+    {
+      name: "duplicate",
+      data: [
+        { index: 0, embedding: [0.1, 0.9] },
+        { index: 0, embedding: [0.2, 0.8] }
+      ],
+      message: /duplicate index 0/u
+    },
+    {
+      name: "out-of-range",
+      data: [
+        { index: 0, embedding: [0.1, 0.9] },
+        { index: 2, embedding: [0.2, 0.8] }
+      ],
+      message: /invalid index 2 for 2 inputs/u
+    },
+    {
+      name: "missing",
+      data: [
+        { index: 0, embedding: [0.1, 0.9] },
+        { embedding: [0.2, 0.8] }
+      ],
+      message: /did not include an index for 2 inputs/u
+    }
+  ])("rejects $name batch response indexes instead of guessing input identity", async ({ data, message }) => {
+    await withLoopbackEmbeddingResponse(data, async (baseUrl) => {
+      await expect(
+        createLoopbackClient(baseUrl).embedTexts(["zero", "one"], { timeoutMs: 1000 })
+      ).rejects.toThrow(message);
+    });
+  });
+
+  // invariant: a single-input response may omit `index`; with exactly one
+  // requested input the vector's identity is unambiguous. This is the only
+  // compatibility case, not a fallback for batches.
+  it("keeps a single-input response without an index compatible", async () => {
+    await withLoopbackEmbeddingResponse([{ embedding: [0.4, 0.6] }], async (baseUrl) => {
+      const embeddings = await createLoopbackClient(baseUrl).embedTexts(["only"], {
+        timeoutMs: 1000
+      });
+
+      expect([...embeddings[0]!]).toEqual([expect.closeTo(0.4), expect.closeTo(0.6)]);
+    });
   });
 
   // invariant: embedTexts MUST settle (reject) when the transport never

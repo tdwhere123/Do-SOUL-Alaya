@@ -1,9 +1,23 @@
-import { vi } from "vitest";
-import type { EventLogEntry, ToolProvider, ToolSpec } from "@do-soul/alaya-protocol";
-import { CoreError } from "../../shared/errors.js";
+import { afterEach, vi } from "vitest";
+import type { ToolProvider, ToolSpec } from "@do-soul/alaya-protocol";
+import {
+  initDatabase,
+  SqliteEventLogRepo,
+  SqliteExtensionDescriptorRepo,
+  SqliteToolSpecRepo,
+  type StorageDatabase
+} from "@do-soul/alaya-storage";
+import { EventPublisher } from "../../runtime/event-publisher.js";
 import { ExtensionRegistryService } from "../../tooling/extension-registry-service.js";
+import { ToolSpecService } from "../../tooling/tool-spec-service.js";
 
 export const validTimestamp = "2026-04-20T10:00:00.000Z";
+const databases = new Set<StorageDatabase>();
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const database of databases) database.close();
+  databases.clear();
+});
 
 export function createProvider(overrides: Partial<ToolProvider> = {}): ToolProvider {
   return {
@@ -44,116 +58,29 @@ export function createExternalToolSpec(provider: ToolProvider, toolId: string): 
 export function createRegistryHarness(input: {
   readonly initialProviders?: readonly ToolProvider[];
   readonly initialToolSpecs?: readonly ToolSpec[];
-  readonly failRegisterAt?: number;
-  readonly failUpdateAt?: number;
-  readonly failDeleteToolProvider?: boolean;
-}) {
-  const providerStore = new Map(
-    (input.initialProviders ?? []).map((provider) => [provider.provider_id, provider] as const)
-  );
-  const toolSpecStore = new Map(
-    (input.initialToolSpecs ?? []).map((spec) => [spec.tool_id, spec] as const)
-  );
-  const appendedEvents: EventLogEntry[] = [];
-  let registerCount = 0;
-  let updateCount = 0;
-
-  const registerToolProvider = vi.fn(async (provider: ToolProvider) => {
-    providerStore.set(provider.provider_id, provider);
-    return provider;
-  });
-  const deleteToolProvider = vi.fn(async (providerId: string) => {
-    if (input.failDeleteToolProvider === true) {
-      throw new Error(`delete provider failed for ${providerId}`);
-    }
-    providerStore.delete(providerId);
-  });
-  const findToolProviders = vi.fn(async () => [...providerStore.values()]);
-  const findToolProviderById = vi.fn(
-    async (providerId: string) => providerStore.get(providerId) ?? null
-  );
-  const findById = vi.fn(async (toolId: string) => {
-    const spec = toolSpecStore.get(toolId);
-    if (spec === undefined) {
-      throw new CoreError("NOT_FOUND", "Tool spec missing");
-    }
-    return spec;
-  });
-  const register = vi.fn(async (spec: ToolSpec) => {
-    registerCount += 1;
-    if (input.failRegisterAt === registerCount) {
-      throw new Error(`register failed for ${spec.tool_id}`);
-    }
-    toolSpecStore.set(spec.tool_id, spec);
-    return spec;
-  });
-  const update = vi.fn(async (spec: ToolSpec) => {
-    updateCount += 1;
-    if (input.failUpdateAt === updateCount) {
-      throw new Error(`update failed for ${spec.tool_id}`);
-    }
-    toolSpecStore.set(spec.tool_id, spec);
-    return spec;
-  });
-  const deleteToolSpec = vi.fn(async (toolId: string) => {
-    toolSpecStore.delete(toolId);
-  });
-  const append = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
-    const persisted = {
-      ...entry,
-      event_id: `event-${appendedEvents.length + 1}`,
-      created_at: validTimestamp,
-      revision: appendedEvents.length
-    } satisfies EventLogEntry;
-    appendedEvents.push(persisted);
-    return persisted;
-  });
+  readonly defaultWorkspaceId?: string;
+  readonly now?: () => string;
+} = {}) {
+  const database = initDatabase({ filename: ":memory:" });
+  databases.add(database);
+  const extensionStore = new SqliteExtensionDescriptorRepo(database);
+  const toolSpecRepo = new SqliteToolSpecRepo(database);
+  for (const provider of input.initialProviders ?? []) extensionStore.registerToolProviderSync(provider);
+  for (const spec of input.initialToolSpecs ?? []) toolSpecRepo.insertSync(spec);
+  const eventLogRepo = new SqliteEventLogRepo(database);
   const notifyEntry = vi.fn(async () => undefined);
-
+  const eventPublisher = new EventPublisher({
+    eventLogRepo,
+    runtimeNotifier: { notify: () => undefined, notifyEntry },
+    runHotStateService: { apply: () => undefined }
+  });
+  const toolSpecService = new ToolSpecService({ toolSpecRepo });
   const service = new ExtensionRegistryService({
-    extensionStore: {
-      registerToolProvider,
-      deleteToolProvider,
-      registerSkillPackage: vi.fn(),
-      findToolProviders,
-      findToolProviderById
-    },
-    toolSpecService: {
-      findById,
-      register,
-      update,
-      delete: deleteToolSpec
-    },
-    eventLogWriter: { append },
-    runtimeNotifier: {
-      notifyEntry
-    },
-    now: () => validTimestamp,
-    buildToolSpecForProviderTool: (provider, tool) => createExternalToolSpec(provider, tool.tool_id)
+    extensionStore,
+    toolSpecService,
+    eventPublisher,
+    now: input.now ?? (() => validTimestamp),
+    ...(input.defaultWorkspaceId === undefined ? {} : { defaultWorkspaceId: input.defaultWorkspaceId })
   });
-
-  return {
-    service,
-    providerStore,
-    toolSpecStore,
-    registerToolProvider,
-    deleteToolProvider,
-    registerToolSpec: register,
-    updateToolSpec: update,
-    deleteToolSpec,
-    append,
-    notifyEntry,
-    appendedEvents
-  };
-}
-
-export function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-
-  return { promise, resolve, reject };
+  return { database, extensionStore, toolSpecRepo, toolSpecService, eventLogRepo, eventPublisher, notifyEntry, service };
 }
