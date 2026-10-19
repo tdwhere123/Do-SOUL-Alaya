@@ -245,6 +245,9 @@ it.each(["repository_config", "repository_index", "public_template_stat"])(
     expect(evidence.operations).toHaveLength(1);
     expect(evidence.operations[0]).toMatchObject({ operation: "process.execFileSync.authority-context",
       blocked: true, refusal: { stage, category: "policy" } });
+    if (stage === "repository_config") expect(evidence.operations[0].refusal).toEqual({
+      stage, category: "policy", file_role: "common_config", reason: "entry_not_admitted"
+    });
     expect(result.stderr).not.toContain(secret);
     expect(existsSync(f.preflight)).toBe(false);
   }

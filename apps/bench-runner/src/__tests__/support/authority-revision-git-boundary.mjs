@@ -9,10 +9,12 @@ const fixedEnvironment = { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: gitEmpty
 const ambientKeys = new Set(["PATH", "Path", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "ComSpec",
   "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "TMP", "TEMP", "TMPDIR", "LANG", "LC_CTYPE"]);
 const credentialPath = path => /(?:^|[/\\])(?:[^/\\]+\.env|\.env(?:\.[^/\\]+)?|\.aws|\.azure|credentials(?:\.json)?|auth\.json)(?:$|[/\\])/iu.test(path);
-const policyRefusals = new WeakSet();
-const refuse = () => {
+// Only owner-authored config details are retained by error identity, never by
+// reading properties from a caught error or serializing inspected config bytes.
+const policyRefusals = new WeakMap();
+const refuse = (detail) => {
   const error = new Error("unsupported authority Git context");
-  policyRefusals.add(error); throw error;
+  policyRefusals.set(error, detail); throw error;
 };
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const refusalDiagnostics = new WeakMap();
@@ -37,7 +39,8 @@ function inStage(stage, inspect) {
     const refusal = new Error("authority Git inspection refused");
     refusalDiagnostics.set(refusal, { stage, category:
       isPermissionRefusal(error) ? "permission" :
-        policyRefusals.has(error) ? "policy" : "inspection" });
+        policyRefusals.has(error) ? "policy" : "inspection",
+      ...policyRefusals.get(error) });
     throw refusal;
   }
 }
@@ -91,8 +94,11 @@ export function createAuthorityRevisionGitPolicy(checkout) {
   };
 }
 
-function regular(path) {
-  if (realpathSync(path) !== resolve(path) || !lstatSync(path).isFile()) refuse();
+function regular(path, fileRole) {
+  if (realpathSync(path) !== resolve(path)) refuse(fileRole === undefined ? undefined :
+    { file_role: fileRole, reason: "noncanonical_file" });
+  if (!lstatSync(path).isFile()) refuse(fileRole === undefined ? undefined :
+    { file_role: fileRole, reason: "nonregular_file" });
   return readFileSync(path);
 }
 
@@ -110,8 +116,8 @@ function inspectRepository(checkout) {
     if (realpathSync(directory) !== directory || !lstatSync(directory).isDirectory()) refuse();
   }
   inStage("repository_config", () => {
-    inspectConfig(join(common, "config"));
-    if (existsSync(join(gitDir, "config.worktree"))) inspectConfig(join(gitDir, "config.worktree"));
+    inspectConfig(join(common, "config"), "common_config");
+    if (existsSync(join(gitDir, "config.worktree"))) inspectConfig(join(gitDir, "config.worktree"), "worktree_config");
   });
   for (const path of ["objects/info/alternates", "objects/info/http-alternates", "info/grafts", "shallow.lock"]) {
     if (existsSync(join(common, path))) refuse();
@@ -130,15 +136,15 @@ function inspectRepository(checkout) {
   inStage("repository_index", () => inspectIndex(checkout, regular(join(gitDir, "index"))));
 }
 
-function inspectConfig(path) {
+function inspectConfig(path, fileRole) {
   let section = "", sectionHeader = "";
-  for (const raw of regular(path).toString("utf8").split(/\r?\n/u)) {
+  for (const raw of regular(path, fileRole).toString("utf8").split(/\r?\n/u)) {
     const line = raw.trim();
     if (!line || /^[#;]/u.test(line)) continue;
     const header = /^\[([a-z]+)(?: "[^"\\]*")?\]$/iu.exec(line);
     if (header) { section = header[1].toLowerCase(); sectionHeader = line.toLowerCase(); continue; }
     const entry = /^([a-z][a-z0-9-]*)\s*=\s*(.*?)\s*$/iu.exec(line);
-    if (!entry) refuse();
+    if (!entry) refuse({ file_role: fileRole, reason: "unsupported_syntax" });
     const key = entry[1].toLowerCase(), value = entry[2].toLowerCase();
     // These settings are inert for the admitted operations. In particular no
     // includes, diff/textconv/filter drivers, fsmonitor, hooks, worktree redirects,
@@ -153,7 +159,7 @@ function inspectConfig(path) {
     if (section === "remote" && ["url", "fetch"].includes(key)) continue;
     if (section === "branch" && ["remote", "merge", "vscode-merge-base"].includes(key)) continue;
     if (section === "user" && ["name", "email"].includes(key)) continue;
-    refuse();
+    refuse({ file_role: fileRole, reason: "entry_not_admitted" });
   }
 }
 
