@@ -101,9 +101,12 @@ replace(cp, "execFileSync", function(command, args, options) {
 });
 for (const key of ["WebSocket", "EventSource"]) if (typeof globalThis[key] === "function") block(globalThis, key, key);
 const nativeDlopen = process.dlopen;
+let samePhysicalLocation;
 replace(process, "dlopen", function(module, filename, ...rest) {
   const path = fs.realpathSync(filename);
-  if (!nativePins.has(path)) return deny("native-addon.load", { path });
+  if (!samePhysicalLocation || ![...nativePins].some(pin => samePhysicalLocation(pin, path))) {
+    return deny("native-addon.load", { path });
+  }
   record("native-addon.load.allowed", { path });
   return Reflect.apply(nativeDlopen, this, [module, filename, ...rest]);
 });
@@ -130,6 +133,8 @@ const hooks = registerHooks({
   }
 });
 syncBuiltinESMExports();
+// Load only the builtins-only physical-path owner, after all effect guards are active.
+({ samePhysicalLocation } = await import("../../runs/fs/opened-contained-path.ts"));
 export function receipt() {
   return { operations: [...operations], credential_file_violations: [...shared.violations],
     pinned_read_worker: readWorker, native_pins: [...nativePins], thread_id: workers.threadId };

@@ -124,6 +124,13 @@ function workflowJob(name) {
   return workflow.slice(start + 1).split(/\n(?=  [a-z][a-z-]*:)/u)[0];
 }
 
+test("shared test checkout does not persist authentication rejected by authority inspection", () => {
+  const job = workflowJob("test-shard-ubuntu");
+  const checkout = job.split("      - uses: actions/checkout@v7\n")[1].split("\n      - uses:")[0];
+  assert.match(checkout, /^          persist-credentials: false$/mu);
+  for (const os of ["macos", "windows"]) assert.match(workflowJob(`test-shard-${os}`), /steps: \*shard-steps/u);
+});
+
 test("CI builds compiled daemon dependencies before whole-workspace typechecking on every OS", () => {
   const job = workflowJob("test-shard-ubuntu");
   const build = job.indexOf("      - name: Build\n        run: pnpm build");

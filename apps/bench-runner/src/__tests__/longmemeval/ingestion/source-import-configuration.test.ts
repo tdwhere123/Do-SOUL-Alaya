@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { samePhysicalLocation } from "../../../runs/fs/opened-contained-path.js";
 
 const boundary = vi.hoisted(() => ({ load: vi.fn(), start: vi.fn() }));
 vi.mock("../../../datasets/longmemeval/ingestion/fetch.js", () => ({ loadDatasetWindowWithIdentity: boundary.load }));
@@ -52,7 +53,10 @@ it("pins a relative config root before asynchronous dataset loading can change c
     release({ sha256: "b".repeat(64), questions: [{ question_id: "captured-root-question" }] });
     await rejection;
     expect(boundary.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      configDirectoryRoot: await realpath(join(before, "config")), dataDirRoot: join(root, "live") }));
+      configDirectoryRoot: expect.any(String), dataDirRoot: join(root, "live") }));
+    const captured = boundary.start.mock.calls[0]![0].configDirectoryRoot;
+    expect(samePhysicalLocation(captured, join(before, "config"))).toBe(true);
+    expect(samePhysicalLocation(captured, join(after, "config"))).toBe(false);
     expect(await readdir(join(before, "config"))).toEqual([]);
     expect(await readdir(join(after, "config"))).toEqual([]);
   } finally { process.chdir(originalCwd); }

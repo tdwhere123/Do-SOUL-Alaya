@@ -11,6 +11,9 @@ const bench = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const repository = resolve(bench, "../..");
 const guard = new URL("../support/source-import-boundary.mjs", import.meta.url);
 const strict = new URL("../support/strict-provider-free-cli-bootstrap.mjs", import.meta.url).href;
+const { createReadOnlyGitExecutionPolicy } = await import(/* @vite-ignore */
+  new URL("../support/read-only-git-boundary.mjs", import.meta.url).href);
+const gitExecutable: string = createReadOnlyGitExecutionPolicy().prepare("git").executable;
 const roots: string[] = [];
 const config = ["-c", "core.autocrlf=true", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
   "-c", "credential.helper=", "-c", "core.askPass="];
@@ -56,9 +59,10 @@ function run(f: Fixture, program?: string, optIn = true, readRoots: readonly str
     : ["--input-type=module", "--eval", program];
   return spawnSync(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${repository}`,
     `--allow-fs-read=${f.outer}`, ...readRoots.map(root => `--allow-fs-read=${root}`),
-    "--allow-fs-read=/usr/bin/git", `--allow-fs-write=${f.out}`,
+    `--allow-fs-read=${gitExecutable}`, `--allow-fs-write=${f.out}`,
     "--import", preload.href, "--import", strict, ...argv], {
-    cwd: f.root, env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+    // Discover through the physical executable directory, not an alias requiring directory read grants.
+    cwd: f.root, env: { PATH: dirname(gitExecutable), LANG: "C", LC_ALL: "C" },
     encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024
   });
 }
@@ -236,6 +240,7 @@ it.each([
   ["filter", ["filter.fixture.clean", "forbidden-helper"]],
   ["fsmonitor", ["core.fsmonitor", "forbidden-helper"]],
   ["include", ["include.path", "/forbidden"]],
+  ["conditional include", ["includeIf.gitdir:/checkout/.git.path", "/forbidden"]],
   ["alternate worktree", ["core.worktree", "/forbidden"]],
   ["external attributes", ["core.attributesFile", "/forbidden"]],
   ["external excludes", ["core.excludesFile", "/forbidden"]],
