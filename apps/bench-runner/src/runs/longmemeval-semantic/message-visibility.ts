@@ -107,10 +107,14 @@ export function scoreConsumerMessageVisibility(input: ConsumerVisibilityInput): 
     const malformed = unknown(observation.reason);
     return result(malformed, malformed, malformed, malformed);
   }
+  // A first-page positive does not establish an observed ten-slot prefix.
+  // An explicitly terminal page does establish its absent tail.
+  const unobservedAt10 = observedAt(observation, 10) ? null
+    : unknown(observation.reason ?? "delivery_position_not_observed");
   return result(anyMetric(gold, intervals, observation, input.admission, 5),
-    anyMetric(gold, intervals, observation, input.admission, 10),
+    unobservedAt10 ?? anyMetric(gold, intervals, observation, input.admission, 10),
     allMetric(gold, intervals, observation, input.admission, 5),
-    allMetric(gold, intervals, observation, input.admission, 10));
+    unobservedAt10 ?? allMetric(gold, intervals, observation, input.admission, 10));
 }
 
 /** A known visible positive survives incomplete gold mapping; absence needs complete page state. */

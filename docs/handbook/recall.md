@@ -599,6 +599,8 @@ continuation; the ordinary arm invokes `soul.recall` through a real MCP client
 and the public tool handler, and leaves library-only request dimensions
 unmapped. One consumer-message visibility scorer evaluates frozen answer-turn
 labels and retains unknowns when required delivery evidence is incomplete.
+Consumer @10 requires an observed ten-slot prefix or explicitly exhausted
+delivery; a first-page positive remains @5 evidence while continuation is unobserved.
 Attribution and cost rows stay request-correlated: diagnostic membership is not visible
 text, debit and allowance sums are logical rather than physical memory, SQLite
 work or IPC time, and the observation is not complete causal attribution.

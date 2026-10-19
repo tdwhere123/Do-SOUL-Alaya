@@ -94,6 +94,19 @@ describe("consumer message visibility", () => {
     expect(secondPage.observation).toEqual({ observed_pages: 2, observed_through: 6, continuation: "none" });
   });
 
+  it("keeps first-page positives at @5 without claiming an unobserved @10 continuation", () => {
+    const oneTurn = gold([span(0, 10)]);
+    const visible = [interval(1, 0, 10)];
+    const pending = score(oneTurn, [firstPage("present", visible)]);
+    expect(pending.any_at_5).toEqual({ status: "hit", reason: null });
+    expect(pending.all_at_5).toEqual({ status: "hit", reason: null });
+    expect(pending.any_at_10).toEqual({ status: "unknown", reason: "second_page_not_observed" });
+    expect(pending.all_at_10).toEqual({ status: "unknown", reason: "second_page_not_observed" });
+    const exhausted = score(oneTurn, [firstPage("none", visible)]);
+    expect(exhausted.any_at_10).toEqual({ status: "hit", reason: null });
+    expect(exhausted.all_at_10).toEqual({ status: "hit", reason: null });
+  });
+
   it("keeps a continuation pointer out of the evidence and distinguishes unknown page state", () => {
     const oneTurn = gold([span(0, 10)]);
     expect(score(oneTurn, [firstPage("present")]).any_at_5).toEqual({ status: "miss", reason: null });
