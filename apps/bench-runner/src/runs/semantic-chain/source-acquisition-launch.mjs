@@ -6,9 +6,10 @@ import { join, resolve } from "node:path";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { acquisitionRuntimeChannel, OBSERVER_BOOTSTRAP_MODE, observerBootstrapEnvelope }
+import { acquisitionRuntimeChannel, OBSERVER_BOOTSTRAP_MODE, observerBootstrapEnvelope, CONTEXT_BOOTSTRAP_MODE, contextBootstrapEnvelope }
   from "./source-acquisition-runtime-channel.mjs";
-export { observerBootstrapEnvelope };
+export { observerBootstrapEnvelope, contextBootstrapEnvelope };
+export const contextBootstrapMode = CONTEXT_BOOTSTRAP_MODE;
 export const observerBootstrapMode = OBSERVER_BOOTSTRAP_MODE;
 
 const candidate = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -23,6 +24,8 @@ const pinnedPaths = [guardPath, receiptPath,
   "apps/bench-runner/dist/runs/semantic-chain/source-qualified-selection-input.js",
   "apps/bench-runner/dist/runs/snapshot/source-records/native.js",
   "apps/bench-runner/src/runs/semantic-chain/source-acquisition-runtime-channel.mjs",
+  "apps/bench-runner/dist/runs/semantic-chain/source-qualified-correspondence-context.js",
+  "apps/bench-runner/dist/runs/semantic-proposal/correspondence-generation-context.js",
   "apps/bench-runner/dist/runs/semantic-proposal/attempt.js",
   "apps/bench-runner/dist/runs/semantic-proposal/query-revision-observer-view.js",
   "apps/bench-runner/dist/runs/semantic-proposal/fill.js",
@@ -99,13 +102,14 @@ async function runOwnedChild() {
   const policy = { preload: paths.preload, inputs: envelope.payload.guard_allocation.source_inputs,
     bytes: envelope.payload.guard_allocation.utf8_bytes };
   const active = isolation.assertActive({ ...policy, unused: true });
-  assert(process.argv.length === 5 || process.argv.length === 6 && process.argv[5] === OBSERVER_BOOTSTRAP_MODE,
+  assert(process.argv.length === 5 || process.argv.length === 6 && [OBSERVER_BOOTSTRAP_MODE, CONTEXT_BOOTSTRAP_MODE].includes(process.argv[5]),
     "invalid acquisition bootstrap mode");
-  const caller = acquisitionRuntimeChannel({ identity, deadline, observer: process.argv[5] === OBSERVER_BOOTSTRAP_MODE });
+  const caller = acquisitionRuntimeChannel({ identity, deadline, observer: process.argv[5] === OBSERVER_BOOTSTRAP_MODE, context: process.argv[5] === CONTEXT_BOOTSTRAP_MODE });
   try {
   await new Promise((resolve, reject) => process.send({ kind: "source_acquisition_guarded", identity, pid: process.pid, active, deadline },
     error => error ? reject(new Error("acquisition guarded acknowledgement failed")) : resolve()));
-  const queryRevisionObserverView = await caller.view;
+  const bootstrap = await caller.view;
+  const runtimeOptions = process.argv[5] === CONTEXT_BOOTSTRAP_MODE ? bootstrap : { queryRevisionObserverView: bootstrap };
   caller.signal.throwIfAborted();
   // All application imports are below the actual active-reference inspection.
   if (envelope.payload.qualified_selection !== undefined) {
@@ -118,7 +122,7 @@ async function runOwnedChild() {
     } });
   }
   const application = await import(pathToFileURL(join(candidate, applicationPath)).href);
-  await application.executeGuardedSourceAcquisition(root, identity, { signal: caller.signal, deadline, active, queryRevisionObserverView });
+  await application.executeGuardedSourceAcquisition(root, identity, { signal: caller.signal, deadline, active, ...runtimeOptions });
   // No restoration here: enforcement remains installed through reconciliation and process exit.
   let failure;
   try {

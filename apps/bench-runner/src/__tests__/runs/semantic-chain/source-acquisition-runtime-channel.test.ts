@@ -12,7 +12,8 @@ import { join } from "node:path";
 import { chainIdentity, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
 const require = createRequire(import.meta.url);
 const owner = require("../../../runs/semantic-chain/source-acquisition-launch.mjs");
-const { acquisitionRuntimeChannel, observerBootstrapEnvelope, OBSERVER_BOOTSTRAP_MODE } =
+const { acquisitionRuntimeChannel, observerBootstrapEnvelope, OBSERVER_BOOTSTRAP_MODE, contextBootstrapEnvelope,
+  CONTEXT_BOOTSTRAP_BYTES } =
   require("../../../runs/semantic-chain/source-acquisition-runtime-channel.mjs");
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -58,6 +59,21 @@ it.each(["malformed", "missing", "pid", "identity", "deadline", "oversized", "di
     expect(evidence.stderr).toContain(failure === "missing" ? "deadline expired" : failure === "cancel" ? "caller cancelled"
       : failure === "disconnect" ? "channel disconnected" : "invalid acquisition runtime bootstrap");
   }, 15000);
+
+it("keeps context and observer payloads separate, bounded and one-shot on the same private channel", async () => {
+  const channel = Object.assign(new EventEmitter(), { pid: process.pid }), identity = "context-experiment", deadline = Date.now() + 2000;
+  const context = { additional_interpretation: { text: "x".repeat(20000) } }, observer = { observation: "separate observer" };
+  expect(() => observerBootstrapEnvelope(identity, process.pid, deadline, context)).toThrow();
+  expect(() => contextBootstrapEnvelope(identity, process.pid, deadline, { text: "x".repeat(CONTEXT_BOOTSTRAP_BYTES) })).toThrow();
+  const runtime = acquisitionRuntimeChannel({ identity, deadline, context: true, channel });
+  const message = contextBootstrapEnvelope(identity, process.pid, deadline, context, observer);
+  channel.emit("message", message);
+  expect(await runtime.view).toEqual({ correspondenceGenerationContext: context, queryRevisionObserverView: observer });
+  channel.emit("message", message); expect(runtime.signal.aborted).toBe(true); runtime.dispose();
+  const misbound = acquisitionRuntimeChannel({ identity, deadline, context: true, channel });
+  channel.emit("message", { ...message, identity: "another-root" });
+  await expect(misbound.view).rejects.toThrow("invalid acquisition runtime bootstrap"); misbound.dispose();
+});
 
 it("retains duplicate detection and cancellation after accepting bootstrap, then releases lifecycle listeners", async () => {
   const channel = Object.assign(new EventEmitter(), { pid: process.pid }), identity = "private-experiment", deadline = Date.now() + 2000;

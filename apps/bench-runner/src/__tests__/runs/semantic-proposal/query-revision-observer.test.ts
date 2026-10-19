@@ -7,10 +7,13 @@ const isolation = await vi.hoisted(async () => {
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { qualifiedSelectionFixture } from "../semantic-chain/source-qualified-selection.test-support.js";
+import { qualifiedSelectionFixture, authoredProposal } from "../semantic-chain/source-qualified-selection.test-support.js";
 import { admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "../../../runs/semantic-chain/source-qualified-selection-input.js";
 import { chainIdentity, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
 import { canonicalPath } from "../../../runs/fs/opened-contained-path.js";
+import { correspondenceAssessmentJson } from "../../../../../core-daemon/src/__tests__/runtime/recall/source-semantic-producer-fixture.js";
+import type { CorrespondenceGenerationContext } from "../../../runs/semantic-proposal/correspondence-generation-context.js";
+import type { SourceAcquisitionExperimentInput } from "../../../runs/semantic-chain/source-acquisition-experiment.js";
 import type { readSourceExperiment } from "../../../runs/semantic-chain/source-experiment.js";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -187,6 +190,71 @@ it("binds observer Q inventory and native readmission through the owned guarded 
   }
   rmSync(f.childRoot, { recursive: true }); rmSync(f.parentRoot, { recursive: true }); rmSync(h.input.config.snapshot_path);
   expect((await invoke()).execution).toEqual(state.execution);
+}, 120_000);
+
+it("composes the actual observer Q with native C generation context through one owned bootstrap and recovers only historical delivery", async () => {
+  const f = await fixture(); f.setBody();
+  await executeSemanticProposalFill({ workset: f.child, cacheRoot: f.childRoot, authority: f.bind(), config,
+    extractor: f.extractor, queryRevisionObserverView: f.view });
+  const h = await qualifiedSelectionFixture(join(f.root, "combined-mechanism"));
+  const invoke = async (input: SourceAcquisitionExperimentInput, runtimeView?: QueryRevisionObserverView,
+    correspondenceGenerationContext?: CorrespondenceGenerationContext) => {
+    const path = join(f.root, "combined-caller.json");
+    writeFileSync(path, JSON.stringify({ input, runtimeView, correspondenceGenerationContext }));
+    return await new Promise<ReturnType<typeof readSourceExperiment>>((resolve, reject) => {
+      const child = spawn(process.execPath, [fileURLToPath(new URL("../semantic-chain/source-acquisition-caller.test-support.mjs", import.meta.url)), path],
+        { env: { ...process.env, NODE_OPTIONS: "", ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS: "60000",
+          ALAYA_CONFLICT_LLM_PROVIDER_URL: "", ALAYA_CONFLICT_LLM_MODEL: "" }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+      let stdout = "", stderr = "";
+      child.stdout!.on("data", chunk => { stdout += chunk; }); child.stderr!.on("data", chunk => { stderr += chunk; });
+      child.on("error", reject); child.on("close", code => {
+        if (code !== 0) reject(new Error(`combined caller ${code}: ${stderr}`));
+        else { try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); } }
+      });
+    });
+  };
+  expect((await invoke(h.input)).lifetime.status).toBe("closed"); // Existing no-runtime default remains executable.
+  const cBase = h.input.config.query_workset, cCap = h.input.config.max_output_tokens;
+  const q = f.read();
+  if (q.received === undefined || !("query" in q.received)) throw new Error("actual observed Q receipt required");
+  h.input.root = join(h.directory, "combined-context-experiment");
+  h.input.original_query = MIRA_QUERY;
+  h.input.config = { ...h.input.config, query_workset: f.child, query_cache_root: f.childRoot, max_output_tokens: cap };
+  const population = h.input.qualified_selection!;
+  population.query = { key: q.line.key, cache_identity: chainIdentity(q.shard), historical_production: { status: "reported", usage: q.shard!.usage } };
+  for (const row of population.nominees) delete row.correspondence;
+  const [h1, h2] = population.nominees.filter(row => row.interpretation !== undefined);
+  const context: CorrespondenceGenerationContext = { target_interpretation_id: h1!.interpretation!.interpretation_id,
+    additional_interpretation: { source_interpretation_id: h2!.interpretation!.interpretation_id,
+      interpretation: h2!.interpretation!.interpretation! } };
+  const cWorkset = parseSemanticProposalWorkset({ ...cBase, kind: "semantic_correspondence", items: [{
+    original_query: MIRA_QUERY, admitted_query_semantics: q.received.query, source_interpretation_descriptors: [{
+      source_interpretation_id: h1!.interpretation!.interpretation_id, interpretation: h1!.interpretation!.interpretation }] }] });
+  const cRoot = join(f.root, "combined-native-c");
+  // Authored unresolved assessment binds the real received Q; unrelated source fixtures certify no answer or benefit.
+  const produced = await authoredProposal(cWorkset, cRoot, prompt => {
+    const request = JSON.parse(prompt);
+    return correspondenceAssessmentJson({ ...request, producer_id: request.producer_capability.producer_id,
+      producer_version: request.producer_capability.producer_version }, { correspondences: [] });
+  }, context);
+  h1!.correspondence = { workset: cWorkset, cache_root: cRoot, max_output_tokens: cCap, artifact: produced.artifact };
+  expect((produced.result.line.request as soul.SourceSemanticCorrespondenceRequest).admitted_query_semantics).toEqual(q.received.query);
+  const strippedOptions: readonly (readonly [QueryRevisionObserverView | undefined, CorrespondenceGenerationContext | undefined])[] =
+    [[undefined, undefined], [f.view, undefined], [undefined, context]];
+  for (const [runtimeView, runtimeContext] of strippedOptions) {
+    expect(await invoke(h.input, runtimeView, runtimeContext)).toMatchObject({ status: "blocked", phase: "admission", execution_started: false });
+  }
+  const state = await invoke(h.input, f.view, context);
+  expect(state.lifetime.status, JSON.stringify(state)).toBe("closed");
+  expect(state.execution).toMatchObject({ qualified_comparison: { producer: { status: "ready", new_dispatches: 0 }, comparison: { outcome: "complete" } } });
+  for (const name of readdirSync(h.input.root).filter(name => name.endsWith(".json"))) {
+    const text = readFileSync(join(h.input.root, name), "utf8");
+    expect(text).not.toContain("additional_interpretation"); expect(text).not.toContain(f.view.observations[0]!.text);
+  }
+  rmSync(f.childRoot, { recursive: true }); rmSync(f.parentRoot, { recursive: true });
+  rmSync(cRoot, { recursive: true }); rmSync(h.input.config.snapshot_path);
+  expect((await invoke(h.input)).execution).toEqual(state.execution);
+  expect(f.wires).toHaveLength(2);
 }, 120_000);
 
 it.each(presentations)("keeps the default %s system/user/schema/key and exact original parent witness unchanged", async presentation => {

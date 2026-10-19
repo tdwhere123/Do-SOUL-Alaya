@@ -170,7 +170,8 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
   mkdirSync(root, { recursive: true });
   const directory = mkdtempSync(join(root, "native-session-"));
   let daemon: BenchDaemonHandle | undefined;
-  let complete = false;
+  let complete = false, operationFailed = false;
+  let operationFailure: unknown;
   try {
     signal?.throwIfAborted();
     restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
@@ -191,8 +192,19 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
     const result = await trackBenchBody(scope, () => body(started));
     complete = true;
     return result;
+  } catch (error) {
+    operationFailed = true;
+    operationFailure = error;
+    throw error;
   } finally {
-    await daemon?.shutdown();
+    try { await daemon?.shutdown(); }
+    catch (cleanup) {
+      if (!operationFailed) throw cleanup;
+      // Cleanup must not erase a rejection/cancellation, including `throw undefined`.
+      // Use cause fields understood by the experiment's bounded diagnostic publisher.
+      throw new AlayaError(operationFailure instanceof AlayaError ? operationFailure.code : "UNAVAILABLE",
+        "semantic chain operation and daemon shutdown failed", { cause: { earlier: operationFailure, cleanup } });
+    }
     if (complete) rmSync(directory, { recursive: true, force: true });
   }
 }

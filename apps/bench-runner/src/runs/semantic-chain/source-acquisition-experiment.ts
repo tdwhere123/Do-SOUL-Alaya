@@ -16,6 +16,8 @@ import type { compareResearchSourceAcquisitionControls, compareResearchSourceQua
 import { SourceQualifiedSelectionInputSchema, admitSourceQualifiedSelection, qualifiedSelectionInputPaths, captureQualifiedQueryObserverView } from "./source-qualified-selection-input.js";
 import { SourceSemanticJointSelectionSchema } from "../../../../core-daemon/dist/runtime/recall-read-worker/source-semantic-joint-boundary.js";
 import type { QueryRevisionObserverView } from "../semantic-proposal/query-revision-observer-view.js";
+import type { CorrespondenceGenerationContext } from "../semantic-proposal/correspondence-generation-context.js";
+import { captureQualifiedCorrespondenceContext, assertContextQualifiedDelivery } from "./source-qualified-correspondence-context.js";
 export type SourceQualifiedAcquisitionComparison = { producer: ReturnType<typeof admitSourceQualifiedSelection>;
   comparison?: Awaited<ReturnType<typeof compareResearchSourceQualifiedSelection>> };
 
@@ -35,6 +37,8 @@ export const SourceAcquisitionExperimentInputSchema = z.object({
 export type SourceAcquisitionExperimentInput = z.infer<typeof SourceAcquisitionExperimentInputSchema>;
 const launchModule = new URL("../../../src/runs/semantic-chain/source-acquisition-launch.mjs", import.meta.url).href;
 type LaunchOwner = {
+  contextBootstrapMode: string;
+  contextBootstrapEnvelope(identity: string, pid: number, deadline: number, context: CorrespondenceGenerationContext, view?: QueryRevisionObserverView): Serializable;
   observerBootstrapMode: string;
   observerBootstrapEnvelope(identity: string, pid: number, deadline: number, view: QueryRevisionObserverView): Serializable;
   captureAcquisitionLaunchBinding(): SourceAcquisitionExperimentInput["launch"];
@@ -48,12 +52,12 @@ function launchOwner(): LaunchOwner { return require("../../../src/runs/semantic
 /** Pure module-byte capture. No index setup, model binding, provider or cache effects. */
 export async function captureSourceAcquisitionLaunchBinding() { return (await launchOwner()).captureAcquisitionLaunchBinding(); }
 
-function assertRoot(input: SourceAcquisitionExperimentInput, root: string, view?: QueryRevisionObserverView): void {
+function assertRoot(input: SourceAcquisitionExperimentInput, root: string, view?: QueryRevisionObserverView, context?: CorrespondenceGenerationContext): void {
   if (input.root !== root || canonicalPath(root) !== root) throw new AlayaError("CONFLICT", "acquisition requires its canonical frozen root");
   for (const path of [input.config.snapshot_path,
     ...(input.config.source_index === undefined ? [] : [input.config.source_index.cache_root, input.config.source_index.preparation_path]),
     input.config.query_cache_root, input.config.correspondence_cache_root,
-    ...(input.qualified_selection === undefined ? [] : qualifiedSelectionInputPaths(input.config, input.qualified_selection, view))]) {
+    ...(input.qualified_selection === undefined ? [] : qualifiedSelectionInputPaths(input.config, input.qualified_selection, view, context))]) {
     if (canonicalPathsOverlap(canonicalPath(root), canonicalPath(path))) {
       throw new AlayaError("CONFLICT", "acquisition output overlaps a frozen input or cache");
     }
@@ -80,7 +84,7 @@ function assertPolicy(input: SourceAcquisitionExperimentInput): void {
 /** Second concrete internal experiment consumer. The callable entry only launches an owned process;
  * it cannot execute model preparation in its caller, and unresolved reservations never rerun. */
 export async function compareSemanticChainSourceAcquisition(inputValue: SourceAcquisitionExperimentInput, rootInput: string,
-  options: Readonly<{ signal?: AbortSignal; queryRevisionObserverView?: QueryRevisionObserverView }> = {}) {
+  options: Readonly<{ signal?: AbortSignal; queryRevisionObserverView?: QueryRevisionObserverView; correspondenceGenerationContext?: CorrespondenceGenerationContext }> = {}) {
   const input = SourceAcquisitionExperimentInputSchema.parse(structuredClone(inputValue)), root = resolve(rootInput);
   const capturedOptions = { ...options }, identity = chainIdentity(input);
   let prior: ReturnType<typeof readSourceExperiment>;
@@ -90,27 +94,29 @@ export async function compareSemanticChainSourceAcquisition(inputValue: SourceAc
       identity: undefined, input: undefined, execution: undefined, projection: undefined, lifetime: { status: "unknown" as const },
       diagnostic: captureSourceExperimentValue(error, true) };
   }
-  if (Object.keys(capturedOptions).some(key => key !== "signal" && key !== "queryRevisionObserverView")) throw new AlayaError("VALIDATION", "unsupported acquisition options");
+  if (Object.keys(capturedOptions).some(key => key !== "signal" && key !== "queryRevisionObserverView" && key !== "correspondenceGenerationContext")) throw new AlayaError("VALIDATION", "unsupported acquisition options");
   if (prior.input !== undefined && prior.identity !== identity) throw new AlayaError("CONFLICT", "source experiment input changed");
   if (prior.status !== "not_started") return prior; // No readiness, hashing, reservation or process effects on readback.
   const blocked = (phase: "admission" | "reservation", error: unknown) => ({ ...prior, status: "blocked" as const,
     phase, execution_started: false as const, diagnostic: captureSourceExperimentValue(error, true) });
-  let owner: LaunchOwner, view: QueryRevisionObserverView | undefined;
+  let owner: LaunchOwner, view: QueryRevisionObserverView | undefined, context: CorrespondenceGenerationContext | undefined;
   try {
     capturedOptions.signal?.throwIfAborted();
     if (process.env.NODE_OPTIONS || process.execArgv.some(arg => /^(?:--import|--loader|--experimental-loader|--require|-r)(?:=|$)/u.test(arg))) {
       throw new AlayaError("CONFLICT", "acquisition rejects ambient application loaders");
     }
     assertPolicy(input);
-    if (capturedOptions.queryRevisionObserverView !== undefined && input.qualified_selection === undefined) {
+    if ((capturedOptions.queryRevisionObserverView !== undefined || capturedOptions.correspondenceGenerationContext !== undefined) && input.qualified_selection === undefined) {
       throw new AlayaError("VALIDATION", "observer runtime consumption requires a qualified population");
     }
     view = input.qualified_selection === undefined ? undefined : captureQualifiedQueryObserverView(
       input.config, input.qualified_selection, capturedOptions.queryRevisionObserverView);
-    assertRoot(input, root, view);
+    context = input.qualified_selection === undefined ? undefined : captureQualifiedCorrespondenceContext(
+      input.qualified_selection, capturedOptions.correspondenceGenerationContext);
+    assertRoot(input, root, view, context);
     freezeRecoveryAllowance(root, identity, input.host_admission, input.config.snapshot_path);
     reserveRecoveryRead(root, "admit guarded acquisition", input.config.source_index === undefined
-      ? qualifiedSelectionInputPaths(input.config, input.qualified_selection!, view) : [input.config.source_index.preparation_path]);
+      ? qualifiedSelectionInputPaths(input.config, input.qualified_selection!, view, context) : [input.config.source_index.preparation_path]);
     assertChainSnapshot(input.config);
     owner = await launchOwner(); owner.assertAcquisitionLaunchBinding(input.launch);
     const timing = await import("../../../../core-daemon/dist/runtime/recall-read-worker/client-config.js");
@@ -131,8 +137,9 @@ export async function compareSemanticChainSourceAcquisition(inputValue: SourceAc
       ALAYA_SOURCE_EMBEDDING_OFFLINE_GUARD_RECEIPT_DIR: join(root, "guard-receipts"),
       ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS: String(input.timeout_ms) });
     const exit = await runOwnedProcess(input.launch.executable, ["--import", paths.preload, paths.launcher, root, identity, String(deadline),
-      ...(view === undefined ? [] : [owner.observerBootstrapMode])], env, identity, deadline, capturedOptions.signal,
-      view === undefined ? undefined : pid => owner.observerBootstrapEnvelope(identity, pid, deadline, view));
+      ...(context !== undefined ? [owner.contextBootstrapMode] : view === undefined ? [] : [owner.observerBootstrapMode])], env, identity, deadline, capturedOptions.signal,
+      context !== undefined ? pid => owner.contextBootstrapEnvelope(identity, pid, deadline, context, view)
+        : view === undefined ? undefined : pid => owner.observerBootstrapEnvelope(identity, pid, deadline, view));
     writeChainArtifact(join(root, "source-experiment-launch.json"), { identity, root, launch: input.launch,
       preload: paths.preload, deadline, ...exit });
     if (readChainArtifact(join(root, "source-experiment-lifetime.json")) === undefined) {
@@ -186,7 +193,7 @@ async function runOwnedProcess(executable: string, args: string[], env: NodeJS.P
 
 /** Private child phase. Requires actual active guard instance and the owned external entry argv. */
 export async function executeGuardedSourceAcquisition(root: string, identity: string,
-  invocation: { signal: AbortSignal; deadline: number; active: unknown; queryRevisionObserverView?: QueryRevisionObserverView }) {
+  invocation: { signal: AbortSignal; deadline: number; active: unknown; queryRevisionObserverView?: QueryRevisionObserverView; correspondenceGenerationContext?: CorrespondenceGenerationContext }) {
   const input = SourceAcquisitionExperimentInputSchema.parse(readChainArtifact(join(root, "source-experiment-input.json")));
   const owner = await launchOwner(), paths = owner.acquisitionLaunchPaths(input.guard_allocation);
   if (process.execArgv.length !== 2 || process.execArgv[0] !== "--import" || process.execArgv[1] !== paths.preload ||
@@ -203,15 +210,18 @@ export async function executeGuardedSourceAcquisition(root: string, identity: st
   writeChainArtifact(join(root, "source-experiment-child-admission.json"), { identity, pid: process.pid, parent_pid: process.ppid,
     deadline: invocation.deadline, active });
   let phase: "startup" | "comparison" | "cleanup" = "startup";
+  let comparisonEvidence: SourceQualifiedAcquisitionComparison["comparison"];
   try {
     const comparisonOwner = await import("../../../../core-daemon/dist/runtime/recall/source-semantic-research-acquisition-controls.js");
     const payloadOwner = await import("../../../../core-daemon/dist/mcp-memory/tool/interpretation-handler.js");
     invocation.signal.throwIfAborted();
-    if ((process.argv[5] === owner.observerBootstrapMode) !== (invocation.queryRevisionObserverView !== undefined)) {
+    const contextMode = process.argv[5] === owner.contextBootstrapMode;
+    if (contextMode !== (invocation.correspondenceGenerationContext !== undefined) ||
+        !contextMode && (process.argv[5] === owner.observerBootstrapMode) !== (invocation.queryRevisionObserverView !== undefined)) {
       throw new AlayaError("CONFLICT", "acquisition runtime bootstrap mode differs from its view");
     }
     const producer = input.qualified_selection === undefined ? undefined : admitSourceQualifiedSelection(
-      input.config, input.qualified_selection, invocation.queryRevisionObserverView);
+      input.config, input.qualified_selection, invocation.queryRevisionObserverView, invocation.correspondenceGenerationContext);
     invocation.signal.throwIfAborted();
     if (producer?.status === "unavailable") {
       publishSourceExperimentResult(root, identity, { qualified_comparison: { producer } });
@@ -236,7 +246,11 @@ export async function executeGuardedSourceAcquisition(root: string, identity: st
       if (producer?.status === "ready") {
         const comparison = await comparisonOwner.compareResearchSourceQualifiedSelection(client, payload, producer.population,
           { signal, timeoutMs: remaining }, input.joint_selection);
+        // Retain the observed result before cancellation or the delivery gate can reject it.
+        // Failure publication below is evidence only, never qualified delivery authority.
+        comparisonEvidence = comparison;
         signal.throwIfAborted();
+        assertContextQualifiedDelivery(input.qualified_selection!, invocation.correspondenceGenerationContext, comparison);
         publishSourceExperimentResult(root, identity, { qualified_comparison: { producer, comparison } });
       } else {
         const comparison = await comparisonOwner.compareResearchSourceAcquisitionControls(client, payload, { signal, timeoutMs: remaining });
@@ -249,7 +263,8 @@ export async function executeGuardedSourceAcquisition(root: string, identity: st
   } catch (error) {
     if (input.qualified_selection !== undefined && readSourceExperiment(root).execution === undefined) {
       publishSourceExperimentResult(root, identity, { qualified_failure: { phase, diagnostic: captureSourceExperimentValue(error, true),
-        population: input.qualified_selection } });
+        population: input.qualified_selection,
+        ...(comparisonEvidence === undefined ? {} : { comparison: comparisonEvidence }) } });
     }
     writeChainArtifact(join(root, "source-experiment-child.json"), { identity, pid: process.pid, status: "failed", phase,
       active, diagnostic: captureSourceExperimentValue(error, true), physical_total: "unknown" });

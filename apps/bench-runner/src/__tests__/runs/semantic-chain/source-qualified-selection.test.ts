@@ -14,8 +14,9 @@ import { fieldContractSha256 } from "@do-soul/alaya-core";
 import { z } from "zod";
 import { openReadOnlyDatabase, closeCachedDatabase } from "@do-soul/alaya-storage";
 import { settleActiveBenchDaemonTasks } from "../../../harness/daemon-task.js";
-import { readChainArtifact } from "../../../runs/semantic-chain/contract.js";
-import { readSourceExperiment } from "../../../runs/semantic-chain/source-experiment.js";
+import { chainIdentity, readChainArtifact, writeChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import { freezeRecoveryAllowance, reserveRecoveryHostEffect } from "../../../runs/semantic-chain/recovery-allowance.js";
+import { readSourceExperiment, publishSourceExperimentResult, SOURCE_EXPERIMENT_ACTION } from "../../../runs/semantic-chain/source-experiment.js";
 import { SourceAcquisitionExperimentInputSchema, type SourceAcquisitionExperimentInput }
   from "../../../runs/semantic-chain/source-acquisition-experiment.js";
 import { admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "../../../runs/semantic-chain/source-qualified-selection-input.js";
@@ -241,12 +242,29 @@ it("retains the completed native selection and raw cleanup cause when rollback f
   const prepare = vi.fn(async () => { throw new Error("query preparation forbidden"); });
   const client = createRecallReadWorkerClient({ databaseFilename: h.input.config.snapshot_path, workerUrl: builtWorkerUrl,
     workerCount: 1, requestTimeoutMs: 60000, prepareSourceQuery: prepare })!;
-  const cleanup = new Error("authored rollback failure");
+  const cleanup = new Error("authored rollback failure", { cause: new Error("authored SQLite cleanup root cause") });
   const rollback = vi.spyOn(client.readSnapshot, "rollback").mockRejectedValueOnce(cleanup);
   try {
     const compared = await compareResearchSourceQualifiedSelection(client, payload, producer.population, { timeoutMs: 60000 });
     expect(compared.outcome).toBe("failed"); expect(compared.selection?.status).toBe("complete");
     expect(compared.failure).toMatchObject({ phase: "cleanup", cause: cleanup }); expect(prepare).not.toHaveBeenCalled();
+    const identity = chainIdentity(h.input);
+    freezeRecoveryAllowance(h.root, identity, h.input.host_admission, h.input.config.snapshot_path);
+    writeChainArtifact(join(h.root, "source-experiment-input.json"), h.input);
+    reserveRecoveryHostEffect(h.root, SOURCE_EXPERIMENT_ACTION, identity, false, true);
+    // Focused publication-owner coverage: native work/selection plus actual Error cleanup causes stay failure evidence.
+    const earlier = new Error("authored earlier worker transport failure", { cause: new Error("authored worker root cause") });
+    publishSourceExperimentResult(h.root, identity, { qualified_failure: { phase: "cleanup", population: h.input.qualified_selection!,
+      diagnostic: new Error("context-qualified delivery rejected"), comparison: { ...compared, failure: { ...compared.failure!,
+        earlier: { phase: "selection", cause: earlier } } } } });
+    const retained = readSourceExperiment(h.root);
+    expect(retained.execution).not.toHaveProperty("qualified_comparison");
+    expect(retained.execution).toMatchObject({ qualified_failure: { comparison: { outcome: "failed", selection: {
+      status: "complete", work: { logical_work: expect.any(Number), logical_memory_bytes: expect.any(Number) } }, failure: {
+      phase: "cleanup", cause: { message: cleanup.message, cause: { message: "authored SQLite cleanup root cause" } },
+      earlier: { phase: "selection", cause: { message: earlier.message, cause: { message: "authored worker root cause" } } } } } } });
+    rmSync(h.input.config.snapshot_path);
+    expect(readSourceExperiment(h.root).execution).toEqual(retained.execution);
   } finally { rollback.mockRestore(); await client.close(); }
 }, 120_000);
 
@@ -418,7 +436,11 @@ it.each(["Q", "C", "Q_parent", "C_parent"] as const)("refuses oversized nested %
       input.query = { key: materializeSemanticProposalLines(child, cap)[0]!.key, cache_identity: null,
         historical_production: { status: "unknown" } };
     }
-    else { c.workset = child; c.cache_root = join(h.directory, "child-c"); }
+    else {
+      c.workset = child; c.cache_root = join(h.directory, "child-c");
+      c.artifact = { key: materializeSemanticProposalLines(child, cap)[0]!.key, cache_identity: null,
+        historical_production: { status: "unknown" } };
+    }
   }
   const shard = semanticProposalShardPath(root, key);
   expect(qualifiedSelectionInputPaths(h.input.config, input)).toContain(shard);

@@ -14,6 +14,15 @@ process.on("message", message => { if (message === "cancel") caller.abort({ auth
 const offered = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const input = offered.input ?? offered;
 const queryRevisionObserverView = offered.runtimeView;
+const correspondenceGenerationContext = offered.correspondenceGenerationContext;
+if (correspondenceGenerationContext !== undefined) {
+  const childProcess = createRequire(import.meta.url)("node:child_process"), spawn = childProcess.spawn;
+  childProcess.spawn = function (executable, args, options) {
+    assert(!args.join(" ").includes(JSON.stringify(correspondenceGenerationContext)), "generation context leaked into argv");
+    return spawn(executable, args, options);
+  };
+  syncBuiltinESMExports();
+}
 if (queryRevisionObserverView !== undefined) {
   const childProcess = createRequire(import.meta.url)("node:child_process"), spawn = childProcess.spawn;
   childProcess.spawn = function (executable, args, options) {
@@ -29,7 +38,9 @@ if (queryRevisionObserverView !== undefined) {
 }
 const { compareSemanticChainSourceAcquisition } = await import("../../../../dist/runs/semantic-chain/source-acquisition-experiment.js");
 const pending = compareSemanticChainSourceAcquisition(input, input.root, { signal: caller.signal,
-  ...(queryRevisionObserverView === undefined ? {} : { queryRevisionObserverView }) });
+  ...(queryRevisionObserverView === undefined ? {} : { queryRevisionObserverView }),
+  ...(correspondenceGenerationContext === undefined ? {} : { correspondenceGenerationContext }) });
+if (offered.mutateCorrespondenceContextAfterCall) correspondenceGenerationContext.target_interpretation_id = "changed after capture";
 if (offered.mutateRuntimeViewAfterCall) queryRevisionObserverView.observations[0].text = "Mutated after synchronous capture.";
 const state = await pending;
 process.stdout.write(JSON.stringify(state));

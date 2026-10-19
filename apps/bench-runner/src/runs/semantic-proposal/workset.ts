@@ -25,6 +25,9 @@ import { CorrespondenceModelViewSchema, projectCorrespondenceModelView, CORRESPO
   from "./correspondence-model-view.js";
 import { queryRevisionObserverGuidance, type QueryRevisionObserverView } from "./query-revision-observer-view.js";
 
+import { captureCorrespondenceGenerationContext, contextualCorrespondenceDescriptors, type CorrespondenceGenerationContext }
+  from "./correspondence-generation-context.js";
+
 export const SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v3" as const;
 export const STEP_SEMANTIC_PROPOSAL_WORKSET_CONTRACT = "source-semantic-proposal-workset-v4" as const;
 export const SEMANTIC_PROPOSAL_OUTPUT_TOKEN_DEFAULT = 4096;
@@ -105,12 +108,16 @@ export function parseSemanticProposalWorkset(value: unknown): SemanticProposalWo
 
 export function materializeSemanticProposalLines(
   workset: SemanticProposalWorkset, maxOutputTokens: number, meter?: SourceSemanticResourceLedger,
-  queryRevisionObserverView?: QueryRevisionObserverView
+  queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext
 ): readonly SemanticProposalLine[] {
   // Capture the complete caller input before validation or any sealed-reference reads.
   workset = structuredClone(workset);
   if (queryRevisionObserverView !== undefined && (workset.kind !== "query" || workset.items.length !== 1)) {
     throw new AlayaError("VALIDATION", "query revision observer view requires one query revision item");
+  }
+  const context = correspondenceGenerationContext === undefined ? undefined : captureCorrespondenceGenerationContext(correspondenceGenerationContext);
+  if (context !== undefined && (workset.kind !== "semantic_correspondence" || workset.items.length !== 1)) {
+    throw new AlayaError("VALIDATION", "correspondence generation context requires one correspondence workset item");
   }
   meter?.retain(workset, "semantic proposal request construction input");
   meter?.canonicalJsonLength(workset);
@@ -147,10 +154,14 @@ export function materializeSemanticProposalLines(
   const producer_version = workset.producer_version ?? SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION;
   return workset.items.map((item) => {
     const parsed = CorrespondenceItemSchema.parse(item);
+    if (context !== undefined && (parsed.revision !== undefined || parsed.generation_policy?.kind === "branch_demand")) {
+      throw new AlayaError("VALIDATION", "correspondence context requires first-generation full assessment");
+    }
+    const descriptors = parsed.source_interpretation_descriptors as SourceSemanticCorrespondenceRequest["source_interpretation_descriptors"];
     const request = buildSourceSemanticCorrespondenceRequest({
       original_query: parsed.original_query,
       admitted_query_semantics: parsed.admitted_query_semantics as SourceSemanticCorrespondenceRequest["admitted_query_semantics"],
-      source_interpretation_descriptors: parsed.source_interpretation_descriptors as SourceSemanticCorrespondenceRequest["source_interpretation_descriptors"],
+      source_interpretation_descriptors: context === undefined ? descriptors : contextualCorrespondenceDescriptors(descriptors, context),
       producer_id, producer_version,
       ...(parsed.generation_policy === undefined ? {} : { generation_policy: parsed.generation_policy }),
       ...(parsed.revision === undefined ? {} : { revision: parsed.revision })

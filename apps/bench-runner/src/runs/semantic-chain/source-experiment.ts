@@ -35,7 +35,9 @@ export type SourceFeedbackExperimentInput = Readonly<{
 }>;
 type ExperimentResult = { trace: FeedbackTrace } | { comparison: SourceAcquisitionComparison } |
   { qualified_comparison: SourceQualifiedAcquisitionComparison } |
-  { qualified_failure: { phase: string; diagnostic: unknown; population: NonNullable<SourceAcquisitionExperimentInput["qualified_selection"]> } };
+  { qualified_failure: { phase: string; diagnostic: unknown; population: NonNullable<SourceAcquisitionExperimentInput["qualified_selection"]>;
+    /** Non-authoritative observed comparison, including native work and Error causes. */
+    comparison?: SourceQualifiedAcquisitionComparison["comparison"] } };
 type Execution = { identity: string } & ExperimentResult;
 type Lifetime = { identity: string; status: "closed" | "failed";
   phase: "startup" | "feedback" | "comparison" | "cleanup" | "reconciliation" | "launch"; diagnostic?: unknown };

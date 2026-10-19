@@ -26,6 +26,9 @@ export function captureQualifiedQueryObserverView(config: SemanticChainConfig, i
   return view;
 }
 
+import type { CorrespondenceGenerationContext } from "../semantic-proposal/correspondence-generation-context.js";
+import { captureQualifiedCorrespondenceContext, contextForQualifiedCorrespondence } from "./source-qualified-correspondence-context.js";
+
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const Artifact = z.object({ key: Digest, cache_identity: Digest.nullable(), historical_production: z.unknown() }).strict();
 const Correspondence = z.object({ artifact: Artifact, workset: SemanticProposalWorksetSchema,
@@ -45,12 +48,13 @@ export const SourceQualifiedSelectionInputSchema = z.object({
 });
 export type SourceQualifiedSelectionInput = z.infer<typeof SourceQualifiedSelectionInputSchema>;
 export function qualifiedSelectionInputPaths(config: SemanticChainConfig, input: SourceQualifiedSelectionInput,
-  queryRevisionObserverView?: QueryRevisionObserverView): string[] {
+  queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext): string[] {
   const view = captureQualifiedQueryObserverView(config, input, queryRevisionObserverView);
+  const context = captureQualifiedCorrespondenceContext(input, correspondenceGenerationContext);
   return [nativeSourceSnapshotManifestPath(config.snapshot_path),
     ...semanticProposalCacheInputPaths(config.query_workset, config.query_cache_root, config.max_output_tokens, true, view),
     ...input.nominees.flatMap(row => row.correspondence === undefined ? [] : semanticProposalCacheInputPaths(
-      row.correspondence.workset, row.correspondence.cache_root, row.correspondence.max_output_tokens, true)),
+      row.correspondence.workset, row.correspondence.cache_root, row.correspondence.max_output_tokens, true, undefined, contextForQualifiedCorrespondence(row, context))),
     ...(input.persona_successor === undefined ? [] : [
       ...sourceRecordsArtifactInputPaths(input.persona_successor.snapshot_path),
       ...sourceRecordsArtifactInputPaths(input.persona_successor.parent_snapshot_path)])];
@@ -59,9 +63,10 @@ export function qualifiedSelectionInputPaths(config: SemanticChainConfig, input:
 /** Read-only producer readmission. Configured paths and caller JSON never establish readiness.
  * The complete native seal is checked independently of the selected fixed subset. */
 export function admitSourceQualifiedSelection(config: SemanticChainConfig, input: SourceQualifiedSelectionInput,
-  queryRevisionObserverView?: QueryRevisionObserverView) {
+  queryRevisionObserverView?: QueryRevisionObserverView, correspondenceGenerationContext?: CorrespondenceGenerationContext) {
   ({ config, input } = structuredClone({ config, input }));
   const view = captureQualifiedQueryObserverView(config, input, queryRevisionObserverView);
+  const context = captureQualifiedCorrespondenceContext(input, correspondenceGenerationContext);
   const meter = new SourceSemanticResourceLedger(config.budget);
   meter.retain(input, "qualified producer admission");
   const full = readVerifiedNativeSourceSnapshot(config.snapshot_path);
@@ -93,9 +98,9 @@ export function admitSourceQualifiedSelection(config: SemanticChainConfig, input
       }
     }
   }
-  const read = (workset: SemanticProposalWorkset, root: string, cap: number, artifact: z.infer<typeof Artifact>, observer?: QueryRevisionObserverView) => {
+  const read = (workset: SemanticProposalWorkset, root: string, cap: number, artifact: z.infer<typeof Artifact>, observer?: QueryRevisionObserverView, generationContext?: CorrespondenceGenerationContext) => {
     if (workset.items.length !== 1) throw new AlayaError("VALIDATION", "qualified consumer requires one exact producer request per artifact");
-    const row = readSemanticProposalResults(workset, root, cap, meter, observer)[0]!;
+    const row = readSemanticProposalResults(workset, root, cap, meter, observer, generationContext)[0]!;
     if (row.line.key !== artifact.key || (row.shard === undefined ? null : chainIdentity(row.shard)) !== artifact.cache_identity ||
         canonicalJson(artifact.historical_production) !== canonicalJson(row.shard?.usage === undefined
           ? { status: "unknown" } : { status: "reported", usage: row.shard.usage })) {
@@ -123,7 +128,10 @@ export function admitSourceQualifiedSelection(config: SemanticChainConfig, input
     if (c === undefined) continue;
     if (c.workset.kind !== "semantic_correspondence") throw new AlayaError("VALIDATION", "qualified C artifact has wrong producer kind");
     assertCorrespondenceModelViewSelection(c.workset.items, config.correspondence_model_view, config);
-    const result = read(c.workset, c.cache_root, c.max_output_tokens, c.artifact);
+    const result = read(c.workset, c.cache_root, c.max_output_tokens, c.artifact, undefined, contextForQualifiedCorrespondence(row, context));
+    if (contextForQualifiedCorrespondence(row, context) !== undefined && result.status !== "interpreted") {
+      throw new AlayaError("CONFLICT", "context-qualified correspondence has no admitted H1 target result");
+    }
     const request = result.line.request as SourceSemanticCorrespondenceRequest, h = request.source_interpretation_descriptors[0];
     if (request.original_query !== q.line.original_query || canonicalJson(request.admitted_query_semantics) !== canonicalJson(query_semantics) ||
         row.interpretation?.interpretation === undefined || h?.source_interpretation_id !== row.interpretation.interpretation_id ||

@@ -27,15 +27,18 @@ import { syntheticGeminiBody } from "../semantic-proposal/gemini-response-eviden
 import { interpretedQueryRaw } from "../../longmemeval/query-producer-fixture.js";
 import { captureSourceAcquisitionLaunchBinding, type SourceAcquisitionExperimentInput } from "../../../runs/semantic-chain/source-acquisition-experiment.js";
 
+import type { CorrespondenceGenerationContext } from "../../../runs/semantic-proposal/correspondence-generation-context.js";
+
 export const CLOCK = "2026-09-18T00:00:00.000Z", CAPTURE = "2026-09-25T00:00:00.000Z";
 const MODEL = "gemini-3.1-flash-lite", PROFILE = "gemini-3.1-minimal-v1", URL = "https://generativelanguage.googleapis.com";
 const TOKENS = 16384, WS = "qualified-authored", RUN = "qualified-run";
 /** Authored producer artifacts travel through the actual reservation, raw, receiver and admission owners.
  * The injected extractor returns authored strings only; it never performs a provider/model call. */
-export async function authoredProposal(workset: ReturnType<typeof parseSemanticProposalWorkset>, root: string, raw: (prompt: string) => string) {
-  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, root, TOKENS, 1),
+export async function authoredProposal(workset: ReturnType<typeof parseSemanticProposalWorkset>, root: string, raw: (prompt: string) => string,
+  correspondenceGenerationContext?: CorrespondenceGenerationContext) {
+  const authority = pinSemanticProposalAuthority({ preflight: prepareSemanticProposal(workset, root, TOKENS, 1, undefined, correspondenceGenerationContext),
     inputUsdPerMillion: 0, outputUsdPerMillion: 0 });
-  await executeSemanticProposalFill({ workset, cacheRoot: root, authority,
+  await executeSemanticProposalFill({ workset, cacheRoot: root, authority, correspondenceGenerationContext,
     config: { model: MODEL, requestProfile: PROFILE, providerUrl: URL, apiKey: null },
     extractor: { extract: async ({ userPrompt }) => {
       const rawJson = raw(userPrompt);
@@ -43,7 +46,7 @@ export async function authoredProposal(workset: ReturnType<typeof parseSemanticP
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, responseBody: syntheticGeminiBody(rawJson, "STOP",
           { inputTokens: 0, outputTokens: 0, totalTokens: 0 }) };
     } } });
-  const result = readSemanticProposalResults(workset, root, TOKENS)[0]!;
+  const result = readSemanticProposalResults(workset, root, TOKENS, undefined, undefined, correspondenceGenerationContext)[0]!;
   expect(result.status, canonicalJson(result)).toBe("interpreted");
   const artifact = { key: result.line.key, cache_identity: chainIdentity(result.shard),
     historical_production: { status: "reported", usage: result.shard!.usage } };
@@ -73,7 +76,7 @@ export function correspondenceRaw(prompt: string) {
     producer_version: SOURCE_SEMANTIC_CORRESPONDENCE_SOUL_PRODUCER_VERSION }, { correspondences: pairs });
 }
 
-export async function qualifiedSelectionFixture(directory: string) {
+export async function qualifiedSelectionFixture(directory: string, sourceVersions: Readonly<Record<string, string>> = {}) {
   // Freeze physical paths before deriving inputs or output roots under an aliased temp directory.
   directory = canonicalPath(directory);
   const task = alternativeSelectionFixture(selectionExecutionBudget), data = join(directory, "source"), root = join(directory, "experiment");
@@ -83,7 +86,7 @@ export async function qualifiedSelectionFixture(directory: string) {
   const daemon = await startBenchDaemon({ dataDirRoot: data, workspaceId: WS, runId: RUN,
     embeddingMode: "disabled", embeddingStartupProbe: "omit", fieldProjectionAdmissionMode: "explicit_checkpoint" });
   try {
-    for (const source of bodies) await daemon.importSourceRecord({ source_id: source.id, source_version: "1", content_bytes: source.body,
+    for (const source of bodies) await daemon.importSourceRecord({ source_id: source.id, source_version: sourceVersions[source.id] ?? "1", content_bytes: source.body,
       event_time: null, recorded_at: CAPTURE, attribution_context: UNKNOWN_UTTERANCE_ATTRIBUTION, speaker: "user",
       valid_from: null, valid_to: null, scope_class: "project", spans: deriveAddressableSpanViews(source.body) });
     await daemon.checkpointFieldProjection();
@@ -96,7 +99,9 @@ export async function qualifiedSelectionFixture(directory: string) {
   const descriptors = new Map<string, SourceSemanticHandleDescriptor>();
   try {
     for (const source of task.sources) {
-      const h = source.package.proofs[0]!.interpretation, locations = h.source.assertion_locations!;
+      const authored = source.package.proofs[0]!.interpretation;
+      const h = { ...authored, source: { ...authored.source, source_version: sourceVersions[source.id] ?? authored.source.source_version } };
+      const locations = h.source.assertion_locations!;
       const catalog = buildSourceReferenceCatalog(fieldContractSha256(source.body), locations.map(row => ({ assertion_id: row.assertion_id,
         text: Buffer.from(source.body).subarray(...row.source_utf8_span).toString("utf8") })), fieldContractSha256);
       const published = await publication.publish({ workspaceId: WS, runId: RUN, artifactKey: source.id, source: source.body,
