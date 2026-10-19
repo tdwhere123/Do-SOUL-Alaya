@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -8,6 +9,7 @@ const guard = new URL("../../support/source-import-boundary.mjs", import.meta.ur
 const prepare = new URL("../../../../dist/runs/snapshot/source-records/prepare.js", import.meta.url).href;
 const artifact = new URL("../../../../dist/runs/snapshot/source-records/contract.js", import.meta.url).href;
 const storage = new URL("../../../../../../packages/storage/dist/index.js", import.meta.url).href;
+const embeddingOwner = createRequire(import.meta.url).resolve("@do-soul/alaya-core/package.json");
 
 // The fixture process uses built application modules, file-backed native SQLite,
 // real MCP installation/attachment, the audited source writer and real read worker.
@@ -18,9 +20,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { basename, dirname, isAbsolute, join } from "node:path";
-const [root, prepareURL, artifactURL, guardURL, storageURL] = process.argv.slice(1);
+const [root, prepareURL, artifactURL, guardURL, storageURL, ownerURL] = process.argv.slice(1);
 const { receipt } = await import(guardURL);
-const require = createRequire(prepareURL);
+const require = createRequire(ownerURL);
 const resolved = require.resolve("@huggingface/transformers");
 assert.match(resolved, /transformers/);
 const leases = [];
@@ -173,7 +175,7 @@ function run(program: string, args: string[] = []) {
 it("imports authored source records and cleans the explicit lease on successful sealing and partial failure without model execution", () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "source-import-lifecycle-")));
   try {
-    const result = run(importProgram, [root, prepare, artifact, guard, storage]);
+    const result = run(importProgram, [root, prepare, artifact, guard, storage, embeddingOwner]);
     expect(result.error, result.stderr).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
     const line = result.stdout.split("\n").find(row => row.startsWith("IMPORT_RECEIPT "));
@@ -185,7 +187,7 @@ it("imports authored source records and cleans the explicit lease on successful 
 
 it.each([
   ["real model import", `const { createRequire } = await import("node:module");
-    const require = createRequire(${JSON.stringify(prepare)});
+    const require = createRequire(${JSON.stringify(embeddingOwner)});
     const { pathToFileURL } = await import("node:url");
     await import(pathToFileURL(require.resolve("@huggingface/transformers")).href)`, "model-provider.module.load"],
   ["model worker", `const { Worker } = await import("node:worker_threads"); new Worker(new URL("file:///forbidden-model-worker.js"))`, "worker.create"],
