@@ -36,6 +36,10 @@ export function readSourceIndexGeneration(database: StorageDatabase, workspaceId
     after_source_id: readNullableStringField(row, "after_source_id"), target_count: readIntegerField(row, "target_count"),
     completed_count: readIntegerField(row, "completed_count"), reason: readNullableStringField(row, "reason") });
 }
+/** Shared serving/coverage predicate. Private measurement reads adapt this owner, not a second qualification rule. */
+export const SOURCE_INDEX_LEXICAL_CURRENT = `x.content_digest=json_extract(r.target_json,'$.target.content_digest')
+  AND x.body_bytes=json_extract(r.target_json,'$.body_bytes')`;
+
 /** Reconcile captured manifests in SQLite, never hydrating the source population into JavaScript. */
 export function verifySourceIndexTargetCoverage(database: StorageDatabase, workspaceId: string, generationId: string, rootKey?: string): void {
   database.connection.prepare(`UPDATE source_index_targets AS t SET complete = CASE WHEN
@@ -43,8 +47,7 @@ export function verifySourceIndexTargetCoverage(database: StorageDatabase, works
       SELECT 1 FROM source_index_roots r JOIN source_index_text x
         ON x.workspace_id=r.workspace_id AND x.root_key=r.root_key
       WHERE r.workspace_id=t.workspace_id AND r.root_key=t.root_key
-        AND x.content_digest=json_extract(r.target_json,'$.target.content_digest')
-        AND x.body_bytes=json_extract(r.target_json,'$.body_bytes'))
+        AND ${SOURCE_INDEX_LEXICAL_CURRENT})
     AND (SELECT COUNT(*) FROM source_index_windows w WHERE w.workspace_id=t.workspace_id
       AND w.generation_id=t.generation_id AND w.root_key=t.root_key)=t.expected_windows
     AND (SELECT COUNT(*) FROM source_index_windows w JOIN source_index_vectors v

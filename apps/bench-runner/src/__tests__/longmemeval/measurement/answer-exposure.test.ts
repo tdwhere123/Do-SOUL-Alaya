@@ -104,7 +104,7 @@ describe("published answer-turn exposure", () => {
     expect(score(observed(28, 43), missingAnnotations).metrics["answer_span_exposure@5"].status).toBe("unknown");
   });
 
-  it("preserves a verified exposure under an incomplete gold join but does not close unresolved negatives", () => {
+  it("preserves a verified exposure under an incomplete gold join and closes a captured miss independently of membership residuals", () => {
     const positive = score(observed(28, 43), { ...answerGold, annotated_turns: 2, complete: false });
     expect(positive.metrics["answer_span_exposure@5"].status).toBe("hit");
     const value = observed(0, 16);
@@ -113,8 +113,8 @@ describe("published answer-turn exposure", () => {
     value.native.source_bearing_union = { ...value.native.source_bearing_union, any_at_5: unresolved, any_at_10: unresolved };
     const negative = score(value);
     expect(negative.metrics["source_bearing_any@5"].status).toBe("unknown");
-    expect(negative.metrics["answer_span_exposure@5"].status).toBe("unknown");
-    expect(negative.earliest_observable_loss).toMatchObject({ status: "unknown", stage: null, observed_failed_stage: null });
+    expect(negative.metrics["answer_span_exposure@5"].status).toBe("miss");
+    expect(negative.earliest_observable_loss).toMatchObject({ status: "unknown", stage: null, observed_failed_stage: "delivery" });
   });
 
   it("does not infer full support sufficiency from exposing every annotated turn", () => {

@@ -24,6 +24,29 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     super.charge(work, bytes, reason);
     this.observer?.cost(this.phase, reason, "debit", work, bytes);
   }
+  private operationDepth = 0;
+  override retain(value: unknown, reason = "preparation", ownership?: "immutable" | "borrow"): void {
+    if (this.observer === undefined) return super.retain(value, reason, ownership);
+    const work = this.spentWork, bytes = this.spentBytes, outer = this.operationDepth++ === 0;
+    let completed = false;
+    try { super.retain(value, reason, ownership); completed = true; }
+    finally {
+      this.operationDepth--;
+      if (outer) this.observer.facts.operation("retain", this.observationId ?? null, this.phase, reason, value,
+        this.spentWork - work, this.spentBytes - bytes, completed);
+    }
+  }
+  override canonicalJsonLength(value: unknown, planner?: SourceSemanticResourceLedger): number {
+    if (this.observer === undefined) return super.canonicalJsonLength(value, planner);
+    const work = this.spentWork, bytes = this.spentBytes, outer = this.operationDepth++ === 0;
+    let completed = false;
+    try { const length = super.canonicalJsonLength(value, planner); completed = true; return length; }
+    finally {
+      this.operationDepth--;
+      if (outer) this.observer.facts.operation("canonical_scan", this.observationId ?? null, this.phase, "canonical JSON size scan", value,
+        this.spentWork - work, this.spentBytes - bytes, completed);
+    }
+  }
   public preparation?: SourceSemanticCompactPreparation;
   public acquisition?: SourceSemanticCompactAcquisition;
   public indexWork = 0;

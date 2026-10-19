@@ -47,7 +47,18 @@ first-exposure evidence for the single `consumer-message-visibility-v1` scorer
 over frozen answer-turn labels instead of defining @K visibility itself.
 Frozen-output attribution keeps missing, partial and unavailable evidence
 explicit; diagnostic membership is not proof of visible text, and logical
-accounting is not a physical resource measurement.
+accounting is not a physical resource measurement. Native facts now record the
+session, request, pool, lease and plan ancestry of the objects that were
+actually used, so equal request numbers or pool labels never join calls, and
+ledger retention and canonical-scan annotations reconcile against recorded
+charges while encoding annotations describe existing work without adding debits. Frozen
+source-index and window qualification is a symbol-keyed capability on the
+existing storage constructor: no package-root export, a caller-owned read
+transaction over a sealed snapshot copy, and unchanged recall when that
+capability is absent. The shared scorer emits one row per mapped gold span,
+and Consumer @10 closes an absence only on an observed ten-slot prefix or an
+admitted index whose occupied tail is proven exhausted. Physical SQL work,
+peak memory and causal policy benefit remain unestablished.
 
 ### Retained-boundary corrections
 

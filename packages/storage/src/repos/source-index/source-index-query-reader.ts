@@ -14,7 +14,7 @@ import type { SqliteFieldSourceRecordRepo } from "../field/source-repo.js";
 import { decodeValidEmbeddingBlob } from "../memory/embedding-vector-validity.js";
 import { buildFtsMatchExpression, tokenizeFtsQuery } from "../shared/fts-lane-routing.js";
 import { readBufferField, readIntegerField, readJsonColumn, readFiniteNumberField, readRecord, readStringField } from "../shared/parse-row.js";
-import { readSourceIndexQueryState } from "./generation-state.js";
+import { readSourceIndexQueryState, SOURCE_INDEX_LEXICAL_CURRENT } from "./generation-state.js";
 import { assertIndexPageLimit, guardSourceIndexTarget } from "./native-source.js";
 
 type QueryResourceRefusal = NonNullable<SourceIndexLexicalRead["resource_refusal"]>;
@@ -84,8 +84,7 @@ export function readSourceIndexLexicalCandidates(database: StorageDatabase, work
           octet_length(r.target_json) AS metadata_bytes FROM ${lane.table}
           JOIN source_index_text x ON x.id=${lane.table}.rowid AND x.workspace_id=?
           JOIN source_index_roots r ON r.workspace_id=x.workspace_id AND r.root_key=x.root_key
-          WHERE ${lane.table} MATCH ? AND x.content_digest=json_extract(r.target_json,'$.target.content_digest')
-            AND x.body_bytes=json_extract(r.target_json,'$.body_bytes')
+          WHERE ${lane.table} MATCH ? AND ${SOURCE_INDEX_LEXICAL_CURRENT}
           ORDER BY score ASC,x.root_key ASC LIMIT 1 OFFSET ?`).get(workspaceId, lane.match, lane.offset);
         if (raw === undefined) { lane.done = true; continue; }
         meter.read(0, 24);
@@ -176,7 +175,7 @@ export function readSourceIndexVectorCandidates(database: StorageDatabase, works
       const embedding = readIntegerField(row, "dimensions") === binding.dimensions
         ? decodeValidEmbeddingBlob(readBufferField(row, "embedding_blob"), binding.dimensions) : null;
       const source = parseTarget(row, workspaceId);
-      if (embedding === null || window.start_byte < 0 || window.end_byte <= window.start_byte || window.end_byte > source.body_bytes) {
+      if (embedding === null || !sourceIndexWindowWithinSource(window, source)) {
         invalid++; continue;
       }
       meter.ledger.retain({ source, window }); meter.ledger.charge(1, 64, "source vector candidate retention");
@@ -220,6 +219,11 @@ export function admitSourceIndexQueryCandidate(database: StorageDatabase, record
     if (error instanceof SourceSemanticResourceExhausted) return refused(error.phase);
     return { status: "partial", reason: "native_source_unavailable", resources: meter.resources() };
   }
+}
+
+/** Mechanical extent validity shared with the private frozen index measurement reader. */
+export function sourceIndexWindowWithinSource(window: { start_byte: number; end_byte: number }, source: SourceIndexTarget): boolean {
+  return window.start_byte >= 0 && window.end_byte > window.start_byte && window.end_byte <= source.body_bytes;
 }
 
 function parseTarget(raw: unknown, workspaceId: string): SourceIndexTarget {

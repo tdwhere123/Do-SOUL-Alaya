@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { measureSemanticChain, ReplaySchema } from "../recall-measurement/replay.js";
 import { deliveredSourceSemanticLibraryIntervals } from "../measurement/source-semantic-library-measurement.js";
+import { admittedSourceDeliveryTail } from "../measurement/source-delivery-visibility.js";
 import { sourceGoldUnitFromPublishedRoot, type SourceGoldUnit } from "../measurement/source-gold-join.js";
 import type { AnswerTurnGold } from "./answer-spans.js";
 import { scoreConsumerMessageVisibility, type ConsumerVisibilityMetric,
@@ -106,20 +107,18 @@ export function measureLongMemEvalAcquisition(input: Readonly<{
     : unknown(sourceGold?.complete ? "native_access_or_computation_unresolved" : "source_or_gold_mapping_incomplete");
   const hasContinuation = measurement?.status === "validated" && measurement.delivered_index.continuation !== null;
   // The replay contract retains one observed page. Its continuation pointer promises more content
-  // but does not itself prove any second-page interval.
+  // but does not itself prove any second-page interval. Occupancy exhaustion is the native
+  // completeness fact, not gold membership and not a null public continuation.
   const deliveryPage: ConsumerVisibilityPage | undefined =
     intervals === null || measurement?.status !== "validated" ? undefined : {
       page: 1, status: "observed", reason: null, complete: true,
       occupied_slots: measurement.first_exposure_slots.length,
       continuation: hasContinuation ? "present" : "none",
+      terminal_tail: admittedSourceDeliveryTail(measurement.delivered_index),
       intervals: intervals.map(({ rank, target, start, end }) =>
         ({ rank, target: sourceGoldUnitFromPublishedRoot(target), start, end }))
     };
-  const nativeFirstPageDeterminate = native?.source_bearing_union?.any_at_5.status === "hit"
-    || native?.source_bearing_union?.any_at_5.status === "miss";
   const visibility = scoreConsumerMessageVisibility({ gold: answerGold,
-    admission: nativeFirstPageDeterminate ? { status: "closed" }
-      : { status: "open", reason: "native_access_or_computation_unresolved" },
     pages: deliveryPage === undefined ? [] : [deliveryPage],
     ...(unavailable === null ? {} : { unavailableReason: unavailable }) });
   const answer5 = visibility.any_at_5;

@@ -225,10 +225,13 @@ function finalizeObservedSourceAccess(runtime: SourceSemanticReadRuntime, worksp
   for (let index = 0; index < selectedSources.length; index++) selectedSources[index] = byId.get(orderedSources[index]!.record_id)!;
   const descriptors = new Array<SourceSemanticHandleDescriptor>(orderedInterpretations.length);
   for (let index = 0; index < descriptors.length; index++) descriptors[index] = interpretations.descriptors.get(orderedInterpretations[index]!.interpretation_id)!;
-  return { sources: selectedSources, descriptors,
+  const pool = { sources: selectedSources, descriptors,
     access, ...(accessHint === undefined ? {} : { accessHint }),
     ...(sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents }),
     sourcePages: sources.pages, interpretationPages: interpretations.pages };
+  meter.observer?.facts.pool(pool, access.pool_id, selectedSources,
+    access.unvisited_sources, access.unvisited_interpretations, "created");
+  return pool;
 }
 
 function restrictedSource(runtime: SourceSemanticReadRuntime, workspace: string, sourceId: string,

@@ -66,6 +66,9 @@ it("freezes two actual five-slot pages in one session without replacing initial 
   expect(row.execution_observation.observations).toEqual(expect.arrayContaining([expect.objectContaining({ execution: "success",
     totals: expect.objectContaining({ debit_work: expect.any(Number) }) })]));
   expect(row.pages.map(page => [page.status, page.occupied_slots])).toEqual([["observed", 5], ["observed", 5]]);
+  expect(row.pages.map(page => page.terminal_tail)).toEqual([
+    { status: "open", reason: "occupancy_continuation_present" },
+    { status: "open", reason: "occupancy_continuation_present" }]);
   expect(row.pages.flatMap(page => page.intervals.map(interval => interval.rank))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   const initial = row.initial!;
   if (initial.response?.operation !== "recall" || initial.first_exposure == null) throw new Error("initial recall required");
@@ -90,6 +93,8 @@ it("freezes two actual five-slot pages in one session without replacing initial 
   const single = await captureSemanticChainLibrary(f.chainRoot, join(f.root, "one-page"), { maxPages: 1 });
   expect(single.header.identity).not.toBe(captured.header.identity);
   expect(single.rows[0]!.pages.map(page => page.status)).toEqual(["observed", "not_run"]);
+  expect(single.rows[0]!.pages[0]!.terminal_tail).toEqual({ status: "open", reason: "occupancy_continuation_present" });
+  expect(single.rows[0]!.pages[1]!.terminal_tail.status).toBe("unknown");
   expect(admitSourceSemanticLibraryContinuation({ ...continuationInput, previous: {
     recallResult: single.rows[0]!.initial!.response, firstExposurePage: single.rows[0]!.initial!.first_exposure!, requestBudget: f.config.budget
   } })?.status).not.toBe("admitted");
@@ -149,6 +154,8 @@ it("aborts a failed raw-envelope archive and retains the first page and the unre
   expect(retained.status).toBe("partial");
   expect(retained.pages.map(page => page.status)).toEqual(["observed", "unobserved"]);
   expect(retained.pages[0]!.occupied_slots).toBe(5);
+  expect(retained.pages[0]!.terminal_tail).toEqual({ status: "open", reason: "occupancy_continuation_present" });
+  expect(retained.pages[1]!.terminal_tail.status).toBe("unknown");
   await expect(captureSemanticChainLibrary(f.chainRoot, output, { maxPages: 2 })).rejects.toThrow();
   expect(isolation.violations).toEqual([]);
 }, 120_000);

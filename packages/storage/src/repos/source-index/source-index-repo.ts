@@ -19,9 +19,16 @@ import { readSourceIndexGeneration, readSourceIndexSelection, requireSourceIndex
   sourceIndexBuildGuard, sourceIndexEpoch, verifySourceIndexTargetCoverage } from "./generation-state.js";
 import { admitSourceIndexQueryCandidate, readSourceIndexLexicalCandidates,
   readSourceIndexVectorCandidates } from "./source-index-query-reader.js";
+import { SOURCE_INDEX_QUALIFICATION_STATUSES, readSourceIndexRootQualification, readSourceIndexSnapshotFact } from "./source-index-qualification.js";
+
+// Private Node measurement friend. No package-root export, public operation or persisted state.
+// Both source and installed consumers discover this on the same existing package constructor.
+const SOURCE_INDEX_MEASUREMENT: unique symbol = Symbol.for("@do-soul/alaya-storage/private/source-index-measurement");
 
 /** Mechanical CAS/materialization for Core's SourceIndexLifecycle. No inference or truth promotion. */
 export class SqliteSourceIndexRepository implements SourceIndexRepository, SourceIndexQueryRepository {
+  static readonly [SOURCE_INDEX_MEASUREMENT] = Object.freeze({ statuses: SOURCE_INDEX_QUALIFICATION_STATUSES,
+    readSnapshot: readSourceIndexSnapshotFact, readRoot: readSourceIndexRootQualification });
   private records: SqliteFieldSourceRecordRepo;
   private connectionVersion: number;
   public constructor(private readonly database: StorageDatabase, private readonly sha256: FieldContractSha256) {

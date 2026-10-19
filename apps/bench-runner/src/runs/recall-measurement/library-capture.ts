@@ -10,6 +10,7 @@ import { FirstExposurePageSchema, FirstExposureSession } from "../measurement/fi
 import { recordSourceSemanticLibraryFirstExposure } from "../measurement/source-semantic-library-recall.js";
 import { admitSourceSemanticLibraryContinuation, admitSourceSemanticLibraryResponse,
   deliveredSourceSemanticLibraryPageIntervals } from "../measurement/source-semantic-library-measurement.js";
+import { admittedSourceDeliveryTail } from "../measurement/source-delivery-visibility.js";
 import type { ConsumerVisibilityPage } from "../longmemeval-semantic/message-visibility.js";
 import type { BenchDaemonHandle } from "../../harness/daemon.js";
 import type { SourceSemanticObservedCall } from "../../../../core-daemon/src/runtime/recall/source-semantic-observation.js";
@@ -280,13 +281,15 @@ function visibilityPage(page: number, admitted: ReturnType<typeof admitSourceSem
   const intervals = deliveredSourceSemanticLibraryPageIntervals(admitted, response, rankOffset);
   if (admitted?.status !== "admitted" || intervals === null) throw new AlayaError("CONFLICT", "library page failed measurement admission");
   return { page, status: "observed", reason: null, occupied_slots: admitted.slots.length, complete: true,
-    continuation: admitted.index.continuation === null ? "none" : "present", intervals: intervals.map(interval => ({
+    continuation: admitted.index.continuation === null ? "none" : "present",
+    terminal_tail: admittedSourceDeliveryTail(admitted.index), intervals: intervals.map(interval => ({
       rank: interval.rank, start: interval.start, end: interval.end, target: SourceGoldUnitSchema.parse({
         workspace_id: interval.target.workspace_id, root_kind: interval.target.root_kind, root_id: interval.target.root_id,
         source_version: interval.target.source_version, content_digest: interval.target.content_digest, span: interval.target.span }) })) };
 }
 function unobservedPage(page: number, reason: string, status: "unobserved" | "not_run" = "unobserved"): ConsumerVisibilityPage {
-  return { page, status, reason, occupied_slots: 0, complete: false, continuation: "unknown", intervals: [] };
+  return { page, status, reason, occupied_slots: 0, complete: false, continuation: "unknown",
+    terminal_tail: { status: "unknown", reason }, intervals: [] };
 }
 function same(actual: unknown, expected: unknown): void {
   if (canonicalJson(actual) !== canonicalJson(expected)) throw new AlayaError("CONFLICT", "library capture reservation or request binding changed");

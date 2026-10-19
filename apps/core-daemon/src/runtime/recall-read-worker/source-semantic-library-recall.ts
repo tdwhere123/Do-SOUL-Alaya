@@ -38,7 +38,7 @@ export function runSourceSemanticLibraryRecall(
   meter.retain(request, "library request admission");
   const requestIdentity = fieldContractSha256(canonicalJson({ ...request, continuation: undefined }));
   const continuationLease = request.continuation === undefined ? undefined
-    : readSemanticLease(runtime, payload, request.continuation.continuation_id, authorized, "library");
+    : readSemanticLease(runtime, payload, request.continuation.continuation_id, authorized, "library", meter);
   if (continuationLease !== undefined && (continuationLease.request_identity !== requestIdentity
     || continuationLease.continuation === undefined || !continuationCapabilityMatches(request.continuation!)
     || canonicalJson(continuationLease.continuation) !== canonicalJson(request.continuation))) {
@@ -51,7 +51,7 @@ export function runSourceSemanticLibraryRecall(
     return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, Number(offset[1]));
   }
   const currentClock = payload.as_of;
-  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
+  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query", meter);
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
     || request.query_semantics !== undefined && sourceSemanticQueryInputIdentity(request.query_semantics) !== lease.query_semantics_input_id
     || request.query_semantics_unavailable !== undefined && (lease.query_semantics_status?.status !== "unavailable"
@@ -100,6 +100,8 @@ export function runSourceSemanticLibraryRecall(
   if (boundPool !== undefined) {
     exploration.retain(boundPool, "leased access pool");
     meter.observer?.event("pool_reuse", meter.phase, () => ({ pool_id: boundPool.access.pool_id, discovery: "not_observed_this_request" }));
+    meter.observer?.facts.pool(boundPool, boundPool.access.pool_id, boundPool.sources,
+      boundPool.access.unvisited_sources, boundPool.access.unvisited_interpretations, "reused");
   }
   const pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
     admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id);

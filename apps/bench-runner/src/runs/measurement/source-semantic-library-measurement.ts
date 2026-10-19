@@ -18,6 +18,7 @@ import {
   type SourceBearingUnionFirstExposureMetric, type SourceGoldUnit, type UnionProofAdmission
 } from "./source-gold-join.js";
 import { soulSearchFromLibraryRecall } from "./source-semantic-library-recall.js";
+import { admittedSourcePreviewInterval } from "./source-delivery-visibility.js";
 
 export const SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT = "source-semantic-library-delivered-slots-v3" as const;
 const HISTORICAL_SOURCE_ONLY_PAGE_BUDGET = 10;
@@ -120,12 +121,9 @@ export function deliveredSourceSemanticLibraryPageIntervals(admitted: ReturnType
     const target = slot.target, result = parsed.data.results[offset];
     if (result === undefined) return null;
     if (target.kind !== "source_evidence" || target.span?.retained_extent !== "body") continue;
-    const span = target.span;
-    const omitted = result.content_preview === "[payload omitted]" && !result.budget_state.within_budget;
-    const empty = result.content_preview === "[empty source]" && span.content_start === span.content_end;
-    const bytes = omitted || empty ? 0 : Buffer.byteLength(result.content_preview, "utf8");
-    if (bytes > span.content_end - span.content_start) return null;
-    intervals.push({ rank: rankOffset + slot.rank, target, start: span.content_start, end: span.content_start + bytes });
+    const interval = admittedSourcePreviewInterval(target, result);
+    if (interval === null) return null;
+    intervals.push({ rank: rankOffset + slot.rank, target, ...interval });
   }
   return intervals;
 }
@@ -243,15 +241,20 @@ function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
 
 /** A delivered positive is observed; a negative cannot close native unvisited or unfinished work.
  * Index pagination and unexercised source-only computation alone do not imply unvisited access. */
-function resolveNativeUnion(metric: SourceBearingUnionFirstExposureMetric,
-  observation: Pick<z.infer<typeof ValidatedMeasurementRecord>["native_observation"], "discovery" | "coverage">): SourceBearingUnionFirstExposureMetric {
+function nativeAccessOrComputationUnresolved(
+  observation: Pick<z.infer<typeof ValidatedMeasurementRecord>["native_observation"], "discovery" | "coverage">): boolean {
   const { discovery, coverage } = observation;
   const access = discovery.access;
   const discoveryFinished = !discovery.open_residuals && !discovery.truncated && coverage.discovery === "complete";
   const accessClosed = access !== undefined && !access.unvisited_sources && !access.unvisited_interpretations;
   const computationFinished = coverage.conditional_computation === "complete"
     || coverage.conditional_computation === "unexercised";
-  if (discoveryFinished && accessClosed && computationFinished) return metric;
+  return !(discoveryFinished && accessClosed && computationFinished);
+}
+
+function resolveNativeUnion(metric: SourceBearingUnionFirstExposureMetric,
+  observation: Pick<z.infer<typeof ValidatedMeasurementRecord>["native_observation"], "discovery" | "coverage">): SourceBearingUnionFirstExposureMetric {
+  if (!nativeAccessOrComputationUnresolved(observation)) return metric;
   const resolve = (value: SourceBearingUnionFirstExposureMetric["any_at_5"]) => value.status !== "miss" ? value
     : { status: "unavailable" as const, value: null, reason: "native access or computation remains unresolved" };
   return { ...metric, any_at_1: resolve(metric.any_at_1), any_at_5: resolve(metric.any_at_5), any_at_10: resolve(metric.any_at_10) };

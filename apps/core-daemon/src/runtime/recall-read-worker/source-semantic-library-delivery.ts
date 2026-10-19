@@ -66,9 +66,13 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
     // Access phases are frozen provenance, not execution of this delivery.
     const result = pageResult(base, page, emittedOffset, more, request, meter, true, access,
       emittedOffset === 0 ? initialExecution : continuationExecution);
+    meter.observer?.facts.encodingInvocation(meter.phase, "candidate_page");
     const encoded = encodeSourceSemanticLibraryResponse(result);
     meter.retain(encoded, "candidate delivery encoding");
-    const bytes = Buffer.byteLength(JSON.stringify(encoded));
+    const encodedJson = JSON.stringify(encoded);
+    const bytes = Buffer.byteLength(encodedJson);
+    meter.observer?.facts.encoding(meter.phase, "candidate_page", encodedJson,
+      "results" in encoded ? encoded.results?.map(row => row.content_preview) ?? [] : []);
     meter.charge(1, bytes * 2, "candidate delivery bytes");
     let fits = bytes <= request.output_byte_limit && "results" in encoded
       && encoded.results !== undefined && encoded.results.every(row => row.budget_state.within_budget);
@@ -80,9 +84,13 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
     if (fits && bytes + payloadGrowth > request.output_byte_limit) {
       meter.observer?.event("encoding_attempt", meter.phase, () => ({ offset: emittedOffset, more, variant: "partial_payload",
         targets: page.map(row => row.entry.target) }));
+      meter.observer?.facts.encodingInvocation(meter.phase, "candidate_partial_page");
       const partial = encodeSourceSemanticLibraryResponse({ ...result, coverage: { ...result.coverage, payload: "truncated" } });
       meter.retain(partial, "candidate partial delivery encoding");
-      const partialBytes = Buffer.byteLength(JSON.stringify(partial));
+      const partialJson = JSON.stringify(partial);
+      const partialBytes = Buffer.byteLength(partialJson);
+      meter.observer?.facts.encoding(meter.phase, "candidate_partial_page", partialJson,
+        "results" in partial ? partial.results?.map(row => row.content_preview) ?? [] : []);
       meter.charge(1, partialBytes * 2, "candidate partial delivery bytes");
       fits = partialBytes <= request.output_byte_limit;
       meter.observer?.event("encoding_result", meter.phase, () => ({ offset: emittedOffset, variant: "partial_payload",
@@ -160,9 +168,11 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
   meter.observer?.event("frozen_membership", meter.phase, () => ({ incomplete,
     pages: frozenPages.map((page, position) => ({ position, targets: page.map(row => row.entry.target) })) }));
   const { pool: _pool, ...frozenBase } = base;
-  return { ...frozenBase, pages: frozenPages, page_access,
-    coverage: incomplete ? { ...base.coverage, payload: "truncated" } : base.coverage,
+  const plan = { ...frozenBase, pages: frozenPages, page_access,
+    coverage: incomplete ? { ...base.coverage, payload: "truncated" as const } : base.coverage,
     discovery: incomplete ? { ...base.discovery, truncated: true, open_residuals: true } : base.discovery };
+  meter.observer?.facts.plan(plan, base.pool);
+  return plan;
 }
 
 function improveReservedPackages(pages: SourceSemanticLibraryPackage[][], access: SourceSemanticAccessReceipt[],
@@ -303,14 +313,18 @@ function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
   const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
     plan.page_access[pageIndex]!, sourceSemanticExecution(meter.preparation, meter.acquisition, meter));
   meter.observer?.event("encoding_attempt", "final_delivery", () => ({ offset, targets: page.map(row => row.entry.target) }));
+  meter.observer?.facts.encodingInvocation("final_delivery", "base_page");
   const baseEncoded = encodeSourceSemanticLibraryResponse(result);
   meter.observer?.event("encoded_membership", "final_delivery", () => ({ offset,
     results: "results" in baseEncoded ? baseEncoded.results?.map(row => ({ target: row.target, preview_bytes: Buffer.byteLength(row.content_preview),
       within_budget: row.budget_state.within_budget })) ?? null : null }));
   meter.retain(baseEncoded, "library public serialization");
   // The reserved work receipt is an upper bound on the eventual metered receipt.
-  let reservedBytes = Buffer.byteLength(JSON.stringify(baseEncoded))
+  const encodedJson = JSON.stringify(baseEncoded);
+  let reservedBytes = Buffer.byteLength(encodedJson)
     + Buffer.byteLength(JSON.stringify(reservedLibraryWork(request))) - Buffer.byteLength(JSON.stringify(result.work));
+  meter.observer?.facts.encoding("final_delivery", "base_page", encodedJson,
+    "results" in baseEncoded ? baseEncoded.results?.map(row => row.content_preview) ?? [] : []);
   meter.observer?.event("encoding_result", "final_delivery", () => ({ offset, bytes: reservedBytes,
     byte_limit: request.output_byte_limit, fits: reservedBytes <= request.output_byte_limit }));
   if (reservedBytes > request.output_byte_limit) {
@@ -340,9 +354,12 @@ function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
       // named-field format. Both public copies use this exact representation.
       const semantic = { ...sourceDisclosure(disclosure), source_time };
       meter.retain(semantic, "optional source time semantic capture");
+      meter.observer?.facts.encodingInvocation("final_delivery", "source_time_after");
       withTime = encodeSourceDisclosure(semantic);
       meter.retain(withTime, "optional source time codec allocation");
       const before = JSON.stringify(disclosure), after = JSON.stringify(withTime);
+      meter.observer?.facts.encoding("final_delivery", "source_time_before", before, []);
+      meter.observer?.facts.encoding("final_delivery", "source_time_after", after, []);
       meter.charge(1, (before.length + after.length) * 2, "optional source time codec encoding");
       addedBytes = 2 * (Buffer.byteLength(after) - Buffer.byteLength(before));
     } catch (error) {

@@ -33,15 +33,17 @@ function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecord
   let releaseDeferred: (() => void) | undefined;
   let completionCost: SourceSemanticResourceBudget = { work_units: 0, memory_bytes: 0 };
   const chunks: string[] = [];
+  // Diagnostic extent summary, not another retained body or execution/charge counter.
+  let requestedEnd = 0, returnedEnd = 0, nativeBytes = 0, readCalls = 0, attempts = 0, available = false;
   try {
     try {
       meter.reserve(5, RETAINED_SOURCE_READ_RESERVATION, "access source extent metadata");
       extent = repo.findByIdBounded(record.workspace_id, record.identity, 1, 0,
         { workLimit: meter.work, nativeByteLimit: meter.bytes });
-      meter.read(5 + (extent?.dependencyWork ?? 0), extent === null ? 0 : extent.nativeBytes + extent.metadataBytes);
       meter.observer?.event("source_read", meter.phase, () => ({ purpose: "observation_metadata", record_id: record.identity,
         source_id: record.source_id, start: 0, end: Buffer.byteLength(extent?.record?.source_body ?? ""),
         native_bytes: extent === null ? 0 : extent!.nativeBytes + extent!.metadataBytes, resource_limited: extent?.resourceLimited ?? false }));
+      meter.read(5 + (extent?.dependencyWork ?? 0), extent === null ? 0 : extent.nativeBytes + extent.metadataBytes);
       bodyBytes = extent?.bodyBytes ?? null;
       if (extent?.resourceLimited) throw new SourceSemanticResourceExhausted("access source dependencies");
     } catch (error) { if (!(error instanceof SourceSemanticResourceExhausted)) throw error; resourceLimited = true; }
@@ -59,16 +61,18 @@ function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecord
           sourcePreviewByteExtent === undefined ? 4096 : sourcePreviewByteExtent - offset);
         if (chunkBytes > 0) {
           const quote = extentQuote(policy.sourceCost, characters, chunkBytes);
-          meter.observer?.event("source_read_attempt", meter.phase, () => ({ purpose: "observation", record_id: record.identity,
-            source_id: record.source_id, start: offset, requested_end: offset + chunkBytes }));
+          if (meter.observer !== undefined) { attempts++; requestedEnd = Math.max(requestedEnd, offset + chunkBytes); }
           meter.reserve(quote.work_units, quote.memory_bytes, "access source extent");
           const page = repo.findByIdBounded(record.workspace_id, record.identity, chunkBytes, offset,
             { workLimit: meter.work - quote.deferredWork, nativeByteLimit: meter.bytes - quote.deferredBytes });
+          if (meter.observer !== undefined) {
+            readCalls++; nativeBytes += page === null ? 0 : page.nativeBytes + page.metadataBytes;
+            if (page?.record?.source_body != null && !page.invalidOffset) {
+              available = true;
+              returnedEnd = Math.max(returnedEnd, offset + Buffer.byteLength(page.record.source_body));
+            }
+          }
           meter.read(5 + (page?.dependencyWork ?? 0), page === null ? 0 : page.nativeBytes + page.metadataBytes);
-          meter.observer?.event("source_read", meter.phase, () => ({ purpose: "observation", record_id: record.identity,
-            source_id: record.source_id, start: offset, end: offset + Buffer.byteLength(page?.record?.source_body ?? ""),
-            requested_end: offset + chunkBytes, native_bytes: page === null ? 0 : page.nativeBytes + page.metadataBytes,
-            resource_limited: page?.resourceLimited ?? false, available: page?.record?.source_body != null && !page.invalidOffset }));
           if (page?.resourceLimited) throw new SourceSemanticResourceExhausted("access source dependencies");
           if (page !== null) {
             bodyBytes = page.bodyBytes;
@@ -107,6 +111,13 @@ function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecord
     return { read_bytes: offset, body_bytes: bodyBytes, complete, signal, resourceLimited };
   } finally {
     releaseDeferred?.();
+    // Extents advance contiguously. Keep actual returned bytes even if later retention/scoring
+    // refused them; one summary replaces repetitive chunk diagnostics, not native reads.
+    if (attempts > 0) meter.observer?.event("source_read_attempt", meter.phase, () => ({ purpose: "observation", record_id: record.identity,
+      source_id: record.source_id, start: 0, requested_end: requestedEnd, attempts, chronology: "source_extent_summary" }));
+    if (readCalls > 0) meter.observer?.event("source_read", meter.phase, () => ({ purpose: "observation", record_id: record.identity,
+      source_id: record.source_id, start: 0, end: returnedEnd, requested_end: requestedEnd, native_bytes: nativeBytes,
+      read_calls: readCalls, resource_limited: resourceLimited, available, chronology: "source_extent_summary" }));
     meter.observer?.event("observation_read_complete", meter.phase, () => ({ record_id: record.identity, source_id: record.source_id,
       start: 0, end: offset, body_bytes: bodyBytes, complete, resource_limited: resourceLimited,
       stop: !settled ? "interrupted" : resourceLimited ? "budget" : complete ? "complete"
