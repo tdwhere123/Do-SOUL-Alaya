@@ -6,6 +6,11 @@ import { join, resolve } from "node:path";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { acquisitionRuntimeChannel, OBSERVER_BOOTSTRAP_MODE, observerBootstrapEnvelope }
+  from "./source-acquisition-runtime-channel.mjs";
+export { observerBootstrapEnvelope };
+export const observerBootstrapMode = OBSERVER_BOOTSTRAP_MODE;
+
 const candidate = fileURLToPath(new URL("../../../../../", import.meta.url));
 const guardPath = "packages/core/src/__tests__/embedding-recall/local-onnx-source-embedding-offline-preload.mjs";
 const receiptPath = "packages/core/src/__tests__/embedding-recall/local-onnx-source-embedding-offline-receipts.mjs";
@@ -17,6 +22,9 @@ const pinnedPaths = [guardPath, receiptPath,
   "apps/bench-runner/dist/runs/semantic-chain/source-experiment.js",
   "apps/bench-runner/dist/runs/semantic-chain/source-qualified-selection-input.js",
   "apps/bench-runner/dist/runs/snapshot/source-records/native.js",
+  "apps/bench-runner/src/runs/semantic-chain/source-acquisition-runtime-channel.mjs",
+  "apps/bench-runner/dist/runs/semantic-proposal/attempt.js",
+  "apps/bench-runner/dist/runs/semantic-proposal/query-revision-observer-view.js",
   "apps/bench-runner/dist/runs/semantic-proposal/fill.js",
   "apps/bench-runner/dist/runs/semantic-proposal/workset.js",
   "apps/bench-runner/dist/runs/semantic-chain/contract.js",
@@ -91,9 +99,14 @@ async function runOwnedChild() {
   const policy = { preload: paths.preload, inputs: envelope.payload.guard_allocation.source_inputs,
     bytes: envelope.payload.guard_allocation.utf8_bytes };
   const active = isolation.assertActive({ ...policy, unused: true });
-  const caller = new AbortController();
-  process.on("message", message => { if (message?.kind === "cancel_source_acquisition") caller.abort(message.reason); });
-  process.send?.({ kind: "source_acquisition_guarded", identity, pid: process.pid, active, deadline });
+  assert(process.argv.length === 5 || process.argv.length === 6 && process.argv[5] === OBSERVER_BOOTSTRAP_MODE,
+    "invalid acquisition bootstrap mode");
+  const caller = acquisitionRuntimeChannel({ identity, deadline, observer: process.argv[5] === OBSERVER_BOOTSTRAP_MODE });
+  try {
+  await new Promise((resolve, reject) => process.send({ kind: "source_acquisition_guarded", identity, pid: process.pid, active, deadline },
+    error => error ? reject(new Error("acquisition guarded acknowledgement failed")) : resolve()));
+  const queryRevisionObserverView = await caller.view;
+  caller.signal.throwIfAborted();
   // All application imports are below the actual active-reference inspection.
   if (envelope.payload.qualified_selection !== undefined) {
     assert.deepEqual(envelope.payload.guard_allocation, { source_inputs: 0, utf8_bytes: 0 });
@@ -105,16 +118,18 @@ async function runOwnedChild() {
     } });
   }
   const application = await import(pathToFileURL(join(candidate, applicationPath)).href);
-  await application.executeGuardedSourceAcquisition(root, identity, { signal: caller.signal, deadline, active });
+  await application.executeGuardedSourceAcquisition(root, identity, { signal: caller.signal, deadline, active, queryRevisionObserverView });
   // No restoration here: enforcement remains installed through reconciliation and process exit.
   let failure;
   try {
     await isolation.closeChildren();
     isolation.assertActive(policy);
+    caller.signal.throwIfAborted();
   } catch (error) { failure = error; }
   const receipts = isolation.receipts("acquisition_shutdown");
   await application.reconcileGuardedSourceAcquisition(root, identity, { receipts, policy, failure });
-  process.disconnect?.();
+  } finally { caller.dispose(); }
+  if (process.connected) process.disconnect();
 }
 
 // Do not keep this module in a top-level-await cycle with its application consumer.
@@ -123,5 +138,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) void runOwnedChild().cat
   try { await activeIsolation?.closeChildren(); } catch (cleanup) { process.stderr.write(`${String(cleanup)}\n`); }
   activeIsolation?.writeReceipts("failure");
   process.exitCode = 1;
-  process.disconnect?.();
+  if (process.connected) process.disconnect();
 });

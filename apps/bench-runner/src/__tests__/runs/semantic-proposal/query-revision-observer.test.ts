@@ -5,17 +5,23 @@ const isolation = await vi.hoisted(async () => {
   return installProviderFreeBoundary();
 });
 
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { qualifiedSelectionFixture } from "../semantic-chain/source-qualified-selection.test-support.js";
+import { admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "../../../runs/semantic-chain/source-qualified-selection-input.js";
+import { chainIdentity, readChainArtifact } from "../../../runs/semantic-chain/contract.js";
+import type { readSourceExperiment } from "../../../runs/semantic-chain/source-experiment.js";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import * as soul from "@do-soul/alaya-soul";
 import * as artifacts from "../../../runs/semantic-proposal/artifact.js";
 import { pinSemanticProposalAuthority } from "../../../runs/semantic-proposal/authority.js";
-import { openSemanticProposalAttemptLedger, semanticProposalLookup } from "../../../runs/semantic-proposal/attempt.js";
+import { openSemanticProposalAttemptLedger, semanticProposalLookup, semanticProposalCacheInputPaths } from "../../../runs/semantic-proposal/attempt.js";
 import { executeSemanticProposalFill, prepareSemanticProposal, prepareRetainedSemanticProposalRevision,
   readSemanticProposalResults } from "../../../runs/semantic-proposal/fill.js";
 import { materializeSemanticProposalLines, parseSemanticProposalWorkset, resolveSemanticProposalRevisionParent,
@@ -124,6 +130,64 @@ async function fixture(presentation: Presentation = "flat-carrier-v1") {
     wires, extractor, setBody: (body = completeBody) => { rawJson = body; }, completeBody };
 }
 
+it("binds observer Q inventory and native readmission through the owned guarded process without persisting its runtime view", async () => {
+  const f = await fixture(); f.setBody();
+  await executeSemanticProposalFill({ workset: f.child, cacheRoot: f.childRoot, authority: f.bind(), config,
+    extractor: f.extractor, queryRevisionObserverView: f.view });
+  const h = await qualifiedSelectionFixture(join(f.root, "mechanism-only-sources"));
+  h.input.original_query = MIRA_QUERY;
+  h.input.config.query_workset = f.child; h.input.config.query_cache_root = f.childRoot; h.input.config.max_output_tokens = cap;
+  for (const nominee of h.input.qualified_selection!.nominees) delete nominee.correspondence;
+  const q = f.read();
+  h.input.qualified_selection!.query = { key: q.line.key, cache_identity: chainIdentity(q.shard),
+    historical_production: { status: "reported", usage: q.shard!.usage } };
+  const selection = h.input.qualified_selection!;
+  expect(() => qualifiedSelectionInputPaths(h.input.config, selection)).toThrow(/exact producer key/u);
+  expect(() => admitSourceQualifiedSelection(h.input.config, selection)).toThrow(/exact producer key/u);
+  const wrong = structuredClone(f.view); (wrong.observations[0] as { text: string }).text = "Changed observer view.";
+  for (const view of [wrong, { ...f.view, parent_key: "a".repeat(64) }]) {
+    expect(() => qualifiedSelectionInputPaths(h.input.config, selection, view)).toThrow();
+    expect(() => admitSourceQualifiedSelection(h.input.config, selection, view)).toThrow();
+  }
+  const paths = qualifiedSelectionInputPaths(h.input.config, selection, f.view);
+  expect(paths).toContain(artifacts.semanticProposalShardPath(f.childRoot, f.line.key));
+  expect(paths).toContain(artifacts.semanticProposalShardPath(f.parentRoot, f.parentLine.key));
+  expect(admitSourceQualifiedSelection(h.input.config, selection, f.view).status).toBe("ready");
+  const invoke = async (view?: QueryRevisionObserverView, bootstrapSendFailure = false) => {
+    const input = bootstrapSendFailure ? { ...h.input, root: join(f.root, "send-failure") } : h.input;
+    const path = join(f.root, "runtime-caller.json"); writeFileSync(path, JSON.stringify({ input, runtimeView: view,
+      mutateRuntimeViewAfterCall: view !== undefined, bootstrapSendFailure }));
+    return await new Promise<ReturnType<typeof readSourceExperiment>>((resolve, reject) => {
+      const child = spawn(process.execPath, [fileURLToPath(new URL("../semantic-chain/source-acquisition-caller.test-support.mjs", import.meta.url)), path],
+        { env: { ...process.env, NODE_OPTIONS: "", ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS: "60000", ALAYA_CONFLICT_LLM_PROVIDER_URL: "", ALAYA_CONFLICT_LLM_MODEL: "" }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+      let stdout = "", stderr = "";
+      child.stdout!.on("data", chunk => { stdout += chunk; }); child.stderr!.on("data", chunk => { stderr += chunk; });
+      child.on("error", reject); child.on("close", code => {
+        if (code !== 0) reject(new Error(`guarded observer caller ${code}: ${stderr}`));
+        else { try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); } }
+      });
+    });
+  };
+  expect(await invoke()).toMatchObject({ status: "blocked", phase: "admission", execution_started: false });
+  expect(await invoke(wrong)).toMatchObject({ status: "blocked", phase: "admission", execution_started: false });
+  const failedSend = await invoke(f.view, true);
+  expect(failedSend.lifetime.status).toBe("failed"); expect(failedSend.execution).toBeUndefined();
+  expect((await invoke(f.view, true)).execution).toBeUndefined(); // Held reservation never redispatches.
+  const state = await invoke(f.view);
+  expect(state.lifetime.status, JSON.stringify(state)).toBe("closed");
+  expect(state.execution).toMatchObject({ qualified_comparison: { producer: { status: "ready", new_dispatches: 0 }, comparison: { outcome: "complete" } } });
+  expect(f.wires).toHaveLength(2);
+  const launch = readChainArtifact(join(h.root, "source-experiment-launch.json"));
+  expect(JSON.stringify(launch)).not.toContain(f.view.observations[0]!.text);
+  for (const name of readdirSync(h.root).filter(name => name.endsWith(".json"))) {
+    const text = readFileSync(join(h.root, name), "utf8");
+    expect(text).not.toContain(f.view.observations[0]!.text);
+    expect(text).not.toContain("observer-authored-mechanical-observations");
+  }
+  rmSync(f.childRoot, { recursive: true }); rmSync(f.parentRoot, { recursive: true }); rmSync(h.input.config.snapshot_path);
+  expect((await invoke()).execution).toEqual(state.execution);
+}, 120_000);
+
 it.each(presentations)("keeps the default %s system/user/schema/key and exact original parent witness unchanged", async presentation => {
   const f = await fixture(presentation), before = JSON.stringify({ child: f.child, view: f.view });
   const current = materializeSemanticProposalLines(f.child, cap)[0]!;
@@ -168,6 +232,9 @@ it.each(presentations)("binds appended %s observations to the actual native wire
   expect(f.line.systemPrompt).toContain(f.view.observations[0]!.text);
   expect(f.line.key).not.toBe(defaultLine.key);
   expect(f.line.requestDigest).not.toBe(defaultLine.requestDigest);
+  const inventory = semanticProposalCacheInputPaths(f.child, f.childRoot, cap, true, f.view);
+  expect(inventory).toContain(artifacts.semanticProposalShardPath(f.childRoot, f.line.key));
+  expect(inventory).toContain(parentPaths[0]);
   const preflight = f.prepare();
   expect(preflight).toMatchObject({ keys: [f.line.key], maximum_attempts: 1, provider_calls: 0,
     maximum_input_tokens_per_attempt: f.line.inputByteUpper, quote_basis: basis });

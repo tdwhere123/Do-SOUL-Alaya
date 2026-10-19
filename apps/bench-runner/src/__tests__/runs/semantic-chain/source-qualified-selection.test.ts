@@ -20,6 +20,7 @@ import { SourceAcquisitionExperimentInputSchema, type SourceAcquisitionExperimen
   from "../../../runs/semantic-chain/source-acquisition-experiment.js";
 import { admitSourceQualifiedSelection, qualifiedSelectionInputPaths } from "../../../runs/semantic-chain/source-qualified-selection-input.js";
 import { semanticProposalShardPath } from "../../../runs/semantic-proposal/artifact.js";
+import { materializeSemanticProposalLines } from "../../../runs/semantic-proposal/workset.js";
 import { prepareRetainedSemanticProposalRevision } from "../../../runs/semantic-proposal/fill.js";
 import { qualifiedSelectionFixture, CLOCK, CAPTURE } from "./source-qualified-selection.test-support.js";
 import { qualifiedPersonaSuccessor, publishQualifiedPersonaInterpretations, forgePersonaPredecessor } from "./source-qualified-persona.test-support.js";
@@ -396,7 +397,11 @@ it.each(["Q", "C", "Q_parent", "C_parent"] as const)("refuses oversized nested %
     const item = workset.items[0];
     if (item === null || typeof item !== "object" || Array.isArray(item)) throw new Error("authored item required");
     const child = { ...workset, revision_parent_cache_root: root, items: [{ ...item, revision }] };
-    if (query) { h.input.config.query_workset = child; h.input.config.query_cache_root = join(h.directory, "child-q"); }
+    if (query) {
+      h.input.config.query_workset = child; h.input.config.query_cache_root = join(h.directory, "child-q");
+      input.query = { key: materializeSemanticProposalLines(child, cap)[0]!.key, cache_identity: null,
+        historical_production: { status: "unknown" } };
+    }
     else { c.workset = child; c.cache_root = join(h.directory, "child-c"); }
   }
   const shard = semanticProposalShardPath(root, key);

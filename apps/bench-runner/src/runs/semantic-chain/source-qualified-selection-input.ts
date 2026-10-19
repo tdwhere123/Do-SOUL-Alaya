@@ -9,9 +9,22 @@ import { readSemanticProposalResults } from "../semantic-proposal/fill.js";
 import { semanticProposalCacheInputPaths } from "../semantic-proposal/attempt.js";
 import { sourceRecordsArtifactInputPaths } from "../snapshot/source-records/contract.js";
 import { readVerifiedPersonaSuccessorMembership } from "../snapshot/source-records/persona-successor.js";
-import { SemanticProposalWorksetSchema, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
+import { materializeSemanticProposalLines, SemanticProposalWorksetSchema, type SemanticProposalWorkset } from "../semantic-proposal/workset.js";
 import { assertCorrespondenceModelViewSelection } from "../semantic-proposal/correspondence-model-view.js";
 import { chainIdentity, type SemanticChainConfig } from "./contract.js";
+
+import { captureQueryRevisionObserverView, type QueryRevisionObserverView } from "../semantic-proposal/query-revision-observer-view.js";
+
+/** Runtime model-view selection is admitted by the existing materializer and exact qualified Q key. */
+export function captureQualifiedQueryObserverView(config: SemanticChainConfig, input: SourceQualifiedSelectionInput,
+  value?: QueryRevisionObserverView): QueryRevisionObserverView | undefined {
+  const view = value === undefined ? undefined : captureQueryRevisionObserverView(value);
+  if (config.query_workset.kind !== "query" || config.query_workset.items.length !== 1 ||
+      materializeSemanticProposalLines(config.query_workset, config.max_output_tokens, undefined, view)[0]!.key !== input.query.key) {
+    throw new AlayaError("CONFLICT", "qualified query runtime view differs from its exact producer key");
+  }
+  return view;
+}
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const Artifact = z.object({ key: Digest, cache_identity: Digest.nullable(), historical_production: z.unknown() }).strict();
@@ -31,9 +44,11 @@ export const SourceQualifiedSelectionInputSchema = z.object({
   if (!admitted.success) for (const issue of admitted.error.issues) context.addIssue({ code: "custom", path: issue.path, message: issue.message });
 });
 export type SourceQualifiedSelectionInput = z.infer<typeof SourceQualifiedSelectionInputSchema>;
-export function qualifiedSelectionInputPaths(config: SemanticChainConfig, input: SourceQualifiedSelectionInput): string[] {
+export function qualifiedSelectionInputPaths(config: SemanticChainConfig, input: SourceQualifiedSelectionInput,
+  queryRevisionObserverView?: QueryRevisionObserverView): string[] {
+  const view = captureQualifiedQueryObserverView(config, input, queryRevisionObserverView);
   return [nativeSourceSnapshotManifestPath(config.snapshot_path),
-    ...semanticProposalCacheInputPaths(config.query_workset, config.query_cache_root, config.max_output_tokens, true),
+    ...semanticProposalCacheInputPaths(config.query_workset, config.query_cache_root, config.max_output_tokens, true, view),
     ...input.nominees.flatMap(row => row.correspondence === undefined ? [] : semanticProposalCacheInputPaths(
       row.correspondence.workset, row.correspondence.cache_root, row.correspondence.max_output_tokens, true)),
     ...(input.persona_successor === undefined ? [] : [
@@ -43,8 +58,10 @@ export function qualifiedSelectionInputPaths(config: SemanticChainConfig, input:
 
 /** Read-only producer readmission. Configured paths and caller JSON never establish readiness.
  * The complete native seal is checked independently of the selected fixed subset. */
-export function admitSourceQualifiedSelection(config: SemanticChainConfig, input: SourceQualifiedSelectionInput) {
+export function admitSourceQualifiedSelection(config: SemanticChainConfig, input: SourceQualifiedSelectionInput,
+  queryRevisionObserverView?: QueryRevisionObserverView) {
   ({ config, input } = structuredClone({ config, input }));
+  const view = captureQualifiedQueryObserverView(config, input, queryRevisionObserverView);
   const meter = new SourceSemanticResourceLedger(config.budget);
   meter.retain(input, "qualified producer admission");
   const full = readVerifiedNativeSourceSnapshot(config.snapshot_path);
@@ -76,9 +93,9 @@ export function admitSourceQualifiedSelection(config: SemanticChainConfig, input
       }
     }
   }
-  const read = (workset: SemanticProposalWorkset, root: string, cap: number, artifact: z.infer<typeof Artifact>) => {
+  const read = (workset: SemanticProposalWorkset, root: string, cap: number, artifact: z.infer<typeof Artifact>, observer?: QueryRevisionObserverView) => {
     if (workset.items.length !== 1) throw new AlayaError("VALIDATION", "qualified consumer requires one exact producer request per artifact");
-    const row = readSemanticProposalResults(workset, root, cap, meter)[0]!;
+    const row = readSemanticProposalResults(workset, root, cap, meter, observer)[0]!;
     if (row.line.key !== artifact.key || (row.shard === undefined ? null : chainIdentity(row.shard)) !== artifact.cache_identity ||
         canonicalJson(artifact.historical_production) !== canonicalJson(row.shard?.usage === undefined
           ? { status: "unknown" } : { status: "reported", usage: row.shard.usage })) {
@@ -86,7 +103,7 @@ export function admitSourceQualifiedSelection(config: SemanticChainConfig, input
     }
     return row;
   };
-  const q = read(config.query_workset, config.query_cache_root, config.max_output_tokens, input.query);
+  const q = read(config.query_workset, config.query_cache_root, config.max_output_tokens, input.query, view);
   const population = QualifiedSourceSelectionSchema.parse({ contract: input.contract, query_as_of: input.query_as_of,
     snapshot_identity: input.snapshot_identity, snapshot_source_count: input.snapshot_source_count,
     nominees: input.nominees.map(({ correspondence, ...source }) => ({ ...source,
