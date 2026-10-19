@@ -1,3 +1,4 @@
+import { traceNativeRecoveryCosts } from "./native-recovery-costs.test-support.js";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 
 const isolation = await vi.hoisted(async () => {
@@ -508,6 +509,8 @@ for (const world of [...WORLDS, { ...WORLDS[2], name: "format C-only revision", 
 }, process.platform === "win32" ? 120_000 : 60_000);
 
 it("reuses exact Q and H physical owners across isolated native source worlds", async (testContext) => {
+  const finishCosts = traceNativeRecoveryCosts();
+  testContext.onTestFinished(finishCosts);
   const phases = startBenchPhaseDiagnostics(testContext.task.file.filepath, testContext.task.id,
     testContext.task.timeout, testContext.signal, undefined, process.platform === "win32" ? 45_000 : undefined);
   const benchPhase = phases.phase;

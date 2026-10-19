@@ -88,6 +88,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   private readonly representationColumn: boolean;
   private readonly recordReadSql;
   private readonly nextCurrentBoundedStatement;
+  private readonly currentBoundedStatement;
   private readonly insertStatement;
   private readonly selectStatement;
   private readonly listStatement;
@@ -109,6 +110,11 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
         INDEXED BY idx_source_records_current
         WHERE source_records.workspace_id = ? AND source_records.source_id > ?
         ORDER BY source_records.source_id ASC, ${CURRENT_RECORD_ORDER} LIMIT 1`));
+    this.currentBoundedStatement = new RefreshableStatementHolder(database, (activeDatabase) =>
+      activeDatabase.connection.prepare(`${this.recordReadSql.bounded}
+        INDEXED BY idx_source_records_current
+        WHERE source_records.workspace_id = ? AND source_records.source_id = ?
+        ORDER BY ${CURRENT_RECORD_ORDER} LIMIT 1`));
     this.insertStatement = database.connection.prepare(`
       INSERT INTO source_records (
         record_id, workspace_id, source_id, source_version, content_digest,
@@ -231,11 +237,7 @@ export class SqliteFieldSourceRecordRepo implements FieldSourceRecordRepo {
   ): BoundedSourceRecordRead | null {
     assertSourceBodyByteLimit(byteLimit);
     if (!Number.isSafeInteger(offset) || offset < 0) throw new StorageError("VALIDATION_FAILED", "invalid source-root byte offset");
-    this.database.reopenIfClosed();
-    const raw = this.database.connection.prepare(`${this.recordReadSql.bounded}
-      INDEXED BY idx_source_records_current
-      WHERE source_records.workspace_id = ? AND source_records.source_id = ?
-      ORDER BY ${CURRENT_RECORD_ORDER} LIMIT 1`).get(workspaceId, sourceId);
+    const raw = this.currentBoundedStatement.active().get(workspaceId, sourceId);
     return raw == null ? null : this.readBoundedBody(raw, byteLimit, offset, allowance);
   }
 
