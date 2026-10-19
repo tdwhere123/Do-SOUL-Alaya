@@ -58,6 +58,7 @@ function setup(empty = false, sources = 2) {
 }
 
 const producerPassRemaining: Array<SourceIndexProducerPassRemaining | undefined> = [];
+const nativeShutdown = new WeakMap<object, ReturnType<typeof vi.fn>>();
 function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-local-model",
   fault?: "backfill_failed" | "token_limit" | "binding_failed") {
   const checkpoint = vi.fn(async () => undefined);
@@ -84,12 +85,14 @@ function bindProducer(unsupported: boolean, modelInputs = 8, modelId = "fixture-
                 vector: new Float32Array([0.6, 0.8, 0]) });
           } };
       } });
+    const shutdown = vi.fn(async () => { await producer.stop(); database.close(); });
     const handle = { dataDir: options!.dataDirRoot!, runtime: { runSourceIndexPass: (remaining?: SourceIndexProducerPassRemaining) => {
       producerPassRemaining.push(remaining);
       return producer.runPass(remaining);
     } },
       checkpointFieldProjection: checkpoint,
-      shutdown: vi.fn(async () => { await producer.stop(); database.close(); }) };
+      shutdown };
+    nativeShutdown.set(handle, shutdown);
     // This narrow fixture exercises the stage through the normal producer/SQLite, not MCP/runtime readiness.
     return handle as unknown as Awaited<ReturnType<typeof startBenchDaemon>>;
   });
@@ -206,20 +209,20 @@ it("omits only the ordinary startup probe for Source setup and restoration and r
     embeddingMode: "env", embeddingProviderKind: "local_onnx", embeddingStartupProbe: "omit", cachedLocalEmbedding: execution
   }));
   const setupDaemon = await vi.mocked(startBenchDaemon).mock.results[0]!.value;
-  expect(setupDaemon.shutdown).toHaveBeenCalledTimes(1);
+  expect(nativeShutdown.get(setupDaemon)).toHaveBeenCalledTimes(1);
   await withSemanticChainDaemon(prepared.config, join(root, "restored"), async daemon => {
     expect(startBenchDaemon).toHaveBeenLastCalledWith(expect.objectContaining({
       embeddingMode: "env", embeddingProviderKind: "local_onnx", embeddingStartupProbe: "omit", cachedLocalEmbedding: execution
     }));
-    expect(daemon.shutdown).not.toHaveBeenCalled();
+    expect(nativeShutdown.get(daemon)).not.toHaveBeenCalled();
   });
   const restored = await vi.mocked(startBenchDaemon).mock.results[1]!.value;
-  expect(restored.shutdown).toHaveBeenCalledTimes(1);
+  expect(nativeShutdown.get(restored)).toHaveBeenCalledTimes(1);
   await expect(withSemanticChainDaemon(prepared.config, join(root, "failed-consumer"), async () => {
     throw new Error("fixture_consumer_failed");
   })).rejects.toThrow("fixture_consumer_failed");
   const failed = await vi.mocked(startBenchDaemon).mock.results[2]!.value;
-  expect(failed.shutdown).toHaveBeenCalledTimes(1);
+  expect(nativeShutdown.get(failed)).toHaveBeenCalledTimes(1);
   await withSemanticChainDaemon(config, join(root, "disabled"), async () => {
     const options = vi.mocked(startBenchDaemon).mock.calls[3]![0]!;
     expect(options.embeddingMode).toBe("disabled");
