@@ -37,7 +37,7 @@ function captureWithProtocolVersion(name: string, protocolVersion: string) {
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
-  if (protocolVersion !== "19.0.0") {
+  if (!["19.0.0", "19.1.0"].includes(protocolVersion)) {
     // Historical producers emitted named objects; pre-18 records predate representation metadata.
     rewriteCapturedEnvelope(root, 1, envelope => {
       const block = envelope.content.find(value => value.type === "text")!;
@@ -74,25 +74,25 @@ it.each(["complete", "prefix", "prefix_error"] as const)("readmits the exact ord
   if (mode === "prefix_error") expect(observation.evidence.calls.at(-1)).toMatchObject({ response_state: "public_error" });
 });
 
-it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0"])("admits a %s archive without rewriting producer provenance", protocolVersion => {
+it.each(["14.1.0", "15.0.0", "16.0.0", "17.0.0", "18.0.0", "18.1.0", "19.0.0"])("admits a %s archive without rewriting producer provenance", protocolVersion => {
   const { root, config } = captureWithProtocolVersion(`historical-${protocolVersion}`, protocolVersion);
   const original = readFileSync(join(root, "config.json"), "utf8");
   const originalEnvelope = readFileSync(join(root, "execution/01-public-envelope.json"), "utf8");
   const observation = admitOrdinaryRecallObservation(root);
-  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "19.0.0",
+  expect(observation.binding).toMatchObject({ protocol_package_version: protocolVersion, reader_protocol_package_version: "19.1.0",
     producer_candidate: config.candidate, producer_revision: config.implementation_revision });
   expect(observation.state).toBe("partial");
   expect(readFileSync(join(root, "config.json"), "utf8")).toBe(original);
   expect(readFileSync(join(root, "execution/01-public-envelope.json"), "utf8")).toBe(originalEnvelope);
 });
 
-it.each(["18.0.0", "18.1.0", "19.0.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
+it.each(["18.0.0", "18.1.0", "19.0.0", "19.1.0"])("refuses legacy original-body qualification relabeled as a %s capture", protocolVersion => {
   const { root, config } = captureWithProtocolVersion(`original-overclaim-${protocolVersion}`, "17.0.0");
   config.protocol_package_version = protocolVersion; writeJson(join(root, "config.json"), config);
   for (const path of ["preparation.json", "execution/reservation.json"]) {
     const value = readJson(join(root, path)); value.config_identity = chainIdentity(config); writeJson(join(root, path), value);
   }
-  if (protocolVersion !== "19.0.0") {
+  if (!["19.0.0", "19.1.0"].includes(protocolVersion)) {
     expect(() => admitOrdinaryRecallObservation(root)).toThrow("public source qualifications differ from sealed metadata");
   } else expect(() => admitOrdinaryRecallObservation(root)).toThrow(z.ZodError);
 });

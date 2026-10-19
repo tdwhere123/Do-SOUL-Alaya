@@ -69,7 +69,7 @@ export function buildPublicPayload(input: {
 }): KpiPayload {
   return withEligibleMeasurementContract({
     bench_name: "public",
-    split: "longmemeval-oracle",
+    split: "longmemeval-s",
     run_at: "2026-05-20T10:00:00.000Z",
     alaya_commit: input.commit,
     alaya_version: "0.3.11",
@@ -78,7 +78,7 @@ export function buildPublicPayload(input: {
     policy_shape: "stress",
     simulate_report: "none",
     dataset: {
-      name: "longmemeval_oracle",
+      name: "longmemeval_s",
       size: 500,
       source: "fixture",
       checksum_sha256: VERIFIED_TEST_DATASET_SHA256,
