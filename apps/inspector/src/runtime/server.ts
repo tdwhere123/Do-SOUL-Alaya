@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serve, type ServerType } from "@hono/node-server";
 import { readInspectorLaunchProof } from "../launch/launch-proof.js";
 import { assertInspectorDaemonUrl } from "../routes/shared.js";
@@ -66,7 +69,18 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
   return server;
 }
 
-if (process.argv[1] !== undefined && process.argv[1].endsWith("/server.js")) {
+function isDirectExecution(): boolean {
+  if (process.argv[1] === undefined) {
+    return false;
+  }
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(resolve(process.argv[1]));
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution()) {
   await startInspectorServer().catch((error) => {
     const isStartupConfigError =
       error instanceof Error &&
