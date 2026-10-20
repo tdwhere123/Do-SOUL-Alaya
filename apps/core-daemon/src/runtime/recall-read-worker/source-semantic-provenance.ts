@@ -36,7 +36,7 @@ export const SourceSemanticNativeFactsSchema = z.object({
   pool: z.object({ pool_id: z.string(), use: z.enum(["created", "reused"]), origin: Origin.nullable(), union: Union }).strict().nullable(),
   lease_reads: z.array(LeaseFact).max(32), lease_issues: z.array(LeaseFact).max(32),
   operations: z.array(Operation).max(128), encodings: z.array(Encoding).max(32),
-  /** Constant-size totals continue after meter/reason detail or object-identity sampling ends. */
+  /** Constant-size totals continue after bounded detail or weak identity capture ends. */
   operation_totals: z.object({ complete: z.boolean(), rows: z.array(OperationTotal).max(2) }).strict().optional(),
   // Bounded diagnostic-detail completeness only; explicit null ancestry is still unknown.
   complete: z.boolean(), issues: z.array(z.string()).max(16)
@@ -45,6 +45,9 @@ export type SourceSemanticNativeFacts = z.infer<typeof SourceSemanticNativeFacts
 const SESSIONS = new WeakMap<object, string>();
 const ORIGINS = new WeakMap<object, Origin>();
 const PLAN_POOLS = new WeakMap<object, Origin | null>();
+// Per request and operation kind. Weak keys never keep payloads alive; the insertion
+// count bounds observer metadata even when every native operation sees a new object.
+const OPERATION_IDENTITY_LIMIT = 16_384;
 const digest = (value: string) => `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 
 /** Weak object ancestry follows the real leases/pools. Equal query strings, pool labels or
@@ -117,7 +120,7 @@ export class SourceSemanticObservationFacts {
       const seen = kind === "retain" ? this.retained : this.scanned;
       const object = value !== null && typeof value === "object" ? value : null;
       const repeated = object !== null && seen.has(object);
-      const uncompared = object !== null && !repeated && this.objectCounts[kind] >= 128;
+      const uncompared = object !== null && !repeated && this.objectCounts[kind] >= OPERATION_IDENTITY_LIMIT;
       if (object !== null && !repeated && !uncompared) { seen.add(object); this.objectCounts[kind]++; }
       if (uncompared) this.overflow("operation_identity_limit");
       const total = this.operationTotals.get(kind) ?? { kind, count: 0, work: 0, bytes: 0, completed: 0,

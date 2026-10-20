@@ -16,6 +16,9 @@ export type ObservationMeter = { id: number; parent: number | null; phase: strin
   /** Absent historically. Current capacity is not the initial allocation or spend. */
   capacity?: { current: { work_units: number; memory_bytes: number };
     adjustment: { work_units: number; memory_bytes: number }; changes: number } };
+export type ObservationMeterState = Pick<ObservationMeter, "remaining" | "spent" | "held"> & {
+  capacity: NonNullable<ObservationMeter["capacity"]> };
+type ObservationAllowance = Omit<ObservationMeter, "id" | "capacity"> & ObservationMeterState & { meters: number };
 export type SourceSemanticObservation = Readonly<{
   version: 1; request_id: number;
   status: "observed" | "not_observed" | "partial" | "overflow" | "failure" | "unavailable";
@@ -30,6 +33,12 @@ export type SourceSemanticObservation = Readonly<{
   /** Native spent deltas, independent of debit/absorption labels and the 32-meter sample. */
   meter_totals?: Readonly<{ complete: boolean; roots: number; children: number;
     root_spent: { work_units: number; memory_bytes: number }; child_spent: { work_units: number; memory_bytes: number } }>;
+  /** Final per-meter state, summed only among siblings of the same parent and phase.
+   * Ancestors overlap descendants. Even sibling allowances are lifetime allocations,
+   * not simultaneously available or globally transferable budget. Held is not unused.
+   * Missing historically means unknown; omitted groups or capture failures are partial. */
+  meter_allowances?: Readonly<{ complete: boolean; scope: "parent_phase_siblings"; state: "final";
+    omitted_meters: number; rows: readonly ObservationAllowance[] }>;
   /** Null means unavailable; partial aggregates are lower bounds, not successful zero cost. */
   totals: Readonly<{ debit_work: number; debit_bytes: number; absorb_work: number; absorb_bytes: number }> | null;
   dropped_events: number; aggregates_complete: boolean;
@@ -55,6 +64,8 @@ export class SourceSemanticObserver {
   private readonly totals = { debit_work: 0, debit_bytes: 0, absorb_work: 0, absorb_bytes: 0 };
   private readonly meterTotals = { roots: 0, children: 0,
     root_spent: { work_units: 0, memory_bytes: 0 }, child_spent: { work_units: 0, memory_bytes: 0 } };
+  private readonly allowances = new Map<string, ObservationAllowance>();
+  private omittedAllowanceMeters = 0;
   private eventBytes = 0;
   private dropped = 0;
   private captureMs = 0;
@@ -89,10 +100,46 @@ export class SourceSemanticObserver {
     const id = this.nextMeter++;
     this.safely(() => {
       this.meterTotals[parent === null ? "roots" : "children"]++;
+      const initial = snapshot(id), key = `${parent}\0${initial.phase}`;
+      if (initial.capacity === undefined || initial.phase.length > 80 || !this.allowances.has(key) && this.allowances.size >= 128) {
+        this.omittedAllowanceMeters++; this.issues.add("meter_allowance_limit");
+      } else {
+        const { id: _id, ...state } = initial;
+        const row = this.allowances.get(key);
+        if (row === undefined) this.allowances.set(key, structuredClone({ ...state, capacity: initial.capacity, meters: 1 }));
+        else {
+          row.meters++;
+          for (const resource of ["work_units", "memory_bytes"] as const) {
+            row.initial[resource] += initial.initial[resource];
+          }
+          this.addMeterState(row, { ...initial, capacity: initial.capacity });
+        }
+      }
       if (this.meters.length >= 32) { this.issues.add("meter_detail_limit"); return; }
       this.meters.push(() => snapshot(id));
     });
     return id;
+  }
+
+  private addMeterState(row: ObservationAllowance, next: ObservationMeterState, previous?: ObservationMeterState): void {
+    for (const resource of ["work_units", "memory_bytes"] as const) {
+      for (const counter of ["remaining", "spent", "held"] as const) {
+        row[counter][resource] += next[counter][resource] - (previous?.[counter][resource] ?? 0);
+      }
+      for (const counter of ["current", "adjustment"] as const) {
+        row.capacity[counter][resource] += next.capacity[counter][resource] - (previous?.capacity[counter][resource] ?? 0);
+      }
+    }
+    row.capacity.changes += next.capacity.changes - (previous?.capacity.changes ?? 0);
+  }
+
+  /** The native meter owns both numeric snapshots. No per-child callbacks or payloads
+   * are retained beyond the detail sample; omitted groups cannot become complete later. */
+  meterState(parent: number | null, phase: string, previous: ObservationMeterState, next: ObservationMeterState): void {
+    this.safely(() => {
+      const row = this.allowances.get(`${parent}\0${phase}`);
+      if (row !== undefined) this.addMeterState(row, next, previous);
+    });
   }
 
   /** Called from successful native ledger mutations, not from cost-row aggregation. */
@@ -161,12 +208,17 @@ export class SourceSemanticObserver {
   }
 
   finish(execution: "success" | "failure"): SourceSemanticObservation {
-    const snapshots: ObservationMeter[] = [];
-    this.safely(() => { for (const snapshot of this.meters) snapshots.push(snapshot()); });
-    const status = this.failed ? "failure" : this.dropped > 0 || !this.aggregatesComplete || this.issues.has("meter_detail_limit") ? "overflow" : execution === "failure"
+    const snapshots: ObservationMeter[] = [], allowances: ObservationAllowance[] = [];
+    this.safely(() => {
+      for (const snapshot of this.meters) snapshots.push(snapshot());
+      allowances.push(...structuredClone([...this.allowances.values()]));
+    });
+    const status = this.failed ? "failure" : this.dropped > 0 || !this.aggregatesComplete || this.omittedAllowanceMeters > 0 || this.issues.has("meter_detail_limit") ? "overflow" : execution === "failure"
       ? "partial" : this.meters.length === 0 ? "not_observed" : "observed";
     const result: SourceSemanticObservation = { version: 1, request_id: this.requestId, status, execution,
       events: this.events, costs: [...this.costs.values()], meters: snapshots, totals: { ...this.totals },
+      meter_allowances: { complete: !this.failed && this.omittedAllowanceMeters === 0, scope: "parent_phase_siblings", state: "final",
+        omitted_meters: this.omittedAllowanceMeters, rows: allowances },
       meter_totals: { complete: !this.failed, roots: this.meterTotals.roots, children: this.meterTotals.children,
         root_spent: { ...this.meterTotals.root_spent }, child_spent: { ...this.meterTotals.child_spent } },
       facts: this.facts.finish(!this.failed), diagnostics: { status: this.omittedDiagnostics > 0 ? "overflow" : "complete",
@@ -185,6 +237,8 @@ export class SourceSemanticObserver {
 
 const Nonnegative = z.number().finite().nonnegative();
 const CounterBudget = z.object({ work_units: Nonnegative, memory_bytes: Nonnegative }).strict();
+const MeterCapacity = z.object({ current: CounterBudget, adjustment: z.object({ work_units: z.number().finite(),
+  memory_bytes: z.number().finite() }).strict(), changes: Nonnegative.int() }).strict();
 const ObservationSchema: z.ZodType<SourceSemanticObservation> = z.object({
   version: z.literal(1), request_id: z.number().finite(),
   status: z.enum(["observed", "not_observed", "partial", "overflow", "failure", "unavailable"]),
@@ -197,8 +251,11 @@ const ObservationSchema: z.ZodType<SourceSemanticObservation> = z.object({
     count: Nonnegative, work: Nonnegative, bytes: Nonnegative }).strict()).max(270),
   meters: z.array(z.object({ id: Nonnegative, parent: Nonnegative.nullable(), phase: z.string().max(80),
     initial: CounterBudget, remaining: CounterBudget, spent: CounterBudget, held: CounterBudget,
-    capacity: z.object({ current: CounterBudget, adjustment: z.object({ work_units: z.number().finite(),
-      memory_bytes: z.number().finite() }).strict(), changes: Nonnegative.int() }).strict().optional() }).strict()).max(32),
+    capacity: MeterCapacity.optional() }).strict()).max(32),
+  meter_allowances: z.object({ complete: z.boolean(), scope: z.literal("parent_phase_siblings"), state: z.literal("final"),
+    omitted_meters: Nonnegative.int(), rows: z.array(z.object({ parent: Nonnegative.nullable(), phase: z.string().max(80),
+      meters: Nonnegative.int(), initial: CounterBudget, remaining: CounterBudget, spent: CounterBudget, held: CounterBudget,
+      capacity: MeterCapacity }).strict()).max(128) }).strict().optional(),
   meter_totals: z.object({ complete: z.boolean(), roots: Nonnegative.int(), children: Nonnegative.int(),
     root_spent: CounterBudget, child_spent: CounterBudget }).strict().optional(),
   totals: z.object({ debit_work: Nonnegative, debit_bytes: Nonnegative, absorb_work: Nonnegative, absorb_bytes: Nonnegative }).strict().nullable(),

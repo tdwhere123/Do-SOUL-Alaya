@@ -2,20 +2,33 @@ import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type Sou
 import { CoreError, authorizeSemanticScope, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRecordFromRow, type StorageDatabase } from "@do-soul/alaya-storage";
 
-import type { SourceSemanticObserver } from "../recall-read-worker/source-semantic-observation.js";
+import type { ObservationMeterState, SourceSemanticObserver } from "../recall-read-worker/source-semantic-observation.js";
 
 export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
   private readonly observationId: number | undefined;
   private readonly capacityAdjustment = { work_units: 0, memory_bytes: 0 };
   private capacityChanges = 0;
+  private observedState?: ObservationMeterState;
   constructor(budget: SourceSemanticResourceBudget, public readonly observer?: SourceSemanticObserver,
     public readonly phase = "request", private readonly parent: number | null = null) {
     super(budget);
-    this.observationId = observer?.meter(parent, id => ({ id, parent, phase, initial: { work_units: budget.work_units, memory_bytes: budget.memory_bytes }, remaining: this.remaining(),
-      spent: { work_units: this.spentWork, memory_bytes: this.spentBytes }, held: { work_units: this.heldWork, memory_bytes: this.heldBytes },
-      capacity: { current: { work_units: this.work + this.spentWork + this.heldWork,
-        memory_bytes: this.bytes + this.spentBytes + this.heldBytes }, adjustment: { ...this.capacityAdjustment }, changes: this.capacityChanges } }));
+    if (observer !== undefined) this.observedState = this.meterState();
+    this.observationId = observer?.meter(parent, id => ({ id, parent, phase,
+      initial: { work_units: budget.work_units, memory_bytes: budget.memory_bytes }, ...this.meterState() }));
     observer?.cost(phase, "phase allowance", "allocation", budget.work_units, budget.memory_bytes);
+  }
+  private meterState(): ObservationMeterState {
+    return { remaining: this.remaining(), spent: { work_units: this.spentWork, memory_bytes: this.spentBytes },
+      held: { work_units: this.heldWork, memory_bytes: this.heldBytes },
+      capacity: { current: { work_units: this.work + this.spentWork + this.heldWork,
+        memory_bytes: this.bytes + this.spentBytes + this.heldBytes },
+        adjustment: { ...this.capacityAdjustment }, changes: this.capacityChanges } };
+  }
+  private observeMutation(): void {
+    if (this.observer === undefined || this.observedState === undefined) return;
+    const next = this.meterState();
+    this.observer.meterState(this.parent, this.phase, this.observedState, next);
+    this.observedState = next;
   }
   child(budget: SourceSemanticResourceBudget, phase: string): SourceSemanticReadBudget {
     return new SourceSemanticReadBudget(budget, this.observer, phase, this.observationId ?? null);
@@ -28,6 +41,7 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     const beforeWork = this.spentWork, beforeBytes = this.spentBytes;
     super.charge(work, bytes, reason);
     this.observer?.meterSpent(this.parent, this.spentWork - beforeWork, this.spentBytes - beforeBytes);
+    this.observeMutation();
     this.observer?.cost(this.phase, reason, "debit", work, bytes);
   }
   private operationDepth = 0;
@@ -75,12 +89,14 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     this.reserve(cost.work_units, cost.memory_bytes, "source completion allowance");
     this.work -= cost.work_units; this.bytes -= cost.memory_bytes;
     this.heldWork += cost.work_units; this.heldBytes += cost.memory_bytes;
+    this.observeMutation();
     this.observer?.cost(this.phase, "source completion allowance", "hold", cost.work_units, cost.memory_bytes);
     let held = true;
     return () => {
       if (!held) return;
       this.work += cost.work_units; this.bytes += cost.memory_bytes;
       this.heldWork -= cost.work_units; this.heldBytes -= cost.memory_bytes; held = false;
+      this.observeMutation();
       this.observer?.cost(this.phase, "source completion allowance", "release", cost.work_units, cost.memory_bytes);
     };
   }
@@ -101,6 +117,7 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     if (this.observer === undefined) return;
     const work = this.work - before.work_units, bytes = this.bytes - before.memory_bytes;
     this.capacityAdjustment.work_units += work; this.capacityAdjustment.memory_bytes += bytes; this.capacityChanges++;
+    this.observeMutation();
     this.observer.cost(this.phase, reason, "capacity_increase", Math.max(0, work), Math.max(0, bytes));
     this.observer.cost(this.phase, reason, "capacity_decrease", Math.max(0, -work), Math.max(0, -bytes));
     this.observer.event("capacity_adjustment", this.phase, () => ({ meter_id: this.observationId, reason,
@@ -120,6 +137,7 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     // A non-root parent's inclusive native spend includes its absorbed descendants.
     // The child's own debits were observed at execution, independently of this transfer.
     this.observer?.meterSpent(this.parent, this.spentWork - beforeWork, this.spentBytes - beforeBytes);
+    this.observeMutation();
     this.observer?.cost(this.phase, child.phase, "absorb", child.spentWork, child.spentBytes);
     this.observer?.cost(child.phase, "phase remainder at absorption", "unused", child.work, child.bytes);
     this.nativeWork += child.nativeWork; this.nativeBytes += child.nativeBytes; this.indexWork += child.indexWork;

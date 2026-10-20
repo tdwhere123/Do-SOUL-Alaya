@@ -15,6 +15,24 @@ export type ObservationCostAmount = Readonly<{
 export type ObservationClassifiedCost = ObservationCostAmount & Readonly<{ class: ObservationCostClass }>;
 export type ObservationMappedCostRow = Readonly<{ phase: string; reason: string; operation: string;
   count: number; work: number; bytes: number; class: ObservationCostClass }>;
+export type ObservationAllowanceBalance = Readonly<{ work_units: number; memory_bytes: number }>;
+/** One native sibling group: meters sharing a parent and phase, summed at final state. Spent is
+ * executed (inclusive of absorbed descendants), held is committed but not executed, adjustment
+ * is the constraint/promotion delta, and remaining is the final unused capacity. Rows overlap
+ * across parents and are never additive into a request-level or transferable headroom amount. */
+export type ObservationAllowanceRow = Readonly<{
+  parent: number | null; phase: string; meters: number;
+  initial: ObservationAllowanceBalance; adjustment: ObservationAllowanceBalance;
+  capacity: ObservationAllowanceBalance; spent: ObservationAllowanceBalance;
+  held: ObservationAllowanceBalance; remaining: ObservationAllowanceBalance;
+  capacity_changes: number; balanced: boolean;
+}>;
+export type ObservationScopedAllowances = Readonly<{
+  status: "complete" | "partial" | "invalid" | "unavailable";
+  scope: "parent_phase_siblings"; state: "final";
+  omitted_meters: number | null; rows: readonly ObservationAllowanceRow[];
+  rows_match_sample: boolean | null; rows_match_meter_totals: boolean | null;
+}>;
 export type ObservationCostSummary = Readonly<{
   contract: typeof OBSERVATION_COST_CONTRACT;
   scope: ObservationCallScope;
@@ -39,13 +57,18 @@ export type ObservationCostSummary = Readonly<{
       debit_row_positions: readonly number[]; matches_recorded_debits: boolean | null;
     }>)[];
     operation_totals: SourceSemanticNativeFacts["operation_totals"] | null;
+    /** Complete per-kind totals outlive the bounded operation and identity samples. Partial
+     * identity capture limits repetition evidence only; it never prices repeated work as waste. */
+    identity_capture: "complete" | "partial" | "unavailable";
     encodings: SourceSemanticNativeFacts["encodings"];
     additional_debits: false; repeated_work_waste: "not_established";
   }>;
   /** Remaining capacity and future commitments are local to each meter, not additive across
-   * a parent/child tree. Raw absorption-time unused rows are retained without a global sum. */
+   * a parent/child tree. Raw absorption-time unused rows are retained without a global sum.
+   * `scoped` adds the complete final-state sibling groups that survive the 32-meter sample. */
   allowances: Readonly<{ aggregation: "per_meter_only";
-    unused_rows: readonly ObservationMappedCostRow[]; meters: SourceSemanticObservation["meters"] }>;
+    unused_rows: readonly ObservationMappedCostRow[]; meters: SourceSemanticObservation["meters"];
+    scoped: ObservationScopedAllowances }>;
   /** Partition of captured debit rows only. Independent counters and meter reconciliation
    * below still decide whether those rows establish the actual spent amount. */
   decomposition: Readonly<{ debit_work: number; debit_bytes: number; conserved: boolean }>;
@@ -97,7 +120,7 @@ export function summarizeObservationCosts(input: Readonly<{
   const debits = rows.filter(row => row.operation === "debit");
   const debitSum = sum(debits);
   const aggregatesKnown = frame !== null && frame.aggregates_complete && frame.totals !== null
-    && frame.issues.every(issue => issue === "meter_detail_limit") && (frame.status === "observed" || frame.status === "overflow");
+    && frame.issues.every(issue => BOUNDED_SAMPLE_ISSUES.has(issue)) && (frame.status === "observed" || frame.status === "overflow");
   const observationComplete = frame !== null && observationFrameComplete(frame);
   const classified = aggregate(debits, aggregatesKnown);
   const nativeAnnotations = annotateNative(facts, rows);
@@ -121,8 +144,13 @@ export function summarizeObservationCosts(input: Readonly<{
   const absorbedMatches = childSpent === null ? null : absorbed.work === childSpent.work && absorbed.bytes === childSpent.bytes;
   const absorbedTotalsMatch = frame?.totals == null ? null
     : absorbed.work === frame.totals.absorb_work && absorbed.bytes === frame.totals.absorb_bytes;
+  const scoped = reconcileAllowances(frame);
   const checks = [debitsMatchTotals, rootMatches, absorbedMatches, absorbedTotalsMatch,
     meters.rootBalancesMatch, meters.capacityBalancesMatch,
+    ...(scoped.rows.length === 0 ? [] : [scoped.rows.every(row => row.balanced)]),
+    ...(scoped.status === "invalid" ? [false] : []),
+    ...(scoped.rows_match_sample === null ? [] : [scoped.rows_match_sample]),
+    ...(scoped.rows_match_meter_totals === null ? [] : [scoped.rows_match_meter_totals]),
     ...(frame?.meter_totals === undefined ? [] : [meters.aggregateMatchesSample])];
   const accountingValidity = checks.includes(false) ? "invalid" : checks.includes(null) || !aggregatesKnown ? "unavailable" : "valid";
   // Contradictory complete counters establish neither a total nor a lower bound.
@@ -149,6 +177,11 @@ export function summarizeObservationCosts(input: Readonly<{
     ...(meters.rootBalancesMatch === false ? ["root_balance_mismatch"] : []),
     ...(meters.capacityBalancesMatch === false ? ["capacity_balance_mismatch"] : []),
     ...(meters.aggregateMatchesSample === false ? ["meter_aggregate_sample_mismatch"] : []),
+    ...(scoped.status === "unavailable" && frame !== null ? ["allowance_scope_unavailable"] : []),
+    ...(scoped.status === "partial" ? ["allowance_scope_incomplete"] : []),
+    ...(scoped.status === "invalid" ? ["allowance_rows_contradictory"] : []),
+    ...(scoped.rows_match_sample === false ? ["allowance_sample_mismatch"] : []),
+    ...(scoped.rows_match_meter_totals === false ? ["allowance_meter_total_mismatch"] : []),
     ...(childSpent === null && frame !== null ? ["complete_child_spend_unavailable"] : []),
     ...(absorbedMatches === false ? ["absorb_meter_mismatch"] : []),
     ...(absorbedTotalsMatch === false ? ["absorb_total_mismatch"] : []),
@@ -161,7 +194,7 @@ export function summarizeObservationCosts(input: Readonly<{
       complete: observationComplete, dropped_events: frame?.dropped_events ?? 0, issues: frame?.issues ?? [] },
     spent, classification, accounting_validity: accountingValidity, meters: frame?.meters ?? [], classified, mapped_rows: rows, transfers,
     native_annotations: nativeAnnotations,
-    allowances: { aggregation: "per_meter_only", unused_rows: unusedRows, meters: frame?.meters ?? [] },
+    allowances: { aggregation: "per_meter_only", unused_rows: unusedRows, meters: frame?.meters ?? [], scoped },
     decomposition: { debit_work: debitSum.work, debit_bytes: debitSum.bytes,
       conserved: classified.reduce((total, row) => total + (row.work ?? 0), 0) === debitSum.work
         && classified.reduce((total, row) => total + (row.bytes ?? 0), 0) === debitSum.bytes },
@@ -243,10 +276,83 @@ const DEBIT_CLASSES: Readonly<Record<string, ObservationCostClass>> = {
   "canonical identity key comparison": "canonical_identity",
   "canonical identity scalar encoding": "canonical_identity",
   "canonical identity hash handoff": "canonical_identity",
+  "canonical identity hash handoff quotation": "canonical_identity",
+  "canonical identity quotation frames": "canonical_identity",
+  // The prepared canonical plan prices its registry, frames, instruction/scalar blocks,
+  // replay and root matching. These construct canonical identity; they are neither
+  // consumer-page encoding nor proof of repeated allocation.
+  "canonical prepared subtree record": "canonical_identity",
+  "canonical prepared recording frame and callbacks": "canonical_identity",
+  "canonical prepared replay frame": "canonical_identity",
+  "canonical prepared instruction recording": "canonical_identity",
+  "canonical prepared instruction replay": "canonical_identity",
+  "canonical prepared punctuation lookup": "canonical_identity",
+  "canonical prepared opcode block": "canonical_identity",
+  "canonical prepared scalar block": "canonical_identity",
+  "canonical prepared registry": "canonical_identity",
+  "canonical prepared root matching": "canonical_identity",
+  "canonical prepared quotation frame": "canonical_identity",
+  // Protocol garden/source-semantic-canonical-preparation.ts binds captured phases into
+  // that prepared identity; its record, borrowing, bridge and binding checks are identity
+  // work, not phase capture or page encoding.
+  "source phase canonical request record": "canonical_identity",
+  "source phase request capture borrowing": "canonical_identity",
+  "source phase canonical request bridge": "canonical_identity",
+  "source phase request binding identity checks": "canonical_identity",
+  "source phase canonical capture eligibility": "canonical_identity",
+  "source phase canonical supplemental key check": "canonical_identity",
   "canonical size traversal": "canonical_scan_proxy",
   "canonical size integer scan": "canonical_scan_proxy",
   "canonical size numeric encoding": "canonical_scan_proxy",
   "canonical size string scan": "canonical_scan_proxy",
+  // Protocol garden/source-semantic-phase-codec.ts packs/expands wire phase metadata.
+  // Packing capture/traversal, the local string index, enum/limitation code lookups and
+  // the compact execution tuple price metadata encoding, not final or candidate page
+  // encoding. Checks and slot aggregation execute; retain is a retention proxy.
+  "source phase preparation packing traversal": "encoding_proxy",
+  "source phase acquisition packing capture": "encoding_proxy",
+  "source phase acquisition packing traversal": "encoding_proxy",
+  "source phase local index construction": "encoding_proxy",
+  "source phase local index entry": "encoding_proxy",
+  "source phase local index lookup": "encoding_proxy",
+  "source phase enum code lookup": "encoding_proxy",
+  "source phase limitation code lookup": "encoding_proxy",
+  "source phase execution tuple allocation": "encoding_proxy",
+  "source phase expanded access framing": "canonical_identity",
+  "source phase canonical native equality": "real_computation",
+  "source phase acquisition resource slots": "real_computation",
+  "source phase observation expansion": "retention_proxy",
+  // Daemon recall-read-worker/source-semantic-access-receipts.ts expands the receipt
+  // material hashed into the access pool identity. Identity frames and quotation framing
+  // are canonical identity; the phase tuples are retained receipt containers.
+  "source access identity frames": "canonical_identity",
+  "source access identity quotation frames": "canonical_identity",
+  "source phase acquisition borrower callback": "canonical_identity",
+  "source phase access tuple allocation": "retention_proxy",
+  "source phase observation tuple allocation": "retention_proxy",
+  // Daemon recall-read-worker/source-semantic-candidate-access.ts: catalog tuple lookup,
+  // per-source observation checks and final signal reconciliation execute; reconciled
+  // rows and the request ownership bridge are retained frames.
+  "access source record lookup": "real_computation",
+  "access observed source check": "real_computation",
+  "access final source signal reconciliation": "real_computation",
+  "access reconciled interpretation signals": "retention_proxy",
+  "source phase request ownership bridge": "retention_proxy",
+  // Daemon recall-read-worker/source-semantic-reasoning.ts prices the retained vector
+  // buffer reference set; the received-buffer copy is charged by its own reason.
+  "worker query vector buffer references": "retention_proxy",
+  // Daemon recall-read-worker/source-semantic-leases.ts prices lease-group retention.
+  "preparation lease retention accounting": "retention_proxy",
+  // Daemon source-semantic-library-delivery.ts and source-semantic-library-packages.ts
+  // scan actual candidates for final proofs and same-root pairs; Core
+  // source-semantic-library-selection.ts scans returned tuple keys for coverage.
+  "final proof candidates": "real_computation",
+  "library pair source search": "real_computation",
+  "returned tuple coverage": "real_computation",
+  // Daemon source-semantic-empty-population-budget.ts allocates the completion-envelope
+  // planning frame. It quotes a future completion and executes no delivery work.
+  "empty interpretation completion planning": "retention_proxy",
+  "source union preparation completion planning": "retention_proxy",
   // Daemon candidate-access.ts projects provenance rows, not source content. This is
   // request-ledger telemetry; private observer allocations/timing remain outside it.
   "access trace selection": "telemetry"
@@ -277,7 +383,8 @@ function classify(row: SourceSemanticObservation["costs"][number], duplicateLabe
 function annotateNative(facts: SourceSemanticNativeFacts | undefined, rows: readonly ObservationMappedCostRow[]): ObservationCostSummary["native_annotations"] {
   return { status: facts === undefined ? "unavailable" : facts.complete && facts.issues.length === 0 ? "complete" : "partial",
     issues: facts?.issues ?? ["native_operation_and_encoding_facts_unavailable"],
-    operation_totals: facts?.operation_totals ?? null, operations: (facts?.operations ?? []).map(operation => {
+    operation_totals: facts?.operation_totals ?? null, identity_capture: identityCapture(facts),
+    operations: (facts?.operations ?? []).map(operation => {
       const positions = rows.flatMap((row, index) => row.operation === "debit" && row.phase === operation.phase
         && (row.reason === operation.reason || operation.kind === "canonical_scan" && /^canonical size /.test(row.reason)) ? [index] : []);
       const matched = sum(positions.map(position => rows[position]!));
@@ -335,8 +442,6 @@ function reconcileMeters(frame: SourceSemanticObservation | null) {
       && meter.initial.memory_bytes + capacity.adjustment.memory_bytes === capacity.current.memory_bytes
       && capacity.current.work_units === sumWork && capacity.current.memory_bytes === sumBytes;
   };
-  const combine = (checks: readonly (boolean | null)[]): boolean | null => checks.includes(false) ? false
-    : checks.length === 0 || checks.includes(null) ? null : true;
   const sampleMatches = (sample: typeof rootSample, captured: number, count: number,
     total: { work_units: number; memory_bytes: number }) => captured <= count && (captured === count
     ? sample.work === total.work_units && sample.bytes === total.memory_bytes
@@ -348,4 +453,108 @@ function reconcileMeters(frame: SourceSemanticObservation | null) {
       || detailIncomplete && frame?.meters.length === 32);
   return { rootSpent, childSpent, rootBalancesMatch: combine(roots.map(balanced)),
     capacityBalancesMatch: combine((frame?.meters ?? []).map(balanced)), aggregateMatchesSample };
+}
+/** These owners add the issue only when a bounded detail or allowance sample ends. The
+ * independent debit and spend counters stay complete, so it must not downgrade them. */
+const BOUNDED_SAMPLE_ISSUES: ReadonlySet<string> = new Set(["meter_detail_limit", "meter_allowance_limit"]);
+const combine = (checks: readonly (boolean | null)[] | null): boolean | null => checks === null ? null
+  : checks.includes(false) ? false : checks.length === 0 || checks.includes(null) ? null : true;
+function identityCapture(facts: SourceSemanticNativeFacts | undefined): "complete" | "partial" | "unavailable" {
+  const totals = facts?.operation_totals;
+  return totals === undefined ? "unavailable"
+    : totals.complete && totals.rows.every(row => row.identity_capture === "complete") ? "complete" : "partial";
+}
+type AllowanceMeter = SourceSemanticObservation["meters"][number];
+type AllowanceWitness = NonNullable<SourceSemanticObservation["meter_allowances"]>["rows"][number];
+/** Complete scoped rows are the only witness for meters beyond the 32-meter detail sample.
+ * Balance is checked per summed sibling group. A strict sample subset cannot prove equality,
+ * but its nonnegative subtotals are lower bounds on the full group. Signed adjustments are
+ * excluded because unsampled siblings may cancel a sampled increase. Per-kind totals and a
+ * complete capture additionally contradict any group they claim to include. */
+function reconcileAllowances(frame: SourceSemanticObservation | null): ObservationScopedAllowances {
+  const witness = frame?.meter_allowances, rows = (witness?.rows ?? []).map(scopedAllowance);
+  const sampled = sampleGroups(frame), totals = frame?.meter_totals;
+  const keys = new Set(rows.map(row => groupKey(row.parent, row.phase)));
+  const sampleChecks = rows.map(row => covered(row, sampled));
+  // A claimed complete witness must contain every sampled group. A partial witness may omit
+  // unsampled groups, and the 32-meter cap may leave a sampled group only partly countable.
+  const completeCoverage = witness?.complete === true ? [...sampled.keys()].map(key => keys.has(key)) : [];
+  const inventoryChecks = [...sampleChecks, ...completeCoverage];
+  const totalChecks = witness?.complete === true && totals?.complete === true
+    ? [meterCount(rows, null) === totals.roots, meterCount(rows, "child") === totals.children,
+      spentMatches(rows, null, totals.root_spent), spentMatches(rows, "child", totals.child_spent)] : null;
+  // Duplicate groups, a witness that omits meters it claims to include, over-covered samples
+  // and zero-meter groups are contradictions even when combined counts and spend still match.
+  const contradictory = keys.size !== rows.length || rows.some(row => !row.balanced || row.meters < 1)
+    || witness?.complete === true && witness.omitted_meters > 0
+    || inventoryChecks.includes(false) || totalChecks?.includes(false) === true;
+  return { status: witness === undefined ? "unavailable" : contradictory ? "invalid" : witness.complete ? "complete" : "partial",
+    scope: "parent_phase_siblings", state: "final", omitted_meters: witness?.omitted_meters ?? null, rows,
+    rows_match_sample: combine(inventoryChecks), rows_match_meter_totals: combine(totalChecks) };
+}
+function scopedAllowance(row: AllowanceWitness): ObservationAllowanceRow {
+  const copy = (value: ObservationAllowanceBalance) => ({ work_units: value.work_units, memory_bytes: value.memory_bytes });
+  const initial = copy(row.initial), adjustment = copy(row.capacity.adjustment), capacity = copy(row.capacity.current);
+  const spent = copy(row.spent), held = copy(row.held), remaining = copy(row.remaining);
+  const balanced = (["work_units", "memory_bytes"] as const).every(resource =>
+    initial[resource] + adjustment[resource] === capacity[resource]
+    && capacity[resource] === spent[resource] + held[resource] + remaining[resource]);
+  return { parent: row.parent, phase: row.phase, meters: row.meters, initial, adjustment, capacity, spent, held, remaining,
+    capacity_changes: row.capacity.changes, balanced };
+}
+const groupKey = (parent: number | null, phase: string) => `${parent}\u0000${phase}`;
+function sampleGroups(frame: SourceSemanticObservation | null): Map<string, AllowanceMeter[]> {
+  const groups = new Map<string, AllowanceMeter[]>();
+  for (const meter of frame?.meters ?? []) groups.set(groupKey(meter.parent, meter.phase),
+    [...(groups.get(groupKey(meter.parent, meter.phase)) ?? []), meter]);
+  return groups;
+}
+/** Null when the capped sample does not cover the whole group; false when it over-covers it
+ * or when a covered subset already exceeds a nonnegative full-group subtotal. */
+function covered(row: ObservationAllowanceRow, sampled: Map<string, AllowanceMeter[]>): boolean | null {
+  const meters = sampled.get(groupKey(row.parent, row.phase)) ?? [];
+  if (meters.length > row.meters) return false;
+  if (meters.length === row.meters) return sameGroup(row, meters);
+  if (meters.length === 0) return null;
+  return sampleWithin(row, meters) ? null : false;
+}
+/** A sample subset is included in its full sibling group, so initial, remaining, spent and held
+ * cannot be smaller than the sampled subtotal. Signed adjustment is not a lower bound: unsampled
+ * siblings may cancel it. The same holds for available current capacities and change counts. */
+function sampleWithin(row: ObservationAllowanceRow, meters: readonly AllowanceMeter[]): boolean {
+  const sum = (pick: (meter: AllowanceMeter) => ObservationAllowanceBalance) => meters.reduce((value, meter) =>
+    ({ work_units: value.work_units + pick(meter).work_units, memory_bytes: value.memory_bytes + pick(meter).memory_bytes }),
+  { work_units: 0, memory_bytes: 0 });
+  const atLeast = (left: ObservationAllowanceBalance, right: ObservationAllowanceBalance) =>
+    left.work_units >= right.work_units && left.memory_bytes >= right.memory_bytes;
+  if (!atLeast(row.initial, sum(meter => meter.initial)) || !atLeast(row.remaining, sum(meter => meter.remaining))
+    || !atLeast(row.spent, sum(meter => meter.spent)) || !atLeast(row.held, sum(meter => meter.held))) return false;
+  const capacities = meters.flatMap(meter => meter.capacity === undefined ? [] : [meter.capacity]);
+  return capacities.length === 0 || atLeast(row.capacity, capacities.reduce((value, capacity) =>
+    ({ work_units: value.work_units + capacity.current.work_units,
+      memory_bytes: value.memory_bytes + capacity.current.memory_bytes }), { work_units: 0, memory_bytes: 0 }))
+    && row.capacity_changes >= capacities.reduce((value, capacity) => value + capacity.changes, 0);
+}
+function sameGroup(row: ObservationAllowanceRow, meters: readonly AllowanceMeter[]): boolean {
+  const total = (pick: (meter: AllowanceMeter) => ObservationAllowanceBalance) => meters.reduce((value, meter) =>
+    ({ work_units: value.work_units + pick(meter).work_units, memory_bytes: value.memory_bytes + pick(meter).memory_bytes }),
+  { work_units: 0, memory_bytes: 0 });
+  const equal = (left: ObservationAllowanceBalance, right: ObservationAllowanceBalance) =>
+    left.work_units === right.work_units && left.memory_bytes === right.memory_bytes;
+  if (!equal(row.initial, total(meter => meter.initial)) || !equal(row.remaining, total(meter => meter.remaining))
+    || !equal(row.spent, total(meter => meter.spent)) || !equal(row.held, total(meter => meter.held))) return false;
+  const capacities = meters.flatMap(meter => meter.capacity === undefined ? [] : [meter.capacity]);
+  return capacities.length === 0 ? true : capacities.length === meters.length
+    && equal(row.capacity, total(meter => meter.capacity!.current)) && equal(row.adjustment, total(meter => meter.capacity!.adjustment))
+    && row.capacity_changes === capacities.reduce((value, capacity) => value + capacity.changes, 0);
+}
+function meterCount(rows: readonly ObservationAllowanceRow[], parent: null | "child"): number {
+  return rows.filter(row => parent === null ? row.parent === null : row.parent !== null)
+    .reduce((count, row) => count + row.meters, 0);
+}
+function spentMatches(rows: readonly ObservationAllowanceRow[], parent: null | "child",
+  spent: ObservationAllowanceBalance): boolean {
+  const selected = rows.filter(row => parent === null ? row.parent === null : row.parent !== null);
+  return selected.reduce((value, row) => value + row.spent.work_units, 0) === spent.work_units
+    && selected.reduce((value, row) => value + row.spent.memory_bytes, 0) === spent.memory_bytes;
 }

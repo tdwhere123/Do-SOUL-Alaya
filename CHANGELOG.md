@@ -54,8 +54,11 @@ ledger retention and canonical-scan annotations reconcile against recorded
 charges while encoding annotations describe existing work without adding debits.
 Meter counts and native spend are recorded independently of the capped
 32-meter detail sample; initial, current capacity, adjustment, held and spent
-values stay distinct, and complete operation quantities continue past the
-bounded 128-row/128-object identity samples. The
+values stay distinct. Optional final parent/sibling-phase allowance aggregates
+continue beyond that sample, with explicit omissions and no global transferable
+budget claim. Complete operation quantities continue past the bounded 128-row
+detail sample; request-local weak repetition tracking admits up to 16,384 objects
+per kind and preserves explicit partial evidence if exhausted. The
 `longmemeval-observation-costs-v1` bench summary classifies debits through
 exact owner-backed reasons or native operation annotations, keeps transfers and allowances out of spending,
 and separates a missing historical witness (unknown, witnessed rows stay lower

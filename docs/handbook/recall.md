@@ -611,9 +611,14 @@ capacity, adjustment, held, spent and remaining stay distinct
 per meter: current capacity is not the initial allocation or spend, a
 historical meter without a capacity witness gets no inferred adjustment, and
 parent and child meters overlap, so summing their remaining, held or spent
-values does not establish a request-level resource total. Complete operation totals per kind
-also outlive the bounded 128-row and 128-object identity samples, so partial
-identity capture limits repetition evidence, not the operation total. The bench
+values does not establish a request-level resource total. Optional final allowance
+aggregates preserve siblings with the same parent and phase independently of the
+32-meter detail sample. Their 128-group bound has explicit omission/completeness
+fields; even sibling lifetime allowances are not simultaneously available budget.
+Complete operation totals per kind also outlive the bounded 128-row detail sample.
+Request-local weak identity tracking covers at most 16,384 objects per operation
+kind without retaining or inspecting payloads. Exhaustion preserves uncompared
+counts and partial repetition evidence, not an invented complete measurement. The bench
 `longmemeval-observation-costs-v1` summary
 ([`observation-costs`](../../apps/bench-runner/src/runs/longmemeval-semantic/observation-costs.ts))
 classifies debits through exact, owner-inspected reasons or native operation

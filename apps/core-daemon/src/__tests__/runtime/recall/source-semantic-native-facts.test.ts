@@ -108,20 +108,53 @@ it("keeps complete operation quantities and failures after per-meter detail is f
   expect(readSourceSemanticObservation(row, 7).facts!.operation_totals).toEqual(row.facts!.operation_totals);
 });
 
-it("bounds object identity sampling without turning unobserved repetition into zero repetition", () => {
+it("measures same-object repetition beyond 128 identities without conflating equal payloads", () => {
   const observer = new SourceSemanticObserver(7, { max_events: 0, max_bytes: 0 });
   const meter = new SourceSemanticReadBudget({ work_units: 10_000, memory_bytes: 100_000 }, observer);
   for (let index = 0; index < 140; index++) meter.retain({ index }, "retained objects");
   const uncaptured = { index: 141 };
   meter.retain(uncaptured, "retained objects"); meter.retain(uncaptured, "retained objects");
+  meter.retain({ index: 141 }, "retained objects");
   const scanned = { value: "bounded" };
   meter.canonicalJsonLength(scanned); meter.canonicalJsonLength(scanned);
   const facts = observer.finish("success").facts!;
   expect(facts.operations).toHaveLength(2);
   expect(facts.operation_totals).toMatchObject({ complete: true, rows: [
-    { kind: "retain", count: 142, completed: 142, same_object_count: 0, uncompared_object_count: 14, identity_capture: "partial" },
+    { kind: "retain", count: 143, completed: 143, same_object_count: 1, same_object_work: 2, same_object_bytes: 172,
+      uncompared_object_count: 0, identity_capture: "complete" },
     { kind: "canonical_scan", count: 2, completed: 2, same_object_count: 1, uncompared_object_count: 0, identity_capture: "complete" }] });
-  expect(facts.issues).toContain("operation_identity_limit");
+  expect(facts.issues).not.toContain("operation_identity_limit");
+});
+
+it("preserves explicit unknown repetition when bounded weak identity capture is exhausted", () => {
+  const observer = new SourceSemanticObserver(7, { max_events: 0, max_bytes: 0 });
+  const early = {};
+  observer.facts.operation("retain", 1, "request", "retention", early, 1, 64, true);
+  for (let index = 1; index < 16_384; index++) {
+    observer.facts.operation("retain", 1, "request", "retention", {}, 1, 64, true);
+  }
+  const uncaptured = {};
+  observer.facts.operation("retain", 1, "request", "retention", uncaptured, 1, 64, true);
+  observer.facts.operation("retain", 1, "request", "retention", uncaptured, 1, 64, true);
+  observer.facts.operation("retain", 1, "request", "retention", early, 1, 64, false);
+  const row = observer.finish("failure");
+  expect(row.facts!.operation_totals).toMatchObject({ complete: true, rows: [{ kind: "retain", count: 16_387,
+    work: 16_387, bytes: 16_387 * 64, completed: 16_386, same_object_count: 1,
+    same_object_work: 1, same_object_bytes: 64, uncompared_object_count: 2, identity_capture: "partial" }] });
+  expect(row.facts!.issues).toContain("operation_identity_limit");
+  expect(readSourceSemanticObservation(row, 7).facts).toEqual(row.facts);
+});
+
+it("observes object identity without reading payload getters or serializing caller objects", () => {
+  const observer = new SourceSemanticObserver(7, { max_events: 0, max_bytes: 0 });
+  const getter = vi.fn(() => { throw new Error("observer must not inspect payload"); });
+  const value = Object.defineProperty({}, "payload", { get: getter, enumerable: true });
+  observer.facts.operation("retain", 1, "request", "retention", value, 3, 10, false);
+  observer.facts.operation("retain", 1, "request", "retention", value, 2, 0, false);
+  const row = observer.finish("failure");
+  expect(getter).not.toHaveBeenCalled();
+  expect(row.facts!.operation_totals).toMatchObject({ complete: true, rows: [{ count: 2, completed: 0,
+    same_object_count: 1, same_object_work: 2, same_object_bytes: 0, identity_capture: "complete" }] });
 });
 
 it("separates proven same-object proxy accounting and exact re-encoding from merely repeated labels", () => {
