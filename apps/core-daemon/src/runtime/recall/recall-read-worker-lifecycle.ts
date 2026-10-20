@@ -8,6 +8,12 @@ import { RECALL_READ_WORKER_PROTOCOL_VERSION, type RecallReadWorkerOperation,
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import { RecallReadWorkerDeadline } from "./recall-read-worker-deadline.js";
 
+import { SourceSemanticObservationRequestSchema, readSourceSemanticObservation, unavailableSourceSemanticObservation,
+  type SourceSemanticObservation, type SourceSemanticObservationRequest } from "../recall-read-worker/source-semantic-observation.js";
+import type { SourceSemanticObservationScope } from "./source-semantic-observation.js";
+
+type ObservationScope = { request: SourceSemanticObservationRequest; rows: SourceSemanticObservation[]; overflow: boolean };
+
 export type SuccessConsumption = Readonly<{ readonly done: boolean; readonly value?: unknown }>;
 
 type Resource = {
@@ -38,6 +44,7 @@ type Pending = {
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
   readonly consumeSuccess?: (value: unknown) => SuccessConsumption;
+  readonly observe?: (value: unknown) => void;
 };
 type Options = {
   readonly databaseFilename: string;
@@ -57,6 +64,19 @@ export class RecallReadWorkerLifecycle {
   private readonly deadlines = new AsyncLocalStorage<RecallReadWorkerDeadline>();
   private readonly waiters = new Set<Waiter>();
   private readonly pending = new Map<number, Pending>();
+  private readonly observations = new AsyncLocalStorage<ObservationScope>();
+
+  public readonly observeSourceSemantics: SourceSemanticObservationScope = async (options, work) => {
+    const scope: ObservationScope = { request: SourceSemanticObservationRequestSchema.parse(options), rows: [], overflow: false };
+    try {
+      const value = await this.observations.run(scope, work);
+      return { outcome: { status: "success", value }, observations: [...scope.rows],
+        status: scope.overflow ? "overflow" : scope.rows.length === 0 ? "not_observed" : "available" };
+    } catch (error) {
+      return { outcome: { status: "failure", error }, observations: [...scope.rows],
+        status: scope.overflow ? "overflow" : scope.rows.length === 0 ? "not_observed" : "available" };
+    }
+  };
   private nextIndex = 0;
   private nextRequestId = 1;
   private closed = false;
@@ -313,6 +333,7 @@ export class RecallReadWorkerLifecycle {
       if (pending.resource !== resource) continue;
       this.pending.delete(id);
       pending.deadline.signal.removeEventListener("abort", pending.abort);
+      pending.observe?.(unavailableSourceSemanticObservation(id, "worker_execution_or_transport_unknown"));
       pending.reject(error);
     }
     // Do not clear the slot or create a replacement here. Termination is only a
@@ -327,18 +348,24 @@ export class RecallReadWorkerLifecycle {
     deadline.check();
     this.assertUsable(resource);
     const id = this.nextRequestId++;
+    const scope = operation === "conditionalField.sourceSemantics" ? this.observations.getStore() : undefined;
+    const observe = scope === undefined ? undefined : (value: unknown) => {
+      if (scope.rows.length >= 16) { scope.overflow = true; return; }
+      scope.rows.push(readSourceSemanticObservation(value, id));
+    };
     return new Promise<T>((resolve, reject) => {
       // A nested caller scope can dispatch under an inherited native lease. Its
       // retirement must still quarantine that physical work until actual exit.
       const abort = () => this.quarantine(resource, deadline.signal.reason);
       this.pending.set(id, { resource, deadline, operation, reject, abort,
         resolve: (value) => resolve(value as T),
-        ...(consumeSuccess === undefined ? {} : { consumeSuccess }) });
+        ...(consumeSuccess === undefined ? {} : { consumeSuccess }),
+        ...(observe === undefined ? {} : { observe }) });
       deadline.signal.addEventListener("abort", abort, { once: true });
       try {
         deadline.phase = "dispatched";
         resource.worker.postMessage({ protocol_version: RECALL_READ_WORKER_PROTOCOL_VERSION,
-          id, operation, payload } satisfies RecallReadWorkerRequest);
+          id, operation, payload, ...(scope === undefined ? {} : { observation: scope.request }) } satisfies RecallReadWorkerRequest);
       } catch (error) {
         this.quarantine(resource, error);
       }
@@ -358,6 +385,7 @@ export class RecallReadWorkerLifecycle {
         if (consumed !== undefined && !consumed.done) return;
         this.pending.delete(message.id);
         pending.deadline.signal.removeEventListener("abort", pending.abort);
+        pending.observe?.(message.observation);
         pending.resolve(consumed?.value ?? parsed);
       } else {
         const error = message.error.core === undefined ? new Error(message.error.message)
@@ -367,6 +395,7 @@ export class RecallReadWorkerLifecycle {
         if (message.error.stack !== undefined) error.stack = message.error.stack;
         this.pending.delete(message.id);
         pending.deadline.signal.removeEventListener("abort", pending.abort);
+        pending.observe?.(message.observation);
         // A worker-reported domain rejection is known failure, not a broken transport.
         pending.reject(error);
       }

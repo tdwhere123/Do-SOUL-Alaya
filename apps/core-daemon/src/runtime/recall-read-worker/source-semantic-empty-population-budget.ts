@@ -214,8 +214,8 @@ export class SourceSemanticUnionCompletion {
     // Parent.remaining excludes every future hold and all executed planning. The
     // child's prior effects and deferred allowance are not another spendable pool.
     const outstanding = input.child.outstandingAllowance();
-    input.child.work = input.parent.work - outstanding.work_units;
-    input.child.bytes = input.parent.bytes - outstanding.memory_bytes;
+    input.child.promoteAfterCensus({ work_units: input.parent.work - outstanding.work_units,
+      memory_bytes: input.parent.bytes - outstanding.memory_bytes });
     this.release();
     return measured.prepared;
   }
@@ -241,8 +241,8 @@ export class SourceSemanticUnionCompletion {
   private reserve(quote: (planning: SourceSemanticReadBudget) => CompletionPrice): CompletionPrice {
     const outstanding = this.child.outstandingAllowance();
     this.parent.reserve(outstanding.work_units, outstanding.memory_bytes, "observation and held native allowance before completion quote");
-    const planning = new SourceSemanticReadBudget({ work_units: this.parent.work - outstanding.work_units,
-      memory_bytes: this.parent.bytes - outstanding.memory_bytes });
+    const planning = this.parent.child({ work_units: this.parent.work - outstanding.work_units,
+      memory_bytes: this.parent.bytes - outstanding.memory_bytes }, "completion_planning");
     let measured: CompletionPrice | undefined;
     try {
       try {
@@ -269,16 +269,16 @@ export function reserveEmptyInterpretationCompletion(input: Completion): Prepare
   // Already executed census/navigation/header spend has first claim on the request allowance.
   const outstanding = child.outstandingAllowance();
   parent.reserve(outstanding.work_units, outstanding.memory_bytes, "empty interpretation prior observation");
-  const planning = new SourceSemanticReadBudget({ work_units: parent.work - outstanding.work_units,
-    memory_bytes: parent.bytes - outstanding.memory_bytes });
+  const planning = parent.child({ work_units: parent.work - outstanding.work_units,
+    memory_bytes: parent.bytes - outstanding.memory_bytes }, "empty_completion_planning");
   let initial: CompletionPrice | undefined;
   try {
     try {
       initial = planCompletion(input, planning, "empty_census_completion");
       planning.reserve(initial.work_units, initial.memory_bytes, "empty interpretation completion");
       // Only the parent's residual outside real future completion can be borrowed.
-      child.work = planning.work - initial.work_units;
-      child.bytes = planning.bytes - initial.memory_bytes;
+      child.promoteAfterCensus({ work_units: planning.work - initial.work_units,
+        memory_bytes: planning.bytes - initial.memory_bytes });
       return initial.prepared;
     } finally {
       // Planning is real work; charge it even if a bound or lease preflight fails.

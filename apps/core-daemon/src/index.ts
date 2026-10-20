@@ -38,6 +38,7 @@ import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
 import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
 import { bindSourceFeedbackExecutionPort } from "./runtime/recall/source-feedback-execution.js";
+import { bindSourceSemanticObservation } from "./runtime/recall/source-semantic-observation.js";
 import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
@@ -110,6 +111,8 @@ export async function createAlayaDaemonRuntime(
     });
     const runtimeRecallReadWorkerClient = recallAndCore.recallWiring.recallReadWorkerClient;
     if (runtimeRecallReadWorkerClient !== null) {
+      // Binding is inert; collection requires an explicit private request scope.
+      bindSourceSemanticObservation(runtime, runtimeRecallReadWorkerClient.observeSourceSemantics);
       if (runtimeRecallReadWorkerClient.sourceSemanticsPort !== undefined) {
         bindSourceFeedbackExecutionPort(runtime, runtimeRecallReadWorkerClient.sourceSemanticsPort);
       }

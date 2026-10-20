@@ -1,17 +1,21 @@
 import type { z } from "zod";
 import type { measureSemanticChain, ReplaySchema } from "../recall-measurement/replay.js";
 import { deliveredSourceSemanticLibraryIntervals } from "../measurement/source-semantic-library-measurement.js";
-import { sourceTargetJoinsGold, type SourceGoldUnit } from "../measurement/source-gold-join.js";
+import { admittedSourceDeliveryTail } from "../measurement/source-delivery-visibility.js";
+import { sourceGoldUnitFromPublishedRoot, type SourceGoldUnit } from "../measurement/source-gold-join.js";
 import type { AnswerTurnGold } from "./answer-spans.js";
+import { scoreConsumerMessageVisibility, type ConsumerVisibilityMetric,
+  type ConsumerVisibilityPage } from "./message-visibility.js";
 
 type NativeMeasurement = ReturnType<typeof measureSemanticChain>["result"]["rows"][number];
 type NativeReplayRow = z.infer<typeof ReplaySchema>["rows"][number];
-export type AcquisitionMetric = Readonly<{ status: "hit" | "miss" | "unknown"; reason: string | null }>;
+export type AcquisitionMetric = ConsumerVisibilityMetric;
 const unknown = (reason: string): AcquisitionMetric => ({ status: "unknown", reason });
 const hit: AcquisitionMetric = { status: "hit", reason: null };
 const miss: AcquisitionMetric = { status: "miss", reason: null };
 export const ACQUISITION_METRICS = ["source_bearing_any@5", "source_bearing_any@10",
-  "answer_span_exposure@5", "answer_span_exposure@10"] as const;
+  "answer_span_exposure@5", "answer_span_exposure@10",
+  "answer_complete_coverage@5", "answer_complete_coverage@10"] as const;
 const STAGES = ["source_available", "candidate_pool", "deliverable_window", "admission", "delivery", "consumer_use"] as const;
 type Stage = typeof STAGES[number];
 type Observation = Readonly<{ stage: Stage; status: "passed" | "failed" | "unknown" | "not_run"; reason: string }>;
@@ -101,19 +105,30 @@ export function measureLongMemEvalAcquisition(input: Readonly<{
     : native?.source_bearing_union?.any_at_5.status === "hit" ? hit
     : sourceGold?.complete && native?.source_bearing_union?.any_at_5.status === "miss" ? miss
     : unknown(sourceGold?.complete ? "native_access_or_computation_unresolved" : "source_or_gold_mapping_incomplete");
-  const spanHit = intervals?.some(interval => answerGold?.spans.some(span => interval.start <= span.start
-    && interval.end >= span.end && sourceTargetJoinsGold({ ...interval, object_kind: "source_evidence" }, span.target))) ?? false;
-  const answer5: AcquisitionMetric = unavailable !== null ? unknown(unavailable) : spanHit ? hit
-    : !answerGold?.complete ? unknown("answer_turn_mapping_incomplete")
-    : native?.source_bearing_union?.any_at_5.status === "hit" || native?.source_bearing_union?.any_at_5.status === "miss" ? miss
-    : unknown("native_access_or_computation_unresolved");
   const hasContinuation = measurement?.status === "validated" && measurement.delivered_index.continuation !== null;
+  // The replay contract retains one observed page. Its continuation pointer promises more content
+  // but does not itself prove any second-page interval. Occupancy exhaustion is the native
+  // completeness fact, not gold membership and not a null public continuation.
+  const deliveryPage: ConsumerVisibilityPage | undefined =
+    intervals === null || measurement?.status !== "validated" ? undefined : {
+      page: 1, status: "observed", reason: null, complete: true,
+      occupied_slots: measurement.first_exposure_slots.length,
+      continuation: hasContinuation ? "present" : "none",
+      terminal_tail: admittedSourceDeliveryTail(measurement.delivered_index),
+      intervals: intervals.map(({ rank, target, start, end }) =>
+        ({ rank, target: sourceGoldUnitFromPublishedRoot(target), start, end }))
+    };
+  const visibility = scoreConsumerMessageVisibility({ gold: answerGold,
+    pages: deliveryPage === undefined ? [] : [deliveryPage],
+    ...(unavailable === null ? {} : { unavailableReason: unavailable }) });
+  const answer5 = visibility.any_at_5;
   const at10 = (at5: AcquisitionMetric): AcquisitionMetric => at5.status === "hit" ? at5
     : hasContinuation ? unknown("second_page_not_observed") : at5;
   const stages = stageObservations(native, sourceGold?.sourceUnits ?? [], source5.status === "hit", answer5, sourceGold?.complete ?? false);
   // has_answer annotations do not identify a complete sufficient support set (especially multi-hop).
   return { metrics: { "source_bearing_any@5": source5, "source_bearing_any@10": at10(source5),
-      "answer_span_exposure@5": answer5, "answer_span_exposure@10": at10(answer5) },
+      "answer_span_exposure@5": visibility.any_at_5, "answer_span_exposure@10": visibility.any_at_10,
+      "answer_complete_coverage@5": visibility.all_at_5, "answer_complete_coverage@10": visibility.all_at_10 },
     support_sufficiency: { status: "not_measured" as const, reason: "no_evaluator_frozen_full_support_set" },
     answer_gold: answerGold ?? null,
     delivery: { unit: "roots_in_native_delivery_order", observed_pages: intervals === null ? 0 : 1,

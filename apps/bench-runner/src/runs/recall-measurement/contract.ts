@@ -12,7 +12,7 @@ import { SemanticProposalWorksetSchema } from "../semantic-cache/workset.js";
 import { readBoundedCanonicalUtf8Artifact } from "../extraction/cache-audit/bounded-artifact-reader.js";
 import { publishBytesExclusiveDurable } from "../extraction/fill/manifest/durable-exclusive-publication.js";
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
-import { restoreSnapshotToDataDir } from "../snapshot/materialize.js";
+import { BENCH_DAEMON_DB_FILENAME, restoreSnapshotToDataDir } from "../snapshot/materialize.js";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../harness/daemon.js";
 import { currentBenchScope, removeDataDirWhenBenchDaemonCancelled, runBenchDaemonOperation,
   trackBenchBody } from "../../harness/daemon-task.js";
@@ -152,7 +152,21 @@ export function assertChainSnapshot(config: SemanticChainConfig): void {
   assertSemanticChainSourceIndex(config);
 }
 
-type SemanticChainDaemonOptions = Readonly<{ signal?: AbortSignal; embeddingStartupProbe?: "omit" }>;
+type SemanticChainDaemonOptions = Readonly<{ signal?: AbortSignal; embeddingStartupProbe?: "omit";
+  sourceSemanticObservations?: boolean }>;
+type DaemonRestoration = Readonly<{ snapshotSha256: string; workspaceId: string; databasePath: string }>;
+const daemonRestorations = new WeakMap<BenchDaemonHandle, Readonly<{
+  binding: DaemonRestoration; scope: NonNullable<ReturnType<typeof currentBenchScope>>;
+}>>();
+
+/** Internal capture seam: only the restore/start owner can establish this association. */
+export function readSemanticChainDaemonRestoration(daemon: BenchDaemonHandle): DaemonRestoration {
+  const owned = daemonRestorations.get(daemon);
+  if (owned === undefined || owned.scope.cancelled || owned.scope.signal.aborted) {
+    throw new AlayaError("CONFLICT", "semantic chain daemon restoration is not live or owned");
+  }
+  return owned.binding;
+}
 export async function withSemanticChainDaemon<T>(config: SemanticChainConfig, root: string,
   body: (daemon: BenchDaemonHandle) => Promise<T>, options: SemanticChainDaemonOptions = {}): Promise<T> {
   const captured = { ...options };
@@ -166,26 +180,33 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
   const { signal, embeddingStartupProbe } = options;
   mkdirSync(root, { recursive: true });
   const directory = mkdtempSync(join(root, "native-session-"));
+  const snapshotPath = config.snapshot_path;
+  const restoration = Object.freeze({ snapshotSha256: config.snapshot_sha256, workspaceId: config.workspace_id,
+    databasePath: join(directory, BENCH_DAEMON_DB_FILENAME) });
   let daemon: BenchDaemonHandle | undefined;
   let complete = false, operationFailed = false;
   let operationFailure: unknown;
   try {
     signal?.throwIfAborted();
-    restoreSnapshotToDataDir({ snapshotDbPath: config.snapshot_path, expectedSha256: config.snapshot_sha256, dataDirRoot: directory });
+    restoreSnapshotToDataDir({ snapshotDbPath: snapshotPath, expectedSha256: restoration.snapshotSha256, dataDirRoot: directory });
     signal?.throwIfAborted();
-    const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: config.workspace_id, runId: config.run_id,
+    const started = await startBenchDaemon({ dataDirRoot: directory, workspaceId: restoration.workspaceId, runId: config.run_id,
       sourceSemanticInterpretationClock: config.interpretation_clock,
+      ...(options.sourceSemanticObservations === undefined ? {} : { sourceSemanticObservations: options.sourceSemanticObservations }),
       ...(config.source_index === undefined ? { embeddingMode: "disabled" as const,
         ...(embeddingStartupProbe === undefined ? {} : { embeddingStartupProbe }) } : {
         embeddingMode: "env" as const, embeddingProviderKind: "local_onnx" as const, embeddingStartupProbe: "omit" as const,
         cachedLocalEmbedding: { cache_root: config.source_index.cache_root, model_id: config.source_index.model_id } }),
       fieldProjectionAdmissionMode: "explicit_checkpoint" });
     daemon = started;
-    if (config.source_index !== undefined) assertSemanticChainSourceIndex(config, join(directory, "alaya.db"));
+    if (config.source_index !== undefined) assertSemanticChainSourceIndex(config, restoration.databasePath);
     removeDataDirWhenBenchDaemonCancelled(directory);
     const scope = currentBenchScope();
     if (scope === undefined) throw new AlayaError("CANCELLED", "bench work has no owning scope");
     signal?.throwIfAborted();
+    daemonRestorations.set(started, { binding: restoration, scope });
+    const shutdown = started.shutdown.bind(started);
+    started.shutdown = () => { daemonRestorations.delete(started); return shutdown(); };
     const result = await trackBenchBody(scope, () => body(started));
     complete = true;
     return result;
@@ -194,6 +215,7 @@ async function runBoundSemanticChainDaemon<T>(config: SemanticChainConfig, root:
     operationFailure = error;
     throw error;
   } finally {
+    if (daemon !== undefined) daemonRestorations.delete(daemon);
     try { await daemon?.shutdown(); }
     catch (cleanup) {
       if (!operationFailed) throw cleanup;

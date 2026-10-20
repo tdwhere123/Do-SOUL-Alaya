@@ -16,6 +16,8 @@ import {
   SoulActiveConstraintSchema
 } from "@do-soul/alaya-protocol";
 
+import { SourceSemanticObservationRequestSchema, type SourceSemanticObservation } from "./source-semantic-observation.js";
+
 // Target recall uses "conditionalField.recall" only. The memory/evidence/
 // synthesis/path/plasticity operations remain for leftover RecallService
 // ports and are not a second selector.
@@ -159,7 +161,8 @@ export const RecallReadWorkerEnvelopeSchema = z
     protocol_version: RecallReadWorkerProtocolVersionSchema,
     id: z.number().finite(),
     operation: z.enum(RECALL_READ_WORKER_OPERATIONS),
-    payload: z.unknown()
+    payload: z.unknown(),
+    observation: SourceSemanticObservationRequestSchema.optional()
   })
   .strict()
   .readonly();
@@ -178,10 +181,11 @@ export type ConditionalFieldRecallWorkerRequest = Readonly<{
 }>;
 
 export type RecallReadWorkerResponse =
-  | Readonly<{ readonly id: number; readonly ok: true; readonly result: unknown }>
+  | Readonly<{ readonly id: number; readonly ok: true; readonly result: unknown; readonly observation?: SourceSemanticObservation }>
   | Readonly<{
       readonly id: number;
       readonly ok: false;
+      readonly observation?: SourceSemanticObservation;
       readonly error: Readonly<{
         readonly name: string;
         readonly message: string;

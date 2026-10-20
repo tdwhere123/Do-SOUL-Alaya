@@ -6,9 +6,9 @@ const isolation = await vi.hoisted(async () => {
 afterAll(() => { isolation.restore(); expect(isolation.violations).toEqual([]); });
 import { SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SourceSemanticWorkerResultSchema, sourceSemanticExecution,
   sourceSemanticExecutionPhases, SourceSemanticExecutionSchema } from "@do-soul/alaya-protocol";
-import { encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
+import { assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse, encodeSourceSemanticLibraryResults } from "@do-soul/alaya-core";
 import * as core from "@do-soul/alaya-core";
-import { DIGEST, REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeProofResponseFixture,
+import { CLOCK, DIGEST, REQUEST, GOLD, GOLD_TARGET, sourceOnly, assemble, workerRecall, nativeProofResponseFixture,
   nativeSourceHitWithUnverifiedProofFixture, libraryAccessPhases } from "./source-semantic-library-measurement-fixture.js";
 import { measureConditionalFieldResponse } from "../../../runs/measurement/conditional-field-measurement.js";
 import { recordSourceSemanticLibraryFirstExposure } from "../../../runs/measurement/source-semantic-library-recall.js";
@@ -16,6 +16,8 @@ import {
   admitSourceSemanticLibraryResponse, measureSourceSemanticLibraryResponse,
   readmitSourceSemanticLibraryMeasurement, readmitHistoricalSourceOnlyLibraryMeasurement
 } from "../../../runs/measurement/source-semantic-library-measurement.js";
+import { admittedSourceDeliveryTail, admittedSourcePreviewInterval } from "../../../runs/measurement/source-delivery-visibility.js";
+import { admitEmittedSourcePreview } from "../../../runs/recall-measurement/library-admission.js";
 import {
   scoreMixedKindFirstExposure, scoreProofConditionedFirstExposure
 } from "../../../runs/measurement/source-gold-join.js";
@@ -31,6 +33,23 @@ function measureOf(result: ReturnType<typeof workerRecall>) {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("source semantic library measurement", () => {
+  it("projects only admitted UTF-8 preview bytes, including clipped and omitted payloads", () => {
+    const result = nativeProofResponseFixture().response.results![0]!;
+    if (result.target.kind !== "source_evidence") throw new Error("expected a source fixture");
+    const target = { ...result.target, span: { ...result.target.span!,
+      retained_extent: "body" as const, content_start: 0, content_end: 4 } };
+    for (const [preview, withinBudget, end] of [["€", false, 3], ["[payload omitted]", false, 0],
+      ["€a", true, 4]] as const) {
+      const emitted = { ...result, target, content_preview: preview,
+        budget_state: { ...result.budget_state, within_budget: withinBudget } };
+      admitEmittedSourcePreview(target.span, emitted, undefined, target, "€a", false);
+      expect(admittedSourcePreviewInterval(target, emitted)).toEqual({ start: 0, end });
+    }
+    const invalid = { ...result, target, content_preview: "€aa" };
+    expect(() => admitEmittedSourcePreview(target.span, invalid, undefined, target, "€a", false)).toThrow();
+    expect(admittedSourcePreviewInterval(target, invalid)).toBeNull();
+  });
+
   it("admits a new reader exposure without spending a proof verification allowance", () => {
     const { response } = nativeProofResponseFixture();
     const verify = vi.spyOn(core, "deliveredSourceSemanticLibraryProof");
@@ -116,6 +135,21 @@ describe("source semantic library measurement", () => {
     expect(index.completeness.logical_index).toBe("partial");
     const evaluated = measureOf(workerRecall(index));
     expect(evaluated.sourceBearingUnion?.any_at_5).toEqual({ status: "miss", value: false });
+  });
+
+  it("proves occupancy exhaustion from native completeness, not a null continuation", () => {
+    const complete = assemble([sourceOnly("other")], []);
+    expect(complete.continuation).toBeNull();
+    expect(admittedSourceDeliveryTail(complete)).toEqual({ status: "exhausted", reason: "logical_index_complete" });
+    const paged = assemble(Array.from({ length: 6 }, (_, offset) => sourceOnly(`other-${offset}`)), []);
+    expect(admittedSourceDeliveryTail(paged)).toEqual({ status: "open", reason: "occupancy_continuation_present" });
+    const truncated = assembleSourceSemanticLibraryIndex({
+      query_id: "library-query", snapshot_id: `sha256:${"cd".repeat(32)}`, interpretation_id: "library-interpretation",
+      as_of: CLOCK, proof_groups: [], source_entries: [sourceOnly("other")], truncated: true, open_residuals: false
+    }).index;
+    expect(truncated.continuation).toBeNull();
+    expect(truncated.completeness.logical_index).toBe("partial");
+    expect(admittedSourceDeliveryTail(truncated)).toEqual({ status: "unknown", reason: "logical_index_partial" });
   });
 
   it.each([

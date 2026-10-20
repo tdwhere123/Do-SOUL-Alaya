@@ -92,6 +92,9 @@ function readWindow(runtime: SourceSemanticReadRuntime, workspace: string, recor
     const read = repo.findByIdBounded(workspace, recordId, end - offset, offset,
       { workLimit: meter.work, nativeByteLimit: meter.bytes });
     meter.read(5 + (read?.dependencyWork ?? 0), read === null ? 0 : read.nativeBytes + read.metadataBytes);
+    meter.observer?.event("source_read", meter.phase, () => ({ purpose: "nominated_window_hydration", record_id: recordId,
+      start: offset, end: offset + Buffer.byteLength(read?.record?.source_body ?? ""), requested_end: end,
+      native_bytes: read === null ? 0 : read.nativeBytes + read.metadataBytes, resource_limited: read?.resourceLimited ?? false }));
     if (read?.resourceLimited) throw new SourceSemanticResourceExhausted("library nominated source dependencies");
     if (read?.record?.source_body == null || read.invalidOffset || read.bodyBytes !== bodyBytes) {
       throw new CoreError("CONFLICT", "nominated source bytes are unavailable or misbound");

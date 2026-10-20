@@ -20,10 +20,12 @@ import {
   type BenchDaemonLaunchConfig
 } from "./daemon-support.js";
 import type { BenchDaemonConfigDirectoryLease } from "./daemon-config-directory.js";
+import type { BenchDaemonHandle } from "./daemon-types.js";
 
 type ActiveBenchContext = { workspaceId: string; runId: string };
 
 export interface BenchDaemonStartupInput {
+  readonly sourceSemanticObservations?: boolean;
   readonly embeddingStartupProbe?: AlayaDaemonRuntimeOptions["embeddingStartupProbe"];
   readonly sourceSemanticInterpretationClock?: string;
   readonly dataDir: string;
@@ -40,6 +42,7 @@ export interface BenchDaemonStartupInput {
 }
 
 export interface BenchDaemonStartupResources {
+  readonly observeSourceSemantics?: BenchDaemonHandle["observeSourceSemantics"];
   readonly runtime: AlayaDaemonRuntime;
   readonly server: ReturnType<typeof createAlayaMcpServer>;
   readonly mcpClient: Client;
@@ -53,14 +56,7 @@ export async function initializeBenchDaemon(
 ): Promise<BenchDaemonStartupResources> {
   applyBenchDaemonEnvironment(input.launch.environment, input.managedEnvKeys);
   await input.configDirectory.prepare();
-  const resources = await createBenchRuntimeResources(
-    input.activeContext,
-    input.expectedReconciliationBasis,
-    input.relationProjectionAdmissionMode,
-    input.fieldProjectionAdmissionMode,
-    input.sourceSemanticInterpretationClock,
-    input.embeddingStartupProbe
-  );
+  const resources = await createBenchRuntimeResources(input);
   try {
     await installBenchProfile(
       resources.dispatchCli,
@@ -78,20 +74,21 @@ export async function initializeBenchDaemon(
   }
 }
 
-async function createBenchRuntimeResources(
-  activeContext: ActiveBenchContext,
-  expectedReconciliationBasis: EffectiveReconciliationBasis | undefined,
-  relationProjectionAdmissionMode: RelationProjectionAdmissionMode | undefined,
-  fieldProjectionAdmissionMode: FieldProjectionAdmissionMode | undefined,
-  sourceSemanticInterpretationClock: string | undefined,
-  embeddingStartupProbe: AlayaDaemonRuntimeOptions["embeddingStartupProbe"]
-): Promise<BenchDaemonStartupResources> {
-  const runtime = await createAlayaDaemonRuntime({
+async function createBenchRuntimeResources(input: BenchDaemonStartupInput): Promise<BenchDaemonStartupResources> {
+  const { activeContext, expectedReconciliationBasis, relationProjectionAdmissionMode,
+    fieldProjectionAdmissionMode, sourceSemanticInterpretationClock, embeddingStartupProbe } = input;
+  const options: AlayaDaemonRuntimeOptions = {
     embeddingStartupProbe,
     ...(sourceSemanticInterpretationClock === undefined ? {} : { sourceSemanticInterpretationClock }),
     relationProjectionAdmissionMode,
     fieldProjectionAdmissionMode
-  });
+  };
+  // The private friend owns both construction and registry lookup so source/dist
+  // test aliases cannot split them. Ordinary startup keeps its existing entry.
+  const observed = input.sourceSemanticObservations === true
+    ? await (await import("../../../../core-daemon/dist/runtime/recall/source-semantic-observation.js"))
+      .createSourceObservedRuntime(options) : undefined;
+  const runtime = observed?.runtime ?? await createAlayaDaemonRuntime(options);
   try {
     assertExpectedReconciliationBasis(runtime, expectedReconciliationBasis);
   } catch (error) {
@@ -110,8 +107,10 @@ async function createBenchRuntimeResources(
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   await mcpClient.connect(clientTransport);
+  const observeSourceSemantics = observed?.observeSourceSemantics;
   return {
     runtime,
+    ...(observeSourceSemantics === undefined ? {} : { observeSourceSemantics }),
     server,
     mcpClient,
     dispatchCli: makeDispatchCli(runtime)

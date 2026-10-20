@@ -38,7 +38,7 @@ export function runSourceSemanticLibraryRecall(
   meter.retain(request, "library request admission");
   const requestIdentity = fieldContractSha256(canonicalJson({ ...request, continuation: undefined }));
   const continuationLease = request.continuation === undefined ? undefined
-    : readSemanticLease(runtime, payload, request.continuation.continuation_id, authorized, "library");
+    : readSemanticLease(runtime, payload, request.continuation.continuation_id, authorized, "library", meter);
   if (continuationLease !== undefined && (continuationLease.request_identity !== requestIdentity
     || continuationLease.continuation === undefined || !continuationCapabilityMatches(request.continuation!)
     || canonicalJson(continuationLease.continuation) !== canonicalJson(request.continuation))) {
@@ -51,7 +51,7 @@ export function runSourceSemanticLibraryRecall(
     return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, Number(offset[1]));
   }
   const currentClock = payload.as_of;
-  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query");
+  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, { ...payload, as_of: currentClock }, request.query_handle, authorized, "query", meter);
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
     || request.query_semantics !== undefined && sourceSemanticQueryInputIdentity(request.query_semantics) !== lease.query_semantics_input_id
     || request.query_semantics_unavailable !== undefined && (lease.query_semantics_status?.status !== "unavailable"
@@ -76,10 +76,10 @@ export function runSourceSemanticLibraryRecall(
   }
   const boundStatus = lease?.query_semantics_status ?? queryStatus;
   // Keep a bounded finalization envelope outside exploration and native hydration.
-  const exploration = new SourceSemanticReadBudget({
+  const exploration = meter.child({
     work_units: Math.max(0, meter.work - Math.min(request.budget.finalization_reserve, Math.floor(meter.work / 4))),
     memory_bytes: meter.bytes - Math.min(Math.floor(meter.bytes / 4), request.output_byte_limit * 8 + 65536)
-  });
+  }, "exploration");
   let explorationAbsorbed = false;
   try {
   const boundPool = lease?.access_pool;
@@ -97,7 +97,12 @@ export function runSourceSemanticLibraryRecall(
   if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
     throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
   }
-  if (boundPool !== undefined) exploration.retain(boundPool, "leased access pool");
+  if (boundPool !== undefined) {
+    exploration.retain(boundPool, "leased access pool");
+    meter.observer?.event("pool_reuse", meter.phase, () => ({ pool_id: boundPool.access.pool_id, discovery: "not_observed_this_request" }));
+    meter.observer?.facts.pool(boundPool, boundPool.access.pool_id, boundPool.sources,
+      boundPool.access.unvisited_sources, boundPool.access.unvisited_interpretations, "reused");
+  }
   const pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
     admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id);
   const sources = { sources: [...pool.sources], pages: pool.sourcePages,
@@ -230,7 +235,7 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   publicRequestIdentity: string) {
   const prepared = prepareSourceSemanticLibraryInputs(runtime, payload, authorized, meter, request, queryStatus,
     query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
-  const selection = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) });
+  const selection = meter.child({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }, "selection");
   const plan = prepareLibraryDelivery(prepared.base, prepared.packages, request, selection, "field", selectSourceSemanticLibraryPage, prepared.execution);
   meter.absorb(selection);
   return plan;
@@ -270,7 +275,7 @@ function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, 
       hypothesis_id: interpretationId }));
   }
   const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen;
-  const hydration = new SourceSemanticReadBudget({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) });
+  const hydration = meter.child({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) }, "package_hydration");
   let prepared: ReturnType<typeof prepareLibraryPackages>;
   try { prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports); }
   finally { meter.absorb(hydration); }

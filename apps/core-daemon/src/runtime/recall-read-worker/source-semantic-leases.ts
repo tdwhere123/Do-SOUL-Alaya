@@ -85,6 +85,7 @@ export function issueSemanticLeaseGroup(runtime: SourceSemanticReadRuntime,
   const rows = admittedRows(runtime, issues.map(({ lease }, index) => ({ id: ids[index]!, lease })),
     sourceSemanticLifetimeNow(issues[0]!.lease), meter);
   LEASES.set(runtime, rows);
+  for (let index = 0; index < issues.length; index++) meter.observer?.facts.lease("issue", ids[index]!, issues[index]!.lease);
   return ids;
 }
 
@@ -110,7 +111,7 @@ function admittedRows<K extends string | symbol, Lease extends { expires_at: str
 }
 
 export function readSemanticLease(runtime: SourceSemanticReadRuntime, caller: Caller, id: string,
-  authorized: readonly string[] | null, kind: SourceSemanticLease["kind"]): SourceSemanticLease {
+  authorized: readonly string[] | null, kind: SourceSemanticLease["kind"], meter?: SourceSemanticReadBudget): SourceSemanticLease {
   const rows = LEASES.get(runtime), lease = rows?.get(id)?.lease;
   if (lease === undefined || lease.expires_at <= sourceSemanticLifetimeNow(caller)) {
     rows?.delete(id); throw new CoreError("VALIDATION", "source semantic preparation handle expired", { details: { admission: "expired" } });
@@ -124,6 +125,7 @@ export function readSemanticLease(runtime: SourceSemanticReadRuntime, caller: Ca
   if (kind !== "source" && lease.revision !== sourceSemanticRevision(runtime)) {
     rows?.delete(id); throw new CoreError("VALIDATION", "preparation snapshot is no longer current", { details: { admission: "filtered" } });
   }
+  meter?.observer?.facts.lease("read", id, lease);
   return lease;
 }
 

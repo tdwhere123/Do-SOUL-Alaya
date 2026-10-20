@@ -18,6 +18,7 @@ import { readRecallTierWindowQuery } from "../recall-read-worker/memory-window.j
 import { postRecallTierWindowChunks } from "../recall-read-worker/tier-window-stream.js";
 import { runOperation } from "../recall-read-worker/dispatch.js";
 import { createRecallReadWorkerRuntime } from "../recall-read-worker/runtime.js";
+import { SourceSemanticObserver, SourceSemanticObservationRequestSchema } from "../recall-read-worker/source-semantic-observation.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
@@ -51,6 +52,7 @@ async function handleRequest(message: unknown): Promise<void> {
     }
     return;
   }
+  const observer = message.observation === undefined ? undefined : new SourceSemanticObserver(message.id, SourceSemanticObservationRequestSchema.parse(message.observation));
   try {
     const active = openRuntime();
     // Chunked window bypasses runOperation; reject closed before a reopenable statement.
@@ -66,12 +68,13 @@ async function handleRequest(message: unknown): Promise<void> {
       await postRecallTierWindowChunks(message.id, result, postResponse);
       return;
     }
-    const result = await runOperation(active, message);
-    postResponse({ id: message.id, ok: true, result });
+    const result = await runOperation(active, message, observer);
+    postResponse({ id: message.id, ok: true, result, ...(observer === undefined ? {} : { observation: observer.finish("success") }) });
   } catch (error) {
     postResponse({
       id: message.id,
       ok: false,
+      ...(observer === undefined ? {} : { observation: observer.finish("failure") }),
       error: serializeWorkerError(error)
     });
   }

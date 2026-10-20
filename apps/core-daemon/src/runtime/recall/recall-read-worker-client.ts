@@ -18,6 +18,8 @@ import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.j
 import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema,
   type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
 
+import type { SourceSemanticObservationScope } from "./source-semantic-observation.js";
+
 type PreparedQuery = NonNullable<WorkerOperationPayload<"conditionalField.sourceSemantics">["prepared_query"]>;
 export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; navigation: string; supplemental_navigation?: string;
   signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
@@ -54,6 +56,7 @@ export interface RecallReadWorkerClient {
   readonly conditionalFieldPort: ConditionalFieldRecallPort;
   readonly sourceInterpretationPort?: Readonly<{ reason: (input: WorkerOperationPayload<"conditionalField.interpretation">) => Promise<SourceInterpretationReasoningResult> }>;
   readonly sourceSemanticsPort?: SourceSemanticsExecutionPort;
+  readonly observeSourceSemantics: SourceSemanticObservationScope;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -274,6 +277,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         await this.lifecycle.isolate(run));
     }
   };
+
+  public readonly observeSourceSemantics: SourceSemanticObservationScope = async (options, work) =>
+    await this.lifecycle.observeSourceSemantics(options, work);
 
   public readonly sourceSemanticsPort: SourceSemanticsExecutionPort = {
     withExecutionScope: async (input, work) => await this.lifecycle.executionScope(input, work),

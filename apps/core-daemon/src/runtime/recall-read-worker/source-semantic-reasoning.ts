@@ -18,6 +18,9 @@ import { finalizeSourceSemanticReason } from "./source-semantic-reason-finalizat
 import { IDLE, loadVerified, workOf } from "./source-semantic-discovery.js";
 import { accessDescriptorPage, accessInputIdentity, observeSourceSemanticAccess, preparationAccessReceipt } from "./source-semantic-candidate-access.js";
 
+import type { SourceSemanticObserver } from "./source-semantic-observation.js";
+import { readSourceIndexSnapshotFact } from "./source-index-measurement.js";
+
 type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
 
 /** The transaction's existing execution cache also owns the request-only capture. */
@@ -29,8 +32,8 @@ export interface SourceSemanticRequestExecution {
 }
 
 /** Snapshot-owned source preparation and one-shot reasoning. No cross-run result/coverage cache. */
-export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload): SourceSemanticWorkerResult {
-  const meter = new SourceSemanticReadBudget(payload.request.budget);
+export function runSourceSemanticWorker(runtime: RecallReadWorkerRuntime, payload: Payload, observer?: SourceSemanticObserver): SourceSemanticWorkerResult {
+  const meter = new SourceSemanticReadBudget(payload.request.budget, observer);
   const run = (executionOf: SourceSemanticRequestExecution) => {
     if (payload.prepared_query !== undefined) {
       meter.preparation = capturePackSourceSemanticPreparationForRequest({
@@ -99,7 +102,19 @@ function withSourceSemanticTransaction(runtime: SourceSemanticReadRuntime, paylo
     }
     return execution;
   }
-  const execute = () => run(executionOf);
+  const execute = () => {
+    const context = { operation: payload.request.kind, workspace_id: payload.workspace_id, as_of: payload.as_of,
+      preparation: payload.prepared_query === undefined ? null : {
+        status: payload.prepared_query.receipt.status, reason: payload.prepared_query.receipt.reason } };
+    meter.observer?.context(runtime, () => ({ ...context, snapshot_revision: null, index: null }));
+    try { return run(executionOf); }
+    finally {
+      // Read only after native execution has pinned (or failed) its existing transaction.
+      // Diagnostics must not become the first read of a deferred snapshot and change its decisions.
+      meter.observer?.context(runtime, () => ({ ...context, snapshot_revision: sourceSemanticRevision(runtime),
+        index: readSourceIndexSnapshotFact(runtime.database, payload.workspace_id) }));
+    }
+  };
   try { return runtime.database.connection.inTransaction ? execute() : runtime.database.connection.transaction(execute)(); }
   catch (error) {
     // Failed capture/packing cannot be reported as native-only or successful absence of phase evidence.
@@ -141,7 +156,7 @@ function prepareSource(runtime: RecallReadWorkerRuntime, payload: Payload, autho
   meter: SourceSemanticReadBudget): SourceSemanticWorkerResult {
   const request = payload.request;
   if (request.kind !== "prepare_source" && request.kind !== "validate_source") throw new CoreError("VALIDATION", "source preparation kind mismatch");
-  const lease = request.kind === "validate_source" ? readSemanticLease(runtime, payload, request.source_handle, authorized, "source") : undefined;
+  const lease = request.kind === "validate_source" ? readSemanticLease(runtime, payload, request.source_handle, authorized, "source", meter) : undefined;
   const sourceId = request.kind === "prepare_source" ? request.source_id : lease!.source_id!;
   const stores = sourceSemanticReadStores(runtime.database, payload.workspace_id, sourceId, meter, authorized);
   const stored = currentSemanticSource(stores, payload.workspace_id, sourceId);
@@ -180,8 +195,8 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
   meter: SourceSemanticReadBudget, executionOf: SourceSemanticRequestExecution): SourceSemanticWorkerResult {
   const request = payload.request;
   if (request.kind !== "prepare_query") throw new CoreError("VALIDATION", "query preparation kind mismatch");
-  const source = request.source_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.source_handle, authorized, "source");
-  const prior = request.continuation_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.continuation_handle, authorized, "page");
+  const source = request.source_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.source_handle, authorized, "source", meter);
+  const prior = request.continuation_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.continuation_handle, authorized, "page", meter);
   meter.retain(request.query_semantics, "query semantics admission");
   const admission = admitSourceSemanticQuery(request.query_semantics, request.original_query);
   const queryStatus = sourceSemanticQueryStatus(admission, request.query_semantics_unavailable);
@@ -219,7 +234,12 @@ function prepareQuery(runtime: SourceSemanticReadRuntime, payload: Payload, auth
     request.original_query, query, policy, request.budget, scopeLease?.source_id,
     { leaseContext: queryLeaseContext, suppliedQuerySemantics: request.query_semantics, executionOf },
     request.source_preview_extents, undefined, accessHint);
-  if (prior?.access_pool !== undefined) meter.retain(pool, "continued access pool");
+  if (prior?.access_pool !== undefined) {
+    meter.retain(pool, "continued access pool");
+    meter.observer?.event("pool_reuse", meter.phase, () => ({ pool_id: pool.access.pool_id, discovery: "not_observed_this_request" }));
+    meter.observer?.facts.pool(pool, pool.access.pool_id, pool.sources,
+      pool.access.unvisited_sources, pool.access.unvisited_interpretations, "reused");
+  }
   const discovery = accessDescriptorPage(runtime, payload.workspace_id, payload.as_of, authorized, meter, pool, prior?.access_offset ?? 0);
   const sourceOffset = prior?.access_source_offset ?? 0;
   const access = preparationAccessReceipt(pool, sourceOffset, prior?.access_offset ?? 0, discovery.candidates.length, meter);
@@ -254,7 +274,7 @@ function reasonSemantics(runtime: RecallReadWorkerRuntime, payload: Payload, aut
   meter: SourceSemanticReadBudget): SourceSemanticWorkerResult {
   const request = payload.request;
   if (request.kind !== "reason") throw new CoreError("VALIDATION", "reason kind mismatch");
-  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.query_handle, authorized, "query");
+  const lease = request.query_handle === undefined ? undefined : readSemanticLease(runtime, payload, request.query_handle, authorized, "query", meter);
   if (lease !== undefined && (request.original_query !== undefined && request.original_query !== lease.original_query
     || request.query_semantics !== undefined && canonicalJson(request.query_semantics) !== canonicalJson(lease.query_semantics))) {
     throw new CoreError("VALIDATION", "query handle cannot be retargeted", { details: { admission: "bound" } });

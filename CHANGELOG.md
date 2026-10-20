@@ -33,6 +33,50 @@ invariant §25. Protocol is now `19.1.0`; gateway remains `2.0.0`.
 See the [current query contract](docs/handbook/recall.md#opt-in-open-source-semantics)
 and [current Source disclosure](docs/handbook/recall.md#source-disclosure).
 
+### Private recall measurement
+
+Private recall measurement is a bench adapter, not a public diagnostic surface:
+it adds no MCP response field and changes no recall policy. A bench-only startup
+option selects the compiled daemon module so runtime construction and scope
+lookup share one module identity; the binding itself is inert, and only an
+explicit request-scoped job records request-correlated source-semantic worker
+events and logical costs. The measurement owner captures library continuations
+in the same first-exposure session and invokes ordinary `soul.recall` through
+its actual public entry. Delivery capture keeps slot, interval and
+first-exposure evidence for the single `consumer-message-visibility-v1` scorer
+over frozen answer-turn labels instead of defining @K visibility itself.
+Frozen-output attribution keeps missing, partial and unavailable evidence
+explicit; diagnostic membership is not proof of visible text, and logical
+accounting is not a physical resource measurement. Native facts now record the
+session, request, pool, lease and plan ancestry of the objects that were
+actually used, so equal request numbers or pool labels never join calls, and
+ledger retention and canonical-scan annotations reconcile against recorded
+charges while encoding annotations describe existing work without adding debits.
+Meter counts and native spend are recorded independently of the capped
+32-meter detail sample; initial, current capacity, adjustment, held and spent
+values stay distinct. Optional final parent/sibling-phase allowance aggregates
+continue beyond that sample, with explicit omissions and no global transferable
+budget claim. Complete operation quantities continue past the bounded 128-row
+detail sample; request-local weak repetition tracking admits up to 16,384 objects
+per kind and preserves explicit partial evidence if exhausted. The
+`longmemeval-observation-costs-v1` bench summary classifies debits through
+exact owner-backed reasons or native operation annotations, keeps transfers and allowances out of spending,
+and separates a missing historical witness (unknown, witnessed rows stay lower
+bounds) from contradictory complete counters (invalid, no spent total).
+Physical SQL, IPC and peak memory remain unmeasured, frozen frames are not
+backfilled, and the record changes no logical charge, refund, ranking or budget
+limit.
+Frozen source-index and window qualification is a symbol-keyed capability on the
+existing storage constructor: no package-root export, a caller-owned read
+transaction, and unchanged recall when that capability is absent. Bench capture
+reads the actual canonically restored session and its WAL, bound by the restore
+owner to the original sealed input; foreign or expired handles are refused.
+Legacy input files are never migrated in place or interpreted as empty indexes
+when current-schema tables are absent. The shared scorer emits one row per mapped gold span,
+and Consumer @10 closes an absence only on an observed ten-slot prefix or an
+admitted index whose occupied tail is proven exhausted. Physical SQL work,
+peak memory and causal policy benefit remain unestablished.
+
 ### Retained-boundary corrections
 
 Inspector startup identifies its actual entry module on Windows and through

@@ -31,6 +31,7 @@ import type {
   SeededSynthesisResult
 } from "./seed/daemon-seed-types.js";
 import type { BenchTokenMetrics } from "../token/token-metrics.js";
+import type { SourceSemanticObservationScope } from "../../../../core-daemon/src/runtime/recall/source-semantic-observation.js";
 export type {
   BenchContextUsageObject,
   BenchReportContextUsageInput,
@@ -58,6 +59,8 @@ export {
 export type { BenchTokenMetrics } from "../token/token-metrics.js";
 
 export interface BenchDaemonOptions {
+  /** Private observation transport, opt-in only; never changes a public MCP response. */
+  readonly sourceSemanticObservations?: boolean;
   readonly sourceSemanticInterpretationClock?: string;
   readonly dataDirRoot?: string;
   /** Execution placement only; the root must already exist. The owned child lease is removed on shutdown. */
@@ -106,6 +109,7 @@ export interface BenchEdgeFormationMember {
 }
 
 export interface BenchDaemonHandle {
+  readonly observeSourceSemantics?: SourceSemanticObservationScope;
   readonly runtime: AlayaDaemonRuntime;
   readonly mcpClient: Client;
   readonly workspaceId: string;

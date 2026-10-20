@@ -6,7 +6,7 @@ import { AlayaError, encodeSourceDisclosure, sourceDisclosure, canonicalJson, sa
   type SoulMemorySearchResponse, type SourceRecordIdentity, type SourceEvidenceTarget } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../snapshot/source-records/publish.js";
 import { withCachedSqliteSnapshot } from "../../snapshot/bound-file.js";
-import { admitEmittedSourcePreview } from "../replay.js";
+import { admitEmittedSourcePreview } from "../library-admission.js";
 import { exposureSlots, firstExposureMismatch, type FirstExposurePage } from "../../measurement/first-exposure-session.js";
 import { OrdinaryRecallObservationSchema, RepresentationAwareRecallProtocolVersionSchema,
   type OrdinaryRecallArchiveConfig, type OrdinaryRecallCaptureConfig } from "./ordinary-recall-contract.js";

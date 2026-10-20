@@ -588,6 +588,80 @@ and downstream utilization unavailable when the response supplies no such
 evidence. Native-fork synthetic pagination verifies the real worker route;
 it does not establish replayability of a historical dataset snapshot.
 
+Private recall measurement is bench-only observation, not a public diagnostic
+surface or a recall-policy change. Runtime construction binds the observation
+scope inertly; only an explicit request-scoped job collects source-semantic
+worker events, native facts and bounded logical costs, whose event/byte limits
+bound the record rather than the delivered result
+([`runtime observation scope`](../../apps/core-daemon/src/runtime/recall/source-semantic-observation.ts),
+[`worker observations`](../../apps/core-daemon/src/runtime/recall-read-worker/source-semantic-observation.ts)).
+Native facts follow actual runtime objects, not equal request numbers or pool
+labels: session, request, pool, lease and plan origins record the objects
+really used, a reused pool whose creation was not observed keeps unknown
+ancestry, and an older frame without facts stays unobserved rather than empty
+([`source-semantic-provenance`](../../apps/core-daemon/src/runtime/recall-read-worker/source-semantic-provenance.ts),
+[`observation-ancestry`](../../apps/bench-runner/src/runs/longmemeval-semantic/observation-ancestry.ts)).
+Ledger retention and canonical-scan annotations reconcile against recorded
+charges; encoding annotations describe already executed work and add no debit;
+same-object repetition is a traversal proxy, not proof of duplicate allocation
+or wasted work. Meter totals are recorded independently of the 32-meter detail
+sample, so that cap bounds neither root/child counts nor native spend; an
+observer failure marks the totals partial, not complete. Initial, current
+capacity, adjustment, held, spent and remaining stay distinct
+per meter: current capacity is not the initial allocation or spend, a
+historical meter without a capacity witness gets no inferred adjustment, and
+parent and child meters overlap, so summing their remaining, held or spent
+values does not establish a request-level resource total. Optional final allowance
+aggregates preserve siblings with the same parent and phase independently of the
+32-meter detail sample. Their 128-group bound has explicit omission/completeness
+fields; even sibling lifetime allowances are not simultaneously available budget.
+Complete operation totals per kind also outlive the bounded 128-row detail sample.
+Request-local weak identity tracking covers at most 16,384 objects per operation
+kind without retaining or inspecting payloads. Exhaustion preserves uncompared
+counts and partial repetition evidence, not an invented complete measurement. The bench
+`longmemeval-observation-costs-v1` summary
+([`observation-costs`](../../apps/bench-runner/src/runs/longmemeval-semantic/observation-costs.ts))
+classifies debits through exact, owner-inspected reasons or native operation
+annotations and leaves unmatched reasons unclassified; absorption, holds, releases,
+allocations, refusals, unused allowances, capacity adjustments and duplicate
+native/index labels are transfers, allowances, refusals or annotations, never
+spending. A missing historical witness stays unknown with witnessed debit rows
+as lower bounds; contradictory complete counters are invalid with no spent
+total or lower bound. The record adds no MCP field and changes no logical
+charge, refund, ranking or budget limit; physical SQL, IPC and peak memory stay
+unmeasured, and frozen frames are not backfilled.
+Frozen source-index and window qualification is private measurement state: a
+symbol-keyed capability on the existing storage constructor, with no
+package-root export, that requires a caller-owned read transaction and reuses
+the serving readers for index state, currentness and window validity. Bench
+capture reads the actual restored session after canonical startup migrations,
+including its WAL; the restoration owner binds that session to the original
+sealed input and rejects foreign or expired handles. The sealed input is never
+migrated, and a missing table is not treated as an empty index. Pages are captured before evaluator labels
+enter and carry no source body, and windows page under an explicit cursor. A
+missing capability leaves the diagnostics unavailable without changing recall
+([`source-index-qualification`](../../packages/storage/src/repos/source-index/source-index-qualification.ts),
+[`index-qualification`](../../apps/bench-runner/src/runs/recall-measurement/index-qualification.ts)).
+Library capture reuses one `FirstExposureSession` for the first page and its
+continuation; the ordinary arm invokes `soul.recall` through a real MCP client
+and the public tool handler, and leaves library-only request dimensions
+unmapped. One consumer-message visibility scorer evaluates frozen answer-turn
+labels and retains unknowns when required delivery evidence is incomplete. It
+emits one row per mapped gold span, and its aggregates restate those rows; no
+per-message state is inferred from them. Consumer @10 requires an observed
+ten-slot prefix or an admitted index that proves the occupied tail exhausted; a
+null continuation pointer alone is not exhaustion, and a first-page positive
+remains @5 evidence while continuation is unobserved. Per-message index
+eligibility comes from the frozen census and window rows rather than from
+evaluator labels: a gold source can be not indexed, stale or partially
+indexed, while an absent root closes only with a complete archived census and
+an incomplete census stays unknown. Attribution and cost rows stay
+request-correlated: diagnostic membership is not visible text, debit and
+allowance sums are logical rather than physical memory, SQLite work or IPC
+time, and the observation is not complete causal attribution. These
+annotations alone accept no benchmark result; physical SQL work and peak
+memory remain unknown, and no causal policy benefit is established.
+
 Continuation in the benchmark reuses the active question/source/working-file
 identity and skips repeated warmup. Lost or changed process/source state
 invalidates continuation before creating a fresh working copy. An old cache's

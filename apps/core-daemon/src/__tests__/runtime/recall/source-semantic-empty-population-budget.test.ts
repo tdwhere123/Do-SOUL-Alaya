@@ -10,6 +10,7 @@ import { createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
 import { closeCachedDatabase } from "@do-soul/alaya-storage";
 import { createRecallRealStorage } from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
+import { SourceSemanticObserver, readSourceSemanticObservation } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
 import { reserveEmptyInterpretationCompletion } from "../../../runtime/recall-read-worker/source-semantic-empty-population-budget.js";
 import { queryPreparationLease, semanticLeaseGroupAccountingCost } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { preparationAccessReceiptValue, sourceSemanticAccessReceiptValue } from "../../../runtime/recall-read-worker/source-semantic-access-receipts.js";
@@ -135,6 +136,41 @@ it("reserves real v2 nomination metadata, execution evidence and both frozen lea
       expect(rejected.parent.spentWork).toBeLessThanOrEqual(short.work_units);
       expect(rejected.parent.spentBytes).toBeLessThanOrEqual(short.memory_bytes);
     }
+  });
+});
+
+it.each([6, 40])("observes real census promotion and planning constraints for %i SQLite sources without changing native spend", async count => {
+  await withIndexedSources(Array.from({ length: count }, (_, index) => ({ id: `raw-${index}`, text: "Granite wall." })), async fixture => {
+    const runtime = { database: fixture.database } as RecallReadWorkerRuntime;
+    const run = (observer?: SourceSemanticObserver) => {
+      const meter = new SourceSemanticReadBudget(QUERY_BUDGET, observer);
+      const pool = fixture.database.connection.transaction(() => observeSourceSemanticAccess(runtime, {
+        workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
+        request: { kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET }
+      }, ["project"], meter, ORIGINAL, undefined, "query-conditioned-v1", QUERY_BUDGET, undefined, {
+        leaseContext: { workspace_id: WS, principal: "", as_of: CLOCK, authorized: ["project"],
+          expires_at: "2026-09-18T00:10:00.000Z", revision: "test", original_query: ORIGINAL }
+      }))();
+      return { meter, pool };
+    };
+    const ordinary = run(), observer = new SourceSemanticObserver(7, { max_events: 512, max_bytes: 262144 });
+    const observed = run(observer), row = observer.finish("success");
+    expect(observed.pool.sources.map(source => source.identity)).toEqual(ordinary.pool.sources.map(source => source.identity));
+    expect(observed.pool.sources).toHaveLength(count);
+    expect([observed.meter.spentWork, observed.meter.spentBytes, observed.meter.nativeBytes, observed.meter.remaining()])
+      .toEqual([ordinary.meter.spentWork, ordinary.meter.spentBytes, ordinary.meter.nativeBytes, ordinary.meter.remaining()]);
+    expect(row.costs.some(cost => cost.reason === "parent constraint" && cost.operation === "capacity_decrease")).toBe(true);
+    expect(row.costs.some(cost => cost.reason === "empty census promotion" && cost.operation === "capacity_increase" && cost.work > 0)).toBe(true);
+    const observation = row.meters.find(meter => meter.phase === "observation")!;
+    expect(observation.capacity!.changes).toBeGreaterThan(1);
+    expect(observation.capacity!.current.work_units).toBe(observation.initial.work_units + observation.capacity!.adjustment.work_units);
+    expect(observation.capacity!.current.memory_bytes).toBe(observation.initial.memory_bytes + observation.capacity!.adjustment.memory_bytes);
+    expect(observation.capacity!.current).toEqual({ work_units: observation.remaining.work_units + observation.spent.work_units + observation.held.work_units,
+      memory_bytes: observation.remaining.memory_bytes + observation.spent.memory_bytes + observation.held.memory_bytes });
+    expect(row.meter_totals!.root_spent).toEqual({ work_units: observed.meter.spentWork, memory_bytes: observed.meter.spentBytes });
+    expect(row.meter_totals!.child_spent).toEqual({ work_units: row.totals!.absorb_work, memory_bytes: row.totals!.absorb_bytes });
+    expect(readSourceSemanticObservation(row, 7)).toEqual(row);
+    if (count === 40) { expect(row.meters).toHaveLength(32); expect(row.issues).toContain("meter_detail_limit"); }
   });
 });
 
