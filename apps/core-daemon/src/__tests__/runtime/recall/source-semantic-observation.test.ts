@@ -119,7 +119,10 @@ it("keeps SQLite/worker delivery and debit parity with diagnostics off and on, a
     expect(debit("selection", "library encoding input check")!.work).toBeGreaterThan(0);
     expect(debit("selection", "library encoding input capture")!.bytes).toBeGreaterThan(0);
     expect(debit("selection", "library encoding escaped component")!.bytes).toBeGreaterThan(0);
-    expect(debit("selection", "library encoding quote scan")!.work).toBeGreaterThan(0);
+    const frameDebit = debit("selection", "library encoding frame bytes");
+    expect(frameDebit).toBeDefined();
+    expect(frameDebit!.work).toBeGreaterThan(0);
+    expect(frameDebit!.bytes).toBeGreaterThan(0);
     expect(debit("request", "library encoding input capture")!.bytes).toBeGreaterThan(0);
     const quote = row.facts!.encodings.find(encoding => encoding.phase === "selection" && encoding.purpose === "candidate_quote")!;
     expect(quote.encoder_invocations).toBeGreaterThan(0);
