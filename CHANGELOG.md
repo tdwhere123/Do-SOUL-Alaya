@@ -103,7 +103,9 @@ peak memory and causal policy benefit remain unestablished.
 ### Retained-boundary corrections
 
 Inspector startup identifies its actual entry module on Windows and through
-symlinks, rather than relying on a forward-slash filename suffix. Crash-WAL
+symlinks, rather than relying on a forward-slash filename suffix. The child
+writes `inspector_ready` only after the loopback server is listening; a bind
+failure rejects without that line. Crash-WAL
 regressions retain committed-write evidence with platform-specific termination
 checks; Windows coverage is not skipped.
 
