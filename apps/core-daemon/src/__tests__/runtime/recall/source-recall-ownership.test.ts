@@ -1,4 +1,4 @@
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "@typescript/typescript6";
 import { describe, expect, it } from "vitest";
@@ -19,7 +19,8 @@ const forbidden = new Set(["SourceSemanticQuery", "SourceSemanticInterpretation"
 
 describe("neutral source recall ownership", () => {
   it("has no query, interpretation, correspondence or proof payload in its emitted type closure", () => {
-    const program = ts.createProgram(neutralModules, { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    const adapterPath = resolve(root, "apps/core-daemon/dist/runtime/recall-read-worker/source-semantic-library-delivery.d.ts");
+    const program = ts.createProgram([...neutralModules, adapterPath], { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext,
       target: ts.ScriptTarget.ES2023, skipLibCheck: true });
     const checker = program.getTypeChecker(), symbols = new Set<ts.Symbol>(), nodes = new Set<ts.Node>();
     const violations = new Set<string>();
@@ -29,8 +30,8 @@ describe("neutral source recall ownership", () => {
       symbols.add(symbol);
       if (forbidden.has(symbol.name)) { violations.add(symbol.name); return; }
       for (const declaration of symbol.declarations ?? []) {
-        const path = declaration.getSourceFile().fileName;
-        if (path.startsWith(`${root}/packages/`) || path.startsWith(`${root}/apps/`)) visit(declaration);
+        const owner = relative(root, declaration.getSourceFile().fileName).split(sep)[0];
+        if (owner === "packages" || owner === "apps") visit(declaration);
       }
     };
     const visit = (node: ts.Node): void => {
@@ -52,6 +53,16 @@ describe("neutral source recall ownership", () => {
     inspect(queryExport!);
     expect([...violations]).toContain("SourceSemanticQuery");
     symbols.clear(); nodes.clear(); violations.clear();
+    // This non-forbidden export must expose its nested payload types on every OS.
+    const adapter = program.getSourceFile(adapterPath);
+    expect(adapter).toBeDefined();
+    const adapterSymbol = checker.getSymbolAtLocation(adapter!);
+    expect(adapterSymbol).toBeDefined();
+    const prepare = checker.getExportsOfModule(adapterSymbol!).find(symbol => symbol.name === "prepareLibraryDelivery");
+    expect(prepare).toBeDefined();
+    inspect(prepare!);
+    expect([...violations]).toContain("SourceSemanticLibraryPackage");
+    symbols.clear(); nodes.clear(); violations.clear();
     for (const path of neutralModules) {
       const source = program.getSourceFile(path);
       expect(source, path).toBeDefined();
@@ -60,7 +71,7 @@ describe("neutral source recall ownership", () => {
       for (const exported of checker.getExportsOfModule(module!)) inspect(exported);
     }
     expect([...violations]).toEqual([]);
-  });
+  }, 30_000); // TypeScript declaration loading is structural analysis, not a 5-second runtime operation.
 
   it("keeps observation before optional computation and absorbs exploration before finalization", () => {
     const meter = new SourceSemanticResourceLedger({ work_units: 101, memory_bytes: 1001 });
