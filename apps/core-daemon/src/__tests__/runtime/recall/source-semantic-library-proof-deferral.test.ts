@@ -26,6 +26,7 @@ import { createRecallReadWorkerRuntime } from "../../../runtime/recall-read-work
 import { prepareLibraryDelivery, deliverFrozenLibraryPage } from "../../../runtime/recall-read-worker/source-semantic-library-delivery.js";
 import { runSourceSemanticLibraryRecall } from "../../../runtime/recall-read-worker/source-semantic-library-recall.js";
 import { sourceSemanticAccessReceiptValue } from "../../../runtime/recall-read-worker/source-semantic-access-receipts.js";
+import { SourceSemanticObserver } from "../../../runtime/recall-read-worker/source-semantic-observation.js";
 import * as Observation from "../../../runtime/recall-read-worker/source-semantic-candidate-access.js";
 import { createRecallRealStorage, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
   from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
@@ -294,6 +295,56 @@ it("freezes a fitting proof on a later page without occupying its root with raw 
     const exhausted = new SourceSemanticReadBudget({ work_units: 100, memory_bytes: 200_000_000 });
     expect(() => prepareLibraryDelivery(finalBase, candidates, finalRequest, exhausted)).toThrow(/budget exhausted/u);
     expect(exhausted.spentWork).toBeLessThanOrEqual(100);
+
+    // Spend the real child allowance after an unsuccessful candidate trace.
+    // Empty completion must use only the parent's post-absorption remainder.
+    const observer = new SourceSemanticObserver(1, { max_events: 512, max_bytes: 262144 });
+    const parent = new SourceSemanticReadBudget(BUDGET, observer);
+    const selection = parent.child({ work_units: 100_000, memory_bytes: BUDGET.memory_bytes }, "selection");
+    const exhaustSelection: typeof selectSourceSemanticLibraryPage = input => {
+      expect(input.fits([input.candidates[0]!])).toBe(false);
+      selection.charge(selection.work, 0, "remaining selection work");
+      return [];
+    };
+    const fallbackPlan = prepareLibraryDelivery(finalBase, candidates, finalRequest, parent, "field",
+      exhaustSelection, sourceSemanticExecution(), selection);
+    expect(selection.spentWork).toBe(100_000);
+    const accounting = observer.finish("success");
+    const debit = (phase: string, reason: string) => accounting.costs.find(row =>
+      row.phase === phase && row.reason === reason && row.operation === "debit");
+    expect(debit("selection", "access trace selection")).toMatchObject({ count: 1, work: 2 });
+    expect(debit("selection", "access trace delivery")?.work).toBeGreaterThan(0);
+    expect(debit("request", "access trace selection")).toMatchObject({ count: 1, work: 2 });
+    expect(debit("request", "access trace delivery")?.work).toBeGreaterThan(0);
+    expect(accounting.costs.find(row => row.operation === "absorb")).toMatchObject({ reason: "selection", count: 1,
+      work: selection.spentWork, bytes: selection.spentBytes });
+    expect(accounting.totals?.debit_work).toBe(parent.spentWork);
+    expect(accounting.totals?.debit_bytes).toBe(parent.spentBytes);
+    expect(parent.spentWork).toBe(selection.spentWork + debit("request", "access trace selection")!.work
+      + debit("request", "access trace delivery")!.work);
+    expect(fallbackPlan.pages).toEqual([[]]);
+    expect(fallbackPlan.page_access).toHaveLength(1);
+    expect(fallbackPlan.page_access[0]!.trace).toMatchObject({ kind: "library_selection" });
+    expect(fallbackPlan.page_access[0]!.source_candidates).toEqual([]);
+    expect(fallbackPlan.page_access[0]!.interpretation_candidates).toEqual([]);
+    expect(fallbackPlan.coverage.payload).toBe("truncated");
+    expect(fallbackPlan.discovery).toMatchObject({ truncated: true, open_residuals: true });
+    const fallbackDelivery = deliverFrozenLibraryPage(runtime, { ...payload, request: finalRequest },
+      parent, finalRequest, fallbackPlan, 0);
+    expect(fallbackDelivery.index.entries).toEqual([]);
+    expect(fallbackDelivery.discovery.access).toEqual(fallbackPlan.page_access[0]);
+    expect(fallbackDelivery.coverage.payload).toBe("truncated");
+    expect(fallbackDelivery.work.logical_work).toBe(parent.spentWork);
+
+    const insufficient = new SourceSemanticReadBudget({ work_units: 100_000, memory_bytes: BUDGET.memory_bytes });
+    const unfundedSelection = insufficient.child(insufficient.remaining(), "selection");
+    expect(() => prepareLibraryDelivery(finalBase, candidates, finalRequest, insufficient, "field", input => {
+      expect(input.fits([input.candidates[0]!])).toBe(false);
+      unfundedSelection.charge(unfundedSelection.work, 0, "remaining selection work");
+      return [];
+    }, sourceSemanticExecution(), unfundedSelection)).toThrow(/budget exhausted/u);
+    expect(insufficient.spentWork).toBe(unfundedSelection.spentWork);
+    expect(insufficient.work).toBe(0);
 
     const rawPlan = prepareLibraryDelivery(base, packages.map(row => row.raw), request, meter());
     const rawPage = deliverFrozenLibraryPage(runtime, payload, meter(), request, rawPlan, 0);

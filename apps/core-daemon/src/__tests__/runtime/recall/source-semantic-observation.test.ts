@@ -113,7 +113,23 @@ it("keeps SQLite/worker delivery and debit parity with diagnostics off and on, a
     expect(events(row, "encoding_attempt").length).toBeGreaterThan(0);
     expect(events(row, "encoded_membership")[0]?.data).toMatchObject({ offset: 0,
       results: [expect.objectContaining({ preview_bytes: Buffer.byteLength(text), within_budget: true })] });
-    expect(row.costs.some(cost => cost.phase === "selection" && cost.reason === "candidate delivery bytes" && cost.operation === "debit")).toBe(true);
+    const debit = (phase: string, reason: string) => row.costs.find(cost => cost.phase === phase && cost.reason === reason && cost.operation === "debit");
+    expect(debit("selection", "candidate delivery bytes")).toBeUndefined();
+    expect(debit("selection", "library encoding input check")).toMatchObject({ bytes: 0, work: expect.any(Number) });
+    expect(debit("selection", "library encoding input check")!.work).toBeGreaterThan(0);
+    expect(debit("selection", "library encoding input capture")!.bytes).toBeGreaterThan(0);
+    expect(debit("selection", "library encoding escaped component")!.bytes).toBeGreaterThan(0);
+    expect(debit("selection", "library encoding quote scan")!.work).toBeGreaterThan(0);
+    expect(debit("request", "library encoding input capture")!.bytes).toBeGreaterThan(0);
+    const quote = row.facts!.encodings.find(encoding => encoding.phase === "selection" && encoding.purpose === "candidate_quote")!;
+    expect(quote.encoder_invocations).toBeGreaterThan(0);
+    expect(quote).toMatchObject({ count: 0, utf8_bytes: 0 });
+    expect(row.facts!.encodings.find(encoding => encoding.purpose === "base_page")!.count).toBe(1);
+    expect(events(row, "encoding_result").some(event => event.phase === "selection"
+      && (event.data as { variant?: string }).variant === "component_quote")).toBe(true);
+    const finalEncoding = events(row, "encoding_result").find(event => event.phase === "final_delivery")?.data as { bytes: number; encoded_bytes?: number };
+    expect(finalEncoding.bytes).toBeGreaterThan(0);
+    if (finalEncoding.encoded_bytes !== undefined) expect(finalEncoding.bytes).toBeGreaterThanOrEqual(finalEncoding.encoded_bytes);
     expect(row.overhead.capture_ms).toBeGreaterThan(0);
     expect(row.overhead.ipc_bytes).toBeNull(); // Actual structured-clone transport is not measured.
     expect(Buffer.byteLength(JSON.stringify(row))).toBeLessThan(1_000_000);

@@ -241,8 +241,10 @@ export { sourceSemanticSupportWindow } from "./memory/evidence-create/source-sem
 export { selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage,
   type SourceSemanticLibraryPackage } from "./recall/runtime/source-semantic-library-selection.js";
 export {
-  SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResults,
+  SOURCE_SEMANTIC_LIBRARY_ORDER, assembleSourceSemanticLibraryIndex,
   proofEntriesFromBranch, proofForLibraryEntry, slotQualifiersFor, sourceGoldRootIdentity, sourceSemanticLibrarySourceEntry,
-  encodeSourceSemanticLibraryResponse, sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity,
-  scopeSourceSemanticLibraryBranch, sourceSemanticLibraryRawPreview
+  sourceSemanticLibraryQueryIdentity, sourceSemanticLibraryRequestIdentity, scopeSourceSemanticLibraryBranch
 } from "./recall/runtime/source-semantic-library-recall.js";
+export { encodeSourceSemanticLibraryResults, encodeSourceSemanticLibraryResponse, sourceSemanticLibraryRawPreview,
+  createSourceSemanticLibraryEncoding, type SourceSemanticLibraryEncoding
+} from "./recall/runtime/source-semantic-library-encoding.js";

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect } from "vitest";
 import { canonicalJson, indexEntryCacheKey, sourceSemanticQueryIdentity, SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP,
   SourceSemanticResourceExhausted, WorkspaceKind, WorkspaceState, type SoulInterpretationResponse, type SourceSemanticWorkerRequest,
-  type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
+  type SourceSemanticWorkerResult, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
 import { createAuditedSourceAdmission, encodeSourceSemanticLibraryResponse, fieldContractSha256,
   selectSourceSemanticLibraryPage, sourceGoldRootIdentity, sourceSemanticLibraryQueryIdentity,
   sourceSemanticLibraryRequestIdentity, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
@@ -37,6 +37,12 @@ type SelectionRegion = "baseline" | "final_envelope" | "same_root_post_pass";
 class ReservationMeter extends SourceSemanticReadBudget {
   public encoded: PublicRecall | undefined;
   readonly reservations = new Map<string, PublicRecall>();
+  readonly completionHolds: { cost: SourceSemanticResourceBudget; spent_work: number }[] = [];
+  override hold(cost: SourceSemanticResourceBudget): () => void {
+    const release = super.hold(cost);
+    this.completionHolds.push({ cost, spent_work: this.spentWork });
+    return release;
+  }
   readonly phases: Record<string, { logical_work: number; logical_bytes: number }> = {};
   readonly regions: { region: SelectionRegion; logical_work: number; logical_bytes: number }[] = [];
   readonly rejections: { phase: string; work: number; bytes: number; remaining_work: number; remaining_bytes: number }[] = [];
@@ -175,8 +181,9 @@ function work(meter: SourceSemanticReadBudget) {
 
 export function measureNativeSubset(context: NativeSubsetContext, limit: number,
   desired?: readonly SourceSemanticLibraryPackage[], candidates = context.fixture.pool,
-  selector: LibraryPageSelector = selectSourceSemanticLibraryPage) {
-  const { request, base } = requestAndBase(context, limit), meter = new ReservationMeter(selectionExecutionBudget);
+  selector: LibraryPageSelector = selectSourceSemanticLibraryPage, observer?: SourceSemanticReadBudget["observer"],
+  preparationBudget: SourceSemanticResourceBudget = selectionExecutionBudget) {
+  const { request, base } = requestAndBase(context, limit), meter = new ReservationMeter(preparationBudget, observer);
   let first = true, probe: { fits: boolean; encoded: PublicRecall } | undefined;
   let reserved: PublicRecall | undefined;
   const select: LibraryPageSelector = input => {
@@ -206,7 +213,7 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
   meter.finish(plan.pages.every(page => page.length === 0));
   const selector_work = meter.regions.reduce((sum, row) => ({ logical_work: sum.logical_work + row.logical_work,
     logical_bytes: sum.logical_bytes + row.logical_bytes }), { logical_work: 0, logical_bytes: 0 });
-  const preparation_work = work(meter), deliveryMeter = new SourceSemanticReadBudget(selectionExecutionBudget);
+  const preparation_work = work(meter), deliveryMeter = new ReservationMeter(selectionExecutionBudget, observer);
   const payload = { workspace_id: WS, as_of: CLOCK,
     authorized_scopes: { mode: "named" as const, scopes: SCOPES }, request };
   // Pair policies against the same empty process-local lease inventory. Reuse
@@ -226,7 +233,9 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
     reserved_bytes: reserved === undefined ? null : bytes(reserved),
     probe_bytes: probe === undefined ? null : bytes(probe.encoded),
     encoded_bytes: bytes(encoded), preparation_work, delivery_work: work(deliveryMeter), selector_work,
-    selector_regions: meter.regions, preparation_phases: meter.phases, budget_rejections: meter.rejections,
+    selector_regions: meter.regions, preparation_phases: meter.phases, delivery_phases: deliveryMeter.phases,
+    budget_rejections: meter.rejections, completion_holds: meter.completionHolds,
+    preparation_remaining: meter.remaining(), preparation_meter: meter,
     support: compatibleTaskSupport(context.fixture, delivered),
     qualifiers: native.slot_qualifiers.map(row => row.support),
     limit, actual_subset: desired === undefined || membership(delivered) === membership(desired) };

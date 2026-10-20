@@ -39,6 +39,8 @@ const sourceFiles = [
   "packages/core/src/__tests__/recall/runtime/source-semantic-selection-fixture.ts",
   "packages/core/src/__tests__/recall/runtime/source-semantic-proof-fixture.ts",
   "packages/core/src/recall/runtime/source-semantic-library-recall.ts",
+  "packages/core/src/recall/runtime/source-semantic-library-encoding.ts",
+  "packages/core/src/recall/runtime/source-semantic-library-codec.ts",
   "packages/core/src/recall/runtime/source-semantic-library-selection.ts",
   "packages/core/src/recall/runtime/source-disclosure.ts",
   "packages/core/src/memory/evidence-create/source-utf8-hydrate.ts",

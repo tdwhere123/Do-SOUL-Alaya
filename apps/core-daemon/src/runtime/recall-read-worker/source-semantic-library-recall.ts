@@ -237,9 +237,8 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   const prepared = prepareSourceSemanticLibraryInputs(runtime, payload, authorized, meter, request, queryStatus,
     query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
   const selection = meter.child(sourceRecallPhaseAllowance(meter, "selection"), "selection");
-  const plan = prepareLibraryDelivery(prepared.base, prepared.packages, request, selection, "field", selectSourceSemanticLibraryPage, prepared.execution);
-  meter.absorb(selection);
-  return plan;
+  return prepareLibraryDelivery(prepared.base, prepared.packages, request, meter, "field",
+    selectSourceSemanticLibraryPage, prepared.execution, selection);
 }
 
 function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,

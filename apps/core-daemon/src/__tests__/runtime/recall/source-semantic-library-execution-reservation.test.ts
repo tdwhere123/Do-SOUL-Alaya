@@ -9,6 +9,7 @@ import { qualifySourceDisclosure, sourceDisclosure, canonicalJson, indexEntryCac
   SourceSemanticExecutionSchema, SourceSemanticWorkerResultSchema, type SourceSemanticAccessReceipt,
   type SourceSemanticExecution, type SourceSemanticWorkerResult, type SoulInterpretationResponse
 } from "@do-soul/alaya-protocol";
+import * as Core from "@do-soul/alaya-core";
 import { assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse, preparedDeliveryId,
   sealIssuedContinuation, sourceGoldRootIdentity } from "@do-soul/alaya-core";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
@@ -53,8 +54,56 @@ function expectedReservation(result: Recall, execution: SourceSemanticExecution)
   }));
   return publicRecall({ ...result, execution, source_disclosures, work: RESERVED_WORK });
 }
+type QuotedAdmission = Readonly<{
+  memberKeys: readonly string[]; more: boolean; payload: string;
+  quote: Readonly<{ bytes: number; withinBudget: boolean }>;
+}>;
+function quoteMatches(quote: QuotedAdmission, admitted: Pick<QuotedAdmission, "memberKeys" | "more" | "payload">): boolean {
+  return quote.more === admitted.more && quote.payload === admitted.payload
+    && quote.memberKeys.length === admitted.memberKeys.length
+    && quote.memberKeys.every((key, index) => key === admitted.memberKeys[index]);
+}
+function admissionHolds(quote: QuotedAdmission, reservedBytes: number): boolean {
+  return quote.quote.bytes === reservedBytes && quote.quote.withinBudget;
+}
+function admittedQuote(quotes: readonly QuotedAdmission[], result: Recall): QuotedAdmission {
+  const admitted = { memberKeys: result.index.entries.map(row => indexEntryCacheKey(row)),
+    more: result.index.continuation !== null, payload: result.coverage.payload };
+  const matched = quotes.filter(row => quoteMatches(row, admitted));
+  if (matched.length === 0) throw new Error("no Core quote bound to admitted membership and frame");
+  return matched[matched.length - 1]!;
+}
 function captureReservations() {
-  const reservations = new Map<string, PublicRecall>();
+  const reservations = new Map<string, PublicRecall>(), quotes: QuotedAdmission[] = [];
+  const create = Core.createSourceSemanticLibraryEncoding;
+  const memberKey = new WeakMap<object, string>();
+  const record = (members: readonly object[], more: boolean, payload: string,
+    quote: { bytes: number; withinBudget: boolean }) => {
+    quotes.push({ memberKeys: members.map(row => memberKey.get(row)!), more, payload,
+      quote: { bytes: quote.bytes, withinBudget: quote.withinBudget } });
+  };
+  vi.spyOn(Core, "createSourceSemanticLibraryEncoding").mockImplementation(meter => {
+    const session = create(meter);
+    return { ...session, prepareRaw: (...args) => {
+      const raw = session.prepareRaw(...args);
+      if (raw === null) return null;
+      const result = args[0];
+      for (const [index, member] of raw.members.entries()) {
+        memberKey.set(member, indexEntryCacheKey(result.index.entries[index]!));
+      }
+      record(raw.members, result.index.continuation !== null, result.coverage.payload, raw.initial);
+      return { initial: raw.initial, members: raw.members, member: input => {
+        const member = raw.member(input);
+        if (member !== null) memberKey.set(member, indexEntryCacheKey(input.entry));
+        return member;
+      }, quote: (frame, members) => {
+        const quote = raw.quote(frame, members);
+        record(members, frame.index.continuation !== null && frame.index.continuation !== undefined,
+          frame.payload, quote);
+        return quote;
+      } };
+    } };
+  });
   const retain = SourceSemanticReadBudget.prototype.retain;
   vi.spyOn(SourceSemanticReadBudget.prototype, "retain").mockImplementation(function (this: SourceSemanticReadBudget, value, phase) {
     retain.call(this, value, phase);
@@ -62,10 +111,10 @@ function captureReservations() {
     const encoded = value as SoulInterpretationResponse;
     if (encoded.operation === "recall" && encoded.delivery_id !== undefined) reservations.set(encoded.delivery_id, encoded);
   });
-  return reservations;
+  return { encodings: reservations, quotes };
 }
 function assertBounded(result: Recall, request: RecallRequest, execution: SourceSemanticExecution,
-  reservations?: ReadonlyMap<string, PublicRecall>) {
+  reservations?: ReturnType<typeof captureReservations>) {
   expect(result.request_budget).toEqual(BUDGET);
   expect(result.execution).toEqual(execution);
   const encoded = publicRecall(result), expected = expectedReservation(result, execution);
@@ -76,7 +125,15 @@ function assertBounded(result: Recall, request: RecallRequest, execution: Source
   expect(result.work.logical_work).toBeLessThanOrEqual(BUDGET.work_units);
   expect(result.work.logical_memory_bytes).toBeLessThanOrEqual(BUDGET.memory_bytes);
   if (reservations !== undefined) {
-    const reserved = reservations.get(result.delivery_id);
+    const reserved = reservations.encodings.get(result.delivery_id);
+    if (reserved === undefined) {
+      // Raw incremental admission does not materialize a complete candidate page.
+      // Observe the real Core quotation and compare its extent with this independent
+      // complete public-encoder oracle; proof paths must still materialize.
+      expect(result.proofs?.length ?? 0).toBe(0);
+      expect(admissionHolds(admittedQuote(reservations.quotes, result), bytes(expected))).toBe(true);
+      return;
+    }
     if (expected.index?.continuation !== null && expected.index?.continuation !== undefined) {
       expect(reserved!.index!.continuation).toMatchObject({ continuation_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
         capability: expect.stringMatching(/^[0-9a-f]{64}$/u) });
@@ -419,4 +476,15 @@ it("keeps a fitting raw baseline when active proof only fits a native final with
     expect(publicRecall(result).results!.map(row => row.content_preview)).toEqual(["Alice uses tools."]);
     expect(sourceSemanticAccessPhases(result.discovery.access!).preparation).toEqual(fixture.prepared.receipt);
   } finally { fixture.cleanup(); }
+});
+
+it("does not treat equal reserved length as admission when membership, frame, or token admission differs", () => {
+  const admitted: QuotedAdmission = { memberKeys: ["root-a"], more: false, payload: "complete",
+    quote: { bytes: 4096, withinBudget: true } };
+  expect(quoteMatches({ ...admitted, memberKeys: ["root-b"] }, admitted)).toBe(false);
+  expect(quoteMatches({ ...admitted, more: true }, admitted)).toBe(false);
+  expect(admissionHolds({ ...admitted, quote: { bytes: 4096, withinBudget: false } }, 4096)).toBe(false);
+  expect(admissionHolds({ ...admitted, quote: { bytes: 4095, withinBudget: true } }, 4096)).toBe(false);
+  expect(quoteMatches(admitted, admitted)).toBe(true);
+  expect(admissionHolds(admitted, 4096)).toBe(true);
 });

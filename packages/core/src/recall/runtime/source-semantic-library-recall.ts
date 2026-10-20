@@ -1,22 +1,20 @@
 import {
-  canonicalJson, CONDITIONAL_FIELD_SCHEMA_VERSION, InformationIndexSchema, MILLIGRADE_TOP,
+  canonicalJson, CONDITIONAL_FIELD_SCHEMA_VERSION, InformationIndexSchema,
   SOURCE_SEMANTIC_LIBRARY_OCCUPANCY, SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX,
   SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
-  SOURCE_SEMANTIC_LIBRARY_TIE_POLICY, sourceIndexEntry, indexEntryCacheKey, indexEntryObjectKind,
-  indexMemoryObjectId, type Continuation, type Derivation, type IndexEntry, type InformationIndex, type MemorySearchResult,
+  SOURCE_SEMANTIC_LIBRARY_TIE_POLICY, sourceIndexEntry,
+  type Continuation, type Derivation, type IndexEntry, type InformationIndex,
   type SourceSemanticLibraryOrder, type SourceSemanticLibrarySlotQualifier,
-  SoulInterpretationResponseSchema, type SourceSemanticWorkerResult, type SoulInterpretationResponse,
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
-  type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier,
-  verifySourceSemanticLibraryDelivery
+  sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier
 } from "@do-soul/alaya-protocol";
 import { libraryPageOrder } from "../conditional-field/index/completion-target.js";
 import { sortIndexEntries } from "./index-continuation.js";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
-import { CoreError } from "../../shared/errors.js";
-import { makeTokenEstimator } from "./recall-service-port-helpers.js";
-import { projectSourceDisclosure } from "./source-disclosure.js";
+// Payload and delivery-identity tests retain these direct imports; retire this
+// adapter when those consumers migrate. Package-root compatibility is independent.
+export { encodeSourceSemanticLibraryResults, encodeSourceSemanticLibraryResponse } from "./source-semantic-library-codec.js";
 
 export { sourceGoldRootIdentity, proofForLibraryEntry, proofForLibraryQualifier } from "@do-soul/alaya-protocol";
 
@@ -48,14 +46,6 @@ export const SOURCE_SEMANTIC_LIBRARY_ORDER: SourceSemanticLibraryOrder = {
   occupancy_prefix: SOURCE_SEMANTIC_LIBRARY_OCCUPANCY_PREFIX,
   page_budget: SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET
 };
-const SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS = 2_000;
-
-/** Raw fallback reserves a fair root share; semantic support may use any remaining space atomically. */
-export function sourceSemanticLibraryRawPreview(text: string, occupiedRoots: number): string {
-  return previewWithinTokens(text, Math.floor(SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS
-    / Math.max(1, Math.min(occupiedRoots, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET))), makeTokenEstimator());
-}
-
 export function sourceSemanticLibrarySourceEntry(input: Readonly<{
   workspaceId: string; root_id: string; source_version: string; content_digest: string;
   evidence_object_id: string | null; hypothesis_id: string;
@@ -188,121 +178,6 @@ function libraryOccupancyContinuation(input: Readonly<{
     interpretation_id: input.interpretation_id, interpretation_clock: input.as_of,
     ...(input.authorized_scopes === undefined ? {} : { authorized_scopes: input.authorized_scopes })
   };
-}
-
-export function encodeSourceSemanticLibraryResults(
-  index: InformationIndex,
-  previews: ReadonlyMap<string, string> = new Map(),
-  maxTotalTokens = SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS,
-  atomic = false,
-  sourceDisclosures: Readonly<Record<string, SourceDisclosure>> = {}
-): MemorySearchResult[] {
-  const encoded: MemorySearchResult[] = [];
-  const estimator = makeTokenEstimator();
-  const entries = index.entries.slice(0, index.representation.page_budget);
-  const payloads = entries.map((entry) => {
-    const objectId = indexMemoryObjectId(entry);
-    const preview = previews.get(indexEntryCacheKey(entry)) ?? (objectId === undefined ? undefined : previews.get(objectId));
-    return { available: preview !== undefined, text: preview === "" ? "[empty source]" : preview ?? "[payload omitted]" };
-  });
-  const allowances = allocatePreviewTokens(payloads.map(({ text }) => estimator.estimate(text)), maxTotalTokens);
-  let usedTokens = 0;
-  for (const [offset, entry] of entries.entries()) {
-    const score = entry.association_milligrades / MILLIGRADE_TOP;
-    const objectId = indexMemoryObjectId(entry);
-    const payload = payloads[offset]!;
-    // Proof support is atomic. The selector must reserve it before choosing the root.
-    const proof = entry.interpretation_node !== undefined && entry.explanation_ids.length > 0;
-    const disclosure = sourceDisclosures[indexEntryCacheKey(entry)] ?? projectSourceDisclosure({
-      material_kind: "original_body", evaluated_as_of: sourceClock(index),
-      proof_use: proof ? "conditional_support" : "source_only"
-    });
-    const prefix = payload.available ? atomic || proof ? payload.text : previewWithinTokens(payload.text, allowances[offset]!, estimator) : "";
-    const content = prefix.length === 0 ? "[payload omitted]" : prefix;
-    const tokenEstimate = estimator.estimate(content);
-    usedTokens += tokenEstimate;
-    encoded.push({
-      ...(objectId === undefined ? {} : { object_id: objectId }),
-      object_kind: indexEntryObjectKind(entry),
-      target: entry.target,
-      relevance_score: score,
-      content_preview: content,
-      source_disclosure: disclosure,
-      evidence_pointers: [],
-      hypothesis_id: entry.hypothesis_id,
-      program_state: entry.program_state ?? "accepting",
-      time_state: entry.time_state ?? "as_of",
-      output_binding: entry.output_binding,
-      selection_reason: proof
-        ? `Conditional on interpretation ${entry.interpretation_node!.packet_id}; claim unknown.`
-        : "Source evidence without a proved semantic answer; claim unknown.",
-      source_channels: proof ? ["conditional_field"] : ["source_record"],
-      score_factors: { activation: score, relevance: score },
-      budget_state: {
-        token_estimate: tokenEstimate,
-        max_entries: index.representation.page_budget,
-        max_total_tokens: maxTotalTokens,
-        remaining_entries: Math.max(0, index.representation.page_budget - encoded.length - 1),
-        remaining_tokens: Math.max(0, maxTotalTokens - usedTokens),
-        within_budget: payload.available && content === payload.text && (atomic
-          ? payloads.reduce((sum, row) => sum + estimator.estimate(row.text), 0) <= maxTotalTokens
-          : tokenEstimate <= (proof ? maxTotalTokens : allowances[offset]!))
-      }
-    });
-  }
-  return encoded;
-}
-
-function sourceClock(index: InformationIndex): string {
-  if (index.as_of === undefined) throw new CoreError("OBLIGATION_VIOLATION", "library source disclosure requires an evaluation clock");
-  return index.as_of;
-}
-
-/** Reserve every occupied slot before redistributing unused preview allowance. */
-function allocatePreviewTokens(required: readonly number[], limit: number): number[] {
-  const allocated = required.map(() => 0);
-  let remaining = Math.max(0, Math.floor(limit));
-  let pending = required.map((_, index) => index);
-  while (remaining > 0 && pending.length > 0) {
-    const share = Math.floor(remaining / pending.length);
-    const remainder = remaining % pending.length;
-    for (const [position, index] of pending.entries()) {
-      const increment = Math.min(required[index]! - allocated[index]!, share + (position < remainder ? 1 : 0));
-      allocated[index]! += increment;
-      remaining -= increment;
-    }
-    pending = pending.filter((index) => allocated[index]! < required[index]!);
-  }
-  return allocated;
-}
-
-function previewWithinTokens(text: string, allowance: number, estimator: ReturnType<typeof makeTokenEstimator>): string {
-  let low = 0, high = text.length;
-  while (low < high) {
-    const end = Math.ceil((low + high) / 2);
-    if (estimator.estimate(text.slice(0, end)) <= allowance) low = end;
-    else high = end - 1;
-  }
-  // UTF-16 slicing must not turn a source character into a replacement character.
-  if (low > 0 && low < text.length && /[\uD800-\uDBFF]/u.test(text[low - 1]!) && /[\uDC00-\uDFFF]/u.test(text[low]!)) low -= 1;
-  return text.slice(0, low);
-}
-
-/** The worker's byte check and MCP delivery encode the exact same public envelope. */
-export function encodeSourceSemanticLibraryResponse(
-  result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>
-): SoulInterpretationResponse {
-  verifySourceSemanticLibraryDelivery(result, fieldContractSha256);
-  if (result.execution === undefined) throw new CoreError("VALIDATION", "Source library v2 requires actual execution accounting");
-  const { kind: _kind, previews, coverage, ...rest } = result;
-  const results = encodeSourceSemanticLibraryResults(result.index, new Map(Object.entries(previews ?? {})), SOURCE_SEMANTIC_LIBRARY_PAYLOAD_TOKENS, true,
-    result.source_disclosures);
-  const omitted = results.some((row) => !row.budget_state.within_budget);
-  const incomplete = omitted || coverage.payload !== "complete";
-  return SoulInterpretationResponseSchema.parse({ operation: "recall", ...rest, results,
-    total_count: results.length,
-    index: incomplete ? { ...result.index, completeness: { ...result.index.completeness, payload: "partial" } } : result.index,
-    coverage: { ...coverage, payload: omitted ? "truncated" : coverage.payload } });
 }
 
 export function slotQualifiersFor(

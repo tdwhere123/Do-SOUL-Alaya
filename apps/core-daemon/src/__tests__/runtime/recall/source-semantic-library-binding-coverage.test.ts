@@ -205,6 +205,8 @@ it("compiled worker baseline omits Pixel and charger on the ten-source fixture",
     assertUnrepresentedEnumeration(worker);
     const labels = assertCrowdedOmission(persisted, worker, rows);
     const limited = await accessCall(execute, recallRequest(ids, EXISTING_TEST_WORK_UNITS));
+    expect(limited.index.entries).toEqual([]);
+    expect(limited.discovery.access?.trace).toMatchObject({ kind: "library_selection" });
     expect(limited.coverage.payload === "truncated" || limited.discovery.truncated === true).toBe(true);
     await writeReceipt("baseline.json", {
       arm: "compiled_worker", labels, body_labels: labels, missing: ["Pixel", "charger", NON_TOOL_LABEL],

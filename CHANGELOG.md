@@ -42,6 +42,20 @@ The extraction preserves current allocations, charges, auxiliary-header reads,
 exact encodings and frozen continuation membership. It does not change ordinary
 `soul.recall`, add a public contract, or calibrate resource budgets.
 
+The subsequent encoding work adds `createSourceSemanticLibraryEncoding` and its
+`SourceSemanticLibraryEncoding` type to Core for the daemon delivery planner.
+This is an approved additive production-consumer API under invariant §25, not a
+wholly private interface or a release. Core retains one proof, token, coverage
+and response-schema authority for both quotations and the existing public
+encoder. Supported raw-only planning captures immutable shared evidence once,
+then validates and prices changing frames and member combinations without
+repeating the complete input capture, projection and schema parse. Unsupported
+shapes retain the complete fallback. Capture, lookup, projection and quotation
+work remain charged; complete final encoding and token admission are still
+authoritative. App versions, MCP and persistent contracts, ranking,
+resource caps and output envelopes are unchanged; no independent Core version
+or unrelated SemVer snapshot is advanced.
+
 ### Private recall measurement
 
 Private recall measurement is a bench adapter, not a public diagnostic surface:

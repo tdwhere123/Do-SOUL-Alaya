@@ -21,6 +21,7 @@ type SourceRecallDelivery = Readonly<{
     fits: (page: readonly SourceRecallMember[]) => boolean) => readonly SourceRecallMember[];
   pairs: (position: number) => Generator<number>;
   encode: (page: readonly SourceRecallMember[], offset: number, more: boolean, partial: boolean) => Readonly<{
+    encoding: "complete_envelope" | "completion_quote";
     access: SourceSemanticAccessReceipt; bytes: number; withinBudget: boolean; payloadGrowth: number }>;
   finishEncoding: () => void;
   // The adapter owns the ONLY canonical page arrays. Views below are synchronous ordinal borrows.
@@ -98,6 +99,18 @@ function select(input: SourceRecallDelivery, selection: Select): readonly Source
     throw error;
   }
 }
+function observeEncodingResult(input: SourceRecallDelivery, page: readonly SourceRecallMember[], offset: number, more: boolean,
+  quoted: ReturnType<SourceRecallDelivery["encode"]>, fits: boolean, partial: boolean): void {
+  if (quoted.encoding === "complete_envelope") {
+    input.meter.observer?.event("encoding_result", input.meter.phase, () => partial
+      ? { offset, variant: "partial_payload", fits, bytes: quoted.bytes, byte_limit: input.byteLimit }
+      : { offset, more, fits, bytes: quoted.bytes, byte_limit: input.byteLimit, targets: page.map(row => input.target(row.member)) });
+    return;
+  }
+  input.meter.observer?.event("encoding_result", input.meter.phase, () => ({
+    offset, more, fits, bytes: quoted.bytes, byte_limit: input.byteLimit, within_budget: quoted.withinBudget,
+    variant: "component_quote", ...(partial ? { partial: true } : {}), targets: page.map(row => input.target(row.member)) }));
+}
 function reservePage(input: SourceRecallDelivery, page: readonly SourceRecallMember[], offset: number, more: boolean): Reservation {
   try {
   const quoted = input.encode(page, offset, more, false);
@@ -105,11 +118,9 @@ function reservePage(input: SourceRecallDelivery, page: readonly SourceRecallMem
   if (fits && quoted.bytes + quoted.payloadGrowth > input.byteLimit) {
     const partial = input.encode(page, offset, more, true);
     fits = partial.bytes <= input.byteLimit;
-    input.meter.observer?.event("encoding_result", input.meter.phase, () => ({ offset, variant: "partial_payload",
-      fits, bytes: partial.bytes, byte_limit: input.byteLimit }));
+    observeEncodingResult(input, page, offset, more, partial, fits, true);
   }
-  input.meter.observer?.event("encoding_result", input.meter.phase, () => ({ offset, more, fits, bytes: quoted.bytes,
-    byte_limit: input.byteLimit, targets: page.map(row => input.target(row.member)) }));
+  observeEncodingResult(input, page, offset, more, quoted, fits, false);
   return { access: quoted.access, fits };
   } finally { input.finishEncoding(); }
 }

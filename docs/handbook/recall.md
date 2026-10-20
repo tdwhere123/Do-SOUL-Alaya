@@ -1684,9 +1684,19 @@ deferral and frozen continuation membership. Its ordinal views borrow the canoni
 candidate inventory only during the synchronous phase; the lease retains one
 canonical package/page plan, not a second neutral plan. Core's existing selection
 gateways adapt support facts to the internal `source-recall-selection` kernel.
-Native source extents and census interleaving still run without Q. Phase allowances,
-charges and source/interpretation scheduling are unchanged; ordinary `soul.recall`
+Native source extents and census interleaving still run without Q. Phase allowances
+and source/interpretation scheduling remain unchanged; ordinary `soul.recall`
 continues to use its separate conditional-field route.
+Core's [`library encoding owner`](../../packages/core/src/recall/runtime/source-semantic-library-encoding.ts)
+exposes a synchronous planning session to the daemon. Supported raw-only plans
+capture immutable shared components once and reuse their validated projections;
+subsequent candidates validate changing frames, member combinations and token
+admission. Unsupported shapes use the complete compatibility path. Actual capture,
+lookup, projection and quotation work remains charged. The existing public encoder
+and quotations share one authority; final complete encoding and token admission
+remain mandatory. The additive Core cross-package API is governed
+by invariant §25; it introduces no MCP or persistent field and changes no
+ranking policy, resource cap or output envelope.
 The `query-conditioned-v1` policy scores original query against observed source
 text, then uses independently verified query/source predicate readings to break
 access ties. `canonical-v1` is the explicit diagnostic control over the same
