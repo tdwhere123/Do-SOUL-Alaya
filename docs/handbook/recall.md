@@ -1675,7 +1675,18 @@ raw-source access. Preparation and delivery expose one admitted/unavailable sema
 status with a reason; unavailable semantics cannot produce a conditional proof.
 Malformed public semantic objects still fail schema admission, and access,
 scope, source-currentness, lease and continuation guards remain in force.
-`prepare_query` and library `recall` share Core's `source-semantic-access` owner.
+`prepare_query` and library `recall` share daemon's neutral `source-recall-access`
+and `source-recall-catalog` phases. Core's semantic access gateway adapts verified
+reading facts to its internal `source-recall-access` policy kernel. The library
+adapter retains Q/H/C admission, computation, proof materialization and public
+projection; daemon's `source-recall-delivery` owns exact-fit admission, final-page
+deferral and frozen continuation membership. Its ordinal views borrow the canonical
+candidate inventory only during the synchronous phase; the lease retains one
+canonical package/page plan, not a second neutral plan. Core's existing selection
+gateways adapt support facts to the internal `source-recall-selection` kernel.
+Native source extents and census interleaving still run without Q. Phase allowances,
+charges and source/interpretation scheduling are unchanged; ordinary `soul.recall`
+continues to use its separate conditional-field route.
 The `query-conditioned-v1` policy scores original query against observed source
 text, then uses independently verified query/source predicate readings to break
 access ties. `canonical-v1` is the explicit diagnostic control over the same

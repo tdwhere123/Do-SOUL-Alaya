@@ -198,7 +198,11 @@ export function measureNativeSubset(context: NativeSubsetContext, limit: number,
   };
   // Forced-subset probes deliberately remain custom selectors. Ordinary measurements
   // must pass the exact selector object so production's same-root post-pass runs.
-  const plan = prepareLibraryDelivery(base, candidates, request, meter, "field", desired === undefined ? selector : select);
+  // Forced alternatives must be explicit inventory members before the neutral
+  // owner can reserve them; the materializer cannot introduce a new package.
+  const inventory = desired === undefined ? candidates
+    : [...candidates, ...desired.filter(row => !candidates.includes(row))];
+  const plan = prepareLibraryDelivery(base, inventory, request, meter, "field", desired === undefined ? selector : select);
   meter.finish(plan.pages.every(page => page.length === 0));
   const selector_work = meter.regions.reduce((sum, row) => ({ logical_work: sum.logical_work + row.logical_work,
     logical_bytes: sum.logical_bytes + row.logical_bytes }), { logical_work: 0, logical_bytes: 0 });

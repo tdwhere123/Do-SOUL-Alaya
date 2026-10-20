@@ -13,7 +13,7 @@ import { observeSourceSemanticAccess } from "../../../runtime/recall-read-worker
 import { SourceSemanticUnionCompletion } from "../../../runtime/recall-read-worker/source-semantic-empty-population-budget.js";
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { beginCanonicalSourceText, quoteSemanticSourceObservation, readSourceText }
-  from "../../../runtime/recall-read-worker/source-semantic-source-observation.js";
+  from "../../../runtime/recall-read-worker/source-recall-source-text.js";
 import { CLOCK, ORIGINAL, QUERY_BUDGET, RAW, SCOPES, WS, withIndexedSources, workerCall, type IndexFixture }
   from "./source-semantic-index-acquisition.test-support.js";
 

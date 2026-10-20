@@ -9,6 +9,7 @@ import type { SourceSemanticReadRuntime } from "./runtime.js";
 import { admissionOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 
 import { LIBRARY_SOURCE_DISPLAY_BYTES as DISPLAY_BYTES } from "./source-semantic-library-nominated-windows.js";
+import { enumerateSourceRecallPairs } from "./source-recall-package-pairs.js";
 export type LibraryExecutedSupport = Readonly<{
   proof: SourceSemanticLibraryProof;
   group: Pick<SourceSemanticLibraryPackage, "entries" | "explanations">;
@@ -131,39 +132,34 @@ function supportPackages(position: number, source: string, sourceBytes: number, 
 /** Optional same-root alternatives reuse complete baseline source windows, after page reservation. */
 export function* prepareLibraryPackagePairs(candidates: readonly SourceSemanticLibraryPackage[],
   page: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget): Generator<SourceSemanticLibraryPackage> {
-  for (const selected of page) {
-    if (selected.entry.target.kind !== "source_evidence") continue;
-    meter.retain(selected.entry.target, "library pair source identity");
-    const root = sourceGoldRootIdentity(selected.entry.target);
-    meter.charge(candidates.length, 0, "library pair source search");
-    const union = candidates.find(row => {
-      if (row.proofs.length <= 2 || row.entry.target.kind !== "source_evidence") return false;
-      meter.retain(row.entry.target, "library pair source identity");
-      return sourceGoldRootIdentity(row.entry.target) === root;
-    });
-    if (union === undefined || union.proofs.length === selected.proofs.length || union.entry.target.kind !== "source_evidence") continue;
-    const span = union.entry.target.span;
-    if (span === undefined) continue;
-    meter.charge(candidates.length * union.proofs.length, candidates.length * 8, "library pair singleton references");
-    const singles = candidates.filter(row => row.proofs.length === 1 && union.proofs.includes(row.proofs[0]!));
-    const inputs = singles.map(row => {
-      const proof = row.proofs[0]!, bindings = proof.binding_results ?? [];
+  const root = (row: SourceSemanticLibraryPackage): string | undefined => {
+    if (row.entry.target.kind !== "source_evidence") return undefined;
+    meter.retain(row.entry.target, "library pair source identity");
+    return sourceGoldRootIdentity(row.entry.target);
+  };
+  const pairs = enumerateSourceRecallPairs({ count: candidates.length, selectedCount: page.length, meter,
+    selectedRoot: position => root(page[position]!), selectedSupportCount: position => page[position]!.proofs.length,
+    root: member => root(candidates[member]!), supportCount: member => candidates[member]!.proofs.length,
+    hasExtent: member => { const target = candidates[member]!.entry.target; return target.kind === "source_evidence" && target.span !== undefined; },
+    belongsTo: (member, union) => candidates[union]!.proofs.includes(candidates[member]!.proofs[0]!),
+    inputs: member => {
+      const proof = candidates[member]!.proofs[0]!, bindings = proof.binding_results ?? [];
       meter.retain(proof.query, "library pair query support");
       const count = proof.query.alternatives.reduce((sum, alternative) => sum + (alternative.evidence_inputs?.length ?? 0), 0);
       meter.charge((bindings.length + 1) * (count + 1), count * 128, "library pair query support");
       return new Set(projectSourceSemanticQuerySupport(proof.query, bindings).evidence_inputs
         .filter(row => row.status === "supported").map(row => `${row.alternative}:${row.input}`));
-    });
-    for (let first = 0; first < singles.length; first++) for (let second = first + 1; second < singles.length; second++) {
-      const left = inputs[first]!, right = inputs[second]!;
-      meter.charge(1 + left.size + right.size, (left.size + right.size) * 8, "library proof pair enumeration");
-      if (![...left].some(id => !right.has(id)) || ![...right].some(id => !left.has(id))) continue;
-      meter.charge(2, 128, "library proof pair references");
-      const branches = [singles[first]!, singles[second]!].map(row => ({ proof: row.proofs[0]!, group: row }));
-      // Extra source bytes are permitted; reusing the bounded union avoids another full-source encoding per pair.
-      yield proofPackage(union.access_position, span.content_complete, branches,
-        { text: union.preview, start_offset: span.content_start, end_offset: span.content_end }, meter, union.source_disclosure);
     }
+  });
+  for (const selected of pairs) {
+    const union = candidates[selected.union]!;
+    if (union.entry.target.kind !== "source_evidence" || union.entry.target.span === undefined) {
+      throw new CoreError("OBLIGATION_VIOLATION", "selected pair has no complete source extent");
+    }
+    const span = union.entry.target.span;
+    const branches = [candidates[selected.left]!, candidates[selected.right]!].map(row => ({ proof: row.proofs[0]!, group: row }));
+    yield proofPackage(union.access_position, span.content_complete, branches,
+      { text: union.preview, start_offset: span.content_start, end_offset: span.content_end }, meter, union.source_disclosure);
   }
 }
 

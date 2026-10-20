@@ -11,7 +11,8 @@ import { query as incompatibleQuery } from "../../../../../../packages/core/src/
 import { canonicalJson, SourceSemanticAccessReceiptSchema, SourceSemanticExecutionSchema, sourceSemanticAccessPhases,
   sourceSemanticExecution, sourceSemanticExecutionPhases, SourceSemanticResourceExhausted, SourceSemanticResourceLedger
 } from "@do-soul/alaya-protocol";
-import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
+import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
+import { listEligibleSemanticSources } from "../../../runtime/recall-read-worker/source-recall-catalog.js";
 import { sourceSemanticRevision } from "../../../runtime/recall-read-worker/source-semantic-leases.js";
 import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/source-semantic-reasoning.js";
 import { acquireSourceSemanticIndex } from "../../../runtime/recall-read-worker/source-semantic-index-acquisition.js";
