@@ -15,8 +15,11 @@ const LeaseFact = z.object({ handle_digest: z.string(), kind: z.string(), origin
   pool_origin: Origin.nullable(), plan_origin: Origin.nullable() }).strict();
 const Operation = z.object({ kind: z.enum(["retain", "canonical_scan"]), meter_id: Count.nullable(), phase: z.string(), reason: z.string(),
   count: Count, work: Count, bytes: Count, completed: Count, same_object_count: Count,
-  same_object_work: Count, same_object_bytes: Count }).strict();
+  same_object_work: Count, same_object_bytes: Count, uncompared_object_count: Count.optional() }).strict();
 type Operation = z.infer<typeof Operation>;
+const OperationTotal = Operation.omit({ meter_id: true, phase: true, reason: true }).extend({
+  uncompared_object_count: Count, identity_capture: z.enum(["complete", "partial"]) });
+type OperationTotal = z.infer<typeof OperationTotal>;
 const Encoding = z.object({ phase: z.string(), purpose: z.string(), encoder_invocations: Count, count: Count, utf8_bytes: Count,
   identical_complete_encodings: Count, repeated_component_bytes: Count, compared_components: Count }).strict();
 type Encoding = z.infer<typeof Encoding>;
@@ -33,6 +36,8 @@ export const SourceSemanticNativeFactsSchema = z.object({
   pool: z.object({ pool_id: z.string(), use: z.enum(["created", "reused"]), origin: Origin.nullable(), union: Union }).strict().nullable(),
   lease_reads: z.array(LeaseFact).max(32), lease_issues: z.array(LeaseFact).max(32),
   operations: z.array(Operation).max(128), encodings: z.array(Encoding).max(32),
+  /** Constant-size totals continue after meter/reason detail or object-identity sampling ends. */
+  operation_totals: z.object({ complete: z.boolean(), rows: z.array(OperationTotal).max(2) }).strict().optional(),
   // Bounded diagnostic-detail completeness only; explicit null ancestry is still unknown.
   complete: z.boolean(), issues: z.array(z.string()).max(16)
 }).strict();
@@ -48,6 +53,8 @@ export class SourceSemanticObservationFacts {
   private readonly value: SourceSemanticNativeFacts = { binding: null, pool: null, lease_reads: [], lease_issues: [],
     operations: [], encodings: [], complete: true, issues: [] };
   private readonly operations = new Map<string, Operation>();
+  private readonly operationTotals = new Map<Operation["kind"], OperationTotal>();
+  private readonly objectCounts = { retain: 0, canonical_scan: 0 };
   private readonly encodings = new Map<string, Encoding>();
   private readonly retained = new WeakSet<object>();
   private readonly scanned = new WeakSet<object>();
@@ -107,16 +114,26 @@ export class SourceSemanticObservationFacts {
     work: number, bytes: number, completed: boolean): void {
     this.safely(() => {
       const key = `${kind}\0${meterId}\0${phase}\0${reason}`;
-      if (!this.operations.has(key) && this.operations.size >= 128) { this.overflow("operation_fact_limit"); return; }
       const seen = kind === "retain" ? this.retained : this.scanned;
       const object = value !== null && typeof value === "object" ? value : null;
       const repeated = object !== null && seen.has(object);
-      if (object !== null) seen.add(object);
+      const uncompared = object !== null && !repeated && this.objectCounts[kind] >= 128;
+      if (object !== null && !repeated && !uncompared) { seen.add(object); this.objectCounts[kind]++; }
+      if (uncompared) this.overflow("operation_identity_limit");
+      const total = this.operationTotals.get(kind) ?? { kind, count: 0, work: 0, bytes: 0, completed: 0,
+        same_object_count: 0, same_object_work: 0, same_object_bytes: 0, uncompared_object_count: 0, identity_capture: "complete" };
+      const update = (row: Operation | OperationTotal) => {
+        row.count++; row.work += work; row.bytes += bytes; row.completed += Number(completed);
+        row.uncompared_object_count = (row.uncompared_object_count ?? 0) + Number(uncompared);
+        if (repeated) { row.same_object_count++; row.same_object_work += work; row.same_object_bytes += bytes; }
+      };
+      update(total);
+      if (uncompared) total.identity_capture = "partial";
+      this.operationTotals.set(kind, total);
+      if (!this.operations.has(key) && this.operations.size >= 128) { this.overflow("operation_fact_limit"); return; }
       const row = this.operations.get(key) ?? { kind, meter_id: meterId, phase, reason, count: 0, work: 0, bytes: 0,
-        completed: 0, same_object_count: 0, same_object_work: 0, same_object_bytes: 0 };
-      row.count++; row.work += work; row.bytes += bytes; row.completed += Number(completed);
-      if (repeated) { row.same_object_count++; row.same_object_work += work; row.same_object_bytes += bytes; }
-      this.operations.set(key, row);
+        completed: 0, same_object_count: 0, same_object_work: 0, same_object_bytes: 0, uncompared_object_count: 0 };
+      update(row); this.operations.set(key, row);
     });
   }
   encodingInvocation(phase: string, purpose: string): void {
@@ -150,7 +167,8 @@ export class SourceSemanticObservationFacts {
       this.encodings.set(key, row);
     });
   }
-  finish(): SourceSemanticNativeFacts {
-    return { ...this.value, operations: [...this.operations.values()], encodings: [...this.encodings.values()] };
+  finish(captureComplete = true): SourceSemanticNativeFacts {
+    return { ...this.value, operations: [...this.operations.values()], encodings: [...this.encodings.values()],
+      operation_totals: { complete: captureComplete, rows: [...this.operationTotals.values()] } };
   }
 }

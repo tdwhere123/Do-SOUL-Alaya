@@ -88,6 +88,42 @@ it("captures the finite actual union despite interrupted native reading and coal
   });
 }, 60_000);
 
+it("keeps complete operation quantities and failures after per-meter detail is full", () => {
+  const observer = new SourceSemanticObserver(7, { max_events: 0, max_bytes: 0 });
+  const root = new SourceSemanticReadBudget({ work_units: 10_000, memory_bytes: 100_000 }, observer);
+  const shared = { text: "same bytes" };
+  for (let index = 0; index < 140; index++) {
+    const child = root.child({ work_units: 100, memory_bytes: 1000 }, "planning");
+    child.retain(shared, "shared retention"); root.absorb(child);
+  }
+  const failed = root.child({ work_units: 1, memory_bytes: 1000 }, "planning");
+  expect(() => failed.retain(shared, "shared retention")).toThrow(); root.absorb(failed);
+  const row = observer.finish("success");
+  expect(row.facts!.operations).toHaveLength(128);
+  expect(row.facts!.issues).toContain("operation_fact_limit");
+  expect(row.facts!.operation_totals).toEqual({ complete: true, rows: [{ kind: "retain", count: 141,
+    completed: 140, work: 281, bytes: 23624, same_object_count: 140, same_object_work: 279,
+    same_object_bytes: 23456, uncompared_object_count: 0, identity_capture: "complete" }] });
+  expect(root.spentWork).toBe(281); expect(root.spentBytes).toBe(23624);
+  expect(readSourceSemanticObservation(row, 7).facts!.operation_totals).toEqual(row.facts!.operation_totals);
+});
+
+it("bounds object identity sampling without turning unobserved repetition into zero repetition", () => {
+  const observer = new SourceSemanticObserver(7, { max_events: 0, max_bytes: 0 });
+  const meter = new SourceSemanticReadBudget({ work_units: 10_000, memory_bytes: 100_000 }, observer);
+  for (let index = 0; index < 140; index++) meter.retain({ index }, "retained objects");
+  const uncaptured = { index: 141 };
+  meter.retain(uncaptured, "retained objects"); meter.retain(uncaptured, "retained objects");
+  const scanned = { value: "bounded" };
+  meter.canonicalJsonLength(scanned); meter.canonicalJsonLength(scanned);
+  const facts = observer.finish("success").facts!;
+  expect(facts.operations).toHaveLength(2);
+  expect(facts.operation_totals).toMatchObject({ complete: true, rows: [
+    { kind: "retain", count: 142, completed: 142, same_object_count: 0, uncompared_object_count: 14, identity_capture: "partial" },
+    { kind: "canonical_scan", count: 2, completed: 2, same_object_count: 1, uncompared_object_count: 0, identity_capture: "complete" }] });
+  expect(facts.issues).toContain("operation_identity_limit");
+});
+
 it("separates proven same-object proxy accounting and exact re-encoding from merely repeated labels", () => {
   const observer = new SourceSemanticObserver(7, { max_events: 8, max_bytes: 2000 });
   const meter = new SourceSemanticReadBudget({ work_units: 10000, memory_bytes: 100000 }, observer);

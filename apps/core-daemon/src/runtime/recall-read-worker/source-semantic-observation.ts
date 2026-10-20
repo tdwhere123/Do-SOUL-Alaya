@@ -12,7 +12,10 @@ export type SourceSemanticObservationRequest = z.output<typeof SourceSemanticObs
 export type ObservationCost = { phase: string; reason: string; operation: string; count: number; work: number; bytes: number };
 export type ObservationMeter = { id: number; parent: number | null; phase: string;
   initial: { work_units: number; memory_bytes: number }; remaining: { work_units: number; memory_bytes: number };
-  spent: { work_units: number; memory_bytes: number }; held: { work_units: number; memory_bytes: number } };
+  spent: { work_units: number; memory_bytes: number }; held: { work_units: number; memory_bytes: number };
+  /** Absent historically. Current capacity is not the initial allocation or spend. */
+  capacity?: { current: { work_units: number; memory_bytes: number };
+    adjustment: { work_units: number; memory_bytes: number }; changes: number } };
 export type SourceSemanticObservation = Readonly<{
   version: 1; request_id: number;
   status: "observed" | "not_observed" | "partial" | "overflow" | "failure" | "unavailable";
@@ -24,6 +27,9 @@ export type SourceSemanticObservation = Readonly<{
     counts: Readonly<Record<string, number>> }>;
   costs: readonly ObservationCost[];
   meters: readonly ObservationMeter[];
+  /** Native spent deltas, independent of debit/absorption labels and the 32-meter sample. */
+  meter_totals?: Readonly<{ complete: boolean; roots: number; children: number;
+    root_spent: { work_units: number; memory_bytes: number }; child_spent: { work_units: number; memory_bytes: number } }>;
   /** Null means unavailable; partial aggregates are lower bounds, not successful zero cost. */
   totals: Readonly<{ debit_work: number; debit_bytes: number; absorb_work: number; absorb_bytes: number }> | null;
   dropped_events: number; aggregates_complete: boolean;
@@ -47,6 +53,8 @@ export class SourceSemanticObserver {
   private readonly meters: (() => ObservationMeter)[] = [];
   private readonly issues = new Set<string>();
   private readonly totals = { debit_work: 0, debit_bytes: 0, absorb_work: 0, absorb_bytes: 0 };
+  private readonly meterTotals = { roots: 0, children: 0,
+    root_spent: { work_units: 0, memory_bytes: 0 }, child_spent: { work_units: 0, memory_bytes: 0 } };
   private eventBytes = 0;
   private dropped = 0;
   private captureMs = 0;
@@ -77,13 +85,22 @@ export class SourceSemanticObserver {
     this.safely(() => this.facts.begin(runtime, data()));
   }
 
-  meter(snapshot: (id: number) => ObservationMeter): number {
+  meter(parent: number | null, snapshot: (id: number) => ObservationMeter): number {
     const id = this.nextMeter++;
     this.safely(() => {
-      if (this.meters.length >= 32) { this.aggregatesComplete = false; this.issues.add("meter_detail_limit"); return; }
+      this.meterTotals[parent === null ? "roots" : "children"]++;
+      if (this.meters.length >= 32) { this.issues.add("meter_detail_limit"); return; }
       this.meters.push(() => snapshot(id));
     });
     return id;
+  }
+
+  /** Called from successful native ledger mutations, not from cost-row aggregation. */
+  meterSpent(parent: number | null, work: number, bytes: number): void {
+    this.safely(() => {
+      const total = this.meterTotals[parent === null ? "root_spent" : "child_spent"];
+      total.work_units += work; total.memory_bytes += bytes;
+    });
   }
 
   cost(phase: string, reason: string, operation: string, work: number, bytes: number): void {
@@ -107,7 +124,7 @@ export class SourceSemanticObserver {
 
   event(kind: string, phase: string, data: () => unknown): void {
     this.safely(() => {
-      const diagnostic = ["selection_attempt", "selection_result", "selection_failure", "encoding_attempt", "encoding_result"].includes(kind);
+      const diagnostic = ["selection_attempt", "selection_result", "selection_failure", "encoding_attempt", "encoding_result", "capacity_adjustment"].includes(kind);
       if (diagnostic) this.diagnosticCounts[kind] = (this.diagnosticCounts[kind] ?? 0) + 1;
       // Repeated fit/encoding detail must not eclipse source reads, union membership and final visibility.
       // Independent operation aggregates continue even when diagnostic detail is omitted.
@@ -146,11 +163,13 @@ export class SourceSemanticObserver {
   finish(execution: "success" | "failure"): SourceSemanticObservation {
     const snapshots: ObservationMeter[] = [];
     this.safely(() => { for (const snapshot of this.meters) snapshots.push(snapshot()); });
-    const status = this.failed ? "failure" : this.dropped > 0 || !this.aggregatesComplete ? "overflow" : execution === "failure"
+    const status = this.failed ? "failure" : this.dropped > 0 || !this.aggregatesComplete || this.issues.has("meter_detail_limit") ? "overflow" : execution === "failure"
       ? "partial" : this.meters.length === 0 ? "not_observed" : "observed";
     const result: SourceSemanticObservation = { version: 1, request_id: this.requestId, status, execution,
       events: this.events, costs: [...this.costs.values()], meters: snapshots, totals: { ...this.totals },
-      facts: this.facts.finish(), diagnostics: { status: this.omittedDiagnostics > 0 ? "overflow" : "complete",
+      meter_totals: { complete: !this.failed, roots: this.meterTotals.roots, children: this.meterTotals.children,
+        root_spent: { ...this.meterTotals.root_spent }, child_spent: { ...this.meterTotals.child_spent } },
+      facts: this.facts.finish(!this.failed), diagnostics: { status: this.omittedDiagnostics > 0 ? "overflow" : "complete",
         compacted_events: this.compactedDiagnostics, omitted_events: this.omittedDiagnostics, counts: { ...this.diagnosticCounts } },
       dropped_events: this.dropped, aggregates_complete: this.aggregatesComplete && !this.failed,
       overhead: { capture_ms: this.captureMs, event_json_bytes: this.eventBytes, ipc_bytes: null,
@@ -177,7 +196,11 @@ const ObservationSchema: z.ZodType<SourceSemanticObservation> = z.object({
   costs: z.array(z.object({ phase: z.string().max(80), reason: z.string().max(160), operation: z.string().max(32),
     count: Nonnegative, work: Nonnegative, bytes: Nonnegative }).strict()).max(270),
   meters: z.array(z.object({ id: Nonnegative, parent: Nonnegative.nullable(), phase: z.string().max(80),
-    initial: CounterBudget, remaining: CounterBudget, spent: CounterBudget, held: CounterBudget }).strict()).max(32),
+    initial: CounterBudget, remaining: CounterBudget, spent: CounterBudget, held: CounterBudget,
+    capacity: z.object({ current: CounterBudget, adjustment: z.object({ work_units: z.number().finite(),
+      memory_bytes: z.number().finite() }).strict(), changes: Nonnegative.int() }).strict().optional() }).strict()).max(32),
+  meter_totals: z.object({ complete: z.boolean(), roots: Nonnegative.int(), children: Nonnegative.int(),
+    root_spent: CounterBudget, child_spent: CounterBudget }).strict().optional(),
   totals: z.object({ debit_work: Nonnegative, debit_bytes: Nonnegative, absorb_work: Nonnegative, absorb_bytes: Nonnegative }).strict().nullable(),
   dropped_events: Nonnegative, aggregates_complete: z.boolean(),
   overhead: z.object({ capture_ms: Nonnegative.nullable(), event_json_bytes: Nonnegative, ipc_bytes: Nonnegative.nullable(),

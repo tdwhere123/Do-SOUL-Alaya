@@ -51,8 +51,19 @@ accounting is not a physical resource measurement. Native facts now record the
 session, request, pool, lease and plan ancestry of the objects that were
 actually used, so equal request numbers or pool labels never join calls, and
 ledger retention and canonical-scan annotations reconcile against recorded
-charges while encoding annotations describe existing work without adding debits. Frozen
-source-index and window qualification is a symbol-keyed capability on the
+charges while encoding annotations describe existing work without adding debits.
+Meter counts and native spend are recorded independently of the capped
+32-meter detail sample; initial, current capacity, adjustment, held and spent
+values stay distinct, and complete operation quantities continue past the
+bounded 128-row/128-object identity samples. The
+`longmemeval-observation-costs-v1` bench summary classifies debits through
+exact owner-backed reasons or native operation annotations, keeps transfers and allowances out of spending,
+and separates a missing historical witness (unknown, witnessed rows stay lower
+bounds) from contradictory complete counters (invalid, no spent total).
+Physical SQL, IPC and peak memory remain unmeasured, frozen frames are not
+backfilled, and the record changes no logical charge, refund, ranking or budget
+limit.
+Frozen source-index and window qualification is a symbol-keyed capability on the
 existing storage constructor: no package-root export, a caller-owned read
 transaction, and unchanged recall when that capability is absent. Bench capture
 reads the actual canonically restored session and its WAL, bound by the restore

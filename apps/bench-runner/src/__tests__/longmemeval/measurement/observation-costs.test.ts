@@ -3,6 +3,8 @@ import { summarizeObservationCosts } from "../../../runs/longmemeval-semantic/ob
 import type { ObservationCallScope, ObservationCapturedFrame } from "../../../runs/longmemeval-semantic/observation-attribution.js";
 import type { SourceSemanticObservation } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-observation.js";
 import type { SourceSemanticNativeFacts } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-provenance.js";
+import { SourceSemanticObserver, readSourceSemanticObservation } from "../../../../../core-daemon/src/runtime/recall-read-worker/source-semantic-observation.js";
+import { SourceSemanticReadBudget } from "../../../../../core-daemon/src/runtime/field/source-semantic-read-stores.js";
 
 const call: ObservationCallScope = { kind: "recall", request_id: 9, session_id: "session", query_key: "q",
   snapshot_id: `sha256:${"ab".repeat(32)}`, workspace_id: "ws", as_of: "2026-10-20T00:00:00Z" };
@@ -134,7 +136,7 @@ describe("observation costs", () => {
       cost("final_delivery", "library index eligibility check", "debit", 1, 0)];
     const result = summarize({ costs: rows, meters: [], totals: { debit_work: 16, debit_bytes: 140, absorb_work: 0, absorb_bytes: 0 } });
     expect(result.mapped_rows.map(row => row.class)).toEqual(["final_encoding", "selection_encoding", "real_native_read",
-      "unclassified", "unclassified", "unclassified"]);
+      "retention_proxy", "unclassified", "unclassified"]);
     expect(result.decomposition.conserved).toBe(true);
     expect(result.classification.status).toBe("partial");
     expect(result.complete).toBe(false);
@@ -148,6 +150,139 @@ describe("observation costs", () => {
     expect(result.classification.status).toBe("complete");
     expect(result.accounting_validity).toBe("valid");
     expect(result.complete).toBe(true);
+  });
+
+  it("reconciles real child spending and absorption beyond the meter sample without self-certifying transfers", () => {
+    const observer = new SourceSemanticObserver(9, { max_events: 0, max_bytes: 0 });
+    const root = new SourceSemanticReadBudget({ work_units: 10_000, memory_bytes: 100_000 }, observer);
+    for (let index = 1; index <= 40; index++) {
+      const child = root.child({ work_units: 100, memory_bytes: 1000 }, "completion_planning");
+      child.charge(index, index * 2, "child work"); root.absorb(child);
+    }
+    const observed = observer.finish("success");
+    expect(observed.meters).toHaveLength(32);
+    expect(observed.aggregates_complete).toBe(true);
+    expect(observed.meter_totals).toEqual({ complete: true, roots: 1, children: 40,
+      root_spent: { work_units: 820, memory_bytes: 1640 }, child_spent: { work_units: 820, memory_bytes: 1640 } });
+    expect(readSourceSemanticObservation(observed, 9)).toEqual(observed);
+    const result = summarizeObservationCosts({ scope: call, frames: [captured(observed)] });
+    expect(result.spent).toMatchObject({ state: "known", work: 820, bytes: 1640 });
+    expect(result.accounting_validity).toBe("valid");
+    expect(result.conservation.absorbed_matches_child_spent).toBe(true);
+    // Forge both transfer rows and their independent transfer counters consistently.
+    // Native child debits, root spend and debit counters remain unchanged.
+    const forged = { ...observed, costs: observed.costs.map(row => row.operation === "absorb" ? { ...row, work: row.work + 1 } : row),
+      totals: { ...observed.totals!, absorb_work: 821 } };
+    const contradiction = summarizeObservationCosts({ scope: call, frames: [captured(forged)] });
+    expect(contradiction.conservation.absorbed_matches_totals).toBe(true);
+    expect(contradiction.conservation.absorbed_matches_child_spent).toBe(false);
+    expect(contradiction.accounting_validity).toBe("invalid");
+    expect(contradiction.spent.state).toBe("unavailable");
+    const historical = { ...observed, meter_totals: undefined, aggregates_complete: false };
+    const raw = JSON.stringify(historical);
+    const old = summarizeObservationCosts({ scope: call, frames: [captured(historical)] });
+    expect(old.conservation.child_spent_work).toBeNull();
+    expect(old.conservation.absorbed_matches_child_spent).toBeNull();
+    expect(old.accounting_validity).toBe("unavailable");
+    expect(old.spent.state).toBe("lower_bound");
+    expect(JSON.stringify(historical)).toBe(raw);
+    const contradictoryRoot = { ...historical, meters: historical.meters.map(meter => meter.parent !== null ? meter : {
+      ...meter, spent: { ...meter.spent, work_units: meter.spent.work_units + 1 },
+      remaining: { ...meter.remaining, work_units: meter.remaining.work_units - 1 }
+    }) };
+    expect(summarizeObservationCosts({ scope: call, frames: [captured(contradictoryRoot)] }).accounting_validity).toBe("invalid");
+  });
+
+  it("detects an unabsorbed uncaptured child and preserves nested inclusive child spend", () => {
+    const observer = new SourceSemanticObserver(9, { max_events: 0, max_bytes: 0 });
+    const root = new SourceSemanticReadBudget({ work_units: 10_000, memory_bytes: 100_000 }, observer);
+    for (let index = 0; index < 32; index++) root.child({ work_units: 100, memory_bytes: 1000 }, "empty");
+    const child = root.child({ work_units: 100, memory_bytes: 1000 }, "observation");
+    const grandchild = child.child({ work_units: 20, memory_bytes: 200 }, "nested");
+    grandchild.charge(3, 30); child.absorb(grandchild); child.charge(2, 20);
+    const missing = summarizeObservationCosts({ scope: call, frames: [captured(observer.finish("success"))] });
+    expect(missing.accounting_validity).toBe("invalid");
+    expect(missing.conservation).toMatchObject({ child_spent_work: 8, absorbed_matches_child_spent: false });
+    root.absorb(child);
+    const complete = summarizeObservationCosts({ scope: call, frames: [captured(observer.finish("success"))] });
+    expect(complete.accounting_validity).toBe("valid");
+    expect(complete.conservation).toMatchObject({ root_meter_spent_work: 5, child_spent_work: 8,
+      absorbed_matches_child_spent: true });
+  });
+
+  it("keeps real constraint/promotion effects distinct from initial limits, holds and spent", () => {
+    const observer = new SourceSemanticObserver(9, { max_events: 32, max_bytes: 10000 });
+    const root = new SourceSemanticReadBudget({ work_units: 100, memory_bytes: 1000 }, observer);
+    const child = root.child({ work_units: 80, memory_bytes: 800 }, "observation");
+    const parentRelease = root.hold({ work_units: 50, memory_bytes: 500 });
+    child.charge(4, 40);
+    const childRelease = child.hold({ work_units: 6, memory_bytes: 60 });
+    child.constrainToParent(root);
+    expect(child.remaining()).toEqual({ work_units: 40, memory_bytes: 400 });
+    parentRelease();
+    const outstanding = child.outstandingAllowance();
+    child.promoteAfterCensus({ work_units: root.work - outstanding.work_units, memory_bytes: root.bytes - outstanding.memory_bytes });
+    const adjusted = observer.finish("success");
+    expect(adjusted.meters[1]).toMatchObject({ initial: { work_units: 80, memory_bytes: 800 },
+      capacity: { current: { work_units: 100, memory_bytes: 1000 }, adjustment: { work_units: 20, memory_bytes: 200 }, changes: 2 },
+      remaining: { work_units: 90, memory_bytes: 900 }, spent: { work_units: 4, memory_bytes: 40 },
+      held: { work_units: 6, memory_bytes: 60 } });
+    expect(adjusted.costs).toContainEqual(cost("observation", "parent constraint", "capacity_decrease", 30, 300));
+    expect(adjusted.costs).toContainEqual(cost("observation", "empty census promotion", "capacity_increase", 50, 500));
+    childRelease(); root.absorb(child);
+    const frame = observer.finish("success");
+    const result = summarizeObservationCosts({ scope: call, frames: [captured(frame)] });
+    expect(result.accounting_validity).toBe("valid");
+    expect(result.spent).toMatchObject({ state: "known", work: 4, bytes: 40 });
+    const forged = { ...frame, meters: frame.meters.map(meter => meter.parent === null ? meter : { ...meter,
+      capacity: { ...meter.capacity!, adjustment: { work_units: 21, memory_bytes: 200 } } }) };
+    expect(summarizeObservationCosts({ scope: call, frames: [captured(forged)] }).accounting_validity).toBe("invalid");
+  });
+
+  it("rejects root balance and complete aggregate contradictions even with capped child details", () => {
+    const base = frame();
+    const badRoot = summarize({ meters: base.meters.map(meter => meter.parent === null
+      ? { ...meter, remaining: { ...meter.remaining, work_units: 94 } } : meter) });
+    expect(badRoot.accounting_validity).toBe("invalid");
+    expect(badRoot.conservation.root_balances_match).toBe(false);
+    const badAggregate = summarize({ meter_totals: { complete: true, roots: 1, children: 1,
+      root_spent: { work_units: 7, memory_bytes: 30 }, child_spent: { work_units: 3, memory_bytes: 20 } } });
+    expect(badAggregate.accounting_validity).toBe("invalid");
+    expect(badAggregate.conservation.meter_aggregate_matches_sample).toBe(false);
+  });
+
+  it("passes complete operation totals through even when sampled identities cannot reconcile a cost row", () => {
+    const observer = new SourceSemanticObserver(9, { max_events: 0, max_bytes: 0 });
+    const root = new SourceSemanticReadBudget({ work_units: 10_000, memory_bytes: 100_000 }, observer);
+    const shared = { text: "same bytes" };
+    for (let index = 0; index < 140; index++) {
+      const child = root.child({ work_units: 100, memory_bytes: 1000 }, "planning");
+      child.retain(shared, "retained pool"); root.absorb(child);
+    }
+    const failed = root.child({ work_units: 1, memory_bytes: 1000 }, "planning");
+    expect(() => failed.retain(shared, "retained pool")).toThrow(); root.absorb(failed);
+    const result = summarizeObservationCosts({ scope: call, frames: [captured(observer.finish("success"))] });
+    expect(result.native_annotations.status).toBe("partial");
+    expect(result.native_annotations.operations).toHaveLength(128);
+    expect(result.native_annotations.operations.every(row => row.matches_recorded_debits === null)).toBe(true);
+    expect(result.native_annotations.operation_totals).toMatchObject({ complete: true, rows: [
+      { kind: "retain", count: 141, completed: 140, work: 281, bytes: 23624, same_object_count: 140, identity_capture: "complete" }] });
+    expect(result.accounting_validity).toBe("valid");
+  });
+
+  it("maps only owner-proven computations, proxies, canonical identity and provenance costs", () => {
+    const reasons = ["access text normalization and scoring", "access query features", "library page root census",
+      "evidence selection candidates", "evidence coverage comparison", "evidence coverage exchange", "preparation lease",
+      "retained value measurement work", "canonical identity traversal", "canonical identity hash handoff",
+      "access trace selection", "library source window encoding", "mystery encoding", "mystery allocation"];
+    const rows = reasons.map(reason => cost("request", reason, "debit", 1, 2));
+    const result = summarize({ costs: rows, meters: [], totals: { debit_work: reasons.length, debit_bytes: reasons.length * 2,
+      absorb_work: 0, absorb_bytes: 0 } });
+    expect(result.mapped_rows.map(row => row.class)).toEqual(["real_computation", "computation_proxy", "real_computation",
+      "real_computation", "real_computation", "real_computation", "retention_proxy", "retention_proxy", "canonical_identity",
+      "canonical_identity", "telemetry", "encoding_proxy", "unclassified", "unclassified"]);
+    expect(result.decomposition.conserved).toBe(true);
+    expect(result.native_annotations.repeated_work_waste).toBe("not_established");
   });
 
   it("selects only the exact call, even when an ancestor or another session has the same request number", () => {

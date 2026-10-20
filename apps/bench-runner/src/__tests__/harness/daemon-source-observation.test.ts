@@ -37,7 +37,22 @@ describe("bench private source observation binding", () => {
         expect(captured.status).toBe("available");
         expect(captured.observations).toHaveLength(1);
         expect(captured.observations[0]).toMatchObject({ version: 1, execution: "success", status: "observed" });
-        expect(captured.observations[0]!.meters.length).toBeGreaterThan(0);
+        const frame = captured.observations[0]!;
+        expect(frame.meters.length).toBeGreaterThan(0);
+        expect(frame.meter_totals).toMatchObject({ complete: true, roots: 1 });
+        expect(frame.meter_totals!.root_spent).toEqual({
+          work_units: frame.totals!.debit_work, memory_bytes: frame.totals!.debit_bytes
+        });
+        expect(frame.meter_totals!.child_spent).toEqual({
+          work_units: frame.totals!.absorb_work, memory_bytes: frame.totals!.absorb_bytes
+        });
+        expect(frame.facts?.operation_totals?.complete).toBe(true);
+        for (const meter of frame.meters) {
+          expect(meter.capacity?.current).toEqual({
+            work_units: meter.remaining.work_units + meter.spent.work_units + meter.held.work_units,
+            memory_bytes: meter.remaining.memory_bytes + meter.spent.memory_bytes + meter.held.memory_bytes
+          });
+        }
       } finally { await daemon.shutdown(); }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });

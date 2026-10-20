@@ -65,6 +65,8 @@ it("isolates capture failures and keeps aggregates after bounded metadata overfl
   expect(row.events.length).toBeLessThanOrEqual(2);
   expect(row.overhead.event_json_bytes).toBeLessThanOrEqual(100);
   expect(row.issues).toContain("observer_capture_failed");
+  expect(row.meter_totals?.complete).toBe(false);
+  expect(row.facts?.operation_totals?.complete).toBe(false);
   expect(meter.spentWork).toBe(300);
   expect(readSourceSemanticObservation({ request_id: 2 }, 1).status).toBe("unavailable");
 });

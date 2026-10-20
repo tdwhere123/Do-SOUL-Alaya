@@ -214,8 +214,8 @@ export class SourceSemanticUnionCompletion {
     // Parent.remaining excludes every future hold and all executed planning. The
     // child's prior effects and deferred allowance are not another spendable pool.
     const outstanding = input.child.outstandingAllowance();
-    input.child.work = input.parent.work - outstanding.work_units;
-    input.child.bytes = input.parent.bytes - outstanding.memory_bytes;
+    input.child.promoteAfterCensus({ work_units: input.parent.work - outstanding.work_units,
+      memory_bytes: input.parent.bytes - outstanding.memory_bytes });
     this.release();
     return measured.prepared;
   }
@@ -277,8 +277,8 @@ export function reserveEmptyInterpretationCompletion(input: Completion): Prepare
       initial = planCompletion(input, planning, "empty_census_completion");
       planning.reserve(initial.work_units, initial.memory_bytes, "empty interpretation completion");
       // Only the parent's residual outside real future completion can be borrowed.
-      child.work = planning.work - initial.work_units;
-      child.bytes = planning.bytes - initial.memory_bytes;
+      child.promoteAfterCensus({ work_units: planning.work - initial.work_units,
+        memory_bytes: planning.bytes - initial.memory_bytes });
       return initial.prepared;
     } finally {
       // Planning is real work; charge it even if a bound or lease preflight fails.

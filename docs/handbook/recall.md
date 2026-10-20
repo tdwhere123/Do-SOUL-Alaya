@@ -604,7 +604,27 @@ ancestry, and an older frame without facts stays unobserved rather than empty
 Ledger retention and canonical-scan annotations reconcile against recorded
 charges; encoding annotations describe already executed work and add no debit;
 same-object repetition is a traversal proxy, not proof of duplicate allocation
-or wasted work.
+or wasted work. Meter totals are recorded independently of the 32-meter detail
+sample, so that cap bounds neither root/child counts nor native spend; an
+observer failure marks the totals partial, not complete. Initial, current
+capacity, adjustment, held, spent and remaining stay distinct
+per meter: current capacity is not the initial allocation or spend, a
+historical meter without a capacity witness gets no inferred adjustment, and
+parent and child meters overlap, so summing their remaining, held or spent
+values does not establish a request-level resource total. Complete operation totals per kind
+also outlive the bounded 128-row and 128-object identity samples, so partial
+identity capture limits repetition evidence, not the operation total. The bench
+`longmemeval-observation-costs-v1` summary
+([`observation-costs`](../../apps/bench-runner/src/runs/longmemeval-semantic/observation-costs.ts))
+classifies debits through exact, owner-inspected reasons or native operation
+annotations and leaves unmatched reasons unclassified; absorption, holds, releases,
+allocations, refusals, unused allowances, capacity adjustments and duplicate
+native/index labels are transfers, allowances, refusals or annotations, never
+spending. A missing historical witness stays unknown with witnessed debit rows
+as lower bounds; contradictory complete counters are invalid with no spent
+total or lower bound. The record adds no MCP field and changes no logical
+charge, refund, ranking or budget limit; physical SQL, IPC and peak memory stay
+unmeasured, and frozen frames are not backfilled.
 Frozen source-index and window qualification is private measurement state: a
 symbol-keyed capability on the existing storage constructor, with no
 package-root export, that requires a caller-owned read transaction and reuses

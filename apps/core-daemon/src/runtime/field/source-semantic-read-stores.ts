@@ -6,11 +6,15 @@ import type { SourceSemanticObserver } from "../recall-read-worker/source-semant
 
 export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
   private readonly observationId: number | undefined;
+  private readonly capacityAdjustment = { work_units: 0, memory_bytes: 0 };
+  private capacityChanges = 0;
   constructor(budget: SourceSemanticResourceBudget, public readonly observer?: SourceSemanticObserver,
-    public readonly phase = "request", parent: number | null = null) {
+    public readonly phase = "request", private readonly parent: number | null = null) {
     super(budget);
-    this.observationId = observer?.meter(id => ({ id, parent, phase, initial: { work_units: budget.work_units, memory_bytes: budget.memory_bytes }, remaining: this.remaining(),
-      spent: { work_units: this.spentWork, memory_bytes: this.spentBytes }, held: { work_units: this.heldWork, memory_bytes: this.heldBytes } }));
+    this.observationId = observer?.meter(parent, id => ({ id, parent, phase, initial: { work_units: budget.work_units, memory_bytes: budget.memory_bytes }, remaining: this.remaining(),
+      spent: { work_units: this.spentWork, memory_bytes: this.spentBytes }, held: { work_units: this.heldWork, memory_bytes: this.heldBytes },
+      capacity: { current: { work_units: this.work + this.spentWork + this.heldWork,
+        memory_bytes: this.bytes + this.spentBytes + this.heldBytes }, adjustment: { ...this.capacityAdjustment }, changes: this.capacityChanges } }));
     observer?.cost(phase, "phase allowance", "allocation", budget.work_units, budget.memory_bytes);
   }
   child(budget: SourceSemanticResourceBudget, phase: string): SourceSemanticReadBudget {
@@ -21,7 +25,9 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     catch (error) { this.observer?.cost(this.phase, reason, "refused", work, bytes); throw error; }
   }
   override charge(work: number, bytes: number, reason = "preparation"): void {
+    const beforeWork = this.spentWork, beforeBytes = this.spentBytes;
     super.charge(work, bytes, reason);
+    this.observer?.meterSpent(this.parent, this.spentWork - beforeWork, this.spentBytes - beforeBytes);
     this.observer?.cost(this.phase, reason, "debit", work, bytes);
   }
   private operationDepth = 0;
@@ -82,8 +88,24 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     return { work_units: this.spentWork + this.heldWork, memory_bytes: this.spentBytes + this.heldBytes };
   }
   constrainToParent(parent: SourceSemanticReadBudget): void {
-    this.work = Math.min(this.work, Math.max(0, parent.work - this.spentWork - this.heldWork));
-    this.bytes = Math.min(this.bytes, Math.max(0, parent.bytes - this.spentBytes - this.heldBytes));
+    this.adjustCapacity({ work_units: Math.min(this.work, Math.max(0, parent.work - this.spentWork - this.heldWork)),
+      memory_bytes: Math.min(this.bytes, Math.max(0, parent.bytes - this.spentBytes - this.heldBytes)) }, "parent constraint");
+  }
+  /** The census owner supplies its unchanged residual calculation; observation adds no allowance. */
+  promoteAfterCensus(remaining: SourceSemanticResourceBudget): void {
+    this.adjustCapacity(remaining, "empty census promotion");
+  }
+  private adjustCapacity(remaining: SourceSemanticResourceBudget, reason: string): void {
+    const before = this.remaining();
+    this.work = remaining.work_units; this.bytes = remaining.memory_bytes;
+    if (this.observer === undefined) return;
+    const work = this.work - before.work_units, bytes = this.bytes - before.memory_bytes;
+    this.capacityAdjustment.work_units += work; this.capacityAdjustment.memory_bytes += bytes; this.capacityChanges++;
+    this.observer.cost(this.phase, reason, "capacity_increase", Math.max(0, work), Math.max(0, bytes));
+    this.observer.cost(this.phase, reason, "capacity_decrease", Math.max(0, -work), Math.max(0, -bytes));
+    this.observer.event("capacity_adjustment", this.phase, () => ({ meter_id: this.observationId, reason,
+      before, remaining: this.remaining(), spent: { work_units: this.spentWork, memory_bytes: this.spentBytes },
+      held: { work_units: this.heldWork, memory_bytes: this.heldBytes } }));
   }
   absorbIndex(resources: SourceIndexQueryResources): void {
     // Native bytes are already included in memory_bytes, not a second debit.
@@ -93,7 +115,11 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
   }
   absorb(child: SourceSemanticReadBudget): void {
     // This transfer has already been debited by the child; do not count it as new work.
+    const beforeWork = this.spentWork, beforeBytes = this.spentBytes;
     super.charge(child.spentWork, child.spentBytes, "bounded read phase");
+    // A non-root parent's inclusive native spend includes its absorbed descendants.
+    // The child's own debits were observed at execution, independently of this transfer.
+    this.observer?.meterSpent(this.parent, this.spentWork - beforeWork, this.spentBytes - beforeBytes);
     this.observer?.cost(this.phase, child.phase, "absorb", child.spentWork, child.spentBytes);
     this.observer?.cost(child.phase, "phase remainder at absorption", "unused", child.work, child.bytes);
     this.nativeWork += child.nativeWork; this.nativeBytes += child.nativeBytes; this.indexWork += child.indexWork;
