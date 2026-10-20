@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -65,6 +66,9 @@ export async function startInspectorServer(options: InspectorServerOptions = {})
     hostname: "127.0.0.1",
     port: parseInspectorPort(env.ALAYA_INSPECTOR_PORT)
   });
+  if (!server.listening) {
+    await once(server, "listening");
+  }
   stdout.write("inspector_ready\n");
   return server;
 }
