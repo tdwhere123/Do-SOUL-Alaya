@@ -33,7 +33,8 @@ import { createMcpMemoryToolHandler } from "../../../mcp-memory/tool/tool-handle
 import { createDaemonFieldRepos } from "../../../runtime/field/field-repos.js";
 import { createSqliteFieldFormationStores } from "../../../runtime/field/sqlite-field-formation-stores.js";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
-import { SourceSemanticReadBudget, listEligibleSemanticSources } from "../../../runtime/field/source-semantic-read-stores.js";
+import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
+import { listEligibleSemanticSources } from "../../../runtime/recall-read-worker/source-recall-catalog.js";
 import { deriveAddressableSpanViews } from "../../../../../../packages/core/src/memory/evidence-create/source-span-views.js";
 import {
   createRecallRealStorage, REAL_SQLITE_TEST_RUN_ID as RUN, REAL_SQLITE_TEST_WORKSPACE_ID as WS

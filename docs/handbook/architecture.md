@@ -45,8 +45,10 @@ equality. A condition can limit a proof while other source evidence remains
 useful. Silent omissions may be absent from both declared gaps and Field
 feedback, so that feedback is not a complete account of the original task.
 
-Core owns admission, conditional computation, source access and lifecycle
-effects. A consuming agent/caller owns its task actions and any further
+Core owns admission, conditional computation, source access/selection policy and
+lifecycle effects. The daemon owns native source-recall execution and resource
+orchestration; semantic gateways adapt verified facts to Core's neutral internal
+policy kernels. A consuming agent/caller owns its task actions and any further
 model-backed preparation; runtime recall does not autonomously invoke a model.
 The current interfaces do not by themselves establish robust final answers,
 automatic error detection or a general cross-source identity solver.

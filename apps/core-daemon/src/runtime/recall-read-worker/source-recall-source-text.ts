@@ -1,10 +1,18 @@
 import { SourceSemanticResourceExhausted, type SourceRecordIdentity, type SourceSemanticAccessReceipt,
   type SourceSemanticAccessSignal, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
-import { CoreError, type createSourceSemanticAccessPolicy } from "@do-soul/alaya-core";
+import { CoreError } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, type SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
-import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import type { SourceRecallAccessMeter } from "./source-recall-access.js";
 
-type Policy = ReturnType<typeof createSourceSemanticAccessPolicy>;
+type Policy = Readonly<{
+  sourceCost: (length: number) => SourceSemanticResourceBudget;
+  source: (text: string, ledger: SourceRecallReadMeter) => SourceSemanticAccessSignal;
+}>;
+type SourceRecallReadMeter = SourceRecallAccessMeter & Readonly<{
+  read: (work: number, bytes: number) => void;
+  hold: (cost: SourceSemanticResourceBudget) => () => void;
+  outstandingAllowance: () => SourceSemanticResourceBudget;
+}>;
 type Observation = SourceSemanticAccessReceipt["source_candidates"][number];
 const UNKNOWN: SourceSemanticAccessSignal = { source_text_score: null, interpretation_reading_score: 0 };
 
@@ -27,7 +35,7 @@ type SourceTextRead = Generator<(() => void) | undefined, SourceTextResult | und
 
 /** One read state across metadata, the guaranteed first native extent, and census-promoted completion. */
 function* sourceTextRead(repo: SqliteFieldSourceRecordRepo, record: SourceRecordIdentity, policy: Policy,
-  meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number, prefetch = false): SourceTextRead {
+  meter: SourceRecallReadMeter, sourcePreviewByteExtent?: number, prefetch = false): SourceTextRead {
   let offset = 0, bodyBytes: number | null = null, characters = 0, complete = false, resourceLimited = false, settled = false;
   let extent: ReturnType<SqliteFieldSourceRecordRepo["findByIdBounded"]> | undefined;
   let releaseDeferred: (() => void) | undefined;
@@ -133,7 +141,7 @@ function finishSourceText(read: SourceTextRead, step = read.next()): SourceTextR
 
 /** A request-local handoff, never a new source identity or a cross-snapshot body cache. */
 export function beginCanonicalSourceText(repo: SqliteFieldSourceRecordRepo, record: SourceRecordIdentity, policy: Policy,
-  meter: SourceSemanticReadBudget, continuationMeter: SourceSemanticReadBudget, bodyBytes: number) {
+  meter: SourceRecallReadMeter, continuationMeter: SourceRecallReadMeter, bodyBytes: number) {
   const native = quoteSemanticSourceObservation(policy.sourceCost, Math.min(4096, bodyBytes));
   const outstanding = meter.outstandingAllowance();
   let releaseParent: () => void;
@@ -175,7 +183,7 @@ export function beginCanonicalSourceText(repo: SqliteFieldSourceRecordRepo, reco
 }
 
 export function readSourceText(repo: SqliteFieldSourceRecordRepo, record: SourceRecordIdentity, policy: Policy,
-  meter: SourceSemanticReadBudget, sourcePreviewByteExtent?: number, afterExtent?: () => void): SourceTextResult {
+  meter: SourceRecallReadMeter, sourcePreviewByteExtent?: number, afterExtent?: () => void): SourceTextResult {
   const read = sourceTextRead(repo, record, policy, meter, sourcePreviewByteExtent);
   try {
     meter.retain(read, "access source observation continuation");

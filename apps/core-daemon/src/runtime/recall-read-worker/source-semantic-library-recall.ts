@@ -16,14 +16,14 @@ import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runti
 import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import { admissionOf, loadVerified } from "./source-semantic-discovery.js";
 import { accessInputIdentity, observeSourceSemanticAccess, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
-import {
-  listEligibleSemanticSources, SourceSemanticReadBudget
-} from "../field/source-semantic-read-stores.js";
+import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
+import type { listEligibleSemanticSources } from "./source-recall-catalog.js";
 import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticQueryInputIdentity,
   sourceSemanticRevision } from "./source-semantic-leases.js";
 
 import { prepareLibraryPackages, type LibraryExecutedSupport } from "./source-semantic-library-packages.js";
-import { prepareLibraryDelivery, deliverFrozenLibraryPage } from "./source-semantic-library-delivery.js";
+import { prepareLibraryDelivery, deliverFrozenLibraryPage, type LibraryDeliveryPlan } from "./source-semantic-library-delivery.js";
+import { runSourceRecall, sourceRecallPhaseAllowance } from "./source-recall.js";
 
 type LibraryDiscovery = Readonly<{ descriptors: readonly SourceSemanticHandleDescriptor[];
   interpretationPages: number; interpretationOpen: boolean; interpretationTruncated: boolean; pool: SourceSemanticAccessPool }>;
@@ -75,50 +75,63 @@ export function runSourceSemanticLibraryRecall(
     }
   }
   const boundStatus = lease?.query_semantics_status ?? queryStatus;
-  // Keep a bounded finalization envelope outside exploration and native hydration.
-  const exploration = meter.child({
-    work_units: Math.max(0, meter.work - Math.min(request.budget.finalization_reserve, Math.floor(meter.work / 4))),
-    memory_bytes: meter.bytes - Math.min(Math.floor(meter.bytes / 4), request.output_byte_limit * 8 + 65536)
-  }, "exploration");
-  let explorationAbsorbed = false;
-  try {
+  return recallAdmittedLibrary(runtime, payload, authorized, meter, request, lease,
+    admission.kind === "admitted" ? admission.query : undefined, boundStatus, original, requestIdentity);
+}
+
+function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
+  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, lease: ReturnType<typeof readSemanticLease> | undefined,
+  query: SourceSemanticQuery | undefined, boundStatus: SourceSemanticQueryStatus, original: string, requestIdentity: string) {
   const boundPool = lease?.access_pool;
   const policy = request.access_policy ?? boundPool?.access.policy ?? "query-conditioned-v1";
-  const publicRequestIdentity = sourceSemanticLibraryRequestIdentity({
-    workspace_id: payload.workspace_id, as_of: payload.as_of, authorized_scopes: authorized,
-    original_query: original, query_semantics: admission.kind === "admitted" ? admission.query : undefined,
-    query_semantics_status: boundStatus, source_id: lease?.source_id,
-    ...(boundPool?.accessHint === undefined ? {} : { access_hint: boundPool.accessHint }),
-    semantic_correspondences: request.semantic_correspondences ?? [], budget: request.budget,
-    output_byte_limit: request.output_byte_limit, access_policy: policy
+  let publicRequestIdentity: string;
+  let exploration: SourceSemanticReadBudget | undefined;
+  let pool: SourceSemanticAccessPool, sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">;
+  let discovered: LibraryDiscovery, branches: ReturnType<typeof executeLibraryBranches>, plan: LibraryDeliveryPlan;
+  let result: SourceSemanticWorkerResult | undefined;
+  runSourceRecall(meter, request.budget.finalization_reserve, request.output_byte_limit, {
+    observe: allowance => {
+      exploration = meter.child(allowance, "exploration");
+      publicRequestIdentity = sourceSemanticLibraryRequestIdentity({
+        workspace_id: payload.workspace_id, as_of: payload.as_of, authorized_scopes: authorized,
+        original_query: original, query_semantics: query,
+        query_semantics_status: boundStatus, source_id: lease?.source_id,
+        ...(boundPool?.accessHint === undefined ? {} : { access_hint: boundPool.accessHint }),
+        semantic_correspondences: request.semantic_correspondences ?? [], budget: request.budget,
+        output_byte_limit: request.output_byte_limit, access_policy: policy
+      });
+      const inputId = accessInputIdentity(original, query,
+        request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents, boundPool?.accessHint);
+      if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
+        throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
+      }
+      if (boundPool !== undefined) {
+        exploration.retain(boundPool, "leased access pool");
+        meter.observer?.event("pool_reuse", meter.phase, () => ({ pool_id: boundPool.access.pool_id, discovery: "not_observed_this_request" }));
+        meter.observer?.facts.pool(boundPool, boundPool.access.pool_id, boundPool.sources,
+          boundPool.access.unvisited_sources, boundPool.access.unvisited_interpretations, "reused");
+      }
+      pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
+        query, policy, request.budget, lease?.source_id);
+      sources = { sources: [...pool.sources], pages: pool.sourcePages,
+        open: pool.access.unvisited_sources, truncated: pool.access.unvisited_sources };
+      discovered = { descriptors: pool.descriptors, interpretationPages: pool.interpretationPages,
+        interpretationOpen: pool.access.unvisited_interpretations, interpretationTruncated: pool.access.unvisited_interpretations, pool };
+    },
+    compute: () => {
+      branches = query === undefined
+        ? { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
+          executedCount: 0, computeOpen: false, interpretationTruncated: false }
+        : executeLibraryBranches(runtime, payload, authorized, exploration!, discovered.descriptors, request, query, original);
+    },
+    absorbExploration: () => { if (exploration !== undefined) meter.absorb(exploration); },
+    finalize: () => { plan = prepareLibraryPlan(runtime, payload, authorized, meter, request, boundStatus,
+      query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity); },
+    deliver: () => { result = deliverFrozenLibraryPage(runtime, payload, meter, request, plan, 0); }
   });
-  const inputId = accessInputIdentity(original, admission.kind === "admitted" ? admission.query : undefined,
-    request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents, boundPool?.accessHint);
-  if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
-    throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
-  }
-  if (boundPool !== undefined) {
-    exploration.retain(boundPool, "leased access pool");
-    meter.observer?.event("pool_reuse", meter.phase, () => ({ pool_id: boundPool.access.pool_id, discovery: "not_observed_this_request" }));
-    meter.observer?.facts.pool(boundPool, boundPool.access.pool_id, boundPool.sources,
-      boundPool.access.unvisited_sources, boundPool.access.unvisited_interpretations, "reused");
-  }
-  const pool = boundPool ?? observeSourceSemanticAccess(runtime, payload, authorized, exploration, original,
-    admission.kind === "admitted" ? admission.query : undefined, policy, request.budget, lease?.source_id);
-  const sources = { sources: [...pool.sources], pages: pool.sourcePages,
-    open: pool.access.unvisited_sources, truncated: pool.access.unvisited_sources };
-  const discovered: LibraryDiscovery = { descriptors: pool.descriptors, interpretationPages: pool.interpretationPages,
-    interpretationOpen: pool.access.unvisited_interpretations, interpretationTruncated: pool.access.unvisited_interpretations, pool };
-  const branches = admission.kind === "admitted"
-    ? executeLibraryBranches(runtime, payload, authorized, exploration,
-      discovered.descriptors, request, admission.query, original)
-    : { proofGroups: [], proofs: [], unproved: [], examined: [], supports: [], pairs: 0,
-      executedCount: 0, computeOpen: false, interpretationTruncated: false };
-  explorationAbsorbed = true; meter.absorb(exploration);
-  return deliverLibraryPage(runtime, payload, authorized, meter, request, boundStatus,
-    admission.kind === "admitted" ? admission.query : undefined,
-    sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
-  } finally { if (!explorationAbsorbed) meter.absorb(exploration); }
+  if (result === undefined) throw new CoreError("OBLIGATION_VIOLATION", "source recall did not deliver its finalized plan");
+  return result;
 }
 
 function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
@@ -214,18 +227,6 @@ function executeLibraryBranches(runtime: SourceSemanticReadRuntime, payload: Sou
   return { proofGroups, proofs, unproved, examined, supports, pairs, executedCount, computeOpen, interpretationTruncated };
 }
 
-function deliverLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
-  authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
-  request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryStatus: SourceSemanticQueryStatus,
-  query: SourceSemanticQuery | undefined,
-  sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">, discovered: LibraryDiscovery,
-  branches: ReturnType<typeof executeLibraryBranches>, original: string, requestIdentity: string,
-  publicRequestIdentity: string): Extract<SourceSemanticWorkerResult, { kind: "recall" }> {
-  const plan = prepareLibraryPlan(runtime, payload, authorized, meter, request, queryStatus,
-    query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
-  return deliverFrozenLibraryPage(runtime, payload, meter, request, plan, 0);
-}
-
 function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget,
   request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, queryStatus: SourceSemanticQueryStatus,
@@ -235,7 +236,7 @@ function prepareLibraryPlan(runtime: SourceSemanticReadRuntime, payload: SourceS
   publicRequestIdentity: string) {
   const prepared = prepareSourceSemanticLibraryInputs(runtime, payload, authorized, meter, request, queryStatus,
     query, sources, discovered, branches, original, requestIdentity, publicRequestIdentity);
-  const selection = meter.child({ work_units: Math.floor(meter.work / 2), memory_bytes: Math.floor(meter.bytes / 2) }, "selection");
+  const selection = meter.child(sourceRecallPhaseAllowance(meter, "selection"), "selection");
   const plan = prepareLibraryDelivery(prepared.base, prepared.packages, request, selection, "field", selectSourceSemanticLibraryPage, prepared.execution);
   meter.absorb(selection);
   return plan;
@@ -275,7 +276,7 @@ function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, 
       hypothesis_id: interpretationId }));
   }
   const openResiduals = sources.open || sources.truncated || interpretationOpen || interpretationTruncated || computeOpen;
-  const hydration = meter.child({ work_units: Math.floor(meter.work / 3), memory_bytes: Math.floor(meter.bytes / 3) }, "package_hydration");
+  const hydration = meter.child(sourceRecallPhaseAllowance(meter, "package_hydration"), "package_hydration");
   let prepared: ReturnType<typeof prepareLibraryPackages>;
   try { prepared = prepareLibraryPackages(runtime, payload, authorized, hydration, sourceEntries, branches.supports); }
   finally { meter.absorb(hydration); }

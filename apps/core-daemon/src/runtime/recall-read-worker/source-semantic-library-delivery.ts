@@ -1,7 +1,6 @@
-import { encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosure, SourceSemanticResourceExhausted, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  indexEntryCacheKey, sourceSemanticExecution, type SourceSemanticExecution, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
-  type SourceSemanticAccessReceipt,
-  type SourceSemanticLibraryUnprovedComputation,
+import { qualifySourceDisclosure, sourceDisclosure, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, indexEntryCacheKey, sourceSemanticExecution, type SourceSemanticExecution, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
+  type SourceSemanticAccessReceipt, type SourceSemanticLibraryUnprovedComputation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
   preparedDeliveryId, selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
@@ -12,159 +11,107 @@ import type { SourceSemanticReadBudget } from "../field/source-semantic-read-sto
 import { libraryAccessReceipt, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import { issueSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
 import { prepareLibraryPackagePairs } from "./source-semantic-library-packages.js";
+import { prepareSourceRecallDelivery, packSourceRecallTimes, sourceRecallPageAt, type SourceRecallMember } from "./source-recall-delivery.js";
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
 type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
 export type LibraryDeliveryPlan = Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string; expires_at: string;
   query_semantics_status: SourceSemanticQueryStatus;
-  // Continuation identity retains exact wire inputs; public identity binds the resolved request.
   authorized: readonly string[] | null; request_identity: string; public_request_identity: string;
   discovery: SourceSemanticLibraryDiscovery; coverage: SourceSemanticCoverage;
   unproved_computations: readonly SourceSemanticLibraryUnprovedComputation[];
-  pages: readonly (readonly SourceSemanticLibraryPackage[])[];
-  page_access: readonly SourceSemanticAccessReceipt[];
+  pages: readonly (readonly SourceSemanticLibraryPackage[])[]; page_access: readonly SourceSemanticAccessReceipt[];
 }>;
 type PlanBase = Omit<LibraryDeliveryPlan, "pages" | "page_access"> & Readonly<{ pool: SourceSemanticAccessPool }>;
 export type LibraryPageSelector = typeof selectSourceSemanticLibraryPage;
 
-/** Observe the existing selector entry/return, without replaying or explaining its private policy branches. */
-function observedLibrarySelection(selectPage: LibraryPageSelector,
-  input: Omit<Parameters<LibraryPageSelector>[0], "meter"> & { meter: SourceSemanticReadBudget }) {
-  const { meter } = input;
-  meter.observer?.event("selection_attempt", meter.phase, () => ({
-    candidates: input.candidates.map(row => ({ target: row.entry.target, access_position: row.access_position, proof_count: row.proofs.length })) }));
-  try {
-    const selected = selectPage(input);
-    meter.observer?.event("selection_result", meter.phase, () => ({ targets: selected.map(row => row.entry.target),
-      unselected_reason: "not_observed_inside_selector" }));
-    return selected;
-  } catch (error) {
-    meter.observer?.event("selection_failure", meter.phase, () => ({
-      cause: error instanceof SourceSemanticResourceExhausted ? "resource_exhausted" : "unknown" }));
-    throw error;
-  }
-}
-
-/**
- * Freeze membership, witness packages and support reservations before exposing any page.
- * Callers with current preparation/acquisition pass it; the default is native-only.
- */
+/** Materialization/projection adapter. The neutral phase owns every membership and fit decision. */
 export function prepareLibraryDelivery(base: PlanBase, candidates: readonly SourceSemanticLibraryPackage[],
   request: Request, meter: SourceSemanticReadBudget, order: "field" | "source_access" = "field",
   selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage,
   initialExecution: SourceSemanticExecution = sourceSemanticExecution()): LibraryDeliveryPlan {
   const continuationExecution = sourceSemanticExecution();
-  const pages: SourceSemanticLibraryPackage[][] = [];
-  const pageAccess: SourceSemanticAccessReceipt[] = [];
-  let remaining = [...candidates], offset = 0, incomplete = false;
-  const reservePage = (page: readonly SourceSemanticLibraryPackage[], emittedOffset: number, more: boolean) => {
-    meter.observer?.event("encoding_attempt", meter.phase, () => ({ offset: emittedOffset, more,
-      targets: page.map(row => row.entry.target), proof_counts: page.map(row => row.proofs.length) }));
-    const access = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
-      page.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
-    // Access phases are frozen provenance, not execution of this delivery.
-    const result = pageResult(base, page, emittedOffset, more, request, meter, true, access,
-      emittedOffset === 0 ? initialExecution : continuationExecution);
-    meter.observer?.facts.encodingInvocation(meter.phase, "candidate_page");
-    const encoded = encodeSourceSemanticLibraryResponse(result);
-    meter.retain(encoded, "candidate delivery encoding");
-    const encodedJson = JSON.stringify(encoded);
-    const bytes = Buffer.byteLength(encodedJson);
-    meter.observer?.facts.encoding(meter.phase, "candidate_page", encodedJson,
-      "results" in encoded ? encoded.results?.map(row => row.content_preview) ?? [] : []);
-    meter.charge(1, bytes * 2, "candidate delivery bytes");
-    let fits = bytes <= request.output_byte_limit && "results" in encoded
-      && encoded.results !== undefined && encoded.results.every(row => row.budget_state.within_budget);
-    // An unfittable later root marks payload truncated. Bound that field's
-    // growth cheaply, then use the shared encoder at an exact byte boundary;
-    // it also owns the resulting index payload state. Other incomplete flags
-    // and index states only shorten their encoding.
-    const payloadGrowth = Math.max(0, JSON.stringify("truncated").length - JSON.stringify(result.coverage.payload).length);
-    if (fits && bytes + payloadGrowth > request.output_byte_limit) {
-      meter.observer?.event("encoding_attempt", meter.phase, () => ({ offset: emittedOffset, more, variant: "partial_payload",
-        targets: page.map(row => row.entry.target) }));
-      meter.observer?.facts.encodingInvocation(meter.phase, "candidate_partial_page");
-      const partial = encodeSourceSemanticLibraryResponse({ ...result, coverage: { ...result.coverage, payload: "truncated" } });
-      meter.retain(partial, "candidate partial delivery encoding");
-      const partialJson = JSON.stringify(partial);
-      const partialBytes = Buffer.byteLength(partialJson);
-      meter.observer?.facts.encoding(meter.phase, "candidate_partial_page", partialJson,
-        "results" in partial ? partial.results?.map(row => row.content_preview) ?? [] : []);
-      meter.charge(1, partialBytes * 2, "candidate partial delivery bytes");
-      fits = partialBytes <= request.output_byte_limit;
-      meter.observer?.event("encoding_result", meter.phase, () => ({ offset: emittedOffset, variant: "partial_payload",
-        fits, bytes: partialBytes, byte_limit: request.output_byte_limit }));
-    }
-    meter.observer?.event("encoding_result", meter.phase, () => ({ offset: emittedOffset, more, fits, bytes,
-      byte_limit: request.output_byte_limit, targets: page.map(row => row.entry.target) }));
-    return { access, fits };
-  };
-  let finalPage: readonly SourceSemanticLibraryPackage[] = [], finalAccess: SourceSemanticAccessReceipt | undefined;
-  while (remaining.length > 0) {
-    try {
-      const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
-      meter.charge(remaining.length, remaining.length * 16, "library page root census");
-      const remainingRootCount = new Set(remaining.map(root)).size;
-      let selected = observedLibrarySelection(selectPage, { candidates: remaining, meter, order,
-        fitsStandalone: (candidate, precedingSlots) => {
-          if (reservePage([candidate], offset + precedingSlots,
-            finalPage.length > 0 || remainingRootCount > precedingSlots + 1).fits) return true;
-          // Until the final membership is reserved, do not consume a raw twin
-          // whose complete proof can use that smaller envelope after other roots.
-          return finalPage.length === 0 && reservePage([candidate], offset, false).fits;
-        },
-        fits: page => {
-          const reserved = reservePage(page, offset, finalPage.length > 0 || remainingRootCount > page.length);
-          if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
-          return reserved.fits;
+  // These are the canonical arrays retained by the lease. No ordinal plan survives this call.
+  const pages: SourceSemanticLibraryPackage[][] = [], pageAccess: SourceSemanticAccessReceipt[] = [];
+  let pair: SourceSemanticLibraryPackage | undefined;
+  const get = (member: number): SourceSemanticLibraryPackage => member === candidates.length ? pair!
+    : member >= 0 ? candidates[member]!
+    : pages[Math.floor((-member - 1) / SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET)]![(-member - 1) % SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET]!;
+  const materialize = (page: readonly SourceRecallMember[]) => page.map(choice => {
+    const row = get(choice.member);
+    return choice.selection_basis === undefined || choice.selection_basis === row.selection_basis ? row
+      : { ...row, selection_basis: choice.selection_basis };
+  });
+  // Membership references are scoped to the current Core call; they never retain a package table.
+  const sameMember = (left: SourceSemanticLibraryPackage, right: SourceSemanticLibraryPackage) =>
+    left.entry === right.entry && left.entries === right.entries && left.explanations === right.explanations
+      && left.proofs === right.proofs && left.preview === right.preview && left.source_disclosure === right.source_disclosure
+      && left.payload_support === right.payload_support && left.access_position === right.access_position;
+  const bind = (rows: readonly SourceSemanticLibraryPackage[], memberAt: (position: number) => number,
+    additional?: number) => (page: readonly SourceSemanticLibraryPackage[]): SourceRecallMember[] => page.map(row => {
+      const index = rows.findIndex(value => sameMember(value, row));
+      const member = index >= 0 ? memberAt(index) : additional !== undefined && sameMember(get(additional), row) ? additional : undefined;
+      if (member === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selection introduced an unknown library member");
+      return { member, selection_basis: row.selection_basis };
+    });
+  let lastResult: Recall | undefined, lastAccess: SourceSemanticAccessReceipt | undefined;
+  let lastRows: readonly SourceSemanticLibraryPackage[] | undefined;
+  const incomplete = prepareSourceRecallDelivery({ meter, count: candidates.length, byteLimit: request.output_byte_limit,
+    initialExecutionDiffers: initialExecution !== continuationExecution, order,
+    improve: order === "field" && selectPage === selectSourceSemanticLibraryPage,
+    root: member => root(get(member)), target: member => get(member).entry.target,
+    supportCount: member => get(member).proofs.length, accessPosition: member => get(member).access_position,
+    pageKey: page => JSON.stringify(page.map(row => indexEntryCacheKey(get(row.member).entry))),
+    select: input => {
+      const rows = input.candidates.map(get), choices = bind(rows, position => input.candidates[position]!);
+      return choices(selectPage({ candidates: rows, meter, order,
+        ...(input.fitsStandalone === undefined ? {} : { fitsStandalone: (row, precedingSlots) => input.fitsStandalone!(choices([row])[0]!, precedingSlots) }),
+        fits: page => input.fits(choices(page)) }));
+    },
+    improvePage: (position, candidate, fits) => {
+      const rows = pages[position]!, additional = get(candidate);
+      const choices = bind(rows, slot => -1 - position * SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET - slot, candidate);
+      return choices(improveSourceSemanticLibraryPage({ page: rows, candidates: [additional], meter,
+        fits: proposed => fits(choices(proposed)) }));
+    },
+    pairs: function* (position) {
+      try {
+        for (const candidate of prepareLibraryPackagePairs(candidates, pages[position]!, meter)) {
+          pair = candidate; yield candidates.length;
         }
-      });
-      // Keep the actual-envelope fallback reserved before optional future-fit work.
-      const fallbackFinal = selected.length === 0 && finalPage.length === 0
-        ? reserveFinalProofPage(remaining, meter, order, selectPage, reservePage, offset) : undefined;
-      // Only the initial preparation/acquisition envelope can shrink to native execution.
-      // Native-only pages retain their incumbent and the existing stalled final-page path.
-      if (offset === 0 && initialExecution !== continuationExecution && finalPage.length === 0
-        && (selected.length === 0 || selected.some(row => row.proofs.length === 0))) {
-        const deferred = reserveDeferredFinalProofPage(remaining, selected, meter, order, selectPage, reservePage, offset);
-        if (deferred !== undefined) {
-          selected = deferred.prefix;
-          accessByPage.set(pageKey(selected), deferred.prefixAccess);
-          finalPage = deferred.page; finalAccess = deferred.access; remaining = deferred.remaining;
-        }
+      } finally { pair = undefined; }
+    },
+    encode: (page, offset, more, partial) => {
+      const rows = partial ? lastRows! : materialize(page);
+      lastRows = rows;
+      meter.observer?.event("encoding_attempt", meter.phase, () => partial
+        ? { offset, more, variant: "partial_payload", targets: rows.map(row => row.entry.target) }
+        : { offset, more, targets: rows.map(row => row.entry.target), proof_counts: rows.map(row => row.proofs.length) });
+      if (!partial) {
+        lastAccess = libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids,
+          rows.flatMap(row => row.entry.target.kind === "source_evidence" ? [row.entry.target.root_id] : []), meter);
+        lastResult = pageResult(base, rows, offset, more, request, meter, true, lastAccess,
+          offset === 0 ? initialExecution : continuationExecution);
       }
-      if (selected.length === 0) {
-        if (fallbackFinal !== undefined && fallbackFinal.page.length > 0) {
-          finalPage = fallbackFinal.page; finalAccess = fallbackFinal.access;
-          const roots = new Set(finalPage.map(root));
-          remaining = remaining.filter(row => !roots.has(root(row)));
-          continue;
-        }
-        incomplete = true; break;
-      }
-      const access = accessByPage.get(pageKey(selected));
-      if (access === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selected library page has no reserved access receipt");
-      pages.push([...selected]); offset += selected.length;
-      pageAccess.push(access);
-      const roots = new Set(selected.map(root));
-      remaining = remaining.filter(row => !roots.has(root(row)));
-    } catch (error) {
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      incomplete = true; break;
-    }
-  }
-  if (finalPage.length > 0) {
-    if (finalAccess === undefined) throw new CoreError("OBLIGATION_VIOLATION", "final library page has no reserved access receipt");
-    pages.push([...finalPage]); pageAccess.push(finalAccess);
-  }
-  if (order === "field" && selectPage === selectSourceSemanticLibraryPage) {
-    improveReservedPackages(pages, pageAccess, candidates, meter, reservePage);
-  }
+      if (lastResult === undefined || lastAccess === undefined) throw new CoreError("OBLIGATION_VIOLATION", "partial encoding has no complete envelope");
+      meter.observer?.facts.encodingInvocation(meter.phase, partial ? "candidate_partial_page" : "candidate_page");
+      const encoded = encodeSourceSemanticLibraryResponse(partial ? { ...lastResult, coverage: { ...lastResult.coverage, payload: "truncated" } } : lastResult);
+      meter.retain(encoded, partial ? "candidate partial delivery encoding" : "candidate delivery encoding");
+      const json = JSON.stringify(encoded), bytes = Buffer.byteLength(json);
+      meter.observer?.facts.encoding(meter.phase, partial ? "candidate_partial_page" : "candidate_page", json,
+        "results" in encoded ? encoded.results?.map(row => row.content_preview) ?? [] : []);
+      meter.charge(1, bytes * 2, partial ? "candidate partial delivery bytes" : "candidate delivery bytes");
+      return { access: lastAccess, bytes, withinBudget: "results" in encoded && encoded.results !== undefined && encoded.results.every(row => row.budget_state.within_budget),
+        payloadGrowth: Math.max(0, JSON.stringify("truncated").length - JSON.stringify(lastResult.coverage.payload).length) };
+    },
+    finishEncoding: () => { lastResult = undefined; lastAccess = undefined; lastRows = undefined; },
+    append: (page, access) => { pages.push(materialize(page)); pageAccess.push(access); },
+    replace: (position, page, access) => { pages[position] = materialize(page); pageAccess[position] = access; },
+    pageCount: () => pages.length, pageLength: position => pages[position]!.length
+  });
   const frozenPages = pages.length === 0 ? [[]] : pages;
-  const page_access = pages.length === 0
-    ? [libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids, [], meter)]
-    : pageAccess;
+  const page_access = pages.length === 0 ? [libraryAccessReceipt(base.pool, base.discovery.examined_source_interpretation_ids, [], meter)] : pageAccess;
   meter.observer?.event("frozen_membership", meter.phase, () => ({ incomplete,
     pages: frozenPages.map((page, position) => ({ position, targets: page.map(row => row.entry.target) })) }));
   const { pool: _pool, ...frozenBase } = base;
@@ -173,116 +120,6 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
     discovery: incomplete ? { ...base.discovery, truncated: true, open_residuals: true } : base.discovery };
   meter.observer?.facts.plan(plan, base.pool);
   return plan;
-}
-
-function improveReservedPackages(pages: SourceSemanticLibraryPackage[][], access: SourceSemanticAccessReceipt[],
-  candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
-  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => {
-    access: SourceSemanticAccessReceipt; fits: boolean;
-  }): void {
-  let offset = 0;
-  try {
-    for (let position = 0; position < pages.length; position++) {
-      for (const candidate of prepareLibraryPackagePairs(candidates, pages[position]!, meter)) {
-        let replacementAccess: SourceSemanticAccessReceipt | undefined;
-        meter.observer?.event("selection_attempt", meter.phase, () => ({ mode: "improve_reserved", position,
-          candidates: [{ target: candidate.entry.target, proof_count: candidate.proofs.length }] }));
-        const improved = improveSourceSemanticLibraryPage({ page: pages[position]!, candidates: [candidate], meter,
-          fits: page => {
-            const reserved = reserve(page, offset, position + 1 < pages.length);
-            if (reserved.fits) replacementAccess = reserved.access;
-            return reserved.fits;
-          } });
-        meter.observer?.event("selection_result", meter.phase, () => ({ mode: "improve_reserved", position,
-          targets: improved.map(row => row.entry.target), replaced: replacementAccess !== undefined,
-          unselected_reason: "not_observed_inside_selector" }));
-        if (replacementAccess !== undefined) {
-          pages[position] = [...improved]; access[position] = replacementAccess;
-        }
-      }
-      offset += pages[position]!.length;
-    }
-  } catch (error) {
-    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-    // The complete baseline is already reserved; optional search cannot revoke any page.
-  }
-}
-
-type PageReservation = Readonly<{ access: SourceSemanticAccessReceipt; fits: boolean }>;
-
-/**
- * A future final envelope cannot justify consuming or excluding a root until a
- * real earlier page fits. Preserve the baseline while trying one final proposal
- * with the existing selector, then its actual current-execution prefix. With
- * that final membership held, other final-only roots may use raw support rather
- * than circularly reserving a second last page. Failed work is never refunded.
- */
-function reserveDeferredFinalProofPage(candidates: readonly SourceSemanticLibraryPackage[],
-  baseline: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
-  order: "field" | "source_access", selectPage: LibraryPageSelector,
-  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => PageReservation,
-  emittedOffset: number
-): Readonly<{ page: readonly SourceSemanticLibraryPackage[]; access: SourceSemanticAccessReceipt;
-  prefix: readonly SourceSemanticLibraryPackage[]; prefixAccess: SourceSemanticAccessReceipt;
-  remaining: SourceSemanticLibraryPackage[] }> | undefined {
-  try {
-    meter.charge(candidates.length + baseline.length, (candidates.length + baseline.length) * 24,
-      "deferred final candidate references");
-    const rawRoots = new Set(baseline.filter(row => row.proofs.length === 0).map(root));
-    const finalCandidates = baseline.length === 0 ? candidates : candidates.filter(row => rawRoots.has(root(row)));
-    // This positive offset prices only a tentative future final, never a published first page.
-    const final = reserveFinalProofPage(finalCandidates, meter, order, selectPage, reserve, emittedOffset + 1);
-    if (final.page.length === 0) return undefined;
-    const finalRoots = new Set(final.page.map(root));
-    const remaining = candidates.filter(row => !finalRoots.has(root(row)));
-    const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
-    const prefix = observedLibrarySelection(selectPage, { candidates: remaining, meter, order,
-      fitsStandalone: (candidate, precedingSlots) => reserve([candidate], emittedOffset + precedingSlots, true).fits,
-      fits: page => {
-        const reserved = reserve(page, emittedOffset, true);
-        if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
-        return reserved.fits;
-      }
-    });
-    if (prefix.length === 0) return undefined;
-    const prefixAccess = accessByPage.get(pageKey(prefix));
-    if (prefixAccess === undefined) throw new CoreError("OBLIGATION_VIOLATION", "deferred final prefix has no reserved access receipt");
-    const confirmed = reserve(final.page, emittedOffset + prefix.length, false);
-    if (!confirmed.fits) return undefined;
-    return { page: final.page, access: confirmed.access, prefix, prefixAccess, remaining };
-  } catch (error) {
-    if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-    // Neither final roots nor prefix membership have changed the reserved baseline.
-    return undefined;
-  }
-}
-
-/**
- * Reserve one final membership without cursor or offset overhead, using the
- * caller's execution context. Earlier pages never change; each invocation uses
- * one metered selection, not a subset/permutation search.
- */
-function reserveFinalProofPage(candidates: readonly SourceSemanticLibraryPackage[], meter: SourceSemanticReadBudget,
-  order: "field" | "source_access", selectPage: LibraryPageSelector,
-  reserve: (page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean) => PageReservation,
-  emittedOffset: number
-): Readonly<{ page: readonly SourceSemanticLibraryPackage[]; access?: SourceSemanticAccessReceipt }> {
-  meter.charge(candidates.length, candidates.length * 8, "final proof candidates");
-  const proofs = candidates.filter(row => row.proofs.length > 0);
-  if (proofs.length === 0) return { page: [] };
-  const accessByPage = new Map<string, SourceSemanticAccessReceipt>();
-  const selected = observedLibrarySelection(selectPage, { candidates: proofs, meter, order, fits: page => {
-    // A future context remains tentative until its caller proves a nonempty prefix.
-    const reserved = reserve(page, emittedOffset, false);
-    if (reserved.fits) accessByPage.set(pageKey(page), reserved.access);
-    return reserved.fits;
-  } });
-  if (selected.length > 0) {
-    const access = accessByPage.get(pageKey(selected));
-    if (access === undefined) throw new CoreError("OBLIGATION_VIOLATION", "final proof selection has no reserved access receipt");
-    return { page: selected, access };
-  }
-  return { page: [] };
 }
 
 /** Continuations reuse the frozen plan; no source access, solver replay or re-selection occurs. */
@@ -300,15 +137,8 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
     targets: result.index.entries.map(row => row.target), continuation: result.index.continuation !== null }));
   return { ...result, work: workOf(meter) };
 }
-
-/** Full native-envelope fitting without publishing or retaining a continuation capability.
- * Private diagnostics may measure/encode this page, but must strip its non-issued identities.
- */
-function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
-  plan: LibraryDeliveryPlan, offset: number): Recall {
-  let position = 0;
-  const pageIndex = plan.pages.findIndex(page => { const matches = position === offset; position += page.length; return matches; });
-  if (pageIndex < 0) throw new CoreError("VALIDATION", "library continuation offset is not a frozen page boundary");
+function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request, plan: LibraryDeliveryPlan, offset: number): Recall {
+  const pageIndex = sourceRecallPageAt(plan.pages.length, position => plan.pages[position]!.length, offset);
   const page = plan.pages[pageIndex]!;
   const result = pageResult(plan, page, offset, pageIndex + 1 < plan.pages.length, request, meter, false,
     plan.page_access[pageIndex]!, sourceSemanticExecution(meter.preparation, meter.acquisition, meter));
@@ -316,115 +146,64 @@ function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
   meter.observer?.facts.encodingInvocation("final_delivery", "base_page");
   const baseEncoded = encodeSourceSemanticLibraryResponse(result);
   meter.observer?.event("encoded_membership", "final_delivery", () => ({ offset,
-    results: "results" in baseEncoded ? baseEncoded.results?.map(row => ({ target: row.target, preview_bytes: Buffer.byteLength(row.content_preview),
-      within_budget: row.budget_state.within_budget })) ?? null : null }));
+    results: "results" in baseEncoded ? baseEncoded.results?.map(row => ({ target: row.target, preview_bytes: Buffer.byteLength(row.content_preview), within_budget: row.budget_state.within_budget })) ?? null : null }));
   meter.retain(baseEncoded, "library public serialization");
-  // The reserved work receipt is an upper bound on the eventual metered receipt.
   const encodedJson = JSON.stringify(baseEncoded);
-  let reservedBytes = Buffer.byteLength(encodedJson)
+  const reservedBytes = Buffer.byteLength(encodedJson)
     + Buffer.byteLength(JSON.stringify(reservedLibraryWork(request))) - Buffer.byteLength(JSON.stringify(result.work));
   meter.observer?.facts.encoding("final_delivery", "base_page", encodedJson,
     "results" in baseEncoded ? baseEncoded.results?.map(row => row.content_preview) ?? [] : []);
   meter.observer?.event("encoding_result", "final_delivery", () => ({ offset, bytes: reservedBytes,
     byte_limit: request.output_byte_limit, fits: reservedBytes <= request.output_byte_limit }));
-  if (reservedBytes > request.output_byte_limit) {
-    throw new CoreError("VALIDATION", "output budget cannot retain reserved source support");
-  }
+  if (reservedBytes > request.output_byte_limit) throw new CoreError("VALIDATION", "output budget cannot retain reserved source support");
   let final: Recall = result;
-  // Source time occurs once in the disclosure map and once in the public result.
-  // Charge each bounded formatting attempt before measuring it, even when it
-  // cannot fit. Previously reserved roots, previews and proofs remain intact.
-  for (const row of page) {
-    const source_time = sourceDisclosure(row.source_disclosure).source_time;
-    if (source_time === undefined) continue;
-    // ISO times are bounded to 64 ASCII characters by the disclosure schema;
-    // this covers escaped JSON, both public copies and transient formatting.
-    const timeSizeBound = source_time.kind === "known" ? source_time.at.length * 6 + 96 : 128;
-    try { meter.charge(1, timeSizeBound * 4, "optional source time packing"); }
-    catch (error) {
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      break;
-    }
-    const key = indexEntryCacheKey(row.entry);
-    const disclosure = final.source_disclosures[key];
-    if (disclosure === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selected library source lacks disclosure");
-    let withTime: typeof disclosure, addedBytes: number;
-    try {
-      // Size the actual codec values, including null absence slots, not a second
-      // named-field format. Both public copies use this exact representation.
-      const semantic = { ...sourceDisclosure(disclosure), source_time };
-      meter.retain(semantic, "optional source time semantic capture");
-      meter.observer?.facts.encodingInvocation("final_delivery", "source_time_after");
-      withTime = encodeSourceDisclosure(semantic);
-      meter.retain(withTime, "optional source time codec allocation");
-      const before = JSON.stringify(disclosure), after = JSON.stringify(withTime);
-      meter.observer?.facts.encoding("final_delivery", "source_time_before", before, []);
-      meter.observer?.facts.encoding("final_delivery", "source_time_after", after, []);
-      meter.charge(1, (before.length + after.length) * 2, "optional source time codec encoding");
-      addedBytes = 2 * (Buffer.byteLength(after) - Buffer.byteLength(before));
-    } catch (error) {
-      if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
-      break;
-    }
-    if (reservedBytes + addedBytes > request.output_byte_limit) continue;
-    final = { ...final, source_disclosures: { ...final.source_disclosures, [key]: withTime } };
-    reservedBytes += addedBytes;
-  }
+  packSourceRecallTimes({ meter, byteLimit: request.output_byte_limit, reservedBytes, count: page.length,
+    time: position => sourceDisclosure(page[position]!.source_disclosure).source_time,
+    disclosure: position => final.source_disclosures[indexEntryCacheKey(page[position]!.entry)],
+    apply: (position, disclosure) => {
+      final = { ...final, source_disclosures: { ...final.source_disclosures, [indexEntryCacheKey(page[position]!.entry)]: disclosure } };
+    },
+    encodingInvocation: () => { meter.observer?.facts.encodingInvocation("final_delivery", "source_time_after"); },
+    encoding: (variant, json) => { meter.observer?.facts.encoding("final_delivery", variant, json, []); }
+  });
   return { ...final, work: workOf(meter) };
 }
-
 function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean,
-  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticAccessReceipt,
-  execution: SourceSemanticExecution): Recall {
+  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticAccessReceipt, execution: SourceSemanticExecution): Recall {
   const assembled = assembleSourceSemanticLibraryIndex({ ...base, authorized_scopes: base.authorized,
     source_entries: page.map(row => row.entry), proof_groups: page.filter(row => row.proofs.length > 0),
-    selected_entries: page.map(row => row.entry), root_order: page.map(root),
-    truncated: base.discovery.truncated, open_residuals: base.discovery.open_residuals, more_roots: more, emitted_offset: offset });
-  const index = assembled.index.continuation === null ? assembled.index : {
-    ...assembled.index, continuation: sealIssuedContinuation(assembled.index.continuation)
-  };
+    selected_entries: page.map(row => row.entry), root_order: page.map(root), truncated: base.discovery.truncated,
+    open_residuals: base.discovery.open_residuals, more_roots: more, emitted_offset: offset });
+  const index = assembled.index.continuation === null ? assembled.index : { ...assembled.index, continuation: sealIssuedContinuation(assembled.index.continuation) };
   const proofs = page.flatMap(row => row.proofs);
   const deliveredSources = new Set(page.flatMap(row => row.entry.target.kind === "source_evidence"
     ? [`${row.entry.target.workspace_id}\0${row.entry.target.root_id}\0${row.entry.target.source_version}\0${row.entry.target.content_digest}`] : []));
   meter.charge(base.unproved_computations.length + page.length, 0, "library unproved computation page selection");
-  const unproved = base.unproved_computations.filter(row => deliveredSources.has(
-    `${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`));
+  const unproved = base.unproved_computations.filter(row => deliveredSources.has(`${row.source_record.workspace_id}\0${row.source_record.identity}\0${row.source_record.source_version}\0${row.source_record.content_digest}`));
   const previews = Object.fromEntries(page.map(row => [indexEntryCacheKey(row.entry), row.preview]));
   const source_disclosures = Object.fromEntries(page.map(row => {
-    const wire = qualifySourceDisclosure(row.source_disclosure,
-      row.proofs.length > 0 ? "conditional_support" : "source_only", false);
-    meter.retain(wire, "library disclosure codec allocation");
-    return [indexEntryCacheKey(row.entry), wire];
+    const wire = qualifySourceDisclosure(row.source_disclosure, row.proofs.length > 0 ? "conditional_support" : "source_only", false);
+    meter.retain(wire, "library disclosure codec allocation"); return [indexEntryCacheKey(row.entry), wire];
   }));
-  const discovery = { ...base.discovery, access };
-  const work = reserveWork ? reservedLibraryWork(request) : workOf(meter);
   const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget, execution,
-    request_identity: base.public_request_identity,
-    query_semantics_status: base.query_semantics_status,
+    request_identity: base.public_request_identity, query_semantics_status: base.query_semantics_status,
     delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
-    discovery, slot_qualifiers: slotQualifiersFor(index, proofs).map(row => ({ ...row,
+    discovery: { ...base.discovery, access }, slot_qualifiers: slotQualifiersFor(index, proofs).map(row => ({ ...row,
       payload_support: page[row.index]!.payload_support, selection_basis: page[row.index]!.selection_basis })),
-    ...(proofs.length === 0 ? {} : { proofs }),
-    ...(unproved.length === 0 ? {} : { unproved_computations: unproved }), previews, source_disclosures, work,
-    coverage: { ...base.coverage, conditional_computation: base.query_semantics_status.status === "unavailable" ? "unexercised"
-      : base.coverage.conditional_computation,
-      payload: page.some(row => row.entry.target.kind === "source_evidence" && !row.entry.target.span?.content_complete)
-        ? "truncated" : base.coverage.payload }
+    ...(proofs.length === 0 ? {} : { proofs }), ...(unproved.length === 0 ? {} : { unproved_computations: unproved }),
+    previews, source_disclosures, work: reserveWork ? reservedLibraryWork(request) : workOf(meter),
+    coverage: { ...base.coverage, conditional_computation: base.query_semantics_status.status === "unavailable" ? "unexercised" : base.coverage.conditional_computation,
+      payload: page.some(row => row.entry.target.kind === "source_evidence" && !row.entry.target.span?.content_complete) ? "truncated" : base.coverage.payload }
   });
   if (result.kind !== "recall") throw new CoreError("OBLIGATION_VIOLATION", "library delivery result kind changed");
   return result;
 }
 function reservedLibraryWork(request: Request) {
-  return { native_work: request.budget.work_units, index_work: request.budget.work_units,
-    native_accounting: "partial" as const, logical_work: request.budget.work_units,
-    native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes,
-    rss_bytes: Number.MAX_SAFE_INTEGER };
+  return { native_work: request.budget.work_units, index_work: request.budget.work_units, native_accounting: "partial" as const,
+    logical_work: request.budget.work_units, native_bytes: request.budget.memory_bytes, logical_memory_bytes: request.budget.memory_bytes, rss_bytes: Number.MAX_SAFE_INTEGER };
 }
 function root(row: SourceSemanticLibraryPackage): string {
   if (row.entry.target.kind !== "source_evidence") throw new CoreError("OBLIGATION_VIOLATION", "library package has no source root");
   return sourceGoldRootIdentity(row.entry.target);
-}
-function pageKey(page: readonly SourceSemanticLibraryPackage[]): string {
-  return JSON.stringify(page.map(row => indexEntryCacheKey(row.entry)));
 }
