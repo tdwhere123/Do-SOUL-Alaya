@@ -9,7 +9,9 @@ import {
   type SourceSemanticReasoningResult, type SourceSemanticLibraryProof, type SourceSemanticQuery,
   type SourceSemanticCorrespondence, type SourceSemanticAccessPolicy, type SourceSemanticQueryStatus, type RequestBudget,
   type SourceDisclosure, sourceGoldRootIdentity, proofForLibraryEntry, sourceSemanticProofQualifier,
-  verifySourceSemanticLibraryDelivery, SourceSemanticAccessProfileSchema, type SourceSemanticAccessProfile
+  verifySourceSemanticLibraryDelivery, SourceSemanticAccessProfileSchema, type SourceSemanticAccessProfile,
+  SourceSemanticComparisonResponseSchema, type SourceSemanticComparisonResponse, type SourceSemanticComparisonWorkerResult,
+  type SourceSemanticReadableWorkerResult
 } from "@do-soul/alaya-protocol";
 import { libraryPageOrder } from "../conditional-field/index/completion-target.js";
 import { sortIndexEntries } from "./index-continuation.js";
@@ -105,6 +107,7 @@ export function scopeSourceSemanticLibraryBranch(index: InformationIndex, result
 
 export function assembleSourceSemanticLibraryIndex(input: Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string;
+  result_version?: "source-semantic-library-v6" | "source-semantic-library-v7";
   proof_groups: readonly { entries: readonly IndexEntry[]; explanations?: readonly Derivation[] }[];
   source_entries: readonly IndexEntry[];
   truncated: boolean; open_residuals: boolean;
@@ -158,7 +161,7 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
     occupied,
     index: InformationIndexSchema.parse({
       schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION, query_id: input.query_id, snapshot_id: input.snapshot_id,
-      result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, entries: page,
+      result_version: input.result_version ?? SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, entries: page,
       interpretation_id: input.interpretation_id, as_of: input.as_of,
       ...(explanations.length === 0 ? {} : { explanations }),
       completeness: {
@@ -187,12 +190,13 @@ export function assembleSourceSemanticLibraryIndex(input: Readonly<{
 function libraryOccupancyContinuation(input: Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string;
   expires_at?: string; authorized_scopes?: readonly string[] | null;
+  result_version?: "source-semantic-library-v6" | "source-semantic-library-v7";
 }>, nextOffset: number): Continuation {
   return {
     schema_version: CONDITIONAL_FIELD_SCHEMA_VERSION,
     continuation_id: `page-${String(nextOffset)}`,
     query_id: input.query_id, snapshot_id: input.snapshot_id,
-    result_version: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
+    result_version: input.result_version ?? SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
     expires_at: input.expires_at ?? input.as_of,
     cursor: `offset-${String(nextOffset)}`,
     interpretation_id: input.interpretation_id, interpretation_clock: input.as_of,
@@ -299,9 +303,12 @@ function previewWithinTokens(text: string, allowance: number, estimator: ReturnT
 }
 
 /** The worker's byte check and MCP delivery encode the exact same public envelope. */
+export function encodeSourceSemanticLibraryResponse(result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>): SoulInterpretationResponse;
+export function encodeSourceSemanticLibraryResponse(result: Extract<SourceSemanticComparisonWorkerResult, { kind: "recall" }>): SourceSemanticComparisonResponse;
+export function encodeSourceSemanticLibraryResponse(result: Extract<SourceSemanticReadableWorkerResult, { kind: "recall" }>): SoulInterpretationResponse | SourceSemanticComparisonResponse;
 export function encodeSourceSemanticLibraryResponse(
-  result: Extract<SourceSemanticWorkerResult, { kind: "recall" }>
-): SoulInterpretationResponse {
+  result: Extract<SourceSemanticReadableWorkerResult, { kind: "recall" }>
+): SoulInterpretationResponse | SourceSemanticComparisonResponse {
   verifySourceSemanticLibraryDelivery(result, fieldContractSha256);
   if (result.execution === undefined) throw new CoreError("VALIDATION", "Source library v2 requires actual execution accounting");
   const { kind: _kind, previews, coverage, ...rest } = result;
@@ -309,7 +316,8 @@ export function encodeSourceSemanticLibraryResponse(
     result.source_disclosures);
   const omitted = results.some((row) => !row.budget_state.within_budget);
   const incomplete = omitted || coverage.payload !== "complete";
-  return SoulInterpretationResponseSchema.parse({ operation: "recall", ...rest, results,
+  const schema = result.protocol_version === 9 ? SourceSemanticComparisonResponseSchema : SoulInterpretationResponseSchema;
+  return schema.parse({ operation: "recall", ...rest, results,
     total_count: results.length,
     index: incomplete ? { ...result.index, completeness: { ...result.index.completeness, payload: "partial" } } : result.index,
     coverage: { ...coverage, payload: omitted ? "truncated" : coverage.payload } });

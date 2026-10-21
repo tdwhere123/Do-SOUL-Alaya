@@ -2,7 +2,8 @@ import { z } from "zod";
 import {
   SourceRecordIdentitySchema, type SourceRecordIdentity, RequestBudgetSchema, SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticLibrarySlotQualifierSchema, SourceSemanticWorkerResultSchema, SoulInterpretationResponseSchema,
-  SourceSemanticExecutionSchema, sourceSemanticExecutionExternalAttempts,
+  SourceSemanticExecutionSchema, SourceSemanticProfiledExecutionSchema, sourceSemanticExecutionExternalAttempts,
+  SourceSemanticComparisonWorkerResultSchema, SourceSemanticComparisonResponseSchema, SourceSemanticProfiledLibraryDeliverySchema,
   SoulInterpretationRecallDeliverySchema, SourceSemanticLibraryDiscoverySchema, SourceSemanticCoverageSchema, SourceSemanticQueryStatusSchema,
   canonicalJson, InformationIndexSchema, ContinuationSchema, MemorySearchResultSchema, SourceSemanticLibraryProofSchema, type SourceSemanticLibraryProof, type InformationIndex, type RequestBudget, type SourceSemanticLibraryOrder,
   sourceGoldRootIdentity, type SourceSemanticLibrarySlotQualifier, type SourceSemanticQueryStatus, type SourceEvidenceTarget, type Continuation
@@ -22,6 +23,8 @@ import { admittedSourcePreviewInterval } from "./source-delivery-visibility.js";
 
 export const SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT = "source-semantic-library-delivered-slots-v3" as const;
 const HISTORICAL_SOURCE_ONLY_PAGE_BUDGET = 10;
+const PROFILED_MEASUREMENT_CONTRACT = "source-semantic-library-delivered-slots-v4" as const;
+const CurrentDiscoverySchema = z.union([SourceSemanticLibraryDiscoverySchema, SourceSemanticProfiledLibraryDeliverySchema.shape.discovery]);
 
 const InvalidReason = z.enum([
   "invalid_response", "missing_zero_call_evidence", "missing_request_budget", "request_budget_mismatch",
@@ -32,12 +35,12 @@ const usableObservedStates = new Set(["complete", "partial", "open", "exhausted_
 
 const ValidatedMeasurementRecord = z.object({
   schema_version: z.literal(1), status: z.literal("validated"),
-  contract: z.literal(SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT),
+  contract: z.enum([SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT, PROFILED_MEASUREMENT_CONTRACT]),
   request: z.object({ budget: RequestBudgetSchema }).strict().readonly(),
   effective_page_budget: z.literal(SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET),
   delivered_index: InformationIndexSchema,
   delivered_proofs: z.array(SourceSemanticLibraryProofSchema).readonly(),
-  native_observation: z.object({ query_semantics_status: SourceSemanticQueryStatusSchema, discovery: SourceSemanticLibraryDiscoverySchema,
+  native_observation: z.object({ query_semantics_status: SourceSemanticQueryStatusSchema, discovery: CurrentDiscoverySchema,
     coverage: SourceSemanticCoverageSchema }).strict().readonly(),
   source_records: z.array(SourceRecordIdentitySchema).readonly().optional(),
   identity: z.object({
@@ -63,6 +66,11 @@ const HistoricalValidatedMeasurementRecord = ValidatedMeasurementRecord.unwrap()
 type ValidatedMeasurement = z.infer<typeof ValidatedMeasurementRecord | typeof HistoricalValidatedMeasurementRecord>;
 
 function recordInconsistency(value: ValidatedMeasurement): string | undefined {
+  if (value.contract !== "source-semantic-library-delivered-slots-v1") {
+    const candidate = value.delivered_index.result_version === "source-semantic-library-v7";
+    if ((value.contract === PROFILED_MEASUREMENT_CONTRACT) !== candidate ||
+        (value.native_observation.discovery.access?.contract === "source-semantic-access-v3") !== candidate) return "mixed library measurement family";
+  }
   if (!librarySlotsMatchIndex(value.first_exposure_slots, value.delivered_index, value.slot_qualifiers)) {
     return "library delivered slots differ from native index";
   }
@@ -112,7 +120,8 @@ export function deliveredSourceSemanticLibraryIntervals(measurement: SourceSeman
 export function deliveredSourceSemanticLibraryPageIntervals(admitted: ReturnType<typeof admitSourceSemanticLibraryResponse>,
   recallResult: unknown, rankOffset = 0): readonly DeliveredSourceInterval[] | null {
   if (admitted?.status !== "admitted" || !Number.isSafeInteger(rankOffset) || rankOffset < 0) return null;
-  const parsed = SoulInterpretationResponseSchema.safeParse(recallResult);
+  const parsed = (isRecord(recallResult) && isProfiledRecall(recallResult)
+    ? SourceSemanticComparisonResponseSchema : SoulInterpretationResponseSchema).safeParse(recallResult);
   if (!parsed.success || parsed.data.operation !== "recall" || parsed.data.results === undefined
     || parsed.data.delivery_id !== admitted.exposure.delivery_id || canonicalJson(parsed.data.index) !== canonicalJson(admitted.index)
     || canonicalJson(parsed.data.slot_qualifiers) !== canonicalJson(admitted.qualifiers)) return null;
@@ -165,7 +174,7 @@ interface LibraryRecall {
   readonly results?: Parameters<typeof soulSearchFromLibraryRecall>[0]["results"];
   readonly total_count?: number;
   readonly previews?: Readonly<Record<string, string>>;
-  readonly discovery: z.infer<typeof SourceSemanticLibraryDiscoverySchema>;
+  readonly discovery: z.infer<typeof CurrentDiscoverySchema>;
   readonly coverage: z.infer<typeof SourceSemanticCoverageSchema>;
   readonly query_semantics_status?: SourceSemanticQueryStatus;
 }
@@ -221,7 +230,8 @@ function measureLibraryDelivery(input: SourceSemanticLibraryMeasurementInput,
   const deliveredSlotUnion = scoreSourceBearingUnionFirstExposure(admitted.slots, gold.data, assessment.unionAdmission);
   const validated = (historicalSourceOnly ? HistoricalValidatedMeasurementRecord : ValidatedMeasurementRecord).safeParse({
     schema_version: 1, status: "validated", contract: historicalSourceOnly
-      ? "source-semantic-library-delivered-slots-v1" : SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT,
+      ? "source-semantic-library-delivered-slots-v1" : admitted.index.result_version === "source-semantic-library-v7"
+        ? PROFILED_MEASUREMENT_CONTRACT : SOURCE_SEMANTIC_LIBRARY_MEASUREMENT_CONTRACT,
     request: { budget: admitted.budget }, identity: admitted.identity,
     effective_page_budget: pageBudget, delivered_index: admitted.index, delivered_proofs: admitted.proofs,
     ...(input.sourceRecords === undefined ? {} : { source_records: input.sourceRecords }),
@@ -376,6 +386,14 @@ function admitLibraryMeasurement(
 }
 
 function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "invalid" | null {
+  if (isProfiledRecall(raw)) {
+    const parsed = raw.kind === "recall" ? SourceSemanticComparisonWorkerResultSchema.safeParse(raw)
+      : SourceSemanticComparisonResponseSchema.safeParse(raw);
+    if (!parsed.success) return "invalid";
+    const row = parsed.data;
+    if (!("index" in row)) return "invalid";
+    return { ...row, ...( "results" in row ? { results: row.results } : { previews: row.previews }) };
+  }
   const worker = SourceSemanticWorkerResultSchema.safeParse(raw);
   if (worker.success) {
     if (worker.data.kind !== "recall") return null;
@@ -405,6 +423,10 @@ function parseLibraryRecall(raw: Record<string, unknown>): LibraryRecall | "inva
   return looksLikeLibraryRecall(raw) ? "invalid" : null;
 }
 
+function isProfiledRecall(raw: Record<string, unknown>): boolean {
+  return raw.protocol_version === 9 || isRecord(raw.index) && raw.index.result_version === "source-semantic-library-v7" ||
+    isRecord(raw.discovery) && isRecord(raw.discovery.access) && raw.discovery.access.contract === "source-semantic-access-v3";
+}
 function looksLikeLibraryRecall(raw: Record<string, unknown>): boolean {
   if (raw.kind === "recall" || raw.operation === "recall") return true;
   return isRecord(raw.index) && raw.index.result_version === SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION;
@@ -468,7 +490,7 @@ function proofMetric(slots: readonly z.infer<typeof ExposureSlotSchema>[], gold:
 
 function zeroCallReason(raw: Record<string, unknown>, requireExecution: boolean): InvalidMeasurementReason | null {
   if (requireExecution || Object.hasOwn(raw, "execution")) {
-    const execution = SourceSemanticExecutionSchema.safeParse(raw.execution);
+    const execution = (isProfiledRecall(raw) ? SourceSemanticProfiledExecutionSchema : SourceSemanticExecutionSchema).safeParse(raw.execution);
     if (!execution.success || sourceSemanticExecutionExternalAttempts(execution.data) !== 0) {
       return "missing_zero_call_evidence";
     }

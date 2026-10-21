@@ -6,7 +6,7 @@ import { admitSourceSemanticQuery, authorizedScopesFromAdmission, authorizeSeman
   sourceSemanticLibraryRequestIdentity, verifyPublishedSourceSemanticInterpretation } from "@do-soul/alaya-core";
 import { AlayaError, canonicalJson, SoulInterpretationRequestSchema, sourceSemanticAccessPhases, sourceEvidenceRootTarget, sourceRecallTarget,
   type MemorySearchResult, type SourceEvidenceTarget, type SourceSemanticLibrarySlotQualifier,
-  type SourceRecordIdentity, type SoulInterpretationResponse } from "@do-soul/alaya-protocol";
+  type SourceRecordIdentity, type SoulInterpretationResponse, type SourceSemanticComparisonResponse } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../snapshot/source-records/publish.js";
 import type { SemanticChainConfig, SemanticChainPlan } from "./contract.js";
 import type { discoverSemanticChainQuery } from "./prepare.js";
@@ -83,7 +83,8 @@ export function admitSealedSemanticChainLibraryDelivery(config: SemanticChainCon
   } finally { connection.close(); }
 }
 
-export function admitDeliveredSources(config: SemanticChainConfig, response: Recall,
+export function admitDeliveredSources(config: Pick<SemanticChainConfig, "workspace_id">,
+  response: Recall | Extract<SourceSemanticComparisonResponse, { operation: "recall" }>,
   stores: ReturnType<typeof sourceLookupStores>, reader: SqliteSourceHintReader, scopes: readonly string[] | null,
   correspondences: Correspondences): SourceRecordIdentity[] {
   const records: SourceRecordIdentity[] = [];

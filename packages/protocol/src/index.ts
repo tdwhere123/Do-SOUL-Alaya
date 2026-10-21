@@ -26,6 +26,7 @@
 export type { EnvLookup } from "./config/env-lookup.js";
 export * from "./recall/source-index.js";
 export type * from "./recall/source-index-query.js";
+export { SourceIndexQueryResourcesSchema } from "./recall/source-index-query.js";
 export { SOURCE_DISCLOSURE_CODEC_VERSION, SourceDisclosureSchema, SourceDisclosureSemanticSchema,
   encodeSourceDisclosure, qualifySourceDisclosure, sourceDisclosureProofUse, sourceDisclosure, decodeHistoricalSourceDisclosure, EvidenceTextDisclosuresSchema,
   type SourceDisclosure, type SourceDisclosureSemantic, type EvidenceTextDisclosures } from "./recall/source-disclosure.js";
@@ -323,9 +324,15 @@ export { SOURCE_SEMANTIC_PROFILED_ACCESS_CONTRACT, SOURCE_SEMANTIC_PROFILED_LIBR
   SOURCE_SEMANTIC_PROFILED_LIBRARY_PROTOCOL_VERSION, SourceSemanticEffectiveOrderSchema,
   SourceSemanticAcquisitionPolicySchema, SourceSemanticAcquisitionChannelsSchema, SourceSemanticAcquisitionAllowanceSchema,
   SourceSemanticAccessProfileSchema, SourceSemanticNominationOccurrenceSchema, SourceSemanticProfiledAcquisitionResultSchema,
-  SourceSemanticProfiledAcquisitionPhaseSchema, SourceSemanticProfiledExecutionPhasesSchema }
+  SourceSemanticRetainedNominationWitnessSchema, sourceSemanticRetainedWitnessMatchesPhase,
+  SourceSemanticProfiledAcquisitionPhaseSchema, SourceSemanticProfiledExecutionPhasesSchema, sourceSemanticProfiledAcquisitionNotRun }
   from "./garden/source-semantic-access-profile.js";
-export type { SourceSemanticAccessProfile, SourceSemanticProfiledAcquisitionPhase, SourceSemanticProfiledExecutionPhases }
+export { SourceSemanticComparisonWorkerResultSchema, SourceSemanticReadableWorkerResultSchema, SourceSemanticComparisonResponseSchema,
+  SourceSemanticComparisonWorkerRequestSchema, SourceSemanticComparisonRequestSchema, admitSourceSemanticWorkerResultFamily } from "./garden/source-semantic-comparison-worker.js";
+export type { SourceSemanticComparisonWorkerResult, SourceSemanticReadableWorkerResult, SourceSemanticComparisonResponse,
+  SourceSemanticComparisonWorkerRequest, SourceSemanticReadableWorkerRequest } from "./garden/source-semantic-comparison-worker.js";
+export type { SourceSemanticAccessProfile, SourceSemanticProfiledAcquisitionPhase, SourceSemanticProfiledExecutionPhases,
+  SourceSemanticNominationOccurrence, SourceSemanticRetainedNominationWitness }
   from "./garden/source-semantic-access-profile.js";
 export { SourceSemanticProfiledLibraryContinuationSchema, SourceSemanticProfiledLibraryDeliverySchema }
   from "./garden/source-semantic-profiled-library.js";
@@ -333,7 +340,8 @@ export type { SourceSemanticProfiledLibraryDelivery } from "./garden/source-sema
 export { SourceSemanticProfiledCompactAcquisitionSchema, SourceSemanticProfiledAccessPhasesSchema,
   SourceSemanticProfiledExecutionSchema } from "./garden/source-semantic-phase-wire.js";
 export type { SourceSemanticProfiledCompactAcquisition, SourceSemanticProfiledAccessPhases,
-  SourceSemanticProfiledExecution } from "./garden/source-semantic-phase-wire.js";
+  SourceSemanticProfiledExecution, SourceSemanticReadableAcquisition, SourceSemanticReadableAccessPhases,
+  SourceSemanticReadableExecution } from "./garden/source-semantic-phase-wire.js";
 export {
   SourceSemanticUndeliveredConclusionSchema, sourceSemanticUndeliveredConclusion, sourceSemanticReasonControl
 } from "./garden/source-semantic-reason-delivery.js";

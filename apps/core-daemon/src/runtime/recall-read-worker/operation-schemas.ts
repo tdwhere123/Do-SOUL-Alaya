@@ -3,8 +3,9 @@ import {
   AuthorizedScopesAdmissionSchema,
   SourceInterpretationReasoningRequestSchema,
   SourceInterpretationReasoningResultSchema,
-  SourceSemanticWorkerRequestSchema,
-  SourceSemanticWorkerResultSchema, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema,
+  SourceSemanticWorkerRequestSchema, SourceSemanticComparisonWorkerRequestSchema,
+  SourceSemanticReadableWorkerResultSchema,
+  SourceSemanticAccessProfileSchema, SourceSemanticQueryPreparationSchema, SourceIndexProfileSchema,
   EvidenceCapsuleSchema,
   MemoryDimensionSchema,
   MemoryEntrySchema,
@@ -91,6 +92,11 @@ export const SourceSemanticsPublicPayloadSchema = z.object({
   expires_at: z.string().datetime().optional(), request: SourceSemanticWorkerRequestSchema
 }).strict();
 export type SourceSemanticsPublicPayload = z.infer<typeof SourceSemanticsPublicPayloadSchema>;
+export const SourceSemanticsComparisonPayloadSchema = SourceSemanticsPublicPayloadSchema.extend({
+  comparison: z.object({ profile: SourceSemanticAccessProfileSchema.optional() }).strict(),
+  request: SourceSemanticComparisonWorkerRequestSchema
+}).strict();
+export type SourceSemanticsComparisonPayload = z.infer<typeof SourceSemanticsComparisonPayloadSchema>;
 const PreparedRouteSchema = z.object({
   receipt: SourceSemanticQueryPreparationSchema.refine(value => value.supplemental === undefined,
     "private route preparation cannot nest supplemental routes"),
@@ -113,7 +119,9 @@ const PAYLOAD_SCHEMAS = {
     as_of: z.string().datetime(), authorized_scopes: AuthorizedScopesAdmissionSchema,
     request: SourceInterpretationReasoningRequestSchema }).strict(),
   "conditionalField.sourceSemantics": SourceSemanticsPublicPayloadSchema.extend({
-    prepared_query: PreparedQuerySchema.optional()
+    prepared_query: PreparedQuerySchema.optional(),
+    request: z.union([SourceSemanticWorkerRequestSchema, SourceSemanticComparisonWorkerRequestSchema]),
+    comparison: z.object({ profile: SourceSemanticAccessProfileSchema }).strict().optional()
   }).strict(),
   "conditionalField.acknowledge": AcknowledgeSchema,
   "conditionalField.discard": DiscardSchema,
@@ -285,7 +293,7 @@ const RESULT_SCHEMAS = {
   "snapshot.rollback": z.null(),
   "conditionalField.recall": ConditionalFieldRecallPortResultSchema,
   "conditionalField.interpretation": SourceInterpretationReasoningResultSchema,
-  "conditionalField.sourceSemantics": SourceSemanticWorkerResultSchema,
+  "conditionalField.sourceSemantics": SourceSemanticReadableWorkerResultSchema,
   // Receipt fields are owned by core; this boundary only requires the version tag.
   "conditionalField.acknowledge": z.union([
     z.null(),

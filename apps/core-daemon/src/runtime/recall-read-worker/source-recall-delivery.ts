@@ -1,5 +1,5 @@
 import { SourceSemanticResourceExhausted, encodeSourceDisclosure, sourceDisclosure,
-  type SourceDisclosure, type SourceDisclosureSemantic, type IndexEntry, type SourceSemanticAccessReceipt } from "@do-soul/alaya-protocol";
+  type SourceDisclosure, type SourceDisclosureSemantic, type IndexEntry, type SourceSemanticReadableAccessReceipt as SourceSemanticAccessReceipt } from "@do-soul/alaya-protocol";
 import { CoreError } from "@do-soul/alaya-core";
 import type { SourceRecallAccessMeter } from "./source-recall-access.js";
 

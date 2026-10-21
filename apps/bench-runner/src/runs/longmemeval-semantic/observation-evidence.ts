@@ -1,4 +1,6 @@
-import { SourceEvidenceTargetSchema, SourceSemanticAcquisitionPhaseSchema, sourceRecallTarget,
+import { SourceEvidenceTargetSchema, SourceSemanticAcquisitionPhaseSchema, SourceSemanticProfiledAcquisitionPhaseSchema,
+  SourceSemanticRetainedNominationWitnessSchema, sourceSemanticRetainedWitnessMatchesPhase, sourceRecallTarget,
+  type SourceSemanticNominationOccurrence, type SourceSemanticProfiledAcquisitionPhase,
   type SourceEvidenceTarget, type SourceSemanticAcquisitionPhase } from "@do-soul/alaya-protocol";
 import { sourceTargetJoinsGold, type SourceGoldUnit } from "../measurement/source-gold-join.js";
 import { observationIndexEligibility, type ObservationAncestry, type ObservationEvent,
@@ -16,7 +18,7 @@ type Events = readonly ObservationEvent[];
 type EventReference = Pick<ObservationEvent, "session_id" | "request_id" | "call_kind" | "event_position">;
 /** Present event metadata rejected by its native schema, not a producer limitation or causal failure. */
 export type ObservationDiagnosticIssue = Readonly<{
-  field: "lexical_rank" | "vector_rank" | "resource_refusal"; reference: EventReference;
+  field: "lexical_rank" | "vector_rank" | "resource_refusal" | "retained_occurrences"; reference: EventReference;
 }>;
 const VECTOR_INSPECTION_DETAIL_UNAVAILABLE = "vector_inspection_detail_unavailable";
 type Nomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
@@ -26,7 +28,8 @@ const nominationFields = acquisitionResult.shape.nominations.unwrap().element.un
 const lexicalRankSchema = nominationFields.lexical.unwrap().element;
 const vectorRankSchema = nominationFields.vector.unwrap();
 const resourceRefusalSchema = acquisitionResult.shape.resource_refusals.unwrap().element;
-type NativePhaseFact = Readonly<{ invocation: "original" | "hint"; phase: SourceSemanticAcquisitionPhase | null;
+type NativePhaseFact = Readonly<{ invocation: "original" | "hint"; phase: SourceSemanticAcquisitionPhase | SourceSemanticProfiledAcquisitionPhase | null;
+  retained?: readonly SourceSemanticNominationOccurrence[] | null; retained_issue?: boolean;
   position: EventReference | null; invocation_position: number }>;
 
 export type ObservationReadInterval = MessageByteInterval & Readonly<{
@@ -44,6 +47,8 @@ export type ObservationNativeRoute = Readonly<{
   lexical_ranks: Nomination["lexical"] | null; vector: Nomination["vector"];
   /** The native lexical nomination has no row/window byte bounds. */
   lexical_window: null;
+  retained_occurrences: readonly SourceSemanticNominationOccurrence[] | null;
+  occurrence_evidence: "full_retained" | "displayed_prefix" | "unavailable";
   vector_state: NonNullable<SourceSemanticAcquisitionPhase["result"]>["vector"]["state"];
   limitations: readonly string[];
   /** Per-attempt producer facts. Null means unobserved, not successful zero. */
@@ -116,7 +121,18 @@ const STAGES: readonly ObservationStage[] = ["eligibility", "nomination", "acces
 /** Parse the actual producer envelope: hint phases live under original.supplemental. */
 function nativePhases(events: Events): NativePhaseFact[] {
   return events.filter(event => event.kind === "source_index_routes").flatMap(event => {
-    const parsed = SourceSemanticAcquisitionPhaseSchema.safeParse(recordOf(event.data)?.original);
+    const data = recordOf(event.data);
+    if (data !== null && Object.hasOwn(data, "candidate_phase")) {
+      const parsed = SourceSemanticProfiledAcquisitionPhaseSchema.safeParse(data.candidate_phase);
+      const retained = Object.hasOwn(data, "retained_occurrences")
+        ? SourceSemanticRetainedNominationWitnessSchema.safeParse(data.retained_occurrences) : undefined;
+      const validRetained = parsed.success && retained?.success && sourceSemanticRetainedWitnessMatchesPhase(retained.data, parsed.data);
+      return (["original", "hint"] as const).map((invocation, invocation_position): NativePhaseFact => ({
+        invocation, invocation_position, phase: parsed.success ? parsed.data : null, position: eventReference(event),
+        retained: validRetained ? retained.data : null, retained_issue: retained !== undefined && !validRetained
+      }));
+    }
+    const parsed = SourceSemanticAcquisitionPhaseSchema.safeParse(data?.original);
     const original = parsed.success ? parsed.data : null;
     return [{ invocation: "original" as const, phase: original, position: eventReference(event), invocation_position: 0 },
       ...(original?.supplemental ?? []).map((phase, index) => ({ invocation: "hint" as const, phase,
@@ -239,29 +255,34 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
     const matching = observed.filter(row => row.invocation === invocation);
     return matching.length > 0 ? matching : [{ invocation, phase: null, position: null, invocation_position: 0 }];
   });
-  return phases.flatMap(({ invocation, phase, position, invocation_position }) => {
+  return phases.flatMap(({ invocation, phase, position, invocation_position, retained, retained_issue }) => {
     const result = phase?.result;
-    const nomination = result?.nominations.find(row => targetMatches(row.source.target, span.target));
+    const prefix = result !== null && result !== undefined && "occurrence_prefix" in result ? result.occurrence_prefix : null;
+    const occurrences = retained ?? prefix;
+    const nomination = phaseNomination(phase, span, invocation);
+    const candidate = phase !== null && "declared_allowance" in phase;
     const routeCaptures = captures.filter(row => row.invocation === invocation);
     return (["lexical", "vector"] as const).map(channel => {
       const fact = route(`index:${invocation}:${channel}`);
-      const native = result?.[channel];
+      const lane = candidate ? phase.result?.lanes.find(row => row.view === invocation && row.route === channel) : undefined;
+      const native = candidate && invocation === "hint" ? undefined : result?.[channel];
       const matching = routeCaptures.filter(row => targetMatches(row.data.target, span.target));
       const attempts = matching.filter(row => row.data.kind === "nomination_attempt" && row.data.channel === channel);
       const dispositions = attempts.map(row => row.data.disposition);
       const nominated = channel === "lexical" ? (nomination?.lexical.length ?? 0) > 0 : nomination?.vector != null;
       // A duplicate retains this route's participation, not another distinct-root admission.
-      const retained = nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
+      const nominatedOnRoute = nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
       const rejected = dispositions.some(value => value === "nomination_limit" || value === "scope_denied"
         || value === "stale" || value === "native_unknown" || value === "resource_refused" || value === "rejected");
       // Attempt facts can fail a route without inventing nomination_limit for an unobserved remainder.
-      fact.nomination = retained ? "passed" : rejected ? "failed"
-        : phase?.status === "not_run" || native?.completion === "not_run" ? "not_run" : "unknown";
+      fact.nomination = nominatedOnRoute ? "passed" : rejected ? "failed"
+        : phase?.status === "not_run" || native?.completion === "not_run" || lane?.availability.status === "absent" || lane?.availability.status === "disabled" ? "not_run" : "unknown";
       fact.eligibility = qualification[channel];
       const rankEvents = matching.filter(row => channel === "lexical" ? row.data.kind === "lexical_candidate"
         : row.data.kind === "vector_ranked" || row.data.kind === "vector_inspected");
       fact.event_references = [...(position === null ? [] : [position]),
         ...attempts.map(row => row.position), ...rankEvents.map(row => row.position)];
+      if (retained_issue && position !== null) fact.diagnostic_issues.push({ field: "retained_occurrences", reference: position });
       const lexicalRanks: Nomination["lexical"][number][] = [];
       let vectorRank: Nomination["vector"] = null;
       // Validate every captured rank, even after a valid event or receipt already supplied proof.
@@ -280,16 +301,19 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       const omittedLexical = channel === "lexical" && joined.frames.some(row =>
         (row.observation.diagnostics?.omitted_counts?.[`source_index_${invocation}_lexical_candidate`] ?? 0) > 0);
       fact.native = { invocation, channel, position, invocation_position, acquisition_status: phase?.status ?? null,
-        completion: native?.completion ?? null, reason: native?.reason ?? phase?.reason
+        completion: native?.completion ?? (lane?.availability.status === "measured_empty" ? "complete" : null), reason: native?.reason
+          ?? (lane?.availability.status === "unavailable" ? lane.availability.reason : undefined) ?? phase?.reason
           ?? (phase === null ? "native_route_not_observed_or_invalid" : null),
         navigation_digest: result?.navigation_digest ?? null,
         lexical_ranks: channel === "lexical" ? mergeLexicalRanks(lexicalRanks, receiptLexical) : null,
         vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
-        vector_state: channel === "vector" ? result?.vector.state ?? null : null,
-        limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])],
+        retained_occurrences: occurrences?.filter(row => row.view === invocation && row.route.kind === channel && targetMatches(row.source.target, span.target)) ?? null,
+        occurrence_evidence: retained !== undefined && retained !== null ? "full_retained" : prefix !== null ? "displayed_prefix" : "unavailable",
+        vector_state: channel === "vector" && (!candidate || invocation === "original") ? result?.vector.state ?? null : null,
+        limitations: [...(result?.limitations ?? []), ...(channel === "lexical" && (!candidate || invocation === "original") ? result?.lexical.limitations ?? [] : [])],
         attempts: nominationAttempts(attempts, fact.diagnostic_issues) };
       const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
-      if (!retained && !ranksAvailable) {
+      if (!nominatedOnRoute && !ranksAvailable) {
         fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
       }
       if (omittedLexical) {
@@ -304,6 +328,17 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       return fact;
     });
   });
+}
+function phaseNomination(phase: NativePhaseFact["phase"], span: AnswerTurnSpan, view: "original" | "hint"): Nomination | undefined {
+  const result = phase?.result;
+  if (result === null || result === undefined) return undefined;
+  if ("nominations" in result) return result.nominations.find(row => targetMatches(row.source.target, span.target));
+  const rows = result.occurrence_prefix.filter(row => row.view === view && targetMatches(row.source.target, span.target));
+  if (rows.length === 0) return undefined;
+  return { source: rows[0]!.source, lexical: rows.flatMap(row => row.route.kind === "lexical"
+    ? [{ rank: row.route.native_rank, lane: row.route.lane, lane_rank: row.route.lane_rank, bm25: row.route.bm25 }] : []),
+  vector: rows.flatMap(row => row.route.kind === "vector" && row.route.window?.status === "available"
+    ? [{ rank: row.route.native_rank, cosine: row.route.cosine, window: row.route.window.window }] : [])[0] ?? null };
 }
 function nominationAttempts(rows: readonly { data: Record<string, unknown>; position: EventReference }[],
   issues: ObservationDiagnosticIssue[]): ObservationNativeRoute["attempts"] {

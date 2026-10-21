@@ -1,6 +1,6 @@
 import { sourceDisclosure, sourceSemanticExecution, SoulInterpretationResponseSchema, verifySourceSemanticDisposition, SourceSemanticHostBoundDraftSchema, SourceSemanticWorkerWorkSchema, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, sourceReferencePreparationCost, type SourceReferenceCatalog, type SourceSemanticPublishedInterpretation,
   type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticInterpretation, type SoulInterpretationRequest,
-  type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork,
+  type SoulInterpretationResponse, type RequestBudget, type SourceSemanticWorkerWork, type SourceSemanticReadableWorkerRequest,
   type AuthorizedScopesAdmission, type SourceRecordIdentity, type SourceInterpretationInvalidation,
   type SourceInterpretationInvalidationResult } from "@do-soul/alaya-protocol";
 import { CoreError, encodeSourceSemanticLibraryResponse, fieldContractSha256, projectSourceDisclosure } from "@do-soul/alaya-core";
@@ -18,6 +18,7 @@ const DEFAULT_BUDGET: RequestBudget = { schema_version: 1, work_units: 200000, m
   page_budget: 100000, finalization_reserve: 10000, min_envelope: 10 };
 
 export type SourceSemanticHostPort = Readonly<{
+  executeComparison?: import("../../runtime/recall/recall-read-worker-client.js").SourceSemanticsExecutionPort["executeComparison"];
   execute(input: Readonly<{ workspace_id: string; as_of: string; authorized_scopes: AuthorizedScopesAdmission;
     principal?: string; expires_at?: string; lifetime_now?: string; request: SourceSemanticWorkerRequest }>): Promise<SourceSemanticWorkerResult>;
 }>;
@@ -224,9 +225,9 @@ async function executeWorker(input: Dependencies, context: McpMemoryToolCallCont
 }
 
 /** Pure private payload construction shared by the handler and guarded acquisition consumer. */
-export function buildSourceSemanticWorkerPayload(input: Pick<Dependencies, "now" | "interpretationClock">,
+export function buildSourceSemanticWorkerPayload<Request extends SourceSemanticReadableWorkerRequest>(input: Pick<Dependencies, "now" | "interpretationClock">,
   context: Pick<McpMemoryToolCallContext, "workspaceId" | "agentTarget" | "sessionId" | "runId">,
-  request: SourceSemanticWorkerRequest, authorized_scopes: AuthorizedScopesAdmission) {
+  request: Request, authorized_scopes: AuthorizedScopesAdmission) {
   const now = input.now();
   return { workspace_id: context.workspaceId, as_of: input.interpretationClock ?? now, lifetime_now: now,
     authorized_scopes, principal: JSON.stringify([context.agentTarget, context.sessionId, context.runId]),

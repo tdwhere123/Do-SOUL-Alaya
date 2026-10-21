@@ -1,27 +1,29 @@
-import { qualifySourceDisclosure, sourceDisclosure, SourceSemanticWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
-  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, indexEntryCacheKey, sourceSemanticExecution, type SourceSemanticExecution, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
-  type SourceSemanticAccessReceipt, type SourceSemanticLibraryUnprovedComputation,
-  type SourceSemanticWorkerRequest, type SourceSemanticWorkerResult } from "@do-soul/alaya-protocol";
+import { qualifySourceDisclosure, sourceDisclosure, SourceSemanticWorkerResultSchema, SourceSemanticComparisonWorkerResultSchema, SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+  SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET, indexEntryCacheKey, sourceSemanticExecution, type SourceSemanticReadableExecution, type SourceSemanticAccessProfile, type SourceSemanticCoverage, type SourceSemanticQueryStatus, type SourceSemanticLibraryDiscovery,
+  type SourceSemanticReadableAccessReceipt, type SourceSemanticLibraryUnprovedComputation,
+  type SourceSemanticReadableWorkerRequest as SourceSemanticWorkerRequest, type SourceSemanticWorkerResult, type SourceSemanticReadableWorkerResult } from "@do-soul/alaya-protocol";
 import { CoreError, assembleSourceSemanticLibraryIndex, encodeSourceSemanticLibraryResponse,
   preparedDeliveryId, selectSourceSemanticLibraryPage, improveSourceSemanticLibraryPage, sealIssuedContinuation, slotQualifiersFor,
   sourceGoldRootIdentity, SOURCE_SEMANTIC_LIBRARY_ORDER, type SourceSemanticLibraryPackage } from "@do-soul/alaya-core";
 import type { RecallReadWorkerRuntime } from "./runtime.js";
 import { workOf, type SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import type { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
-import { libraryAccessReceipt, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
+import { libraryAccessReceipt, type SourceSemanticReadableAccessPool as SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import { issueSemanticLease, sourceSemanticLifetimeNow, sourceSemanticRevision } from "./source-semantic-leases.js";
 import { prepareLibraryPackagePairs } from "./source-semantic-library-packages.js";
 import { prepareSourceRecallDelivery, packSourceRecallTimes, sourceRecallPageAt, type SourceRecallMember } from "./source-recall-delivery.js";
 
 type Request = Extract<SourceSemanticWorkerRequest, { kind: "recall" }>;
-type Recall = Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
+type Recall = Extract<SourceSemanticReadableWorkerResult, { kind: "recall" }>;
 export type LibraryDeliveryPlan = Readonly<{
   query_id: string; snapshot_id: string; interpretation_id: string; as_of: string; expires_at: string;
+  profile?: SourceSemanticAccessProfile;
+  retainedWitness?: import("@do-soul/alaya-protocol").SourceSemanticRetainedNominationWitness;
   query_semantics_status: SourceSemanticQueryStatus;
   authorized: readonly string[] | null; request_identity: string; public_request_identity: string;
   discovery: SourceSemanticLibraryDiscovery; coverage: SourceSemanticCoverage;
   unproved_computations: readonly SourceSemanticLibraryUnprovedComputation[];
-  pages: readonly (readonly SourceSemanticLibraryPackage[])[]; page_access: readonly SourceSemanticAccessReceipt[];
+  pages: readonly (readonly SourceSemanticLibraryPackage[])[]; page_access: readonly SourceSemanticReadableAccessReceipt[];
 }>;
 type PlanBase = Omit<LibraryDeliveryPlan, "pages" | "page_access"> & Readonly<{ pool: SourceSemanticAccessPool }>;
 export type LibraryPageSelector = typeof selectSourceSemanticLibraryPage;
@@ -30,10 +32,10 @@ export type LibraryPageSelector = typeof selectSourceSemanticLibraryPage;
 export function prepareLibraryDelivery(base: PlanBase, candidates: readonly SourceSemanticLibraryPackage[],
   request: Request, meter: SourceSemanticReadBudget, order: "field" | "source_access" = "field",
   selectPage: LibraryPageSelector = selectSourceSemanticLibraryPage,
-  initialExecution: SourceSemanticExecution = sourceSemanticExecution()): LibraryDeliveryPlan {
+  initialExecution: SourceSemanticReadableExecution = sourceSemanticExecution()): LibraryDeliveryPlan {
   const continuationExecution = sourceSemanticExecution();
   // These are the canonical arrays retained by the lease. No ordinal plan survives this call.
-  const pages: SourceSemanticLibraryPackage[][] = [], pageAccess: SourceSemanticAccessReceipt[] = [];
+  const pages: SourceSemanticLibraryPackage[][] = [], pageAccess: SourceSemanticReadableAccessReceipt[] = [];
   let pair: SourceSemanticLibraryPackage | undefined;
   const get = (member: number): SourceSemanticLibraryPackage => member === candidates.length ? pair!
     : member >= 0 ? candidates[member]!
@@ -55,7 +57,7 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
       if (member === undefined) throw new CoreError("OBLIGATION_VIOLATION", "selection introduced an unknown library member");
       return { member, selection_basis: row.selection_basis };
     });
-  let lastResult: Recall | undefined, lastAccess: SourceSemanticAccessReceipt | undefined;
+  let lastResult: Recall | undefined, lastAccess: SourceSemanticReadableAccessReceipt | undefined;
   let lastRows: readonly SourceSemanticLibraryPackage[] | undefined;
   const incomplete = prepareSourceRecallDelivery({ meter, count: candidates.length, byteLimit: request.output_byte_limit,
     initialExecutionDiffers: initialExecution !== continuationExecution, order,
@@ -116,6 +118,7 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
     pages: frozenPages.map((page, position) => ({ position, targets: page.map(row => row.entry.target) })) }));
   const { pool: _pool, ...frozenBase } = base;
   const plan = { ...frozenBase, pages: frozenPages, page_access,
+    ...(base.pool.retainedWitness === undefined ? {} : { retainedWitness: base.pool.retainedWitness }),
     coverage: incomplete ? { ...base.coverage, payload: "truncated" as const } : base.coverage,
     discovery: incomplete ? { ...base.discovery, truncated: true, open_residuals: true } : base.discovery };
   meter.observer?.facts.plan(plan, base.pool);
@@ -123,6 +126,11 @@ export function prepareLibraryDelivery(base: PlanBase, candidates: readonly Sour
 }
 
 /** Continuations reuse the frozen plan; no source access, solver replay or re-selection occurs. */
+export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime,
+  payload: Omit<SourceSemanticWorkerPayload, "comparison"> & { comparison?: never }, meter: SourceSemanticReadBudget,
+  request: Request, plan: LibraryDeliveryPlan, offset: number): Extract<SourceSemanticWorkerResult, { kind: "recall" }>;
+export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+  meter: SourceSemanticReadBudget, request: Request, plan: LibraryDeliveryPlan, offset: number): Recall;
 export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   meter: SourceSemanticReadBudget, request: Request, plan: LibraryDeliveryPlan, offset: number): Recall {
   const result = fitFrozenLibraryPage(meter, request, plan, offset);
@@ -131,6 +139,7 @@ export function deliverFrozenLibraryPage(runtime: RecallReadWorkerRuntime, paylo
     issueSemanticLease(runtime, { kind: "library", workspace_id: payload.workspace_id,
       lifetime_now: sourceSemanticLifetimeNow(payload), principal: payload.principal ?? "", as_of: plan.as_of,
       authorized: plan.authorized, expires_at: plan.expires_at, revision: sourceSemanticRevision(runtime),
+      ...(plan.profile === undefined ? {} : { profile: plan.profile }),
       continuation, request_identity: plan.request_identity, library_plan: plan }, meter, continuation.continuation_id);
   }
   meter.observer?.event("delivered_membership", meter.phase, () => ({ offset,
@@ -169,8 +178,9 @@ function fitFrozenLibraryPage(meter: SourceSemanticReadBudget, request: Request,
   return { ...final, work: workOf(meter) };
 }
 function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, page: readonly SourceSemanticLibraryPackage[], offset: number, more: boolean,
-  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticAccessReceipt, execution: SourceSemanticExecution): Recall {
+  request: Request, meter: SourceSemanticReadBudget, reserveWork: boolean, access: SourceSemanticReadableAccessReceipt, execution: SourceSemanticReadableExecution): Recall {
   const assembled = assembleSourceSemanticLibraryIndex({ ...base, authorized_scopes: base.authorized,
+    result_version: base.profile?.result_version,
     source_entries: page.map(row => row.entry), proof_groups: page.filter(row => row.proofs.length > 0),
     selected_entries: page.map(row => row.entry), root_order: page.map(root), truncated: base.discovery.truncated,
     open_residuals: base.discovery.open_residuals, more_roots: more, emitted_offset: offset });
@@ -185,9 +195,9 @@ function pageResult(base: Omit<LibraryDeliveryPlan, "pages" | "page_access">, pa
     const wire = qualifySourceDisclosure(row.source_disclosure, row.proofs.length > 0 ? "conditional_support" : "source_only", false);
     meter.retain(wire, "library disclosure codec allocation"); return [indexEntryCacheKey(row.entry), wire];
   }));
-  const result = SourceSemanticWorkerResultSchema.parse({ kind: "recall", request_budget: request.budget, execution,
+  const result = (base.profile === undefined ? SourceSemanticWorkerResultSchema : SourceSemanticComparisonWorkerResultSchema).parse({ kind: "recall", request_budget: request.budget, execution,
     request_identity: base.public_request_identity, query_semantics_status: base.query_semantics_status,
-    delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
+    delivery_id: preparedDeliveryId(base.public_request_identity, index), protocol_version: base.profile?.protocol_version ?? SOURCE_SEMANTIC_LIBRARY_PROTOCOL_VERSION,
     total_count: index.entries.length, index, page_purpose: "membership", order: SOURCE_SEMANTIC_LIBRARY_ORDER,
     discovery: { ...base.discovery, access }, slot_qualifiers: slotQualifiersFor(index, proofs).map(row => ({ ...row,
       payload_support: page[row.index]!.payload_support, selection_basis: page[row.index]!.selection_basis })),

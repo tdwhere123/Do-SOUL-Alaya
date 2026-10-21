@@ -5,7 +5,7 @@ const OPPORTUNITY_CYCLE = ["original-lexical", "original-vector", "hint-lexical"
 type LaneId = typeof OPPORTUNITY_CYCLE[number];
 
 /** Omission means unprovided, not an empty hit or an inferred window. */
-export type NativeRoutePosition = Readonly<
+type NativeRoutePosition = Readonly<
   { status: "unavailable"; reason: string } |
   { status: "captured"; reference: string; start: number; end: number }
 >;
@@ -114,7 +114,7 @@ function validateAdmission(outcome: NativeRouteAdmission): void {
   if (outcome.status !== "admitted") requireFact(nonempty(outcome.reason), "missing admission outcome reason");
 }
 
-/** Unwired request-local nomination. Acquisition's envelope owner must already admit these ceilings.
+/** Request-local nomination. Acquisition's envelope owner must already admit these ceilings.
  * Resource refusal terminates even before start; only started opportunities advance the cursor.
  * Counters below are scheduling facts, never native debits; unknown native cost stays outside this kernel.
  */

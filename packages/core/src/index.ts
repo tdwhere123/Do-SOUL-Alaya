@@ -1,6 +1,9 @@
 export * from "./runtime/config/index.js";
 export { SourceIndexLifecycle } from "./source-index/source-index-lifecycle.js";
 export { SourceIndexBackfill, type SourceIndexBackfillInput } from "./source-index/source-index-backfill.js";
+export { orderNativeRouteAccess } from "./recall/runtime/native-route-opportunity.js";
+export type { NativeRouteLane } from "./recall/runtime/native-route-opportunity.js";
+export { acquireProfiledSourceIndex } from "./source-index/source-index-profiled-acquisition.js";
 export { SourceIndexAcquisition } from "./source-index/source-index-acquisition.js";
 export * from "./governance/proposals/arbitration-service.js";
 export * from "./governance/policy/auditor-scheduling-advisor.js";
@@ -84,7 +87,7 @@ export {
 } from "./memory/evidence-create/audited-source-replacement.js";
 export { runFieldAtomicWithOutcome, type FieldAtomicOutcome } from "./memory/evidence-create/field-stores.js";
 export { newerSourceRecord, resolveCurrentSource } from "./memory/evidence-create/source-observation-currentness.js";
-export { authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
+export { resolveSourceSemanticComparisonProfile, authorizeSemanticScope, createSourceSemanticAccessPolicy, sourceSemanticAccessInputIdentity } from "./recall/runtime/source-semantic-access.js";
 export {
   createSourceObservationPublication,
   verifySourceObservationPublication,

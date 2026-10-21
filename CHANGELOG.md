@@ -20,15 +20,17 @@ versions can move independently of the app semver.
 Protocol 20.0.0 declares the separately versioned Source access/profile migration
 as a **major** under handbook invariant §25. Access v3, compact acquisition 2,
 expanded execution v4 and library v7 / protocol 9 have independent, correlated
-schema admission and owner-bound input/request identities. These foundations are
-unwired: no public/private request, worker propagation, acquisition, ordering or
-delivery producer selects them. Public request policies and default access v2,
-compact acquisition 1, expanded execution v3 and library v6 / protocol 8 retain
-their exact meanings and bytes. Old schemas serve the current default until an
-independently accepted, explicitly authorized cutover; this is not a generic
-historical decoder. Candidate prefix evidence is not full pool membership;
-producer witness/pool binding remains later work. App/root and gateway versions
-are unchanged. See [the migration contract](docs/handbook/recall.md#versioned-source-access-foundation).
+schema admission and owner-bound input/request identities. A runtime-bound private
+comparison now connects shared handler admission, preparation, worker affinity,
+acquisition, native access order and frozen library delivery. Public request
+policies and default access v2, compact acquisition 1, expanded execution v3 and
+library v6 / protocol 8 retain their meanings and bytes. Old schemas serve that
+current default, not a generic historical decoder. The bounded producer's full
+retained occurrence witness binds the existing pool/snapshot identity independently
+of its displayed 16-occurrence prefix. Private captures use the shared first-exposure
+owner and explicit versioned admission, never fabricated MCP calls. This is not
+measurement, default promotion or release; the temporary selector is removed on
+comparison promotion or termination. App/root and gateway versions are unchanged. See [the migration contract](docs/handbook/recall.md#versioned-source-access-foundation).
 
 Protocol 19.1.0 added the conflict-edge deletion audit type and expands the
 EventLog payload envelope to an independent 8,388,608 serialized-character

@@ -1,6 +1,6 @@
 import type { SourceSemanticResourceBudget } from "../garden/source-semantic-resources.js";
 import type { SourceIndexProfile, SourceIndexTarget } from "./source-index.js";
-import type { SourceSemanticAcquisition } from "../garden/source-semantic-phase-semantics.js";
+import { SourceSemanticAcquisitionSchema, type SourceSemanticAcquisition } from "../garden/source-semantic-phase-semantics.js";
 
 /** Private acquisition input, not an MCP vector input or an inference-usage receipt. */
 export type SourceIndexQueryVector = Readonly<{
@@ -13,6 +13,7 @@ export type SourceIndexNominationAllowance = Readonly<{
   max_attempts: number; max_roots: number; max_vector_windows: number;
 }>;
 /** Includes returned native bytes, decoded vectors and logical retention, not RSS or SQLite CPU. */
+export const SourceIndexQueryResourcesSchema = SourceSemanticAcquisitionSchema.unwrap().shape.resources;
 export type SourceIndexQueryResources = SourceSemanticAcquisition["resources"];
 export type SourceIndexQueryCompletion = SourceSemanticAcquisition["completion"];
 export type SourceIndexVectorQueryState = NonNullable<SourceSemanticAcquisition["vector"]["state"]>;

@@ -2,8 +2,8 @@ import {
   SOURCE_SEMANTIC_LIBRARY_EXAMINATION_CAP, SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION,
   SourceSemanticResourceExhausted, SourceSemanticLibraryUnprovedComputationSchema, canonicalJson, sourceSemanticExecution,
   type SourceSemanticCorrespondence, type SourceSemanticHandleDescriptor,
-  type SourceSemanticLibraryProof, type SourceSemanticLibraryUnprovedComputation, type SourceSemanticWorkerResult, type SourceSemanticQuery, type SourceSemanticQueryStatus,
-  type SourceSemanticWorkerRequest
+  type SourceSemanticLibraryProof, type SourceSemanticLibraryUnprovedComputation, type SourceSemanticWorkerResult, type SourceSemanticReadableWorkerResult, type SourceSemanticQuery, type SourceSemanticQueryStatus,
+  type SourceSemanticReadableWorkerRequest as SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import {
   CoreError, OFFSET_CURSOR, admitSourceSemanticCorrespondence, admitSourceSemanticQuery, sourceSemanticQueryStatus,
@@ -15,7 +15,7 @@ import {
 import type { RecallReadWorkerRuntime, SourceSemanticReadRuntime } from "./runtime.js";
 import type { SourceSemanticWorkerPayload } from "./source-semantic-discovery.js";
 import { admissionOf, loadVerified } from "./source-semantic-discovery.js";
-import { accessInputIdentity, observeSourceSemanticAccess, type SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
+import { accessInputIdentity, observeSourceSemanticAccess, type SourceSemanticReadableAccessPool as SourceSemanticAccessPool } from "./source-semantic-candidate-access.js";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { listEligibleSemanticSources } from "./source-recall-catalog.js";
 import { readSemanticLease, sourceSemanticLifetimeNow, sourceSemanticQueryInputIdentity,
@@ -29,10 +29,15 @@ type LibraryDiscovery = Readonly<{ descriptors: readonly SourceSemanticHandleDes
   interpretationPages: number; interpretationOpen: boolean; interpretationTruncated: boolean; pool: SourceSemanticAccessPool }>;
 
 /** Native library computation over one prepared query/scope and its bounded shared access pool. */
+export function runSourceSemanticLibraryRecall(runtime: RecallReadWorkerRuntime,
+  payload: Omit<SourceSemanticWorkerPayload, "comparison"> & { comparison?: never }, authorized: readonly string[] | null,
+  meter: SourceSemanticReadBudget): SourceSemanticWorkerResult;
+export function runSourceSemanticLibraryRecall(runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
+  authorized: readonly string[] | null, meter: SourceSemanticReadBudget): SourceSemanticReadableWorkerResult;
 export function runSourceSemanticLibraryRecall(
   runtime: RecallReadWorkerRuntime, payload: SourceSemanticWorkerPayload,
   authorized: readonly string[] | null, meter: SourceSemanticReadBudget
-): SourceSemanticWorkerResult {
+): SourceSemanticReadableWorkerResult {
   const request = payload.request;
   if (request.kind !== "recall") throw new CoreError("VALIDATION", "recall kind mismatch");
   meter.retain(request, "library request admission");
@@ -84,12 +89,14 @@ function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: Source
   request: Extract<SourceSemanticWorkerRequest, { kind: "recall" }>, lease: ReturnType<typeof readSemanticLease> | undefined,
   query: SourceSemanticQuery | undefined, boundStatus: SourceSemanticQueryStatus, original: string, requestIdentity: string) {
   const boundPool = lease?.access_pool;
-  const policy = request.access_policy ?? boundPool?.access.policy ?? "query-conditioned-v1";
+  const profile = payload.comparison?.profile;
+  const policy = request.access_policy ?? (profile?.order_policy === "canonical-v1" ? "canonical-v1" :
+    boundPool?.access.contract === "source-semantic-access-v2" ? boundPool.access.policy : "query-conditioned-v1");
   let publicRequestIdentity: string;
   let exploration: SourceSemanticReadBudget | undefined;
   let pool: SourceSemanticAccessPool, sources: Pick<ReturnType<typeof listEligibleSemanticSources>, "sources" | "pages" | "open" | "truncated">;
   let discovered: LibraryDiscovery, branches: ReturnType<typeof executeLibraryBranches>, plan: LibraryDeliveryPlan;
-  let result: SourceSemanticWorkerResult | undefined;
+  let result: SourceSemanticReadableWorkerResult | undefined;
   runSourceRecall(meter, request.budget.finalization_reserve, request.output_byte_limit, {
     observe: allowance => {
       exploration = meter.child(allowance, "exploration");
@@ -99,10 +106,10 @@ function recallAdmittedLibrary(runtime: RecallReadWorkerRuntime, payload: Source
         query_semantics_status: boundStatus, source_id: lease?.source_id,
         ...(boundPool?.accessHint === undefined ? {} : { access_hint: boundPool.accessHint }),
         semantic_correspondences: request.semantic_correspondences ?? [], budget: request.budget,
-        output_byte_limit: request.output_byte_limit, access_policy: policy
+        output_byte_limit: request.output_byte_limit, ...(profile === undefined ? { access_policy: policy } : { candidate_profile: profile })
       });
       const inputId = accessInputIdentity(original, query,
-        request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents, boundPool?.accessHint);
+        request.budget, policy, lease?.source_id, boundPool?.sourcePreviewExtents, boundPool?.accessHint, profile);
       if (boundPool !== undefined && boundPool.access.input_id !== inputId) {
         throw new CoreError("VALIDATION", "library access policy or budget changed", { details: { admission: "bound" } });
       }
@@ -253,13 +260,13 @@ function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, 
   const { proofGroups, examined, computeOpen } = branches;
   const interpretationTruncated = discovered.interpretationTruncated || branches.interpretationTruncated;
   const interpretationId = `sha256:${fieldContractSha256(canonicalJson({
-    kind: SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_status: queryStatus, scopes: authorized
+    kind: payload.comparison?.profile.result_version ?? SOURCE_SEMANTIC_LIBRARY_RESULT_VERSION, query: original, query_semantics_status: queryStatus, scopes: authorized
   }))}`;
-  const snapshotId = `sha256:${fieldContractSha256(canonicalJson({
+  const snapshotId = sourceSemanticLibrarySnapshotIdentity({
     workspace: payload.workspace_id, as_of: payload.as_of, scopes: authorized, revision: sourceSemanticRevision(runtime), requestIdentity,
     sources: sources.sources.map((row) => row.identity), access_pool: discovered.pool.access.pool_id,
     semantic_correspondences: request.semantic_correspondences ?? []
-  }))}`;
+  });
   const sourceEntries = sources.sources.map(record => sourceSemanticLibrarySourceEntry({
     workspaceId: payload.workspace_id, root_id: record.identity, source_version: record.source_version,
     content_digest: record.content_digest, evidence_object_id: record.evidence_object_id, hypothesis_id: interpretationId
@@ -284,7 +291,8 @@ function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, 
   // from the parent after observation, not from the pool's frozen provenance.
   const execution = sourceSemanticExecution(meter.preparation, meter.acquisition, meter);
   const base: Parameters<typeof prepareLibraryDelivery>[0] = {
-    query_id: sourceSemanticLibraryQueryIdentity(original), snapshot_id: snapshotId, interpretation_id: interpretationId,
+    query_id: sourceSemanticLibraryQueryIdentity(original, payload.comparison?.profile.result_version), snapshot_id: snapshotId, interpretation_id: interpretationId,
+    ...(payload.comparison === undefined ? {} : { profile: payload.comparison.profile }),
     as_of: payload.as_of, authorized, request_identity: requestIdentity, public_request_identity: publicRequestIdentity, pool: discovered.pool,
     query_semantics_status: queryStatus,
     unproved_computations: branches.unproved,
@@ -312,6 +320,12 @@ function prepareSourceSemanticLibraryInputs(runtime: SourceSemanticReadRuntime, 
   };
   return { base, packages: prepared.packages, incomplete: prepared.incomplete, execution };
 }
+
+/** The existing library snapshot preimage binds the full retained acquisition through access_pool. */
+export function sourceSemanticLibrarySnapshotIdentity(input: Readonly<{
+  workspace: string; as_of: string; scopes: readonly string[] | null; revision: string; requestIdentity: string;
+  sources: readonly string[]; access_pool: string; semantic_correspondences: readonly SourceSemanticCorrespondence[];
+}>): string { return `sha256:${fieldContractSha256(canonicalJson(input))}`; }
 
 function semanticCorrespondencesByInterpretation(rows: readonly SourceSemanticCorrespondence[]): Map<string, SourceSemanticCorrespondence[]> {
   const mapped = new Map<string, SourceSemanticCorrespondence[]>();

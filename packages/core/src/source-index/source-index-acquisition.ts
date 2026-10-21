@@ -8,7 +8,8 @@ import {
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
   type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
   type SourceIndexRootNomination, type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding,
-  type SourceIndexVectorCandidate, type SourceIndexVectorCursor, type SourceSemanticWorkerRequest
+  type SourceIndexVectorCandidate, type SourceIndexVectorCursor, type SourceSemanticWorkerRequest,
+  type SourceSemanticNominationOccurrence
 } from "@do-soul/alaya-protocol";
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
@@ -215,6 +216,18 @@ export class SourceIndexAcquisition {
 
   public constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256) {}
 
+  /** Private comparison producer: real captured pages, not observer diagnostics. */
+  public captureNative(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
+    view: "original" | "hint", grouped: boolean, control: SourceAcquisitionChannelControl, observer?: SourceIndexAcquisitionObserver) {
+    validateInput(input, admitScope, grouped ? 128 : 16);
+    const retained: SourceSemanticNominationOccurrence[] = [];
+    const progress = { lexical: 0, vector: 0 };
+    const query = new AcquisitionQuery(this.repository, this.sha256, input, admitScope, control,
+      observer, { view, grouped, retained, progress });
+    const result = query.run(grouped);
+    return { result, retained, progress, ...query.capturedNative() };
+  }
+
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
     control?: SourceAcquisitionChannelControl, observer?: SourceIndexAcquisitionObserver): SourceIndexAcquisitionResult {
     validateInput(input, admitScope);
@@ -253,7 +266,9 @@ class AcquisitionQuery {
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
     private readonly input: SourceIndexAcquisitionInput, private readonly admitScope: SourceIndexScopeAdmission,
     private readonly control?: SourceAcquisitionChannelControl,
-    private readonly observer?: SourceIndexAcquisitionObserver) {
+    private readonly observer?: SourceIndexAcquisitionObserver,
+    private readonly candidate?: { view: "original" | "hint"; grouped: boolean; retained: SourceSemanticNominationOccurrence[];
+      progress: { lexical: number; vector: number } }) {
     this.meter = new SourceSemanticResourceLedger(input.budget);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
@@ -264,7 +279,9 @@ class AcquisitionQuery {
         input_digest: vector.input_digest } : { status: "unavailable", reason: vector.reason } };
   }
 
-  run(): SourceIndexAcquisitionResult {
+  capturedNative() { return { lexical: this.lexicalCandidates, vector: this.vectorCandidates, binding: this.vectorBinding }; }
+
+  run(captureOnly = false): SourceIndexAcquisitionResult {
     try {
       // Result envelope and per-nomination output references are admitted before discovery can exhaust the ledger.
       this.meter.charge(1, 2048 + 8 * this.input.allowance.max_roots, "source acquisition result envelope");
@@ -289,7 +306,7 @@ class AcquisitionQuery {
       }
       this.stage = "vector";
       if (this.control !== "lexical") this.scanVectors();
-      this.stage = "nomination"; this.nominatePrefix();
+      this.stage = "nomination"; if (!captureOnly) this.nominatePrefix();
     } catch (error) {
       // Keep all completed debits even when a repository or admission callback fails.
       // Work inside the failed operation remains unknown; it is not successful absence.
@@ -462,7 +479,7 @@ class AcquisitionQuery {
     if (!Number.isFinite(cosine)) return;
     this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
-    const key = sourceGoldRootIdentity(candidate.source.target);
+    const key = this.candidate?.grouped === true ? candidate.window.window_id : sourceGoldRootIdentity(candidate.source.target);
     this.meter.charge(1 + key.length, 0, "source vector root lookup");
     const previous = best.get(key);
     if (previous !== undefined && (previous.vector.cosine > cosine || previous.vector.cosine === cosine &&
@@ -485,6 +502,7 @@ class AcquisitionQuery {
       this.stage = "nomination";
       this.meter.charge(1 + source.root_key.length, 0, "source nomination attempt");
       this.counts.attempted++;
+      if (this.candidate !== undefined) this.candidate.progress[channel]++;
       this.stage = "admission";
       try {
         const admission = this.repository.admitQueryCandidate(source, vector === null ? null : this.vectorBinding, this.meter.remaining());
@@ -543,6 +561,7 @@ class AcquisitionQuery {
     const key = sourceGoldRootIdentity(source.target), previous = this.nominations.get(key);
     if (previous !== undefined) {
       this.meter.charge(1, lexical === null ? 0 : 8, "source nomination overlap");
+      this.retainOccurrence(source, lexical, vector);
       if (lexical !== null) previous.lexical.push(lexical);
       if (vector !== null) previous.vector = vector;
       this.counts.duplicate++;
@@ -553,9 +572,24 @@ class AcquisitionQuery {
       this.observeNomination(channel, source, "nomination_limit"); return;
     }
     this.meter.charge(1 + key.length, 192 + 4 * key.length, "source nomination retention");
+    this.retainOccurrence(source, lexical, vector);
     this.nominations.set(key, { source, lexical: lexical === null ? [] : [lexical], vector });
     this.counts.admitted++;
     this.observeNomination(channel, source, "admitted");
+  }
+
+  private retainOccurrence(source: SourceIndexTarget, lexical: SourceIndexLexicalRank | null,
+    vector: SourceIndexRootNomination["vector"]): void {
+    if (this.candidate === undefined) return;
+    const view = this.candidate.view;
+    const route: SourceSemanticNominationOccurrence["route"] = lexical !== null
+      ? { kind: "lexical", native_rank: lexical.rank, lane: lexical.lane, lane_rank: lexical.lane_rank, bm25: lexical.bm25 }
+      : { kind: "vector", native_rank: vector!.rank, cosine: vector!.cosine,
+        window: { status: "available", window: vector!.window } };
+    const occurrence = { reference: `${view}:${route.kind}:${route.native_rank}`, attempt: this.counts.attempted,
+      source, view, route };
+    this.meter.retain(occurrence, "source retained nomination occurrence");
+    this.candidate.retained.push(occurrence);
   }
 
   private absorb(resources: SourceIndexQueryResources): void {
@@ -564,7 +598,7 @@ class AcquisitionQuery {
   }
 }
 
-function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission): void {
+function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission, rootCeiling = 16): void {
   BoundedIdSchema.parse(input.workspace_id);
   if (typeof admitScope !== "function" || typeof input.navigation_text !== "string") {
     throw new CoreError("VALIDATION", "source index query requires captured text and scope admission");
@@ -572,7 +606,7 @@ function validateInput(input: SourceIndexAcquisitionInput, admitScope: SourceInd
   const { max_attempts: attempts, max_roots: roots, max_vector_windows: windows } = input.allowance;
   // These are safety ceilings, not adopted product defaults or independent channel resource envelopes.
   if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 128 ||
-      !Number.isSafeInteger(roots) || roots < 1 || roots > 16 || roots > attempts ||
+      !Number.isSafeInteger(roots) || roots < 1 || roots > rootCeiling || roots > attempts ||
       !Number.isSafeInteger(windows) || windows < 0 || windows > 4096 ||
       !Number.isSafeInteger(input.budget.work_units) || input.budget.work_units < 0 ||
       !Number.isSafeInteger(input.budget.memory_bytes) || input.budget.memory_bytes < 0 ||

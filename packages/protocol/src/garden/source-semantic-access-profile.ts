@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { canonicalJsonChunks } from "../recall/selection/capture/canonical-json.js";
+import type { SourceSemanticResourceLedger } from "./source-semantic-resources.js";
 import { BoundedIdSchema, NonNegativeIntSchema as N } from "../shared/schema-primitives.js";
 import { Sha256DigestSchema } from "../recall/conditional-field/common.js";
 import { SourceIndexTargetSchema } from "../recall/source-index.js";
@@ -67,6 +69,38 @@ export const SourceSemanticNominationOccurrenceSchema = z.object({
   if (end !== undefined && end > value.source.body_bytes) ctx.addIssue({ code: "custom", message: "native position exceeds source extent" });
 });
 
+export type SourceSemanticNominationOccurrence = z.infer<typeof SourceSemanticNominationOccurrenceSchema>;
+/** Full producer-owned retention, never reconstructed from the displayed prefix. */
+export const SourceSemanticRetainedNominationWitnessSchema = z.array(SourceSemanticNominationOccurrenceSchema).max(128).readonly();
+export type SourceSemanticRetainedNominationWitness = z.infer<typeof SourceSemanticRetainedNominationWitnessSchema>;
+
+/** The full witness and its lossy receipt projection share this one consistency authority. */
+export function sourceSemanticRetainedWitnessMatchesPhase(witness: SourceSemanticRetainedNominationWitness,
+  phase: SourceSemanticProfiledAcquisitionPhase, meter?: Pick<SourceSemanticResourceLedger, "charge">): boolean {
+  const result = phase.result;
+  if (result === null) return witness.length === 0;
+  if (witness.length !== result.counts.retained_occurrences || witness.length > 128) return false;
+  meter?.charge(1, 128 + witness.length * 48, "source retained witness consistency references");
+  const references = new Set<string>(), roots = new Set<string>();
+  let previous = 0;
+  for (const row of witness) {
+    meter?.charge(3, 0, "source retained witness consistency");
+    if (references.has(row.reference) || row.attempt <= previous || row.attempt > result.counts.attempts) return false;
+    references.add(row.reference); roots.add(row.source.root_key); previous = row.attempt;
+  }
+  if (roots.size !== result.counts.distinct_roots) return false;
+  // Use the same canonical codec, not another renderer or a side digest.
+  for (const [index, prefix] of result.occurrence_prefix.entries()) {
+    const left = canonicalJsonChunks(prefix, meter), right = canonicalJsonChunks(witness[index], meter);
+    for (;;) {
+      const a = left.next(), b = right.next();
+      if (a.done || b.done) { if (a.done !== b.done) return false; break; }
+      if (a.value !== b.value) return false;
+    }
+  }
+  return true;
+}
+
 const LaneProgress = z.object({
   view: View, route: z.enum(["lexical", "vector"]),
   availability: z.discriminatedUnion("status", [
@@ -132,8 +166,11 @@ export const SourceSemanticProfiledAcquisitionResultSchema = z.object({
     progress.set(key, { count: prior.count + 1, rank: row.route.native_rank });
   }
   if (result.vector.invalid_windows > result.vector.inspected_windows) fail("invalid windows exceed inspected windows");
+  // Native discovery can retain several phase refusals; an unknown-cost throw is
+  // failure evidence, not a fabricated resource-refused nomination opportunity.
+  const knownRefusal = result.resource_refusals.some(row => row.phase !== "acquisition_failed_unknown_additional_cost");
   if (c.resource_refused_before_start + c.resource_refused_after_start > 1 ||
-      result.resource_refusals.length !== c.resource_refused_before_start + c.resource_refused_after_start) {
+      knownRefusal !== (c.resource_refused_before_start + c.resource_refused_after_start > 0)) {
     fail("refusal evidence and counts disagree");
   }
 });
@@ -171,6 +208,11 @@ export function refineSourceSemanticProfiledAcquisition(value: SourceSemanticPro
   }
 }
 export const SourceSemanticProfiledAcquisitionPhaseSchema = Phase.superRefine(refineSourceSemanticProfiledAcquisition).readonly();
+export function sourceSemanticProfiledAcquisitionNotRun(profile: SourceSemanticAccessProfile, reason: string): SourceSemanticProfiledAcquisitionPhase {
+  return { policy: profile.acquisition_policy, channels: profile.channels, declared_allowance: profile.declared_allowance,
+    status: "not_run", reason, allowance: { max_attempts: 0, max_roots: 0, max_vector_windows: 0 },
+    budget: { work_units: 0, memory_bytes: 0 }, result: null, accounting: "not_run" };
+}
 export const SourceSemanticProfiledExecutionPhasesSchema = z.object({
   contract: z.literal("source-semantic-execution-v4"), query_preparation: SourceSemanticQueryPreparationSchema,
   acquisition: SourceSemanticProfiledAcquisitionPhaseSchema, semantic_generation_attempts: z.literal(0)

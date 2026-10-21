@@ -1,4 +1,4 @@
-import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceRecordIdentity, type SourceIndexQueryResources, type SourceSemanticResourceBudget, type SourceSemanticCompactPreparation, type SourceSemanticCompactAcquisition } from "@do-soul/alaya-protocol";
+import { SourceSemanticResourceLedger, SourceSemanticResourceExhausted, type SourceRecordIdentity, type SourceIndexQueryResources, type SourceSemanticResourceBudget, type SourceSemanticCompactPreparation, type SourceSemanticReadableAcquisition } from "@do-soul/alaya-protocol";
 import { CoreError, authorizeSemanticScope, fieldContractSha256, type FieldFormationStores } from "@do-soul/alaya-core";
 import { RETAINED_SOURCE_READ_RESERVATION, SqliteFieldSourceRecordRepo, sourceRecordFromRow, type StorageDatabase } from "@do-soul/alaya-storage";
 
@@ -68,7 +68,7 @@ export class SourceSemanticReadBudget extends SourceSemanticResourceLedger {
     }
   }
   public preparation?: SourceSemanticCompactPreparation;
-  public acquisition?: SourceSemanticCompactAcquisition;
+  public acquisition?: SourceSemanticReadableAcquisition;
   public indexWork = 0;
   private heldWork = 0;
   private heldBytes = 0;

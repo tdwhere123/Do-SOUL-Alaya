@@ -1,5 +1,7 @@
 import type { Worker } from "node:worker_threads";
-import { indexEntryCacheKey, unavailableSourceQueryPreparation, type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
+import { indexEntryCacheKey, unavailableSourceQueryPreparation, admitSourceSemanticWorkerResultFamily,
+  type SourceSemanticAccessProfile, type SourceSemanticComparisonWorkerResult, type SourceSemanticReadableWorkerResult,
+  type SourceInterpretationReasoningResult, type SourceSemanticWorkerResult, type PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
   ConditionalFieldRecallPort,
   ConditionalFieldRecallPortResult,
@@ -15,8 +17,8 @@ import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type { RecallPathReadBind } from "./recall-path-read-bind.js";
 import type { RecallReadWorkerOperation } from "../recall-read-worker/protocol.js";
-import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema,
-  type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
+import { type WorkerOperationPayload, SourceSemanticsPublicPayloadSchema, SourceSemanticsComparisonPayloadSchema,
+  type SourceSemanticsComparisonPayload, type SourceSemanticsPublicPayload } from "../recall-read-worker/operation-schemas.js";
 
 import type { SourceSemanticObservationScope } from "./source-semantic-observation.js";
 
@@ -25,6 +27,7 @@ export type PrepareSourceQuery = (input: Readonly<{ workspace_id: string; naviga
   signal: AbortSignal; remainingMs: () => number }>) => Promise<PreparedQuery>;
 export type SourceSemanticsExecutionPort = Readonly<{
   execute(input: SourceSemanticsPublicPayload): Promise<SourceSemanticWorkerResult>;
+  executeComparison?(input: SourceSemanticsComparisonPayload): Promise<SourceSemanticComparisonWorkerResult>;
   withExecutionScope<T>(input: { signal?: AbortSignal; timeoutMs: number },
     work: (phase: () => "waiting" | "preparing" | "dispatched") => Promise<T>): Promise<T>;
   /** Capture/prepare before caller-owned beginDeferred, then execute within that caller's snapshot. */
@@ -37,7 +40,7 @@ import {
   normalizeWorkerCount,
   resolveDefaultWorkerUrl
 } from "../recall-read-worker/client-config.js";
-import { encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
+import { resolveSourceSemanticComparisonProfile, encodeAuthorizedScopesAdmission } from "@do-soul/alaya-core";
 import { readRecallTierWindowOverIpc } from "../recall-read-worker/tier-window-client.js";
 import {
   createWorkerMemoryRepo,
@@ -104,6 +107,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly pathReadBind: RecallPathReadBind | undefined;
   private readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
   private readonly deliveryOwners = new Map<string, Worker>();
+  private readonly sourceBindings = new Map<string, { profile?: SourceSemanticAccessProfile }>();
   private readonly prepareSourceQuery?: PrepareSourceQuery;
   private readyPromise: Promise<void> | null = null;
   public readonly readSnapshot: RecallReadSnapshotPort;
@@ -255,7 +259,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       requestTimeoutMs: normalizeRequestTimeoutMs(input.requestTimeoutMs),
       onUnavailable: (worker) => {
         for (const [handle, owner] of this.deliveryOwners) {
-          if (owner === worker) this.deliveryOwners.delete(handle);
+          if (owner === worker) { this.deliveryOwners.delete(handle); this.sourceBindings.delete(handle); }
         }
         this.readyPromise = null;
       }
@@ -283,26 +287,45 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   public readonly sourceSemanticsPort: SourceSemanticsExecutionPort = {
     withExecutionScope: async (input, work) => await this.lifecycle.executionScope(input, work),
-    execute: async input => await this.withPreparedSourceExecution(input, execute => execute()),
-    withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input, work)
+    execute: async input => admitSourceSemanticWorkerResultFamily(await this.withPreparedSourceExecution(input, execute => execute()), false),
+    executeComparison: async input => admitSourceSemanticWorkerResultFamily(
+      await this.withPreparedSourceExecution(input, execute => execute(), true), true),
+    withPreparedExecution: async (input, work) => await this.withPreparedSourceExecution(input,
+      execute => work(async () => admitSourceSemanticWorkerResultFamily(await execute(), false)))
   };
 
-  private async withPreparedSourceExecution<T>(input: SourceSemanticsPublicPayload,
-    work: (execute: () => Promise<SourceSemanticWorkerResult>) => Promise<T>): Promise<T> {
+  private async withPreparedSourceExecution<T>(input: SourceSemanticsPublicPayload | SourceSemanticsComparisonPayload,
+    work: (execute: () => Promise<SourceSemanticReadableWorkerResult>) => Promise<T>, comparison = false): Promise<T> {
     return await this.lifecycle.withinDeadline("conditionalField.sourceSemantics", async () => {
       // Synchronous whole-input capture precedes binding, worker acquisition and caller beginDeferred.
-      const captured = SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
-      const request = captured.request;
+      const privateEnvelope = comparison ? SourceSemanticsComparisonPayloadSchema.parse(structuredClone(input)) : undefined;
+      const raw = privateEnvelope ?? SourceSemanticsPublicPayloadSchema.parse(structuredClone(input));
+      const request = raw.request;
+      const handle = request.kind === "reason" ? request.query_handle
+        : request.kind === "recall" ? request.continuation?.continuation_id ?? request.query_handle
+        : request.kind === "prepare_query" ? request.continuation_handle ?? request.source_handle
+        : request.kind === "validate_source" ? request.source_handle : undefined;
+      const profile = resolveSourceSemanticComparisonProfile({ comparison: privateEnvelope?.comparison,
+        bound: handle === undefined ? undefined : this.sourceBindings.get(handle),
+        public_policy: "access_policy" in request ? request.access_policy : undefined });
+      if (comparison && (request.kind !== "prepare_query" && request.kind !== "recall" ||
+          request.kind === "prepare_query" && (request.source_handle !== undefined || request.source_preview_extents !== undefined))) {
+        throw new Error("private comparison requires unscoped query preparation or recall");
+      }
+      const captured = { ...raw, ...(profile === undefined ? {} : { comparison: { profile } }) };
       const initial = request.kind === "prepare_query" ? request.source_handle === undefined &&
         request.continuation_handle === undefined && request.source_preview_extents === undefined
         : request.kind === "recall" && request.query_handle === undefined && request.continuation === undefined;
       let prepared: PreparedQuery | undefined;
-      if (initial && (request.kind === "prepare_query" || request.kind === "recall") && request.access_policy !== "canonical-v1") {
+      if (initial && (request.kind === "prepare_query" || request.kind === "recall") && request.access_policy !== "canonical-v1" && profile?.order_policy !== "canonical-v1") {
         const reason = this.lifecycle.snapshotHasBegun() ? "snapshot_already_begun" :
           this.prepareSourceQuery === undefined ? "embedding_preparation_unwired" : undefined;
         const navigation = request.original_query!;
         const hint = request.kind === "prepare_query" && request.access_hint !== navigation ? request.access_hint : undefined;
-        if (reason !== undefined) {
+        if (profile?.channels === "lexical") {
+          prepared = { receipt: unavailableSourceQueryPreparation("acquisition_channel_not_requested", "not_requested"),
+            vector: { status: "unavailable", reason: "acquisition_channel_not_requested" } };
+        } else if (reason !== undefined) {
           // No preparation ran: preserve unknown digest/profile rather than synthesizing a ready binding.
           const unavailable = { receipt: unavailableSourceQueryPreparation(reason), vector: { status: "unavailable" as const, reason } };
           prepared = { ...unavailable, ...(hint === undefined ? {} : { supplemental: unavailable }) };
@@ -319,16 +342,13 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         if (executed) throw new Error("captured Source execution can only be dispatched once");
         executed = true;
         this.lifecycle.preparationDeadline().check();
-        const handle = request.kind === "reason" ? request.query_handle
-          : request.kind === "recall" ? request.continuation?.continuation_id ?? request.query_handle
-          : request.kind === "prepare_query" ? request.continuation_handle ?? request.source_handle
-          : request.kind === "validate_source" ? request.source_handle : undefined;
         const owner = handle === undefined ? undefined : this.deliveryOwner(handle);
         return await this.lifecycle.isolate(async () => {
           const worker = this.lifecycle.pinnedWorker()!;
-          const native = await this.lifecycle.request<SourceSemanticWorkerResult>(
+          const native = await this.lifecycle.request<SourceSemanticReadableWorkerResult>(
             "conditionalField.sourceSemantics", { ...captured,
               ...(prepared === undefined ? {} : { prepared_query: prepared }) });
+          admitSourceSemanticWorkerResultFamily(native, comparison);
           const issued = native.kind === "prepare_source" ? native.source_handle
             : native.kind === "prepare_query" ? native.query_handle : undefined;
           if (issued !== undefined) this.deliveryOwners.set(issued, worker);
@@ -337,7 +357,15 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
             this.deliveryOwners.set(native.delivery_id, worker);
             if (native.index.continuation !== null) this.deliveryOwners.set(native.index.continuation.continuation_id, worker);
           }
-          while (this.deliveryOwners.size > 256) this.deliveryOwners.delete(this.deliveryOwners.keys().next().value!);
+          for (const id of [issued, native.kind === "prepare_query" ? native.continuation_handle : undefined,
+            native.kind === "recall" ? native.delivery_id : undefined,
+            native.kind === "recall" ? native.index.continuation?.continuation_id : undefined]) {
+            if (id !== undefined) this.sourceBindings.set(id, { profile });
+          }
+          while (this.deliveryOwners.size > 256) {
+            const id = this.deliveryOwners.keys().next().value!;
+            this.deliveryOwners.delete(id); this.sourceBindings.delete(id);
+          }
           return native;
         }, owner);
       });

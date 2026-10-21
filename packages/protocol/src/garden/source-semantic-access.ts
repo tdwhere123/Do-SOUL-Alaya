@@ -122,6 +122,7 @@ export const SourceSemanticProfiledAccessReceiptSchema = AccessReceipt.omit({ co
   }
 });
 export type SourceSemanticProfiledAccessReceipt = z.infer<typeof SourceSemanticProfiledAccessReceiptSchema>;
+export type SourceSemanticReadableAccessReceipt = SourceSemanticAccessReceipt | SourceSemanticProfiledAccessReceipt;
 
 export type SourceSemanticAccessPolicy = z.infer<typeof SourceSemanticAccessPolicySchema>;
 export type SourceSemanticAccessSignal = z.infer<typeof SourceSemanticAccessSignalSchema>;

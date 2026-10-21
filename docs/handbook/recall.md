@@ -968,8 +968,9 @@ or replace utterance attribution.
 ### Versioned source access foundation
 
 Protocol 20.0.0 declares the authorized Source access migration major under
-invariant §25. This is an **unwired schema/identity foundation**, not an executable
-candidate, default change, benefit result or release. Public MCP/worker requests
+invariant §25. The separately versioned family is executable only through a
+runtime-bound private comparison closure. This is not a default change, measured
+benefit, independent acceptance or release. Public MCP/worker requests
 retain exactly `query-conditioned-v1` / `canonical-v1`; no comparison labels enter
 that enum. Public response producers remain on the unchanged default family:
 
@@ -995,7 +996,11 @@ allowance. Core's existing `sourceSemanticAccessInputIdentity` and
 `sourceSemanticLibraryRequestIdentity` bind this separate material without
 redefining legacy preimages. Null is invalid. The profile is not public ingress;
 public access policy cannot accompany it. Bound-call omission/inheritance/equal
-profile/conflict normalization is later lifecycle work, not implemented here.
+profile/conflict normalization uses the shared Core resolver before preparation.
+The acquisition owner additionally admits only positive execution allowances and
+at most 16 roots for the original fixed-prefix policy. Public and candidate handle
+families cannot cross-admit; expiration, caller/scope and SQLite revision checks
+remain owned by the existing leases.
 
 Candidate acquisition projects at most 16 retained **occurrences**, not roots,
 with explicit prefix omissions. Attempt, retained occurrence, distinct root,
@@ -1010,15 +1015,34 @@ phase allowance; an executed phase cannot silently downgrade it. The shared
 Packing, expansion, resource readers, canonical capture and quotation dispatch the
 nested version before touching version-specific slots at their existing owners.
 
-No private ingress, worker propagation, acquisition/group/refill bridge, runtime
-native ordering, selection or delivery producer uses these schemas. Full retained
-producer witness and the existing access-pool preimage extension remain later
-bridge obligations: a prefix/count projection cannot reconstruct membership or
-sign a pool digest. The later proof must change occurrence/root 17 while holding
-the prefix, counts and observed pool fixed, and show changed pool/library snapshot
-identities. Native ordering must use actual captured catalog positions, preserve
-descriptor order within a record and retain `non_total` when positions are absent.
-No budget inflation or index regeneration is authorized by this code-only change.
+The private ingress shares normal tool admission, surface registration and payload
+construction; public `execute()` rejects its fields. Bench captures its actual
+workspace/run and enclosed session synchronously, without exposing a worker port,
+prepared vectors or selected generation. Existing execution scopes and prepared
+execution retain deadline/cancellation, preparation-before-snapshot and worker
+affinity. Bound calls inherit an omitted profile; an equal explicit profile has the
+same identity, while null, conflicts and public-policy mixtures fail closed.
+
+Core's acquisition producer retains an authenticated, bounded full occurrence
+witness before projecting the 16-occurrence prefix. The existing
+`accessPoolIdentityMaterial` includes that witness for both quotation and binding;
+completion and lease capacity charge and retain it. Library snapshots continue
+binding `access_pool: pool_id`, with no second signature. Native ordering uses
+actual catalog positions, preserves captured descriptor order within each record,
+and fails with `non_total` rather than inventing missing tail positions. Initial
+refill walks only the already captured pages/subsets; frozen continuation performs
+no acquisition, refill or re-selection. The public default and native selection
+owner are unchanged; no budget inflation or index regeneration is authorized.
+
+The temporary selector's named consumer is C3.4's bounded comparison; promotion or
+termination removes it and losing branches. Private library capture records a
+`private_source_comparison` entry, reuses `FirstExposureSession`, and requires
+version-correlated response, request/profile/context, continuation and sealed-source
+admission before labels. Candidate measurement records use delivered-slots v4;
+default v3 and the explicitly named historical source-only reader keep their own
+contracts. Optional diagnostic observation cannot change execution, and malformed
+retained evidence remains distinct from unavailable detail. No natural-corpus
+settings or winner are selected by this bridge.
 
 The ordinary public-capture reader explicitly admits Protocol 19 and 20's unchanged
 conditional-field source-only contract using its current compact disclosure reader;
@@ -1768,8 +1792,8 @@ operations and returned bytes, not SQLite posting comparisons, physical I/O or
 CPU. SQL failures remain unavailable. That capsule path adds no index or model
 field.
 
-Separately, unscoped query-conditioned `prepare_query` / library `recall` may run
-one snapshot-owned `source-index-interleaved-prefix.v1` join: bounded BM25 lexical
+Separately, the unchanged public default's unscoped query-conditioned
+`prepare_query` / library `recall` may run one snapshot-owned `source-index-interleaved-prefix.v1` join: bounded BM25 lexical
 rows and inspected vector windows (`ranking: exact_over_inspected_subset`, not
 full-library nearest neighbor). This Source-index pass nominates at most 16 roots;
 canonical observation is separate, so this is not a total candidate-union ceiling.
@@ -1869,9 +1893,11 @@ observation allowance. It first reserves bounded receipt, ordering, trace and
 lease completion, including source-only continuation feasibility, and retains
 the already-spent census/header cost; an unfunded completion reports resource
 exhaustion. Inactive, filtered, unavailable and truncated populations keep the
-ordinary observation envelope. The shared access input identity includes the
-`empty-interpretation-reserve-v1` resource contract so frozen pools cannot cross
-allocation semantics; continuation and direct Recall behavior remain unchanged.
+ordinary observation envelope. Live v2 and private profiled access input identities bind the
+`original-first-navigation-v3` resource contract so frozen pools cannot cross
+allocation semantics. Core's omitted-contract helper retains its frozen legacy
+`empty-interpretation-reserve-v1` preimage; live workers pass the explicit current
+contract. Continuation and direct Recall allocation behavior remain unchanged.
 Compatible source interpretation, query semantics, and semantic correspondence compile independently through the existing field; there is no
 cross-interpretation join. Each local reader enumerates that prepared premise
 population. Its exhaustion closes only that domain, not unobserved sources or
@@ -1909,8 +1935,9 @@ The separately named source-bearing union metric scores the same initial occupie
 slots across source evidence and validated semantic proofs. The entire delivered
 slot sequence must bind to the native index before either source or proof
 scoring: count, order, kinds and product coordinates must match the native delivery
-owner. Protocol owns the complete delivery identity: protocol 8, library v6,
-membership purpose and the five-slot page budget. Worker and public readers derive
+owner. Protocol owns the complete default delivery identity: protocol 8, library
+v6, membership purpose and the five-slot page budget. Private comparison instead
+requires the correlated protocol 9 / library v7 / access v3 family. Worker and public readers derive
 from it; a public outcome-only response contains no partial delivery fields and
 is unavailable for measurement. Unknown/obsolete delivery versions are invalid.
 Explicit offline source-only v1 readmission retains the original index, query and

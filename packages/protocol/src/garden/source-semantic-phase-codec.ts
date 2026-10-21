@@ -322,7 +322,7 @@ export function sourceSemanticExecution(preparation: SourceSemanticQueryPreparat
 export function sourceSemanticExecution(preparation?: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation,
   acquisition?: SourceSemanticAcquisitionPhase | SourceSemanticCompactAcquisition, meter?: Meter): SourceSemanticExecution;
 export function sourceSemanticExecution(preparation: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation | undefined,
-  acquisition: AcquisitionPhase | SourceSemanticReadableAcquisition, meter?: Meter): SourceSemanticReadableExecution;
+  acquisition: AcquisitionPhase | SourceSemanticReadableAcquisition | undefined, meter?: Meter): SourceSemanticReadableExecution;
 export function sourceSemanticExecution(preparation?: SourceSemanticQueryPreparation | SourceSemanticCompactPreparation,
   acquisition?: AcquisitionPhase | SourceSemanticReadableAcquisition, meter?: Meter): SourceSemanticReadableExecution {
   if (preparation === undefined && acquisition === undefined) return "native_reasoning_only";

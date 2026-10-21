@@ -26,6 +26,7 @@ type ActiveBenchContext = { workspaceId: string; runId: string };
 
 export interface BenchDaemonStartupInput {
   readonly sourceSemanticObservations?: boolean;
+  readonly sourceSemanticComparison?: boolean;
   readonly embeddingStartupProbe?: AlayaDaemonRuntimeOptions["embeddingStartupProbe"];
   readonly sourceSemanticInterpretationClock?: string;
   readonly dataDir: string;
@@ -43,6 +44,7 @@ export interface BenchDaemonStartupInput {
 
 export interface BenchDaemonStartupResources {
   readonly observeSourceSemantics?: BenchDaemonHandle["observeSourceSemantics"];
+  readonly compareSourceSemantics?: BenchDaemonHandle["compareSourceSemantics"];
   readonly runtime: AlayaDaemonRuntime;
   readonly server: ReturnType<typeof createAlayaMcpServer>;
   readonly mcpClient: Client;
@@ -88,7 +90,9 @@ async function createBenchRuntimeResources(input: BenchDaemonStartupInput): Prom
   const observed = input.sourceSemanticObservations === true
     ? await (await import("../../../../core-daemon/dist/runtime/recall/source-semantic-observation.js"))
       .createSourceObservedRuntime(options) : undefined;
-  const runtime = observed?.runtime ?? await createAlayaDaemonRuntime(options);
+  const compared = input.sourceSemanticComparison === true && observed === undefined
+    ? await (await import("../../../../core-daemon/dist/runtime/recall/source-comparison-execution.js")).createSourceComparisonRuntime(options) : undefined;
+  const runtime = observed?.runtime ?? compared?.runtime ?? await createAlayaDaemonRuntime(options);
   try {
     assertExpectedReconciliationBasis(runtime, expectedReconciliationBasis);
   } catch (error) {
@@ -108,9 +112,13 @@ async function createBenchRuntimeResources(input: BenchDaemonStartupInput): Prom
   await server.connect(serverTransport);
   await mcpClient.connect(clientTransport);
   const observeSourceSemantics = observed?.observeSourceSemantics;
+  const compareSourceSemantics = input.sourceSemanticComparison === true
+    ? (await import("../../../../core-daemon/dist/runtime/recall/source-comparison-execution.js"))
+      .sourceComparisonForRuntime(runtime, () => createBenchToolContext(activeContext, sessionId)) : undefined;
   return {
     runtime,
     ...(observeSourceSemantics === undefined ? {} : { observeSourceSemantics }),
+    ...(compareSourceSemantics === undefined ? {} : { compareSourceSemantics }),
     server,
     mcpClient,
     dispatchCli: makeDispatchCli(runtime)

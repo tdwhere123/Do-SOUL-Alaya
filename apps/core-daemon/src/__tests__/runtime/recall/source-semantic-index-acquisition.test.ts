@@ -30,7 +30,7 @@ async function preparedVector(fixture: IndexFixture) {
   return fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal, remainingMs: () => 60_000 });
 }
 function checkedAcquisitionCapture(result: ReturnType<typeof acquireSourceSemanticIndex>, meter: SourceSemanticReadBudget) {
-  const phase = sourceSemanticExecutionPhases(sourceSemanticExecution(undefined, meter.acquisition!)).acquisition;
+  const phase = sourceSemanticExecutionPhases(SourceSemanticExecutionSchema.parse(sourceSemanticExecution(undefined, meter.acquisition!))).acquisition;
   expect(result.phase).toEqual(phase);
   expect(Object.isFrozen(result.phase)).toBe(true);
   expect(Array.isArray(meter.acquisition)).toBe(true);

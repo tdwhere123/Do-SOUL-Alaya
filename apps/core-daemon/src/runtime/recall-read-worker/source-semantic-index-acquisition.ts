@@ -1,7 +1,8 @@
 import { sourceSemanticAcquisitionNotRun, SourceSemanticResourceLedger, SourceSemanticResourceExhausted,
   capturePackSourceSemanticAcquisitionForRequest, type SourceSemanticCompactAcquisition, type SourceSemanticAcquisitionPhase,
+  packSourceSemanticAcquisition, SourceIndexQueryResourcesSchema, type SourceSemanticAccessProfile,
   type SourceIndexQueryVector, type SourceIndexTarget, type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
-import { SourceIndexAcquisition, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
+import { CoreError, acquireProfiledSourceIndex, SourceIndexAcquisition, authorizeSemanticScope, fieldContractSha256 } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { quoteSemanticSourceObservation } from "./source-recall-source-text.js";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
@@ -82,6 +83,38 @@ export function acquireSourceSemanticIndex(input: Readonly<{
     if (!(error instanceof SourceSemanticResourceExhausted) || phase.status !== "not_run") throw error;
     return finish();
   } finally { if (!handedOff) release?.(); }
+}
+
+/** Same native reservation and ledger; only the explicit private producer/profile differs. */
+export function acquireProfiledSourceSemanticIndex(input: Parameters<typeof acquireSourceSemanticIndex>[0], profile: SourceSemanticAccessProfile) {
+  const { meter } = input;
+  const release = meter.hold(quoteSemanticSourceObservation(input.sourceCost, Math.min(4096, input.canonicalBytes)));
+  let handedOff = false;
+  try {
+    const produced = acquireProfiledSourceIndex({ repository: new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256),
+      sha256: fieldContractSha256, workspace: input.workspace, original: { navigation: input.navigation, vector: input.vector },
+      hint: input.supplemental, profile, budget: meter.remaining(),
+      ...(meter.observer === undefined ? {} : { observe: (invocation, capture, kind) => {
+        if (kind === "vector_inspected") meter.observer!.omitDiagnostic(`source_index_${invocation}_${kind}`);
+        else meter.observer!.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }),
+          kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
+      } }), admitScope: scope => {
+        try { authorizeSemanticScope(scope, input.authorized); return "admitted"; } catch { return "denied"; }
+      } });
+    meter.absorbIndex(produced.phase.result!.resources);
+    meter.observer?.event("source_index_routes", meter.phase, () => ({ candidate_phase: produced.phase,
+      retained_occurrences: produced.witness, beyond_observed_prefix: "unknown_not_nomination_limit" }));
+    meter.acquisition = packSourceSemanticAcquisition(produced.phase, input.metadataMeter);
+    input.metadataMeter.retain(produced.witness, "source retained full acquisition witness");
+    handedOff = true;
+    return { ...produced, releaseCanonical: release };
+  } catch (error) {
+    if (error instanceof CoreError) {
+      const resources = SourceIndexQueryResourcesSchema.safeParse(error.details?.index_resources);
+      if (resources.success) meter.absorbIndex(resources.data);
+    }
+    throw error;
+  } finally { if (!handedOff) release(); }
 }
 
 function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, authorized: readonly string[] | null,

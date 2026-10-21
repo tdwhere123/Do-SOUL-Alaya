@@ -201,7 +201,7 @@ function acceptVerifiedSource(input: SourceRecallAccess, record: SourceRecordIde
 export function orderSourceRecallObservations(records: readonly SourceRecordIdentity[], sources: Map<string, SourceObservation>,
   rows: readonly SourceSemanticAccessReceipt["interpretation_candidates"][number][], stops: Set<Stop>,
   meter: SourceRecallAccessMeter,
-  order: <T extends { readonly identity: string; readonly signal: SourceSemanticAccessSignal }>(rows: readonly T[]) => T[],
+  order: <T extends { readonly identity: string; readonly record_id: string; readonly signal: SourceSemanticAccessSignal }>(rows: readonly T[]) => T[],
   reconcile: (count: number) => void) {
   for (const record of records) if (!sources.has(record.identity)) sources.set(record.identity, {
     source_id: record.source_id, record_id: record.identity, read_bytes: 0, body_bytes: null, complete: false, signal: UNKNOWN

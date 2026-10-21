@@ -9,9 +9,10 @@ type CatalogMeter = SourceRecallAccessMeter & { read: (work: number, bytes: numb
 export function listEligibleSemanticSources(database: StorageDatabase, workspace: string, meter: CatalogMeter,
   authorized: readonly string[] | null, preferredSourceIds: readonly string[] = [],
   union?: Readonly<{ nominations: readonly SourceIndexTarget[]; beforeRetain: (record: SourceRecordIdentity, tuple: string) => void;
+    catalogPositions?: Map<string, number>;
     acquire?: (next: SourceRecordIdentity | null, bodyBytes: number) => readonly SourceIndexTarget[] }>
 ): { sources: SourceRecordIdentity[]; truncated: boolean; open: boolean; pages: number;
-  stopping_reasons: readonly ("budget" | "source_limit" | "unavailable")[] } {
+  stopping_reasons: readonly ("budget" | "source_limit" | "unavailable")[]; catalog_positions: ReadonlyMap<string, number> | undefined } {
   if (preferredSourceIds.length > 16 || new Set(preferredSourceIds).size !== preferredSourceIds.length || preferredSourceIds.some(id => id.length === 0)) {
     throw new CoreError("VALIDATION", "invalid bounded source nomination");
   }
@@ -81,12 +82,17 @@ export function listEligibleSemanticSources(database: StorageDatabase, workspace
     }
     if (page.record === null) { open = true; stoppingReasons.add("unavailable"); break; }
     afterSourceId = page.record.source_id;
+    // This is the actual cursor-page position, not the final union array index.
+    if (union?.catalogPositions !== undefined) {
+      meter.charge(1, 96, "captured source catalog position");
+      union.catalogPositions.set(sourceRecordFromRow(page.record).identity, pages - 1);
+    }
     if (append(page, "cursor") === "budget") break;
     if (pages === 1) admitNominations(union?.acquire?.(sources[0] ?? null, page.bodyBytes) ?? []);
   }
   if (truncated) open = true;
   if (truncated && pages >= 512) stoppingReasons.add("source_limit");
-  return { sources, truncated, open, pages, stopping_reasons: [...stoppingReasons] };
+  return { sources, truncated, open, pages, stopping_reasons: [...stoppingReasons], catalog_positions: union?.catalogPositions };
 }
 export function semanticSourceTupleIdentity(record: SourceRecordIdentity, meter: SourceRecallAccessMeter): string {
   const tuple = `${record.workspace_id}\0${record.identity}\0${record.source_version}\0${record.content_digest}`;

@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { fieldContractSha256 } from "../../shared/field-hash.js";
 import { CoreError } from "../../shared/errors.js";
+import { captureProfiledSourceIndexExecutionProfile } from "../../source-index/source-index-profiled-acquisition.js";
 import { createSourceRecallAccessPolicy } from "./source-recall-access.js";
 
 const SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT = "empty-interpretation-reserve-v1";
@@ -27,6 +28,27 @@ export function sourceSemanticAccessInputIdentity(input: Readonly<{
     ...(input.source_preview_extents === undefined ? {} : { source_preview_extents: input.source_preview_extents }),
     resource_contract: candidate !== undefined || input.contract === "source-semantic-access-v2" ? "original-first-navigation-v3" :
       SOURCE_SEMANTIC_ACCESS_RESOURCE_CONTRACT }))}`;
+}
+
+/** One profile/family normalization rule for preparation, worker reuse and retained leases. */
+export function resolveSourceSemanticComparisonProfile(input: Readonly<{
+  comparison?: Readonly<{ profile?: unknown }>; bound?: Readonly<{ profile?: SourceSemanticAccessProfile }>;
+  public_policy?: SourceSemanticAccessPolicy;
+}>): SourceSemanticAccessProfile | undefined {
+  if (input.comparison === undefined) {
+    if (input.bound?.profile !== undefined) throw new CoreError("VALIDATION", "candidate handle requires private comparison ingress");
+    return undefined;
+  }
+  if (input.public_policy !== undefined) throw new CoreError("VALIDATION", "private profile cannot accompany public access policy");
+  if (input.bound !== undefined && input.bound.profile === undefined) throw new CoreError("VALIDATION", "public handle cannot enter private comparison");
+  const supplied = Object.hasOwn(input.comparison, "profile")
+    ? captureProfiledSourceIndexExecutionProfile(input.comparison.profile) : undefined;
+  const retained = input.bound?.profile;
+  if (supplied === undefined && retained === undefined) throw new CoreError("VALIDATION", "initial comparison requires an explicit profile");
+  if (supplied !== undefined && retained !== undefined && canonicalJson(supplied) !== canonicalJson(retained)) {
+    throw new CoreError("VALIDATION", "comparison profile conflicts with the frozen handle");
+  }
+  return retained ?? supplied;
 }
 
 export function authorizeSemanticScope(scope: string | null | undefined, authorized: readonly string[] | null): void {

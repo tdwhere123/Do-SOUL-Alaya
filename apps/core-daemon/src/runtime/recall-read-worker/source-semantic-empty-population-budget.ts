@@ -1,7 +1,7 @@
 import { sourceSemanticExecution, SourceSemanticResourceLedger, SourceSemanticResourceExhausted, SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE,
   type RequestBudget, type SourceRecordIdentity, type SourceSemanticAccessPolicy, type SourceSemanticQuery,
   type SourceSemanticResourceBudget, type SourceSemanticAccessReceipt, type SourceSemanticCompactPreparation,
-  type SourceSemanticCompactAcquisition, type SourceSemanticHandleDescriptor,
+  type SourceSemanticReadableAcquisition, type SourceSemanticReadableAccessPhases, type SourceSemanticRetainedNominationWitness, type SourceSemanticHandleDescriptor,
   type SourceSemanticPreviewExtents, type PreparedSourceSemanticCanonicalSubtrees } from "@do-soul/alaya-protocol";
 import { SourceSemanticReadBudget } from "../field/source-semantic-read-stores.js";
 import type { SourceSemanticReadRuntime } from "./runtime.js";
@@ -22,11 +22,12 @@ type Completion = Readonly<{
   policy: SourceSemanticAccessPolicy; budget: RequestBudget; accessHint?: string;
   orderCost: (count: number) => SourceSemanticResourceBudget;
   leaseContext: QueryPreparationLeaseBase; suppliedQuerySemantics?: SourceSemanticQuery;
-  phases?: Readonly<{ preparation: SourceSemanticCompactPreparation; acquisition: SourceSemanticCompactAcquisition }>;
+  phases?: Readonly<{ preparation: SourceSemanticCompactPreparation; acquisition: SourceSemanticReadableAcquisition }>;
   sourcePreviewExtents?: SourceSemanticPreviewExtents;
   leaseCount?: 1 | 2;
 }> & SourceSemanticIdentityCaptures;
-type CompletionPrice = SourceSemanticResourceBudget & { prepared?: PreparedSourceSemanticCanonicalSubtrees };
+type PreparedIdentity = PreparedSourceSemanticCanonicalSubtrees<SourceSemanticReadableAccessPhases>;
+type CompletionPrice = SourceSemanticResourceBudget & { prepared?: PreparedIdentity };
 
 function add(...costs: readonly SourceSemanticResourceBudget[]): SourceSemanticResourceBudget {
   return { work_units: costs.reduce((sum, cost) => sum + cost.work_units, 0),
@@ -45,17 +46,21 @@ function completionEnvelope(input: Completion, planning: SourceSemanticReadBudge
   const beforeReceipt = { work_units: planning.spentWork, memory_bytes: planning.spentBytes };
   const value = sourceSemanticAccessReceiptValue(planning, policy, DIGEST, sourceRows, [],
     WIDE_SCALAR, WIDE_SCALAR, ALL_STOPS, input.sourcePreviewExtents, input.phases === undefined ? undefined : {
-      ...input.phases, observation: null });
+      ...input.phases, observation: null }, leaseContext.profile);
   const accounting = sourceSemanticObservationAccounting(value.phases[2], { spentWork: Number.MAX_SAFE_INTEGER,
     spentBytes: Number.MAX_SAFE_INTEGER, nativeBytes: Number.MAX_SAFE_INTEGER }, planning);
   // Acquisition can become known after the base quote. Always price the populated
   // observation tuple, even while its current phase would report unknown resources.
   const observation = accounting ?? [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER] as const;
-  const receipt = { ...value, phases: [2, value.phases[1], value.phases[2], observation] as const };
+  const acquisition = value.phases[2];
+  const phases: SourceSemanticReadableAccessPhases = acquisition[0] === 1
+    ? [2, value.phases[1], acquisition, observation] : [2, value.phases[1], acquisition, observation];
+  const receipt = { ...value, phases };
   const construction = { work_units: planning.spentWork - beforeReceipt.work_units,
     memory_bytes: planning.spentBytes - beforeReceipt.memory_bytes };
   const access = { ...receipt, pool_id: DIGEST };
   const pool = { sources: records, descriptors: [], access, sourcePages: WIDE_SCALAR, interpretationPages: WIDE_SCALAR,
+    ...(input.retainedWitness === undefined ? {} : { retainedWitness: input.retainedWitness }),
     ...(input.sourcePreviewExtents === undefined ? {} : { sourcePreviewExtents: input.sourcePreviewExtents }),
     ...(input.accessHint === undefined ? {} : { accessHint: input.accessHint }) };
   const trace = preparationAccessReceiptValue(pool, 0, 0, 0, records.length);
@@ -149,7 +154,8 @@ export class SourceSemanticUnionCompletion {
   }
 
   // Receipt, delivered trace, two query/page leases and current execution evidence.
-  metadata(value: Readonly<{ preparation: SourceSemanticCompactPreparation }> | SourceSemanticCompactAcquisition): void {
+  metadata(value: Readonly<{ preparation: SourceSemanticCompactPreparation }> | SourceSemanticReadableAcquisition |
+    Readonly<{ retainedWitness: SourceSemanticRetainedNominationWitness }>): void {
     this.reserve(planning => {
       const payload = SourceSemanticResourceLedger.quoteRetain(value, planning.remaining(), planning, "borrow");
       // Retention borrows five references, but each future lease still scans the actual
@@ -194,7 +200,7 @@ export class SourceSemanticUnionCompletion {
    * finalization is protected. Reuse its retention/lease-sizing holds, quote the
    * previously unreserved expanded identity, and recheck current lease capacity.
    */
-  emptyCompletion(input: Completion): PreparedSourceSemanticCanonicalSubtrees | undefined {
+  emptyCompletion(input: Completion): PreparedIdentity | undefined {
     if (this.preparation === undefined || this.sourceCount !== input.records.length
       || this.sourceCount > SOURCE_SEMANTIC_LIBRARY_INTERPRETATION_PAGE || this.interpretationCount !== 0) {
       this.release();
@@ -264,7 +270,7 @@ export class SourceSemanticUnionCompletion {
 }
 
 /** Spend planner work on the same Protocol traversal used by actual retain calls. */
-export function reserveEmptyInterpretationCompletion(input: Completion): PreparedSourceSemanticCanonicalSubtrees | undefined {
+export function reserveEmptyInterpretationCompletion(input: Completion): PreparedIdentity | undefined {
   const { parent, child } = input;
   // Already executed census/navigation/header spend has first claim on the request allowance.
   const outstanding = child.outstandingAllowance();

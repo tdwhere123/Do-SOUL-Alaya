@@ -24,7 +24,9 @@ import { assertBuiltWorker, builtWorkerUrl, createMemoryEntry } from "./recall-r
 import { createRecallRealStorage, REAL_SQLITE_TEST_WORKSPACE_ID as WS }
   from "../../../../../../packages/core/src/__tests__/shared/real-sqlite.test-support.js";
 
-type Payload = WorkerOperationPayload<"conditionalField.sourceSemantics">;
+type Payload = Omit<WorkerOperationPayload<"conditionalField.sourceSemantics">, "request" | "comparison"> & {
+  request: import("@do-soul/alaya-protocol").SourceSemanticWorkerRequest; comparison?: never;
+};
 type Mutable<T> = { -readonly [K in keyof T]: Mutable<T[K]> };
 const BODY = "Alice uses tools.";
 function deferred() {

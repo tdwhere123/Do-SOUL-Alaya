@@ -1,3 +1,4 @@
+import { bindSourceComparisonHandler } from "./source-comparison-handler.js";
 import { randomUUID } from "node:crypto";
 import { isHandlerTimeoutError, throwIfAborted } from "@do-soul/alaya-engine-gateway";
 import { hasAlayaMemoryToolName } from "./tool-catalog.js";
@@ -65,18 +66,21 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
     interpretation
   });
 
-  return {
+  const admit = async (context: McpMemoryToolCallContext, toolName = "soul.interpretation") => {
+    throwIfAborted(context.abortSignal);
+    await deps.zeroDayToolAccess?.enforceToolAccess(context.workspaceId, toolName);
+    throwIfAborted(context.abortSignal);
+    await surfaceRegistrar.ensureAgentSurfaceForCall(context);
+    throwIfAborted(context.abortSignal);
+  };
+  const handler: McpMemoryToolHandler = {
     async call({ toolName, arguments: rawArguments, context }) {
       if (!hasAlayaMemoryToolName(toolName)) {
         return fail(toolName, "UNKNOWN_TOOL", `Unsupported Alaya memory tool: ${toolName}`);
       }
 
       try {
-        throwIfAborted(context.abortSignal);
-        await deps.zeroDayToolAccess?.enforceToolAccess(context.workspaceId, toolName);
-        throwIfAborted(context.abortSignal);
-        await surfaceRegistrar.ensureAgentSurfaceForCall(context);
-        throwIfAborted(context.abortSignal);
+        await admit(context, toolName);
         return await dispatcher.dispatchToolCall({ toolName, rawArguments, context });
       } catch (error) {
         // Timeout abort is not a tool-domain failure; keep it as the race winner.
@@ -87,4 +91,6 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       }
     }
   };
+  bindSourceComparisonHandler(handler, { now, interpretationClock, sourceSemanticsPort: deps.sourceSemanticsPort, admit });
+  return handler;
 }

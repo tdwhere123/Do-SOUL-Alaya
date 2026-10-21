@@ -18,9 +18,14 @@ import { runSourceSemanticWorker } from "../../../runtime/recall-read-worker/sou
 import type { RecallReadWorkerRuntime } from "../../../runtime/recall-read-worker/runtime.js";
 import { withIndexedSources, WS, CLOCK, ORIGINAL, SCOPES, QUERY_BUDGET } from "./source-semantic-index-acquisition.test-support.js";
 
-type Completion = Parameters<SourceSemanticUnionCompletion["emptyCompletion"]>[0];
-function capturedCompletion(input: Completion): Completion {
-  const phases = sourceSemanticAccessPhases({ phases: [2, input.phases!.preparation, input.phases!.acquisition, null] });
+type FullCompletion = Parameters<SourceSemanticUnionCompletion["emptyCompletion"]>[0];
+type Completion = Omit<FullCompletion, "phases"> & {
+  phases?: Pick<import("../../../runtime/recall-read-worker/source-semantic-access-receipts.js").AccessReceiptPhases, "preparation" | "acquisition">;
+};
+function capturedCompletion(input: FullCompletion): Completion {
+  const acquisition = input.phases!.acquisition;
+  if (acquisition[0] !== 1) throw new Error("default completion requires legacy acquisition");
+  const phases = sourceSemanticAccessPhases({ phases: [2, input.phases!.preparation, acquisition, null] });
   const pair = captureSourcePhaseFixture(new SourceSemanticReadBudget(QUERY_BUDGET), phases);
   return { ...input, phases: { preparation: pair.phases[1], acquisition: pair.phases[2] },
     borrowPreparation: pair.borrowPreparation, acquisitionCapture: pair.acquisition };
@@ -110,7 +115,7 @@ it("borrows only the parent's surplus outside spent effects, unrelated holds and
     const empty = SourceSemanticUnionCompletion.prototype.emptyCompletion;
     let captured: Completion | undefined;
     const census = vi.spyOn(SourceSemanticUnionCompletion.prototype, "emptyCompletion")
-      .mockImplementation(function (this: SourceSemanticUnionCompletion, input) { captured = input; return empty.call(this, input); });
+      .mockImplementation(function (this: SourceSemanticUnionCompletion, input) { captured = capturedCompletion(input); return empty.call(this, input); });
     runSourceSemanticWorker(runtime, { workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
       request: { kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET } });
     census.mockRestore();
@@ -154,7 +159,7 @@ it("executes actual completion at exact and adjacent exhaustion with a full reta
     const empty = SourceSemanticUnionCompletion.prototype.emptyCompletion;
     let completion: Completion | undefined;
     vi.spyOn(SourceSemanticUnionCompletion.prototype, "emptyCompletion").mockImplementation(function (this: SourceSemanticUnionCompletion, input) {
-      completion = input; return empty.call(this, input);
+      completion = capturedCompletion(input); return empty.call(this, input);
     });
     runSourceSemanticWorker(runtime, { workspace_id: WS, as_of: CLOCK, authorized_scopes: SCOPES,
       request: { kind: "prepare_query", original_query: ORIGINAL, budget: QUERY_BUDGET } });
