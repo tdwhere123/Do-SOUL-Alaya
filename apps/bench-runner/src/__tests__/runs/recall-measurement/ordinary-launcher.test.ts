@@ -8,6 +8,7 @@ const isolation = await vi.hoisted(async () => {
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StorageDatabase } from "@do-soul/alaya-storage";
 import { canonicalJson } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../../runs/snapshot/source-records/publish.js";
@@ -215,6 +216,73 @@ it("captures an actual continuation page without replacing first exposure", asyn
   expect(row.reason ?? "").not.toMatch(/continuation was issued/iu);
 }, 120000);
 
+it.each([
+  { page: "first", defect: "malformed-envelope", status: "unavailable", count: 1 },
+  { page: "later", defect: "malformed-envelope", status: "partial", count: 2 },
+  { page: "first", defect: "malformed-output", status: "unavailable", count: 1 },
+  { page: "later", defect: "malformed-output", status: "partial", count: 2 },
+  { page: "first", defect: "missing-index-identity", status: "unavailable", count: 1 },
+  { page: "later", defect: "missing-index-identity", status: "partial", count: 2 }
+] as const)("keeps a $page-page $defect as an unobserved attempted page with raw frame and timing",
+  async ({ page, defect, status, count }) => {
+    const plan = base.admitted.plan, query = plan.queries[0]!;
+    const original = Client.prototype.callTool;
+    const injected: unknown[] = [];
+    let recalls = 0;
+    const spy = vi.spyOn(Client.prototype, "callTool").mockImplementation(function (this: Client, params, resultSchema, options) {
+      return original.call(this, params, resultSchema, options).then(result => {
+        if (params.name !== "soul.recall") return result;
+        recalls += 1;
+        const next = (page === "first" ? recalls === 1 : recalls >= 2)
+          ? corruptSoulRecallResult(defect, result) : result;
+        injected.push(next);
+        return next as typeof result;
+      });
+    });
+    try {
+      const execution = await executeOrdinaryRecallEntry({
+        config: plan.config, root: join(base.root, `ordinary-entry-${page}-${defect}`),
+        queries: [{ query_key: query.query_key, original_query: query.original_query }]
+      });
+      const row = execution.rows[0]!;
+      const attempted = row.pages.at(-1)!;
+      expect(row.status).toBe(status);
+      expect(row.stop_cause).toBe("unavailable");
+      expect(row.page_count).toBe(count);
+      expect(row.pages).toHaveLength(count);
+      expect(injected).toHaveLength(count);
+      expect(attempted.observation).toBe("unobserved");
+      expect(attempted.response_state).toBe("success");
+      expect(attempted.occupied_slots).toBe(0);
+      expect(attempted.source_intervals).toEqual([]);
+      expect(attempted.complete).toBe(false);
+      expect(attempted.public_call?.response).toEqual(JSON.parse(JSON.stringify(injected.at(-1))));
+      expect(row.costs.latency_ms).toMatchObject({ status: "available", source: "client_mcp_elapsed" });
+      expect(row.costs.latency_ms).toHaveProperty("value");
+      if (page === "later") {
+        expect(row.pages[0]?.observation).toBe("observed");
+        expect(row.pages[0]?.occupied_slots).toBeGreaterThan(0);
+        expect(row.pages[0]?.public_call?.response).toEqual(JSON.parse(JSON.stringify(injected[0])));
+      } else {
+        expect(row.first_exposure).toBeNull();
+        expect(row.pages.every(item => item.observation !== "observed")).toBe(true);
+      }
+      if (defect === "malformed-envelope") {
+        expect(attempted.envelope).toBeNull();
+        expect(attempted.output).toBeNull();
+      } else if (defect === "malformed-output") {
+        expect(attempted.envelope).not.toBeNull();
+        expect(attempted.output).toBeNull();
+      } else {
+        expect(attempted.output).not.toBeNull();
+        expect(attempted.output?.index?.interpretation_id).toBeUndefined();
+        expect(attempted.output?.index?.as_of).toBeUndefined();
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  }, 120000);
+
 it("follows public continuation past two pages until ten slots or admitted tail exhaustion", async () => {
   const names = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory",
     "Ironwood", "Juniper", "Kauri", "Larch", "Maple", "Nance", "Oak", "Pine"];
@@ -283,6 +351,29 @@ it("returns not-run without intervals when ordinary entry cannot express authori
   expect(execution.rows[0]?.source_intervals).toEqual([]);
   expect(readdirSync(root).filter(name => name.startsWith("native-session-"))).toEqual([]);
 }, 120000);
+
+function corruptSoulRecallResult(
+  defect: "malformed-envelope" | "malformed-output" | "missing-index-identity", result: unknown
+): unknown {
+  if (defect === "malformed-envelope") {
+    return { structuredContent: { ok: true, output: { not_an_envelope: true } } };
+  }
+  if (defect === "malformed-output") {
+    const envelope = result !== null && typeof result === "object" ? result as { content?: unknown } : {};
+    return {
+      content: Array.isArray(envelope.content) ? envelope.content : [{ type: "text", text: "malformed-output" }],
+      structuredContent: { ok: true, output: { not_a_recall_response: true } }
+    };
+  }
+  const clone = structuredClone(result) as {
+    structuredContent?: { output?: { index?: { interpretation_id?: unknown; as_of?: unknown } } };
+  };
+  const index = clone.structuredContent?.output?.index;
+  if (index === undefined) throw new Error("native soul.recall result lacked an index to strip");
+  delete index.interpretation_id;
+  delete index.as_of;
+  return clone;
+}
 
 function readSourceBody(snapshotPath: string, workspaceId: string, rootId: string): string {
   const connection = new BetterSqlite3(snapshotPath, { readonly: true, fileMustExist: true });

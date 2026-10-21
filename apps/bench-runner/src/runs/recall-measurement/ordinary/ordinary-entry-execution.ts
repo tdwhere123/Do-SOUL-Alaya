@@ -217,16 +217,39 @@ async function recallPublicMembershipPage(
     return membershipPage({ ordinal, request, frame: null, envelope: null, output: null,
       firstExposure: null, responseState: "unknown", observation: "unobserved", occupiedSlots: 0, sourceIntervals: [] });
   }
-  if (canonicalJson(frame.request) !== canonicalJson({ name: "soul.recall", arguments: args })) {
+  return admitCapturedPublicMembership({ ordinal, request, frame, args, session, firstExposure });
+}
+
+/** Captured frames stay on an unobserved page when parse fails; CANCELLED/CONFLICT still fail closed. */
+function admitCapturedPublicMembership(input: Readonly<{
+  ordinal: number; request: OrdinaryRecallPublicRequest; frame: BenchMcpToolCapture; args: Record<string, unknown>;
+  session: FirstExposureSession; firstExposure: FirstExposurePage | null;
+}>): EntryPage {
+  if (canonicalJson(input.frame.request) !== canonicalJson({ name: "soul.recall", arguments: input.args })) {
     throw new AlayaError("CONFLICT", "ordinary public MCP request differs from the captured frame");
   }
-  const envelope = OrdinaryRecallEnvelopeSchema.parse(frame.response);
-  const generic = readBenchMcpToolOutput("soul.recall", frame.response);
-  const output = SoulMemorySearchResponseSchema.parse(generic);
-  if (canonicalJson(output) !== canonicalJson(generic)) {
+  const failed = {
+    ordinal: input.ordinal, request: input.request, frame: input.frame, output: null, firstExposure: null,
+    responseState: "success" as const, observation: "unobserved" as const, occupiedSlots: 0, sourceIntervals: [] as SourceInterval[]
+  };
+  const envelope = OrdinaryRecallEnvelopeSchema.safeParse(input.frame.response);
+  if (!envelope.success) return membershipPage({ ...failed, envelope: null });
+  let generic: unknown;
+  try {
+    generic = readBenchMcpToolOutput("soul.recall", input.frame.response);
+  } catch (error) {
+    if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
+    return membershipPage({ ...failed, envelope: envelope.data });
+  }
+  const output = SoulMemorySearchResponseSchema.safeParse(generic);
+  if (!output.success) return membershipPage({ ...failed, envelope: envelope.data });
+  if (canonicalJson(output.data) !== canonicalJson(generic)) {
     throw new AlayaError("CONFLICT", "public output cannot be normalized during ordinary entry admission");
   }
-  return bindPublicExposure({ ordinal, request, frame, envelope, output, session, firstExposure });
+  return bindPublicExposure({
+    ordinal: input.ordinal, request: input.request, frame: input.frame, envelope: envelope.data,
+    output: output.data, session: input.session, firstExposure: input.firstExposure
+  });
 }
 
 function bindPublicExposure(input: Readonly<{
