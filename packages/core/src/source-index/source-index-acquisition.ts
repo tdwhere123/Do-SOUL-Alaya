@@ -33,9 +33,34 @@ type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceS
 type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
+/** Core-owned acquisition facts. Not a public receipt, protocol schema or daemon type.
+ * Rank on vector_ranked exists only after exact ordering of the captured subset.
+ */
+export type SourceIndexAcquisitionFact = Readonly<{
+  kind: "lexical_candidate"; target: SourceIndexTarget["target"];
+  lane: SourceIndexLexicalRank["lane"]; rank: number; lane_rank: number; bm25: number;
+}> | Readonly<{
+  kind: "vector_inspected"; target: SourceIndexTarget["target"];
+  window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number;
+}> | Readonly<{
+  kind: "vector_ranked"; target: SourceIndexTarget["target"];
+  window: NonNullable<SourceIndexRootNomination["vector"]>["window"]; cosine: number; rank: number;
+}> | Readonly<{
+  kind: "nomination_attempt"; channel: "lexical" | "vector"; target: SourceIndexTarget["target"];
+  disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
+    | "stale" | "native_unknown" | "resource_refused" | "rejected";
+}> | Readonly<{
+  kind: "acquisition_complete"; completion: SourceIndexAcquisitionResult["completion"];
+  accounting: SourceIndexNominationAccounting;
+  lexical_completion: SourceIndexAcquisitionResult["lexical"]["completion"];
+  vector_completion: SourceIndexAcquisitionResult["vector"]["completion"];
+}>;
+export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact) => void;
+
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
  * Nomination does not run inference, read bodies, select delivery packages or publish public receipts.
+ * Observation facts stay in this producer so they can be captured before candidate loss; they are not a second policy.
  */
 export class SourceIndexAcquisition {
   /** Disabled-channel receipts; not infrastructure unavailability. Named consumers: nominate/prepareQuery/assertControl. */
@@ -178,12 +203,12 @@ export class SourceIndexAcquisition {
   public constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256) {}
 
   public nominate(input: SourceIndexAcquisitionInput, admitScope: SourceIndexScopeAdmission,
-    control?: SourceAcquisitionChannelControl): SourceIndexAcquisitionResult {
+    control?: SourceAcquisitionChannelControl, observer?: SourceIndexAcquisitionObserver): SourceIndexAcquisitionResult {
     validateInput(input, admitScope);
     const capturedControl = control;
     SourceIndexAcquisition.assertControl({ control: capturedControl, vector: input.vector, navigation: input.navigation_text });
     const captured = { ...input, allowance: { ...input.allowance }, budget: { ...input.budget } };
-    return new AcquisitionQuery(this.repository, this.sha256, captured, admitScope, capturedControl).run();
+    return new AcquisitionQuery(this.repository, this.sha256, captured, admitScope, capturedControl, observer).run();
   }
 }
 
@@ -214,7 +239,8 @@ class AcquisitionQuery {
 
   constructor(private readonly repository: SourceIndexQueryRepository, private readonly sha256: FieldContractSha256,
     private readonly input: SourceIndexAcquisitionInput, private readonly admitScope: SourceIndexScopeAdmission,
-    private readonly control?: SourceAcquisitionChannelControl) {
+    private readonly control?: SourceAcquisitionChannelControl,
+    private readonly observer?: SourceIndexAcquisitionObserver) {
     this.meter = new SourceSemanticResourceLedger(input.budget);
     const vector = input.vector;
     // Capture supplied preparation metadata even if the result envelope or validation cannot be funded.
@@ -242,6 +268,11 @@ class AcquisitionQuery {
           index_coverage: lexical.index_coverage, limitations: lexical.limitations, tokenization: lexical.tokenization };
         if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
         this.absorb(lexical.resources);
+        for (const candidate of this.lexicalCandidates) {
+          this.observe(() => ({ kind: "lexical_candidate", target: structuredClone(candidate.source.target),
+            lane: candidate.lexical.lane, rank: candidate.lexical.rank, lane_rank: candidate.lexical.lane_rank,
+            bm25: candidate.lexical.bm25 }));
+        }
       }
       this.stage = "vector";
       if (this.control !== "lexical") this.scanVectors();
@@ -259,7 +290,7 @@ class AcquisitionQuery {
     const lexicalDone = this.lexical.completion === "complete" || this.control === "vector" && this.lexical.completion === "not_run";
     const complete = !this.limited && this.counts.native_unknown === 0 && lexicalDone &&
       (this.vector.completion === "complete" || this.vector.completion === "not_run");
-    return {
+    const result: SourceIndexAcquisitionResult = {
       policy: "source-index-interleaved-prefix.v1", navigation_digest: this.navigationDigest,
       completion: complete ? "complete" : this.nominations.size === 0 && this.lexical.completion === "unavailable" &&
         this.vector.completion === "unavailable" ? "unavailable" : "partial",
@@ -271,6 +302,18 @@ class AcquisitionQuery {
         "native_deadline_and_interruption_require_daemon_integration", "caller_owned_read_snapshot_required",
         "lexical_corpus_coverage_untracked"]
     };
+    this.observe(() => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
+      lexical_completion: this.lexical.completion, vector_completion: this.vector.completion }));
+    return result;
+  }
+
+  private observe(capture: () => SourceIndexAcquisitionFact): void {
+    try { this.observer?.(capture); } catch { /* Observer failure cannot alter nomination, budget or output. */ }
+  }
+
+  private observeNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
+    disposition: Extract<SourceIndexAcquisitionFact, { kind: "nomination_attempt" }>["disposition"]): void {
+    this.observe(() => ({ kind: "nomination_attempt", channel, target: structuredClone(source.target), disposition }));
   }
 
   private prepareInput(): void {
@@ -367,7 +410,11 @@ class AcquisitionQuery {
       });
       this.vectorCandidates = ranked.map((candidate, index) => {
         this.meter.charge(1, 128, "source vector rank retention");
-        return { ...candidate, vector: { ...candidate.vector, rank: index + 1 } };
+        const rankedCandidate = { ...candidate, vector: { ...candidate.vector, rank: index + 1 } };
+        this.observe(() => ({ kind: "vector_ranked", target: structuredClone(rankedCandidate.source.target),
+          window: structuredClone(rankedCandidate.vector.window), cosine: rankedCandidate.vector.cosine,
+          rank: rankedCandidate.vector.rank }));
+        return rankedCandidate;
       });
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
@@ -391,6 +438,8 @@ class AcquisitionQuery {
     }
     const cosine = this.scoreVector!(candidate.embedding);
     if (!Number.isFinite(cosine)) return;
+    this.observe(() => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
+      window: structuredClone(candidate.window), cosine }));
     const key = sourceGoldRootIdentity(candidate.source.target);
     this.meter.charge(1 + key.length, 0, "source vector root lookup");
     const previous = best.get(key);
@@ -410,6 +459,7 @@ class AcquisitionQuery {
       const lexical = lexicalTurn ? this.lexicalCandidates[lexicalIndex++]! : null;
       const vector = lexicalTurn ? null : this.vectorCandidates[vectorIndex++]!;
       const source = lexical?.source ?? vector!.source;
+      const channel = lexicalTurn ? "lexical" as const : "vector" as const;
       this.stage = "nomination";
       this.meter.charge(1 + source.root_key.length, 0, "source nomination attempt");
       this.counts.attempted++;
@@ -422,23 +472,31 @@ class AcquisitionQuery {
           if (admission.status === "resource_limited") {
             this.counts.resource_refused++;
             this.resourceRefusals.push({ stage: "admission", phase: admission.phase });
+            this.observeNomination(channel, source, "resource_refused");
             this.limited = true; break;
           }
+          const disposition = admission.status === "stale" ? "stale" as const : "native_unknown" as const;
           if (admission.status === "stale") this.counts.stale++; else this.counts.native_unknown++;
+          this.observeNomination(channel, source, disposition);
           continue;
         }
         this.meter.charge(1 + (admission.scope_class?.length ?? 0), 0, "source scope admission");
         const scope = this.admitScope(admission.scope_class, source);
-        if (scope === "denied") { this.counts.rejected++; this.counts.scope_denied++; continue; }
+        if (scope === "denied") {
+          this.counts.rejected++; this.counts.scope_denied++;
+          this.observeNomination(channel, source, "scope_denied"); continue;
+        }
         if (scope !== "admitted") throw new CoreError("VALIDATION", "invalid source scope admission result");
         this.stage = "nomination";
-        this.retainNomination(source, lexical?.lexical ?? null, vector?.vector ?? null);
+        this.retainNomination(channel, source, lexical?.lexical ?? null, vector?.vector ?? null);
       } catch (error) {
         // A thrown admission leaves this attempt unsettled, not a native-unknown result.
         if (this.counts.attempted > this.counts.admitted + this.counts.duplicate + this.counts.rejected) {
           this.counts.rejected++;
         }
-        if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
+        const resource = error instanceof SourceSemanticResourceExhausted;
+        this.observeNomination(channel, source, resource ? "resource_refused" : "rejected");
+        if (!resource) throw error;
         this.counts.resource_refused++;
         this.resourceRefusals.push({ stage: this.stage, phase: error.phase });
         this.limited = true; break;
@@ -447,21 +505,24 @@ class AcquisitionQuery {
     if (lexicalIndex < this.lexicalCandidates.length || vectorIndex < this.vectorCandidates.length) this.limited = true;
   }
 
-  private retainNomination(source: SourceIndexTarget, lexical: SourceIndexLexicalRank | null,
-    vector: SourceIndexRootNomination["vector"]): void {
+  private retainNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
+    lexical: SourceIndexLexicalRank | null, vector: SourceIndexRootNomination["vector"]): void {
     const key = sourceGoldRootIdentity(source.target), previous = this.nominations.get(key);
     if (previous !== undefined) {
       this.meter.charge(1, lexical === null ? 0 : 8, "source nomination overlap");
       if (lexical !== null) previous.lexical.push(lexical);
       if (vector !== null) previous.vector = vector;
-      this.counts.duplicate++; return;
+      this.counts.duplicate++;
+      this.observeNomination(channel, source, "duplicate"); return;
     }
     if (this.nominations.size >= this.input.allowance.max_roots) {
-      this.counts.rejected++; this.counts.nomination_limit++; this.limited = true; return;
+      this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;
+      this.observeNomination(channel, source, "nomination_limit"); return;
     }
     this.meter.charge(1 + key.length, 192 + 4 * key.length, "source nomination retention");
     this.nominations.set(key, { source, lexical: lexical === null ? [] : [lexical], vector });
     this.counts.admitted++;
+    this.observeNomination(channel, source, "admitted");
   }
 
   private absorb(resources: SourceIndexQueryResources): void {

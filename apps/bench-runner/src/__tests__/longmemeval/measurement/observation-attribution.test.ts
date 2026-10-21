@@ -243,6 +243,28 @@ describe("observation attribution", () => {
     expect(partial.messages[0]?.read).toBe("unknown");
   });
 
+  it("consumes producer acquisition facts for native ranks and cap rejection without inventing remainder ranks", () => {
+    const goldTarget = target(unit());
+    const lexical = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original" as const, kind: "lexical_candidate", target: goldTarget, lane: "unicode61" as const,
+      rank: 4, lane_rank: 2, bm25: 1.5 } };
+    const attempt = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original" as const, kind: "nomination_attempt", channel: "lexical" as const, target: goldTarget,
+      disposition: "nomination_limit" } };
+    const ranked = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original" as const, kind: "vector_ranked", target: goldTarget, cosine: 0.4, rank: 9,
+      window: { window_id: DIGEST, content_digest: DIGEST, start_byte: 8, end_byte: 16 } } };
+    const routes = attributed({ frames: [captured([lexical, attempt, ranked])] }).messages[0]!.routes;
+    expect(routes.find(row => row.route === "index:original:lexical")).toMatchObject({
+      nomination: "failed", native: { lexical_ranks: [{ rank: 4, lane: "unicode61", lane_rank: 2, bm25: 1.5 }],
+        lexical_window: null } });
+    expect(routes.find(row => row.route === "index:original:vector")?.native?.vector).toMatchObject({
+      rank: 9, cosine: 0.4, window: { start_byte: 8, end_byte: 16 } });
+    const overflowed = attributed({ frames: [captured([lexical], call, facts(), { status: "overflow", dropped_events: 1 })] });
+    expect(overflowed.messages[0]?.routes.find(row => row.route === "index:original:lexical")).toMatchObject({
+      nomination: "unknown", native: { lexical_ranks: [{ rank: 4 }] } });
+  });
+
   it("conserves the exclusive question partition while opportunity bounds overlap independently", () => {
     const rows = [attributed({ visibility: visibility(gold(), "hit"), frames: [] }),
       attributed({ frozen_index: frozen(unit(), false) }), attributed(),

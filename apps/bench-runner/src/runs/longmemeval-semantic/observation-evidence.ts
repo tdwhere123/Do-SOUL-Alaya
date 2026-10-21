@@ -194,6 +194,13 @@ function messageDelivery(span: AnswerTurnSpan, score: ConsumerVisibilityScore,
 function indexRoutes(events: Events, span: AnswerTurnSpan, complete: boolean,
   qualification: ObservationIndexEligibility): MutableRoute[] {
   const observed = nativePhases(events);
+  const captures = events.flatMap(event => {
+    if (event.kind !== "source_index_acquisition") return [];
+    const data = recordOf(event.data);
+    const invocation = data?.invocation === "hint" ? "hint" as const
+      : data?.invocation === "original" ? "original" as const : null;
+    return invocation === null || data === null ? [] : [{ invocation, data, position: eventReference(event) }];
+  });
   const phases = (["original", "hint"] as const).flatMap<NativePhaseFact>(invocation => {
     const matching = observed.filter(row => row.invocation === invocation);
     return matching.length > 0 ? matching : [{ invocation, phase: null, position: null, invocation_position: 0 }];
@@ -201,28 +208,59 @@ function indexRoutes(events: Events, span: AnswerTurnSpan, complete: boolean,
   return phases.flatMap(({ invocation, phase, position, invocation_position }) => {
     const result = phase?.result;
     const nomination = result?.nominations.find(row => targetMatches(row.source.target, span.target));
+    const routeCaptures = captures.filter(row => row.invocation === invocation);
     return (["lexical", "vector"] as const).map(channel => {
       const fact = route(`index:${invocation}:${channel}`);
       const native = result?.[channel];
+      const matching = routeCaptures.filter(row => targetMatches(row.data.target, span.target));
+      const attempts = matching.filter(row => row.data.kind === "nomination_attempt" && row.data.channel === channel);
+      const dispositions = attempts.map(row => row.data.disposition);
       const nominated = channel === "lexical" ? (nomination?.lexical.length ?? 0) > 0 : nomination?.vector != null;
-      // Even complete native query schedules cover a bounded subset; missing rank is not nomination_limit.
-      fact.nomination = nominated ? "passed" : phase?.status === "not_run" || native?.completion === "not_run"
-        ? "not_run" : "unknown";
+      const admitted = nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
+      const rejected = dispositions.some(value => value === "nomination_limit" || value === "scope_denied"
+        || value === "stale" || value === "native_unknown" || value === "resource_refused" || value === "rejected");
+      // Attempt facts can fail a route without inventing nomination_limit for an unobserved remainder.
+      fact.nomination = admitted ? "passed" : rejected ? "failed"
+        : phase?.status === "not_run" || native?.completion === "not_run" ? "not_run" : "unknown";
       fact.eligibility = qualification[channel];
-      fact.event_references = position === null ? [] : [position];
+      const rankEvents = matching.filter(row => channel === "lexical" ? row.data.kind === "lexical_candidate"
+        : row.data.kind === "vector_ranked" || row.data.kind === "vector_inspected");
+      fact.event_references = [...(position === null ? [] : [position]),
+        ...attempts.map(row => row.position), ...rankEvents.map(row => row.position)];
+      const lexicalRanks = matching.flatMap(row => row.data.kind === "lexical_candidate" ? lexicalRankFrom(row.data) : []);
+      const vectorRank = matching.reduce<Nomination["vector"]>((found, row) => found ?? (row.data.kind === "vector_ranked"
+        ? vectorRankFrom(row.data) : null), null);
       fact.native = { invocation, channel, position, invocation_position, acquisition_status: phase?.status ?? null,
         completion: native?.completion ?? null, reason: native?.reason ?? phase?.reason
           ?? (phase === null ? "native_route_not_observed_or_invalid" : null),
-        navigation_digest: result?.navigation_digest ?? null, lexical_ranks: channel === "lexical" ? nomination?.lexical ?? null : null,
-        vector: channel === "vector" ? nomination?.vector ?? null : null, lexical_window: null,
+        navigation_digest: result?.navigation_digest ?? null,
+        lexical_ranks: channel === "lexical" ? (nomination?.lexical.length ? nomination.lexical
+          : lexicalRanks.length > 0 ? lexicalRanks : null) : null,
+        vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
         vector_state: channel === "vector" ? result?.vector.state ?? null : null,
         limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])] };
-      if (!nominated) fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable_not_individual_nomination_limit` });
+      const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
+      if (!admitted && !ranksAvailable) {
+        fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable_not_individual_nomination_limit` });
+      }
       if (qualification[channel] === "unknown") fact.unknowns.push({ stage: "eligibility", reason: qualification.reason });
       if (!complete) fact.unknowns.push({ stage: "nomination", reason: "observation_incomplete" });
       return fact;
     });
   });
+}
+function lexicalRankFrom(data: Record<string, unknown>): Nomination["lexical"] {
+  return data.lane !== "unicode61" && data.lane !== "trigram" || !nonnegative(data.rank) || !nonnegative(data.lane_rank)
+    || typeof data.bm25 !== "number" || !Number.isFinite(data.bm25) ? [] : [{ rank: data.rank, lane: data.lane,
+    lane_rank: data.lane_rank, bm25: data.bm25 }];
+}
+function vectorRankFrom(data: Record<string, unknown>): Nomination["vector"] {
+  const window = recordOf(data.window);
+  return !nonnegative(data.rank) || typeof data.cosine !== "number" || !Number.isFinite(data.cosine) || window === null
+    || typeof window.window_id !== "string" || !nonnegative(window.start_byte) || !nonnegative(window.end_byte)
+    || typeof window.content_digest !== "string" ? null : { rank: data.rank, cosine: data.cosine,
+    window: { window_id: window.window_id, start_byte: window.start_byte, end_byte: window.end_byte,
+      content_digest: window.content_digest } };
 }
 
 /** Returned extents are captured before retention/scoring may fail. Completion and policy-order

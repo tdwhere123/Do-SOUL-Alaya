@@ -45,9 +45,9 @@ export function acquireSourceSemanticIndex(input: Readonly<{
       max_vector_windows: Math.min(4096, budget.work_units) };
     const repository = new SqliteSourceIndexRepository(input.runtime.database, fieldContractSha256);
     const acquisition = new SourceIndexAcquisition(repository, fieldContractSha256);
-    const run = (route: Route, remaining: Allowance): SourceSemanticAcquisitionPhase =>
-      acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter);
-    phase = run(input, allowance);
+    const run = (route: Route, remaining: Allowance, invocation: "original" | "hint"): SourceSemanticAcquisitionPhase =>
+      acquireRoute(acquisition, input.workspace, input.authorized, route, remaining, meter, invocation);
+    phase = run(input, allowance, "original");
     const nominations = phase.result?.nominations.map(row => row.source) ?? [];
     const hint = input.supplemental;
     if (hint !== undefined && hint.navigation !== input.navigation) {
@@ -59,11 +59,11 @@ export function acquireSourceSemanticIndex(input: Readonly<{
         allowance: remaining, budget: meter.remaining() };
       // A true cap-zero skip must not look like a later union-reference failure.
       if (remaining.max_attempts === 0 || remaining.max_roots === 0) {
-        supplemental = run(hint, remaining);
+        supplemental = run(hint, remaining, "hint");
       } else {
         try {
           meter.charge(nominations.length, 64 + 16 * nominations.length, "source route union references");
-          supplemental = run(hint, remaining);
+          supplemental = run(hint, remaining, "hint");
         } catch (error) {
           if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
           supplemental = { ...supplemental, reason: error.phase, budget: meter.remaining() };
@@ -85,7 +85,7 @@ export function acquireSourceSemanticIndex(input: Readonly<{
 }
 
 function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, authorized: readonly string[] | null,
-  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget): SourceSemanticAcquisitionPhase {
+  route: Route, allowance: Allowance, meter: SourceSemanticReadBudget, invocation: "original" | "hint"): SourceSemanticAcquisitionPhase {
   let phase = { ...sourceSemanticAcquisitionNotRun("acquisition_envelope_allowance"), allowance, budget: meter.remaining() };
   if (allowance.max_attempts === 0 || allowance.max_roots === 0) return { ...phase, reason: "shared_nomination_allowance" };
   try {
@@ -101,10 +101,13 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
       (dimensions === 0 ? 0 : 1 + 3 * dimensions),
       2048 + 8 * allowance.max_roots + navigation.memory_bytes + vectorInput.memory_bytes +
       (dimensions === 0 ? 0 : 256 + 4 * dimensions), "source acquisition envelope and input capture");
+    const observer = meter.observer;
     const result = acquisition.nominate({ workspace_id: workspace, navigation_text: route.navigation,
       vector: route.vector, allowance, budget }, scope => {
         try { authorizeSemanticScope(scope, authorized); return "admitted"; }
         catch { return "denied"; }
+      }, undefined, observer === undefined ? undefined : capture => {
+        observer.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }));
       });
     meter.absorbIndex(result.resources);
     const failed = result.resource_refusals.some(row => row.phase === "acquisition_failed_unknown_additional_cost");

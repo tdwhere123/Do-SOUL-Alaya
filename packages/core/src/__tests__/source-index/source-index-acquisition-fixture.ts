@@ -56,10 +56,11 @@ export function queryInput(config = configuration(), changes: Partial<SourceInde
   }, ...changes };
 }
 
-export function query(environment: Fixture, input: SourceIndexAcquisitionInput, scope: SourceIndexScopeAdmission) {
+export function query(environment: Fixture, input: SourceIndexAcquisitionInput, scope: SourceIndexScopeAdmission,
+  observer?: Parameters<SourceIndexAcquisition["nominate"]>[3]) {
   // Caller-owned real SQLite snapshot; no daemon lease or deadline claim is made here.
   return environment.database.connection.transaction(() => new SourceIndexAcquisition(environment.index, fieldSha256)
-    .nominate(input, scope))();
+    .nominate(input, scope, undefined, observer))();
 }
 
 export function expectBounded(result: SourceIndexAcquisitionResult, input: SourceIndexAcquisitionInput) {
