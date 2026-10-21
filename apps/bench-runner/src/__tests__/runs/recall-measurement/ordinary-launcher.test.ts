@@ -221,6 +221,8 @@ it.each([
   { page: "later", defect: "malformed-envelope", status: "partial", count: 2 },
   { page: "first", defect: "malformed-output", status: "failed", count: 1 },
   { page: "later", defect: "malformed-output", status: "partial", count: 2 },
+  { page: "first", defect: "malformed-continuation", status: "failed", count: 1 },
+  { page: "later", defect: "malformed-continuation", status: "partial", count: 2 },
   { page: "first", defect: "non-ok-output", status: "failed", count: 1 },
   { page: "later", defect: "non-ok-output", status: "partial", count: 2 },
   { page: "first", defect: "public-error", status: "failed", count: 1 },
@@ -392,7 +394,7 @@ it("returns not-run without intervals when ordinary entry cannot express authori
 }, 120000);
 
 function corruptSoulRecallResult(
-  defect: "malformed-envelope" | "malformed-output" | "non-ok-output" | "public-error" | "missing-index-identity", result: unknown
+  defect: "malformed-envelope" | "malformed-output" | "malformed-continuation" | "non-ok-output" | "public-error" | "missing-index-identity", result: unknown
 ): unknown {
   if (defect === "non-ok-output") return { content: [], structuredContent: { ok: false } };
   if (defect === "public-error") return { content: [{ type: "text", text: "native rejection" }], isError: true };
@@ -407,12 +409,12 @@ function corruptSoulRecallResult(
     };
   }
   const clone = structuredClone(result) as {
-    structuredContent?: { output?: { index?: { interpretation_id?: unknown; as_of?: unknown } } };
+    structuredContent?: { output?: { index?: { interpretation_id?: unknown; as_of?: unknown; continuation?: unknown } } };
   };
   const index = clone.structuredContent?.output?.index;
-  if (index === undefined) throw new Error("native soul.recall result lacked an index to strip");
-  delete index.interpretation_id;
-  delete index.as_of;
+  if (index === undefined) throw new Error("native soul.recall result lacked an index to corrupt");
+  if (defect === "malformed-continuation") index.continuation = { cursor: "not-an-issued-continuation" };
+  else { delete index.interpretation_id; delete index.as_of; }
   return clone;
 }
 

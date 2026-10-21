@@ -199,6 +199,8 @@ async function recallPublicMembershipPage(
   session: FirstExposureSession, firstExposure: FirstExposurePage | null
 ): Promise<EntryPage> {
   const args = JSON.parse(JSON.stringify(request)) as Record<string, unknown>;
+  // Bind the actual JSON request, not optional own undefined keys absent from the invocation.
+  request = SoulMemorySearchRequestSchema.parse(args);
   let frame: BenchMcpToolCapture | undefined;
   try {
     await callMcpTool(daemon.mcpClient, "soul.recall", args, captured => { frame = captured; });
@@ -246,7 +248,8 @@ function admitCapturedPublicMembership(input: Readonly<{
   }
   return bindPublicExposure({
     ordinal: input.ordinal, request: input.request, frame: input.frame, envelope: envelope.data,
-    output: output.data, session: input.session, firstExposure: input.firstExposure
+    output: freezeOrdinaryArtifact(SoulMemorySearchResponseSchema, output.data),
+    session: input.session, firstExposure: input.firstExposure
   });
 }
 

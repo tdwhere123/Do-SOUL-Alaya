@@ -27,6 +27,20 @@ export const FirstExposurePageSchema = z.object({
   commitment: z.string().regex(/^[a-f0-9]{64}$/u)
 }).strict().readonly();
 export type FirstExposurePage = z.infer<typeof FirstExposurePageSchema>;
+const InitialExposureMaterialSchema = InitialExposure.unwrap().omit({ digest: true });
+const PageMaterialSchema = FirstExposurePageSchema.unwrap().omit({ commitment: true });
+
+/** Validate detached source material before JSON can hide invalid values, then bind its wire snapshot. */
+function captureExposureMaterial<T>(schema: z.ZodType<T>, value: unknown): T {
+  const captured: unknown = structuredClone(value);
+  schema.parse(captured);
+  const serialized: unknown = JSON.parse(JSON.stringify(captured));
+  const parsed = schema.parse(serialized);
+  if (stableCanonicalStringify(parsed) !== stableCanonicalStringify(serialized)) {
+    throw new Error("first-exposure material cannot be normalized during capture");
+  }
+  return parsed;
+}
 
 function exposureDigest(initial: Omit<z.infer<typeof InitialExposure>, "digest">): string {
   return createHash("sha256").update(stableCanonicalStringify(initial)).digest("hex");
@@ -76,26 +90,29 @@ export class FirstExposureSession {
     scoringSlots?: readonly z.infer<typeof ScoringSlot>[]): FirstExposurePage {
     const index = response.index;
     const purpose = index?.page_purpose ?? "membership";
-    let initial = continuation == null ? this.deliveries.get(response.delivery_id) : this.issued.get(stableCanonicalStringify(continuation));
-    if (initial === undefined && continuation == null && purpose === "membership" && index?.interpretation_id !== undefined && index.as_of !== undefined) {
-      const material = { session_id: randomUUID(), delivery_id: response.delivery_id,
+    const request = captureExposureMaterial(ContinuationSchema.nullable(), continuation ?? null);
+    const issued = captureExposureMaterial(ContinuationSchema.nullable(), index?.continuation ?? null);
+    let initial = request === null ? this.deliveries.get(response.delivery_id) : this.issued.get(stableCanonicalStringify(request));
+    if (initial === undefined && request === null && purpose === "membership" && index?.interpretation_id !== undefined && index.as_of !== undefined) {
+      const material = captureExposureMaterial(InitialExposureMaterialSchema, { session_id: randomUUID(), delivery_id: response.delivery_id,
         identity: { query_id: index.query_id, snapshot_id: index.snapshot_id,
           interpretation_id: index.interpretation_id, as_of: index.as_of }, slots: exposureSlots(response),
-        scoring_slots: scoringSlots ?? exposureSlots(response) };
+        scoring_slots: scoringSlots ?? exposureSlots(response) });
       initial = InitialExposure.parse({ ...material, digest: exposureDigest(material) });
     }
+    const page = captureExposureMaterial(PageMaterialSchema, { delivery_id: response.delivery_id, request_continuation: request,
+      page_purpose: purpose, initial: initial ?? null });
+    const receipt = FirstExposurePageSchema.parse({ ...page, commitment: pageCommitment(page) });
     if (initial !== undefined) {
       this.deliveries.set(response.delivery_id, initial);
       while (this.deliveries.size > 256) this.deliveries.delete(this.deliveries.keys().next().value!);
     }
-    if (initial !== undefined && index?.continuation != null) {
-      this.issued.set(stableCanonicalStringify(index.continuation), initial);
+    if (initial !== undefined && issued !== null) {
+      this.issued.set(stableCanonicalStringify(issued), initial);
       // Eviction makes old continuations unscorable instead of silently restarting a metric.
       while (this.issued.size > 256) this.issued.delete(this.issued.keys().next().value!);
     }
-    const page = { delivery_id: response.delivery_id, request_continuation: continuation ?? null,
-      page_purpose: purpose, initial: initial ?? null };
-    return { ...page, commitment: pageCommitment(page) };
+    return receipt;
   }
 }
 
