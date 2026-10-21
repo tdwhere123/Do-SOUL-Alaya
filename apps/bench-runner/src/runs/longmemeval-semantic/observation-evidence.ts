@@ -28,7 +28,8 @@ const nominationFields = acquisitionResult.shape.nominations.unwrap().element.un
 const lexicalRankSchema = nominationFields.lexical.unwrap().element;
 const vectorRankSchema = nominationFields.vector.unwrap();
 const resourceRefusalSchema = acquisitionResult.shape.resource_refusals.unwrap().element;
-type NativePhaseFact = Readonly<{ invocation: "original" | "hint"; phase: SourceSemanticAcquisitionPhase | SourceSemanticProfiledAcquisitionPhase | null;
+type NativePhaseFact = Readonly<{ family: "legacy" | "profiled"; invocation: "original" | "hint";
+  phase: SourceSemanticAcquisitionPhase | SourceSemanticProfiledAcquisitionPhase | null;
   retained?: readonly SourceSemanticNominationOccurrence[] | null; retained_issue?: boolean;
   position: EventReference | null; invocation_position: number }>;
 
@@ -44,7 +45,10 @@ export type ObservationNativeRoute = Readonly<{
   completion: string | null; reason: string | null; navigation_digest: string | null;
   /** Null means no valid captured rank, never valid-empty. Diagnostic issues distinguish corrupt
    * captures from missing evidence, independently of valid ranks supplied by another event or receipt. */
-  lexical_ranks: Nomination["lexical"] | null; vector: Nomination["vector"];
+  lexical_ranks: Nomination["lexical"] | null;
+  /** Compatibility summary of one available rank/window pair, not proof of nomination or all windows.
+   * Profiled occurrences retain native ranks even when window detail is omitted or unavailable. */
+  vector: Nomination["vector"];
   /** The native lexical nomination has no row/window byte bounds. */
   lexical_window: null;
   retained_occurrences: readonly SourceSemanticNominationOccurrence[] | null;
@@ -128,14 +132,14 @@ function nativePhases(events: Events): NativePhaseFact[] {
         ? SourceSemanticRetainedNominationWitnessSchema.safeParse(data.retained_occurrences) : undefined;
       const validRetained = parsed.success && retained?.success && sourceSemanticRetainedWitnessMatchesPhase(retained.data, parsed.data);
       return (["original", "hint"] as const).map((invocation, invocation_position): NativePhaseFact => ({
-        invocation, invocation_position, phase: parsed.success ? parsed.data : null, position: eventReference(event),
+        family: "profiled", invocation, invocation_position, phase: parsed.success ? parsed.data : null, position: eventReference(event),
         retained: validRetained ? retained.data : null, retained_issue: retained !== undefined && !validRetained
       }));
     }
     const parsed = SourceSemanticAcquisitionPhaseSchema.safeParse(data?.original);
     const original = parsed.success ? parsed.data : null;
-    return [{ invocation: "original" as const, phase: original, position: eventReference(event), invocation_position: 0 },
-      ...(original?.supplemental ?? []).map((phase, index) => ({ invocation: "hint" as const, phase,
+    return [{ family: "legacy" as const, invocation: "original" as const, phase: original, position: eventReference(event), invocation_position: 0 },
+      ...(original?.supplemental ?? []).map((phase, index) => ({ family: "legacy" as const, invocation: "hint" as const, phase,
         position: eventReference(event), invocation_position: index + 1 }))];
   });
 }
@@ -253,26 +257,30 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
   });
   const phases = (["original", "hint"] as const).flatMap<NativePhaseFact>(invocation => {
     const matching = observed.filter(row => row.invocation === invocation);
-    return matching.length > 0 ? matching : [{ invocation, phase: null, position: null, invocation_position: 0 }];
+    return matching.length > 0 ? matching : [{ family: "legacy", invocation, phase: null, position: null, invocation_position: 0 }];
   });
-  return phases.flatMap(({ invocation, phase, position, invocation_position, retained, retained_issue }) => {
+  return phases.flatMap(({ family, invocation, phase, position, invocation_position, retained, retained_issue }) => {
     const result = phase?.result;
     const prefix = result !== null && result !== undefined && "occurrence_prefix" in result ? result.occurrence_prefix : null;
-    const occurrences = retained ?? prefix;
-    const nomination = phaseNomination(phase, span, invocation);
-    const candidate = phase !== null && "declared_allowance" in phase;
+    const occurrences = (retained ?? prefix)?.filter(row => row.view === invocation && targetMatches(row.source.target, span.target)) ?? null;
+    const nomination = phaseNomination(phase, span, occurrences);
+    const candidate = family === "profiled";
     const routeCaptures = captures.filter(row => row.invocation === invocation);
     return (["lexical", "vector"] as const).map(channel => {
       const fact = route(`index:${invocation}:${channel}`);
-      const lane = candidate ? phase.result?.lanes.find(row => row.view === invocation && row.route === channel) : undefined;
+      const lane = phase !== null && "declared_allowance" in phase
+        ? phase.result?.lanes.find(row => row.view === invocation && row.route === channel) : undefined;
+      const routeOccurrences = occurrences?.filter(row => row.route.kind === channel) ?? null;
       const native = candidate && invocation === "hint" ? undefined : result?.[channel];
       const matching = routeCaptures.filter(row => targetMatches(row.data.target, span.target));
       const attempts = matching.filter(row => row.data.kind === "nomination_attempt" && row.data.channel === channel);
       const dispositions = attempts.map(row => row.data.disposition);
       const nominated = channel === "lexical" ? (nomination?.lexical.length ?? 0) > 0 : nomination?.vector != null;
-      // A duplicate retains this route's participation, not another distinct-root admission.
-      const nominatedOnRoute = nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
-      const rejected = dispositions.some(value => value === "nomination_limit" || value === "scope_denied"
+      // Profiled participation comes only from nativePhases' validated witness/prefix, independently
+      // of window availability. Optional attempt diagnostics cannot override that authority.
+      const nominatedOnRoute = candidate ? (routeOccurrences?.length ?? 0) > 0
+        : nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
+      const rejected = !candidate && dispositions.some(value => value === "nomination_limit" || value === "scope_denied"
         || value === "stale" || value === "native_unknown" || value === "resource_refused" || value === "rejected");
       // Attempt facts can fail a route without inventing nomination_limit for an unobserved remainder.
       fact.nomination = nominatedOnRoute ? "passed" : rejected ? "failed"
@@ -305,14 +313,15 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
           ?? (lane?.availability.status === "unavailable" ? lane.availability.reason : undefined) ?? phase?.reason
           ?? (phase === null ? "native_route_not_observed_or_invalid" : null),
         navigation_digest: result?.navigation_digest ?? null,
-        lexical_ranks: channel === "lexical" ? mergeLexicalRanks(lexicalRanks, receiptLexical) : null,
-        vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
-        retained_occurrences: occurrences?.filter(row => row.view === invocation && row.route.kind === channel && targetMatches(row.source.target, span.target)) ?? null,
+        lexical_ranks: channel === "lexical" ? mergeLexicalRanks(candidate ? [] : lexicalRanks, receiptLexical) : null,
+        vector: channel === "vector" ? nomination?.vector ?? (candidate ? null : vectorRank) : null, lexical_window: null,
+        retained_occurrences: routeOccurrences,
         occurrence_evidence: retained !== undefined && retained !== null ? "full_retained" : prefix !== null ? "displayed_prefix" : "unavailable",
         vector_state: channel === "vector" && (!candidate || invocation === "original") ? result?.vector.state ?? null : null,
         limitations: [...(result?.limitations ?? []), ...(channel === "lexical" && (!candidate || invocation === "original") ? result?.lexical.limitations ?? [] : [])],
         attempts: nominationAttempts(attempts, fact.diagnostic_issues) };
-      const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
+      const ranksAvailable = (routeOccurrences?.length ?? 0) > 0
+        || (channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null);
       if (!nominatedOnRoute && !ranksAvailable) {
         fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
       }
@@ -329,12 +338,12 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
     });
   });
 }
-function phaseNomination(phase: NativePhaseFact["phase"], span: AnswerTurnSpan, view: "original" | "hint"): Nomination | undefined {
+function phaseNomination(phase: NativePhaseFact["phase"], span: AnswerTurnSpan,
+  rows: readonly SourceSemanticNominationOccurrence[] | null): Nomination | undefined {
   const result = phase?.result;
   if (result === null || result === undefined) return undefined;
   if ("nominations" in result) return result.nominations.find(row => targetMatches(row.source.target, span.target));
-  const rows = result.occurrence_prefix.filter(row => row.view === view && targetMatches(row.source.target, span.target));
-  if (rows.length === 0) return undefined;
+  if (rows === null || rows.length === 0) return undefined;
   return { source: rows[0]!.source, lexical: rows.flatMap(row => row.route.kind === "lexical"
     ? [{ rank: row.route.native_rank, lane: row.route.lane, lane_rank: row.route.lane_rank, bm25: row.route.bm25 }] : []),
   vector: rows.flatMap(row => row.route.kind === "vector" && row.route.window?.status === "available"
