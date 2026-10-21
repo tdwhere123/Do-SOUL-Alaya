@@ -290,6 +290,33 @@ describe("observation attribution", () => {
     }
   });
 
+  it("marks omitted lexical candidate detail on the matching invocation without poisoning receipt ranks", () => {
+    const diagnostic = { status: "overflow" as const, compacted_events: 0, omitted_events: 1,
+      counts: { source_index_original_lexical_candidate: 3 },
+      omitted_counts: { source_index_original_lexical_candidate: 1 } };
+    const goldTarget = target(unit());
+    const lexical = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original" as const, kind: "lexical_candidate", target: goldTarget, lane: "unicode61" as const,
+      rank: 4, lane_rank: 2, bm25: 1.5 } };
+    const eventOnly = attributed({ frames: [captured([lexical], call, facts(), { diagnostics: diagnostic })] });
+    expect(eventOnly.observation).toMatchObject({ complete: false, progress_complete: true });
+    expect(eventOnly.layer).not.toBe("U");
+    expect(eventOnly.messages[0]?.routes.find(row => row.route === "index:original:lexical")).toMatchObject({
+      native: { lexical_ranks: [{ rank: 4, lane: "unicode61", lane_rank: 2, bm25: 1.5 }] },
+      unknowns: expect.arrayContaining([{ stage: "nomination", reason: "lexical_candidate_detail_unavailable" }]) });
+    expect(eventOnly.messages[0]?.routes.find(row => row.route === "index:hint:lexical")?.unknowns
+      .some(value => value.reason === "lexical_candidate_detail_unavailable")).toBe(false);
+    expect(eventOnly.messages[0]?.routes.find(row => row.route === "index:original:vector")?.unknowns
+      .some(value => value.reason === "lexical_candidate_detail_unavailable")).toBe(false);
+    const receipt = attributed({ frames: [captured([routeEvent, lexical], call, facts(), { diagnostics: diagnostic })] });
+    expect(receipt.messages[0]?.routes.find(row => row.route === "index:original:lexical")).toMatchObject({
+      nomination: "passed", native: { lexical_ranks: [{ rank: 2, lane_rank: 1, bm25: -3.5 }] } });
+    expect(receipt.messages[0]?.routes.find(row => row.route === "index:original:lexical")?.unknowns
+      .some(value => value.reason === "lexical_candidate_detail_unavailable")).toBe(false);
+    expect(attributed({ visibility: visibility(gold(), "hit"),
+      frames: [captured([routeEvent, lexical], call, facts(), { diagnostics: diagnostic })] }).layer).toBe("H");
+  });
+
   it("preserves a cap rejection when its rank diagnostic is unavailable", () => {
     const attempt = { kind: "source_index_acquisition", phase: "observation", data: {
       invocation: "original", kind: "nomination_attempt", channel: "vector", target: target(unit()),

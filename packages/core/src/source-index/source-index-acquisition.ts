@@ -6,9 +6,9 @@ import {
   unavailableSourceQueryPreparation,
   type FieldContractSha256, type SourceIndexAcquisitionInput, type SourceIndexAcquisitionResult,
   type SourceIndexLexicalCandidate, type SourceIndexLexicalRank, type SourceIndexNominationAccounting,
-  type SourceIndexQueryRepository, type SourceIndexQueryResources, type SourceIndexRootNomination,
-  type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding, type SourceIndexVectorCandidate,
-  type SourceIndexVectorCursor, type SourceSemanticWorkerRequest
+  type SourceIndexQueryAdmission, type SourceIndexQueryRepository, type SourceIndexQueryResources,
+  type SourceIndexRootNomination, type SourceIndexScopeAdmission, type SourceIndexTarget, type SourceIndexVectorBinding,
+  type SourceIndexVectorCandidate, type SourceIndexVectorCursor, type SourceSemanticWorkerRequest
 } from "@do-soul/alaya-protocol";
 import { createCosineBatchScorer, isFiniteNonzeroVector } from "../embedding-recall/helpers.js";
 import { CoreError } from "../shared/errors.js";
@@ -33,8 +33,11 @@ type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceS
 type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
+type NativeAdmissionFact = Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>,
+  "status" | "reason">;
+
 /** Core-owned acquisition facts. Not a public receipt, protocol schema or daemon type.
- * Rank on vector_ranked exists only after exact ordering of the captured subset.
+ * Rank on vector_ranked exists only after the whole finalized ranked set is retained.
  */
 export type SourceIndexAcquisitionFact = Readonly<{
   kind: "lexical_candidate"; target: SourceIndexTarget["target"];
@@ -49,6 +52,8 @@ export type SourceIndexAcquisitionFact = Readonly<{
   kind: "nomination_attempt"; channel: "lexical" | "vector"; target: SourceIndexTarget["target"];
   disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
     | "stale" | "native_unknown" | "resource_refused" | "rejected";
+  /** Opaque native admission union owns status/reason. Absent when the attempt never returned one. */
+  admission?: NativeAdmissionFact;
 }> | Readonly<{
   kind: "acquisition_complete"; completion: SourceIndexAcquisitionResult["completion"];
   accounting: SourceIndexNominationAccounting;
@@ -314,8 +319,10 @@ class AcquisitionQuery {
   }
 
   private observeNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
-    disposition: Extract<SourceIndexAcquisitionFact, { kind: "nomination_attempt" }>["disposition"]): void {
-    this.observe("nomination_attempt", () => ({ kind: "nomination_attempt", channel, target: structuredClone(source.target), disposition }));
+    disposition: Extract<SourceIndexAcquisitionFact, { kind: "nomination_attempt" }>["disposition"],
+    admission?: NativeAdmissionFact): void {
+    this.observe("nomination_attempt", () => ({ kind: "nomination_attempt", channel,
+      target: structuredClone(source.target), disposition, ...(admission === undefined ? {} : { admission }) }));
   }
 
   private prepareInput(): void {
@@ -410,14 +417,17 @@ class AcquisitionQuery {
         return right.vector.cosine - left.vector.cosine || compareKey(left.source.root_key, right.source.root_key) ||
           compareKey(left.vector.window.window_id, right.vector.window.window_id);
       });
-      this.vectorCandidates = ranked.map((candidate, index) => {
+      const retained = ranked.map((candidate, index) => {
         this.meter.charge(1, 128, "source vector rank retention");
-        const rankedCandidate = { ...candidate, vector: { ...candidate.vector, rank: index + 1 } };
+        return { ...candidate, vector: { ...candidate.vector, rank: index + 1 } };
+      });
+      // Publish only after the whole ranked set is retained. A later meter refusal discards this map.
+      this.vectorCandidates = retained;
+      for (const rankedCandidate of retained) {
         this.observe("vector_ranked", () => ({ kind: "vector_ranked", target: structuredClone(rankedCandidate.source.target),
           window: structuredClone(rankedCandidate.vector.window), cosine: rankedCandidate.vector.cosine,
           rank: rankedCandidate.vector.rank }));
-        return rankedCandidate;
-      });
+      }
     } catch (error) {
       if (!(error instanceof SourceSemanticResourceExhausted)) throw error;
       this.resourceRefusals.push({ stage: "vector", phase: error.phase });
@@ -477,9 +487,14 @@ class AcquisitionQuery {
             this.observeNomination(channel, source, "resource_refused");
             this.limited = true; break;
           }
-          const disposition = admission.status === "stale" ? "stale" as const : "native_unknown" as const;
-          if (admission.status === "stale") this.counts.stale++; else this.counts.native_unknown++;
-          this.observeNomination(channel, source, disposition);
+          const native = { status: admission.status, reason: admission.reason };
+          if (admission.status === "stale") {
+            this.counts.stale++;
+            this.observeNomination(channel, source, "stale", native);
+            continue;
+          }
+          this.counts.native_unknown++;
+          this.observeNomination(channel, source, "native_unknown", native);
           continue;
         }
         this.meter.charge(1 + (admission.scope_class?.length ?? 0), 0, "source scope admission");

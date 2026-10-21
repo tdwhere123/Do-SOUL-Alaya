@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import type { SourceIndexAcquisitionFact } from "../../source-index/source-index-acquisition.js";
 import { fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
@@ -103,5 +104,86 @@ describe("source index acquisition observation through native SQLite", () => {
       expect(admitted.target.root_id).toBe("mutated");
       expect(on.nominations[0]?.source.target.root_id).not.toBe("mutated");
     }
+  });
+
+  it("does not publish vector ranks when later rank retention refuses after at least one real meter charge", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const input = queryInput();
+    const charge = SourceSemanticResourceLedger.prototype.charge;
+    const spentAfterRetention: number[] = [];
+    const spy = vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(
+      function (this: SourceSemanticResourceLedger, work, bytes, phase) {
+        charge.call(this, work, bytes, phase);
+        if (phase === "source vector rank retention") spentAfterRetention.push(this.spentWork);
+      });
+    query(environment, input, admitScope);
+    spy.mockRestore();
+    expect(spentAfterRetention.length).toBeGreaterThanOrEqual(2);
+    const limitedInput = { ...input, budget: { ...input.budget, work_units: spentAfterRetention[0]! } };
+    const off = query(environment, limitedInput, admitScope);
+    const { facts, observer } = collect();
+    const on = query(environment, limitedInput, admitScope, observer);
+    expect(on).toEqual(off);
+    expect(on.resources).toEqual(off.resources);
+    expect(facts.filter(fact => fact.kind === "vector_ranked")).toEqual([]);
+    expect(on.vector.completion).toBe("partial");
+    expect(on.resource_refusals.some(row => row.stage === "vector" && row.phase === "source vector rank retention")).toBe(true);
+    expect(on.nominations.every(row => row.vector === null)).toBe(true);
+    expectBounded(on, limitedInput);
+    expectMetadataOnly(on, AXIS_ROOTS.map(root => root.body));
+  });
+
+  it("does not publish vector ranks when rank retention throws a non-resource error after the first charge", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const input = queryInput();
+    const charge = SourceSemanticResourceLedger.prototype.charge;
+    let retentions = 0;
+    vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(
+      function (this: SourceSemanticResourceLedger, work, bytes, phase) {
+        if (phase === "source vector rank retention" && ++retentions > 1) {
+          throw new Error("rank retention interrupted");
+        }
+        return charge.call(this, work, bytes, phase);
+      });
+    const off = query(environment, input, admitScope);
+    retentions = 0;
+    const { facts, observer } = collect();
+    const on = query(environment, input, admitScope, observer);
+    expect(on).toEqual(off);
+    expect(facts.filter(fact => fact.kind === "vector_ranked")).toEqual([]);
+    expect(on.resource_refusals).toEqual(expect.arrayContaining([
+      { stage: "vector", phase: "acquisition_failed_unknown_additional_cost" }]));
+    expect(on.nominations.every(row => row.vector === null)).toBe(true);
+    expectBounded(on, input);
+  });
+
+  it("preserves native partial and unbound admission reasons on attempt facts without collapsing receipts", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const input = queryInput();
+    const admit = environment.index.admitQueryCandidate.bind(environment.index);
+    vi.spyOn(environment.index, "admitQueryCandidate").mockImplementation((source, binding, budget) => {
+      if (binding !== null) {
+        return admit(source, { ...binding, generation_id: `sha256:${"00".repeat(32)}` }, budget);
+      }
+      const native = admit(source, binding, budget);
+      if (native.status !== "ready") return native;
+      return { status: "partial", reason: "native_source_unavailable", resources: native.resources };
+    });
+    const off = query(environment, input, admitScope);
+    const { facts, observer } = collect();
+    const on = query(environment, input, admitScope, observer);
+    expect(on).toEqual(off);
+    expect(on.accounting.native_unknown).toBeGreaterThan(0);
+    expect(on.accounting.stale).toBe(0);
+    const attempts = facts.filter(fact => fact.kind === "nomination_attempt");
+    expect(attempts.some(fact => fact.kind === "nomination_attempt" && fact.channel === "lexical"
+      && fact.disposition === "native_unknown" && fact.admission?.status === "partial"
+      && fact.admission.reason === "native_source_unavailable")).toBe(true);
+    expect(attempts.some(fact => fact.kind === "nomination_attempt" && fact.channel === "vector"
+      && fact.disposition === "native_unknown" && fact.admission?.status === "unbound")).toBe(true);
+    expectBounded(on, input);
   });
 });

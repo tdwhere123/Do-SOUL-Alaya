@@ -232,18 +232,23 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       const lexicalRanks = matching.flatMap(row => row.data.kind === "lexical_candidate" ? lexicalRankFrom(row.data) : []);
       const vectorRank = matching.reduce<Nomination["vector"]>((found, row) => found ?? (row.data.kind === "vector_ranked"
         ? vectorRankFrom(row.data) : null), null);
+      const receiptLexical = channel === "lexical" && (nomination?.lexical.length ?? 0) > 0 ? nomination!.lexical : null;
+      const omittedLexical = channel === "lexical" && joined.frames.some(row =>
+        (row.observation.diagnostics?.omitted_counts?.[`source_index_${invocation}_lexical_candidate`] ?? 0) > 0);
       fact.native = { invocation, channel, position, invocation_position, acquisition_status: phase?.status ?? null,
         completion: native?.completion ?? null, reason: native?.reason ?? phase?.reason
           ?? (phase === null ? "native_route_not_observed_or_invalid" : null),
         navigation_digest: result?.navigation_digest ?? null,
-        lexical_ranks: channel === "lexical" ? (nomination?.lexical.length ? nomination.lexical
-          : lexicalRanks.length > 0 ? lexicalRanks : null) : null,
+        lexical_ranks: channel === "lexical" ? receiptLexical ?? (lexicalRanks.length > 0 ? lexicalRanks : null) : null,
         vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
         vector_state: channel === "vector" ? result?.vector.state ?? null : null,
         limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])] };
       const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
       if (!retained && !ranksAvailable) {
         fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
+      }
+      if (omittedLexical && receiptLexical === null) {
+        fact.unknowns.push({ stage: "nomination", reason: "lexical_candidate_detail_unavailable" });
       }
       if (channel === "vector" && joined.frames.some(row =>
         (row.observation.diagnostics?.omitted_counts?.[`source_index_${invocation}_vector_inspected`] ?? 0) > 0)) {
