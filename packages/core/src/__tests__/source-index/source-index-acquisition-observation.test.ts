@@ -219,7 +219,9 @@ describe("source index acquisition observation through native SQLite", () => {
       && !("phase" in fact.admission))).toBe(true);
     expect(attempts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "resource_refused"
       && fact.admission?.status === "resource_limited" && fact.admission.reason === "read_budget"
-      && fact.admission.phase === "source currentness and erase guard")).toBe(true);
+      && fact.admission.phase === "source currentness and erase guard"
+      && fact.resource_refusal?.stage === "admission"
+      && fact.resource_refusal.phase === "source currentness and erase guard")).toBe(true);
     expect(on.resource_refusals).toEqual([{ stage: "admission", phase: "source currentness and erase guard" }]);
     expect(attempts.filter(fact => fact.kind === "nomination_attempt" && fact.admission !== undefined))
       .toHaveLength(attempts.filter(fact => fact.kind === "nomination_attempt"
@@ -240,7 +242,8 @@ describe("source index acquisition observation through native SQLite", () => {
     expect(thrownOn).toEqual(thrownOff);
     const thrownAttempts = thrown.facts.filter(fact => fact.kind === "nomination_attempt");
     expect(thrownAttempts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "resource_refused"
-      && fact.admission === undefined)).toBe(true);
+      && fact.admission === undefined && fact.resource_refusal?.stage === "admission"
+      && fact.resource_refusal.phase === "source currentness and erase guard")).toBe(true);
     expect(thrownAttempts.every(fact => fact.kind !== "nomination_attempt" || fact.admission === undefined)).toBe(true);
     vi.restoreAllMocks();
     const charge = SourceSemanticResourceLedger.prototype.charge;

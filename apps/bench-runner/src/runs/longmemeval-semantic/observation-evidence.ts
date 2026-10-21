@@ -16,6 +16,9 @@ type Events = readonly ObservationEvent[];
 type EventReference = Pick<ObservationEvent, "session_id" | "request_id" | "call_kind" | "event_position">;
 const VECTOR_INSPECTION_DETAIL_UNAVAILABLE = "vector_inspection_detail_unavailable";
 type Nomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
+type ResourceRefusal = NonNullable<SourceSemanticAcquisitionPhase["result"]>["resource_refusals"][number];
+const RESOURCE_REFUSAL_STAGES: readonly ResourceRefusal["stage"][] =
+  ["input", "lexical", "vector", "admission", "nomination"];
 type NativePhaseFact = Readonly<{ invocation: "original" | "hint"; phase: SourceSemanticAcquisitionPhase | null;
   position: EventReference | null; invocation_position: number }>;
 
@@ -39,6 +42,8 @@ export type ObservationNativeRoute = Readonly<{
     disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
       | "stale" | "native_unknown" | "resource_refused" | "rejected";
     admission: Readonly<{ status: string; reason: string; phase?: string }> | null;
+    /** Producer-owned refusal. Null when this attempt recorded none; not native admission. */
+    resource_refusal: ResourceRefusal | null;
     reference: EventReference;
     merge_target: SourceEvidenceTarget | null;
   }>[] | null;
@@ -251,7 +256,7 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
         completion: native?.completion ?? null, reason: native?.reason ?? phase?.reason
           ?? (phase === null ? "native_route_not_observed_or_invalid" : null),
         navigation_digest: result?.navigation_digest ?? null,
-        lexical_ranks: channel === "lexical" ? receiptLexical ?? (lexicalRanks.length > 0 ? lexicalRanks : null) : null,
+        lexical_ranks: channel === "lexical" ? mergeLexicalRanks(lexicalRanks, receiptLexical) : null,
         vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
         vector_state: channel === "vector" ? result?.vector.state ?? null : null,
         limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])],
@@ -260,7 +265,7 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       if (!retained && !ranksAvailable) {
         fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
       }
-      if (omittedLexical && receiptLexical === null) {
+      if (omittedLexical) {
         fact.unknowns.push({ stage: "nomination", reason: "lexical_candidate_detail_unavailable" });
       }
       if (channel === "vector" && joined.frames.some(row =>
@@ -289,10 +294,29 @@ function nominationAttempts(rows: readonly { data: Record<string, unknown>; posi
       ? { status, reason, ...(status === "resource_limited" && typeof admission.phase === "string"
         ? { phase: admission.phase } : {}) } : null;
     const parsed = SourceEvidenceTargetSchema.safeParse(row.data.merge_target);
-    facts.push({ disposition: value, admission: captured, reference: row.position,
-      merge_target: parsed.success ? parsed.data : null });
+    facts.push({ disposition: value, admission: captured, resource_refusal: resourceRefusalFrom(row.data),
+      reference: row.position, merge_target: parsed.success ? parsed.data : null });
   }
   return facts.length === 0 ? null : facts;
+}
+/** Event ranks and receipt ranks are independent observations. Dedup only identical facts. */
+function mergeLexicalRanks(events: Nomination["lexical"], receipt: Nomination["lexical"] | null):
+  Nomination["lexical"] | null {
+  const ranks: Nomination["lexical"][number][] = [];
+  const seen = new Set<string>();
+  for (const row of [...events, ...(receipt ?? [])]) {
+    const key = `${row.lane}:${row.rank}:${row.lane_rank}:${row.bm25}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ranks.push(row);
+  }
+  return ranks.length > 0 ? ranks : null;
+}
+function resourceRefusalFrom(data: Record<string, unknown>): ResourceRefusal | null {
+  const value = recordOf(data.resource_refusal), stage = value?.stage, phase = value?.phase;
+  return value !== null && typeof stage === "string" && typeof phase === "string"
+    && (RESOURCE_REFUSAL_STAGES as readonly string[]).includes(stage)
+    ? { stage: stage as ResourceRefusal["stage"], phase } : null;
 }
 function lexicalRankFrom(data: Record<string, unknown>): Nomination["lexical"] {
   return data.lane !== "unicode61" && data.lane !== "trigram" || !nonnegative(data.rank) || !nonnegative(data.lane_rank)
@@ -435,7 +459,13 @@ function finalizeRoute(value: MutableRoute): ObservationRouteFact {
   return { ...value, first_failure: earliestPosition(failures), first_unknown: earliestPosition(unknowns), unknowns };
 }
 function earliestPosition(positions: readonly ObservationStagePosition[]): ObservationStagePosition | null {
-  for (const stage of STAGES) { const found = positions.find(position => position.stage === stage); if (found !== undefined) return found; }
+  for (const stage of STAGES) {
+    const matching = positions.filter(position => position.stage === stage);
+    if (matching.length === 0) continue;
+    // Count-only inspection omission stays when it is the only unknown at this stage.
+    // Causal progress unknown and any other same-stage fact outrank it in the summary.
+    return matching.find(position => position.reason !== VECTOR_INSPECTION_DETAIL_UNAVAILABLE) ?? matching[0]!;
+  }
   return null;
 }
 function findAdmitted(map: ReadonlyMap<string, ObservationAdmittedRoot>, call: ObservationCallScope,

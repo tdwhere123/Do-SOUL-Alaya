@@ -5,9 +5,9 @@ const isolation = await vi.hoisted(async () => {
 });
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
-import { createSourceSemanticAccessPolicy, encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
+import { createSourceSemanticAccessPolicy, encodeSourceSemanticLibraryResponse, SourceIndexAcquisition } from "@do-soul/alaya-core";
 import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
-import { sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
+import { sourceSemanticExecutionPhases, SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import { attributeObservation } from "../../../../../bench-runner/src/runs/longmemeval-semantic/observation-attribution.js";
 import { scoreConsumerMessageVisibility } from "../../../../../bench-runner/src/runs/longmemeval-semantic/message-visibility.js";
 import { SourceSemanticReadBudget } from "../../../runtime/field/source-semantic-read-stores.js";
@@ -174,6 +174,129 @@ it("transports native stale and resource_limited admission through observer JSON
   });
 });
 
+it("keeps both SQLite unicode61 and trigram lexical facts after vector interleave consumes the attempt cap", async () => {
+  const navigation = "alpha 部署流水线";
+  const goldText = "alpha 部署流水线配置说明 Harbor opening was put off.";
+  const sources = [
+    { id: "gold-mixed", text: goldText, vector: [1, 0, 0] as const },
+    { id: "harbor-0", text: `${ORIGINAL} harbor 0`, vector: [1, 0, 0] as const },
+    { id: "harbor-1", text: `${ORIGINAL} harbor 1`, vector: [1, 0, 0] as const }
+  ];
+  const nominate = SourceIndexAcquisition.prototype.nominate;
+  vi.spyOn(SourceIndexAcquisition.prototype, "nominate").mockImplementation(function (
+    this: SourceIndexAcquisition, input, admitScope, control, observer) {
+    return nominate.call(this, { ...input, allowance: { ...input.allowance, max_attempts: 2, max_roots: 2 } },
+      admitScope, control, observer);
+  });
+  await withIndexedSources(sources, async fixture => {
+    const prepared = await fixture.prepareQuery({ navigation, signal: new AbortController().signal, remainingMs: () => 60_000 });
+    const observer = new SourceSemanticObserver(21, { max_events: 2048, max_bytes: 524288 });
+    const meter = new SourceSemanticReadBudget(QUERY_BUDGET, observer);
+    const metadataMeter = new SourceSemanticReadBudget(QUERY_BUDGET);
+    const policy = createSourceSemanticAccessPolicy(navigation, undefined, "query-conditioned-v1", metadataMeter);
+    const on = fixture.database.connection.transaction(() => acquireSourceSemanticIndex({
+      runtime: runtime(fixture), workspace: WS, navigation, authorized: ["project"], meter, metadataMeter,
+      vector: prepared.vector, canonicalBytes: Buffer.byteLength(goldText), sourceCost: policy.sourceCost
+    }))();
+    try {
+      const row = JSON.parse(JSON.stringify(observer.finish("success"))) as ReturnType<SourceSemanticObserver["finish"]>;
+      const source = fixture.targets.find(target => target.source_id === "gold-mixed")!;
+      const lexicalHits = events(row, "source_index_acquisition")
+        .map(event => event.data as Record<string, unknown>)
+        .filter(data => data.kind === "lexical_candidate"
+          && (data.target as { root_id?: string } | undefined)?.root_id === source.target.root_id);
+      expect(lexicalHits.map(data => data.lane).sort()).toEqual(["trigram", "unicode61"]);
+      expect(lexicalHits).toHaveLength(2);
+      const receipt = (events(row, "source_index_routes")[0]?.data as {
+        original?: { result?: { nominations?: readonly {
+          source: { target: { root_id: string } }; lexical: readonly Record<string, unknown>[] }[];
+          accounting?: { attempted: number } } } } | undefined)?.original?.result;
+      const receiptLexical = receipt?.nominations?.find(row => row.source.target.root_id === source.target.root_id)?.lexical ?? [];
+      expect(receipt?.accounting?.attempted).toBe(2);
+      expect(receiptLexical).toHaveLength(1);
+      const snapshot = digest("multi-lane-collector-json");
+      const call = { kind: "recall" as const, request_id: row.request_id, session_id: "session",
+        query_key: navigation, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
+      const { evidence_object_id: _evidence, kind: _kind, ...gold } = source.target;
+      const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
+        spans: [{ session_index: 0, message_index: 0, source_id: source.source_id, target: gold, start: 0, end: 5 }] };
+      const visibility = scoreConsumerMessageVisibility({ gold: answer, pages: [{ page: 1, status: "observed",
+        reason: null, occupied_slots: 0, complete: true, continuation: "none", intervals: [],
+        terminal_tail: { status: "unknown", reason: "native_access_or_computation_unresolved" } }] });
+      const attribution = attributeObservation({ question_id: "multi-lane-json", k: 5, call,
+        frames: [{ call, observation: row }], frozen_index: null, admitted_roots_complete: true,
+        admitted_roots: new Map([[gold.root_id, { record_id: gold.root_id, source_id: source.source_id,
+          snapshot_id: snapshot, identity: gold }]]), answer_gold: answer, visibility });
+      const projected = attribution.messages[0]!.routes.find(route => route.route === "index:original:lexical")
+        ?.native?.lexical_ranks ?? [];
+      const keyOf = (value: { rank?: unknown; lane?: unknown; lane_rank?: unknown; bm25?: unknown }) =>
+        `${String(value.lane)}:${String(value.rank)}:${String(value.lane_rank)}:${String(value.bm25)}`;
+      expect(new Set(projected.map(value => keyOf(value)))).toEqual(new Set([
+        ...lexicalHits, ...receiptLexical].map(value => keyOf(value))));
+      expect(attribution.messages[0]!.routes.find(route => route.route === "index:original:lexical")
+        ?.nomination).not.toBe("failed");
+    } finally { on.releaseCanonical(); }
+  });
+});
+
+it("preserves a thrown resource-exhaustion phase on the collector JSON route attempt without inventing native admission", async () => {
+  const sources = [
+    { id: "harbor-0", text: `${ORIGINAL} harbor 0`, vector: [1, 0, 0] as const },
+    { id: "harbor-1", text: `${ORIGINAL} harbor 1`, vector: [1, 0, 0] as const }
+  ];
+  const phase = "source nomination retention";
+  const charge = SourceSemanticResourceLedger.prototype.charge;
+  vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(
+    function (this: SourceSemanticResourceLedger, work, bytes, reason) {
+      if (reason === phase) throw new SourceSemanticResourceExhausted(phase);
+      return charge.call(this, work, bytes, reason);
+    });
+  await withIndexedSources(sources, async fixture => {
+    const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal,
+      remainingMs: () => 60_000 });
+    const observer = new SourceSemanticObserver(22, { max_events: 512, max_bytes: 262144 });
+    const on = acquire(fixture, prepared, observer);
+    try {
+      const row = JSON.parse(JSON.stringify(observer.finish("success"))) as ReturnType<SourceSemanticObserver["finish"]>;
+      const captured = events(row, "source_index_acquisition")
+        .map(event => event.data as Record<string, unknown>)
+        .filter(data => data.kind === "nomination_attempt");
+      expect(captured.some(data => data.disposition === "resource_refused" && data.admission == null
+        && (data.resource_refusal as { stage?: unknown; phase?: unknown } | undefined)?.stage === "nomination"
+        && (data.resource_refusal as { phase?: unknown }).phase === phase)).toBe(true);
+      expect(captured.every(data => data.admission == null)).toBe(true);
+      const refusals = (events(row, "source_index_routes")[0]?.data as {
+        original?: { result?: { resource_refusals?: readonly { stage: string; phase: string }[] } }
+      } | undefined)?.original?.result?.resource_refusals ?? [];
+      expect(refusals).toEqual(expect.arrayContaining([expect.objectContaining({ stage: "nomination", phase })]));
+      const refusedEvent = captured.find(data => data.disposition === "resource_refused")!;
+      const identity = refusedEvent.target as typeof fixture.targets[number]["target"];
+      const source = fixture.targets.find(target => target.target.root_id === identity.root_id)!;
+      const snapshot = digest("thrown-refusal-collector-json");
+      const call = { kind: "recall" as const, request_id: row.request_id, session_id: "session",
+        query_key: ORIGINAL, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
+      const { evidence_object_id: _evidence, kind: _kind, ...gold } = source.target;
+      const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
+        spans: [{ session_index: 0, message_index: 0, source_id: source.source_id, target: gold, start: 0, end: 4 }] };
+      const visibility = scoreConsumerMessageVisibility({ gold: answer, pages: [{ page: 1, status: "observed",
+        reason: null, occupied_slots: 0, complete: true, continuation: "none", intervals: [],
+        terminal_tail: { status: "unknown", reason: "native_access_or_computation_unresolved" } }] });
+      const attribution = attributeObservation({ question_id: "thrown-refusal-json", k: 5, call,
+        frames: [{ call, observation: row }], frozen_index: null, admitted_roots_complete: true,
+        admitted_roots: new Map([[gold.root_id, { record_id: gold.root_id, source_id: source.source_id,
+          snapshot_id: snapshot, identity: gold }]]), answer_gold: answer, visibility });
+      const refused = attribution.messages[0]!.routes.flatMap(route => route.native?.attempts ?? [])
+        .filter(attempt => attempt.disposition === "resource_refused");
+      expect(refused.length).toBeGreaterThan(0);
+      for (const attempt of refused) {
+        expect(attempt.admission).toBeNull();
+        expect(attempt.admission?.status === "resource_limited").toBe(false);
+        expect(attempt.resource_refusal).toEqual({ stage: "nomination", phase });
+      }
+    } finally { on.releaseCanonical(); }
+  });
+});
+
 it("keeps SQLite/worker delivery and debit parity with acquisition observation off, on and overflowed", async () => {
   const sources = Array.from({ length: 18 }, (_, index) => ({
     id: `harbor-${index}`, text: `${ORIGINAL} harbor ${index}`, vector: [1, 0, 0] as const
@@ -249,6 +372,8 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
     expect(captured.filter(event => (event.data as { kind: string }).kind === "vector_inspected")).toEqual([]);
     expect(captured.filter(event => (event.data as { kind: string }).kind === "vector_ranked")).toHaveLength(18);
     expect(captured.filter(event => (event.data as { kind: string }).kind === "nomination_attempt")).toHaveLength(36);
+    expect(captured.filter(event => (event.data as { kind: string }).kind === "lexical_candidate").length).toBeGreaterThan(0);
+    expect(row.diagnostics?.omitted_counts?.source_index_original_lexical_candidate ?? 0).toBe(0);
     for (const kind of ["source_index_routes", "source_read", "frozen_membership", "encoded_membership"]) {
       expect(events(row, kind).length, kind).toBeGreaterThan(0);
     }

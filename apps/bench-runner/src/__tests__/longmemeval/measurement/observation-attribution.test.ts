@@ -278,8 +278,12 @@ describe("observation attribution", () => {
     const routes = result.messages[0]!.routes;
     expect(routes.find(row => row.route === "index:original:vector")).toMatchObject({ nomination: "passed",
       native: { vector: { rank: 3 } }, unknowns: [{ stage: "nomination", reason: "vector_inspection_detail_unavailable" }] });
+    expect(routes.find(row => row.route === "index:original:vector")?.first_unknown)
+      .toEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
     expect(result.messages[0]?.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable")).toBe(false);
     expect(result.messages[0]?.first_unknown?.reason).not.toBe("vector_inspection_detail_unavailable");
+    expect(result.messages[0]?.unknowns.some(unknown => unknown.reason === "observation_incomplete"
+      || unknown.reason === "causal_observation_incomplete")).toBe(false);
     expect(routes.find(row => row.route === "index:hint:vector")?.unknowns).toEqual([]);
     expect(routes.find(row => row.route === "index:original:lexical")?.unknowns).toEqual([]);
     expect(routes.find(row => row.route === "read:observation")?.unknowns).toEqual([]);
@@ -291,7 +295,17 @@ describe("observation attribution", () => {
       expect(incomplete.messages[0]?.read).toBe("unknown");
       expect(incomplete.messages[0]?.unknowns.some(unknown => unknown.reason === "observation_incomplete"
         || unknown.reason === "causal_observation_incomplete")).toBe(true);
-      expect(incomplete.messages[0]?.first_unknown).not.toBeNull();
+      expect(incomplete.messages[0]?.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable")).toBe(false);
+      expect(incomplete.messages[0]?.first_unknown?.reason === "observation_incomplete"
+        || incomplete.messages[0]?.first_unknown?.reason === "causal_observation_incomplete").toBe(true);
+      expect(incomplete.messages[0]?.first_unknown?.reason).not.toBe("vector_inspection_detail_unavailable");
+      const incompleteVector = incomplete.messages[0]?.routes.find(row => row.route === "index:original:vector");
+      expect(incompleteVector?.unknowns).toContainEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
+      expect(incompleteVector?.unknowns.some(unknown => unknown.reason === "observation_incomplete"
+        || unknown.reason === "causal_observation_incomplete")).toBe(true);
+      expect(incompleteVector?.first_unknown?.reason === "observation_incomplete"
+        || incompleteVector?.first_unknown?.reason === "causal_observation_incomplete").toBe(true);
+      expect(incompleteVector?.first_unknown?.reason).not.toBe("vector_inspection_detail_unavailable");
     }
     const whole = attributed({ frames: [captured([routeEvent, returned(0, 30)], call, facts(call, { pool: pool([unit()]) }),
       { diagnostics: diagnostic })] });
@@ -300,7 +314,11 @@ describe("observation attribution", () => {
       first_failure: { stage: "delivery" } });
     expect(whole.messages[0]?.routes.find(row => row.route === "index:original:vector")?.unknowns)
       .toContainEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
+    expect(whole.messages[0]?.routes.find(row => row.route === "index:original:vector")?.first_unknown)
+      .toEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
     expect(whole.messages[0]?.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable")).toBe(false);
+    expect(whole.messages[0]?.unknowns.some(unknown => unknown.reason === "observation_incomplete"
+      || unknown.reason === "causal_observation_incomplete")).toBe(false);
     expect(whole.messages[0]?.first_unknown).toBeNull();
   });
 
@@ -323,10 +341,13 @@ describe("observation attribution", () => {
     expect(eventOnly.messages[0]?.routes.find(row => row.route === "index:original:vector")?.unknowns
       .some(value => value.reason === "lexical_candidate_detail_unavailable")).toBe(false);
     const receipt = attributed({ frames: [captured([routeEvent, lexical], call, facts(), { diagnostics: diagnostic })] });
-    expect(receipt.messages[0]?.routes.find(row => row.route === "index:original:lexical")).toMatchObject({
-      nomination: "passed", native: { lexical_ranks: [{ rank: 2, lane_rank: 1, bm25: -3.5 }] } });
-    expect(receipt.messages[0]?.routes.find(row => row.route === "index:original:lexical")?.unknowns
-      .some(value => value.reason === "lexical_candidate_detail_unavailable")).toBe(false);
+    const receiptLexical = receipt.messages[0]?.routes.find(row => row.route === "index:original:lexical");
+    expect(receiptLexical?.nomination).toBe("passed");
+    expect(receiptLexical?.native?.lexical_ranks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rank: 4, lane: "unicode61", lane_rank: 2, bm25: 1.5 }),
+      expect.objectContaining({ rank: 2, lane: "unicode61", lane_rank: 1, bm25: -3.5 })]));
+    expect(receiptLexical?.native?.lexical_ranks).toHaveLength(2);
+    expect(receiptLexical?.unknowns.some(value => value.reason === "lexical_candidate_detail_unavailable")).toBe(true);
     expect(attributed({ visibility: visibility(gold(), "hit"),
       frames: [captured([routeEvent, lexical], call, facts(), { diagnostics: diagnostic })] }).layer).toBe("H");
   });

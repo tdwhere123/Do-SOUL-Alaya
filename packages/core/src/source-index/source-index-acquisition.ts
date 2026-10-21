@@ -57,6 +57,9 @@ export type SourceIndexAcquisitionFact = Readonly<{
   admission?: NativeAdmissionFact;
   /** Previous retained gold-root target when this attempt merged as a duplicate. Absent otherwise. */
   merge_target?: SourceIndexTarget["target"];
+  /** Producer-owned refusal recorded for this attempt. Absent when none was recorded.
+   * Reuses result resource_refusals semantics; not a native admission. */
+  resource_refusal?: QueryResourceRefusal;
 }> | Readonly<{
   kind: "acquisition_complete"; completion: SourceIndexAcquisitionResult["completion"];
   accounting: SourceIndexNominationAccounting;
@@ -323,11 +326,13 @@ class AcquisitionQuery {
 
   private observeNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
     disposition: Extract<SourceIndexAcquisitionFact, { kind: "nomination_attempt" }>["disposition"],
-    admission?: NativeAdmissionFact, mergeTarget?: SourceIndexTarget["target"]): void {
+    admission?: NativeAdmissionFact, mergeTarget?: SourceIndexTarget["target"],
+    resourceRefusal?: QueryResourceRefusal): void {
     this.observe("nomination_attempt", () => ({ kind: "nomination_attempt", channel,
       target: structuredClone(source.target), disposition,
       ...(admission === undefined ? {} : { admission }),
-      ...(mergeTarget === undefined ? {} : { merge_target: structuredClone(mergeTarget) }) }));
+      ...(mergeTarget === undefined ? {} : { merge_target: structuredClone(mergeTarget) }),
+      ...(resourceRefusal === undefined ? {} : { resource_refusal: { ...resourceRefusal } }) }));
   }
 
   private prepareInput(): void {
@@ -488,9 +493,10 @@ class AcquisitionQuery {
           this.counts.rejected++;
           if (admission.status === "resource_limited") {
             this.counts.resource_refused++;
-            this.resourceRefusals.push({ stage: "admission", phase: admission.phase });
+            const refusal: QueryResourceRefusal = { stage: "admission", phase: admission.phase };
+            this.resourceRefusals.push(refusal);
             this.observeNomination(channel, source, "resource_refused",
-              { status: admission.status, reason: admission.reason, phase: admission.phase });
+              { status: admission.status, reason: admission.reason, phase: admission.phase }, undefined, refusal);
             this.limited = true; break;
           }
           const native = { status: admission.status, reason: admission.reason };
@@ -518,10 +524,14 @@ class AcquisitionQuery {
           this.counts.rejected++;
         }
         const resource = error instanceof SourceSemanticResourceExhausted;
-        this.observeNomination(channel, source, resource ? "resource_refused" : "rejected");
-        if (!resource) throw error;
+        if (!resource) {
+          this.observeNomination(channel, source, "rejected");
+          throw error;
+        }
+        const refusal: QueryResourceRefusal = { stage: this.stage, phase: error.phase };
+        this.observeNomination(channel, source, "resource_refused", undefined, undefined, refusal);
         this.counts.resource_refused++;
-        this.resourceRefusals.push({ stage: this.stage, phase: error.phase });
+        this.resourceRefusals.push(refusal);
         this.limited = true; break;
       }
     }
