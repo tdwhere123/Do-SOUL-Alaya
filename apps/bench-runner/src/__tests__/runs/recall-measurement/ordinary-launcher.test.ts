@@ -16,8 +16,10 @@ import {
   OrdinaryRecallEntryInputSchema, ORDINARY_RECALL_OBSERVED_SLOT_TARGET, ORDINARY_RECALL_PUBLIC_PAGE_SLOTS,
   buildOrdinaryRecallRequest, mapOrdinaryRecallScope
 } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
-import { executeOrdinaryRecallEntry, ordinaryEntryVisibilityPages } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
-import { scoreConsumerMessageVisibility } from "../../../runs/longmemeval-semantic/message-visibility.js";
+import {
+  admitOrdinaryEntryCursor, executeOrdinaryRecallEntry, ordinaryEntryStatusReason,
+  type OrdinaryEntryCursorSeen
+} from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
 import { nativeRecallFixture, HIDDEN_GOLD, QUESTION } from "./native-recall.test-support.js";
 
 const PROJECTS = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory"] as const;
@@ -50,6 +52,82 @@ it("refuses denied and multi-scope authorization instead of silently broadening"
     config: {}, root: "/tmp/ordinary-entry", queries: [{ query_key: "a".repeat(64), original_query: QUESTION }],
     gold: [{ query_key: "a".repeat(64) }]
   }).success).toBe(false);
+});
+
+it("derives partial and failure reasons from the actual stop and last response", () => {
+  const observed = { observation: "observed" as const, response_state: "success" as const, reason: null };
+  const errorPage = {
+    observation: "unobserved" as const, response_state: "public_error" as const,
+    reason: "ordinary public soul.recall returned an error envelope"
+  };
+  const transport = {
+    observation: "unobserved" as const, response_state: "transport_error" as const,
+    reason: "ordinary public soul.recall transport did not yield an envelope"
+  };
+  const missing = {
+    observation: "unobserved" as const, response_state: "success" as const,
+    reason: "ordinary public soul.recall did not supply required first-exposure or source-interval evidence"
+  };
+  expect(ordinaryEntryStatusReason("partial", "no_issued_continuation", observed))
+    .toBe("ordinary public membership issued no continuation before ten occupied slots");
+  expect(ordinaryEntryStatusReason("partial", "membership_page_bound", observed))
+    .toBe("ordinary public membership reached the page bound before ten occupied slots");
+  expect(ordinaryEntryStatusReason("partial", "terminal_index", observed))
+    .toBe("ordinary public membership stopped at a terminal index before ten occupied slots");
+  expect(ordinaryEntryStatusReason("partial", "failed", errorPage)).toBe(errorPage.reason);
+  expect(ordinaryEntryStatusReason("partial", "unavailable", transport)).toBe(transport.reason);
+  expect(ordinaryEntryStatusReason("partial", "unavailable", missing)).toBe(missing.reason);
+  expect(ordinaryEntryStatusReason("failed", "failed", errorPage))
+    .toBe("ordinary public soul.recall returned an error envelope");
+  expect(ordinaryEntryStatusReason("unavailable", "unavailable", transport))
+    .toBe("ordinary public soul.recall transport did not yield an envelope");
+  expect(ordinaryEntryStatusReason("complete", "occupancy_tail_exhausted", observed))
+    .toBe("ordinary public occupancy tail exhausted");
+  expect(ordinaryEntryStatusReason("complete", "observed_ten_slot_prefix", observed))
+    .toBe("ordinary public membership window captured");
+  for (const cause of ["no_issued_continuation", "membership_page_bound", "terminal_index", "failed", "unavailable"] as const) {
+    const last = cause === "failed" ? errorPage : cause === "unavailable" ? transport : observed;
+    expect(ordinaryEntryStatusReason("partial", cause, last)).not.toMatch(/continuation was issued/iu);
+  }
+});
+
+it("fails closed on repeated cursors and does not treat replayed positions as fresh", () => {
+  const seen = (): OrdinaryEntryCursorSeen => ({ deliveries: new Set(), continuations: new Set(), positions: new Set() });
+  const first = seen();
+  expect(admitOrdinaryEntryCursor(first, {
+    delivery_id: "d1", request_continuation: null, issued_continuation: { token: "c1" }, positions: ["p1", "p2"]
+  })).toBeNull();
+  expect(first.positions.size).toBe(2);
+  expect(admitOrdinaryEntryCursor(first, {
+    delivery_id: "d1", request_continuation: { token: "c1" }, issued_continuation: { token: "c2" }, positions: ["p3"]
+  })).toBe("ordinary public membership repeated a delivery identity");
+  expect(first.positions.has("p3")).toBe(false);
+  const issued = seen();
+  expect(admitOrdinaryEntryCursor(issued, {
+    delivery_id: "d1", request_continuation: null, issued_continuation: { token: "c1" }, positions: ["p1"]
+  })).toBeNull();
+  expect(admitOrdinaryEntryCursor(issued, {
+    delivery_id: "d2", request_continuation: { token: "c1" }, issued_continuation: { token: "c1" }, positions: ["p2"]
+  })).toBe("ordinary public membership repeated an issued continuation");
+  expect(issued.positions.has("p2")).toBe(false);
+  const positions = seen();
+  expect(admitOrdinaryEntryCursor(positions, {
+    delivery_id: "d1", request_continuation: null, issued_continuation: { token: "c1" }, positions: ["p1"]
+  })).toBeNull();
+  expect(admitOrdinaryEntryCursor(positions, {
+    delivery_id: "d2", request_continuation: { token: "c1" }, issued_continuation: { token: "c2" }, positions: ["p1"]
+  })).toBe("ordinary public membership repeated a delivery position");
+  expect(admitOrdinaryEntryCursor(seen(), {
+    delivery_id: "d1", request_continuation: { token: "c1" }, issued_continuation: { token: "c2" }, positions: ["p1"]
+  })).toBe("ordinary public membership used a continuation that was not issued");
+  const fresh = seen();
+  expect(admitOrdinaryEntryCursor(fresh, {
+    delivery_id: "d1", request_continuation: null, issued_continuation: { token: "c1" }, positions: ["p1"]
+  })).toBeNull();
+  expect(admitOrdinaryEntryCursor(fresh, {
+    delivery_id: "d2", request_continuation: { token: "c1" }, issued_continuation: { token: "c2" }, positions: ["p2"]
+  })).toBeNull();
+  expect(fresh.positions.size).toBe(2);
 });
 
 it("executes public soul.recall through MCP against the restored SQLite snapshot", async () => {
@@ -131,20 +209,16 @@ it("captures an actual continuation page without replacing first exposure", asyn
   if (row.stop_cause === "occupancy_tail_exhausted") {
     expect(row.pages.at(-1)?.terminal_tail.status).toBe("exhausted");
     expect(row.pages.at(-1)?.continuation).toBe("none");
-  }
-  const score = scoreConsumerMessageVisibility({ gold: undefined, pages: ordinaryEntryVisibilityPages(row) });
-  expect(score.any_at_10.reason).not.toBe("second_page_not_observed");
-  expect(score.observation.observed_through).toBe(occupied);
-  if (row.stop_cause === "occupancy_tail_exhausted") {
-    expect(score.any_at_10).toEqual({ status: "unknown", reason: "answer_turn_mapping_incomplete" });
   } else {
     expect(occupied).toBeGreaterThanOrEqual(ORDINARY_RECALL_OBSERVED_SLOT_TARGET);
   }
+  expect(row.reason ?? "").not.toMatch(/continuation was issued/iu);
 }, 120000);
 
 it("follows public continuation past two pages until ten slots or admitted tail exhaustion", async () => {
-  const names = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory", "Ironwood", "Juniper", "Kauri", "Larch"];
-  const large = await nativeRecallFixture(names.map(name => `Project ${name} was mentioned. ${"Encoding padding. ".repeat(320)}`));
+  const names = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory",
+    "Ironwood", "Juniper", "Kauri", "Larch", "Maple", "Nance", "Oak", "Pine"];
+  const large = await nativeRecallFixture(names.map(name => `Project ${name} was mentioned. ${"Encoding padding. ".repeat(400)}`));
   try {
     const plan = large.admitted.plan, query = plan.queries[0]!;
     const execution = await executeOrdinaryRecallEntry({
@@ -154,12 +228,11 @@ it("follows public continuation past two pages until ten slots or admitted tail 
     const row = execution.rows[0]!;
     expect(row.status).toBe("complete");
     expect(row.page_count).toBe(row.pages.length);
+    expect(row.pages.length).toBeGreaterThan(2);
     expect(["observed_ten_slot_prefix", "occupancy_tail_exhausted"]).toContain(row.stop_cause);
     const occupied = row.pages.reduce((sum, page) => sum + page.occupied_slots, 0);
     const firstTwo = row.pages.slice(0, 2).reduce((sum, page) => sum + page.occupied_slots, 0);
-    if (firstTwo < ORDINARY_RECALL_OBSERVED_SLOT_TARGET && row.stop_cause !== "failed") {
-      expect(row.pages.length).toBeGreaterThan(2);
-    }
+    expect(firstTwo).toBeLessThan(ORDINARY_RECALL_OBSERVED_SLOT_TARGET);
     if (row.stop_cause === "observed_ten_slot_prefix") {
       expect(occupied).toBeGreaterThanOrEqual(ORDINARY_RECALL_OBSERVED_SLOT_TARGET);
     } else {
@@ -169,9 +242,9 @@ it("follows public continuation past two pages until ten slots or admitted tail 
     expect(row.costs.work_units.status).toBe("unavailable");
     expect(row.costs.read_bytes.status).toBe("unavailable");
     expect(row.costs.latency_ms.status).toBe("available");
-    const score = scoreConsumerMessageVisibility({ gold: undefined, pages: ordinaryEntryVisibilityPages(row) });
-    expect(score.any_at_10.reason).not.toBe("second_page_not_observed");
-    expect(score.observation.observed_through).toBe(occupied);
+    expect(row.costs.work_units).not.toHaveProperty("value");
+    expect(row.costs.read_bytes).not.toHaveProperty("value");
+    expect(row.reason ?? "").not.toMatch(/continuation was issued/iu);
     expect(JSON.stringify(execution)).not.toContain(HIDDEN_GOLD);
   } finally {
     rmSync(large.root, { recursive: true, force: true });
