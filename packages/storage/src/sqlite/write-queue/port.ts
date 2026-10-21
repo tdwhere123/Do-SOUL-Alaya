@@ -9,6 +9,8 @@
  * invariant: LRU eviction must not close a database while blocksEviction(filename).
  */
 
+import { createQueueLifecycleObservation, queueLifecycleObservation, type QueueLifecycleObservation } from "./lifecycle-observation.js";
+
 export type SqliteWriteJobKind = "event_log_transaction" | "ontology_write" | "maintenance";
 
 export interface SqliteWriteStatement {
@@ -63,6 +65,7 @@ function createFilenamePendingTracker(): FilenamePendingTracker {
 }
 
 interface SerialQueueState {
+  observation?: QueueLifecycleObservation;
   chain: Promise<void>;
   pending: number;
   activeFilename: string | null;
@@ -85,12 +88,26 @@ async function runTrackedJob(
   runJob: (job: SqliteWriteJob) => Promise<void>
 ): Promise<void> {
   state.activeFilename = job.filename;
+  const observation = state.observation;
+  if (observation) {
+    observation.state.activeJob = job.execute ? "caller" : job.payload ? "payload" : "empty";
+    observation.publish();
+  }
   try {
     await runJob(job);
+    if (observation) observation.state.completedJobs += 1;
+  } catch (error) {
+    if (observation) observation.state.failedJobs += 1;
+    throw error;
   } finally {
     state.activeFilename = null;
     state.pending -= 1;
     state.tracker.adjust(job.filename, -1);
+    if (observation) {
+      observation.state.pendingJobs = state.pending;
+      observation.state.activeJob = null;
+      observation.publish();
+    }
   }
 }
 
@@ -112,6 +129,10 @@ function createSerialEnqueue(
     state.chain = ticket.catch((error) => {
       warnFailedWriteJob(job, error);
     });
+    if (state.observation) {
+      state.observation.state.pendingJobs = state.pending;
+      state.observation.publish();
+    }
     await ticket;
   };
 }
@@ -121,7 +142,9 @@ export function createSerialSqliteWriteQueuePort(input: {
   runJob(job: SqliteWriteJob): Promise<void>;
   close?(): Promise<void>;
 }): SqliteWriteQueuePort {
+  const observation = queueLifecycleObservation(input) ?? createQueueLifecycleObservation();
   const state: SerialQueueState = {
+    observation,
     chain: Promise.resolve(),
     pending: 0,
     activeFilename: null,
@@ -129,6 +152,7 @@ export function createSerialSqliteWriteQueuePort(input: {
   };
   let accepting = true;
   const enqueue = createSerialEnqueue(state, input.runJob);
+  observation?.publish();
   return {
     kind: input.kind,
     pendingCount: () => state.pending,
@@ -144,8 +168,28 @@ export function createSerialSqliteWriteQueuePort(input: {
       // Drain in-flight/queued jobs before teardown so close does not abandon work
       // already handed to runJob / the worker.
       accepting = false;
+      const attempt = observation ? {
+        id: observation.state.closes.length + 1, drained: false,
+        result: "pending" as "pending" | "fulfilled" | "rejected"
+      } : undefined;
+      if (observation && attempt) {
+        observation.state.accepting = false;
+        observation.state.closes.push(attempt);
+        observation.publish();
+      }
       await state.chain;
-      await input.close?.();
+      if (observation && attempt) { attempt.drained = true; observation.publish(); }
+      try {
+        await (observation && attempt
+          ? observation.close(attempt.id, () => input.close?.())
+          : input.close?.());
+        if (attempt) attempt.result = "fulfilled";
+      } catch (error) {
+        if (attempt) attempt.result = "rejected";
+        throw error;
+      } finally {
+        observation?.publish();
+      }
     }
   };
 }

@@ -1,3 +1,4 @@
+import { bindQueueLifecycleObservation, createQueueLifecycleObservation, type QueueLifecycleObservation } from "./lifecycle-observation.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
@@ -22,6 +23,7 @@ interface PendingWaiter {
 }
 
 interface WorkerSession {
+  readonly observation?: QueueLifecycleObservation;
   readonly worker: Worker;
   readonly pending: Map<number, PendingWaiter>;
   readonly ready: Promise<void>;
@@ -62,10 +64,11 @@ function createReadyGate(): {
   return { ready, markReady, failReady };
 }
 
-function createWorkerSession(workerUrl: URL): WorkerSession {
+function createWorkerSession(workerUrl: URL, observation: QueueLifecycleObservation | undefined): WorkerSession {
   const pending = new Map<number, PendingWaiter>();
   const { ready, markReady, failReady } = createReadyGate();
   const session: WorkerSession = {
+    observation,
     worker: new Worker(workerUrl),
     pending,
     ready,
@@ -76,18 +79,28 @@ function createWorkerSession(workerUrl: URL): WorkerSession {
         waiter.reject(error);
       }
       pending.clear();
+      if (observation) { observation.state.pendingRequests = 0; observation.publish(); }
     }
   };
 
+  if (observation) {
+    observation.state.threadId = session.worker.threadId;
+    observation.state.readiness = "pending";
+    observation.publish();
+  }
   session.worker.on("message", (message: unknown) => {
     if (!isSqliteWriteQueueWorkerResponse(message)) return;
     if (message.type === "ready") {
       markReady();
+      if (observation && observation.state.readiness === "pending") {
+        observation.state.readiness = "ready"; observation.publish();
+      }
       return;
     }
     const waiter = pending.get(message.requestId);
     if (waiter === undefined) return;
     pending.delete(message.requestId);
+    if (observation) { observation.state.pendingRequests = pending.size; observation.publish(); }
     if (message.ok) {
       waiter.resolve();
       return;
@@ -98,13 +111,20 @@ function createWorkerSession(workerUrl: URL): WorkerSession {
   session.worker.on("error", (error) => {
     const normalized = error instanceof Error ? error : new Error(String(error));
     failReady(normalized);
+    if (observation && observation.state.readiness === "pending") {
+      observation.state.readiness = "failed"; observation.publish();
+    }
     session.failAllPending(normalized);
   });
 
   session.worker.on("exit", (code) => {
+    if (observation) { observation.state.terminal = { code }; observation.publish(); }
     if (session.closed) return;
     const error = new Error(`sqlite write queue worker exited unexpectedly (code=${code})`);
     failReady(error);
+    if (observation && observation.state.readiness === "pending") {
+      observation.state.readiness = "failed"; observation.publish();
+    }
     session.failAllPending(error);
   });
 
@@ -121,6 +141,10 @@ async function postRequest(
   }
   await new Promise<void>((resolve, reject) => {
     session.pending.set(request.requestId, { resolve, reject });
+    if (session.observation) {
+      session.observation.state.pendingRequests = session.pending.size;
+      session.observation.publish();
+    }
     session.worker.postMessage(request);
   });
 }
@@ -156,17 +180,33 @@ async function closeWorker(session: WorkerSession): Promise<void> {
   if (session.closed) {
     return;
   }
+  const observation = session.observation;
+  const attempt = observation ? {
+    id: observation.state.shutdowns.length + 1, closeId: observation.currentClose(),
+    result: "pending" as "pending" | "acknowledged" | "failed",
+    pendingBeforeTerminate: null as number | null, terminationRequested: false
+  } : undefined;
+  if (observation && attempt) { observation.state.shutdowns.push(attempt); observation.publish(); }
   // Send shutdown while the session still accepts protocol messages; serial
   // close drains the job chain before this runs.
   try {
     const requestId = session.nextRequestId;
     session.nextRequestId += 1;
     await postRequest(session, { type: "shutdown", requestId });
+    if (attempt) attempt.result = "acknowledged";
   } catch {
+    if (attempt) attempt.result = "failed";
     // Shutdown best-effort; always terminate the worker.
   }
   session.closed = true;
-  await session.worker.terminate();
+  if (observation && attempt) {
+    attempt.pendingBeforeTerminate = session.pending.size;
+    attempt.terminationRequested = true;
+    observation.publish();
+  }
+  await (observation
+    ? observation.terminate(() => session.worker.terminate())
+    : session.worker.terminate());
   // Only waiters still pending after drain+shutdown (never handed a result).
   session.failAllPending(new Error("sqlite write queue worker closed"));
 }
@@ -178,10 +218,13 @@ export function createWorkerThreadSqliteWriteQueuePort(
   if (workerUrl === null) {
     throw new Error("sqlite write queue worker script is missing; build @do-soul/alaya-storage first");
   }
-  const session = createWorkerSession(workerUrl);
-  return createSerialSqliteWriteQueuePort({
+  const observation = createQueueLifecycleObservation();
+  const session = createWorkerSession(workerUrl, observation);
+  const input = {
     kind: "worker-thread-sqlite-write-queue",
-    runJob: (job) => runPayloadJob(session, job),
+    runJob: (job: SqliteWriteJob) => runPayloadJob(session, job),
     close: () => closeWorker(session)
-  });
+  };
+  bindQueueLifecycleObservation(input, observation);
+  return createSerialSqliteWriteQueuePort(input);
 }
