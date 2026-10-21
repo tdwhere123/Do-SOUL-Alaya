@@ -161,7 +161,7 @@ async function executeOrdinaryQuery(
       elapsedCalls += 1;
       pages.push(page);
       if (page.observation !== "observed" || page.output?.index === undefined) {
-        stopCause = page.response_state === "public_error" ? "failed" : "unavailable";
+        stopCause = page.response_state === "public_error" || page.response_state === "invalid_response" ? "failed" : "unavailable";
         break;
       }
       const index = page.output.index;
@@ -206,12 +206,7 @@ async function recallPublicMembershipPage(
     if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
     if (frame === undefined) return membershipPage({ ordinal, request, frame: null, envelope: null, output: null,
       firstExposure: null, responseState: "transport_error", observation: "unobserved", occupiedSlots: 0, sourceIntervals: [] });
-    const envelope = OrdinaryRecallEnvelopeSchema.safeParse(frame.response);
-    return membershipPage({
-      ordinal, request, frame, envelope: envelope.success ? envelope.data : null,
-      output: null, firstExposure: null, responseState: "public_error", observation: "unobserved", occupiedSlots: 0,
-      sourceIntervals: []
-    });
+    // A captured rejection still needs envelope/output admission below; only a missing frame is transport failure.
   }
   if (frame === undefined) {
     return membershipPage({ ordinal, request, frame: null, envelope: null, output: null,
@@ -220,7 +215,7 @@ async function recallPublicMembershipPage(
   return admitCapturedPublicMembership({ ordinal, request, frame, args, session, firstExposure });
 }
 
-/** Captured frames stay on an unobserved page when parse fails; CANCELLED/CONFLICT still fail closed. */
+/** Invalid frames retain raw evidence on a typed failed page; CANCELLED/CONFLICT still fail closed. */
 function admitCapturedPublicMembership(input: Readonly<{
   ordinal: number; request: OrdinaryRecallPublicRequest; frame: BenchMcpToolCapture; args: Record<string, unknown>;
   session: FirstExposureSession; firstExposure: FirstExposurePage | null;
@@ -230,10 +225,13 @@ function admitCapturedPublicMembership(input: Readonly<{
   }
   const failed = {
     ordinal: input.ordinal, request: input.request, frame: input.frame, output: null, firstExposure: null,
-    responseState: "success" as const, observation: "unobserved" as const, occupiedSlots: 0, sourceIntervals: [] as SourceInterval[]
+    responseState: "invalid_response" as const, observation: "unobserved" as const, occupiedSlots: 0, sourceIntervals: [] as SourceInterval[]
   };
   const envelope = OrdinaryRecallEnvelopeSchema.safeParse(input.frame.response);
   if (!envelope.success) return membershipPage({ ...failed, envelope: null });
+  if (envelope.data.isError === true) {
+    return membershipPage({ ...failed, envelope: envelope.data, responseState: "public_error" });
+  }
   let generic: unknown;
   try {
     generic = readBenchMcpToolOutput("soul.recall", input.frame.response);
@@ -388,8 +386,7 @@ function decideStatus(
   stopCause: OrdinaryRecallQueryRow["stop_cause"]
 ): OrdinaryRecallQueryRow["status"] {
   if (firstExposure?.initial == null || pages.every(page => page.observation !== "observed")) {
-    return pages.some(page => page.response_state === "public_error") && pages.every(page => page.observation !== "observed")
-      ? "failed" : "unavailable";
+    return stopCause === "failed" ? "failed" : "unavailable";
   }
   if (pages.some(page => page.observation !== "observed")) return "partial";
   return stopCause === "observed_ten_slot_prefix" || stopCause === "occupancy_tail_exhausted" ? "complete" : "partial";
@@ -409,7 +406,7 @@ export function ordinaryEntryStatusReason(
       ? "ordinary public occupancy tail exhausted" : "ordinary public membership window captured";
   }
   if (status === "partial") return partialStatusReason(stopCause, last);
-  if (status === "failed") return "ordinary public soul.recall returned an error envelope";
+  if (status === "failed") return last?.reason ?? pageUnobservedReason(last?.response_state ?? "unknown");
   if (last?.response_state === "transport_error") return "ordinary public soul.recall transport did not yield an envelope";
   return "ordinary public soul.recall did not supply required first-exposure or source-interval evidence";
 }
@@ -445,6 +442,7 @@ function emptyRow(
 }
 
 function pageUnobservedReason(responseState: EntryPage["response_state"]): string {
+  if (responseState === "invalid_response") return "ordinary public soul.recall captured an invalid envelope or output";
   if (responseState === "public_error") return "ordinary public soul.recall returned an error envelope";
   if (responseState === "transport_error") return "ordinary public soul.recall transport did not yield an envelope";
   return "ordinary public soul.recall did not supply required first-exposure or source-interval evidence";

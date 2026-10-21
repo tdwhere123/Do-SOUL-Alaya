@@ -217,10 +217,14 @@ it("captures an actual continuation page without replacing first exposure", asyn
 }, 120000);
 
 it.each([
-  { page: "first", defect: "malformed-envelope", status: "unavailable", count: 1 },
+  { page: "first", defect: "malformed-envelope", status: "failed", count: 1 },
   { page: "later", defect: "malformed-envelope", status: "partial", count: 2 },
-  { page: "first", defect: "malformed-output", status: "unavailable", count: 1 },
+  { page: "first", defect: "malformed-output", status: "failed", count: 1 },
   { page: "later", defect: "malformed-output", status: "partial", count: 2 },
+  { page: "first", defect: "non-ok-output", status: "failed", count: 1 },
+  { page: "later", defect: "non-ok-output", status: "partial", count: 2 },
+  { page: "first", defect: "public-error", status: "failed", count: 1 },
+  { page: "later", defect: "public-error", status: "partial", count: 2 },
   { page: "first", defect: "missing-index-identity", status: "unavailable", count: 1 },
   { page: "later", defect: "missing-index-identity", status: "partial", count: 2 }
 ] as const)("keeps a $page-page $defect as an unobserved attempted page with raw frame and timing",
@@ -240,19 +244,19 @@ it.each([
       });
     });
     try {
-      const execution = await executeOrdinaryRecallEntry({
-        config: plan.config, root: join(base.root, `ordinary-entry-${page}-${defect}`),
-        queries: [{ query_key: query.query_key, original_query: query.original_query }]
-      });
+      const input = { config: plan.config, root: join(base.root, `ordinary-entry-${page}-${defect}`),
+        queries: [{ query_key: query.query_key, original_query: query.original_query }] };
+      const execution = await executeOrdinaryRecallEntry(input);
       const row = execution.rows[0]!;
       const attempted = row.pages.at(-1)!;
       expect(row.status).toBe(status);
-      expect(row.stop_cause).toBe("unavailable");
+      expect(row.stop_cause).toBe(defect === "missing-index-identity" ? "unavailable" : "failed");
       expect(row.page_count).toBe(count);
       expect(row.pages).toHaveLength(count);
       expect(injected).toHaveLength(count);
       expect(attempted.observation).toBe("unobserved");
-      expect(attempted.response_state).toBe("success");
+      expect(attempted.response_state).toBe(defect === "missing-index-identity" ? "success"
+        : defect === "public-error" ? "public_error" : "invalid_response");
       expect(attempted.occupied_slots).toBe(0);
       expect(attempted.source_intervals).toEqual([]);
       expect(attempted.complete).toBe(false);
@@ -270,7 +274,7 @@ it.each([
       if (defect === "malformed-envelope") {
         expect(attempted.envelope).toBeNull();
         expect(attempted.output).toBeNull();
-      } else if (defect === "malformed-output") {
+      } else if (defect !== "missing-index-identity") {
         expect(attempted.envelope).not.toBeNull();
         expect(attempted.output).toBeNull();
       } else {
@@ -278,6 +282,9 @@ it.each([
         expect(attempted.output?.index?.interpretation_id).toBeUndefined();
         expect(attempted.output?.index?.as_of).toBeUndefined();
       }
+      const retained = await executeOrdinaryRecallEntry(input);
+      expect(retained).toEqual(execution);
+      expect(recalls).toBe(count);
     } finally {
       spy.mockRestore();
     }
@@ -385,8 +392,10 @@ it("returns not-run without intervals when ordinary entry cannot express authori
 }, 120000);
 
 function corruptSoulRecallResult(
-  defect: "malformed-envelope" | "malformed-output" | "missing-index-identity", result: unknown
+  defect: "malformed-envelope" | "malformed-output" | "non-ok-output" | "public-error" | "missing-index-identity", result: unknown
 ): unknown {
+  if (defect === "non-ok-output") return { content: [], structuredContent: { ok: false } };
+  if (defect === "public-error") return { content: [{ type: "text", text: "native rejection" }], isError: true };
   if (defect === "malformed-envelope") {
     return { structuredContent: { ok: true, output: { not_an_envelope: true } } };
   }

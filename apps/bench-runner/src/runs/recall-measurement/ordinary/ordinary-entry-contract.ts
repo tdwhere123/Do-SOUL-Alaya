@@ -56,7 +56,8 @@ export const OrdinaryRecallEntryPageSchema = z.object({
   envelope: OrdinaryRecallEnvelopeSchema.nullable(),
   output: SoulMemorySearchResponseSchema.nullable(),
   first_exposure: FirstExposurePageSchema.nullable(),
-  response_state: z.enum(["success", "public_error", "transport_error", "unknown"]),
+  /** Invalid captured envelopes/outputs are failures, not valid responses with unobserved metadata. */
+  response_state: z.enum(["success", "public_error", "transport_error", "invalid_response", "unknown"]),
   observation: z.enum(["observed", "unobserved"]),
   /** Admitted delivery slots on this page, including non-body results. Not source_intervals.length. */
   occupied_slots: z.number().int().nonnegative(),
