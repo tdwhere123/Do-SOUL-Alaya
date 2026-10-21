@@ -6,12 +6,15 @@ const isolation = await vi.hoisted(async () => {
 vi.mock("../../../harness/daemon.js", async importOriginal => ({
   ...await importOriginal<typeof import("../../../harness/daemon.js")>(), startBenchDaemon: vi.fn()
 }));
-import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, readdirSync } from "node:fs";
+import childProcess from "node:child_process";
+import workerThreads from "node:worker_threads";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { initDatabase, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo } from "@do-soul/alaya-storage";
-import { fieldContractSha256, type SourceEmbeddingResult } from "@do-soul/alaya-core";
-import { hashSourceRecordId, sourceIndexProfileId } from "@do-soul/alaya-protocol";
+import { initDatabase, SqliteSourceIndexRepository, SqliteFieldSourceRecordRepo, SqliteFieldEraseBarrierRepo } from "@do-soul/alaya-storage";
+import { fieldContractSha256, LocalOnnxEmbeddingClient, type SourceEmbeddingResult } from "@do-soul/alaya-core";
+import { hashSourceRecordId, sourceIndexProfileId, SoulInterpretationResponseSchema, sourceSemanticAccessPhases } from "@do-soul/alaya-protocol";
 import { startBenchDaemon } from "../../../harness/daemon.js";
 import { hashRegularFileNoFollow } from "../../../runs/snapshot/bound-file.js";
 import { readCurrentExtractionAuthorityRevision } from "../../../runs/extraction/authority/inspection.js";
@@ -20,10 +23,15 @@ import { SemanticChainConfigSchema, assertChainSnapshot, readChainArtifact, with
 import { inspectSemanticChainSourceIndex, prepareSemanticChainSourceIndex } from "../../../runs/recall-measurement/source-index-binding.js";
 import { checkpointAndCopyBenchDb } from "../../../runs/snapshot/freeze/db-copy.js";
 import { createSourceIndexProducer, type SourceIndexProducerPassRemaining } from "../../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
-import { configuration, fixture, publishSource, WORKSPACE } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
+import { captureSourceIndexProgress, compareSourceIndexProgress, sourceIndexProgressBindingMatches } from "../../../runs/recall-measurement/source-index-progress.js";
+import { callMcpTool } from "../../../harness/daemon/runtime/daemon-mcp-support.js";
+import { bindBenchDaemonTestSignal, clearBenchDaemonTestSignal } from "../../../harness/daemon-task.js";
+import { configuration, fixture, publishSource, WORKSPACE, BUDGET, captureDocuments, vectorFor } from "../../../../../../packages/storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import { hashedOriginalRecord } from "../../../../../../packages/storage/src/__tests__/repos/field/field-contract-fixture.js";
 const roots: string[] = [];
 afterEach(() => {
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   vi.clearAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   expect(isolation.violations).toEqual([]);
@@ -402,3 +410,241 @@ it("rejects output aliases into inputs and leaves disabled configuration unbound
   expect(startBenchDaemon).not.toHaveBeenCalled();
   assertChainSnapshot(config);
 });
+
+it("captures the allocation before startup awaits and retains each receipt before the next same-runtime pass", async () => {
+  const { root, config, execution } = setupSources(3), output = join(root, "captured");
+  bindProducer(false, 2);
+  const original = vi.mocked(startBenchDaemon).getMockImplementation()!;
+  const allocation = { maxPasses: 2, modelInputs: 3, work: 100000, nativeBytes: 8388608, inputBytes: 524288 };
+  vi.mocked(startBenchDaemon).mockImplementationOnce(async options => {
+    allocation.maxPasses = 0; allocation.modelInputs = 0;
+    const daemon = await original(options), run = daemon.runtime.runSourceIndexPass!;
+    let passes = 0;
+    vi.spyOn(daemon.runtime, "runSourceIndexPass").mockImplementation(async remaining => {
+      if (++passes === 2) expect(readChainArtifact(join(output, "passes/pass-1.json"))).toMatchObject({
+        pass: 1, receipt: { status: "partial", resources: { model_inputs: 2 } },
+        remaining_before: { modelInputs: 3 }, remaining_after: { modelInputs: 1 }, effective_limits: { modelInputs: 2 } });
+      return run(remaining);
+    });
+    return daemon;
+  });
+  const result = await prepareSemanticChainSourceIndex(config, execution, output, undefined, allocation);
+  expect(result.config).not.toBeNull();
+  expect(startBenchDaemon).toHaveBeenCalledTimes(1);
+  expect(result.report).toMatchObject({ setup_passes: 2, setup_stop_reason: "settled",
+    setup_resources: { model_inputs: 3 }, setup_allowance: { maxPasses: 2, leftover: { modelInputs: 3 } } });
+  const total = { work: 0, native_bytes: 0, model_inputs: 0, input_bytes: 0 };
+  for (const entry of result.report.setup_history) {
+    for (const key of Object.keys(total) as Array<keyof typeof total>) total[key] += entry.receipt.resources[key];
+    expect(readChainArtifact(join(output, `passes/pass-${entry.pass}.json`))).toEqual(entry);
+    for (const [allowanceKey, receiptKey] of [["work", "work"], ["nativeBytes", "native_bytes"],
+      ["modelInputs", "model_inputs"], ["inputBytes", "input_bytes"]] as const) {
+      expect(entry.remaining_after![allowanceKey]).toBe(entry.remaining_before![allowanceKey]! - entry.receipt.resources[receiptKey]);
+    }
+    expect(entry.receipt.limits).toMatchObject({ work: 50000, nativeBytes: 4194304, modelInputs: 2, inputBytes: 262144 });
+    expect(entry.after.cost.pending_reads).toBeLessThanOrEqual(16);
+    expect(entry.after.pending.every(row => row.result.status !== "ready" || row.result.ordinals.length <= 1)).toBe(true);
+  }
+  expect(total).toEqual(result.report.setup_resources);
+  const diagnosticWork = result.report.setup_history.reduce((sum, entry) => sum + entry.before.cost.work + entry.after.cost.work, 0);
+  expect(result.report.setup_diagnostics).toMatchObject({ snapshots: 4, work: diagnosticWork, sql_internal_work: "unknown" });
+  expect(result.report.setup_history[1]!.remaining_after!.modelInputs).toBe(0); // exact-limit complete success
+});
+
+it("uses native persisted capture and pending-window progress, not charges or an incomplete census, to distinguish a stall", () => {
+  const { root } = setupSources(1), filename = join(root, "input.sqlite");
+  const database = initDatabase({ filename });
+  const environment = { database, index: new SqliteSourceIndexRepository(database, fieldContractSha256),
+    records: new SqliteFieldSourceRecordRepo(database, fieldContractSha256), erase: new SqliteFieldEraseBarrierRepo(database, fieldContractSha256) },
+    index = environment.index;
+  const generation = index.begin(index.select(WORKSPACE, configuration({ window_bytes: 4 })));
+  const snapshot = () => captureSourceIndexProgress(filename, WORKSPACE);
+  const initial = snapshot();
+  index.capturePage(WORKSPACE, generation.generation_id, 1, BUDGET);
+  const capture = snapshot();
+  expect(compareSourceIndexProgress(initial, capture)).toMatchObject({ status: "progress" });
+  expect(compareSourceIndexProgress(capture, snapshot())).toMatchObject({ status: "unknown" });
+  index.capturePage(WORKSPACE, generation.generation_id, 128, BUDGET);
+  const unprepared = snapshot(), documents = captureDocuments(environment, generation), prepared = snapshot();
+  expect(compareSourceIndexProgress(unprepared, prepared)).toEqual({ status: "progress", reason: "manifest_prepared" });
+  expect(compareSourceIndexProgress(prepared, snapshot())).toMatchObject({ status: "no_progress" });
+  expect(documents[0]!.windows.length).toBeGreaterThan(1);
+  index.writeVector(WORKSPACE, generation.generation_id, vectorFor(documents[0]!.windows[0]!));
+  const advanced = snapshot();
+  expect(compareSourceIndexProgress(prepared, advanced)).toEqual({ status: "progress", reason: "first_pending_window_advanced" });
+  const unknown = structuredClone(advanced); unknown.status = "unknown";
+  expect(compareSourceIndexProgress(advanced, unknown).status).toBe("unknown");
+  const changed = structuredClone(advanced); changed.metadata!.source_epoch++;
+  expect(compareSourceIndexProgress(advanced, changed).status).toBe("unknown");
+  const refused = structuredClone(advanced);
+  refused.pending[0]!.result = { status: "stale", reason: "stale", resources: { work: 0, native_bytes: 0 } };
+  expect(compareSourceIndexProgress(advanced, refused)).toEqual({ status: "unknown", reason: "native_witness_refused" });
+  expect(sourceIndexProgressBindingMatches(refused, { profile_id: generation.selection.profile_id,
+    profile: generation.selection.configuration.profile })).toBe(false);
+  environment.database.close();
+});
+
+it("lets valid unknown diagnostics spend finite allowance but stops a complete prepared unchanged witness", async () => {
+  const { root, config, execution } = setupSources(1);
+  bindProducer(false, 0);
+  const unknown = await prepareSemanticChainSourceIndex(config, execution, join(root, "unknown"), undefined, { maxPasses: 2 });
+  expect(unknown.report).toMatchObject({ setup_passes: 2, setup_stop_reason: "setup_pass_exhausted" });
+  expect(unknown.report.setup_history[1]!.progress.status).toBe("unknown"); // manifest unprepared
+  const database = initDatabase({ filename: config.snapshot_path });
+  const environment = { database, index: new SqliteSourceIndexRepository(database, fieldContractSha256),
+    records: new SqliteFieldSourceRecordRepo(database, fieldContractSha256), erase: new SqliteFieldEraseBarrierRepo(database, fieldContractSha256) };
+  const generation = environment.index.begin(environment.index.select(WORKSPACE,
+    configuration({ provider_kind: "local_onnx", model_id: execution.model_id, window_bytes: 504, max_input_tokens: 512 }, "source-index-local.v1")));
+  captureDocuments(environment, generation);
+  environment.database.close();
+  config.snapshot_sha256 = hashRegularFileNoFollow(config.snapshot_path);
+  bindProducer(false, 0);
+  const stalled = await prepareSemanticChainSourceIndex(config, execution, join(root, "stall"), undefined, { maxPasses: 3 });
+  expect(stalled.config).toBeNull();
+  expect(stalled.report.setup_passes).toBeLessThan(3);
+  expect(stalled.report).toMatchObject({ setup_stop_reason: "setup_no_progress", setup: { status: "partial", reason: "pending_targets" } });
+  expect(stalled.report.setup_history.at(-1)!.progress.status).toBe("no_progress");
+});
+
+it.each(["startup", "pass", "cleanup"] as const)("checks the soft monotonic allowance including awaited %s and withholds configuration", async phase => {
+  const { root, config, execution } = setup(), output = join(root, phase);
+  bindProducer(false);
+  const original = vi.mocked(startBenchDaemon).getMockImplementation()!;
+  let clock = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => clock);
+  vi.mocked(startBenchDaemon).mockImplementationOnce(async options => {
+    const daemon = await original(options), run = daemon.runtime.runSourceIndexPass!,
+      shutdown = vi.mocked(daemon.shutdown).getMockImplementation()!;
+    if (phase === "startup") clock = 60001;
+    vi.spyOn(daemon.runtime, "runSourceIndexPass").mockImplementation(async remaining => {
+      const receipt = await run(remaining);
+      if (phase === "pass") clock = 60001;
+      return receipt;
+    });
+    vi.spyOn(daemon, "shutdown").mockImplementation(async () => {
+      await shutdown();
+      if (phase === "cleanup") clock = 60001;
+    });
+    return daemon;
+  });
+  const result = await prepareSemanticChainSourceIndex(config, execution, output, undefined,
+    { maxPasses: 2, softElapsedMs: 60000 });
+  expect(result.config).toBeNull();
+  expect(result.report).toMatchObject({ reason: "setup_soft_deadline", setup_stop_reason: "setup_soft_deadline", setup_elapsed_ms: 60001 });
+  expect(result.report.setup_passes).toBe(phase === "startup" ? 0 : 1);
+  if (phase !== "startup") expect(result.report.setup.status).toBe("settled");
+  expect(existsSync(join(output, "chain-config.json"))).toBe(false);
+  expect(readdirSync(output).filter(name => name.startsWith("source-runtime-"))).toEqual([]);
+});
+
+it("does not enter native startup for a zero soft allowance and rejects malformed soft allowances", async () => {
+  const { root, config, execution } = setup();
+  const result = await prepareSemanticChainSourceIndex(config, execution, join(root, "zero-time"), undefined,
+    { maxPasses: 2, softElapsedMs: 0 });
+  expect(result.report).toMatchObject({ setup_passes: 0, setup_stop_reason: "setup_soft_deadline" });
+  await expect(prepareSemanticChainSourceIndex(config, execution, join(root, "invalid-time"), undefined,
+    { maxPasses: 2, softElapsedMs: -1 })).rejects.toThrow(/soft elapsed allowance/u);
+  expect(startBenchDaemon).not.toHaveBeenCalled();
+});
+
+it.each(["cancel", "cleanup_failure", "later_pass_throw"] as const)("retains completed pass prefixes without external publication after %s", async fault => {
+  const { root, config, execution } = setupSources(3), output = join(root, fault);
+  bindProducer(false, 2);
+  const original = vi.mocked(startBenchDaemon).getMockImplementation()!;
+  const controller = new AbortController();
+  bindBenchDaemonTestSignal(controller.signal);
+  let directory = "";
+  vi.mocked(startBenchDaemon).mockImplementationOnce(async options => {
+    const daemon = await original(options), run = daemon.runtime.runSourceIndexPass!,
+      shutdown = vi.mocked(daemon.shutdown).getMockImplementation()!;
+    directory = daemon.dataDir;
+    let pass = 0;
+    vi.spyOn(daemon.runtime, "runSourceIndexPass").mockImplementation(async remaining => {
+      if (++pass === 2 && fault === "later_pass_throw") throw new Error("synthetic_later_pass_failed");
+      const receipt = await run(remaining);
+      if (fault === "cancel") {
+        controller.abort();
+        await new Promise(resolve => setTimeout(resolve, 25));
+        expect(existsSync(directory)).toBe(true);
+        expect(daemon.shutdown).not.toHaveBeenCalled();
+        expect(existsSync(join(output, "chain-config.json"))).toBe(false);
+      }
+      return receipt;
+    });
+    vi.spyOn(daemon, "shutdown").mockImplementation(async () => {
+      expect(existsSync(directory)).toBe(true);
+      await shutdown();
+      if (fault === "cleanup_failure") throw new Error("synthetic_cleanup_failed");
+    });
+    return daemon;
+  });
+  try {
+    await expect(prepareSemanticChainSourceIndex(config, execution, output, undefined, { maxPasses: 2 })).rejects.toThrow();
+    expect(readChainArtifact(join(output, "passes/pass-1.json"))).toMatchObject({ receipt: { status: "partial" } });
+    expect(existsSync(join(output, "chain-config.json"))).toBe(false);
+    expect(existsSync(join(output, "preparation.json"))).toBe(false);
+    expect(existsSync(directory)).toBe(fault === "cleanup_failure");
+    if (fault === "cancel") expect(readChainArtifact(join(output, "passes/pass-1.json"))).toMatchObject({
+      after: { status: "unknown", reason: "scope_cancelled", cost: { pending_reads: 0, metadata_transactions: 0 } } });
+    if (fault === "later_pass_throw") expect(readChainArtifact(join(output, "setup-failure-prefix.json"))).toMatchObject({
+      resources: { model_inputs: 2 }, history: [{ receipt: { resources: { model_inputs: 2 } } }] });
+  } finally { clearBenchDaemonTestSignal(controller.signal); }
+});
+
+it("recognizes capture-only advancement without model submissions and does not call a bounded root prefix a stall", async () => {
+  const { root, config, execution } = setupSources(33);
+  bindProducer(false);
+  const result = await prepareSemanticChainSourceIndex(config, execution, join(root, "capture-only"), undefined,
+    { maxPasses: 2, maxCapturePages: 1, maxRootsPerPass: 0 });
+  expect(result.config).toBeNull();
+  expect(result.report.setup_passes).toBe(2);
+  expect(result.report.setup_resources.model_inputs).toBe(0);
+  const last = result.report.setup_history[1]!;
+  expect(last.progress).toMatchObject({ status: "progress", reason: "persisted_capture_or_completion_advanced" });
+  expect(last.after.metadata!.targets).toHaveLength(16);
+  expect(last.after.cost.pending_reads).toBe(16);
+  expect(compareSourceIndexProgress(last.after, last.after)).toMatchObject({ status: "unknown" });
+});
+
+it("continues two passes in one actual daemon and proves the sealed generation through its built read worker using only a deterministic fake model", async () => {
+  const { root, config, execution } = setupSources(9);
+  const real = await vi.importActual<typeof import("../../../harness/daemon.js")>("../../../harness/daemon.js");
+  vi.mocked(startBenchDaemon).mockImplementation(real.startBenchDaemon);
+  const fork = vi.spyOn(childProcess, "fork").mockImplementation(() => { throw new Error("synthetic fixture forbids model processes"); });
+  const workers: { operation: string; thread_id: number; exit: number | null }[] = [];
+  const nativePost = workerThreads.Worker.prototype.postMessage;
+  vi.spyOn(workerThreads.Worker.prototype, "postMessage").mockImplementation(function (this: workerThreads.Worker, ...args) {
+    const message = args[0] as { operation?: string };
+    if (message.operation === "conditionalField.sourceSemantics") {
+      const record = { operation: message.operation, thread_id: this.threadId, exit: null as number | null };
+      workers.push(record); this.once("exit", code => { record.exit = code; });
+    }
+    return Reflect.apply(nativePost, this, args);
+  });
+  syncBuiltinESMExports();
+  vi.spyOn(LocalOnnxEmbeddingClient.prototype, "embedTexts").mockImplementation(async texts => texts.map(() => new Float32Array([0.6, 0.8, 0])));
+  vi.spyOn(LocalOnnxEmbeddingClient.prototype, "bindSourceEmbedding").mockImplementation(async options => {
+    const profile = configuration({ provider_kind: "local_onnx", model_id: execution.model_id,
+      max_input_tokens: 512, window_bytes: options.window_bytes }).profile;
+    return { status: "ready", profile, profile_id: sourceIndexProfileId(profile, fieldContractSha256),
+      embedInputs: async inputs => inputs.map(input => ({ status: "embedded", input_id: input.input_id,
+        input_digest: `sha256:${fieldContractSha256(input.text)}`, token_count: 4, truncated: false, vector: new Float32Array([0.6, 0.8, 0]) })) };
+  });
+  let workerGeneration: string | undefined;
+  const result = await prepareSemanticChainSourceIndex(config, execution, join(root, "actual-runtime"), async (bound, daemon) => {
+    const response = SoulInterpretationResponseSchema.parse(await callMcpTool(daemon.mcpClient, "soul.interpretation", {
+      operation: "prepare_query", original_query: "Synthetic stone", budget: config.budget,
+      authorized_scopes: config.authorized_scopes, access_policy: config.access_policy }));
+    if (response.operation !== "prepare_query" || response.access === undefined) throw new Error("synthetic worker receipt missing");
+    const state = sourceSemanticAccessPhases(response.access).acquisition.result?.vector.state;
+    if (state == null || !("binding" in state)) throw new Error("synthetic worker binding missing");
+    workerGeneration = state.binding.generation_id;
+    expect(workerGeneration).toBe(bound.source_index!.index.generation_id);
+  }, { maxPasses: 2, modelInputs: 9, work: 100000, nativeBytes: 8388608, inputBytes: 524288, softElapsedMs: 60000 });
+  expect(result.report).toMatchObject({ setup_passes: 2, setup_stop_reason: "settled", setup_resources: { model_inputs: 9 } });
+  expect(result.config?.source_index?.index.generation_id).toBe(workerGeneration);
+  expect(startBenchDaemon).toHaveBeenCalledTimes(1);
+  expect(fork).not.toHaveBeenCalled();
+  expect(workers.length).toBeGreaterThan(0);
+  expect(workers.every(worker => worker.thread_id > 0 && worker.exit !== null)).toBe(true);
+}, 120000);

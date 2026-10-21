@@ -9,6 +9,14 @@ import { readSemanticChainDaemonRestoration } from "./contract.js";
 type Constructor = typeof SqliteSourceIndexRepository;
 type Measurement = Constructor[Extract<keyof Constructor, symbol>];
 
+/** Resolve the single installed/source constructor authority, not a workspace-relative runtime import. */
+export function sourceIndexMeasurementCapability(): Measurement {
+  const measurement = Reflect.get(SqliteSourceIndexRepository,
+    Symbol.for("@do-soul/alaya-storage/private/source-index-measurement")) as Measurement | undefined;
+  if (measurement === undefined) throw new AlayaError("CONFLICT", "private source-index measurement capability unavailable");
+  return measurement;
+}
+
 export type FrozenSourceIndexQualificationPage = Readonly<{
   snapshot_identity: string; index_identity: string; qualification: Omit<SourceIndexRootQualification, "snapshot">;
 }>;
@@ -37,10 +45,7 @@ export function captureFrozenSourceIndexQualifications(input: Readonly<{
 function captureQualificationRows(input: Readonly<{ database: StorageDatabase; workspaceId: string; snapshotIdentity: string;
   onPage: (page: FrozenSourceIndexQualificationPage) => void }>): FrozenSourceIndexQualifications {
   if (input.database.connection.inTransaction) throw new AlayaError("CONFLICT", "qualification capture owns its read transaction");
-  // Resolve through the installed/source package constructor, never a workspace-relative runtime import.
-  const measurement = Reflect.get(SqliteSourceIndexRepository,
-    Symbol.for("@do-soul/alaya-storage/private/source-index-measurement")) as Measurement | undefined;
-  if (measurement === undefined) throw new AlayaError("CONFLICT", "private source-index measurement capability unavailable");
+  const measurement = sourceIndexMeasurementCapability();
   return input.database.connection.transaction(() => {
     const index = measurement.readSnapshot(input.database, input.workspaceId), indexMaterial = canonicalJson(index);
     const indexIdentity = `sha256:${fieldContractSha256(indexMaterial)}`;
