@@ -31,7 +31,7 @@ export type ObservationAttribution = Readonly<{
   layer: ObservationAttributionLayer; reason: string;
   observation: Readonly<{
     status: string; request_id: number | null; execution: "success" | "failure" | "unknown";
-    complete: boolean; dropped_events: number; issues: readonly string[];
+    complete: boolean; progress_complete: boolean; dropped_events: number; issues: readonly string[];
     joined_requests: readonly Readonly<{ session_id: string | null; request_id: number; kind: ObservationCallScope["kind"];
       binding: SourceSemanticNativeFacts["binding"]; pool_origin: NonNullable<SourceSemanticNativeFacts["pool"]>["origin"];
       lease_reads: SourceSemanticNativeFacts["lease_reads"]; lease_issues: SourceSemanticNativeFacts["lease_issues"] }>[];
@@ -51,13 +51,13 @@ export function attributeObservation(input: ObservationAttributionInput): Observ
   const frame = joined.target;
   const any = input.visibility[input.k === 5 ? "any_at_5" : "any_at_10"];
   const messages = input.answer_gold.spans.map(span => observationMessageFacts(span, input, joined, finite));
-  const decided = attributeLayer(messages, any, joined.complete, input.answer_gold.complete);
+  const decided = attributeLayer(messages, any, joined.progress_complete, input.answer_gold.complete);
   const bounds = Object.fromEntries(LOSS_LAYERS.map(layer => [layer,
     opportunityBound(layer, messages, any, input.answer_gold.complete)])) as Record<LossLayer, ObservationOpportunityBound>;
   return { contract: OBSERVATION_ATTRIBUTION_CONTRACT, question_id: input.question_id,
     metric: input.k === 5 ? "any_at_5" : "any_at_10", layer: decided.layer, reason: decided.reason,
     observation: { status: joined.status === "usable" ? frame?.status === "observed" ? "usable" : frame?.status ?? "unavailable" : joined.status,
-      request_id: frame?.request_id ?? null, execution: frame?.execution ?? "unknown", complete: joined.complete,
+      request_id: frame?.request_id ?? null, execution: frame?.execution ?? "unknown", complete: joined.complete, progress_complete: joined.progress_complete,
       dropped_events: joined.frames.reduce((sum, row) => sum + row.observation.dropped_events, 0),
       issues: [...joined.issues, ...joined.frames.flatMap(row => row.observation.issues)],
       joined_requests: joined.frames.map(row => ({ session_id: row.call.session_id, request_id: row.observation.request_id, kind: row.call.kind,

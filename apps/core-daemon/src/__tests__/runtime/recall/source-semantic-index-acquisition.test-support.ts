@@ -64,7 +64,8 @@ function simulatedBinding(selection: SourceIndexSelection, axis: (text: string) 
   return { status: "ready" as const, profile: selection.configuration.profile, profile_id: selection.profile_id, embedInputs };
 }
 
-export async function withIndexedSources(sources: readonly IndexedSource[], body: (fixture: IndexFixture) => Promise<void>) {
+export async function withIndexedSources(sources: readonly IndexedSource[], body: (fixture: IndexFixture) => Promise<void>,
+  configuration: SourceIndexConfiguration = SIMULATED_CONFIGURATION) {
   const directory = await mkdtemp(join(tmpdir(), "source-semantic-index-")), filename = join(directory, "alaya.db");
   const { database } = await createRecallRealStorage(() => undefined, filename);
   const clients: RecallReadWorkerClient[] = [];
@@ -82,7 +83,7 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
     for (const source of indexed) await admit(source);
     const repository = new SqliteSourceIndexRepository(database, fieldContractSha256);
     const lifecycle = new SourceIndexLifecycle(repository, fieldContractSha256);
-    const selection = lifecycle.select(WS, SIMULATED_CONFIGURATION), generation = lifecycle.begin(selection);
+    const selection = lifecycle.select(WS, configuration), generation = lifecycle.begin(selection);
     let captured = lifecycle.capture(WS, generation.generation_id, 128, INDEX_BUDGET);
     expect(captured.generation.reason).not.toBe("native_source_unknown");
     while (!captured.generation.enumeration_complete) {
@@ -92,15 +93,18 @@ export async function withIndexedSources(sources: readonly IndexedSource[], body
     const targets = repository.listTargets(WS, generation.generation_id, null, 128);
     expect(targets).toHaveLength(indexed.length);
     const outsideTransaction = () => { expect(database.connection.inTransaction).toBe(false); };
-    const backfillBinding = simulatedBinding(selection, text => sources.find(source => source.text === text)?.vector ?? [0, 1, 0],
-      outsideTransaction);
+    let backfillAxis: readonly number[] = [0, 1, 0];
+    const backfillBinding = simulatedBinding(selection, () => backfillAxis, outsideTransaction);
     for (const target of targets) {
+      // Bind the root's authored axis even when different roots have identical window text.
+      backfillAxis = sources.find(source => source.id === target.source_id)?.vector ?? [0, 1, 0];
       const result = await new SourceIndexBackfill(lifecycle).step({ selection, generation_id: generation.generation_id,
         root_key: target.root_key, binding: backfillBinding, budget: { ...INDEX_BUDGET,
           model_inputs: 128, input_bytes: 1_000_000, max_body_bytes: 1_000_000 },
         deadline_ms: Date.now() + 60_000, signal: new AbortController().signal });
-      expect(result).toMatchObject({ status: "root_complete", accepted_vectors: 1,
-        resources: { model_inputs_submitted: 1, model_execution_work: "unknown", native_accounting: "complete" } });
+      const windows = Math.ceil(target.body_bytes / configuration.profile.window_bytes);
+      expect(result).toMatchObject({ status: "root_complete", accepted_vectors: windows,
+        resources: { model_inputs_submitted: windows, model_execution_work: "unknown", native_accounting: "complete" } });
     }
     expect(lifecycle.publish(WS, generation.generation_id)).toEqual({ status: "accepted" });
     expect(repository.generation(WS, generation.generation_id)).toMatchObject({ status: "ready",

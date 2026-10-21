@@ -106,8 +106,12 @@ function acquireRoute(acquisition: SourceIndexAcquisition, workspace: string, au
       vector: route.vector, allowance, budget }, scope => {
         try { authorizeSemanticScope(scope, authorized); return "admitted"; }
         catch { return "denied"; }
-      }, undefined, observer === undefined ? undefined : capture => {
-        observer.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }));
+      }, undefined, observer === undefined ? undefined : (capture, kind) => {
+        // Window inspections can outnumber the entire observation envelope. Keep only
+        // counts; finalized best-per-root ranks share the existing diagnostic quota.
+        if (kind === "vector_inspected") observer.omitDiagnostic(`source_index_${invocation}_${kind}`);
+        else observer.event("source_index_acquisition", meter.phase, () => ({ invocation, ...capture() }),
+          kind === "vector_ranked" || kind === "lexical_candidate" ? `source_index_${invocation}_${kind}` : undefined);
       });
     meter.absorbIndex(result.resources);
     const failed = result.resource_refusals.some(row => row.phase === "acquisition_failed_unknown_additional_cost");

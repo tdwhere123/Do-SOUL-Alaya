@@ -55,7 +55,9 @@ export type SourceIndexAcquisitionFact = Readonly<{
   lexical_completion: SourceIndexAcquisitionResult["lexical"]["completion"];
   vector_completion: SourceIndexAcquisitionResult["vector"]["completion"];
 }>;
-export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact) => void;
+/** Kind is available without constructing a payload, including count-only inspection diagnostics. */
+export type SourceIndexAcquisitionObserver = (capture: () => SourceIndexAcquisitionFact,
+  kind: SourceIndexAcquisitionFact["kind"]) => void;
 
 /** Production acquisition policy shared by preparation and library access.
  * nominate runs inside the caller-owned read snapshot; prepareQuery runs before it. Neither creates a snapshot lease.
@@ -269,7 +271,7 @@ class AcquisitionQuery {
         if (lexical.resource_refusal) this.resourceRefusals.push(lexical.resource_refusal);
         this.absorb(lexical.resources);
         for (const candidate of this.lexicalCandidates) {
-          this.observe(() => ({ kind: "lexical_candidate", target: structuredClone(candidate.source.target),
+          this.observe("lexical_candidate", () => ({ kind: "lexical_candidate", target: structuredClone(candidate.source.target),
             lane: candidate.lexical.lane, rank: candidate.lexical.rank, lane_rank: candidate.lexical.lane_rank,
             bm25: candidate.lexical.bm25 }));
         }
@@ -302,18 +304,18 @@ class AcquisitionQuery {
         "native_deadline_and_interruption_require_daemon_integration", "caller_owned_read_snapshot_required",
         "lexical_corpus_coverage_untracked"]
     };
-    this.observe(() => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
+    this.observe("acquisition_complete", () => ({ kind: "acquisition_complete", completion: result.completion, accounting: { ...this.counts },
       lexical_completion: this.lexical.completion, vector_completion: this.vector.completion }));
     return result;
   }
 
-  private observe(capture: () => SourceIndexAcquisitionFact): void {
-    try { this.observer?.(capture); } catch { /* Observer failure cannot alter nomination, budget or output. */ }
+  private observe(kind: SourceIndexAcquisitionFact["kind"], capture: () => SourceIndexAcquisitionFact): void {
+    try { this.observer?.(capture, kind); } catch { /* Observer failure cannot alter nomination, budget or output. */ }
   }
 
   private observeNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
     disposition: Extract<SourceIndexAcquisitionFact, { kind: "nomination_attempt" }>["disposition"]): void {
-    this.observe(() => ({ kind: "nomination_attempt", channel, target: structuredClone(source.target), disposition }));
+    this.observe("nomination_attempt", () => ({ kind: "nomination_attempt", channel, target: structuredClone(source.target), disposition }));
   }
 
   private prepareInput(): void {
@@ -411,7 +413,7 @@ class AcquisitionQuery {
       this.vectorCandidates = ranked.map((candidate, index) => {
         this.meter.charge(1, 128, "source vector rank retention");
         const rankedCandidate = { ...candidate, vector: { ...candidate.vector, rank: index + 1 } };
-        this.observe(() => ({ kind: "vector_ranked", target: structuredClone(rankedCandidate.source.target),
+        this.observe("vector_ranked", () => ({ kind: "vector_ranked", target: structuredClone(rankedCandidate.source.target),
           window: structuredClone(rankedCandidate.vector.window), cosine: rankedCandidate.vector.cosine,
           rank: rankedCandidate.vector.rank }));
         return rankedCandidate;
@@ -438,7 +440,7 @@ class AcquisitionQuery {
     }
     const cosine = this.scoreVector!(candidate.embedding);
     if (!Number.isFinite(cosine)) return;
-    this.observe(() => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
+    this.observe("vector_inspected", () => ({ kind: "vector_inspected", target: structuredClone(candidate.source.target),
       window: structuredClone(candidate.window), cosine }));
     const key = sourceGoldRootIdentity(candidate.source.target);
     this.meter.charge(1 + key.length, 0, "source vector root lookup");

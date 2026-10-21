@@ -17,7 +17,11 @@ function setup() {
 }
 function collect() {
   const facts: SourceIndexAcquisitionFact[] = [];
-  return { facts, observer: (capture: () => SourceIndexAcquisitionFact) => { facts.push(capture()); } };
+  return { facts, observer: (capture: () => SourceIndexAcquisitionFact, kind: SourceIndexAcquisitionFact["kind"]) => {
+    const fact = capture();
+    expect(fact.kind).toBe(kind);
+    facts.push(fact);
+  } };
 }
 
 describe("source index acquisition observation through native SQLite", () => {
@@ -42,6 +46,11 @@ describe("source index acquisition observation through native SQLite", () => {
     expect(limited.facts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "nomination_limit")).toBe(true);
     expect(limited.facts.some(fact => fact.kind === "lexical_candidate" && "start_byte" in fact)).toBe(false);
     expect(limited.facts.some(fact => "remaining" in fact || "global_rank" in fact || "fused_score" in fact)).toBe(false);
+    expect(facts.filter(fact => fact.kind === "vector_inspected")).toHaveLength(7);
+    const ranked = facts.filter(fact => fact.kind === "vector_ranked");
+    expect(ranked).toHaveLength(5);
+    expect(new Set(ranked.map(fact => fact.target.root_id)).size).toBe(5);
+    expect(ranked[0]).toMatchObject({ cosine: 1, rank: 1, window: { start_byte: 0, end_byte: 8 } });
     for (const fact of facts) {
       if (fact.kind === "vector_inspected") expect("rank" in fact).toBe(false);
       if (fact.kind === "vector_ranked") expect(fact.rank).toBeGreaterThan(0);
@@ -49,13 +58,35 @@ describe("source index acquisition observation through native SQLite", () => {
     expectMetadataOnly(on, AXIS_ROOTS.map(root => root.body));
   });
 
+  it("counts inspected SQLite windows without constructing their discarded payloads", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const input = queryInput(), off = query(environment, input, admitScope);
+    const clone = vi.spyOn(globalThis, "structuredClone");
+    let inspected = 0;
+    const on = query(environment, input, admitScope, (capture, kind) => {
+      if (kind === "vector_inspected") inspected++;
+      else capture();
+    });
+    expect(on).toEqual(off);
+    expect(inspected).toBe(7);
+    // Only the five finalized best-per-root windows are copied, not seven inspections.
+    expect(clone.mock.calls.filter(([value]) => value !== null && typeof value === "object" && "window_id" in value))
+      .toHaveLength(5);
+  });
+
   it("does not construct payloads unless capture runs, and observer failure cannot change output", () => {
     const environment = setup();
     publishIndex(environment);
     const input = queryInput();
+    const clone = vi.spyOn(globalThis, "structuredClone");
     const off = query(environment, input, admitScope);
+    const observationClones = () => clone.mock.calls.filter(([value]) => value !== null && typeof value === "object"
+      && ("kind" in value && value.kind === "source_evidence" || "window_id" in value));
+    expect(observationClones()).toEqual([]);
     let constructed = 0;
     const skipped = query(environment, input, admitScope, capture => { expect(typeof capture).toBe("function"); });
+    expect(observationClones()).toEqual([]);
     const counted = query(environment, input, admitScope, capture => { constructed++; capture(); });
     const failed = query(environment, input, admitScope, () => { throw new Error("observer must not affect acquisition"); });
     expect(skipped).toEqual(off);
@@ -68,7 +99,8 @@ describe("source index acquisition observation through native SQLite", () => {
     expect(admitted?.kind).toBe("nomination_attempt");
     if (admitted?.kind === "nomination_attempt") {
       expect(admitted.target).not.toBe(on.nominations[0]?.source.target);
-      expect({ ...admitted.target, root_id: "mutated" }.root_id).toBe("mutated");
+      Object.assign(admitted.target, { root_id: "mutated" });
+      expect(admitted.target.root_id).toBe("mutated");
       expect(on.nominations[0]?.source.target.root_id).not.toBe("mutated");
     }
   });

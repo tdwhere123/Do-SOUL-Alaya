@@ -22,7 +22,9 @@ export type ObservationEvent = SourceSemanticObservation["events"][number] & Rea
 }>;
 export type ObservationAncestry = Readonly<{
   target: SourceSemanticObservation | null; frames: readonly ObservationCapturedFrame[];
-  events: readonly ObservationEvent[]; complete: boolean; snapshot_bound: boolean;
+  events: readonly ObservationEvent[]; complete: boolean;
+  /** Complete causal progress events/ancestry, independent of optional candidate/fit detail. */
+  progress_complete: boolean; snapshot_bound: boolean;
   status: "usable" | "missing" | "ambiguous" | "unavailable"; issues: readonly string[];
 }>;
 type Origin = NonNullable<SourceSemanticNativeFacts["pool"]>["origin"];
@@ -59,7 +61,7 @@ export function observationFrameComplete(frame: SourceSemanticObservation): bool
 export function joinObservationFrames(call: ObservationCallScope, captured: readonly ObservationCapturedFrame[]): ObservationAncestry {
   const matches = captured.filter(row => sameCall(row.call, call));
   const empty = (status: ObservationAncestry["status"], issue: string): ObservationAncestry =>
-    ({ target: null, frames: [], events: [], complete: false, snapshot_bound: false, status, issues: [issue] });
+    ({ target: null, frames: [], events: [], complete: false, progress_complete: false, snapshot_bound: false, status, issues: [issue] });
   if (call.request_id === null) return empty("missing", "observation_request_unscoped");
   if (matches.length !== 1) return empty(matches.length > 1 ? "ambiguous" : "missing",
     matches.length > 1 ? "ambiguous_observation_request" : "observation_missing_for_request");
@@ -128,8 +130,10 @@ export function joinObservationFrames(call: ObservationCallScope, captured: read
   };
   visit(target);
   const frames = [...selected];
+  const progressComplete = issues.size === 0 && frames.every(row => observationFrameComplete(row.observation));
   return { target: target.observation, frames, status: "usable", issues: [...issues],
-    snapshot_bound: bound(target) && sealedSnapshot(call.snapshot_id), complete: issues.size === 0 && frames.every(row => observationFrameComplete(row.observation)),
+    snapshot_bound: bound(target) && sealedSnapshot(call.snapshot_id), progress_complete: progressComplete,
+    complete: progressComplete && frames.every(row => row.observation.diagnostics?.status !== "overflow"),
     events: frames.flatMap(({ call: scope, observation }) => observation.events.map((event, event_position) =>
       ({ ...event, event_position, request_id: observation.request_id, session_id: scope.session_id, call_kind: scope.kind }))) };
 }

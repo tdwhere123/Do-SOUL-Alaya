@@ -265,6 +265,54 @@ describe("observation attribution", () => {
       nomination: "unknown", native: { lexical_ranks: [{ rank: 4 }] } });
   });
 
+  it("scopes unavailable inspection detail to its vector route without closing the whole observation", () => {
+    const diagnostic = { status: "overflow" as const, compacted_events: 0, omitted_events: 600,
+      counts: { source_index_original_vector_inspected: 600 },
+      omitted_counts: { source_index_original_vector_inspected: 600 } };
+    const frame = captured([routeEvent, returned(0, 5)], call, facts(call, { pool: pool([unit()]) }),
+      { diagnostics: diagnostic });
+    const result = attributed({ frames: [frame] });
+    expect(result.observation).toMatchObject({ complete: false, progress_complete: true });
+    expect(result.layer).toBe("L3");
+    expect(result.messages[0]).toMatchObject({ candidate: "present", read: "none", visibility: { delivery: "failed" } });
+    const routes = result.messages[0]!.routes;
+    expect(routes.find(row => row.route === "index:original:vector")).toMatchObject({ nomination: "passed",
+      native: { vector: { rank: 3 } }, unknowns: [{ stage: "nomination", reason: "vector_inspection_detail_unavailable" }] });
+    expect(routes.find(row => row.route === "index:hint:vector")?.unknowns).toEqual([]);
+    expect(routes.find(row => row.route === "index:original:lexical")?.unknowns).toEqual([]);
+    expect(routes.find(row => row.route === "read:observation")?.unknowns).toEqual([]);
+    for (const extra of [{ status: "overflow" as const, dropped_events: 1 },
+      { status: "failure" as const, issues: ["observer_capture_failed"] }]) {
+      const incomplete = attributed({ frames: [{ ...frame, observation: { ...frame.observation, ...extra } }] });
+      expect(incomplete.observation.progress_complete).toBe(false);
+      expect(incomplete.layer).toBe("U");
+      expect(incomplete.messages[0]?.read).toBe("unknown");
+    }
+  });
+
+  it("preserves a cap rejection when its rank diagnostic is unavailable", () => {
+    const attempt = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original", kind: "nomination_attempt", channel: "vector", target: target(unit()),
+      disposition: "nomination_limit" } };
+    const result = attributed({ frames: [captured([attempt], call, facts(), { diagnostics: {
+      status: "overflow", compacted_events: 0, omitted_events: 1,
+      counts: { source_index_original_vector_ranked: 129 }, omitted_counts: { source_index_original_vector_ranked: 1 } } })] });
+    expect(result.layer).toBe("L2");
+    expect(result.observation).toMatchObject({ complete: false, progress_complete: true });
+    expect(result.messages[0]?.routes.find(row => row.route === "index:original:vector")).toMatchObject({
+      nomination: "failed", native: { vector: null },
+      unknowns: [{ stage: "nomination", reason: "vector_rank_unavailable" }] });
+  });
+
+  it("treats a duplicate as retained route participation, not distinct admission or consumer visibility", () => {
+    const duplicate = { kind: "source_index_acquisition", phase: "observation", data: {
+      invocation: "original", kind: "nomination_attempt", channel: "vector", target: target(unit()), disposition: "duplicate" } };
+    const result = attributed({ frames: [captured([duplicate])] });
+    expect(result.layer).toBe("L2");
+    expect(result.messages[0]).toMatchObject({ candidate: "absent", read: "none", visibility: { delivery: "failed" } });
+    expect(result.messages[0]?.routes.find(row => row.route === "index:original:vector")).toMatchObject({ nomination: "passed" });
+  });
+
   it("conserves the exclusive question partition while opportunity bounds overlap independently", () => {
     const rows = [attributed({ visibility: visibility(gold(), "hit"), frames: [] }),
       attributed({ frozen_index: frozen(unit(), false) }), attributed(),

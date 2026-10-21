@@ -100,7 +100,7 @@ function nativePhases(events: Events): NativePhaseFact[] {
  * mapped identity and span; an absent, repeated or unknown row stays unknown. */
 export function observationMessageFacts(span: AnswerTurnSpan, input: ObservationAttributionInput,
   joined: ObservationAncestry, finite: ReturnType<typeof observedFiniteUnion>): ObservationMessageFacts {
-  const events = joined.events, complete = joined.complete, poolClosed = finite.complete;
+  const events = joined.events, complete = joined.progress_complete, poolClosed = finite.complete;
   const qualification = observationIndexEligibility(span, input.call, joined, input.frozen_index);
   const admitted = joined.snapshot_bound ? findAdmitted(input.admitted_roots, input.call, span)
     : { state: "unknown" as const, root: null };
@@ -115,7 +115,7 @@ export function observationMessageFacts(span: AnswerTurnSpan, input: Observation
   const readIdentity = admitted.root ?? (member !== null && joined.snapshot_bound && input.call.snapshot_id !== null ? {
     record_id: member.record_id, source_id: member.source_id, snapshot_id: input.call.snapshot_id, identity: span.target } : null);
   const matches = (value: unknown) => span.target.workspace_id === input.call.workspace_id && eventMatches(value, readIdentity, span);
-  const routes = indexRoutes(events, span, complete, qualification);
+  const routes = indexRoutes(joined, span, qualification);
   const snapshot = route("snapshot_admission");
   snapshot.eligibility = "not_run";
   snapshot.nomination = "not_run";
@@ -191,8 +191,9 @@ function messageDelivery(span: AnswerTurnSpan, score: ConsumerVisibilityScore,
     reason: metric.reason, visible_intervals: matches[0]!.visible_intervals };
 }
 
-function indexRoutes(events: Events, span: AnswerTurnSpan, complete: boolean,
+function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
   qualification: ObservationIndexEligibility): MutableRoute[] {
+  const events = joined.events, complete = joined.progress_complete;
   const observed = nativePhases(events);
   const captures = events.flatMap(event => {
     if (event.kind !== "source_index_acquisition") return [];
@@ -216,11 +217,12 @@ function indexRoutes(events: Events, span: AnswerTurnSpan, complete: boolean,
       const attempts = matching.filter(row => row.data.kind === "nomination_attempt" && row.data.channel === channel);
       const dispositions = attempts.map(row => row.data.disposition);
       const nominated = channel === "lexical" ? (nomination?.lexical.length ?? 0) > 0 : nomination?.vector != null;
-      const admitted = nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
+      // A duplicate retains this route's participation, not another distinct-root admission.
+      const retained = nominated || dispositions.some(value => value === "admitted" || value === "duplicate");
       const rejected = dispositions.some(value => value === "nomination_limit" || value === "scope_denied"
         || value === "stale" || value === "native_unknown" || value === "resource_refused" || value === "rejected");
       // Attempt facts can fail a route without inventing nomination_limit for an unobserved remainder.
-      fact.nomination = admitted ? "passed" : rejected ? "failed"
+      fact.nomination = retained ? "passed" : rejected ? "failed"
         : phase?.status === "not_run" || native?.completion === "not_run" ? "not_run" : "unknown";
       fact.eligibility = qualification[channel];
       const rankEvents = matching.filter(row => channel === "lexical" ? row.data.kind === "lexical_candidate"
@@ -240,8 +242,12 @@ function indexRoutes(events: Events, span: AnswerTurnSpan, complete: boolean,
         vector_state: channel === "vector" ? result?.vector.state ?? null : null,
         limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])] };
       const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
-      if (!admitted && !ranksAvailable) {
-        fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable_not_individual_nomination_limit` });
+      if (!retained && !ranksAvailable) {
+        fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
+      }
+      if (channel === "vector" && joined.frames.some(row =>
+        (row.observation.diagnostics?.omitted_counts?.[`source_index_${invocation}_vector_inspected`] ?? 0) > 0)) {
+        fact.unknowns.push({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
       }
       if (qualification[channel] === "unknown") fact.unknowns.push({ stage: "eligibility", reason: qualification.reason });
       if (!complete) fact.unknowns.push({ stage: "nomination", reason: "observation_incomplete" });

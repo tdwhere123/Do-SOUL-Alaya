@@ -9,6 +9,7 @@ export const SourceSemanticObservationRequestSchema = z.object({
 }).strict();
 export type SourceSemanticObservationOptions = z.input<typeof SourceSemanticObservationRequestSchema>;
 export type SourceSemanticObservationRequest = z.output<typeof SourceSemanticObservationRequestSchema>;
+type AcquisitionDiagnosticKind = `source_index_${"original" | "hint"}_${"vector_inspected" | "vector_ranked" | "lexical_candidate"}`;
 export type ObservationCost = { phase: string; reason: string; operation: string; count: number; work: number; bytes: number };
 export type ObservationMeter = { id: number; parent: number | null; phase: string;
   initial: { work_units: number; memory_bytes: number }; remaining: { work_units: number; memory_bytes: number };
@@ -27,7 +28,9 @@ export type SourceSemanticObservation = Readonly<{
   /** Absent on historical frames. Diagnostic omission does not truncate the native finite union. */
   facts?: SourceSemanticNativeFacts;
   diagnostics?: Readonly<{ status: "complete" | "overflow"; compacted_events: number; omitted_events: number;
-    counts: Readonly<Record<string, number>> }>;
+    counts: Readonly<Record<string, number>>;
+    /** Absent historically. Count-only or capacity-omitted detail, not missing causal progress events. */
+    omitted_counts?: Readonly<Record<string, number>> }>;
   costs: readonly ObservationCost[];
   meters: readonly ObservationMeter[];
   /** Native spent deltas, independent of debit/absorption labels and the 32-meter sample. */
@@ -79,6 +82,7 @@ export class SourceSemanticObserver {
   private compactedDiagnostics = 0;
   private omittedDiagnostics = 0;
   private readonly diagnosticCounts: Record<string, number> = {};
+  private readonly omittedDiagnosticCounts: Record<string, number> = {};
   private readonly diagnosticPayloads = new Set<string>();
 
   constructor(private readonly requestId: number, private readonly limits: SourceSemanticObservationRequest) {
@@ -169,15 +173,30 @@ export class SourceSemanticObserver {
     });
   }
 
-  event(kind: string, phase: string, data: () => unknown): void {
+  /** Count deliberately unavailable detail without constructing, serializing or queuing its payload. */
+  omitDiagnostic(kind: AcquisitionDiagnosticKind): void {
     this.safely(() => {
-      const diagnostic = ["selection_attempt", "selection_result", "selection_failure", "encoding_attempt", "encoding_result", "capacity_adjustment"].includes(kind);
-      if (diagnostic) this.diagnosticCounts[kind] = (this.diagnosticCounts[kind] ?? 0) + 1;
-      // Repeated fit/encoding detail must not eclipse source reads, union membership and final visibility.
-      // Independent operation aggregates continue even when diagnostic detail is omitted.
-      const omit = () => { if (diagnostic) this.omittedDiagnostics++; else this.dropped++; };
+      this.diagnosticCounts[kind] = (this.diagnosticCounts[kind] ?? 0) + 1;
+      this.omittedDiagnosticCounts[kind] = (this.omittedDiagnosticCounts[kind] ?? 0) + 1;
+      this.omittedDiagnostics++;
+    });
+  }
+
+  event(kind: string, phase: string, data: () => unknown, diagnosticKind?: AcquisitionDiagnosticKind): void {
+    this.safely(() => {
+      const diagnostic = diagnosticKind ?? (["selection_attempt", "selection_result", "selection_failure", "encoding_attempt", "encoding_result", "capacity_adjustment"].includes(kind) ? kind : undefined);
+      if (diagnostic !== undefined) this.diagnosticCounts[diagnostic] = (this.diagnosticCounts[diagnostic] ?? 0) + 1;
+      // Candidate and repeated fit/encoding detail share the existing diagnostic quota;
+      // they must not eclipse nomination attempts, source reads or final visibility.
+      const omit = () => {
+        if (diagnostic === undefined) this.dropped++;
+        else {
+          this.omittedDiagnostics++;
+          this.omittedDiagnosticCounts[diagnostic] = (this.omittedDiagnosticCounts[diagnostic] ?? 0) + 1;
+        }
+      };
       if (this.events.length >= this.limits.max_events || this.eventBytes >= this.limits.max_bytes
-        || diagnostic && (this.diagnosticEvents >= Math.floor(this.limits.max_events / 4)
+        || diagnostic !== undefined && (this.diagnosticEvents >= Math.floor(this.limits.max_events / 4)
           || this.diagnosticBytes >= Math.floor(this.limits.max_bytes / 4))) { omit(); return; }
       const value = { kind, phase, data: data() };
       // Bound temporary serialization too. Oversize identities/trees are unknown, never silently clipped.
@@ -196,14 +215,14 @@ export class SourceSemanticObserver {
       }
       const json = JSON.stringify(value);
       const size = Buffer.byteLength(json);
-      if (diagnostic && this.diagnosticPayloads.has(json)) { this.compactedDiagnostics++; return; }
-      if (size > this.limits.max_bytes - this.eventBytes || diagnostic && size > Math.floor(this.limits.max_bytes / 4) - this.diagnosticBytes) {
+      if (diagnostic !== undefined && this.diagnosticPayloads.has(json)) { this.compactedDiagnostics++; return; }
+      if (size > this.limits.max_bytes - this.eventBytes || diagnostic !== undefined && size > Math.floor(this.limits.max_bytes / 4) - this.diagnosticBytes) {
         omit(); return;
       }
       // Snapshot metadata, never retain mutable producer objects or source bodies.
       this.events.push(JSON.parse(json) as { kind: string; phase: string; data: unknown });
       this.eventBytes += size;
-      if (diagnostic) { this.diagnosticPayloads.add(json); this.diagnosticEvents++; this.diagnosticBytes += size; }
+      if (diagnostic !== undefined) { this.diagnosticPayloads.add(json); this.diagnosticEvents++; this.diagnosticBytes += size; }
     });
   }
 
@@ -222,7 +241,8 @@ export class SourceSemanticObserver {
       meter_totals: { complete: !this.failed, roots: this.meterTotals.roots, children: this.meterTotals.children,
         root_spent: { ...this.meterTotals.root_spent }, child_spent: { ...this.meterTotals.child_spent } },
       facts: this.facts.finish(!this.failed), diagnostics: { status: this.omittedDiagnostics > 0 ? "overflow" : "complete",
-        compacted_events: this.compactedDiagnostics, omitted_events: this.omittedDiagnostics, counts: { ...this.diagnosticCounts } },
+        compacted_events: this.compactedDiagnostics, omitted_events: this.omittedDiagnostics, counts: { ...this.diagnosticCounts },
+        omitted_counts: { ...this.omittedDiagnosticCounts } },
       dropped_events: this.dropped, aggregates_complete: this.aggregatesComplete && !this.failed,
       overhead: { capture_ms: this.captureMs, event_json_bytes: this.eventBytes, ipc_bytes: null,
         ipc_time: "not_measured", physical_peak_memory: "not_measured", physical_sql_work: "not_measured" },
@@ -246,7 +266,8 @@ const ObservationSchema: z.ZodType<SourceSemanticObservation> = z.object({
   events: z.array(z.object({ kind: z.string().max(80), phase: z.string().max(80), data: z.unknown() }).strict()).max(2048),
   facts: SourceSemanticNativeFactsSchema.optional(),
   diagnostics: z.object({ status: z.enum(["complete", "overflow"]), compacted_events: Nonnegative,
-    omitted_events: Nonnegative, counts: z.record(z.string().max(80), Nonnegative) }).strict().optional(),
+    omitted_events: Nonnegative, counts: z.record(z.string().max(80), Nonnegative),
+    omitted_counts: z.record(z.string().max(80), Nonnegative).optional() }).strict().optional(),
   costs: z.array(z.object({ phase: z.string().max(80), reason: z.string().max(160), operation: z.string().max(32),
     count: Nonnegative, work: Nonnegative, bytes: Nonnegative }).strict()).max(270),
   meters: z.array(z.object({ id: Nonnegative, parent: Nonnegative.nullable(), phase: z.string().max(80),
