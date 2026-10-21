@@ -18,7 +18,8 @@ import { currentBenchScope, removeDataDirWhenBenchDaemonCancelled, runBenchDaemo
   trackBenchBody } from "../../harness/daemon-task.js";
 import { readCurrentExtractionAuthorityRevision } from "../extraction/authority/inspection.js";
 import { isAuthorityRevision } from "../extraction/authority/receipt.js";
-import { SemanticChainSourceIndexBindingSchema, assertSemanticChainSourceIndex } from "./source-index-binding.js";
+import { SemanticChainSourceIndexBindingSchema } from "./source-index-binding-schema.js";
+import { assertSemanticChainSourceIndex } from "./source-index-binding.js";
 import { SemanticChainSourceFailureSchema } from "./source-index-observation.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);

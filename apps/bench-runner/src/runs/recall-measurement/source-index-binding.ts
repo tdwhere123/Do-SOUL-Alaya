@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { z } from "zod";
-import { AlayaError, canonicalJson, SourceIndexConfigurationSchema,
+import { AlayaError, canonicalJson,
   sourceIndexConfigurationId, sourceIndexGenerationId, sourceIndexProfileId, sourceIndexGenerationCanServeQueries,
   SourceIndexProfileSchema,
   type SourceSemanticResourceBudget } from "@do-soul/alaya-protocol";
@@ -16,27 +16,12 @@ import { restoreSnapshotToDataDir, checkpointAndCopyBenchDb } from "../snapshot/
 import { hashRegularFileNoFollow } from "../snapshot/bound-file.js";
 import { SemanticChainConfigSchema, assertChainSnapshot, chainIdentity, readChainArtifact,
   writeChainArtifact, writeChainJson, type SemanticChainConfig } from "./contract.js";
+import { CachedLocalSourceExecutionSchema, IndexBindingSchema } from "./source-index-binding-schema.js";
 import type {
   SourceIndexProducerPassReceipt, SourceIndexProducerPassRemaining
 } from "../../../../core-daemon/src/runtime/source-index/source-index-producer.js";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
-export const CachedLocalSourceExecutionSchema = z.object({
-  cache_root: z.string().min(1).refine(isAbsolute, "explicit absolute model cache required"),
-  model_id: z.string().min(1)
-}).strict();
-const IndexBindingSchema = z.object({
-  configuration: SourceIndexConfigurationSchema, config_id: z.string(), profile_id: z.string(),
-  selection_revision: z.number().int().nonnegative(), generation_id: z.string(),
-  source_epoch: z.number().int().nonnegative(), status: z.enum(["ready", "partial", "valid_empty"]),
-  enumeration_complete: z.boolean(), target_count: z.number().int().nonnegative(),
-  completed_count: z.number().int().nonnegative()
-}).strict();
-export const SemanticChainSourceIndexBindingSchema = CachedLocalSourceExecutionSchema.extend({
-  kind: z.literal("cached_local"), index: IndexBindingSchema,
-  preparation_path: z.string().min(1), preparation_identity: Digest
-}).strict();
-export type SemanticChainSourceIndexBinding = z.infer<typeof SemanticChainSourceIndexBindingSchema>;
 
 /** Metadata alone is diagnostic. With a budget, the query reader owns epoch/active eligibility;
  * this chain additionally requires complete captured coverage, not the product's partial-index mode. */
