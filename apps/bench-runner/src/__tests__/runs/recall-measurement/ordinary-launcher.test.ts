@@ -13,9 +13,11 @@ import { canonicalJson } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../../runs/snapshot/source-records/publish.js";
 import { readChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import {
-  OrdinaryRecallEntryInputSchema, ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, buildOrdinaryRecallRequest, mapOrdinaryRecallScope
+  OrdinaryRecallEntryInputSchema, ORDINARY_RECALL_OBSERVED_SLOT_TARGET, ORDINARY_RECALL_PUBLIC_PAGE_SLOTS,
+  buildOrdinaryRecallRequest, mapOrdinaryRecallScope
 } from "../../../runs/recall-measurement/ordinary/ordinary-entry-contract.js";
-import { executeOrdinaryRecallEntry } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
+import { executeOrdinaryRecallEntry, ordinaryEntryVisibilityPages } from "../../../runs/recall-measurement/ordinary/ordinary-entry-execution.js";
+import { scoreConsumerMessageVisibility } from "../../../runs/longmemeval-semantic/message-visibility.js";
 import { nativeRecallFixture, HIDDEN_GOLD, QUESTION } from "./native-recall.test-support.js";
 
 const PROJECTS = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory"] as const;
@@ -58,13 +60,23 @@ it("executes public soul.recall through MCP against the restored SQLite snapshot
     config: plan.config, root,
     queries: [{ query_key: query.query_key, original_query: query.original_query }]
   });
-  expect(execution.mapping).toMatchObject({ status: "mapped", scope_class: "project", max_results: 5 });
+  expect(execution.mapping).toMatchObject({
+    status: "mapped", scope_class: "project", max_results: 5,
+    observed_slot_target: ORDINARY_RECALL_OBSERVED_SLOT_TARGET
+  });
   expect(execution.mapping.unmapped_dimensions).toEqual(expect.arrayContaining(["budget.page_budget", "output_byte_limit", "budget.work_units"]));
   expect(execution.consumer_model_calls).toBe(0);
   const row = execution.rows[0]!;
   expect(row.status).toBe("complete");
+  expect(row.page_count).toBe(row.pages.length);
+  expect(["observed_ten_slot_prefix", "occupancy_tail_exhausted"]).toContain(row.stop_cause);
   expect(row.unobserved_counters).toEqual(expect.arrayContaining(["work_units", "provider_calls"]));
   expect(row.unobserved_counters).not.toContain(0);
+  expect(row.costs.work_units).toEqual({ status: "unavailable", reason: "public_soul_recall_omits_native_work" });
+  expect(row.costs.read_bytes).toEqual({ status: "unavailable", reason: "public_soul_recall_omits_read_bytes" });
+  expect(row.costs.latency_ms).toMatchObject({ status: "available", source: "client_mcp_elapsed" });
+  expect(row.costs.work_units).not.toHaveProperty("value");
+  expect(row.costs.read_bytes).not.toHaveProperty("value");
   expect(row.first_exposure?.initial).not.toBeNull();
   expect(row.pages[0]?.public_call?.request.name).toBe("soul.recall");
   expect(row.pages[0]?.envelope).not.toBeNull();
@@ -104,17 +116,67 @@ it("captures an actual continuation page without replacing first exposure", asyn
   expect(first.occupied_slots).toBe(5);
   expect(first.output?.results.length).toBe(5);
   expect(first.output?.index?.continuation).not.toBeNull();
-  expect(row.pages).toHaveLength(2);
+  expect(row.page_count).toBe(row.pages.length);
+  expect(row.pages.length).toBeGreaterThanOrEqual(2);
   const second = row.pages[1]!;
   expect(second.request.continuation).toEqual(first.output?.index?.continuation);
   expect(second.first_exposure?.initial).toEqual(first.first_exposure?.initial);
   expect(second.first_exposure?.request_continuation).toEqual(first.output?.index?.continuation);
   expect(second.occupied_slots).toBeGreaterThan(0);
-  expect(row.pages.reduce((sum, page) => sum + page.occupied_slots, 0)).toBeGreaterThan(5);
+  const occupied = row.pages.reduce((sum, page) => sum + page.occupied_slots, 0);
+  expect(occupied).toBeGreaterThan(5);
   expect(row.source_intervals.length).toBeGreaterThan(5);
   expect(new Set(row.source_intervals.flatMap(interval => interval.target.kind === "source_evidence" ? [interval.target.root_id] : [])).size)
     .toBe(row.source_intervals.length);
+  if (row.stop_cause === "occupancy_tail_exhausted") {
+    expect(row.pages.at(-1)?.terminal_tail.status).toBe("exhausted");
+    expect(row.pages.at(-1)?.continuation).toBe("none");
+  }
+  const score = scoreConsumerMessageVisibility({ gold: undefined, pages: ordinaryEntryVisibilityPages(row) });
+  expect(score.any_at_10.reason).not.toBe("second_page_not_observed");
+  expect(score.observation.observed_through).toBe(occupied);
+  if (row.stop_cause === "occupancy_tail_exhausted") {
+    expect(score.any_at_10).toEqual({ status: "unknown", reason: "answer_turn_mapping_incomplete" });
+  } else {
+    expect(occupied).toBeGreaterThanOrEqual(ORDINARY_RECALL_OBSERVED_SLOT_TARGET);
+  }
 }, 120000);
+
+it("follows public continuation past two pages until ten slots or admitted tail exhaustion", async () => {
+  const names = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory", "Ironwood", "Juniper", "Kauri", "Larch"];
+  const large = await nativeRecallFixture(names.map(name => `Project ${name} was mentioned. ${"Encoding padding. ".repeat(320)}`));
+  try {
+    const plan = large.admitted.plan, query = plan.queries[0]!;
+    const execution = await executeOrdinaryRecallEntry({
+      config: plan.config, root: join(large.root, "ordinary-entry-long-pages"),
+      queries: [{ query_key: query.query_key, original_query: query.original_query }]
+    });
+    const row = execution.rows[0]!;
+    expect(row.status).toBe("complete");
+    expect(row.page_count).toBe(row.pages.length);
+    expect(["observed_ten_slot_prefix", "occupancy_tail_exhausted"]).toContain(row.stop_cause);
+    const occupied = row.pages.reduce((sum, page) => sum + page.occupied_slots, 0);
+    const firstTwo = row.pages.slice(0, 2).reduce((sum, page) => sum + page.occupied_slots, 0);
+    if (firstTwo < ORDINARY_RECALL_OBSERVED_SLOT_TARGET && row.stop_cause !== "failed") {
+      expect(row.pages.length).toBeGreaterThan(2);
+    }
+    if (row.stop_cause === "observed_ten_slot_prefix") {
+      expect(occupied).toBeGreaterThanOrEqual(ORDINARY_RECALL_OBSERVED_SLOT_TARGET);
+    } else {
+      expect(row.pages.at(-1)?.terminal_tail.status).toBe("exhausted");
+      expect(row.pages.at(-1)?.continuation).toBe("none");
+    }
+    expect(row.costs.work_units.status).toBe("unavailable");
+    expect(row.costs.read_bytes.status).toBe("unavailable");
+    expect(row.costs.latency_ms.status).toBe("available");
+    const score = scoreConsumerMessageVisibility({ gold: undefined, pages: ordinaryEntryVisibilityPages(row) });
+    expect(score.any_at_10.reason).not.toBe("second_page_not_observed");
+    expect(score.observation.observed_through).toBe(occupied);
+    expect(JSON.stringify(execution)).not.toContain(HIDDEN_GOLD);
+  } finally {
+    rmSync(large.root, { recursive: true, force: true });
+  }
+}, 180000);
 
 it("does not reuse an ordinary entry artifact for a different requested config", async () => {
   const plan = base.admitted.plan, query = plan.queries[0]!;
@@ -136,7 +198,14 @@ it("returns not-run without intervals when ordinary entry cannot express authori
     queries: [{ query_key: query.query_key, original_query: query.original_query }]
   });
   expect(execution.mapping.status).toBe("not_run");
-  expect(execution.rows[0]).toMatchObject({ status: "not_run", pages: [], source_intervals: [], first_exposure: null });
+  expect(execution.rows[0]).toMatchObject({
+    status: "not_run", pages: [], page_count: 0, stop_cause: "not_run", source_intervals: [], first_exposure: null,
+    costs: {
+      work_units: { status: "unavailable", reason: "public_soul_recall_omits_native_work" },
+      read_bytes: { status: "unavailable", reason: "public_soul_recall_omits_read_bytes" },
+      latency_ms: { status: "unavailable", reason: "no_public_call_elapsed" }
+    }
+  });
   expect(execution.rows[0]?.pages.every(page => page.occupied_slots === 0) ?? true).toBe(true);
   expect(execution.rows[0]?.source_intervals).toEqual([]);
   expect(readdirSync(root).filter(name => name.startsWith("native-session-"))).toEqual([]);

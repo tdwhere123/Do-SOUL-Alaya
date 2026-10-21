@@ -7,10 +7,17 @@ import { FirstExposurePageSchema } from "../../measurement/first-exposure-sessio
 import { OrdinaryRecallEnvelopeSchema } from "./ordinary-recall-contract.js";
 
 /** Live public `soul.recall` execution evidence, not an offline capture-operator archive. */
-export const ORDINARY_RECALL_ENTRY_CONTRACT = "ordinary-recall-public-entry-v1" as const;
-/** Public membership width for @5 / two-page @10. Not `SemanticChainConfig.budget.page_budget`. */
+export const ORDINARY_RECALL_ENTRY_CONTRACT = "ordinary-recall-public-entry-v2" as const;
+/** Public membership width. Not `SemanticChainConfig.budget.page_budget`. */
 export const ORDINARY_RECALL_PUBLIC_PAGE_SLOTS = SOURCE_SEMANTIC_LIBRARY_PAGE_BUDGET;
-export const ORDINARY_RECALL_PUBLIC_PAGE_LIMIT = 2 as const;
+/** Occupied delivery slots needed for a resolved @10 prefix. */
+export const ORDINARY_RECALL_OBSERVED_SLOT_TARGET = 10 as const;
+/** Hard membership-call bound; stop earlier at ten occupied slots or admitted tail exhaustion. */
+export const ORDINARY_RECALL_PUBLIC_PAGE_LIMIT = 64 as const;
+export const ORDINARY_RECALL_STOP_CAUSES = [
+  "observed_ten_slot_prefix", "occupancy_tail_exhausted", "no_issued_continuation",
+  "terminal_index", "membership_page_bound", "not_run", "unavailable", "failed"
+] as const;
 
 /**
  * Library RequestBudget / output_byte_limit / access_policy are not soul.recall fields.
@@ -53,7 +60,13 @@ export const OrdinaryRecallEntryPageSchema = z.object({
   observation: z.enum(["observed", "unobserved"]),
   /** Admitted delivery slots on this page, including non-body results. Not source_intervals.length. */
   occupied_slots: z.number().int().nonnegative(),
-  source_intervals: z.array(OrdinaryRecallSourceIntervalSchema)
+  source_intervals: z.array(OrdinaryRecallSourceIntervalSchema),
+  complete: z.boolean(),
+  continuation: z.enum(["none", "present", "unknown"]),
+  terminal_tail: z.object({
+    status: z.enum(["exhausted", "open", "unknown"]), reason: z.string().min(1)
+  }).strict(),
+  reason: z.string().min(1).nullable()
 }).strict();
 const SnapshotIdentitySchema = z.object({
   query_id: z.string().min(1), snapshot_id: z.string().min(1), result_version: z.string().min(1),
@@ -62,20 +75,33 @@ const SnapshotIdentitySchema = z.object({
 const Unobserved = z.enum([
   "work_units", "memory_bytes", "finalization_reserve", "min_envelope", "provider_calls"
 ]);
+/** Native work/bytes stay unavailable on the public envelope; client MCP elapsed is not worker time. */
+export const OrdinaryCostSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("available"), value: z.number().finite().nonnegative(), source: z.string().min(1)
+  }).strict(),
+  z.object({ status: z.literal("unavailable"), reason: z.string().min(1) }).strict()
+]);
 export const OrdinaryRecallQueryRowSchema = z.object({
   query_key: Digest, original_query: z.string().min(1),
   status: z.enum(["not_run", "unavailable", "failed", "partial", "complete"]),
   reason: z.string().min(1).optional(),
   snapshot_identity: SnapshotIdentitySchema.nullable(),
   pages: z.array(OrdinaryRecallEntryPageSchema).max(ORDINARY_RECALL_PUBLIC_PAGE_LIMIT),
+  page_count: z.number().int().nonnegative().max(ORDINARY_RECALL_PUBLIC_PAGE_LIMIT),
+  stop_cause: z.enum(ORDINARY_RECALL_STOP_CAUSES),
   first_exposure: FirstExposurePageSchema.nullable(),
   source_intervals: z.array(OrdinaryRecallSourceIntervalSchema),
-  unobserved_counters: z.array(Unobserved).readonly()
+  unobserved_counters: z.array(Unobserved).readonly(),
+  costs: z.object({
+    work_units: OrdinaryCostSchema, read_bytes: OrdinaryCostSchema, latency_ms: OrdinaryCostSchema
+  }).strict()
 }).strict();
 export const OrdinaryRecallMappingSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("mapped"), scope_class: ScopeClassSchema.nullable(),
     max_results: z.literal(ORDINARY_RECALL_PUBLIC_PAGE_SLOTS),
+    observed_slot_target: z.literal(ORDINARY_RECALL_OBSERVED_SLOT_TARGET),
     unmapped_dimensions: z.array(z.string()).readonly()
   }).strict(),
   z.object({

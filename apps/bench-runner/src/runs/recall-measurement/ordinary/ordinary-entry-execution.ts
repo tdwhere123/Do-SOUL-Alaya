@@ -20,12 +20,16 @@ import { semanticChainCacheInputPaths } from "../inputs.js";
 import { OrdinaryRecallEnvelopeSchema, OrdinaryRecallRequestRecordSchema, type OrdinaryRecallEnvelope } from "./ordinary-recall-contract.js";
 import type { CapturedOrdinaryRecallCall } from "./ordinary-recall.js";
 import { terminal, verifyExposure } from "./ordinary-recall-delivery.js";
+import { admittedSourceDeliveryTail, admittedSourcePreviewInterval } from "../../measurement/source-delivery-visibility.js";
+import { SourceGoldUnitSchema } from "../../measurement/source-gold-join.js";
+import type { ConsumerVisibilityPage } from "../../longmemeval-semantic/message-visibility.js";
 import {
   OrdinaryRecallEntryInputSchema, OrdinaryRecallExecutionSchema, OrdinaryRecallQueryRowSchema,
-  OrdinaryRecallSourceIntervalSchema, ORDINARY_RECALL_ENTRY_CONTRACT, ORDINARY_RECALL_PUBLIC_PAGE_LIMIT,
-  ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, ORDINARY_RECALL_UNMAPPED_DIMENSIONS, UNOBSERVED_ORDINARY_COUNTERS,
-  buildOrdinaryRecallRequest, mapOrdinaryRecallScope, type OrdinaryRecallExecution, type OrdinaryRecallMapping,
-  type OrdinaryRecallPublicRequest, type OrdinaryRecallQueryRow
+  OrdinaryRecallSourceIntervalSchema, ORDINARY_RECALL_ENTRY_CONTRACT, ORDINARY_RECALL_OBSERVED_SLOT_TARGET,
+  ORDINARY_RECALL_PUBLIC_PAGE_LIMIT, ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, ORDINARY_RECALL_UNMAPPED_DIMENSIONS,
+  UNOBSERVED_ORDINARY_COUNTERS, buildOrdinaryRecallRequest, mapOrdinaryRecallScope,
+  type OrdinaryRecallExecution, type OrdinaryRecallMapping, type OrdinaryRecallPublicRequest,
+  type OrdinaryRecallQueryRow
 } from "./ordinary-entry-contract.js";
 
 type SourceInterval = z.infer<typeof OrdinaryRecallSourceIntervalSchema>;
@@ -37,8 +41,9 @@ type EntryPage = OrdinaryRecallQueryRow["pages"][number];
  * `executeOrdinaryRecallEntry({ config, root, queries })` parses `SemanticChainConfig` and
  * `{ query_key, original_query }[]`, restores the snapshot with `withSemanticChainDaemon`,
  * and calls `callMcpTool(daemon.mcpClient, "soul.recall", args, capture)`.
- * Writes `root/ordinary-entry.json`. Each observed page sets `occupied_slots` from admitted
- * `exposureSlots`, not `source_intervals.length` (0 when the page is not admitted).
+ * Writes `root/ordinary-entry.json`. Follows issued public continuation until ten occupied
+ * slots or admitted occupancy-tail exhaustion. Each observed page sets `occupied_slots` from
+ * admitted `exposureSlots`, not `source_intervals.length` (0 when the page is not admitted).
  */
 export async function executeOrdinaryRecallEntry(value: unknown): Promise<OrdinaryRecallExecution> {
   const input = OrdinaryRecallEntryInputSchema.parse(value);
@@ -79,7 +84,8 @@ function mapConfig(config: SemanticChainConfig): OrdinaryRecallMapping {
   if (scope.status === "not_run") return { status: "not_run", reason: scope.reason, unmapped_dimensions };
   return {
     status: "mapped", scope_class: scope.scope_class,
-    max_results: ORDINARY_RECALL_PUBLIC_PAGE_SLOTS, unmapped_dimensions
+    max_results: ORDINARY_RECALL_PUBLIC_PAGE_SLOTS,
+    observed_slot_target: ORDINARY_RECALL_OBSERVED_SLOT_TARGET, unmapped_dimensions
   };
 }
 
@@ -143,11 +149,21 @@ async function executeOrdinaryQuery(
   let identity: SnapshotIdentity | null = null;
   let firstExposure: FirstExposurePage | null = null;
   let request: OrdinaryRecallPublicRequest = firstRequest;
+  let occupied = 0;
+  let elapsedMs = 0;
+  let elapsedCalls = 0;
+  let stopCause: OrdinaryRecallQueryRow["stop_cause"] = "membership_page_bound";
   try {
     for (let ordinal = 1; ordinal <= ORDINARY_RECALL_PUBLIC_PAGE_LIMIT; ordinal += 1) {
+      const started = performance.now();
       const page = await recallPublicMembershipPage(daemon, request, ordinal, session, firstExposure);
+      elapsedMs += performance.now() - started;
+      elapsedCalls += 1;
       pages.push(page);
-      if (page.observation !== "observed" || page.output?.index === undefined) break;
+      if (page.observation !== "observed" || page.output?.index === undefined) {
+        stopCause = page.response_state === "public_error" ? "failed" : "unavailable";
+        break;
+      }
       const index = page.output.index;
       const nextIdentity = snapshotIdentity(index, config.interpretation_clock);
       if (identity === null) identity = nextIdentity;
@@ -155,16 +171,21 @@ async function executeOrdinaryQuery(
         throw new AlayaError("CONFLICT", "ordinary public query or snapshot identity changed");
       }
       firstExposure ??= page.first_exposure;
-      if (index.continuation == null || terminal(index) || ordinal === ORDINARY_RECALL_PUBLIC_PAGE_LIMIT) break;
+      occupied += page.occupied_slots;
+      if (terminal(index)) { stopCause = "terminal_index"; break; }
+      if (page.terminal_tail.status === "exhausted") { stopCause = "occupancy_tail_exhausted"; break; }
+      if (occupied >= ORDINARY_RECALL_OBSERVED_SLOT_TARGET) { stopCause = "observed_ten_slot_prefix"; break; }
+      if (index.continuation == null) { stopCause = "no_issued_continuation"; break; }
+      if (ordinal === ORDINARY_RECALL_PUBLIC_PAGE_LIMIT) { stopCause = "membership_page_bound"; break; }
       request = SoulMemorySearchRequestSchema.parse({ ...firstRequest, continuation: index.continuation });
     }
   } catch (error) {
     refuseBenchWorkAfterCancel();
     if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
-    return finishQuery(query, pages, identity, firstExposure, "unavailable",
-      error instanceof Error ? error.message : String(error));
+    return finishQuery(query, pages, identity, firstExposure, ordinaryCosts(elapsedCalls, elapsedMs), "unavailable",
+      "unavailable", error instanceof Error ? error.message : String(error));
   }
-  return finishQuery(query, pages, identity, firstExposure);
+  return finishQuery(query, pages, identity, firstExposure, ordinaryCosts(elapsedCalls, elapsedMs), stopCause);
 }
 
 async function recallPublicMembershipPage(
@@ -290,6 +311,8 @@ function membershipPage(input: Readonly<{
   firstExposure: FirstExposurePage | null; responseState: EntryPage["response_state"];
   observation: EntryPage["observation"]; occupiedSlots: number; sourceIntervals: readonly SourceInterval[];
 }>): EntryPage {
+  const index = input.output?.index;
+  const unobserved = input.observation !== "observed" || index === undefined;
   return {
     ordinal: input.ordinal, phase: "membership", request: input.request,
     public_call: input.frame === null ? null : {
@@ -297,14 +320,21 @@ function membershipPage(input: Readonly<{
     },
     envelope: input.envelope, output: input.output, first_exposure: input.firstExposure,
     response_state: input.responseState, observation: input.observation, occupied_slots: input.occupiedSlots,
-    source_intervals: [...input.sourceIntervals]
+    source_intervals: [...input.sourceIntervals],
+    complete: !unobserved,
+    continuation: unobserved || index === undefined ? "unknown" : index.continuation === null ? "none" : "present",
+    terminal_tail: unobserved || index === undefined
+      ? { status: "unknown", reason: pageUnobservedReason(input.responseState) }
+      : admittedSourceDeliveryTail(index),
+    reason: unobserved ? pageUnobservedReason(input.responseState) : null
   };
 }
 
 function finishQuery(
   query: { query_key: string; original_query: string },
   pages: readonly EntryPage[], identity: SnapshotIdentity | null,
-  firstExposure: FirstExposurePage | null, forced?: OrdinaryRecallQueryRow["status"], reason?: string
+  firstExposure: FirstExposurePage | null, costs: OrdinaryRecallQueryRow["costs"],
+  stopCause: OrdinaryRecallQueryRow["stop_cause"], forced?: OrdinaryRecallQueryRow["status"], reason?: string
 ): OrdinaryRecallQueryRow {
   const observed = pages.filter(page => page.observation === "observed");
   const intervals: SourceInterval[] = [];
@@ -313,26 +343,37 @@ function finishQuery(
     for (const interval of page.source_intervals) intervals.push({ ...interval, slot_index: occupied + interval.slot_index });
     occupied += page.occupied_slots;
   }
-  const status = forced ?? decideStatus(pages, firstExposure);
+  const status = forced ?? decideStatus(pages, firstExposure, stopCause);
   return {
     query_key: query.query_key, original_query: query.original_query, status,
-    ...(status === "complete" && reason === undefined ? {} : { reason: reason ?? statusReason(status, pages.at(-1)) }),
-    snapshot_identity: identity, pages: [...pages], first_exposure: firstExposure,
+    ...(status === "complete" && reason === undefined ? {} : { reason: reason ?? statusReason(status, pages.at(-1), stopCause) }),
+    snapshot_identity: identity, pages: [...pages], page_count: pages.length, stop_cause: stopCause,
+    first_exposure: firstExposure,
     source_intervals: firstExposure?.initial == null ? [] : intervals,
-    unobserved_counters: [...UNOBSERVED_ORDINARY_COUNTERS]
+    unobserved_counters: [...UNOBSERVED_ORDINARY_COUNTERS], costs
   };
 }
 
-function decideStatus(pages: readonly EntryPage[], firstExposure: FirstExposurePage | null): OrdinaryRecallQueryRow["status"] {
+function decideStatus(
+  pages: readonly EntryPage[], firstExposure: FirstExposurePage | null,
+  stopCause: OrdinaryRecallQueryRow["stop_cause"]
+): OrdinaryRecallQueryRow["status"] {
   if (firstExposure?.initial == null || pages.every(page => page.observation !== "observed")) {
     return pages.some(page => page.response_state === "public_error") && pages.every(page => page.observation !== "observed")
       ? "failed" : "unavailable";
   }
-  return pages.some(page => page.observation !== "observed") ? "partial" : "complete";
+  if (pages.some(page => page.observation !== "observed")) return "partial";
+  return stopCause === "observed_ten_slot_prefix" || stopCause === "occupancy_tail_exhausted" ? "complete" : "partial";
 }
 
-function statusReason(status: OrdinaryRecallQueryRow["status"], last: EntryPage | undefined): string {
-  if (status === "complete") return "ordinary public membership window captured";
+function statusReason(
+  status: OrdinaryRecallQueryRow["status"], last: EntryPage | undefined,
+  stopCause: OrdinaryRecallQueryRow["stop_cause"]
+): string {
+  if (status === "complete") {
+    return stopCause === "occupancy_tail_exhausted"
+      ? "ordinary public occupancy tail exhausted" : "ordinary public membership window captured";
+  }
   if (status === "partial") return "ordinary public continuation was issued but the @10 window is incomplete";
   if (status === "failed") return "ordinary public soul.recall returned an error envelope";
   if (last?.response_state === "transport_error") return "ordinary public soul.recall transport did not yield an envelope";
@@ -344,6 +385,56 @@ function emptyRow(
 ): OrdinaryRecallQueryRow {
   return {
     query_key: query.query_key, original_query: query.original_query, status, reason, snapshot_identity: null,
-    pages: [], first_exposure: null, source_intervals: [], unobserved_counters: [...UNOBSERVED_ORDINARY_COUNTERS]
+    pages: [], page_count: 0, stop_cause: status === "not_run" ? "not_run" : "unavailable",
+    first_exposure: null, source_intervals: [], unobserved_counters: [...UNOBSERVED_ORDINARY_COUNTERS],
+    costs: ordinaryCosts(0, 0)
   };
+}
+
+function pageUnobservedReason(responseState: EntryPage["response_state"]): string {
+  if (responseState === "public_error") return "ordinary public soul.recall returned an error envelope";
+  if (responseState === "transport_error") return "ordinary public soul.recall transport did not yield an envelope";
+  return "ordinary public soul.recall did not supply required first-exposure or source-interval evidence";
+}
+
+function ordinaryCosts(elapsedCalls: number, elapsedMs: number): OrdinaryRecallQueryRow["costs"] {
+  return {
+    work_units: { status: "unavailable", reason: "public_soul_recall_omits_native_work" },
+    read_bytes: { status: "unavailable", reason: "public_soul_recall_omits_read_bytes" },
+    latency_ms: elapsedCalls === 0
+      ? { status: "unavailable", reason: "no_public_call_elapsed" }
+      : { status: "available", value: elapsedMs, source: "client_mcp_elapsed" }
+  };
+}
+
+/** Projects captured public pages onto the shared consumer-visibility page facts. */
+export function ordinaryEntryVisibilityPages(row: OrdinaryRecallQueryRow): ConsumerVisibilityPage[] {
+  let occupied = 0;
+  return row.pages.map(page => {
+    const intervals = page.observation !== "observed" ? [] : visibilityIntervals(page, occupied);
+    const projected: ConsumerVisibilityPage = {
+      page: page.ordinal, status: page.observation, reason: page.reason, occupied_slots: page.occupied_slots,
+      complete: page.complete, continuation: page.continuation, terminal_tail: page.terminal_tail, intervals
+    };
+    occupied += page.occupied_slots;
+    return projected;
+  });
+}
+
+function visibilityIntervals(page: EntryPage, rankOffset: number): ConsumerVisibilityPage["intervals"][number][] {
+  const results = page.output?.results ?? [];
+  const intervals: ConsumerVisibilityPage["intervals"][number][] = [];
+  for (const [slot, result] of results.entries()) {
+    if (result.target.kind !== "source_evidence") continue;
+    const preview = admittedSourcePreviewInterval(result.target, result);
+    if (preview === null) continue;
+    intervals.push({
+      rank: rankOffset + slot + 1, start: preview.start, end: preview.end,
+      target: SourceGoldUnitSchema.parse({
+        workspace_id: result.target.workspace_id, root_kind: result.target.root_kind, root_id: result.target.root_id,
+        source_version: result.target.source_version, content_digest: result.target.content_digest, span: result.target.span
+      })
+    });
+  }
+  return intervals;
 }
