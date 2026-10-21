@@ -17,8 +17,11 @@ type EventReference = Pick<ObservationEvent, "session_id" | "request_id" | "call
 const VECTOR_INSPECTION_DETAIL_UNAVAILABLE = "vector_inspection_detail_unavailable";
 type Nomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
 type ResourceRefusal = NonNullable<SourceSemanticAcquisitionPhase["result"]>["resource_refusals"][number];
-const RESOURCE_REFUSAL_STAGES: readonly ResourceRefusal["stage"][] =
-  ["input", "lexical", "vector", "admission", "nomination"];
+const acquisitionResult = SourceSemanticAcquisitionPhaseSchema.unwrap().shape.result.unwrap().unwrap();
+const nominationFields = acquisitionResult.shape.nominations.unwrap().element.unwrap().shape;
+const lexicalRankSchema = nominationFields.lexical.unwrap().element;
+const vectorRankSchema = nominationFields.vector.unwrap();
+const resourceRefusalSchema = acquisitionResult.shape.resource_refusals.unwrap().element;
 type NativePhaseFact = Readonly<{ invocation: "original" | "hint"; phase: SourceSemanticAcquisitionPhase | null;
   position: EventReference | null; invocation_position: number }>;
 
@@ -313,23 +316,16 @@ function mergeLexicalRanks(events: Nomination["lexical"], receipt: Nomination["l
   return ranks.length > 0 ? ranks : null;
 }
 function resourceRefusalFrom(data: Record<string, unknown>): ResourceRefusal | null {
-  const value = recordOf(data.resource_refusal), stage = value?.stage, phase = value?.phase;
-  return value !== null && typeof stage === "string" && typeof phase === "string"
-    && (RESOURCE_REFUSAL_STAGES as readonly string[]).includes(stage)
-    ? { stage: stage as ResourceRefusal["stage"], phase } : null;
+  const parsed = resourceRefusalSchema.safeParse(data.resource_refusal);
+  return parsed.success ? parsed.data : null;
 }
 function lexicalRankFrom(data: Record<string, unknown>): Nomination["lexical"] {
-  return data.lane !== "unicode61" && data.lane !== "trigram" || !nonnegative(data.rank) || !nonnegative(data.lane_rank)
-    || typeof data.bm25 !== "number" || !Number.isFinite(data.bm25) ? [] : [{ rank: data.rank, lane: data.lane,
-    lane_rank: data.lane_rank, bm25: data.bm25 }];
+  const parsed = lexicalRankSchema.safeParse({ rank: data.rank, lane: data.lane, lane_rank: data.lane_rank, bm25: data.bm25 });
+  return parsed.success ? [parsed.data] : [];
 }
 function vectorRankFrom(data: Record<string, unknown>): Nomination["vector"] {
-  const window = recordOf(data.window);
-  return !nonnegative(data.rank) || typeof data.cosine !== "number" || !Number.isFinite(data.cosine) || window === null
-    || typeof window.window_id !== "string" || !nonnegative(window.start_byte) || !nonnegative(window.end_byte)
-    || typeof window.content_digest !== "string" ? null : { rank: data.rank, cosine: data.cosine,
-    window: { window_id: window.window_id, start_byte: window.start_byte, end_byte: window.end_byte,
-      content_digest: window.content_digest } };
+  const parsed = vectorRankSchema.safeParse({ rank: data.rank, cosine: data.cosine, window: data.window });
+  return parsed.success ? parsed.data : null;
 }
 
 /** Returned extents are captured before retention/scoring may fail. Completion and policy-order
