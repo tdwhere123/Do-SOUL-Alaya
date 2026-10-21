@@ -14,6 +14,7 @@ export type ObservationReadStatus = "whole" | "partial" | "attempted" | "none" |
 export type ObservationStagePosition = Readonly<{ stage: ObservationStage; reason: string }>;
 type Events = readonly ObservationEvent[];
 type EventReference = Pick<ObservationEvent, "session_id" | "request_id" | "call_kind" | "event_position">;
+const VECTOR_INSPECTION_DETAIL_UNAVAILABLE = "vector_inspection_detail_unavailable";
 type Nomination = NonNullable<SourceSemanticAcquisitionPhase["result"]>["nominations"][number];
 type NativePhaseFact = Readonly<{ invocation: "original" | "hint"; phase: SourceSemanticAcquisitionPhase | null;
   position: EventReference | null; invocation_position: number }>;
@@ -33,6 +34,14 @@ export type ObservationNativeRoute = Readonly<{
   lexical_window: null;
   vector_state: NonNullable<SourceSemanticAcquisitionPhase["result"]>["vector"]["state"];
   limitations: readonly string[];
+  /** Per-attempt producer facts. Null means unobserved, not successful zero. */
+  attempts: readonly Readonly<{
+    disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
+      | "stale" | "native_unknown" | "resource_refused" | "rejected";
+    admission: Readonly<{ status: string; reason: string; phase?: string }> | null;
+    reference: EventReference;
+    merge_target: SourceEvidenceTarget | null;
+  }>[] | null;
 }>;
 export type ObservationRouteFact = Readonly<{
   route: string; eligibility: ObservationStageStatus; nomination: ObservationStageStatus;
@@ -158,7 +167,10 @@ export function observationMessageFacts(span: AnswerTurnSpan, input: Observation
   } else if (candidate === "absent" && eligibility === "passed") {
     failures.push({ stage: "nomination", reason: "eligible_message_absent_from_finite_pool" });
   } else if (eligibility === "failed") failures.push({ stage: "eligibility", reason: qualification.reason });
-  const unknowns = finished.flatMap(fact => fact.unknowns);
+  // Count-only vector inspection omission stays on its route. It cannot manufacture
+  // a message-level nomination unknown after rank, read or delivery were observed.
+  const unknowns = finished.flatMap(fact => fact.unknowns.filter(position =>
+    position.reason !== VECTOR_INSPECTION_DETAIL_UNAVAILABLE));
   if (candidate === "unknown") unknowns.push({ stage: "nomination", reason: poolClosed && witnessed
     ? "finite_union_conflicts_with_observed_progress" : "finite_pool_membership_unavailable" });
   if (read === "unknown") unknowns.push({ stage: "access_read", reason: complete ? "read_extent_unavailable" : "causal_observation_incomplete" });
@@ -242,7 +254,8 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
         lexical_ranks: channel === "lexical" ? receiptLexical ?? (lexicalRanks.length > 0 ? lexicalRanks : null) : null,
         vector: channel === "vector" ? nomination?.vector ?? vectorRank : null, lexical_window: null,
         vector_state: channel === "vector" ? result?.vector.state ?? null : null,
-        limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])] };
+        limitations: [...(result?.limitations ?? []), ...(channel === "lexical" ? result?.lexical.limitations ?? [] : [])],
+        attempts: nominationAttempts(attempts) };
       const ranksAvailable = channel === "lexical" ? (fact.native.lexical_ranks?.length ?? 0) > 0 : fact.native.vector != null;
       if (!retained && !ranksAvailable) {
         fact.unknowns.push({ stage: "nomination", reason: `${channel}_rank_unavailable` });
@@ -252,13 +265,34 @@ function indexRoutes(joined: ObservationAncestry, span: AnswerTurnSpan,
       }
       if (channel === "vector" && joined.frames.some(row =>
         (row.observation.diagnostics?.omitted_counts?.[`source_index_${invocation}_vector_inspected`] ?? 0) > 0)) {
-        fact.unknowns.push({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
+        fact.unknowns.push({ stage: "nomination", reason: VECTOR_INSPECTION_DETAIL_UNAVAILABLE });
       }
       if (qualification[channel] === "unknown") fact.unknowns.push({ stage: "eligibility", reason: qualification.reason });
       if (!complete) fact.unknowns.push({ stage: "nomination", reason: "observation_incomplete" });
       return fact;
     });
   });
+}
+function nominationAttempts(rows: readonly { data: Record<string, unknown>; position: EventReference }[]):
+  ObservationNativeRoute["attempts"] {
+  const facts: NonNullable<ObservationNativeRoute["attempts"]>[number][] = [];
+  for (const row of rows) {
+    const value = row.data.disposition;
+    if (value !== "admitted" && value !== "duplicate" && value !== "nomination_limit" && value !== "scope_denied"
+      && value !== "stale" && value !== "native_unknown" && value !== "resource_refused" && value !== "rejected") {
+      continue;
+    }
+    const admission = recordOf(row.data.admission);
+    const status = admission?.status, reason = admission?.reason;
+    const captured = admission !== null && typeof status === "string" && typeof reason === "string"
+      && (status === "resource_limited" || status === "stale" || status === "partial" || status === "unbound")
+      ? { status, reason, ...(status === "resource_limited" && typeof admission.phase === "string"
+        ? { phase: admission.phase } : {}) } : null;
+    const parsed = SourceEvidenceTargetSchema.safeParse(row.data.merge_target);
+    facts.push({ disposition: value, admission: captured, reference: row.position,
+      merge_target: parsed.success ? parsed.data : null });
+  }
+  return facts.length === 0 ? null : facts;
 }
 function lexicalRankFrom(data: Record<string, unknown>): Nomination["lexical"] {
   return data.lane !== "unicode61" && data.lane !== "trigram" || !nonnegative(data.rank) || !nonnegative(data.lane_rank)

@@ -33,8 +33,9 @@ type PreparedRoute = Readonly<{ vector: SourceIndexQueryVector; receipt: SourceS
 type PreparedSourceQuery = PreparedRoute & Readonly<{ supplemental?: PreparedRoute }>;
 type SourceAcquisitionChannelControl = "lexical" | "vector" | "dual";
 
-type NativeAdmissionFact = Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>,
-  "status" | "reason">;
+type NativeAdmissionFact =
+  | Pick<Extract<SourceIndexQueryAdmission, { status: "stale" | "partial" | "unbound" }>, "status" | "reason">
+  | Pick<Extract<SourceIndexQueryAdmission, { status: "resource_limited" }>, "status" | "reason" | "phase">;
 
 /** Core-owned acquisition facts. Not a public receipt, protocol schema or daemon type.
  * Rank on vector_ranked exists only after the whole finalized ranked set is retained.
@@ -52,8 +53,10 @@ export type SourceIndexAcquisitionFact = Readonly<{
   kind: "nomination_attempt"; channel: "lexical" | "vector"; target: SourceIndexTarget["target"];
   disposition: "admitted" | "duplicate" | "nomination_limit" | "scope_denied"
     | "stale" | "native_unknown" | "resource_refused" | "rejected";
-  /** Opaque native admission union owns status/reason. Absent when the attempt never returned one. */
+  /** Native admission status/reason/phase. Absent when the attempt never returned one. */
   admission?: NativeAdmissionFact;
+  /** Previous retained gold-root target when this attempt merged as a duplicate. Absent otherwise. */
+  merge_target?: SourceIndexTarget["target"];
 }> | Readonly<{
   kind: "acquisition_complete"; completion: SourceIndexAcquisitionResult["completion"];
   accounting: SourceIndexNominationAccounting;
@@ -320,9 +323,11 @@ class AcquisitionQuery {
 
   private observeNomination(channel: "lexical" | "vector", source: SourceIndexTarget,
     disposition: Extract<SourceIndexAcquisitionFact, { kind: "nomination_attempt" }>["disposition"],
-    admission?: NativeAdmissionFact): void {
+    admission?: NativeAdmissionFact, mergeTarget?: SourceIndexTarget["target"]): void {
     this.observe("nomination_attempt", () => ({ kind: "nomination_attempt", channel,
-      target: structuredClone(source.target), disposition, ...(admission === undefined ? {} : { admission }) }));
+      target: structuredClone(source.target), disposition,
+      ...(admission === undefined ? {} : { admission }),
+      ...(mergeTarget === undefined ? {} : { merge_target: structuredClone(mergeTarget) }) }));
   }
 
   private prepareInput(): void {
@@ -484,7 +489,8 @@ class AcquisitionQuery {
           if (admission.status === "resource_limited") {
             this.counts.resource_refused++;
             this.resourceRefusals.push({ stage: "admission", phase: admission.phase });
-            this.observeNomination(channel, source, "resource_refused");
+            this.observeNomination(channel, source, "resource_refused",
+              { status: admission.status, reason: admission.reason, phase: admission.phase });
             this.limited = true; break;
           }
           const native = { status: admission.status, reason: admission.reason };
@@ -530,7 +536,7 @@ class AcquisitionQuery {
       if (lexical !== null) previous.lexical.push(lexical);
       if (vector !== null) previous.vector = vector;
       this.counts.duplicate++;
-      this.observeNomination(channel, source, "duplicate"); return;
+      this.observeNomination(channel, source, "duplicate", undefined, previous.source.target); return;
     }
     if (this.nominations.size >= this.input.allowance.max_roots) {
       this.counts.rejected++; this.counts.nomination_limit++; this.limited = true;

@@ -6,6 +6,7 @@ const isolation = await vi.hoisted(async () => {
 afterEach(() => { expect(isolation.violations).toEqual([]); vi.restoreAllMocks(); });
 afterAll(() => { isolation.restore(); });
 import { createSourceSemanticAccessPolicy, encodeSourceSemanticLibraryResponse } from "@do-soul/alaya-core";
+import { SqliteSourceIndexRepository } from "@do-soul/alaya-storage";
 import { sourceSemanticExecutionPhases } from "@do-soul/alaya-protocol";
 import { attributeObservation } from "../../../../../bench-runner/src/runs/longmemeval-semantic/observation-attribution.js";
 import { scoreConsumerMessageVisibility } from "../../../../../bench-runner/src/runs/longmemeval-semantic/message-visibility.js";
@@ -111,6 +112,66 @@ it("bounds candidate diagnostics without consuming later nomination and delivery
   disabled.event("source_index_acquisition", "observation", () => { throw new Error("omitted payload constructed"); },
     "source_index_original_vector_ranked");
   expect(disabled.finish("success").issues).toEqual([]);
+});
+
+it("transports native stale and resource_limited admission through observer JSON into the bench route", async () => {
+  const sources = [
+    { id: "harbor-0", text: `${ORIGINAL} harbor 0`, vector: [1, 0, 0] as const },
+    { id: "harbor-1", text: `${ORIGINAL} harbor 1`, vector: [1, 0, 0] as const }
+  ];
+  await withIndexedSources(sources, async fixture => {
+    const prepared = await fixture.prepareQuery({ navigation: ORIGINAL, signal: new AbortController().signal,
+      remainingMs: () => 60_000 });
+    const admit = SqliteSourceIndexRepository.prototype.admitQueryCandidate;
+    let ready = 0;
+    vi.spyOn(SqliteSourceIndexRepository.prototype, "admitQueryCandidate").mockImplementation(function (
+      this: SqliteSourceIndexRepository, source, binding, budget) {
+      const native = admit.call(this, source, binding, budget);
+      if (native.status !== "ready") return native;
+      ready += 1;
+      if (ready === 1) return { status: "stale", reason: "target_identity", resources: native.resources };
+      return { status: "resource_limited", reason: "read_budget", phase: "source currentness and erase guard",
+        resources: native.resources };
+    });
+    const observer = new SourceSemanticObserver(13, { max_events: 512, max_bytes: 262144 });
+    const on = acquire(fixture, prepared, observer);
+    try {
+      const row = observer.finish("success");
+      const attempts = events(row, "source_index_acquisition")
+        .map(event => event.data as Record<string, unknown>)
+        .filter(data => data.kind === "nomination_attempt");
+      expect(attempts.some(data => data.disposition === "stale" && data.admission !== undefined
+        && (data.admission as { status: string; reason: string }).status === "stale"
+        && (data.admission as { reason: string }).reason === "target_identity")).toBe(true);
+      expect(attempts.some(data => data.disposition === "resource_refused"
+        && (data.admission as { status: string; reason: string; phase: string }).status === "resource_limited"
+        && (data.admission as { reason: string }).reason === "read_budget"
+        && (data.admission as { phase: string }).phase === "source currentness and erase guard")).toBe(true);
+      const stale = attempts.find(data => data.disposition === "stale");
+      expect(stale?.target).toEqual(expect.objectContaining({ workspace_id: WS }));
+      const identity = stale!.target as typeof fixture.targets[number]["target"];
+      const source = fixture.targets.find(target => target.target.root_id === identity.root_id)!;
+      const snapshot = digest("observer-json-admission");
+      const call = { kind: "recall" as const, request_id: row.request_id, session_id: "session",
+        query_key: ORIGINAL, snapshot_id: snapshot, workspace_id: WS, as_of: CLOCK };
+      const { evidence_object_id: _evidence, kind: _kind, ...gold } = source.target;
+      const answer = { unit: "published_body_utf8_bytes" as const, annotated_turns: 1, complete: true,
+        spans: [{ session_index: 0, message_index: 0, source_id: source.source_id, target: gold, start: 0, end: 4 }] };
+      const visibility = scoreConsumerMessageVisibility({ gold: answer, pages: [{ page: 1, status: "observed",
+        reason: null, occupied_slots: 0, complete: true, continuation: "none", intervals: [],
+        terminal_tail: { status: "unknown", reason: "native_access_or_computation_unresolved" } }] });
+      const attribution = attributeObservation({ question_id: "admission-json", k: 5, call,
+        frames: [{ call, observation: row }], frozen_index: null, admitted_roots_complete: true,
+        admitted_roots: new Map(), answer_gold: answer, visibility });
+      const projected = attribution.messages[0]!.routes.flatMap(route => route.native?.attempts ?? []);
+      expect(projected.some(attempt => attempt.disposition === "stale" && attempt.admission?.status === "stale"
+        && attempt.admission.reason === "target_identity" && attempt.admission.phase === undefined)).toBe(true);
+      expect(projected.some(attempt => attempt.disposition === "resource_refused"
+        && attempt.admission?.status === "resource_limited" && attempt.admission.reason === "read_budget"
+        && attempt.admission.phase === "source currentness and erase guard")).toBe(true);
+      expect(attribution.messages[0]?.routes.every(route => route.native === null || route.native.lexical_window === null)).toBe(true);
+    } finally { on.releaseCanonical(); }
+  });
 });
 
 it("keeps SQLite/worker delivery and debit parity with acquisition observation off, on and overflowed", async () => {
@@ -224,7 +285,20 @@ it("retains finalized ranks, attempts and delivery after more SQLite windows tha
     expect(message.read_intervals.some(interval => interval.start <= 4096 && interval.end >= 4100)).toBe(true);
     expect(message.routes.find(route => route.route === "index:original:vector")?.unknowns)
       .toContainEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
-    expect(message.unknowns.some(unknown => unknown.reason === "causal_observation_incomplete"
-      || unknown.reason === "observation_incomplete")).toBe(false);
+    expect(message.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable"
+      || unknown.reason === "causal_observation_incomplete" || unknown.reason === "observation_incomplete")).toBe(false);
+    expect(message.first_unknown?.reason).not.toBe("vector_inspection_detail_unavailable");
+    expect(message.routes.find(route => route.route === "index:original:vector")?.native?.lexical_window).toBeNull();
+    const capturedAttempts = captured.filter(event => {
+      const data = event.data as { kind?: string; target?: { root_id?: string }; disposition?: string };
+      return data.kind === "nomination_attempt" && data.target?.root_id === identity.root_id;
+    }).map(event => event.data as { channel: string; disposition: string });
+    const workerAttempts = message.routes.flatMap(route => (route.native?.attempts ?? []).map(attempt => ({
+      channel: route.native!.channel, disposition: attempt.disposition })));
+    expect(captured.some(event => (event.data as { disposition?: string }).disposition === "nomination_limit")).toBe(true);
+    const keyed = (row: { channel: string; disposition: string }) => `${row.channel}:${row.disposition}`;
+    expect(workerAttempts.map(keyed).sort()).toEqual(capturedAttempts.map(row => keyed({
+      channel: row.channel, disposition: row.disposition })).sort());
+    expect(workerAttempts.length).toBeGreaterThan(0);
   }, configuration);
 }, 60_000);

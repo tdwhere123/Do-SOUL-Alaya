@@ -278,6 +278,8 @@ describe("observation attribution", () => {
     const routes = result.messages[0]!.routes;
     expect(routes.find(row => row.route === "index:original:vector")).toMatchObject({ nomination: "passed",
       native: { vector: { rank: 3 } }, unknowns: [{ stage: "nomination", reason: "vector_inspection_detail_unavailable" }] });
+    expect(result.messages[0]?.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable")).toBe(false);
+    expect(result.messages[0]?.first_unknown?.reason).not.toBe("vector_inspection_detail_unavailable");
     expect(routes.find(row => row.route === "index:hint:vector")?.unknowns).toEqual([]);
     expect(routes.find(row => row.route === "index:original:lexical")?.unknowns).toEqual([]);
     expect(routes.find(row => row.route === "read:observation")?.unknowns).toEqual([]);
@@ -287,7 +289,19 @@ describe("observation attribution", () => {
       expect(incomplete.observation.progress_complete).toBe(false);
       expect(incomplete.layer).toBe("U");
       expect(incomplete.messages[0]?.read).toBe("unknown");
+      expect(incomplete.messages[0]?.unknowns.some(unknown => unknown.reason === "observation_incomplete"
+        || unknown.reason === "causal_observation_incomplete")).toBe(true);
+      expect(incomplete.messages[0]?.first_unknown).not.toBeNull();
     }
+    const whole = attributed({ frames: [captured([routeEvent, returned(0, 30)], call, facts(call, { pool: pool([unit()]) }),
+      { diagnostics: diagnostic })] });
+    expect(whole.layer).toBe("L4");
+    expect(whole.messages[0]).toMatchObject({ candidate: "present", read: "whole", visibility: { delivery: "failed" },
+      first_failure: { stage: "delivery" } });
+    expect(whole.messages[0]?.routes.find(row => row.route === "index:original:vector")?.unknowns)
+      .toContainEqual({ stage: "nomination", reason: "vector_inspection_detail_unavailable" });
+    expect(whole.messages[0]?.unknowns.some(unknown => unknown.reason === "vector_inspection_detail_unavailable")).toBe(false);
+    expect(whole.messages[0]?.first_unknown).toBeNull();
   });
 
   it("marks omitted lexical candidate detail on the matching invocation without poisoning receipt ranks", () => {
@@ -327,8 +341,10 @@ describe("observation attribution", () => {
     expect(result.layer).toBe("L2");
     expect(result.observation).toMatchObject({ complete: false, progress_complete: true });
     expect(result.messages[0]?.routes.find(row => row.route === "index:original:vector")).toMatchObject({
-      nomination: "failed", native: { vector: null },
+      nomination: "failed", native: { vector: null, attempts: [{ disposition: "nomination_limit", admission: null }] },
       unknowns: [{ stage: "nomination", reason: "vector_rank_unavailable" }] });
+    expect(result.messages[0]?.unknowns).toContainEqual({ stage: "nomination", reason: "vector_rank_unavailable" });
+    expect(result.messages[0]?.first_unknown?.stage).toBe("nomination");
   });
 
   it("treats a duplicate as retained route participation, not distinct admission or consumer visibility", () => {
@@ -337,7 +353,42 @@ describe("observation attribution", () => {
     const result = attributed({ frames: [captured([duplicate])] });
     expect(result.layer).toBe("L2");
     expect(result.messages[0]).toMatchObject({ candidate: "absent", read: "none", visibility: { delivery: "failed" } });
-    expect(result.messages[0]?.routes.find(row => row.route === "index:original:vector")).toMatchObject({ nomination: "passed" });
+    expect(result.messages[0]?.routes.find(row => row.route === "index:original:vector")).toMatchObject({
+      nomination: "passed", native: { attempts: [{ disposition: "duplicate", admission: null, merge_target: null }],
+        lexical_window: null } });
+  });
+
+  it("projects every matching attempt disposition and native admission onto the final route", () => {
+    const goldTarget = target(unit());
+    const attempt = (channel: "lexical" | "vector", disposition: string, extra: Record<string, unknown> = {}) => ({
+      kind: "source_index_acquisition", phase: "observation", data: {
+        invocation: "original" as const, kind: "nomination_attempt", channel, target: goldTarget, disposition, ...extra } });
+    const result = attributed({ frames: [captured([
+      attempt("lexical", "stale", { admission: { status: "stale", reason: "target_identity" } }),
+      attempt("lexical", "native_unknown", { admission: { status: "partial", reason: "native_source_unavailable" } }),
+      attempt("vector", "resource_refused", { admission: { status: "resource_limited", reason: "read_budget",
+        phase: "source currentness and erase guard" } }),
+      attempt("vector", "duplicate", { merge_target: goldTarget }),
+      { kind: "source_index_acquisition", phase: "observation", data: {
+        invocation: "hint", kind: "nomination_attempt", channel: "vector", target: goldTarget,
+        disposition: "nomination_limit" } }
+    ])] });
+    const originalLexical = result.messages[0]?.routes.find(row => row.route === "index:original:lexical");
+    const originalVector = result.messages[0]?.routes.find(row => row.route === "index:original:vector");
+    const hintVector = result.messages[0]?.routes.find(row => row.route === "index:hint:vector");
+    expect(originalLexical).toMatchObject({ nomination: "failed", native: { lexical_window: null, attempts: [
+      { disposition: "stale", admission: { status: "stale", reason: "target_identity" } },
+      { disposition: "native_unknown", admission: { status: "partial", reason: "native_source_unavailable" } }
+    ] } });
+    expect(originalLexical?.native?.attempts?.some(row => row.admission !== null && "phase" in row.admission)).toBe(false);
+    expect(originalVector).toMatchObject({ nomination: "passed", native: { attempts: [
+      { disposition: "resource_refused", admission: { status: "resource_limited", reason: "read_budget",
+        phase: "source currentness and erase guard" } },
+      { disposition: "duplicate", admission: null, merge_target: goldTarget }
+    ] } });
+    expect(hintVector).toMatchObject({ nomination: "failed", native: {
+      attempts: [{ disposition: "nomination_limit", admission: null }] } });
+    expect(result.messages[0]?.routes.find(row => row.route === "index:hint:lexical")?.native?.attempts).toBeNull();
   });
 
   it("conserves the exclusive question partition while opportunity bounds overlap independently", () => {

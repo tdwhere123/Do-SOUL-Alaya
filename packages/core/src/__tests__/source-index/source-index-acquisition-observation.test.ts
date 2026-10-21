@@ -1,5 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+const isolation = await vi.hoisted(async () => {
+  const { installProviderFreeBoundary } = await import(
+    "../../../../../apps/bench-runner/src/__tests__/support/provider-free-boundary.js");
+  return installProviderFreeBoundary();
+});
+afterAll(() => { isolation.restore(); });
+import { SourceSemanticResourceExhausted, SourceSemanticResourceLedger } from "@do-soul/alaya-protocol";
 import type { SourceIndexAcquisitionFact } from "../../source-index/source-index-acquisition.js";
 import { fixture, type Fixture } from "../../../../storage/src/__tests__/repos/source-index/source-index-fixture.js";
 import {
@@ -8,6 +14,7 @@ import {
 
 const environments: Fixture[] = [];
 afterEach(() => {
+  expect(isolation.violations).toEqual([]);
   vi.restoreAllMocks();
   for (const environment of environments.splice(0)) environment.database.close();
 });
@@ -185,5 +192,88 @@ describe("source index acquisition observation through native SQLite", () => {
     expect(attempts.some(fact => fact.kind === "nomination_attempt" && fact.channel === "vector"
       && fact.disposition === "native_unknown" && fact.admission?.status === "unbound")).toBe(true);
     expectBounded(on, input);
+  });
+
+  it("preserves stale and resource_limited native admission phases on successive attempt facts", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const input = queryInput();
+    const admit = environment.index.admitQueryCandidate.bind(environment.index);
+    let ready = 0;
+    vi.spyOn(environment.index, "admitQueryCandidate").mockImplementation((source, binding, budget) => {
+      const native = admit(source, binding, budget);
+      if (native.status !== "ready") return native;
+      ready++;
+      if (ready === 1) return { status: "stale", reason: "target_identity", resources: native.resources };
+      return { status: "resource_limited", reason: "read_budget", phase: "source currentness and erase guard",
+        resources: native.resources };
+    });
+    const off = query(environment, input, admitScope);
+    ready = 0;
+    const { facts, observer } = collect();
+    const on = query(environment, input, admitScope, observer);
+    expect(on).toEqual(off);
+    const attempts = facts.filter(fact => fact.kind === "nomination_attempt");
+    expect(attempts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "stale"
+      && fact.admission?.status === "stale" && fact.admission.reason === "target_identity"
+      && !("phase" in fact.admission))).toBe(true);
+    expect(attempts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "resource_refused"
+      && fact.admission?.status === "resource_limited" && fact.admission.reason === "read_budget"
+      && fact.admission.phase === "source currentness and erase guard")).toBe(true);
+    expect(on.resource_refusals).toEqual([{ stage: "admission", phase: "source currentness and erase guard" }]);
+    expect(attempts.filter(fact => fact.kind === "nomination_attempt" && fact.admission !== undefined))
+      .toHaveLength(attempts.filter(fact => fact.kind === "nomination_attempt"
+        && (fact.disposition === "stale" || fact.disposition === "resource_refused")).length);
+    expectBounded(on, input);
+  });
+
+  it("does not invent native admission when the owner throws or is not called", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const input = queryInput();
+    vi.spyOn(environment.index, "admitQueryCandidate").mockImplementation(() => {
+      throw new SourceSemanticResourceExhausted("source currentness and erase guard");
+    });
+    const thrownOff = query(environment, input, admitScope);
+    const thrown = collect();
+    const thrownOn = query(environment, input, admitScope, thrown.observer);
+    expect(thrownOn).toEqual(thrownOff);
+    const thrownAttempts = thrown.facts.filter(fact => fact.kind === "nomination_attempt");
+    expect(thrownAttempts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "resource_refused"
+      && fact.admission === undefined)).toBe(true);
+    expect(thrownAttempts.every(fact => fact.kind !== "nomination_attempt" || fact.admission === undefined)).toBe(true);
+    vi.restoreAllMocks();
+    const charge = SourceSemanticResourceLedger.prototype.charge;
+    vi.spyOn(SourceSemanticResourceLedger.prototype, "charge").mockImplementation(
+      function (this: SourceSemanticResourceLedger, work, bytes, phase) {
+        if (phase === "source nomination attempt") throw new SourceSemanticResourceExhausted(phase);
+        return charge.call(this, work, bytes, phase);
+      });
+    const skippedOff = query(environment, input, admitScope);
+    const skipped = collect();
+    const skippedOn = query(environment, input, admitScope, skipped.observer);
+    expect(skippedOn).toEqual(skippedOff);
+    expect(skipped.facts.filter(fact => fact.kind === "nomination_attempt")).toEqual([]);
+    expect(skippedOn.resource_refusals.some(row => row.stage === "nomination"
+      && row.phase === "source nomination attempt")).toBe(true);
+    expectBounded(skippedOn, input);
+  });
+
+  it("records the retained gold-root merge target on duplicate attempts without inventing admission", () => {
+    const environment = setup();
+    publishIndex(environment);
+    const { facts, observer } = collect();
+    const on = query(environment, queryInput(), admitScope, observer);
+    const duplicates = facts.filter(fact => fact.kind === "nomination_attempt" && fact.disposition === "duplicate");
+    expect(duplicates.length).toBeGreaterThan(0);
+    for (const fact of duplicates) {
+      expect(fact.kind).toBe("nomination_attempt");
+      if (fact.kind !== "nomination_attempt") continue;
+      expect(fact.merge_target).toEqual(fact.target);
+      expect(fact.admission).toBeUndefined();
+    }
+    expect(facts.some(fact => fact.kind === "nomination_attempt" && fact.disposition === "admitted"
+      && fact.merge_target === undefined)).toBe(true);
+    expect(on.accounting.duplicate).toBe(duplicates.length);
   });
 });
