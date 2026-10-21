@@ -268,14 +268,14 @@ function bindPublicExposure(input: Readonly<{
   let exposure: FirstExposurePage;
   try { exposure = input.session.record(input.output, input.request.continuation); }
   catch (error) {
-    if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
+    if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
     return membershipPage(base);
   }
   // Continuation cannot mint a replacement initial page; missing initial is not evidence.
   if (input.request.continuation != null && exposure.initial === null) return membershipPage({ ...base, firstExposure: exposure });
   try { verifyExposure(capturedCall(input.ordinal, input.request, input.output, exposure), index, input.firstExposure); }
   catch (error) {
-    if (error instanceof AlayaError && error.code === "CANCELLED") throw error;
+    if (error instanceof AlayaError && (error.code === "CANCELLED" || error.code === "CONFLICT")) throw error;
     return membershipPage({ ...base, firstExposure: exposure });
   }
   if (firstExposureMismatch(exposure, {

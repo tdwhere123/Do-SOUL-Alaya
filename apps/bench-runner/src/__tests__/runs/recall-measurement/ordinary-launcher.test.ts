@@ -10,7 +10,7 @@ import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StorageDatabase } from "@do-soul/alaya-storage";
-import { canonicalJson } from "@do-soul/alaya-protocol";
+import { canonicalJson, SoulMemorySearchResponseSchema } from "@do-soul/alaya-protocol";
 import { sourceLookupStores } from "../../../runs/snapshot/source-records/publish.js";
 import { readChainArtifact } from "../../../runs/recall-measurement/contract.js";
 import {
@@ -282,6 +282,38 @@ it.each([
       spy.mockRestore();
     }
   }, 120000);
+
+it.each(["query_id", "snapshot_id"] as const)("fails closed when a real continuation response changes %s", async field => {
+  const plan = base.admitted.plan, query = plan.queries[0]!;
+  const root = join(base.root, `ordinary-entry-changed-${field}`);
+  const input = { config: plan.config, root,
+    queries: [{ query_key: query.query_key, original_query: query.original_query }] };
+  const original = Client.prototype.callTool;
+  let recalls = 0;
+  const spy = vi.spyOn(Client.prototype, "callTool").mockImplementation(function (this: Client, params, resultSchema, options) {
+    return original.call(this, params, resultSchema, options).then(result => {
+      if (params.name !== "soul.recall" || ++recalls !== 2) return result;
+      const clone = structuredClone(result) as typeof result & {
+        structuredContent: { output: { index: { query_id: string; snapshot_id: string;
+          continuation?: { query_id: string; snapshot_id: string } | null } } };
+      };
+      const index = clone.structuredContent.output.index;
+      index[field] = `${index[field].slice(0, -1)}${index[field].endsWith("0") ? "1" : "0"}`;
+      if (index.continuation != null) index.continuation[field] = index[field];
+      expect(SoulMemorySearchResponseSchema.safeParse(clone.structuredContent.output).success).toBe(true);
+      return clone;
+    });
+  });
+  try {
+    await expect(executeOrdinaryRecallEntry(input)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(recalls).toBe(2);
+    const rowPath = join(root, "ordinary-entry", `${query.query_key}.json`);
+    expect(readChainArtifact(rowPath)).toBeUndefined();
+    expect(readChainArtifact(`${rowPath}.reserved`)).toBeDefined();
+    await expect(executeOrdinaryRecallEntry(input)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(recalls).toBe(2);
+  } finally { spy.mockRestore(); }
+}, 120000);
 
 it("follows public continuation past two pages until ten slots or admitted tail exhaustion", async () => {
   const names = ["Aster", "Birch", "Cedar", "Dock", "Elm", "Fir", "Gum", "Hickory",
